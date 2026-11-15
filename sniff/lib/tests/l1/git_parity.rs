@@ -1008,6 +1008,31 @@ fn commit_by_sha_at_returns_none_for_unmatched_prefix() {
 }
 
 #[test]
+fn commit_by_sha_at_treats_a_non_hex_name_as_absent() {
+    // A name of prefix length with a non-hex character names no object.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    let result = sniff::filesystem::commit_by_sha_at(dir.path(), "no-such-name").unwrap();
+
+    assert!(result.is_none(), "got {result:?}");
+}
+
+#[test]
+fn commit_by_sha_at_surfaces_a_prefix_of_unverifiable_length() {
+    // Too short or too long to look up, so absence cannot be proven.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    for spec in ["abc", &"a".repeat(65)] {
+        assert!(
+            sniff::filesystem::commit_by_sha_at(dir.path(), spec).is_err(),
+            "{spec:?} must surface through commit_by_sha_at"
+        );
+    }
+}
+
+#[test]
 fn commits_for_path_at_surfaces_malformed_head() {
     // A malformed HEAD is corruption, not an unborn branch.
     let dir = TempDir::new().unwrap();

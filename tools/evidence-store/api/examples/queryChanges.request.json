@@ -1,0 +1,5 @@
+{
+  "stream": "observations",
+  "after_sequence": 1200,
+  "page_size": 100
+}

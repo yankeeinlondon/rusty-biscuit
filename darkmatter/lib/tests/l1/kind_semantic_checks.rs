@@ -136,15 +136,18 @@ fn opened(shipped: &str) -> String {
 struct OpenedCopy {
     fixture: Fixture,
     roots: String,
+    /// The copy, joined component by component so it is in the fixture's
+    /// spelling with native separators, as discovery names the definition.
+    copy: std::path::PathBuf,
 }
 
 impl OpenedCopy {
     fn new(relative: &str, shipped: &str) -> Self {
         let fixture = Fixture::new();
-        let copy = fixture.repo().join(relative);
+        let copy = relative.split('/').fold(fixture.repo(), |path, component| path.join(component));
         crate::yaml_kind_registry::write(&copy, &opened(shipped));
         let roots = copy.parent().expect("copy folder").display().to_string();
-        Self { fixture, roots }
+        Self { fixture, roots, copy }
     }
 
     fn validate(&self, text: &str) -> YamlValidation {
@@ -160,14 +163,7 @@ impl OpenedCopy {
     /// `text` and `text` with an added `note: hi` both pass.
     fn assert_open(&self, text: &str) {
         let control = self.validate(text);
-        let definition = std::path::Path::new(&control.definition);
-        assert!(
-            definition.ends_with("schemas/schema.yaml")
-                || definition.ends_with("schemas/yaml-schema.yaml")
-                || definition.ends_with("schemas/schema-trigger.yaml"),
-            "{}",
-            control.definition
-        );
+        assert_eq!(control.definition, self.copy.display().to_string(), "the checkout copy is selected");
         assert!(std::path::Path::new(&control.definition).is_absolute(), "the checkout copy is selected: {}", control.definition);
         assert!(control.report.valid, "control: {:?}", control.report.problems);
         let added = self.validate(&format!("{text}note: hi\n"));

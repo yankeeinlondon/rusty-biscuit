@@ -114,7 +114,7 @@ Shell completions help people learn new CLI's as well as navigate a CLI they don
 
 ### Pre-push Hook
 
-A local pre-push hook runs `just ci-local --l2`: lint plus L1 and hostable non-focusing L2 for source-changed packages. It detects macOS, Linux, native Windows, or WSL2 with `sniff`. CI compiles unchanged direct reverse dependencies inside the changed package's Ubuntu check; they receive no separate jobs. For a clean outgoing `HEAD`, complete validation outcomes are published per package, environment, and tier. CI reuses only qualifying passing cells; failures remain diagnostic evidence and are rerun. A comparison containing only documentation changes gates no packages.
+A local pre-push hook launches `ci-push` (a Rust program in `repo-deps`, built by Cargo on first use; it needs Python 3.10 or newer) which reviews the push and runs `just ci-local --l2`: lint plus L1 and hostable non-focusing L2 for source-changed packages. It detects macOS, Linux, native Windows, or WSL2 with `sniff`. CI compiles unchanged direct reverse dependencies inside the changed package's Ubuntu check; they receive no separate jobs. For a clean outgoing `HEAD`, complete validation outcomes are published per package, environment, and tier. CI reuses only qualifying passing cells; failures remain diagnostic evidence and are rerun. A comparison containing only documentation changes gates no packages.
 
 Reuse qualifying passes on every OS; required tests without qualifying passing evidence must run. Avoiding duplicate passing tests does not establish an OS-specific execution ban.
 
@@ -128,7 +128,9 @@ just init
 
 Linked worktrees share one Git hooks directory. The installed dispatcher
 resolves the active worktree at push time, so each checkout runs its own
-versioned `.githooks/pre-push` protocol.
+versioned `.githooks/pre-push` protocol. How the hook runs (Python selection,
+temporary review worktrees, retained reports, cancellation, and its tests) is
+described in [CI/CD: How the hook runs](docs/topics/ci-cd.md#how-the-hook-runs).
 
 The hook's behavior is controlled by the `RUSTY_BISCUIT_PRE_PUSH` environment variable:
 

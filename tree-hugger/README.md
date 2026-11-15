@@ -26,6 +26,8 @@ cargo install --path tree-hugger/cli   # from the repository root
 just install                           # or, from tree-hugger/
 ```
 
+Prebuilt `hug` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md).
+
 ## Supported Languages
 
 Tree Hugger reports functions in all 16 languages, and types and imports

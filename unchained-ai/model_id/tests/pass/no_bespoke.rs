@@ -8,7 +8,8 @@ pub enum StrictProvider {
     ModelB,
 }
 
-fn main() {
+#[test]
+fn compiles_and_behaves() {
     // Test model_id()
     assert_eq!(StrictProvider::ModelA.model_id(), "modela");
     assert_eq!(StrictProvider::ModelB.model_id(), "modelb");

@@ -1,0 +1,66 @@
+{
+  "ok": true,
+  "ran_at": "2026-11-11T20:20:26.048Z",
+  "wrangler": "4.160.1",
+  "d1_checks": [
+    {
+      "name": "register repository",
+      "ok": true,
+      "detail": "{\"status\":200,\"body\":{\"ok\":true}}"
+    },
+    {
+      "name": "first delivery accepts both",
+      "ok": true,
+      "detail": "{\"status\":200,\"body\":{\"accepted\":[\"4b41e8582ae1447396768226007cbaa11fbb45f95bfede47d7baff681724dacc\",\"8c1ec116a223273b832658986e6b31809ec04f2feea8979c49b155715751352d\"],\"already_present\":[],\"evidence_revision\":2}}"
+    },
+    {
+      "name": "replay is already-present without revision or event change",
+      "ok": true,
+      "detail": "{\"replay\":{\"accepted\":[],\"already_present\":[\"4b41e8582ae1447396768226007cbaa11fbb45f95bfede47d7baff681724dacc\",\"8c1ec116a223273b832658986e6b31809ec04f2feea8979c49b155715751352d\"],\"evidence_revision\":2},\"before\":2,\"after\":2}"
+    },
+    {
+      "name": "conflicting context is rejected with identity_conflict",
+      "ok": true,
+      "detail": "{\"status\":409,\"body\":{\"error\":\"identity_conflict\"}}"
+    },
+    {
+      "name": "rejected batch leaves no sibling, manifest, member, event, or revision",
+      "ok": true,
+      "detail": "{\"revision\":2,\"observations\":2,\"collections\":1,\"members\":2,\"events\":2,\"ids\":[\"4b41e8582ae1447396768226007cbaa11fbb45f95bfede47d7baff681724dacc\",\"8c1ec116a223273b832658986e6b31809ec04f2feea8979c49b155715751352d\"],\"collection_ids\":[\"collection-1\"]}"
+    },
+    {
+      "name": "late statement failure rolls back the whole batch",
+      "ok": true,
+      "detail": "{\"late\":{\"rejected\":true,\"message\":\"D1_ERROR: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)\"},\"revision\":2}"
+    },
+    {
+      "name": "generated-column CHECK and immutability trigger refuse",
+      "ok": true,
+      "detail": "{\"generated_gate_check\":\"rejected: D1_ERROR: CHECK constraint failed: gate IN ('lint', 'check', 'L1', 'L2', 'browser'): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)\",\"immutable_update\":\"rejected: D1_ERROR: observations are immutable: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)\"}"
+    },
+    {
+      "name": "20 concurrent conflicting pairs each commit exactly one side",
+      "ok": true,
+      "detail": "20 winners"
+    },
+    {
+      "name": "concurrent pairs advance revision, events, and members by winners only",
+      "ok": true,
+      "detail": "{\"before\":{\"revision\":2,\"observations\":2,\"collections\":1,\"members\":2,\"events\":2,\"ids\":[\"4b41e8582ae1447396768226007cbaa11fbb45f95bfede47d7baff681724dacc\",\"8c1ec116a223273b832658986e6b31809ec04f2feea8979c49b155715751352d\"],\"collection_ids\":[\"collection-1\"]},\"after\":{\"revision\":42,\"observations\":42,\"collections\":21,\"members\":42,\"events\":42,\"ids\":42,\"collection_ids\":[\"collection-1\",\"pair-0-right\",\"pair-1-left\",\"pair-10-left\",\"pair-11-right\",\"pair-12-right\",\"pair-13-right\",\"pair-14-left\",\"pair-15-left\",\"pair-16-right\",\"pair-17-right\",\"pair-18-right\",\"pair-19-left\",\"pair-2-right\",\"pair-3-left\",\"pair-4-left\",\"pair-5-right\",\"pair-6-right\",\"pair-7-right\",\"pair-8-right\",\"pair-9-right\"]}}"
+    },
+    {
+      "name": "query catalog prepares and runs with bound parameters",
+      "ok": true,
+      "detail": "{\"snapshot\":{\"evidence_revision\":42,\"observation_watermark\":44,\"location_watermark\":0},\"rows\":{\"q4_history\":1,\"q5_retry_successors\":0,\"q7_usable_locations\":1,\"q8_needing_probe\":0,\"q9_current_evaluation_changes\":1,\"q9_stale_evaluation_changes\":0,\"q10_quick_answer\":1,\"q13_export\":16,\"q14_feed\":42,\"q15_growth\":1}}"
+    }
+  ],
+  "cpu_bounds": [
+    {
+      "observations": 256,
+      "request_bytes": 1044480,
+      "passed": true
+    }
+  ],
+  "advertised_collection_observations": 256,
+  "failure": null
+}

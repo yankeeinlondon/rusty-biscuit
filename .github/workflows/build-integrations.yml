@@ -1,5 +1,10 @@
 name: Build UC Integrations
 
+# A published Release builds an archive only for the integration its exact
+# `{package}-v{semver}` tag names, from that tag's commit, and uploads it to
+# that Release. Any other Release selects nothing and no build starts. The
+# selection is made by `scripts/ci/integration_release.py`; no event value is
+# interpolated into shell code. The operational guide is `docs/releases.md`.
 on:
   release:
     types: [published]
@@ -11,25 +16,61 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    name: Build aarch64 integration binaries
+  select:
+    name: Select the released integration
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+      matrix: ${{ steps.select.outputs.matrix }}
+      commit: ${{ steps.select.outputs.commit }}
+    steps:
+      - name: Checkout the selector
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+
+      - name: Select
+        id: select
+        shell: bash
+        run: python3 scripts/ci/integration_release.py select
+
+  build:
+    name: Build aarch64 integration binary
+    needs: select
+    if: needs.select.outputs.selected == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - package: arcam-amp-integration
-            package_dir: homelab/arcam-amp-integration
-          - package: eversolo-integration
-            package_dir: homelab/eversolo-integration
-          - package: sony-receiver-integration
-            package_dir: homelab/sony-receiver-integration
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    env:
+      PACKAGE: ${{ matrix.package }}
+      PACKAGE_DIR: ${{ matrix.package_dir }}
+      TAG: ${{ matrix.tag }}
+      COMMIT: ${{ needs.select.outputs.commit }}
     steps:
-      - name: Checkout
+      - name: Checkout the tag's commit
         uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.select.outputs.commit }}
+          persist-credentials: false
+
+      - name: Assert the checkout is the tag's commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "${head}" != "${COMMIT}" ]; then
+            echo "::error title=integration release::HEAD is ${head}, expected ${TAG} at ${COMMIT}"
+            exit 1
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -37,17 +78,23 @@ jobs:
       - name: Install cross
         run: cargo install cross --locked
 
-      - name: Build ${{ matrix.package }}
-        run: cross build -p "${{ matrix.package }}" --release --target aarch64-unknown-linux-musl
+      - name: Build
+        shell: bash
+        run: cross build -p "${PACKAGE}" --release --target aarch64-unknown-linux-musl
 
       - name: Package archive
+        shell: bash
         run: |
-          mkdir -p "pkg/${{ matrix.package }}"
-          cp "target/aarch64-unknown-linux-musl/release/${{ matrix.package }}" "pkg/${{ matrix.package }}/"
-          cp "${{ matrix.package_dir }}/driver.json" "pkg/${{ matrix.package }}/" 2>/dev/null || true
-          cd pkg && tar czf "${{ matrix.package }}-aarch64.tar.gz" "${{ matrix.package }}"
+          set -euo pipefail
+          mkdir -p "pkg/${PACKAGE}"
+          cp "target/aarch64-unknown-linux-musl/release/${PACKAGE}" "pkg/${PACKAGE}/"
+          if [ -f "${PACKAGE_DIR}/driver.json" ]; then
+            cp "${PACKAGE_DIR}/driver.json" "pkg/${PACKAGE}/"
+          fi
+          cd pkg && tar czf "${PACKAGE}-aarch64.tar.gz" "${PACKAGE}"
 
       - name: Upload release asset
+        shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "pkg/${{ matrix.package }}-aarch64.tar.gz"
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${TAG}" "pkg/${PACKAGE}-aarch64.tar.gz" --repo "${GITHUB_REPOSITORY}"

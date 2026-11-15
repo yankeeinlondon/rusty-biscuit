@@ -1,0 +1,88 @@
+# Disposable display check: mirrors _package-ci.yml's test and wsl2 jobs.
+name: Display package
+
+on:
+  workflow_call:
+    inputs:
+      test-rows:
+        type: string
+        required: true
+      test-rows-plain:
+        type: string
+        required: true
+      wsl-rows:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # V1: no name, labeled rows.
+  test:
+    if: ${{ inputs.test-rows != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.test-rows) }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "V1 ${{ matrix.package }} ${{ matrix.gate }} ${{ matrix.environment }}"
+
+  # V2: static name, labeled rows.
+  test-static:
+    name: Run tests
+    if: ${{ inputs.test-rows != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.test-rows) }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "V2 ${{ matrix.package }} ${{ matrix.gate }} ${{ matrix.environment }}"
+
+  # V3: static name, unlabeled rows.
+  test-static-nolabel:
+    name: Run tests
+    if: ${{ inputs.test-rows-plain != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.test-rows-plain) }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "V3 ${{ matrix.package }} ${{ matrix.gate }} ${{ matrix.environment }}"
+
+  # V4: no name, unlabeled rows (today's production shape).
+  test-auto-nolabel:
+    if: ${{ inputs.test-rows-plain != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.test-rows-plain) }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "V4 ${{ matrix.package }} ${{ matrix.gate }} ${{ matrix.environment }}"
+
+  # V5: no name, labeled WSL2 rows, nested call.
+  wsl2:
+    if: ${{ inputs.wsl-rows != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.wsl-rows) }}
+    uses: ./.github/workflows/zz-display-wsl.yml
+    with:
+      row: ${{ toJSON(matrix) }}
+
+  # V6: static name, labeled WSL2 rows, nested call.
+  wsl2-static:
+    name: Run WSL2 tests
+    if: ${{ inputs.wsl-rows != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.wsl-rows) }}
+    uses: ./.github/workflows/zz-display-wsl.yml
+    with:
+      row: ${{ toJSON(matrix) }}

@@ -91,8 +91,9 @@ test-browser:
 
 # Real-resource tests (live provider/LLM lookups). Skip-clean when credentials absent.
 test-real *args="":
-    @just _test_real research {{args}}
-    @just _test_real research-cli {{args}}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real research {{args}}; \
+        just _test_real research-cli {{args}}
 
 # Lint both the library and CLI
 lint:

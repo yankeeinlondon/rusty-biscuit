@@ -718,5 +718,67 @@ class CertificationTests(unittest.TestCase):
         self.assertTrue(written[0]["name"].startswith(f"ci-coverage-v1-{WSL2}-{'e' * 40}-"))
 
 
+class AuditJobNameTests(unittest.TestCase):
+    """An area's audit counts under its current and its historical label.
+
+    `Check required results` is the audit's display name today; runs created
+    before the rename carry `coverage-audit`. Both consumers of `AUDIT_JOB` —
+    the legacy-run anchor check and certification counting — must accept
+    either, and a mixed run (one area per spelling) as well.
+    """
+
+    RENAMED = "area-ci (a) / Check required results"
+    HISTORICAL = "area-ci (b) / coverage-audit"
+
+    @staticmethod
+    def legacy_passed(jobs: list[dict]) -> bool:
+        return reuse_validation.legacy_audits_passed(
+            REPO, {"id": 10}, lambda endpoint: {"jobs": jobs}
+        )
+
+    def test_renamed_audits_are_counted(self) -> None:
+        jobs = [
+            {"name": self.RENAMED, "conclusion": "success"},
+            {"name": "area-ci (c) / Check required results", "conclusion": "skipped"},
+        ]
+        self.assertEqual((2, 1), count_audits(jobs, 2))
+
+    def test_a_mixed_run_counts_both_spellings(self) -> None:
+        jobs = [
+            {"name": self.RENAMED, "conclusion": "success"},
+            {"name": self.HISTORICAL, "conclusion": "success"},
+        ]
+        self.assertEqual((2, 2), count_audits(jobs, 2))
+        self.assertTrue(self.legacy_passed(jobs))
+
+    def test_a_renamed_or_historical_failed_audit_fails_a_legacy_run(self) -> None:
+        for failed in (self.RENAMED, self.HISTORICAL):
+            with self.subTest(failed):
+                jobs = [
+                    {"name": self.RENAMED, "conclusion": "success"},
+                    {"name": self.HISTORICAL, "conclusion": "success"},
+                ]
+                next(job for job in jobs if job["name"] == failed)["conclusion"] = "failure"
+                self.assertFalse(self.legacy_passed(jobs))
+
+    def test_only_renamed_audits_prove_a_legacy_run(self) -> None:
+        self.assertTrue(self.legacy_passed([{"name": self.RENAMED, "conclusion": "success"}]))
+
+    def test_lookalike_jobs_are_not_audits(self) -> None:
+        lookalikes = [
+            {"name": "area-ci (a) / Check required results extra", "conclusion": "success"},
+            {"name": "area-ci (a) / Publish accepted capability gaps", "conclusion": "success"},
+            {"name": "area-ci (a) / Run package work / test (a, L1, ubuntu-latest, ubuntu-latest)",
+             "conclusion": "success"},
+        ]
+        self.assertEqual((1, 0), count_audits(lookalikes, 1))
+        self.assertFalse(self.legacy_passed(lookalikes), "no audit at all proves nothing")
+        # A failing lookalike does not count against a passing real audit.
+        lookalikes[0]["conclusion"] = "failure"
+        self.assertTrue(
+            self.legacy_passed([*lookalikes, {"name": self.RENAMED, "conclusion": "success"}])
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

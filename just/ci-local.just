@@ -101,6 +101,13 @@
 # checkout — is `just cross-check`, which uses the same `ci-build` producer,
 # manifest, verifier, and archive-mode tier recipes CI uses.
 #
+# Every Python helper runs under one interpreter: the one `ci-push` selected,
+# when it hands one over as `BISCUIT_CI_PYTHON` (a native executable path) and
+# `BISCUIT_CI_PYTHON_ARGS_FILE` (its argv prefix, each argument NUL-terminated;
+# empty or unset for none), else `python3`. A helper must never re-launch
+# `python3` itself: on native Windows that can be a broken shim, and ci-push
+# may have selected `py -3` precisely to avoid it.
+#
 # Usage:
 #   just ci-local                       affected packages vs origin/main
 #   just ci-local --lint-only           clippy gates only
@@ -161,9 +168,41 @@ ci-local *args="":
         esac
         shift
     done
-    if ! command -v python3 > /dev/null 2>&1; then
-        echo "ci-local: python3 is required (scripts/ci/affected_scope.py); run 'just init'." >&2
+    # Every helper below runs as "${python[@]}" (see the header). An args file
+    # without an interpreter is refused rather than applied to `python3`: its
+    # prefix (`-3` for `py -3`) belongs to the launcher it was selected with.
+    if [[ -n "${BISCUIT_CI_PYTHON:-}" ]]; then
+        if [[ ! -f "${BISCUIT_CI_PYTHON}" || ! -x "${BISCUIT_CI_PYTHON}" ]]; then
+            echo "ci-local: BISCUIT_CI_PYTHON '${BISCUIT_CI_PYTHON}' is not an executable file." >&2
+            exit 2
+        fi
+        python=("${BISCUIT_CI_PYTHON}")
+        python_args_file="${BISCUIT_CI_PYTHON_ARGS_FILE:-}"
+        if [[ -n "${python_args_file}" ]]; then
+            if [[ ! -f "${python_args_file}" || ! -r "${python_args_file}" ]]; then
+                echo "ci-local: BISCUIT_CI_PYTHON_ARGS_FILE '${python_args_file}' is not a readable file." >&2
+                exit 2
+            fi
+            # `read` fails at end of input; a nonempty `arg` left behind is a
+            # final record with no terminating NUL, which is a truncated file.
+            arg=""
+            while IFS= read -r -d '' arg; do
+                python+=("${arg}")
+            done < "${python_args_file}"
+            if [[ -n "${arg}" ]]; then
+                echo "ci-local: BISCUIT_CI_PYTHON_ARGS_FILE '${python_args_file}' ends in a record with no terminating NUL byte; refusing a truncated interpreter prefix." >&2
+                exit 2
+            fi
+        fi
+    elif [[ -n "${BISCUIT_CI_PYTHON_ARGS_FILE:-}" ]]; then
+        echo "ci-local: BISCUIT_CI_PYTHON_ARGS_FILE is set without BISCUIT_CI_PYTHON; set both or neither." >&2
         exit 2
+    else
+        if ! command -v python3 > /dev/null 2>&1; then
+            echo "ci-local: python3 is required (scripts/ci/affected_scope.py); run 'just init'." >&2
+            exit 2
+        fi
+        python=(python3)
     fi
     ci_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
     # The reserved directory exists because of a rustc wrapper (see above).
@@ -191,7 +230,7 @@ ci-local *args="":
     # repository from the remote being pushed to; this preview has no push, so
     # it uses origin's URL — empty without one, which is the store root, where
     # every repository's records bind.
-    constraints_dir="$(python3 scripts/ci/constraints.py directory \
+    constraints_dir="$("${python[@]}" scripts/ci/constraints.py directory \
         --repository "$(git remote get-url origin 2>/dev/null || true)" \
         --directory "${constraints_dir}")"
 
@@ -230,12 +269,12 @@ ci-local *args="":
             exit 2
         fi
         cp "${plan_in}" "${plan_file}"
-        python3 scripts/ci/affected_scope.py --apply-to "${plan_file}" > "${scope_file}"
+        "${python[@]}" scripts/ci/affected_scope.py --apply-to "${plan_file}" > "${scope_file}"
         plan_view="${plan_file}"
         echo
         echo "Plan supplied by the caller: ${plan_in}"
     elif (( select_all == 1 )) || (( ${#selectors[@]} > 0 )); then
-        python3 scripts/ci/affected_scope.py "${scope_args[@]}" --all > "${scope_file}"
+        "${python[@]}" scripts/ci/affected_scope.py "${scope_args[@]}" --all > "${scope_file}"
     else
         if ! merge_base="$(git merge-base "${base}" HEAD 2>/dev/null)"; then
             echo "ci-local: cannot resolve base ref '${base}' (set --base or CI_LOCAL_BASE)." >&2
@@ -254,7 +293,7 @@ ci-local *args="":
         done < <(git ls-files --others --exclude-standard -z)
         diff_arguments="$(mktemp)"
         git diff --name-status -z "${merge_base}" \
-            | python3 scripts/ci/diff_scope.py ${untracked[@]+"${untracked[@]}"} > "${diff_arguments}"
+            | "${python[@]}" scripts/ci/diff_scope.py ${untracked[@]+"${untracked[@]}"} > "${diff_arguments}"
         path_args=()
         while IFS= read -r -d '' argument; do
             path_args+=("${argument}")
@@ -275,7 +314,7 @@ ci-local *args="":
         # The revision pair is part of the plan: a receipt records the head it
         # tested, and a reviewer reconciles the plan against the outgoing work.
         scope_args+=(--base "${merge_base}" --head "$(git rev-parse HEAD)")
-        python3 scripts/ci/affected_scope.py "${scope_args[@]}" "${path_args[@]}" > "${scope_file}"
+        "${python[@]}" scripts/ci/affected_scope.py "${scope_args[@]}" "${path_args[@]}" > "${scope_file}"
         echo
         echo "Changed vs ${base} (${merge_base:0:9}): ${changed_count} file(s)"
     fi
@@ -293,10 +332,10 @@ ci-local *args="":
     # separate `scope_file`.
     if (( show_plan == 1 )) && [[ -n "${merge_base}" ]] && [[ -f scripts/ci/local_evidence.py ]]; then
         head_sha="$(git rev-parse HEAD)"
-        if python3 scripts/ci/local_evidence.py verify --cells \
+        if "${python[@]}" scripts/ci/local_evidence.py verify --cells \
             --plan "${plan_view}" --base "${merge_base}" --head "${head_sha}" \
             --rejections "${rejected_file}" > "${accepted_file}" 2>/dev/null; then
-            python3 scripts/ci/affected_scope.py --apply-to "${plan_file}" \
+            "${python[@]}" scripts/ci/affected_scope.py --apply-to "${plan_file}" \
                 --accepted-cells "${accepted_file}" \
                 --evidence-rejections "${rejected_file}" \
                 --resolved-plan --plan-out "${plan_file}" > "${scope_file}"
@@ -329,10 +368,23 @@ ci-local *args="":
         packages="$(jq -r '.packages[]' "${scope_file}")"
     fi
 
-    count="$(sed '/^$/d' <<< "${packages}" | wc -l | tr -d ' ')"
-    full_scope="$(jq -r '.full_scope' "${scope_file}")"
-    change_class="$(jq -r '.change_class' "${scope_file}")"
-    full_gates="$(jq -rc '.full_scope_gates | join(",")' "${scope_file}")"
+    # Counted and read without a process per fact: each one is a fork and a
+    # program start, which costs tens of milliseconds under Git Bash on
+    # native Windows.
+    count=0
+    while IFS= read -r listed; do
+        if [[ -n "${listed}" ]]; then
+            count=$(( count + 1 ))
+        fi
+    done <<< "${packages}"
+    scope_facts="$(jq -r '.full_scope, .change_class, (.full_scope_gates | join(","))' "${scope_file}")"
+    scope_fact=()
+    while IFS= read -r line; do
+        scope_fact+=("${line}")
+    done <<< "${scope_facts}"
+    full_scope="${scope_fact[0]:-}"
+    change_class="${scope_fact[1]:-}"
+    full_gates="${scope_fact[2]:-}"
     if [[ -n "${scope_out}" ]]; then
         cp "${scope_file}" "${scope_out}"
     fi
@@ -538,7 +590,7 @@ ci-local *args="":
     # `test_evidence_index.py` covers `just ci-evidence`, which reads the store
     # this recipe's hook writes; it is local-only for the same reason.
     for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py test_consolidation.py test_evidence_index.py; do
-        if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
+        if "${python[@]}" "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else
             cat "${selftest_log}"
@@ -555,25 +607,55 @@ ci-local *args="":
     if [[ -n "${plan_in}" ]]; then
         # A narrowed test-input cell runs through its own step below, never as
         # the package's whole tier.
-        running_cells="$(jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | select((.test_filter // "") == "") | select(.execution == "execute" or (.execution == "reuse" and .evidence.outcome == "fail")) | "\(.package)/\(.gate)"' "${plan_file}")"
+        # One `jq` reads both: each cell's listing line (`P `), preceded by
+        # `R ` and the cell's name when it runs here.
+        cell_lines="$(jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | (select((.test_filter // "") == "") | select(.execution == "execute" or (.execution == "reuse" and .evidence.outcome == "fail")) | "R \(.package)/\(.gate)"), "P " + (if .execution == "execute" then "  run    \(.package)/\(.gate)" elif .execution == "reuse" and .evidence.outcome == "fail" then "  rerun  \(.package)/\(.gate)  (prior evidence is a failure; a fresh result supersedes it)" elif .execution == "reuse" then "  skip   \(.package)/\(.gate)  (reused: \(.origin) \(.evidence.outcome // "") on \((.evidence.evidence.commit // .evidence.commit // "this tree")[0:9]))" else "  skip   \(.package)/\(.gate)  (\(.state))" end)' "${plan_file}")"
         echo "Cells for ${local_environment} from the supplied plan:"
-        jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | if .execution == "execute" then "  run    \(.package)/\(.gate)" elif .execution == "reuse" and .evidence.outcome == "fail" then "  rerun  \(.package)/\(.gate)  (prior evidence is a failure; a fresh result supersedes it)" elif .execution == "reuse" then "  skip   \(.package)/\(.gate)  (reused: \(.origin) \(.evidence.outcome // "") on \((.evidence.evidence.commit // .evidence.commit // "this tree")[0:9]))" else "  skip   \(.package)/\(.gate)  (\(.state))" end' "${plan_file}"
+        while IFS= read -r line; do
+            case "${line}" in
+                "R "*) running_cells+="${line#R }"$'\n' ;;
+                "P "*) printf '%s\n' "${line#P }" ;;
+            esac
+        done <<< "${cell_lines}"
         echo "------------------------------------------------"
     fi
+    # An exact line of `running_cells`, matched without starting a `grep`.
     cell_runs_here() {
         [[ -z "${plan_in}" ]] && return 0
-        grep -qxF -- "$1/$2" <<< "${running_cells}"
+        [[ $'\n'"${running_cells}" == *$'\n'"$1/$2"$'\n'* ]]
     }
 
     while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
-        # The plan's package record; empty for a package the plan does not
-        # carry, which then runs no gate.
-        record="$(jq -c --arg p "${package}" '.packages[] | select(.package == $p)' "${plan_file}")"
-        test_args="$(jq -r '.test_args // ""' <<< "${record}")"
-        # The plan spells each test tier as its own gate; this loop runs them
-        # under one `test` gate, with L2 selected separately below.
-        gates="$(jq -r '[.gates[] | if . == "lint" or . == "check" then . else "test" end] | unique | join(" ")' <<< "${record}")"
+        # Every fact the gates below read from the plan, one per line, in one
+        # `jq` (each is explained where it is used). Nothing in this loop
+        # rewrites the plan, so reading them before the first gate runs reads
+        # what each gate would have read. An empty plan prints nothing, and
+        # every fact is then empty.
+        #
+        # The plan's package record (compact JSON) is empty for a package the
+        # plan does not carry, which then runs no gate. The plan spells each
+        # test tier as its own gate; this loop runs them under one `test`
+        # gate, with L2 selected separately below.
+        package_facts="$(jq -r --arg p "${package}" '
+            (first(.packages[] | select(.package == $p)) // null) as $record
+            | ($record | if . == null then "" else tojson end),
+              ($record | if . == null then "" else .test_args // "" end),
+              ($record | if . == null then "" else [.gates[] | if . == "lint" or . == "check" then . else "test" end] | unique | join(" ") end),
+              ([.cells[] | select(.package == $p and .gate == "lint") | .companions_only // false] | any),
+              ([.cells[]? | select(.package == $p and .gate == "lint") | (.companions // [])[] | select(.name == "archive-path-guard")] | length > 0),
+              ([.cells[]? | select(.package == $p and .gate == "L1" and .execution == "execute") | .test_filter // empty] | first // "")
+        ' "${plan_file}")"
+        package_fact=()
+        while IFS= read -r line; do
+            package_fact+=("${line}")
+        done <<< "${package_facts}"
+        record="${package_fact[0]:-}"
+        test_args="${package_fact[1]:-}"
+        gates="${package_fact[2]:-}"
+        companions_only="${package_fact[3]:-}"
+        guard_planned="${package_fact[4]:-false}"
+        narrow_filter="${package_fact[5]:-}"
         # A package reached only through the check gate. Unreachable today (see
         # the recipe header): every gating package owns a lint cell, so `check`
         # is never a package's sole gate.
@@ -591,7 +673,6 @@ ci-local *args="":
         # selected, not for the package, so its producer skips clippy — see
         # `_package-ci.yml`'s lint job. Linting here anyway would run work CI
         # will not run and report a gate that does not exist.
-        companions_only="$(jq -r --arg p "${package}" '[.cells[] | select(.package == $p and .gate == "lint") | .companions_only // false] | any' "${plan_file}")"
         if (( run_lint == 1 )) && [[ " ${gates} " == *" lint "* ]] && [[ "${companions_only}" != "true" ]]; then
             if just _lint "${package}"; then
                 passed+=("lint ${package}")
@@ -613,10 +694,6 @@ ci-local *args="":
         # lint cell is already `reusable=False` in the plan, so nothing here can
         # be reused for the ubuntu-latest execution — which is what the message
         # below states outright on a non-Linux host.
-        guard_planned=false
-        if [[ -s "${plan_file}" ]]; then
-            guard_planned="$(jq -r --arg p "${package}" '[.cells[]? | select(.package == $p and .gate == "lint") | (.companions // [])[] | select(.name == "archive-path-guard")] | length > 0' "${plan_file}")"
-        fi
         if (( run_lint == 1 )) && [[ "${guard_planned}" == "true" ]]; then
             guard_note=""
             if [[ "${local_environment}" != "ubuntu-latest" ]]; then
@@ -625,7 +702,7 @@ ci-local *args="":
                 echo "  A pass here is a local check only; the planned ubuntu-latest execution of"
                 echo "  ${package}/ubuntu-latest/lint remains OUTSTANDING and no local result stands in for it."
             fi
-            if BISCUIT_ARCHIVE_GUARD_PLAN="${plan_file}" python3 scripts/ci/companion_suites.py \
+            if BISCUIT_ARCHIVE_GUARD_PLAN="${plan_file}" "${python[@]}" scripts/ci/companion_suites.py \
                 --suites '["archive-path-guard"]' \
                 --environment ubuntu-latest \
                 --gate lint \
@@ -651,10 +728,6 @@ ci-local *args="":
         # with the others: `record-cells` records it WITH its filter, and a
         # published exact-tree receipt then satisfies the planned cell instead
         # of CI running it. It never stands in for this host's whole tier.
-        narrow_filter=""
-        if [[ -s "${plan_file}" ]]; then
-            narrow_filter="$(jq -r --arg p "${package}" '[.cells[]? | select(.package == $p and .gate == "L1" and .execution == "execute") | .test_filter // empty] | first // ""' "${plan_file}")"
-        fi
         if (( run_test == 1 )) && [[ -n "${narrow_filter}" ]]; then
             narrow_note=" — narrowed to the tests that read the changed file(s)"
             # The filter can name a `slow_` test only where the package keeps

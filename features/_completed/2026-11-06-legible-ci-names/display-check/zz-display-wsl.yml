@@ -1,0 +1,22 @@
+# Disposable display check: mirrors _wsl-ci.yml's wsl job (runs on Linux here;
+# the row's runner value is data only).
+name: Display WSL
+
+on:
+  workflow_call:
+    inputs:
+      row:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  wsl:
+    name: Run guest tests
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "$ROW"
+        env:
+          ROW: ${{ inputs.row }}

@@ -23,15 +23,12 @@ use super::types::*;
 /// permission, I/O, or corruption failure surfaces as [`SniffError::Git`]
 /// rather than collapsing into an empty walk.
 pub(crate) fn head_id_opt(repo: &gix::Repository) -> Result<Option<gix::ObjectId>> {
-    match repo.head_id() {
-        Ok(id) => Ok(Some(id.detach())),
-        // Only an unborn branch is "no history"; the symbolic HEAD exists but
-        // its branch has no commits yet.
-        Err(gix::reference::head_id::Error::PeelToId(
-            gix::head::peel::into_id::Error::Unborn { .. },
-        )) => Ok(None),
-        Err(e) => Err(SniffError::git("head", e)),
-    }
+    // Only an unborn branch is "no history" (`Ok(None)` from the peel); the
+    // symbolic HEAD exists but its branch has no commits yet.
+    repo.head()
+        .and_then(|mut head| head.try_peel_to_id())
+        .map(|id| id.map(gix::Id::detach))
+        .map_err(|e| SniffError::git("head", e))
 }
 
 /// Resolve a revision spec to a single object id, distinguishing a genuine
@@ -43,8 +40,6 @@ pub(crate) fn head_id_opt(repo: &gix::Repository) -> Result<Option<gix::ObjectId
 /// an object-database read error means the lookup failed for a reason other
 /// than absence and must surface.
 pub(crate) fn resolve_single_opt(repo: &gix::Repository, spec: &str) -> Result<Option<gix::ObjectId>> {
-    use gix::hash::prefix::from_hex::Error as HexError;
-
     match repo.rev_parse_single(spec) {
         Ok(id) => Ok(Some(id.detach())),
         Err(err) => match gix::hash::Prefix::from_hex(spec) {
@@ -56,16 +51,21 @@ pub(crate) fn resolve_single_opt(repo: &gix::Repository, spec: &str) -> Result<O
                 _ => Err(SniffError::git("revparse", err)),
             },
             // A non-hex spec (e.g. a ref name) that did not resolve names no
-            // commit — genuine absence.
-            Err(HexError::Invalid) => Ok(None),
+            // commit — genuine absence. `from_hex` checks the length first,
+            // so a spec of valid prefix length failed on a non-hex character.
+            Err(_) if prefix_hex_len_is_valid(spec) => Ok(None),
             // A too-short/too-long hex prefix cannot be verified against the
             // object database, so absence cannot be proven: surface the error
             // rather than masquerade an ambiguous lookup as "not found".
-            Err(HexError::TooShort { .. } | HexError::TooLong { .. }) => {
-                Err(SniffError::git("revparse", err))
-            }
+            Err(_) => Err(SniffError::git("revparse", err)),
         },
     }
+}
+
+/// Whether `spec`'s length is one `gix::hash::Prefix::from_hex` accepts, so
+/// that its rejection can only mean a non-hex character.
+fn prefix_hex_len_is_valid(spec: &str) -> bool {
+    (gix::hash::Prefix::MIN_HEX_LEN..=gix::hash::Kind::longest().len_in_hex()).contains(&spec.len())
 }
 
 /// Resolve a changed-paths base token to a commit id, following annotated
@@ -135,13 +135,13 @@ fn resolve_remote_or_sha(
     repo: &gix::Repository,
     branch_name: &str,
 ) -> Result<Option<gix::ObjectId>> {
-    match repo.find_reference(&format!("refs/remotes/{branch_name}")) {
-        Ok(r) => Ok(Some(
+    match repo.try_find_reference(&format!("refs/remotes/{branch_name}")) {
+        Ok(Some(r)) => Ok(Some(
             r.into_fully_peeled_id()
                 .map_err(|e| SniffError::git("peel", e))?
                 .detach(),
         )),
-        Err(gix::reference::find::existing::Error::NotFound { .. }) => {
+        Ok(None) => {
             // Probe the object database only for SHA-shaped input. A name that
             // cannot form an object-ID prefix names no commit by definition, so
             // it is absence rather than a verifiable-against-the-odb SHA.
@@ -502,7 +502,7 @@ pub(crate) fn get_commit_files_with_cache_fallible(
         .for_each_to_obtain_tree_with_cache(
             &tree,
             cache,
-            |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+            |change| -> gix::Result<std::ops::ControlFlow<()>> {
                 if change.entry_mode().is_tree() {
                     return Ok(std::ops::ControlFlow::Continue(()));
                 }
@@ -558,7 +558,7 @@ pub(crate) fn tip_diff_paths(
         .for_each_to_obtain_tree_with_cache(
             &head_tree,
             &mut cache,
-            |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+            |change| -> gix::Result<std::ops::ControlFlow<()>> {
                 if change.entry_mode().is_tree() {
                     return Ok(std::ops::ControlFlow::Continue(()));
                 }
@@ -657,7 +657,7 @@ pub(crate) fn committed_file_changes_with_cache(
         .for_each_to_obtain_tree_with_cache(
             &tree,
             cache,
-            |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+            |change| -> gix::Result<std::ops::ControlFlow<()>> {
                 if change.entry_mode().is_tree() || change.location().is_empty() {
                     return Ok(std::ops::ControlFlow::Continue(()));
                 }
@@ -843,7 +843,7 @@ fn commit_touches_path(
     let outcome = platform.for_each_to_obtain_tree_with_cache(
         &tree,
         cache,
-        |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+        |change| -> gix::Result<std::ops::ControlFlow<()>> {
             if change.entry_mode().is_tree() {
                 return Ok(std::ops::ControlFlow::Continue(()));
             }
@@ -1199,11 +1199,9 @@ pub(crate) fn get_commits_for_branch_fallible(
     // remote-tracking/SHA fallback (so `origin/main` and bare SHAs still
     // resolve), but a malformed branch ref, or one peeling to a missing object,
     // must surface rather than silently producing an empty history.
-    let local = match repo.find_reference(&format!("refs/heads/{branch_name}")) {
-        Ok(r) => Some(r),
-        Err(gix::reference::find::existing::Error::NotFound { .. }) => None,
-        Err(e) => return Err(SniffError::git("find_reference", e)),
-    };
+    let local = repo
+        .try_find_reference(&format!("refs/heads/{branch_name}"))
+        .map_err(|e| SniffError::git("find_reference", e))?;
 
     let start_oid = match local {
         Some(r) => Some(

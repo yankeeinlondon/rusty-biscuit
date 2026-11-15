@@ -1,0 +1,1843 @@
+{
+ "_area-ci.yml": {
+  "True": {
+   "workflow_call": {
+    "inputs": {
+     "accepted-gaps": {
+      "description": "Whether the resolved plan carries an accepted policy gap in this area. Required, so a caller that forgets it fails at parse rather than silently publishing nothing.",
+      "required": true,
+      "type": "boolean"
+     },
+     "area": {
+      "description": "Package area, as `sniff repo package-area` names it (e.g. claudine, claudine/rendezvous, root).",
+      "required": true,
+      "type": "string"
+     },
+     "measure-compiler-work": {
+      "default": false,
+      "description": "Count actual rustc invocations around each measured test command. Baseline collection only; defaults off so an ordinary run is byte-identical to the uninstrumented one.",
+      "required": false,
+      "type": "boolean"
+     },
+     "rows": {
+      "description": "This area's dispatch row document, produced by `affected_scope.row_sets`: `{test, check, lint, wsl}` \u2014 four disjoint sets that together partition the area's executing cells \u2014 plus the scalar `has_*_rows` flags this workflow guards on. A row is `{package, gate, environment, runner}` and nothing else.",
+      "required": true,
+      "type": "string"
+     },
+     "slug": {
+      "description": "The area name spelled for artifact names (`/` -> `--`). Presentation only; `--area` still receives the real name.",
+      "required": true,
+      "type": "string"
+     },
+     "tested-revision": {
+      "description": "The resolved plan's `head`: the one revision this whole run tests, and the only checkout `ci-build` will produce or verify an archive against. Required, and never recomputed here \u2014 see the `env:` comment in `ci.yml`.",
+      "required": true,
+      "type": "string"
+     }
+    }
+   }
+  },
+  "env": {
+   "RUSTC_WRAPPER": ""
+  },
+  "jobs": {
+   "accepted-gaps": {
+    "if": "inputs.accepted-gaps",
+    "permissions": {
+     "checks": "write",
+     "contents": "read"
+    },
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ inputs.tested-revision }}"
+      }
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-resolved-plan",
+       "path": "ci-artifacts/ci-resolved-plan"
+      }
+     },
+     {
+      "env": {
+       "AREA": "${{ inputs.area }}",
+       "GH_TOKEN": "${{ github.token }}",
+       "HEAD_SHA": "${{ inputs.tested-revision }}"
+      },
+      "run": "set -euo pipefail\npython3 scripts/ci/publish_gaps.py \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --area \"$AREA\" \\\n  --head-sha \"$HEAD_SHA\" \\\n  --repo \"$GITHUB_REPOSITORY\" \\\n  --server \"$GITHUB_SERVER_URL\"\n",
+      "shell": "bash"
+     }
+    ],
+    "timeout-minutes": 5
+   },
+   "coverage-audit": {
+    "if": "always()",
+    "needs": "package-ci",
+    "permissions": {
+     "actions": "read",
+     "checks": "read",
+     "contents": "read"
+    },
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ inputs.tested-revision }}"
+      }
+     },
+     {
+      "run": "rustup show"
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "github-token": "${{ github.token }}",
+       "name": "ci-scope",
+       "path": "ci-artifacts/ci-scope",
+       "run-id": "${{ github.run_id }}"
+      }
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "github-token": "${{ github.token }}",
+       "name": "ci-resolved-plan",
+       "path": "ci-artifacts/ci-resolved-plan",
+       "run-id": "${{ github.run_id }}"
+      }
+     },
+     {
+      "env": {
+       "AREA": "${{ inputs.area }}"
+      },
+      "id": "area",
+      "run": "set -euo pipefail\nplan=ci-artifacts/ci-resolved-plan/resolved-plan.json\npackages=\"$(jq -r --arg area \"$AREA\" \\\n  '[.packages[] | select(.area == $area and (.gates | length) > 0) | .package] | join(\",\")' \\\n  \"$plan\")\"\noverlay=\"$(jq -r --arg area \"$AREA\" \\\n  '[.packages[] | select(.area == $area and (.gates | length) > 0) | .package\n    | \"junit-\\(.)-*\", \"status-\\(.)-*\", \"completion-\\(.)-*\"]\n   + [\"build-status-*\"] | \"{\" + join(\",\") + \"}\"' \\\n  \"$plan\")\"\necho \"packages=$packages\" >>\"$GITHUB_OUTPUT\"\necho \"overlay=$overlay\" >>\"$GITHUB_OUTPUT\"\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "merge-multiple": false,
+       "path": "ci-artifacts",
+       "pattern": "{junit-*,status-*,build-status-*,completion-*}"
+      }
+     },
+     {
+      "if": "${{ github.run_attempt > 1 }}",
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "github-token": "${{ github.token }}",
+       "merge-multiple": false,
+       "path": "ci-artifacts",
+       "pattern": "${{ steps.area.outputs.overlay }}",
+       "run-id": "${{ github.run_id }}"
+      }
+     },
+     {
+      "env": {
+       "AREA_PACKAGES": "${{ steps.area.outputs.packages }}",
+       "GH_TOKEN": "${{ github.token }}"
+      },
+      "run": "set -euo pipefail\nmkdir -p ci-artifacts\npython3 scripts/ci/runner_loss.py attribute \\\n  --repo \"$GITHUB_REPOSITORY\" \\\n  --run-id \"$GITHUB_RUN_ID\" \\\n  --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n  --artifacts ci-artifacts \\\n  --package \"$AREA_PACKAGES\" \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --out \"$RUNNER_TEMP/runner-loss.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "run": "cargo build --release \\\n  -p repo-deps \\\n  --no-default-features --bin ci-rollup\n"
+     },
+     {
+      "continue-on-error": true,
+      "env": {
+       "AREA": "${{ inputs.area }}"
+      },
+      "id": "rollup",
+      "run": "set -euo pipefail\nmkdir -p ci-artifacts\n./target/release/ci-rollup rollup \\\n  --artifacts ci-artifacts \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --policy ci-artifacts/ci-scope/scope.json \\\n  --environments .github/ci/environments.json \\\n  --area \"$AREA\" \\\n  --out \"ci-results-${{ inputs.slug }}.json\" \\\n  --run-id '${{ github.run_id }}'\n",
+      "shell": "bash"
+     },
+     {
+      "if": "always()",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "ci-results-${{ inputs.slug }}",
+       "path": "ci-results-${{ inputs.slug }}.json"
+      }
+     },
+     {
+      "env": {
+       "AREA": "${{ inputs.area }}",
+       "PRODUCERS": "${{ needs.package-ci.result }}"
+      },
+      "if": "needs.package-ci.result == 'success' || needs.package-ci.result == 'skipped'",
+      "run": "./target/release/ci-rollup verdict \\\n  --results \"ci-results-${{ inputs.slug }}.json\" \\\n  --area \"$AREA\" \\\n  --producers \"$PRODUCERS\" \\\n  --baseline .github/ci/ci-baseline.toml\n",
+      "shell": "bash"
+     }
+    ],
+    "timeout-minutes": 20
+   },
+   "package-ci": {
+    "if": "fromJSON(inputs.rows).has_test_rows || fromJSON(inputs.rows).has_check_rows || fromJSON(inputs.rows).has_lint_rows || fromJSON(inputs.rows).has_wsl_rows",
+    "permissions": {
+     "contents": "read"
+    },
+    "secrets": "inherit",
+    "uses": "./.github/workflows/_package-ci.yml",
+    "with": {
+     "check-rows": "${{ toJSON(fromJSON(inputs.rows).check) }}",
+     "lint-rows": "${{ toJSON(fromJSON(inputs.rows).lint) }}",
+     "measure-compiler-work": "${{ inputs.measure-compiler-work }}",
+     "test-rows": "${{ toJSON(fromJSON(inputs.rows).test) }}",
+     "tested-revision": "${{ inputs.tested-revision }}",
+     "wsl-rows": "${{ toJSON(fromJSON(inputs.rows).wsl) }}"
+    }
+   }
+  }
+ },
+ "_package-ci.yml": {
+  "True": {
+   "workflow_call": {
+    "inputs": {
+     "check-rows": {
+      "default": "[]",
+      "description": "JSON array of this area's `check` rows. Each row is `{package, gate, environment, runner}`.",
+      "type": "string"
+     },
+     "lint-rows": {
+      "default": "[]",
+      "description": "JSON array of this area's `lint` rows. Each row is `{package, gate, environment, runner}`.",
+      "type": "string"
+     },
+     "measure-compiler-work": {
+      "default": false,
+      "description": "Count actual rustc invocations around each measured test command. Baseline collection only; defaults off so an ordinary run is byte-identical to the uninstrumented one.",
+      "required": false,
+      "type": "boolean"
+     },
+     "test-rows": {
+      "default": "[]",
+      "description": "JSON array of this area's NATIVE test rows (L1, L2, and browser cells on a runner that is its own environment). Each row is `{package, gate, environment, runner}`; the job resolves the rest from the plan.",
+      "type": "string"
+     },
+     "tested-revision": {
+      "description": "The resolved plan's `head`: the one revision this whole run tests, and the only checkout `ci-build` will produce or verify an archive against. Required, and never recomputed here \u2014 see the `env:` comment in `ci.yml`.",
+      "required": true,
+      "type": "string"
+     },
+     "wsl-rows": {
+      "default": "[]",
+      "description": "JSON array of this area's `wsl2-ubuntu` rows, each delegated whole to `_wsl-ci.yml`. Kept apart from `test-rows` so a guest cell can never reach a `runs-on` matrix.",
+      "type": "string"
+     }
+    }
+   }
+  },
+  "env": {
+   "COLORTERM": "truecolor",
+   "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24": true,
+   "NEXTEST_PROFILE": "ci",
+   "PYTHONUTF8": "1",
+   "RUSTC_WRAPPER": ""
+  },
+  "jobs": {
+   "check": {
+    "if": "${{ inputs.check-rows != '[]' }}",
+    "runs-on": "${{ matrix.runner }}",
+    "steps": [
+     {
+      "id": "job_start",
+      "if": "${{ inputs.measure-compiler-work }}",
+      "run": "echo \"epoch=$(date +%s)\" >>\"$GITHUB_OUTPUT\"",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ inputs.tested-revision }}"
+      }
+     },
+     {
+      "uses": "extractions/setup-just@v4"
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-resolved-plan",
+       "path": "ci-artifacts/ci-resolved-plan"
+      }
+     },
+     {
+      "env": {
+       "ROW": "${{ toJSON(matrix) }}"
+      },
+      "id": "cell",
+      "run": "set -euo pipefail\npython3 scripts/ci/cell_contract.py \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --row \"$ROW\" \\\n  --head '${{ inputs.tested-revision }}' \\\n  --github-output \"$GITHUB_OUTPUT\"\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "DEPENDENTS_NATIVE": "${{ steps.cell.outputs.dependents_native }}",
+       "ENVIRONMENT": "${{ matrix.environment }}",
+       "NATIVE": "${{ steps.cell.outputs.native_packages }}"
+      },
+      "run": "set -euo pipefail\n# The dependent closure's prerequisites are installed only in the one\n# cell that compiles it (Linux, below), and the union is deduplicated\n# before it reaches the recipe.\ndependents='[]'\nif [ \"${ENVIRONMENT:-}\" = \"ubuntu-latest\" ]; then\n  dependents=\"${DEPENDENTS_NATIVE:-[]}\"\nfi\nnative_args=()\nwhile IFS= read -r package; do\n  if [ -n \"$package\" ]; then native_args+=(\"$package\"); fi\ndone < <(jq -r -n --argjson native \"${NATIVE:-[]}\" --argjson dependents \"$dependents\" \\\n  '($native + $dependents) | unique | .[]')\nif [ ${#native_args[@]} -gt 0 ]; then\n  just _ensure-native-libs \"${native_args[@]}\"\nfi\n",
+      "shell": "bash"
+     },
+     {
+      "run": "rustup show"
+     },
+     {
+      "uses": "Swatinem/rust-cache@v2",
+      "with": {
+       "shared-key": "package-ci-${{ matrix.package }}-check-${{ matrix.environment }}",
+       "workspaces": ". -> target"
+      }
+     },
+     {
+      "id": "counter",
+      "if": "${{ inputs.measure-compiler-work }}",
+      "run": "set -euo pipefail\njust _ci_build_counter \"check ${{ matrix.environment }}\"\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "BISCUIT_CI_BUILD_CONFIGURATION": "check ${{ matrix.environment }}",
+       "BISCUIT_CI_BUILD_COUNTER_DIR": "${{ steps.counter.outputs.counter_dir }}",
+       "BISCUIT_CI_BUILD_PACKAGE": "${{ matrix.package }}",
+       "BISCUIT_CI_BUILD_WRAP": "${{ steps.counter.outputs.wrap }}",
+       "RUSTC_WRAPPER": "${{ steps.counter.outputs.wrapper }}"
+      },
+      "id": "check",
+      "run": "cargo check ${{ steps.cell.outputs.check_args }}"
+     },
+     {
+      "env": {
+       "BISCUIT_CI_BUILD_CONFIGURATION": "check ${{ matrix.environment }}",
+       "BISCUIT_CI_BUILD_COUNTER_DIR": "${{ steps.counter.outputs.counter_dir }}",
+       "BISCUIT_CI_BUILD_PACKAGE": "${{ matrix.package }}",
+       "BISCUIT_CI_BUILD_WRAP": "${{ steps.counter.outputs.wrap }}",
+       "RUSTC_WRAPPER": "${{ steps.counter.outputs.wrapper }}"
+      },
+      "id": "dependents",
+      "if": "${{ !cancelled() && matrix.environment == 'ubuntu-latest' && steps.cell.outputs.dependents_check_args != '' }}",
+      "run": "cargo check ${{ steps.cell.outputs.dependents_check_args }}"
+     },
+     {
+      "continue-on-error": true,
+      "env": {
+       "BISCUIT_CI_JOB_STARTED_EPOCH": "${{ steps.job_start.outputs.epoch }}",
+       "BISCUIT_CI_STAGE_SECONDS": "{\"counter_setup_seconds\":${{ steps.counter.outputs.setup_seconds || 0 }}}"
+      },
+      "if": "${{ !cancelled() && inputs.measure-compiler-work }}",
+      "run": "set -euo pipefail\njust _ci_build_report \\\n  \"${{ steps.counter.outputs.wrapper }}\" \\\n  \"${{ steps.counter.outputs.counter_dir }}\" \\\n  \"$RUNNER_TEMP/measurement/measurement.json\" \\\n  \"${{ matrix.package }}\" \"${{ matrix.environment }}\" check\n",
+      "shell": "bash"
+     },
+     {
+      "continue-on-error": true,
+      "if": "${{ !cancelled() && inputs.measure-compiler-work }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "measurement-${{ matrix.package }}-check-${{ matrix.environment }}",
+       "path": "${{ runner.temp }}/measurement"
+      }
+     },
+     {
+      "env": {
+       "DEPENDENTS": "${{ steps.cell.outputs.dependents }}",
+       "DEPENDENTS_GATE": "${{ steps.dependents.outcome }}",
+       "ENVIRONMENT": "${{ matrix.environment }}",
+       "GATE": "${{ steps.check.outcome }}",
+       "JOB": "check",
+       "JOB_STATUS": "${{ job.status }}",
+       "PACKAGE": "${{ matrix.package }}"
+      },
+      "if": "${{ always() }}",
+      "run": "set -euo pipefail\nmkdir -p \"$RUNNER_TEMP/status\"\n# `result` is the CELL's conclusion, not the job's (see the header).\nresult=\"$JOB_STATUS\"\ndetail=\"\"\nif [ \"$result\" = \"success\" ]; then\n  if [ \"$GATE\" = \"failure\" ] && [ \"$DEPENDENTS_GATE\" = \"failure\" ]; then\n    detail=\"both halves failed to compile: the package's own checked kinds and its unchanged dependents\"\n  elif [ \"$GATE\" = \"failure\" ]; then\n    detail=\"the package's own checked kinds failed to compile (the unchanged dependents did not fail)\"\n  elif [ \"$DEPENDENTS_GATE\" = \"failure\" ]; then\n    detail=\"an unchanged dependent failed to compile against this package's public API (the package's own targets compiled)\"\n  fi\nfi\nif [ -n \"$detail\" ]; then\n  result=failure\n  echo \"::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::${detail}.\"\nfi\n# jq, not printf: dependent names come from the plan and belong in a\n# JSON array, and `detail` is present only when there is one.\njq -cn \\\n  --arg package \"$PACKAGE\" --arg job \"$JOB\" --arg environment \"$ENVIRONMENT\" \\\n  --arg result \"$result\" --arg detail \"$detail\" --argjson dependents \"${DEPENDENTS:-[]}\" \\\n  '{package: $package, job: $job, environment: $environment, result: $result, dependents: $dependents}\n   + (if $detail == \"\" then {} else {detail: $detail} end)' \\\n  >\"$RUNNER_TEMP/status/status.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ always() && steps.cell.outputs.status_artifact != '' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "name": "${{ steps.cell.outputs.status_artifact }}",
+       "path": "${{ runner.temp }}/status"
+      }
+     },
+     {
+      "id": "completion",
+      "run": "set -euo pipefail\npython3 scripts/ci/completion.py \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --cell '${{ steps.cell.outputs.cell }}' \\\n  --artifacts ci-artifacts \\\n  --target '${{ steps.cell.outputs.target }}' \\\n  --run \"$GITHUB_RUN_ID\" \\\n  --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n  --out \"$RUNNER_TEMP/completion/completion.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "name": "${{ steps.cell.outputs.completion_artifact }}",
+       "path": "${{ runner.temp }}/completion"
+      }
+     }
+    ],
+    "strategy": {
+     "fail-fast": false,
+     "matrix": {
+      "include": "${{ fromJSON(inputs.check-rows) }}"
+     }
+    },
+    "timeout-minutes": 45
+   },
+   "lint": {
+    "env": {
+     "RUSTFLAGS": "-D warnings"
+    },
+    "if": "${{ inputs.lint-rows != '[]' }}",
+    "runs-on": "${{ matrix.runner }}",
+    "steps": [
+     {
+      "id": "job_start",
+      "if": "${{ inputs.measure-compiler-work }}",
+      "run": "echo \"epoch=$(date +%s)\" >>\"$GITHUB_OUTPUT\"",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ inputs.tested-revision }}"
+      }
+     },
+     {
+      "uses": "extractions/setup-just@v4"
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-resolved-plan",
+       "path": "ci-artifacts/ci-resolved-plan"
+      }
+     },
+     {
+      "env": {
+       "ROW": "${{ toJSON(matrix) }}"
+      },
+      "id": "cell",
+      "run": "set -euo pipefail\npython3 scripts/ci/cell_contract.py \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --row \"$ROW\" \\\n  --head '${{ inputs.tested-revision }}' \\\n  --github-output \"$GITHUB_OUTPUT\"\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "NATIVE": "${{ steps.cell.outputs.native_packages }}"
+      },
+      "run": "set -euo pipefail\nnative_args=()\nwhile IFS= read -r package; do\n  if [ -n \"$package\" ]; then native_args+=(\"$package\"); fi\ndone < <(jq -r '.[]?' <<<\"${NATIVE:-[]}\")\nif [ ${#native_args[@]} -gt 0 ]; then\n  just _ensure-native-libs \"${native_args[@]}\"\nfi\n",
+      "shell": "bash"
+     },
+     {
+      "run": "rustup show"
+     },
+     {
+      "id": "zed-extension-pin",
+      "if": "${{ contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension') }}",
+      "run": "set -euo pipefail\nconfig=.github/ci/zed-extension.json\ntest \"$(jq -r '.schema_version' \"$config\")\" = 1\nfor field in zed_commit linux_x86_64_url linux_x86_64_sha256; do\n  value=\"$(jq -er \".${field} | select(type == \\\"string\\\" and length > 0)\" \"$config\")\"\n  printf '%s=%s\\n' \"$field\" \"$value\" >>\"$GITHUB_OUTPUT\"\ndone\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension') }}",
+      "uses": "actions/cache@v5",
+      "with": {
+       "key": "zed-extension-${{ steps.zed-extension-pin.outputs.zed_commit }}-${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}",
+       "path": "${{ runner.tool_cache }}/zed-extension/${{ steps.zed-extension-pin.outputs.zed_commit }}/zed-extension"
+      }
+     },
+     {
+      "env": {
+       "ZED_EXTENSION_SHA": "${{ steps.zed-extension-pin.outputs.zed_commit }}",
+       "ZED_EXTENSION_SHA256": "${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}",
+       "ZED_EXTENSION_URL": "${{ steps.zed-extension-pin.outputs.linux_x86_64_url }}"
+      },
+      "if": "${{ contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension') }}",
+      "run": "set -euo pipefail\nrustup target add wasm32-wasip2\ntool_dir=\"$RUNNER_TOOL_CACHE/zed-extension/$ZED_EXTENSION_SHA\"\ntool=\"$tool_dir/zed-extension\"\nmkdir -p \"$tool_dir\"\nif [ ! -f \"$tool\" ]; then\n  curl --fail --location --retry 3 --output \"$tool\" \"$ZED_EXTENSION_URL\"\nfi\nprintf '%s  %s\\n' \"$ZED_EXTENSION_SHA256\" \"$tool\" | sha256sum --check --strict\nchmod +x \"$tool\"\n\"$tool\" --help >/dev/null\necho \"$tool_dir\" >>\"$GITHUB_PATH\"\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "Swatinem/rust-cache@v2",
+      "with": {
+       "shared-key": "package-ci-${{ matrix.package }}-lint-${{ matrix.environment }}",
+       "workspaces": ". -> target"
+      }
+     },
+     {
+      "if": "${{ steps.cell.outputs.requires_node == 'true' }}",
+      "uses": "pnpm/action-setup@v5",
+      "with": {
+       "version": 10
+      }
+     },
+     {
+      "if": "${{ steps.cell.outputs.requires_node == 'true' }}",
+      "uses": "actions/setup-node@v6",
+      "with": {
+       "node-version": 22
+      }
+     },
+     {
+      "if": "${{ steps.cell.outputs.requires_node == 'true' }}",
+      "run": "set -euo pipefail\nnode --version\npnpm --version\n",
+      "shell": "bash"
+     },
+     {
+      "id": "counter",
+      "if": "${{ inputs.measure-compiler-work }}",
+      "run": "set -euo pipefail\njust _ci_build_counter \"lint ${{ matrix.environment }}\"\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "BISCUIT_CI_BUILD_CONFIGURATION": "lint ${{ matrix.environment }}",
+       "BISCUIT_CI_BUILD_COUNTER_DIR": "${{ steps.counter.outputs.counter_dir }}",
+       "BISCUIT_CI_BUILD_PACKAGE": "${{ matrix.package }}",
+       "BISCUIT_CI_BUILD_WRAP": "${{ steps.counter.outputs.wrap }}",
+       "BISCUIT_FRONTEND_REQUIRED": "${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}",
+       "RUSTC_WRAPPER": "${{ steps.counter.outputs.wrapper }}"
+      },
+      "id": "clippy",
+      "if": "${{ steps.cell.outputs.companions_only != 'true' }}",
+      "run": "set -euo pipefail\nif ! command -v python3 >/dev/null 2>&1; then\n  status=0\n  just _lint \"${{ matrix.package }}\" || status=$?\n  echo \"duration_s=\" >>\"$GITHUB_OUTPUT\"\n  exit \"$status\"\nfi\npython3 - \"${{ matrix.package }}\" <<'PY'\nimport os\nimport subprocess\nimport sys\nimport time\n\nstarted = time.monotonic()\ncompleted = subprocess.run([\"just\", \"_lint\", sys.argv[1]], check=False)\nelapsed = round(time.monotonic() - started, 3)\ndestination = os.environ.get(\"GITHUB_OUTPUT\")\nif destination:\n    with open(destination, \"a\", encoding=\"utf-8\") as output:\n        output.write(f\"duration_s={elapsed}\\n\")\nsys.exit(completed.returncode)\nPY\n",
+      "shell": "bash"
+     },
+     {
+      "continue-on-error": true,
+      "env": {
+       "BISCUIT_CI_JOB_STARTED_EPOCH": "${{ steps.job_start.outputs.epoch }}",
+       "BISCUIT_CI_STAGE_SECONDS": "{\"counter_setup_seconds\":${{ steps.counter.outputs.setup_seconds || 0 }}}"
+      },
+      "if": "${{ !cancelled() && inputs.measure-compiler-work }}",
+      "run": "set -euo pipefail\njust _ci_build_report \\\n  \"${{ steps.counter.outputs.wrapper }}\" \\\n  \"${{ steps.counter.outputs.counter_dir }}\" \\\n  \"$RUNNER_TEMP/measurement/measurement.json\" \\\n  \"${{ matrix.package }}\" \"${{ matrix.environment }}\" lint\n",
+      "shell": "bash"
+     },
+     {
+      "continue-on-error": true,
+      "if": "${{ !cancelled() && inputs.measure-compiler-work }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "measurement-${{ matrix.package }}-lint-${{ matrix.environment }}",
+       "path": "${{ runner.temp }}/measurement"
+      }
+     },
+     {
+      "id": "zed",
+      "if": "${{ !cancelled() && contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension') }}",
+      "run": "cd darkmatter && just zed-verify",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ !cancelled() && contains(fromJSON(steps.cell.outputs.companion_suites), 'archive-path-guard') }}",
+      "uses": "taiki-e/install-action@nextest"
+     },
+     {
+      "env": {
+       "BISCUIT_ARCHIVE_GUARD_PLAN": "${{ github.workspace }}/ci-artifacts/ci-resolved-plan/resolved-plan.json",
+       "BISCUIT_FRONTEND_REQUIRED": "${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}",
+       "COMPANION_SUITES": "${{ steps.cell.outputs.companion_suites }}",
+       "ENVIRONMENT": "${{ matrix.environment }}"
+      },
+      "id": "companion",
+      "if": "${{ !cancelled() && steps.cell.outputs.companion_suites != '[]' }}",
+      "run": "set -euo pipefail\npython3 scripts/ci/companion_suites.py \\\n  --suites \"$COMPANION_SUITES\" \\\n  --environment \"$ENVIRONMENT\" \\\n  --gate lint \\\n  --out \"$RUNNER_TEMP/companions.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "COMPANION": "${{ steps.companion.outcome }}",
+       "COMPANIONS_FILE": "${{ runner.temp }}/companions.json",
+       "COMPANIONS_ONLY": "${{ steps.cell.outputs.companions_only }}",
+       "ENVIRONMENT": "${{ matrix.environment }}",
+       "GATE": "${{ steps.clippy.outcome }}",
+       "GATE_DURATION": "${{ steps.clippy.outputs.duration_s }}",
+       "JOB": "lint",
+       "JOB_STATUS": "${{ job.status }}",
+       "PACKAGE": "${{ matrix.package }}",
+       "ZED": "${{ steps.zed.outcome }}"
+      },
+      "if": "${{ always() }}",
+      "run": "set -euo pipefail\nmkdir -p \"$RUNNER_TEMP/status\"\n# `result` is the CELL's conclusion, not the job's (see the header).\n#\n# INVARIANT, companions-only cell: its required work IS its companion\n# suites, so the companion step's outcome is the cell's outcome and\n# ONLY `success` passes. Clippy was `if`-gated off above, so its\n# `skipped` outcome carries no information \u2014 reading it as a failure\n# would block every pull request that touches a Rust file, and\n# reading it as a pass would let a cell that ran NOTHING go green,\n# which is the false full-tree evidence this cell exists to prevent.\n# The ordinary branch is untouched: there `skipped` still means \"not\n# this cell's work\" and only an explicit `failure` downgrades.\ncompanion_uncovered=\"\"\nresult=\"$JOB_STATUS\"\nif [ \"$COMPANIONS_ONLY\" = \"true\" ]; then\n  if [ \"$result\" = \"success\" ] && [ \"$COMPANION\" != \"success\" ]; then\n    result=failure\n    companion_uncovered=1\n    echo \"::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::companion lint: ${COMPANION}. This cell runs no clippy of its own, so a companion that did not succeed leaves it with no evidence.\"\n  fi\nelif [ \"$result\" = \"success\" ] && { [ \"$GATE\" = \"failure\" ] || [ \"$ZED\" = \"failure\" ] || [ \"$COMPANION\" = \"failure\" ]; }; then\n  result=failure\n  echo \"::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::clippy: ${GATE}; Zed extension: ${ZED}; companion lint: ${COMPANION}.\"\nfi\ncompanions='{}'\nif [ -f \"$COMPANIONS_FILE\" ]; then\n  companions=\"$(cat \"$COMPANIONS_FILE\")\"\nfi\ndetail=\"\"\nif [ \"$COMPANION\" = \"failure\" ] || [ -n \"$companion_uncovered\" ]; then\n  failed=\"$(jq -r '[to_entries[] | select(.value.outcome != \"success\") | .key] | join(\", \")' <<<\"$companions\")\"\n  if [ -n \"$companion_uncovered\" ]; then\n    detail=\"companion suite(s) ${failed:-unreported} lint produced no success evidence; this cell lints nothing of its own, so nothing else covers them\"\n  else\n    detail=\"companion suite(s) ${failed:-unreported} lint FAILED; clippy's result does not cover them\"\n  fi\nfi\n# An unmeasured duration is ABSENT: the lint step never ran (a\n# cancelled job, or a companions-only cell that skips clippy on\n# purpose) and inventing a measurement for it would be a fabrication\n# (AC13). Nothing downstream divides by it \u2014 the empty string is\n# dropped from the document here rather than coerced to a number. A\n# RECORDED duration is emitted exactly as the step measured it,\n# fraction included \u2014 `0.4` is a fast clippy run, and only the absent\n# field means \"not recorded\".\njq -nc \\\n  --arg package \"$PACKAGE\" \\\n  --arg job \"$JOB\" \\\n  --arg environment \"$ENVIRONMENT\" \\\n  --arg result \"$result\" \\\n  --arg detail \"$detail\" \\\n  --arg duration \"$GATE_DURATION\" \\\n  --argjson companions \"$companions\" \\\n  '{package: $package, job: $job, environment: $environment, result: $result}\n   + (if $detail == \"\" then {} else {detail: $detail} end)\n   + (if $duration == \"\" then {} else {duration_s: ($duration | tonumber)} end)\n   + (if ($companions | length) == 0 then {} else {companions: $companions} end)' \\\n  >\"$RUNNER_TEMP/status/status.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ always() && steps.cell.outputs.status_artifact != '' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "name": "${{ steps.cell.outputs.status_artifact }}",
+       "path": "${{ runner.temp }}/status"
+      }
+     },
+     {
+      "id": "completion",
+      "run": "set -euo pipefail\npython3 scripts/ci/completion.py \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --cell '${{ steps.cell.outputs.cell }}' \\\n  --artifacts ci-artifacts \\\n  --companions \"$RUNNER_TEMP/companions.json\" \\\n  --target '${{ steps.cell.outputs.target }}' \\\n  --run \"$GITHUB_RUN_ID\" \\\n  --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n  --out \"$RUNNER_TEMP/completion/completion.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "name": "${{ steps.cell.outputs.completion_artifact }}",
+       "path": "${{ runner.temp }}/completion"
+      }
+     }
+    ],
+    "strategy": {
+     "fail-fast": false,
+     "matrix": {
+      "include": "${{ fromJSON(inputs.lint-rows) }}"
+     }
+    },
+    "timeout-minutes": 45
+   },
+   "test": {
+    "env": {
+     "BISCUIT_BROWSER_REQUIRED": "${{ matrix.gate == 'browser' && '1' || '' }}",
+     "BISCUIT_CI_ENVIRONMENT": "${{ matrix.environment }}"
+    },
+    "if": "${{ inputs.test-rows != '[]' }}",
+    "runs-on": "${{ matrix.runner }}",
+    "steps": [
+     {
+      "id": "job_start",
+      "if": "${{ inputs.measure-compiler-work }}",
+      "run": "echo \"epoch=$(date +%s)\" >>\"$GITHUB_OUTPUT\"",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ inputs.tested-revision }}"
+      }
+     },
+     {
+      "uses": "extractions/setup-just@v4"
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-resolved-plan",
+       "path": "ci-artifacts/ci-resolved-plan"
+      }
+     },
+     {
+      "env": {
+       "ROW": "${{ toJSON(matrix) }}"
+      },
+      "id": "cell",
+      "run": "set -euo pipefail\npython3 scripts/ci/cell_contract.py \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --row \"$ROW\" \\\n  --head '${{ inputs.tested-revision }}' \\\n  --github-output \"$GITHUB_OUTPUT\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ steps.cell.outputs.requires_toolchain == 'true' }}",
+      "run": "rustup show"
+     },
+     {
+      "env": {
+       "NATIVE": "${{ steps.cell.outputs.native_packages }}"
+      },
+      "run": "set -euo pipefail\nnative_args=()\nwhile IFS= read -r package; do\n  if [ -n \"$package\" ]; then native_args+=(\"$package\"); fi\ndone < <(jq -r '.[]?' <<<\"${NATIVE:-[]}\")\nif [ ${#native_args[@]} -gt 0 ]; then\n  just _ensure-native-libs \"${native_args[@]}\"\nfi\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "ENVIRONMENT": "${{ matrix.environment }}"
+      },
+      "if": "${{ matrix.gate == 'L2' }}",
+      "run": "set -euo pipefail\ncase \"$ENVIRONMENT\" in\n  ubuntu-latest)\n    sudo apt-get update && sudo apt-get install -y tmux\n    ;;\n  macos-latest)\n    brew list tmux >/dev/null 2>&1 || brew install tmux\n    ;;\n  *)\n    echo \"no tmux provisioning path for environment '$ENVIRONMENT'\" >&2\n    exit 1\n    ;;\nesac\n# Verify runtime reachability (D8): a broken tmux fails this named\n# provisioning step \u2014 the hard-require for the one L2 backend CI hosts.\n# `tmux -V` needs no server, no display, and no pane, so it takes no\n# focus. CI must never steal focus.\ntmux -V\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "ENVIRONMENT": "${{ matrix.environment }}"
+      },
+      "if": "${{ matrix.gate == 'L2' && contains(fromJSON(steps.cell.outputs.runner_tools), 'neovim') }}",
+      "run": "set -euo pipefail\ncase \"$ENVIRONMENT\" in\n  ubuntu-latest)\n    sudo apt-get update && sudo apt-get install -y neovim\n    ;;\n  macos-latest)\n    brew list neovim >/dev/null 2>&1 || brew install neovim\n    ;;\n  *)\n    echo \"no neovim provisioning path for environment '$ENVIRONMENT'\" >&2\n    exit 1\n    ;;\nesac\nnvim --version | head -1\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "DECLARED_BACKENDS": "${{ steps.cell.outputs.declared_backends }}",
+       "ENVIRONMENT": "${{ matrix.environment }}",
+       "PACKAGE": "${{ matrix.package }}",
+       "REQUIRED_BACKENDS": "${{ steps.cell.outputs.backends }}"
+      },
+      "if": "${{ matrix.gate == 'L2' }}",
+      "run": "set -euo pipefail\n# A backend that cannot exist here skips silently inside require_level!.\n# Naming every declared backend and its status turns \"0 run / N skipped\"\n# from an invisible non-event into a readable row. Which ones this cell\n# must prove is the plan's decision (the cell's `backends`), not a\n# name test here.\n{\n  echo \"### L2 backends \u2014 ${PACKAGE} on ${ENVIRONMENT}\"\n  echo \"\"\n  echo \"| backend | status |\"\n  echo \"|---|---|\"\n  while IFS= read -r backend; do\n    [ -n \"$backend\" ] || continue\n    if [ \"$(jq -r --arg b \"$backend\" 'index($b) != null' <<<\"$REQUIRED_BACKENDS\")\" = \"true\" ]; then\n      echo \"| ${backend} | required by the plan \u2014 its tests MUST execute |\"\n    elif [ \"$backend\" = \"apple-terminal\" ] && [ \"$ENVIRONMENT\" = \"macos-latest\" ]; then\n      echo \"| apple-terminal | unavailable \u2014 \\`available()\\` returns false when CI is truthy; its tests skip |\"\n    else\n      echo \"| ${backend} | unavailable \u2014 needs a live GUI session; its tests skip |\"\n    fi\n  done < <(printf '%s' \"$DECLARED_BACKENDS\" | jq -r '.[]?')\n} >>\"$GITHUB_STEP_SUMMARY\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ contains(fromJSON(steps.cell.outputs.runner_tools), 'ai-provider-stubs') }}",
+      "run": "set -euo pipefail\nstubdir=\"$RUNNER_TEMP/ai-cli-stubs\"\nmkdir -p \"$stubdir\"\nfor bin in claude opencode roo gemini aider codex goose kimi qwen; do\n  if [ \"${{ runner.os }}\" = \"Windows\" ]; then\n    printf '@echo off\\r\\nexit /b 0\\r\\n' >\"$stubdir/$bin.cmd\"\n  else\n    printf '#!/usr/bin/env sh\\nexit 0\\n' >\"$stubdir/$bin\"\n    chmod +x \"$stubdir/$bin\"\n  fi\ndone\necho \"$stubdir\" >>\"$GITHUB_PATH\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ steps.cell.outputs.requires_node == 'true' }}",
+      "uses": "pnpm/action-setup@v5",
+      "with": {
+       "version": 10
+      }
+     },
+     {
+      "if": "${{ steps.cell.outputs.requires_node == 'true' }}",
+      "uses": "actions/setup-node@v6",
+      "with": {
+       "node-version": 22
+      }
+     },
+     {
+      "if": "${{ steps.cell.outputs.requires_node == 'true' }}",
+      "run": "set -euo pipefail\nnode --version\npnpm --version\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ steps.cell.outputs.requires_node == 'true' }}",
+      "run": "set -euo pipefail\npnpm install --frozen-lockfile\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "taiki-e/install-action@nextest"
+     },
+     {
+      "continue-on-error": true,
+      "id": "build_status_download",
+      "if": "${{ steps.cell.outputs.consumes_archive == 'true' }}",
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "build-status-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.build_producer }}-${{ steps.cell.outputs.build_key }}",
+       "path": "${{ runner.temp }}/build-status"
+      }
+     },
+     {
+      "id": "build_status",
+      "if": "${{ steps.cell.outputs.consumes_archive == 'true' }}",
+      "run": "python3 scripts/ci/build_status.py \\\n  --status \"$RUNNER_TEMP/build-status/build-status.json\" \\\n  --package '${{ steps.cell.outputs.package }}' \\\n  --key '${{ steps.cell.outputs.build_key }}' \\\n  --producer '${{ steps.cell.outputs.build_producer }}' \\\n  --artifact '${{ steps.cell.outputs.build_artifact }}'\n",
+      "shell": "bash"
+     },
+     {
+      "id": "transfer",
+      "if": "${{ steps.cell.outputs.consumes_archive == 'true' }}",
+      "run": "echo \"epoch=$(date +%s)\" >>\"$GITHUB_OUTPUT\"",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ steps.cell.outputs.consumes_archive == 'true' }}",
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "${{ steps.cell.outputs.build_artifact }}",
+       "path": "${{ runner.temp }}/build"
+      }
+     },
+     {
+      "env": {
+       "BISCUIT_CI_TRANSFER_STARTED_EPOCH": "${{ steps.transfer.outputs.epoch }}"
+      },
+      "id": "verified",
+      "if": "${{ steps.cell.outputs.consumes_archive == 'true' }}",
+      "run": "just _ci_build_verify \\\n  \"$RUNNER_TEMP/build\" \\\n  '${{ steps.cell.outputs.build_artifact }}' \\\n  '${{ matrix.environment }}' \\\n  ci-artifacts/ci-resolved-plan/resolved-plan.json\n",
+      "shell": "bash"
+     },
+     {
+      "run": "set -euo pipefail\nsidecars='${{ steps.verified.outputs.sidecar_dir }}'\n[ -d \"$sidecars\" ] || exit 0\necho \"$sidecars\" >>\"$GITHUB_PATH\"\nif [ -x \"$sidecars/stub_dunstify\" ] || [ -x \"$sidecars/stub_dunstify.exe\" ]; then\n  echo \"MESSENGER_STUB_BIN_DIR=$sidecars\" >>\"$GITHUB_ENV\"\nfi\nfor broker in \"$sidecars/biscuit-harness-broker\" \"$sidecars/biscuit-harness-broker.exe\"; do\n  if [ -x \"$broker\" ]; then\n    echo \"BISCUIT_HARNESS_BROKER_BIN=$broker\" >>\"$GITHUB_ENV\"\n  fi\ndone\nfor proof in \"$sidecars/backend-proof\" \"$sidecars/backend-proof.exe\"; do\n  if [ -x \"$proof\" ]; then\n    echo \"BISCUIT_BACKEND_PROOF_BIN=$proof\" >>\"$GITHUB_ENV\"\n  fi\ndone\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "ARCHIVE_FILE": "${{ steps.verified.outputs.archive_file }}",
+       "ARCHIVE_WORKSPACE": "${{ steps.verified.outputs.workspace }}",
+       "BISCUIT_CI_COMPANION_SUITES": "${{ steps.cell.outputs.companion_suites }}",
+       "BISCUIT_CI_ENVIRONMENT": "${{ matrix.environment }}",
+       "BISCUIT_L1_INCLUDE_SLOW": "${{ steps.cell.outputs.l1_include_slow }}",
+       "BISCUIT_TEST_NARROW": "${{ steps.cell.outputs.test_filter }}",
+       "GATE": "${{ matrix.gate }}",
+       "REQUIRED_BACKENDS": "${{ steps.cell.outputs.backends }}"
+      },
+      "id": "expected",
+      "run": "set -euo pipefail\n# The plan's declared suites and required backends, in the spelling\n# the recipe records them as provenance. `completion.py` refuses a\n# disagreement between these and the plan rather than preferring one,\n# so the list is the cell's verbatim \u2014 never narrowed here.\nsuites=\"$(jq -r 'join(\",\")' <<<\"${BISCUIT_CI_COMPANION_SUITES:-[]}\")\"\nexport BISCUIT_CI_COMPANION_SUITES=\"$suites\"\nif [ \"$GATE\" = \"L2\" ]; then\n  required=\"$(jq -r 'join(\",\")' <<<\"${REQUIRED_BACKENDS:-[]}\")\"\n  if [ -n \"$required\" ]; then\n    export BISCUIT_TEST_REQUIRED_BACKENDS=\"$required\"\n  fi\nfi\narchive_args=()\nif [ -n \"${ARCHIVE_FILE:-}\" ]; then\n  archive_args=(--archive-file \"$ARCHIVE_FILE\" --workspace-remap \"$ARCHIVE_WORKSPACE\")\n  export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'\n  export BISCUIT_JUNIT_WORKSPACE_ROOT=\"$ARCHIVE_WORKSPACE\"\n  export BISCUIT_JUNIT_TARGET_DIR=\"$ARCHIVE_WORKSPACE/target\"\nfi\njust _expected_manifest \"$GATE\" \"${{ matrix.package }}\" \\\n  ${archive_args[@]+\"${archive_args[@]}\"} ${{ steps.cell.outputs.test_args }}\n",
+      "shell": "bash"
+     },
+     {
+      "id": "counter",
+      "if": "${{ inputs.measure-compiler-work }}",
+      "run": "set -euo pipefail\njust _ci_build_counter \"${{ matrix.gate }} ${{ matrix.environment }}\"\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "ARCHIVE_FILE": "${{ steps.verified.outputs.archive_file }}",
+       "ARCHIVE_KEY_HELPER": "${{ steps.verified.outputs.key_helper }}",
+       "ARCHIVE_WORKSPACE": "${{ steps.verified.outputs.workspace }}",
+       "BISCUIT_CI_BUILD_CONFIGURATION": "${{ matrix.gate }} ${{ matrix.environment }}",
+       "BISCUIT_CI_BUILD_COUNTER_DIR": "${{ steps.counter.outputs.counter_dir }}",
+       "BISCUIT_CI_BUILD_PACKAGE": "${{ matrix.package }}",
+       "BISCUIT_CI_BUILD_WRAP": "${{ steps.counter.outputs.wrap }}",
+       "BISCUIT_FRONTEND_REQUIRED": "${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}",
+       "BISCUIT_L1_INCLUDE_SLOW": "${{ steps.cell.outputs.l1_include_slow }}",
+       "BISCUIT_TEST_NARROW": "${{ steps.cell.outputs.test_filter }}",
+       "GATE": "${{ matrix.gate }}",
+       "JOB_STARTED_EPOCH": "${{ steps.job_start.outputs.epoch }}",
+       "RECIPE": "${{ steps.cell.outputs.recipe }}",
+       "REQUIRED_BACKENDS": "${{ steps.cell.outputs.backends }}",
+       "RUNNER_TOOLS": "${{ steps.cell.outputs.runner_tools }}",
+       "RUSTC_WRAPPER": "${{ steps.counter.outputs.wrapper }}"
+      },
+      "id": "gate",
+      "run": "set -euo pipefail\ntier_args=()\ncase \"$GATE\" in\n  L1)\n    # --no-fail-fast: run ALL of the package's tests so one slow or\n    # failing test cannot suppress the rest of the suite's evidence.\n    tier_args=(--no-fail-fast)\n    ;;\n  L2)\n    # --no-fail-fast, for the same reason as L1: a truncated report\n    # costs a full round-trip to learn what the second failure was,\n    # and L2 is the tier whose backends the author's host may not\n    # have. The shared-pane suites are safe to run on: the broker's\n    # pane is torn down by `_test_l2`'s trap rather than by a test,\n    # and both profiles set `retries = 0`.\n    tier_args=(--no-fail-fast)\n    # Execution proof, not just availability: require exactly the\n    # backends the plan attached to this cell \u2014 the subset of the\n    # package's declaration its environment hosts, the same list the\n    # expected manifest recorded and `completion.py` will demand a\n    # proof for. With BISCUIT_TEST_REQUIRED_BACKENDS set, `_test_l2`'s\n    # backend-proof bracket fails the tier when a required backend\n    # produced zero executed tests and writes `backend-proofs.json`\n    # into the staging tree \u2014 an installed tmux plus a suite that\n    # skipped everywhere must not render a green cell.\n    required=\"$(jq -r 'join(\",\")' <<<\"${REQUIRED_BACKENDS:-[]}\")\"\n    if [ -n \"$required\" ]; then\n      export BISCUIT_TEST_REQUIRED_BACKENDS=\"$required\"\n    fi\n    # L2 runs in parallel unless the package declared `l2-serial`\n    # (with its reason) in `[package.metadata.ci.tests]`.\n    if [ \"$(jq -r 'contains([\"l2-serial\"])' <<<\"$RUNNER_TOOLS\")\" = \"true\" ]; then\n      export BISCUIT_L2_THREADS=\"${BISCUIT_L2_THREADS:-1}\"\n    else\n      export BISCUIT_L2_THREADS=\"${BISCUIT_L2_THREADS:-$(just _test_l2_threads)}\"\n    fi\n    ;;\nesac\n# Archive mode passes the verified archive and remaps the workspace to\n# this checkout; the declared feature flags are already baked in and\n# `_archive_drop_build_flags` removes them. Nothing here is a Cargo\n# build flag, so this invocation cannot reach a compiler.\narchive_args=()\nif [ -n \"${ARCHIVE_FILE:-}\" ]; then\n  archive_args=(--archive-file \"$ARCHIVE_FILE\" --workspace-remap \"$ARCHIVE_WORKSPACE\")\n  # The knobs that keep the recipe off Cargo entirely: nextest as a\n  # standalone binary, and the workspace and target directory the\n  # JUnit staging would otherwise ask `cargo metadata` for. A\n  # consumer's `cargo metadata` would succeed on a hosted runner and\n  # fail in the toolchain-free guest \u2014 one spelling for both. The\n  # planner's key helper is the same kind of unintended build: the\n  # verified `ci-build` is already here, so a planner test must not\n  # `cargo run` a cold one.\n  export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'\n  export BISCUIT_JUNIT_WORKSPACE_ROOT=\"$ARCHIVE_WORKSPACE\"\n  export BISCUIT_JUNIT_TARGET_DIR=\"$ARCHIVE_WORKSPACE/target\"\n  export INSTA_WORKSPACE_ROOT=\"$ARCHIVE_WORKSPACE\"\n  : \"${ARCHIVE_KEY_HELPER:?verification did not report the ci-build key helper}\"\n  export BISCUIT_CI_BUILD_BIN=\"$ARCHIVE_KEY_HELPER\"\nfi\nstarted=\"$(date +%s)\"\nstatus=0\njust \"$RECIPE\" \"${{ matrix.package }}\" \\\n  ${tier_args[@]+\"${tier_args[@]}\"} \\\n  ${archive_args[@]+\"${archive_args[@]}\"} ${{ steps.cell.outputs.test_args }} || status=$?\n# The gate's own duration, recorded whether it passed or failed. In\n# the pre-cutover schedule this window contains BOTH the compile and\n# the test run \u2014 they are one Nextest invocation \u2014 which is why the\n# compiler-work count, not this number, is the compile evidence.\necho \"seconds=$(( $(date +%s) - started ))\" >>\"$GITHUB_OUTPUT\"\nif [ -n \"${JOB_STARTED_EPOCH:-}\" ]; then\n  echo \"setup_seconds=$(( started - JOB_STARTED_EPOCH ))\" >>\"$GITHUB_OUTPUT\"\nfi\nexit \"$status\"\n",
+      "shell": "bash"
+     },
+     {
+      "continue-on-error": true,
+      "env": {
+       "BISCUIT_CI_JOB_STARTED_EPOCH": "${{ steps.job_start.outputs.epoch }}",
+       "BISCUIT_CI_STAGE_SECONDS": "{\"counter_setup_seconds\":${{ steps.counter.outputs.setup_seconds || 0 }},\n \"gate_seconds\":${{ steps.gate.outputs.seconds || 0 }},\n \"setup_seconds\":${{ steps.gate.outputs.setup_seconds || 0 }}}"
+      },
+      "if": "${{ !cancelled() && inputs.measure-compiler-work }}",
+      "run": "set -euo pipefail\njust _ci_build_report \\\n  \"${{ steps.counter.outputs.wrapper }}\" \\\n  \"${{ steps.counter.outputs.counter_dir }}\" \\\n  \"$RUNNER_TEMP/measurement/measurement.json\" \\\n  \"${{ matrix.package }}\" \"${{ matrix.environment }}\" \"${{ matrix.gate }}\"\n",
+      "shell": "bash"
+     },
+     {
+      "continue-on-error": true,
+      "if": "${{ !cancelled() && inputs.measure-compiler-work }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "measurement-${{ matrix.package }}-${{ matrix.gate }}-${{ matrix.environment }}",
+       "path": "${{ runner.temp }}/measurement"
+      }
+     },
+     {
+      "env": {
+       "BISCUIT_FRONTEND_REQUIRED": "${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}",
+       "BISCUIT_REQUIRE_BASH": "1",
+       "BISCUIT_REQUIRE_CARGO": "1",
+       "BISCUIT_REQUIRE_JQ": "1",
+       "BISCUIT_REQUIRE_JUST": "1",
+       "COMPANION_SUITES": "${{ steps.cell.outputs.companion_suites }}",
+       "ENVIRONMENT": "${{ matrix.environment }}",
+       "GATE": "${{ matrix.gate }}"
+      },
+      "id": "companion",
+      "if": "${{ !cancelled() && steps.cell.outputs.companion_suites != '[]' }}",
+      "run": "set -euo pipefail\npython3 scripts/ci/companion_suites.py \\\n  --suites \"$COMPANION_SUITES\" \\\n  --environment \"$ENVIRONMENT\" \\\n  --gate \"$GATE\" \\\n  --out \"$RUNNER_TEMP/companions.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ !cancelled() && steps.cell.outputs.junit_artifact != '' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "${{ steps.cell.outputs.junit_artifact }}",
+       "path": "target/nextest/ci-reports"
+      }
+     },
+     {
+      "env": {
+       "BUILD_DIGEST": "${{ steps.verified.outputs.digest }}",
+       "BUILD_KEY": "${{ steps.cell.outputs.build_key }}",
+       "BUILD_PRODUCER": "${{ steps.cell.outputs.build_producer }}",
+       "COMPANION": "${{ steps.companion.outcome }}",
+       "COMPANIONS_FILE": "${{ runner.temp }}/companions.json",
+       "ENVIRONMENT": "${{ matrix.environment }}",
+       "GATE": "${{ steps.gate.outcome }}",
+       "JOB": "${{ matrix.gate }}",
+       "JOB_STATUS": "${{ job.status }}",
+       "PACKAGE": "${{ matrix.package }}",
+       "TIMINGS": "{\"download_seconds\":${{ steps.verified.outputs.download_seconds || 0 }},\n \"verify_seconds\":${{ steps.verified.outputs.verify_seconds || 0 }},\n \"extract_ms\":${{ steps.verified.outputs.extract_ms || 0 }},\n \"execute_seconds\":${{ steps.gate.outputs.seconds || 0 }}}"
+      },
+      "if": "${{ always() }}",
+      "run": "set -euo pipefail\nmkdir -p \"$RUNNER_TEMP/status\"\n# An unmeasured stage is absent, never zero: a job that reported no\n# timings at all must not read as one whose transfer was instant. A\n# malformed measurement is treated the same way \u2014 this step runs under\n# `always()` and is the cell's only evidence, so instrumentation must\n# not be able to lose it.\ntimings=\"${TIMINGS:-}\"\nif ! printf '%s' \"$timings\" | jq -e 'type == \"object\"' >/dev/null 2>&1; then\n  timings='{}'\nfi\n# `result` is the CELL's conclusion, not the job's (see the header).\nresult=\"$JOB_STATUS\"\nif [ \"$result\" = \"success\" ] && { [ \"$GATE\" = \"failure\" ] || [ \"$COMPANION\" = \"failure\" ]; }; then\n  result=failure\n  echo \"::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::${JOB} tests: ${GATE}; companion suites: ${COMPANION}.\"\nfi\n# Every DECLARED companion suite records its own outcome, counts, and\n# command duration, not only on failure: a SKIPPED companion leaves no\n# other evidence, and the rollup downgrades a green Rust cell whose\n# declared companion produced no success evidence (R12).\ncompanions='{}'\nif [ -f \"$COMPANIONS_FILE\" ]; then\n  companions=\"$(cat \"$COMPANIONS_FILE\")\"\nfi\ndetail=\"\"\nif [ \"$COMPANION\" = \"failure\" ]; then\n  failed=\"$(jq -r '[to_entries[] | select(.value.outcome != \"success\") | .key] | join(\", \")' <<<\"$companions\")\"\n  detail=\"companion suite(s) ${failed:-unreported} FAILED; the Rust JUnit report does not cover them\"\nfi\n# The build this cell executed, when it executed one. Reporting only;\n# the cell's identity stays `{package, environment, gate}` and the\n# rollup keys nothing on a build.\njq -nc \\\n  --arg package \"$PACKAGE\" \\\n  --arg job \"$JOB\" \\\n  --arg environment \"$ENVIRONMENT\" \\\n  --arg result \"$result\" \\\n  --arg detail \"$detail\" \\\n  --arg key \"${BUILD_KEY:-}\" \\\n  --arg producer \"${BUILD_PRODUCER:-}\" \\\n  --arg digest \"${BUILD_DIGEST:-}\" \\\n  --argjson companions \"$companions\" \\\n  --argjson timings \"$timings\" \\\n  '{package: $package, job: $job, environment: $environment, result: $result}\n   + (if $detail == \"\" then {} else {detail: $detail} end)\n   + (if ($companions | length) == 0 then {} else {companions: $companions} end)\n   + (if $key == \"\" then {}\n      else {build: {key: $key, producer: $producer, digest: $digest}} end)\n   + (if $timings == {} then {} else {timings: $timings} end)' \\\n  >\"$RUNNER_TEMP/status/status.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ always() && steps.cell.outputs.status_artifact != '' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "name": "${{ steps.cell.outputs.status_artifact }}",
+       "path": "${{ runner.temp }}/status"
+      }
+     },
+     {
+      "id": "completion",
+      "run": "set -euo pipefail\npython3 scripts/ci/completion.py \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --cell '${{ steps.cell.outputs.cell }}' \\\n  --expected-manifest \"target/nextest/ci-reports/expected-${{ matrix.gate }}.json\" \\\n  --artifacts target/nextest/ci-reports \\\n  --companions \"$RUNNER_TEMP/companions.json\" \\\n  --backend-proofs target/nextest/ci-reports/backend-proofs.json \\\n  --target '${{ steps.cell.outputs.target }}' \\\n  --run \"$GITHUB_RUN_ID\" \\\n  --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n  --out \"$RUNNER_TEMP/completion/completion.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "name": "${{ steps.cell.outputs.completion_artifact }}",
+       "path": "${{ runner.temp }}/completion"
+      }
+     },
+     {
+      "continue-on-error": true,
+      "env": {
+       "CELL": "${{ steps.cell.outputs.cell }}",
+       "GATE_OUTCOME": "${{ steps.gate.outcome }}"
+      },
+      "if": "${{ !cancelled() && github.event_name == 'schedule' }}",
+      "run": "set -euo pipefail\npython3 scripts/ci/hosted_observations.py emit \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --cell \"$CELL\" \\\n  --stage target/nextest/ci-reports \\\n  --completion \"$RUNNER_TEMP/completion/completion.json\" \\\n  --gate-outcome \"$GATE_OUTCOME\" \\\n  --run-id \"$GITHUB_RUN_ID\" \\\n  --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n  --workflow \"$GITHUB_WORKFLOW_REF\" \\\n  --out \"$RUNNER_TEMP/observation/observation.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ !cancelled() && github.event_name == 'schedule' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "observation-${{ matrix.package }}-${{ matrix.gate }}-${{ matrix.environment }}",
+       "path": "${{ runner.temp }}/observation",
+       "retention-days": 90
+      }
+     }
+    ],
+    "strategy": {
+     "fail-fast": false,
+     "matrix": {
+      "include": "${{ fromJSON(inputs.test-rows) }}"
+     }
+    },
+    "timeout-minutes": "${{ matrix.gate == 'L1' && 45 || 30 }}"
+   },
+   "wsl2": {
+    "if": "${{ inputs.wsl-rows != '[]' }}",
+    "secrets": "inherit",
+    "strategy": {
+     "fail-fast": false,
+     "matrix": {
+      "include": "${{ fromJSON(inputs.wsl-rows) }}"
+     }
+    },
+    "uses": "./.github/workflows/_wsl-ci.yml",
+    "with": {
+     "row": "${{ toJSON(matrix) }}",
+     "tested-revision": "${{ inputs.tested-revision }}"
+    }
+   }
+  }
+ },
+ "_wsl-ci.yml": {
+  "True": {
+   "workflow_call": {
+    "inputs": {
+     "distribution": {
+      "default": "Ubuntu-24.04",
+      "description": "WSL distribution to provision.",
+      "type": "string"
+     },
+     "row": {
+      "description": "ONE dispatch row, `{package, gate, environment, runner}`, as the planner derived it for this area. Everything else this leg needs \u2014 the package's test arguments, its slow-test contract, its runner tools, its native prerequisites, and the build record it consumes \u2014 is resolved from the run's `ci-resolved-plan` artifact by `scripts/ci/cell_contract.py`, which refuses a row the plan does not schedule before the guest is even provisioned.",
+      "required": true,
+      "type": "string"
+     },
+     "tested-revision": {
+      "description": "The resolved plan's `head`: the one revision this whole run tests, and the only checkout `ci-build` will verify an archive against. The guest clone below inherits it from the runner checkout. Required, and never recomputed here \u2014 see the `env:` comment in `ci.yml`.",
+      "required": true,
+      "type": "string"
+     }
+    }
+   }
+  },
+  "env": {
+   "COLORTERM": "truecolor",
+   "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24": true,
+   "JUST_VERSION": "1.58.0",
+   "NEXTEST_PROFILE": "ci",
+   "PYTHONUTF8": "1",
+   "RUSTC_WRAPPER": ""
+  },
+  "jobs": {
+   "wsl": {
+    "env": {
+     "BISCUIT_CI_ENVIRONMENT": "wsl2-ubuntu",
+     "GUEST_BUILD": "/home/biscuit/build",
+     "GUEST_ROOT": "/home/biscuit/checkout"
+    },
+    "runs-on": "windows-latest",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ inputs.tested-revision }}"
+      }
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-resolved-plan",
+       "path": "${{ github.workspace }}/ci-resolved-plan"
+      }
+     },
+     {
+      "env": {
+       "ROW": "${{ inputs.row }}"
+      },
+      "id": "cell",
+      "run": "set -euo pipefail\npython3 scripts/ci/cell_contract.py \\\n  --plan ci-resolved-plan/resolved-plan.json \\\n  --row \"$ROW\" \\\n  --head '${{ inputs.tested-revision }}' \\\n  --github-output \"$GITHUB_OUTPUT\"\n",
+      "shell": "bash"
+     },
+     {
+      "continue-on-error": true,
+      "id": "build_status_download",
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "build-status-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.build_producer }}-${{ steps.cell.outputs.build_key }}",
+       "path": "${{ github.workspace }}/ci-build-status"
+      }
+     },
+     {
+      "id": "build_status",
+      "run": "python3 scripts/ci/build_status.py \\\n  --status ci-build-status/build-status.json \\\n  --package '${{ steps.cell.outputs.package }}' \\\n  --key '${{ steps.cell.outputs.build_key }}' \\\n  --producer '${{ steps.cell.outputs.build_producer }}' \\\n  --artifact '${{ steps.cell.outputs.build_artifact }}'\n",
+      "shell": "bash"
+     },
+     {
+      "id": "transfer",
+      "run": "echo \"epoch=$(date +%s)\" >>\"$GITHUB_OUTPUT\"",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "${{ steps.cell.outputs.build_artifact }}",
+       "path": "${{ github.workspace }}/ci-build-artifact"
+      }
+     },
+     {
+      "id": "manifest",
+      "run": "set -euo pipefail\nmanifest=\"ci-build-artifact/${{ steps.cell.outputs.build_artifact }}.manifest.json\"\n[ -f \"$manifest\" ] || { echo \"the build artifact carries no manifest at $manifest\" >&2; exit 1; }\n{\n  echo \"digest=$(jq -er '.digest' \"$manifest\")\"\n  echo \"archive_name=$(jq -er '.archive.file' \"$manifest\")\"\n  echo \"download_seconds=$(( $(date +%s) - ${{ steps.transfer.outputs.epoch }} ))\"\n} >>\"$GITHUB_OUTPUT\"\n",
+      "shell": "bash"
+     },
+     {
+      "continue-on-error": true,
+      "id": "provision",
+      "timeout-minutes": 10,
+      "uses": "Vampire/setup-wsl@v7",
+      "with": {
+       "distribution": "${{ inputs.distribution }}",
+       "set-as-default": true
+      }
+     },
+     {
+      "if": "${{ steps.provision.outcome == 'failure' }}",
+      "run": "sleep 90",
+      "shell": "bash"
+     },
+     {
+      "id": "provision_retry",
+      "if": "${{ steps.provision.outcome == 'failure' }}",
+      "timeout-minutes": 10,
+      "uses": "Vampire/setup-wsl@v7",
+      "with": {
+       "distribution": "${{ inputs.distribution }}",
+       "set-as-default": true
+      }
+     },
+     {
+      "run": "set -euo pipefail\nuname -a\n# WSL2 runs a real Linux kernel and says so; WSL1's syscall translation\n# layer reports a Microsoft build instead. A silent downgrade to WSL1\n# would make every WSLg-dependent package (playa, messenger,\n# biscuit-clipboard, biscuit-visualized, renderable) report its\n# no-capability fallback, and NAT'd networking would stop applying to\n# sniff, homelab, and rendezvous.\ncase \"$(uname -r)\" in\n  *microsoft-standard-WSL2*) ;;\n  *)\n    echo \"guest is not WSL2 (kernel: $(uname -r)); refusing to report a result\" >&2\n    exit 1\n    ;;\nesac\n",
+      "shell": "wsl-bash {0}",
+      "timeout-minutes": 10
+     },
+     {
+      "run": "set -euo pipefail\nexport DEBIAN_FRONTEND=noninteractive\nfor attempt in 1 2 3; do\n  if apt-get update && apt-get install --yes --no-install-recommends \\\n      ca-certificates curl git xz-utils jq python3; then\n    jq --version\n    python3 --version\n    exit 0\n  fi\n  echo \"apt attempt $attempt failed; retrying in 30s\" >&2\n  sleep 30\ndone\necho \"guest package installation failed three times\" >&2\nexit 1\n",
+      "shell": "wsl-bash {0}",
+      "timeout-minutes": 10
+     },
+     {
+      "run": "set -euo pipefail\nid -u biscuit >/dev/null 2>&1 || useradd -m -s /bin/bash biscuit\n# Passwordless sudo so recipes that self-elevate (apt installs in\n# `_ensure-native-libs`) keep working if ever invoked as the user.\necho 'biscuit ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/biscuit\nchmod 0440 /etc/sudoers.d/biscuit\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "run": "set -euo pipefail\n# `wsl-bash` starts in the translated workspace directory, so `pwd` is\n# the one workspace path that needs no WSLENV forwarding to be correct.\nworkspace=\"$(pwd)\"\ngit config --global --add safe.directory '*'\nrevision=\"$(git -C \"$workspace\" rev-parse HEAD)\"\n\nguest_root='${{ env.GUEST_ROOT }}'\nrm -rf \"$guest_root\" '${{ env.GUEST_BUILD }}'\n# `git clone` creates the leaf but not the intervening directories, and\n# the guest has no such path until something makes it.\nmkdir -p \"$(dirname \"$guest_root\")\" '${{ env.GUEST_BUILD }}'\n# Building over the workspace pays the 9p boundary penalty on every\n# file access; ext4 is both faster and where real WSL developers keep\n# their repositories, so it is the configuration worth testing.\ngit clone --no-hardlinks \"$workspace\" \"$guest_root\"\ngit -C \"$guest_root\" checkout --detach \"$revision\"\n\ncp -R \"$workspace/ci-build-artifact/.\" '${{ env.GUEST_BUILD }}/'\ncp \"$workspace/ci-resolved-plan/resolved-plan.json\" '${{ env.GUEST_BUILD }}/'\n# The test step runs as `biscuit` (see the user-creation step); every\n# tree it touches must be writable by that user, not root.\nchown -R biscuit:biscuit \"$guest_root\" '${{ env.GUEST_BUILD }}' /home/biscuit\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "run": "set -euo pipefail\n# Deliberately NOT rustup: the guest only RUNS prebuilt test binaries\n# from the archive, so a Rust toolchain would add minutes and buy\n# nothing. cargo-nextest executes an archive without Cargo or rustc.\ncurl_get() {\n  curl --proto '=https' --tlsv1.2 -sSfL \\\n    --retry 5 --retry-delay 5 --retry-all-errors \\\n    --connect-timeout 15 \"$@\"\n}\n# A retried download must target a file: stdout cannot be rewound, so\n# streaming a partial response into tar would preserve corrupt bytes.\ndownload_dir=\"$(mktemp -d)\"\ntrap 'rm -rf \"$download_dir\"' EXIT\ncurl_get --output \"$download_dir/just.tar.gz\" \\\n  'https://github.com/casey/just/releases/download/${{ env.JUST_VERSION }}/just-${{ env.JUST_VERSION }}-x86_64-unknown-linux-musl.tar.gz'\ntar xzf \"$download_dir/just.tar.gz\" -C /usr/local/bin just\ncurl_get --output \"$download_dir/nextest.tar.gz\" \\\n  https://get.nexte.st/latest/linux\ntar xzf \"$download_dir/nextest.tar.gz\" -C /usr/local/bin\njust --version\ncargo-nextest nextest --version\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "run": "set -euo pipefail\n# A WSL2 guest IS Linux, so it consumes the `ubuntu-latest` package\n# list \u2014 the same dependency-closure union the producer installed.\n# Satisfying only the producer is insufficient when an archived binary\n# dynamically links a library the guest lacks.\n#\n# Interpolated, NOT read from `env:`: step env lives on the Windows\n# host process, and `wsl-bash` forwards only WSLENV-listed variables\n# into the guest \u2014 an `env:`-sourced $NATIVE is unbound here.\ncd '${{ env.GUEST_ROOT }}'\nnative_args=()\nwhile IFS= read -r package; do\n  if [ -n \"$package\" ]; then native_args+=(\"$package\"); fi\ndone < <(jq -r '.[]?' <<<'${{ steps.cell.outputs.native_packages }}')\nif [ ${#native_args[@]} -gt 0 ]; then\n  just _ensure-native-libs \"${native_args[@]}\"\nfi\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "id": "verified",
+      "run": "set -euo pipefail\n# The 9p workspace, before the `cd`: `$GITHUB_OUTPUT` is a Windows\n# path this guest cannot write, so every measurement the host needs\n# crosses back as a file the status step reads (the same reason the\n# manifest is read on the host).\nworkspace=\"$(pwd)\"\nmkdir -p \"$workspace/wsl-timing\"\ncd '${{ env.GUEST_ROOT }}'\nexport PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nstarted=\"$(date +%s)\"\nstatus=0\njust _ci_build_verify \\\n  '${{ env.GUEST_BUILD }}' \\\n  '${{ steps.cell.outputs.build_artifact }}' \\\n  wsl2-ubuntu \\\n  '${{ env.GUEST_BUILD }}/resolved-plan.json' || status=$?\necho \"$(( $(date +%s) - started ))\" >\"$workspace/wsl-timing/verify.seconds\"\n# Written whether or not the build was accepted: a refused cell's\n# transfer and verification cost is exactly what a reader wants.\ncp '${{ env.GUEST_BUILD }}/${{ steps.cell.outputs.build_artifact }}.verdict.json' \\\n  \"$workspace/wsl-timing/verdict.json\" 2>/dev/null || true\nexit \"$status\"\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "continue-on-error": true,
+      "if": "${{ !cancelled() }}",
+      "run": "# Headroom on the volume the guest's VHDX grows into. This number is\n# the whole diagnosis: compare it against the extracted size of the\n# package's archive.\nGet-PSDrive -PSProvider FileSystem |\n  Select-Object Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},\n                      @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} |\n  Format-Table | Out-String | Write-Host\n",
+      "shell": "pwsh"
+     },
+     {
+      "if": "${{ !cancelled() }}",
+      "run": "set -uo pipefail\nworkspace=\"$(pwd)\"\nmkdir -p \"$workspace/wsl-diag\"\n{\n  echo \"=== $(date -u +%FT%TZ) guest census ===\"\n  uname -a\n  echo \"--- filesystem backing each path extraction touches ---\"\n  for path in /tmp / /home; do\n    # -T resolves the mount for a PATH, so this is correct whether or\n    # not the directory is itself a mount point.\n    findmnt -T \"$path\" -o TARGET,SOURCE,FSTYPE,SIZE,AVAIL 2>&1 || echo \"$path: findmnt failed\"\n  done\n  echo \"--- df ---\"\n  df -h / /tmp /home 2>&1\n  echo \"--- memory ---\"\n  free -m\n  swapon --show 2>&1 || true\n} 2>&1 | tee \"$workspace/wsl-diag/guest-census.txt\"\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "id": "expected",
+      "run": "set -euo pipefail\nif [ \"$(id -u)\" -eq 0 ]; then\n  exec runuser -u biscuit -- env -u XDG_RUNTIME_DIR HOME=/home/biscuit USER=biscuit LOGNAME=biscuit bash \"$0\"\nfi\nguest_root='${{ env.GUEST_ROOT }}'\nexport PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nsidecars='${{ env.GUEST_BUILD }}/${{ steps.cell.outputs.build_artifact }}-sidecars'\nif [ -d \"$sidecars\" ]; then\n  export PATH=\"$sidecars:$PATH\"\nfi\nexport BISCUIT_CI_ENVIRONMENT='${{ env.BISCUIT_CI_ENVIRONMENT }}'\nexport NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'\nexport BISCUIT_L1_INCLUDE_SLOW='${{ steps.cell.outputs.l1_include_slow }}'\nexport BISCUIT_NEXTEST_BIN='cargo-nextest nextest'\nexport BISCUIT_JUNIT_WORKSPACE_ROOT=\"$guest_root\"\nexport BISCUIT_JUNIT_TARGET_DIR=\"$guest_root/target\"\nexport BISCUIT_JUNIT_STAGE_DIR=\"$guest_root/target/nextest/ci-reports\"\narchive='${{ env.GUEST_BUILD }}/${{ steps.manifest.outputs.archive_name }}'\n[ -f \"$archive\" ] || { echo \"the verified archive is missing at $archive\" >&2; exit 1; }\ncd \"$guest_root\"\njust _expected_manifest '${{ steps.cell.outputs.gate }}' \\\n  '${{ steps.cell.outputs.package }}' \\\n  --archive-file \"$archive\" \\\n  --workspace-remap \"$guest_root\" \\\n  ${{ steps.cell.outputs.test_args }}\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "env": {
+       "GUEST_ROOT": "${{ env.GUEST_ROOT }}"
+      },
+      "id": "l1",
+      "run": "set -euo pipefail\n# Drop to the unprivileged user: root ignores file permissions, which\n# inverts permission-denial fixtures (claudine's readonly-file and\n# shadow-home-copy tests, sniff's worktree-registry test). `env`\n# preserves the wrapper environment while giving the user its own\n# HOME, which tests that write under HOME rely on.\n# `-u XDG_RUNTIME_DIR`: the preserved environment carries root's\n# `/run/user/0`, and `just` dies with EACCES trying to use it as the\n# unprivileged user \u2014 which took out every guest leg on run\n# 31415404872. Unset, it falls back to a user-writable location.\nif [ \"$(id -u)\" -eq 0 ]; then\n  exec runuser -u biscuit -- env -u XDG_RUNTIME_DIR HOME=/home/biscuit USER=biscuit LOGNAME=biscuit bash \"$0\"\nfi\n# Re-exported from the job-level `env:` block through GitHub expression\n# interpolation rather than read from the guest environment: whether\n# `wsl-bash` forwards a given variable depends on WSLENV, and the\n# result identity is far too consequential to leave to that. A missing\n# or wrong BISCUIT_CI_ENVIRONMENT does not fail \u2014 it silently files\n# these results under the native Windows cell.\nexport BISCUIT_CI_ENVIRONMENT='${{ env.BISCUIT_CI_ENVIRONMENT }}'\nexport NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'\nexport COLORTERM='${{ env.COLORTERM }}'\nexport BISCUIT_L1_INCLUDE_SLOW='${{ steps.cell.outputs.l1_include_slow }}'\nguest_root='${{ env.GUEST_ROOT }}'\n# WSL appends the Windows host PATH by default. On hosted runners that\n# adds dozens of /mnt/c entries, so every intentionally missing binary\n# probe crosses the 9p boundary dozens of times. Claudine performs many\n# such discovery probes; the inherited PATH turned sub-second tests\n# into 20-second tests and made this serial, archive-only lane take\n# hours. The guest is intentionally self-contained and installs every\n# required executable under the standard Linux prefixes above.\nexport PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n# Every compile-time tool the package declared reaches the guest as a\n# VERIFIED build sidecar. Nothing is built here, and the guest proves\n# it has no toolchain to build one with.\nsidecars='${{ env.GUEST_BUILD }}/${{ steps.cell.outputs.build_artifact }}-sidecars'\nif [ -d \"$sidecars\" ]; then\n  export PATH=\"$sidecars:$PATH\"\n  if [ -x \"$sidecars/stub_dunstify\" ]; then\n    export MESSENGER_STUB_BIN_DIR=\"$sidecars\"\n  fi\nfi\nif command -v cargo >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1; then\n  echo \"the wsl2-ubuntu cell requires a toolchain-free unprivileged guest\" >&2\n  exit 1\nfi\n# No Cargo in the guest, so the canonical recipe must reach nextest as\n# a standalone binary and stage its JUnit report without shelling out\n# to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.\nexport BISCUIT_NEXTEST_BIN='cargo-nextest nextest'\nexport BISCUIT_JUNIT_WORKSPACE_ROOT=\"$guest_root\"\nexport BISCUIT_JUNIT_TARGET_DIR=\"$guest_root/target\"\n# insta finds the workspace root by running `cargo metadata`; with no\n# cargo in the guest its manifest-dir fallback DOUBLES the snapshot\n# path (darkmatter/lib/darkmatter/lib/...), every .snap looks absent,\n# and each snapshot test fails while rendering correct output \u2014 165\n# phantom failures on run 30791562395. Pin the root explicitly.\nexport INSTA_WORKSPACE_ROOT=\"$guest_root\"\nexport BISCUIT_JUNIT_STAGE_DIR=\"$guest_root/target/nextest/ci-reports\"\n\narchive='${{ env.GUEST_BUILD }}/${{ steps.manifest.outputs.archive_name }}'\n[ -f \"$archive\" ] || { echo \"the verified archive is missing at $archive\" >&2; exit 1; }\n\n# DIAGNOSTIC ONLY. Started HERE rather than in its own step so it is\n# unambiguously alive across extraction \u2014 a background process from an\n# earlier `wsl-bash` invocation would depend on surviving that\n# invocation's exit, which is exactly the assumption a dying guest\n# breaks. It writes across the 9p mount, ON PURPOSE: a log on ext4 is\n# unreachable from the Windows host once the VM is gone, and a VM that\n# is gone is the case being diagnosed. Self-limiting so nothing outlives\n# the job's own ceiling.\nworkspace=\"$(pwd)\"\nmkdir -p \"$workspace/wsl-diag\"\ncat >/tmp/biscuit-sampler.sh <<'SAMPLER'\n#!/bin/bash\nout=\"$1\"\nfor _ in $(seq 1 400); do\n  {\n    printf '%s' \"$(date -u +%FT%TZ)\"\n    df -BM --output=target,avail /tmp / /home 2>/dev/null | tail -n +2 | tr -s ' \\n' ' '\n    printf '| memAvailMiB=%s' \"$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)\"\n    printf ' | %s\\n' \"$(tr '\\n' ' ' </proc/pressure/memory 2>/dev/null)\"\n  } >>\"$out\"\n  sleep 10\ndone\nSAMPLER\nchmod +x /tmp/biscuit-sampler.sh\nsetsid nohup /tmp/biscuit-sampler.sh \\\n  \"$workspace/wsl-diag/guest-resources.log\" >/dev/null 2>&1 &\n\n# --workspace-remap is not optional: the archive records the PRODUCER's\n# source paths, and the guest checkout is its own clone. Declared\n# feature flags are passed along and dropped by\n# `_archive_drop_build_flags` \u2014 they were baked into the archive.\ncd \"$guest_root\"\nstarted=\"$(date +%s)\"\nstatus=0\njust _test \"${{ steps.cell.outputs.package }}\" \\\n  --no-fail-fast \\\n  --archive-file \"$archive\" \\\n  --workspace-remap \"$guest_root\" \\\n  ${{ steps.cell.outputs.test_args }} || status=$?\n# The gate's own window, recorded whether it passed or failed and\n# carried back across the 9p mount for the host's status step. It\n# contains the extraction nextest performs inside the run, which is\n# why the verifier reports its own extraction separately.\nmkdir -p \"$workspace/wsl-timing\"\necho \"$(( $(date +%s) - started ))\" >\"$workspace/wsl-timing/l1.seconds\"\nexit \"$status\"\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "id": "stage_junit",
+      "if": "${{ !cancelled() }}",
+      "run": "set -uo pipefail\n# The upload runs on the Windows host, which cannot read ext4, so the\n# reports cross the 9p mount once, at the end, rather than per test.\nworkspace=\"$(pwd)\"\nrm -rf \"$workspace/wsl-junit\"\nmkdir -p \"$workspace/wsl-junit\"\n# The CONTENTS of the staging root, so `manifest.jsonl` lands at the\n# artifact root. `ci-rollup` reads the manifest only from there;\n# copying `target/nextest/` instead would bury it one level down.\ncp -R '${{ env.GUEST_ROOT }}/target/nextest/ci-reports/.' \\\n  \"$workspace/wsl-junit/\" 2>/dev/null || true\n# Staging must never change the tier's outcome.\nexit 0\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "if": "${{ !cancelled() && steps.cell.outputs.junit_artifact != '' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "${{ steps.cell.outputs.junit_artifact }}",
+       "path": "wsl-junit"
+      }
+     },
+     {
+      "continue-on-error": true,
+      "id": "guest_postmortem",
+      "if": "${{ !cancelled() && steps.l1.outcome == 'failure' }}",
+      "run": "set -uo pipefail\nworkspace=\"$(pwd)\"\nmkdir -p \"$workspace/wsl-diag\"\n{\n  echo \"=== $(date -u +%FT%TZ) guest post-mortem ===\"\n  df -h / /tmp /home 2>&1\n  free -m\n  # An OOM kill or an ext4 I/O error \u2014 the two ways a backing store\n  # failure becomes a signal \u2014 are both recorded here and nowhere else.\n  echo \"--- dmesg tail ---\"\n  dmesg -T 2>&1 | tail -120\n} 2>&1 | tee \"$workspace/wsl-diag/guest-postmortem.txt\"\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "continue-on-error": true,
+      "if": "${{ !cancelled() && steps.l1.outcome == 'failure' }}",
+      "run": "# The VHDX only ever grows, so a Windows volume that is full HERE was\n# full when the guest died. This is the measurement that separates \"the\n# guest filled its own filesystem\" from \"the guest's disk could not grow\n# because the host had nothing left to give it\".\n$ErrorActionPreference = 'Continue'\n# wsl.exe emits UTF-16 by default, which is why it renders as spaced-out\n# characters in the raw Actions logs. WSL_UTF8 makes it emit UTF-8\n# instead. Reaching for [Console]::OutputEncoding would be the wrong\n# lever: it also governs what pwsh WRITES, so it would garble this\n# step's own output to fix someone else's.\n$env:WSL_UTF8 = '1'\nNew-Item -ItemType Directory -Force -Path wsl-diag | Out-Null\n$report = @(\"=== host post-mortem $(Get-Date -Format o) ===\")\n$report += Get-PSDrive -PSProvider FileSystem |\n  Select-Object Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},\n                      @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} |\n  Out-String\n$report += \"--- wsl --status ---\"\n$report += (wsl.exe --status 2>&1 | Out-String)\n$report += \"--- wsl --list --verbose ---\"\n$report += (wsl.exe --list --verbose 2>&1 | Out-String)\n$report += \"--- backing VHDX ---\"\n# Bounded depth: a recursive sweep of the whole profile would cost\n# minutes on a Windows runner for a file whose location is well known.\n$roots = @(\"$env:LOCALAPPDATA\\Packages\", \"$env:LOCALAPPDATA\\wsl\") |\n  Where-Object { Test-Path $_ }\nif ($roots) {\n  # No backtick continuations anywhere in this step: a single trailing\n  # space after one silently turns it into a syntax error, and this\n  # script cannot be parse-checked on a macOS or Linux host.\n  $vhdx = Get-ChildItem -Path $roots -Recurse -Depth 3 -Filter 'ext4.vhdx' -ErrorAction SilentlyContinue\n  $report += $vhdx |\n    Select-Object FullName, @{n='SizeGB';e={[math]::Round($_.Length/1GB,2)}} |\n    Out-String\n}\n$report | Tee-Object -FilePath wsl-diag/host-postmortem.txt\n",
+      "shell": "pwsh"
+     },
+     {
+      "if": "${{ !cancelled() && (steps.l1.outcome == 'failure' || steps.verified.outcome == 'failure') }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "wsl-diag-${{ steps.cell.outputs.package }}-wsl2-ubuntu",
+       "path": "wsl-diag\nwsl-timing/verdict.json\n",
+       "retention-days": 3
+      }
+     },
+     {
+      "env": {
+       "BUILD_DIGEST": "${{ steps.manifest.outputs.digest }}",
+       "BUILD_KEY": "${{ steps.cell.outputs.build_key }}",
+       "BUILD_PRODUCER": "${{ steps.cell.outputs.build_producer }}",
+       "BUILD_STATUS": "${{ steps.build_status.outcome }}",
+       "DOWNLOAD_SECONDS": "${{ steps.manifest.outputs.download_seconds }}",
+       "ENVIRONMENT": "wsl2-ubuntu",
+       "JOB": "L1",
+       "JOB_STATUS": "${{ job.status }}",
+       "L1": "${{ steps.l1.outcome }}",
+       "PACKAGE": "${{ steps.cell.outputs.package }}",
+       "PROVISION": "${{ steps.provision.outcome == 'success' && 'success' || steps.provision_retry.outcome }}",
+       "PROVISION_FIRST": "${{ steps.provision.outcome }}",
+       "STAGED": "${{ steps.stage_junit.outcome }}",
+       "VERIFIED": "${{ steps.verified.outcome }}"
+      },
+      "if": "${{ always() }}",
+      "run": "set -euo pipefail\nmkdir -p \"$RUNNER_TEMP/status\"\n# `result` is the CELL's conclusion. The test step fails the producer\n# directly; folding L1 remains defensive and keeps the status format\n# correct if GitHub reports a healthy job during an `always()` step.\nresult=\"$JOB_STATUS\"\nif [ \"$result\" = \"success\" ] && [ \"$L1\" = \"failure\" ]; then\n  result=failure\n  echo \"::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the L1 suite failed in the WSL2 guest.\"\nfi\n# Name WHY no evidence exists, when that is the case.\n#\n# A guest that dies takes the staging step with it, `wsl-junit` stays\n# empty, and `if-no-files-found: ignore` uploads nothing successfully \u2014\n# so the rollup could only say \"produced no report at all\", which reads\n# identically to a tier that ran and had no tests. Only the producer\n# can tell those apart, so it says which.\n#\n# A failing TEST needs no detail: the guest stays healthy, staging\n# succeeds, and the report the rollup reads is uploaded normally.\ndetail=\"\"\n# First: a refused build status skips provisioning, which must not\n# then be reported as a guest that failed to provision.\nif [ \"$BUILD_STATUS\" = \"failure\" ]; then\n  detail=\"build ${BUILD_KEY} produced on ${BUILD_PRODUCER} has no successful build status; the guest was not provisioned and no test was started\"\nelif [ \"$PROVISION\" != \"success\" ]; then\n  detail=\"the WSL2 guest failed to provision (attempt 1: ${PROVISION_FIRST}, attempt 2: ${PROVISION}); no test could run\"\nelif [ \"$VERIFIED\" != \"success\" ]; then\n  detail=\"build ${BUILD_KEY} produced on ${BUILD_PRODUCER} was refused by the guest's verification (${VERIFIED}); no test was started and nothing was compiled to replace it\"\nelif [ \"$STAGED\" != \"success\" ]; then\n  detail=\"the WSL2 guest became unreachable after the test step (L1: ${L1}, staging: ${STAGED}); its reports could not be collected\"\nfi\n# This cell's stages. The guest cannot write `$GITHUB_OUTPUT`, so each\n# window it measured crossed the 9p mount as a file; a guest that died\n# leaves none, and the stage reports 0 rather than a fabricated\n# duration. Reporting only \u2014 the cell's identity stays\n# {package, environment, gate}.\n# Anything that is not a plain count reports 0. This step runs under\n# `always()` and is the cell's only evidence: instrumentation must not\n# be able to lose it.\nnumber() {\n  case \"${1:-}\" in\n    ''|*[!0-9]*) echo 0 ;;\n    *) echo \"$1\" ;;\n  esac\n}\nread_seconds() {\n  if [ -f \"wsl-timing/$1\" ]; then\n    number \"$(tr -cd '0-9' <\"wsl-timing/$1\")\"\n  else\n    echo 0\n  fi\n}\nextract_ms=0\nif [ -f wsl-timing/verdict.json ]; then\n  extract_ms=\"$(jq -r '.timings.extract_ms // 0' wsl-timing/verdict.json 2>/dev/null || echo 0)\"\nfi\ntimings=\"$(jq -cn \\\n  --argjson download \"$(number \"${DOWNLOAD_SECONDS:-}\")\" \\\n  --argjson verify \"$(read_seconds verify.seconds)\" \\\n  --argjson extract \"$(number \"$extract_ms\")\" \\\n  --argjson execute \"$(read_seconds l1.seconds)\" \\\n  '{download_seconds: $download, verify_seconds: $verify,\n    extract_ms: $extract, execute_seconds: $execute}')\"\njq -cn \\\n  --arg package \"$PACKAGE\" --arg job \"$JOB\" --arg environment \"$ENVIRONMENT\" \\\n  --arg result \"$result\" --arg detail \"$detail\" \\\n  --arg key \"${BUILD_KEY:-}\" --arg producer \"${BUILD_PRODUCER:-}\" \\\n  --arg digest \"${BUILD_DIGEST:-}\" \\\n  --argjson timings \"$timings\" \\\n  '{package: $package, job: $job, environment: $environment, result: $result}\n   + (if $detail == \"\" then {} else {detail: $detail} end)\n   + (if $key == \"\" then {}\n      else {build: {key: $key, producer: $producer, digest: $digest}} end)\n   + {timings: $timings}' \\\n  >\"$RUNNER_TEMP/status/status.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ always() && steps.cell.outputs.status_artifact != '' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "name": "${{ steps.cell.outputs.status_artifact }}",
+       "path": "${{ runner.temp }}/status"
+      }
+     },
+     {
+      "id": "completion",
+      "run": "set -euo pipefail\nworkspace=\"$(pwd)\"\nrm -rf \"$workspace/wsl-completion\"\nmkdir -p \"$workspace/wsl-completion\"\nstage='${{ env.GUEST_ROOT }}/target/nextest/ci-reports'\ncd '${{ env.GUEST_ROOT }}'\npython3 scripts/ci/completion.py \\\n  --plan '${{ env.GUEST_BUILD }}/resolved-plan.json' \\\n  --cell '${{ steps.cell.outputs.cell }}' \\\n  --expected-manifest \"$stage/expected-${{ steps.cell.outputs.gate }}.json\" \\\n  --artifacts \"$stage\" \\\n  --backend-proofs \"$stage/backend-proofs.json\" \\\n  --target '${{ steps.cell.outputs.target }}' \\\n  --run '${{ github.run_id }}' \\\n  --attempt '${{ github.run_attempt }}' \\\n  --out \"$workspace/wsl-completion/completion.json\"\n",
+      "shell": "wsl-bash {0}"
+     },
+     {
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "name": "${{ steps.cell.outputs.completion_artifact }}",
+       "path": "wsl-completion"
+      }
+     },
+     {
+      "continue-on-error": true,
+      "env": {
+       "CELL": "${{ steps.cell.outputs.cell }}",
+       "GATE_OUTCOME": "${{ steps.l1.outcome }}"
+      },
+      "if": "${{ !cancelled() && github.event_name == 'schedule' }}",
+      "run": "set -euo pipefail\npython3 scripts/ci/hosted_observations.py emit \\\n  --plan ci-resolved-plan/resolved-plan.json \\\n  --cell \"$CELL\" \\\n  --stage wsl-junit \\\n  --completion wsl-completion/completion.json \\\n  --gate-outcome \"$GATE_OUTCOME\" \\\n  --run-id \"$GITHUB_RUN_ID\" \\\n  --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n  --workflow \"$GITHUB_WORKFLOW_REF\" \\\n  --host-os Linux \\\n  --host-kernel \"WSL2 Ubuntu guest on a hosted $RUNNER_OS runner\" \\\n  --out \"$RUNNER_TEMP/observation/observation.json\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ !cancelled() && github.event_name == 'schedule' && steps.cell.outputs.package != '' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "ignore",
+       "name": "observation-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.gate }}-wsl2-ubuntu",
+       "path": "${{ runner.temp }}/observation",
+       "retention-days": 90
+      }
+     }
+    ],
+    "timeout-minutes": 60
+   }
+  }
+ },
+ "ci.yml": {
+  "True": {
+   "pull_request": null,
+   "push": {
+    "branches": [
+     "main"
+    ]
+   },
+   "schedule": [
+    {
+     "cron": "0 8 * * *"
+    }
+   ],
+   "workflow_dispatch": {
+    "inputs": {
+     "measure-compiler-work": {
+      "default": false,
+      "description": "Count actual rustc invocations around each measured test command. Baseline collection only.",
+      "type": "boolean"
+     }
+    }
+   }
+  },
+  "concurrency": {
+   "cancel-in-progress": true,
+   "group": "ci-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}"
+  },
+  "env": {
+   "TESTED_REVISION": "${{ github.event.pull_request.head.sha || github.sha }}"
+  },
+  "jobs": {
+   "area-ci": {
+    "if": "!cancelled() && needs.scope.outputs.has_packages == 'true'",
+    "needs": [
+     "scope",
+     "preflight",
+     "build"
+    ],
+    "permissions": {
+     "actions": "read",
+     "checks": "write",
+     "contents": "read"
+    },
+    "secrets": "inherit",
+    "strategy": {
+     "fail-fast": false,
+     "matrix": {
+      "area": "${{ fromJSON(needs.scope.outputs.scheduled_areas) }}"
+     }
+    },
+    "uses": "./.github/workflows/_area-ci.yml",
+    "with": {
+     "accepted-gaps": "${{ contains(fromJSON(needs.scope.outputs.gap_areas), matrix.area) }}",
+     "area": "${{ matrix.area }}",
+     "measure-compiler-work": "${{ inputs.measure-compiler-work == true }}",
+     "rows": "${{ toJSON(fromJSON(needs.scope.outputs.area_rows)[matrix.area]) }}",
+     "slug": "${{ fromJSON(needs.scope.outputs.area_slugs)[matrix.area] }}",
+     "tested-revision": "${{ needs.scope.outputs.head }}"
+    }
+   },
+   "area-drift": {
+    "env": {
+     "RUSTC_WRAPPER": ""
+    },
+    "if": "!cancelled() && needs.scope.outputs.area_drift == 'true'",
+    "needs": [
+     "scope",
+     "preflight"
+    ],
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ needs.scope.outputs.head }}"
+      }
+     },
+     {
+      "run": "rustup show"
+     },
+     {
+      "uses": "Swatinem/rust-cache@v2",
+      "with": {
+       "shared-key": "area-drift",
+       "workspaces": ". -> target"
+      }
+     },
+     {
+      "run": "cargo build -p sniff-detection-cli --release"
+     },
+     {
+      "env": {
+       "BISCUIT_REQUIRE_SNIFF": "1"
+      },
+      "run": "set -euo pipefail\nexport PATH=\"${GITHUB_WORKSPACE}/target/release:${PATH}\"\nsniff --version\npython3 scripts/ci/test_resolved_plan.py AreaGroupingTests\n"
+     }
+    ],
+    "timeout-minutes": 30
+   },
+   "build": {
+    "env": {
+     "COLORTERM": "truecolor",
+     "NEXTEST_PROFILE": "ci",
+     "RUSTC_WRAPPER": ""
+    },
+    "if": "!cancelled() && needs.scope.outputs.has_builds == 'true'",
+    "needs": [
+     "scope",
+     "preflight"
+    ],
+    "runs-on": "${{ fromJSON(needs.scope.outputs.build_owner_runners)[matrix.build] }}",
+    "steps": [
+     {
+      "id": "job_start",
+      "run": "echo \"epoch=$(date +%s)\" >>\"$GITHUB_OUTPUT\"\n# Storage samples are an Ubuntu diagnostic: that owner is the one\n# whose disk fills. Every sampling step below, and the producer's own\n# per-record samples (`produce-owner.sh`), key off this variable.\nif [ \"$RUNNER_OS\" = Linux ]; then\n  echo \"BUILD_DIAGNOSTICS=$RUNNER_TEMP/build-diagnostics\" >>\"$GITHUB_ENV\"\nfi\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ needs.scope.outputs.head }}"
+      }
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-scope",
+       "path": "ci-artifacts/ci-scope"
+      }
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-resolved-plan",
+       "path": "ci-artifacts/ci-resolved-plan"
+      }
+     },
+     {
+      "env": {
+       "PRODUCER": "${{ matrix.build }}"
+      },
+      "id": "slice",
+      "run": "set -euo pipefail\nowner=\"$(jq -ce --arg producer \"$PRODUCER\" \\\n  '.build_owners[] | select(.environment == $producer)' \\\n  ci-artifacts/ci-scope/scope.json)\"\n{\n  echo \"producer=$PRODUCER\"\n  echo \"native=$(jq -c '.native' <<<\"$owner\")\"\n} >>\"$GITHUB_OUTPUT\"\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/setup-node@v4",
+      "with": {
+       "node-version": 22
+      }
+     },
+     {
+      "run": "npm ci --prefix scripts/ci/artifacts --ignore-scripts --no-audit --no-fund"
+     },
+     {
+      "uses": "extractions/setup-just@v4"
+     },
+     {
+      "env": {
+       "NATIVE": "${{ steps.slice.outputs.native }}"
+      },
+      "run": "set -euo pipefail\nnative_args=()\nwhile IFS= read -r package; do\n  if [ -n \"$package\" ]; then native_args+=(\"$package\"); fi\ndone < <(jq -r '.[]' <<<\"$NATIVE\")\nif [ ${#native_args[@]} -gt 0 ]; then\n  just _ensure-native-libs \"${native_args[@]}\"\nfi\n",
+      "shell": "bash"
+     },
+     {
+      "run": "rustup show"
+     },
+     {
+      "if": "${{ env.BUILD_DIAGNOSTICS != '' }}",
+      "run": "python3 scripts/ci/storage_sample.py --out \"$BUILD_DIAGNOSTICS/storage.jsonl\" --target \"$GITHUB_WORKSPACE/target\" --output \"$RUNNER_TEMP/build\" --label before-cache-restore --inventory || true",
+      "shell": "bash"
+     },
+     {
+      "id": "cache",
+      "uses": "Swatinem/rust-cache@v2",
+      "with": {
+       "shared-key": "build-owner-${{ steps.slice.outputs.producer }}",
+       "workspaces": ". -> target"
+      }
+     },
+     {
+      "env": {
+       "CACHE_HIT": "${{ steps.cache.outputs.cache-hit }}",
+       "PRODUCER": "${{ matrix.build }}"
+      },
+      "if": "${{ env.BUILD_DIAGNOSTICS != '' }}",
+      "run": "python3 scripts/ci/storage_sample.py --out \"$BUILD_DIAGNOSTICS/storage.jsonl\" --target \"$GITHUB_WORKSPACE/target\" --output \"$RUNNER_TEMP/build\" --label after-cache-restore --cache-hit \"$CACHE_HIT\" --inventory --restored-since before-cache-restore --plan ci-artifacts/ci-resolved-plan/resolved-plan.json --producer \"$PRODUCER\" --live-path release --live-path schematic-fresh-output || true",
+      "shell": "bash"
+     },
+     {
+      "uses": "taiki-e/install-action@nextest"
+     },
+     {
+      "run": "cargo build --release \\\n  -p repo-deps \\\n  --no-default-features --features build-tools --bin ci-build\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ env.BUILD_DIAGNOSTICS != '' }}",
+      "run": "python3 scripts/ci/storage_sample.py --out \"$BUILD_DIAGNOSTICS/storage.jsonl\" --target \"$GITHUB_WORKSPACE/target\" --output \"$RUNNER_TEMP/build\" --label before-schematic-guard || true",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "PRODUCER": "${{ matrix.build }}"
+      },
+      "id": "fresh_output",
+      "run": "set -euo pipefail\nif ! jq -e --arg producer \"$PRODUCER\" \\\n  'any(.builds[]; .producer == $producer and .package == \"schematic-gen\")' \\\n  ci-artifacts/ci-resolved-plan/resolved-plan.json >/dev/null; then\n  echo \"This owner does not build schematic-gen; the guard does not apply.\"\n  echo \"ran=false\" >>\"$GITHUB_OUTPUT\"\n  exit 0\nfi\necho \"ran=true\" >>\"$GITHUB_OUTPUT\"\n# The guard builds offline against the generated crate's lockfile.\ncargo fetch --manifest-path schematic/schema/Cargo.toml\njust -f schematic/justfile test-fresh-output\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ always() && env.BUILD_DIAGNOSTICS != '' && steps.fresh_output.outputs.ran == 'true' }}",
+      "run": "python3 scripts/ci/storage_sample.py --out \"$BUILD_DIAGNOSTICS/storage.jsonl\" --target \"$GITHUB_WORKSPACE/target\" --output \"$RUNNER_TEMP/build\" --label after-schematic-guard || true",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ always() && steps.fresh_output.outputs.ran == 'true' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "error",
+       "name": "fresh-output-schematic-gen-${{ matrix.build }}",
+       "path": "target/nextest/ci/test-results.xml"
+      }
+     },
+     {
+      "env": {
+       "JOB_EPOCH": "${{ steps.job_start.outputs.epoch }}",
+       "MEASURE": "${{ inputs.measure-compiler-work && 'true' || 'false' }}",
+       "PLAN_EPOCH": "${{ needs.scope.outputs.plan_epoch }}",
+       "PRODUCER": "${{ matrix.build }}"
+      },
+      "id": "produce",
+      "uses": "actions/github-script@v8",
+      "with": {
+       "script": "const owner = require(`${process.env.GITHUB_WORKSPACE}/scripts/ci/artifacts/produce.cjs`);\nif (!await owner.produceOwner(owner.hostedOptions())) {\n  core.setFailed('One or more package builds failed or could not be published');\n}\n"
+      }
+     },
+     {
+      "if": "${{ always() && env.BUILD_DIAGNOSTICS != '' }}",
+      "run": "python3 scripts/ci/storage_sample.py --out \"$BUILD_DIAGNOSTICS/storage.jsonl\" --target \"$GITHUB_WORKSPACE/target\" --output \"$RUNNER_TEMP/build\" --label before-publication || true",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "JOB_EPOCH": "${{ steps.job_start.outputs.epoch }}",
+       "JOB_STATUS": "${{ job.status }}",
+       "MEASURE": "${{ inputs.measure-compiler-work && 'true' || 'false' }}",
+       "PLAN_EPOCH": "${{ needs.scope.outputs.plan_epoch }}",
+       "PRODUCER": "${{ matrix.build }}"
+      },
+      "if": "${{ always() }}",
+      "uses": "actions/github-script@v8",
+      "with": {
+       "script": "const root = process.env.GITHUB_WORKSPACE;\nconst {hostedOptions} = require(`${root}/scripts/ci/artifacts/produce.cjs`);\nconst {finalizeOwner} = require(`${root}/scripts/ci/artifacts/publish.cjs`);\nif (!await finalizeOwner(hostedOptions())) {\n  core.setFailed('One or more package builds could not be published');\n}\n"
+      }
+     },
+     {
+      "if": "${{ always() && env.BUILD_DIAGNOSTICS != '' }}",
+      "run": "python3 scripts/ci/storage_sample.py --out \"$BUILD_DIAGNOSTICS/storage.jsonl\" --target \"$GITHUB_WORKSPACE/target\" --output \"$RUNNER_TEMP/build\" --label after-publication || true",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ always() && env.BUILD_DIAGNOSTICS != '' }}",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "warn",
+       "name": "build-diagnostics-${{ matrix.build }}",
+       "path": "${{ runner.temp }}/build-diagnostics"
+      }
+     }
+    ],
+    "strategy": {
+     "fail-fast": false,
+     "matrix": {
+      "build": "${{ fromJSON(needs.scope.outputs.build_producers) }}"
+     }
+    },
+    "timeout-minutes": 180
+   },
+   "certify-nightly": {
+    "if": "always() && github.event_name == 'schedule' && needs.ci-gate.result == 'success' && needs.scope.result == 'success' && needs.scope.outputs.coverage_environments != '[]'",
+    "needs": [
+     "scope",
+     "ci-gate"
+    ],
+    "permissions": {
+     "actions": "read",
+     "contents": "read"
+    },
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ needs.scope.outputs.head }}"
+      }
+     },
+     {
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-resolved-plan",
+       "path": "ci-artifacts/ci-resolved-plan"
+      }
+     },
+     {
+      "env": {
+       "ENVIRONMENT": "${{ matrix.environment }}",
+       "GATE_RESULT": "${{ needs.ci-gate.result }}",
+       "GH_TOKEN": "${{ github.token }}"
+      },
+      "id": "certify",
+      "run": "set -euo pipefail\nwritten=\"$(python3 scripts/ci/reuse_validation.py certify \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  --out certifications \\\n  --gate-result \"$GATE_RESULT\")\"\nname=\"$(jq -er --arg environment \"$ENVIRONMENT\" \\\n  '.[] | select(.environment == $environment) | .name' <<<\"$written\")\"\necho \"name=$name\" >>\"$GITHUB_OUTPUT\"\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "error",
+       "name": "${{ steps.certify.outputs.name }}",
+       "path": "certifications/${{ steps.certify.outputs.name }}/certification.json",
+       "retention-days": 90
+      }
+     }
+    ],
+    "strategy": {
+     "fail-fast": false,
+     "matrix": {
+      "environment": "${{ fromJSON(needs.scope.outputs.coverage_environments) }}"
+     }
+    },
+    "timeout-minutes": 10
+   },
+   "ci-gate": {
+    "if": "always()",
+    "needs": [
+     "validation",
+     "scope",
+     "preflight",
+     "build",
+     "area-ci",
+     "area-drift"
+    ],
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "env": {
+       "RESULTS": "validation:${{ needs.validation.result }}\nscope:${{ needs.scope.result }}\npreflight:${{ needs.preflight.result }}\nbuild:${{ needs.build.result }}\narea-ci:${{ needs.area-ci.result }}\narea-drift:${{ needs.area-drift.result }}\n"
+      },
+      "run": "set -euo pipefail\nblocking=\"\"\nwhile IFS= read -r entry; do\n  [ -n \"$entry\" ] || continue\n  job=\"${entry%%:*}\"\n  result=\"${entry##*:}\"\n  case \"$result\" in\n    success|skipped) echo \"$job: $result\" ;;\n    *)\n      echo \"$job: $result (blocks)\"\n      blocking=\"${blocking} ${job}\"\n      ;;\n  esac\ndone <<<\"$RESULTS\"\nif [ -n \"$blocking\" ]; then\n  echo \"ci-gate: blocked by${blocking}\" >&2\n  exit 1\nfi\necho \"ci-gate: every blocking job succeeded or was skipped\"\n",
+      "shell": "bash"
+     }
+    ],
+    "timeout-minutes": 2
+   },
+   "ci-reporting": {
+    "continue-on-error": true,
+    "if": "always()",
+    "needs": [
+     "validation",
+     "scope",
+     "area-ci",
+     "ci-gate"
+    ],
+    "permissions": {
+     "contents": "read"
+    },
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "env": {
+       "VALIDATED_RUN": "${{ needs.validation.outputs.run_id }}"
+      },
+      "if": "${{ needs.validation.result == 'success' && needs.validation.outputs.reuse == 'true' }}",
+      "run": "{\n  echo \"## Reused PR validation\"\n  echo \"\"\n  echo \"This push has the same Git tree and integration base as a successful PR validation.\"\n  echo \"\"\n  echo \"The environments the pull request event schedules were proven there; this run planned only the environments the push event adds (the plan's \\`proven_environments\\` names the rest).\"\n  echo \"\"\n  echo \"[Original validation]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$VALIDATED_RUN)\"\n} >>\"$GITHUB_STEP_SUMMARY\"\n",
+      "shell": "bash"
+     },
+     {
+      "if": "${{ needs.scope.result == 'success' }}",
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ needs.scope.outputs.head }}"
+      }
+     },
+     {
+      "if": "${{ needs.scope.result == 'success' }}",
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "name": "ci-resolved-plan",
+       "path": "ci-artifacts/ci-resolved-plan"
+      }
+     },
+     {
+      "continue-on-error": true,
+      "if": "${{ needs.scope.result == 'success' }}",
+      "uses": "actions/download-artifact@v7",
+      "with": {
+       "merge-multiple": false,
+       "path": "ci-artifacts",
+       "pattern": "ci-results-*"
+      }
+     },
+     {
+      "if": "${{ needs.scope.result == 'success' }}",
+      "run": "rustup show"
+     },
+     {
+      "if": "${{ needs.scope.result == 'success' }}",
+      "run": "cargo build --release \\\n  -p repo-deps \\\n  --no-default-features --bin ci-rollup\n"
+     },
+     {
+      "if": "${{ needs.scope.result == 'success' }}",
+      "run": "set -euo pipefail\nargs=()\nwhile IFS= read -r slice; do\n  [ -n \"$slice\" ] || continue\n  args+=(--results \"$slice\")\ndone < <(find ci-artifacts -type f -path 'ci-artifacts/ci-results-*/*.json' | sort)\n./target/release/ci-rollup summarize \\\n  --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \\\n  \"${args[@]}\"\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "RESULTS": "bootstrap (reuse check):${{ needs.validation.result }}\nbootstrap (scope calculation):${{ needs.scope.result }}\n"
+      },
+      "if": "${{ needs.scope.result != 'success' }}",
+      "run": "set -euo pipefail\n{\n  echo \"\"\n  echo \"## Jobs outside the rollup\"\n  echo \"\"\n} >>\"$GITHUB_STEP_SUMMARY\"\n\nfirst=\"\"\nstate=\"\"\nwhile IFS= read -r entry; do\n  [ -n \"$entry\" ] || continue\n  stage=\"${entry%:*}\"\n  result=\"${entry##*:}\"\n  echo \"- ${stage}: ${result}\" >>\"$GITHUB_STEP_SUMMARY\"\n  if [ -z \"$first\" ]; then\n    case \"$result\" in\n      failure) first=\"$stage\"; state=\"failed\" ;;\n      cancelled) first=\"$stage\"; state=\"cancelled\" ;;\n    esac\n  fi\ndone <<<\"$RESULTS\"\necho \"\" >>\"$GITHUB_STEP_SUMMARY\"\n\nif [ -z \"$first\" ]; then\n  echo \"No bootstrap stage failed or was cancelled, yet the scope calculation did not succeed, so this run scheduled no package cell. **The run's gate is \\`ci-gate\\`, not this line** \u2014 it folds every blocking job's result, including \\`preflight\\`, and package results live in each area's coverage-audit grid.\" >>\"$GITHUB_STEP_SUMMARY\"\n  exit 0\nfi\n\n{\n  echo \"**First actionable failure class: ${first} (${state})**\"\n  echo \"\"\n  echo \"This stage emits no result artifacts, so no area coverage audit can see it; \\`ci-gate\\` blocks on its result directly. Open that job first \u2014 later red jobs are usually the same root cause.\"\n} >>\"$GITHUB_STEP_SUMMARY\"\n",
+      "shell": "bash"
+     }
+    ],
+    "timeout-minutes": 15
+   },
+   "preflight": {
+    "if": "needs.scope.result == 'success' && needs.scope.outputs.preflight_os != '[]'",
+    "needs": "scope",
+    "runs-on": "${{ matrix.os }}",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "fetch-depth": 0,
+       "ref": "${{ needs.scope.outputs.head }}"
+      }
+     },
+     {
+      "run": "rustup show"
+     },
+     {
+      "uses": "extractions/setup-just@v4"
+     },
+     {
+      "uses": "taiki-e/install-action@nextest"
+     },
+     {
+      "run": "set -euo pipefail\nrustc -vV\ncargo -V\njust --version\ncargo nextest --version\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "RUSTC_WRAPPER": ""
+      },
+      "run": "cargo metadata --no-deps --format-version 1 >/dev/null",
+      "shell": "bash"
+     },
+     {
+      "run": "just check-canonical"
+     }
+    ],
+    "strategy": {
+     "fail-fast": false,
+     "matrix": {
+      "os": "${{ fromJSON(needs.scope.outputs.preflight_os) }}"
+     }
+    },
+    "timeout-minutes": 20
+   },
+   "publish-observations": {
+    "if": "always() && github.event_name == 'schedule' && needs.scope.result == 'success' && needs.scope.outputs.has_packages == 'true'",
+    "needs": [
+     "scope",
+     "area-ci"
+    ],
+    "permissions": {
+     "actions": "read",
+     "contents": "write"
+    },
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "fetch-depth": 0,
+       "ref": "${{ needs.scope.outputs.head }}"
+      }
+     },
+     {
+      "env": {
+       "GH_TOKEN": "${{ github.token }}",
+       "GIT_AUTHOR_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
+       "GIT_AUTHOR_NAME": "github-actions[bot]",
+       "GIT_COMMITTER_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
+       "GIT_COMMITTER_NAME": "github-actions[bot]"
+      },
+      "run": "set -euo pipefail\npython3 scripts/ci/hosted_observations.py publish \\\n  --repository \"$GITHUB_REPOSITORY\" \\\n  --run-id \"$GITHUB_RUN_ID\"\n",
+      "shell": "bash"
+     },
+     {
+      "env": {
+       "GH_TOKEN": "${{ github.token }}",
+       "GIT_AUTHOR_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
+       "GIT_AUTHOR_NAME": "github-actions[bot]",
+       "GIT_COMMITTER_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
+       "GIT_COMMITTER_NAME": "github-actions[bot]"
+      },
+      "if": "always()",
+      "run": "set -euo pipefail\npython3 scripts/ci/hosted_observations.py publish \\\n  --repository \"$GITHUB_REPOSITORY\" \\\n  --recent\n",
+      "shell": "bash"
+     }
+    ],
+    "timeout-minutes": 15
+   },
+   "scope": {
+    "if": "${{ !cancelled() }}",
+    "needs": "validation",
+    "outputs": {
+     "area_drift": "${{ steps.scope.outputs.area_drift }}",
+     "area_rows": "${{ steps.scope.outputs.area_rows }}",
+     "area_slugs": "${{ steps.scope.outputs.area_slugs }}",
+     "build_artifacts": "${{ steps.scope.outputs.build_artifacts }}",
+     "build_owner_runners": "${{ steps.scope.outputs.build_owner_runners }}",
+     "build_producers": "${{ steps.scope.outputs.build_producers }}",
+     "build_runners": "${{ steps.scope.outputs.build_runners }}",
+     "change_class": "${{ steps.scope.outputs.change_class }}",
+     "coverage_environments": "${{ steps.scope.outputs.coverage_environments }}",
+     "full_scope": "${{ steps.scope.outputs.full_scope }}",
+     "gap_areas": "${{ steps.scope.outputs.gap_areas }}",
+     "has_builds": "${{ steps.scope.outputs.has_builds }}",
+     "has_packages": "${{ steps.scope.outputs.has_packages }}",
+     "head": "${{ steps.scope.outputs.head }}",
+     "job_estimate": "${{ steps.scope.outputs.job_estimate }}",
+     "package_names": "${{ steps.scope.outputs.package_names }}",
+     "packages": "${{ steps.scope.outputs.packages }}",
+     "plan_epoch": "${{ steps.plan_published.outputs.epoch }}",
+     "preflight_os": "${{ steps.scope.outputs.preflight_os }}",
+     "preflight_reason": "${{ steps.scope.outputs.preflight_reason }}",
+     "scheduled_areas": "${{ steps.scope.outputs.scheduled_areas }}",
+     "sniff": "${{ steps.scope.outputs.sniff }}"
+    },
+    "permissions": {
+     "actions": "read",
+     "contents": "read"
+    },
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "fetch-depth": 0,
+       "ref": "${{ env.TESTED_REVISION }}"
+      }
+     },
+     {
+      "continue-on-error": true,
+      "run": "git fetch origin '+refs/notes/ci-local/*:refs/notes/ci-local/*'"
+     },
+     {
+      "env": {
+       "ALL_ENVIRONMENTS": "${{ contains(github.event.pull_request.labels.*.name, 'ci:all-os') }}",
+       "EVENT_NAME": "${{ github.event_name }}",
+       "GH_TOKEN": "${{ github.token }}",
+       "PROVEN_BY_PULL_REQUEST": "${{ needs.validation.outputs.reuse }}",
+       "PR_BASE": "${{ github.event.pull_request.base.sha }}",
+       "PR_HEAD": "${{ github.event.pull_request.head.sha }}",
+       "PUSH_BASE": "${{ github.event.before }}",
+       "PUSH_HEAD": "${{ github.sha }}"
+      },
+      "id": "scope",
+      "run": "set -euo pipefail\nscope_args=()\nif [[ \"$EVENT_NAME\" == \"workflow_dispatch\" ]]; then\n  # A manual full run has no diff range. Its plan records the\n  # all-zero \"no such object\" ID as the base, the same identity a\n  # branch-creating push carries in `github.event.before`, and the\n  # tested head; no receipt is verified against that pair.\n  base=\"0000000000000000000000000000000000000000\"\n  head=\"$PUSH_HEAD\"\n  scope_args=(--all)\nelse\n  if [[ \"$EVENT_NAME\" == \"pull_request\" ]]; then\n    base=\"$PR_BASE\"\n    head=\"$PR_HEAD\"\n  elif [[ \"$EVENT_NAME\" == \"schedule\" ]]; then\n    # The nightly has no single comparison base: each scheduled\n    # environment is planned from the diff since the newest\n    # successful nightly that proved IT (or the full gated\n    # workspace, with a coded reason), so a WSL2-only history never\n    # shortens Windows' scope. The planner derives every diff\n    # itself from the anchors, and the plan records the all-zero\n    # \"no single base\" identity. A lookup failure degrades inside\n    # `nightly-anchors` to a visible full-scope fallback, never to\n    # a narrower plan.\n    python3 scripts/ci/reuse_validation.py nightly-anchors > nightly-anchors.json\n    # Earlier nightlies' finished hosted cells whose run never\n    # reached `publish-observations` (force-cancelled, lost runner,\n    # timed out) exist only as `observation-*` artifacts. Record the\n    # newest scheduled runs' ones in THIS checkout's notes (no push:\n    # this job writes nothing remote) BEFORE planning: the planner\n    # reopens an anchored cell that a recovered failure contradicts,\n    # and the verifier below vouches for recovered passes like any\n    # other observation. A failure here only costs reuse, so it\n    # warns and carries on.\n    recovery_status=0\n    GIT_AUTHOR_NAME='github-actions[bot]' \\\n    GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' \\\n    GIT_COMMITTER_NAME='github-actions[bot]' \\\n    GIT_COMMITTER_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' \\\n      python3 scripts/ci/hosted_observations.py publish \\\n        --repository \"$GITHUB_REPOSITORY\" --recent --no-push \\\n      || recovery_status=$?\n    if (( recovery_status != 0 )); then\n      echo \"::warning title=CI scope::recovering earlier nightlies' hosted observations ended with exit ${recovery_status}; a cell it could not recover executes\"\n    fi\n    base=\"0000000000000000000000000000000000000000\"\n    head=\"$PUSH_HEAD\"\n  else\n    base=\"$PUSH_BASE\"\n    head=\"$PUSH_HEAD\"\n  fi\n\n  if [[ \"$EVENT_NAME\" == \"schedule\" ]]; then\n    # The probe lets a hosted passing retry supersede a failure on\n    # a cell the anchor would otherwise lend this run.\n    scope_args=(--anchors nightly-anchors.json --artifact-repo \"$GITHUB_REPOSITORY\")\n  elif [[ -z \"$base\" || \"$base\" =~ ^0+$ ]]; then\n    scope_args=(--all)\n  else\n    # One diff, two lists. `--name-status` is what separates a\n    # deletion from a path that is merely absent; `diff_scope.py`\n    # turns the stream into `--deleted <path>... -- <changed path>...`\n    # so the change inventory carries that identity and the\n    # archive-path guard never has to guess. The arguments land in a\n    # file rather than a process substitution: `pipefail` sees a\n    # failing diff or parse there, and would not see it there.\n    diff_arguments=\"$(mktemp)\"\n    git diff --name-status -z \"$base\" \"$head\" | python3 scripts/ci/diff_scope.py > \"$diff_arguments\"\n    mapfile -d '' scope_args < \"$diff_arguments\"\n    rm -f \"$diff_arguments\"\n  fi\nfi\n\n# The event decides which environments are planned\n# (`environments.json` `events`); a scope receipt planned for\n# another event is refused below for the same reason.\nevent_args=(--event \"$EVENT_NAME\")\nif [[ \"$EVENT_NAME\" == \"pull_request\" && \"${ALL_ENVIRONMENTS:-}\" == \"true\" ]]; then\n  event_args+=(--all-environments)\nfi\nif [[ \"$EVENT_NAME\" == \"push\" && \"${PROVEN_BY_PULL_REQUEST:-}\" == \"true\" ]]; then\n  event_args+=(--proven-event pull_request)\nfi\n# Ahead of the file list: after its `--` argparse reads everything,\n# options included, as a path. (A nightly's `--anchors` is the whole\n# selection input: it carries no file list.)\nscope_args=(--plan-out resolved-plan.json --base \"$base\" --head \"$head\" \"${event_args[@]}\" \"${scope_args[@]}\")\n\n# A scope receipt on refs/notes/ci-local/scope that binds this\n# event's exact {base, head, tree} IS the plan: selection never runs\n# again for it, with or without validation evidence. Any miss \u2014 no\n# note, another schema, head, tree, base, or event, or a malformed\n# document \u2014 calculates scope exactly as before. A manual or nightly\n# run and a branch-creating push carry no comparison base and never\n# consult the note, and a push whose pull request validation is\n# reused plans a narrower set than any receipt holds. A receipt is\n# planned for the event's own environments, so a `ci:all-os` pull\n# request never takes one: the hook publishes a receipt on every\n# push, and taking it silently dropped the label.\nlocal_scope=0\nscope_source=\"CI (no comparison base)\"\nif [[ \"$EVENT_NAME\" == \"workflow_dispatch\" || \"$EVENT_NAME\" == \"schedule\" ]]; then\n  scope_source=\"CI ($EVENT_NAME ignores local scope)\"\nelif [[ \"$EVENT_NAME\" == \"pull_request\" && \"${ALL_ENVIRONMENTS:-}\" == \"true\" ]]; then\n  scope_source=\"CI (ci:all-os plans every environment)\"\nelif [[ \"$EVENT_NAME\" == \"push\" && \"${PROVEN_BY_PULL_REQUEST:-}\" == \"true\" ]]; then\n  scope_source=\"CI (reused pull request validation narrows the plan)\"\nelif [[ -n \"$base\" && ! \"$base\" =~ ^0+$ ]]; then\n  if python3 scripts/ci/local_evidence.py scope-verify \\\n      --base \"$base\" --head \"$head\" --event \"$EVENT_NAME\" \\\n      --plan-out resolved-plan.json --scope-out scope.json \\\n      --reason-out scope-reason.txt; then\n    local_scope=1\n    scope_source=\"local (refs/notes/ci-local/scope @ ${head:0:9})\"\n  else\n    reason=\"$(cat scope-reason.txt 2>/dev/null || true)\"\n    scope_source=\"CI fallback (${reason:-scope-verify failed})\"\n  fi\nfi\nif (( local_scope )); then\n  scope_json=\"$(cat scope.json)\"\nelse\n  # Selection reads `cargo metadata`, so this is the one place the\n  # scope job needs Rust: a runner without the pinned toolchain\n  # installs it here and nowhere else. A receipt hit never reaches\n  # this branch \u2014 scope-verify, verify --cells, --apply-to, jq, and\n  # the summary need no toolchain (R9: the valid-receipt path pays\n  # for no Rust it does not use).\n  rustup show\n  scope_json=\"$(python3 scripts/ci/affected_scope.py \"${scope_args[@]}\")\"\nfi\nevidence_failure=\"\"\nif [[ \"$EVENT_NAME\" != \"workflow_dispatch\" ]]; then\n  # Per CELL, across every environment's notes ref at once: a macOS\n  # receipt and a prior WSL cross-check receipt both contribute.\n  # Each accepted cell has its EXECUTION omitted while staying a\n  # cell, so the rollup expects a local-origin result for it rather\n  # than reporting MISSING (the PR #76 regression). Every refusal\n  # carries a coded reason and is published with the plan.\n  #\n  # Evidence PROCESSING adds work, never removes it (R8): a verifier\n  # that crashes or prints anything but a JSON list, or an overlay\n  # that fails, leaves the plan in hand \u2014 the receipt's on a hit,\n  # this run's calculation on a miss \u2014 exactly as it was, reuses no\n  # cell, and says so in the summary and a warning annotation. The\n  # overlay writes its result beside the plan and replaces it only\n  # on success, so a crash mid-write cannot leave a half-written\n  # resolved-plan.json for the fan-out.\n  verifier_status=0\n  python3 scripts/ci/local_evidence.py verify --cells \\\n    --plan resolved-plan.json \\\n    --base \"$base\" \\\n    --head \"$head\" \\\n    --artifact-repo \"$GITHUB_REPOSITORY\" \\\n    --rejections evidence-rejections.json > accepted-cells.json \\\n    || verifier_status=$?\n  if (( verifier_status != 0 )); then\n    evidence_failure=\"verifier failed (exit ${verifier_status})\"\n  elif ! jq -e 'type == \"array\"' accepted-cells.json >/dev/null 2>&1; then\n    evidence_failure=\"verifier output is not a JSON list\"\n  elif [[ \"$(jq -r 'length' accepted-cells.json)\" != \"0\" ]] \\\n      || jq -e 'type == \"array\" and length > 0' evidence-rejections.json >/dev/null 2>&1; then\n    # One evidence path for both scope sources: the accepted set is\n    # overlaid on the plan already in hand and the projection is\n    # re-derived from the result. `--apply-to` performs no\n    # selection and reads nothing from the checkout, so a receipt's\n    # areas, packages, gates, targets, features, and environment\n    # policy reach the fan-out exactly as the hook resolved them.\n    # A refusal with nothing accepted takes the same path, so an\n    # all-rejected verification still publishes its coded reasons\n    # as `evidence_rejections`; only a verification that saw no\n    # evidence at all leaves the plan, and the planner, untouched.\n    overlay_status=0\n    overlaid_json=\"$(\n      python3 scripts/ci/affected_scope.py \\\n        --apply-to resolved-plan.json \\\n        --accepted-cells accepted-cells.json \\\n        --evidence-rejections evidence-rejections.json \\\n        --plan-out applied-plan.json\n    )\" || overlay_status=$?\n    if (( overlay_status == 0 )); then\n      mv applied-plan.json resolved-plan.json\n      scope_json=\"$overlaid_json\"\n    else\n      evidence_failure=\"overlay failed (exit ${overlay_status})\"\n    fi\n  fi\n  if [[ -n \"$evidence_failure\" ]]; then\n    # Nothing downstream may read a partial accepted set.\n    printf '[]' > accepted-cells.json\n    rm -f applied-plan.json\n    echo \"::warning title=CI scope::local evidence ${evidence_failure}; the plan runs unmodified and no cell is reused\"\n  fi\nfi\npackages=\"$(jq -c '.packages' <<<\"$scope_json\")\"\n\n# The full scope document is also the rollup's policy source: it\n# carries every impacted package's resolved `[package.metadata.ci]`\n# policy (gating and `gates = false` alike). Uploaded as an artifact\n# so each area's coverage audit sees exactly what this run scheduled.\nprintf '%s' \"$scope_json\" > scope.json\n\n# One caller identity per scheduled AREA, each carrying its own\n# dispatch rows. Grouping happens in the planner, not here, so the\n# shape has test coverage. There is no canary stage: the\n# compile check that gates each package's own tests is a cheaper and\n# strictly better predictor than a sample of two other packages, and\n# it cannot stall the fan-out because it runs inside it.\n\n{\n  echo \"scheduled_areas=$(jq -c '.scheduled_areas' <<<\"$scope_json\")\"\n  # The dispatch rows, one document per area. `jq -c` preserves key\n  # order, and it has to: GitHub renders a matrix job's label from\n  # the row's values in the order they appear (ruling R1), so a\n  # key-sorting serializer anywhere on this path degrades every\n  # producer label to `test (macos-latest, L1, pkg, macos-latest)`.\n  echo \"area_rows=$(jq -c '.area_rows' <<<\"$scope_json\")\"\n  echo \"area_slugs=$(jq -c '.area_slugs' <<<\"$scope_json\")\"\n  # The areas carrying an accepted policy gap, read from the PLAN\n  # (the authority on cell state, receipt-carried or calculated)\n  # so each area can decide whether to spend a runner on its gap\n  # publisher. A skip hint only: the publisher reselects the cells\n  # from the same plan, so a wrong `true` publishes nothing.\n  echo \"gap_areas=$(jq -c '[.cells[] | select(.state == \"accepted-gap\") | .area] | unique' resolved-plan.json)\"\n  echo \"packages=$packages\"\n  echo \"package_names=$(jq -c '.packages' <<<\"$scope_json\")\"\n  # Derived from the SCHEDULED AREAS, not the impacted list: a change\n  # touching only `gates = false` packages impacts packages but\n  # schedules none, and an empty area matrix under\n  # `has_packages=true` fails the fan-out at strategy evaluation.\n  # Reading the list the area matrix expands means the two can never\n  # disagree.\n  echo \"has_packages=$(jq -r '.scheduled_areas | length > 0' <<<\"$scope_json\")\"\n  echo \"full_scope=$(jq -r '.full_scope' <<<\"$scope_json\")\"\n  echo \"sniff=$(jq -r '.flags.sniff' <<<\"$scope_json\")\"\n  echo \"area_drift=$(jq -r '.flags.area_drift' <<<\"$scope_json\")\"\n  echo \"job_estimate=$(jq -r '.job_estimate' <<<\"$scope_json\")\"\n  echo \"preflight_os=$(jq -c '.preflight_os' <<<\"$scope_json\")\"\n  echo \"preflight_reason=$(jq -r '.preflight_reason' <<<\"$scope_json\")\"\n  echo \"change_class=$(jq -r '.change_class' <<<\"$scope_json\")\"\n  # Scheduling is a projection of the plan's producer owners.\n  echo \"has_builds=$(jq -r '.build_artifacts | length > 0' <<<\"$scope_json\")\"\n  echo \"build_producers=$(jq -c '[.build_owners[].environment]' <<<\"$scope_json\")\"\n  echo \"build_owner_runners=$(jq -c '[.build_owners[] | {key: .environment, value: .runner}] | from_entries' <<<\"$scope_json\")\"\n  echo \"build_artifacts=$(jq -c '.build_artifacts' <<<\"$scope_json\")\"\n  echo \"build_runners=$(jq -c '.build_runners' <<<\"$scope_json\")\"\n  # Read back from the WRITTEN plan, not from `$head`: every later\n  # checkout in this run is this value, and `ci-build` refuses any\n  # checkout that is not `plan.head`.\n  echo \"head=$(jq -r '.head' resolved-plan.json)\"\n  echo \"coverage_environments=$(jq -c '[(.coverage_anchors // [])[].environment]' resolved-plan.json)\"\n} >>\"$GITHUB_OUTPUT\"\n\n# Evidence provenance, read from the WRITTEN plan (the authority on\n# what was reused) rather than from the verifier's transient files,\n# so the rows describe exactly what the fan-out will see \u2014 on an\n# evidence-processing failure that is the unmodified plan, and the\n# rows honestly read `none`. The verifier does not report which\n# refs it walked; it walks every fetched `refs/notes/ci-local/<env>`\n# ref, so those are the environments listed as consulted, and the\n# reused cells' environments are the ones that matched. A rejection\n# names one candidate note (or one cell of it), not a plan cell, so\n# the retained row counts them by code; the full texts ride in the\n# plan artifact's `evidence_rejections`.\nreuse_row='def cells(f): [.cells[] | select(f)\n  | \"\\(.package)/\\(.environment)/\\(.gate)\"]\n  | if length == 0 then \"none\" else \"\\(length): \\(join(\", \"))\" end;'\nreused_passing=\"$(jq -r \"$reuse_row\"' cells(.execution == \"reuse\" and .evidence.outcome == \"pass\")' resolved-plan.json)\"\nretained=\"$(jq -r '(.evidence_rejections // []) as $rejections\n  | if ($rejections | length) == 0 then \"none\"\n    else \"\\($rejections | length) rejection(s): \\(\n      [$rejections[] | split(\":\")[0]] | group_by(.) | map(\"\\(.[0]) (\\(length))\") | join(\", \"))\"\n    end' resolved-plan.json)\"\nif [[ \"$EVENT_NAME\" == \"workflow_dispatch\" ]]; then\n  validation_environments=\"n/a ($EVENT_NAME runs no verifier)\"\nelse\n  consulted=\"$(git for-each-ref --format='%(refname:strip=3)' 'refs/notes/ci-local/' \\\n    | jq -Rrs '[split(\"\\n\")[] | select(length > 0 and . != \"scope\")] | join(\", \")')\"\n  matched=\"$(jq -r '[.cells[] | select(.execution == \"reuse\") | .environment] | unique | join(\", \")' resolved-plan.json)\"\n  if [[ -z \"$consulted\" ]]; then\n    validation_environments=\"none\"\n  else\n    validation_environments=\"consulted: ${consulted}; matched: ${matched:-none}\"\n  fi\nfi\n\n# One actionable scope summary (D15).\n{\n  echo \"## CI scope\"\n  echo \"\"\n  echo \"| field | value |\"\n  echo \"|---|---|\"\n  echo \"| event | ${EVENT_NAME} |\"\n  echo \"| scope source | ${scope_source} |\"\n  if [[ -n \"$evidence_failure\" ]]; then\n    echo \"| evidence processing | ${evidence_failure}; no cell reused |\"\n  fi\n  echo \"| validation environments | ${validation_environments} |\"\n  echo \"| reused passing cells | ${reused_passing} |\"\n  echo \"| cells (execute / reuse / accepted gap) | $(jq -r '[.cells[] | select(.execution == \"execute\")] | length' resolved-plan.json) / $(jq -r '[.cells[] | select(.execution == \"reuse\")] | length' resolved-plan.json) / $(jq -r '[.cells[] | select(.state == \"accepted-gap\")] | length' resolved-plan.json) |\"\n  echo \"| coverage anchors | $(jq -r '(.coverage_anchors // []) | if length == 0 then \"n/a\" else map(\"\\(.environment): \\(.reason)\") | join(\"; \") end' resolved-plan.json) |\"\n  echo \"| cells retained (evidence incomplete or rejected) | ${retained} |\"\n  echo \"| change class | $(jq -r '.change_class' <<<\"$scope_json\") |\"\n  echo \"| full scope | $(jq -r '.full_scope' <<<\"$scope_json\") |\"\n  echo \"| full-scope gates | $(jq -rc '.full_scope_gates | join(\", \")' <<<\"$scope_json\") |\"\n  echo \"| reason | $(jq -r '.preflight_reason' <<<\"$scope_json\") |\"\n  echo \"| preflight OS | $(jq -rc '.preflight_os | join(\", \")' <<<\"$scope_json\") |\"\n  echo \"| selected areas | $(jq -rc '[.areas[].area] | join(\", \")' <<<\"$scope_json\") |\"\n  echo \"| areas that fan out | $(jq -rc '.scheduled_areas | join(\", \")' <<<\"$scope_json\") |\"\n  echo \"| affected packages | $(jq -r '.packages | length' <<<\"$scope_json\") |\"\n  echo \"| source-changed packages | $(jq -rc '.source_packages | join(\", \")' <<<\"$scope_json\") |\"\n  echo \"| reported (unselected) reverse dependencies | $(jq -rc '.reverse_dependencies | join(\", \")' <<<\"$scope_json\") |\"\n  echo \"| gating packages | $(jq -r '[.packages[] | select(.gates | length > 0)] | length' resolved-plan.json) |\"\n  echo \"| expanded job estimate | $(jq -r '.job_estimate' <<<\"$scope_json\") |\"\n  echo \"| toolchain | $(grep '^channel' rust-toolchain.toml | cut -d'\"' -f2) |\"\n} >>\"$GITHUB_STEP_SUMMARY\"\n",
+      "shell": "bash"
+     },
+     {
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "error",
+       "name": "ci-scope",
+       "path": "scope.json",
+       "retention-days": 3
+      }
+     },
+     {
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "error",
+       "name": "ci-resolved-plan",
+       "path": "resolved-plan.json",
+       "retention-days": 3
+      }
+     },
+     {
+      "id": "plan_published",
+      "run": "echo \"epoch=$(date +%s)\" >>\"$GITHUB_OUTPUT\"",
+      "shell": "bash"
+     },
+     {
+      "id": "receipt",
+      "if": "github.event_name == 'pull_request'",
+      "run": "python3 scripts/ci/reuse_validation.py record"
+     },
+     {
+      "if": "github.event_name == 'pull_request'",
+      "uses": "actions/upload-artifact@v6",
+      "with": {
+       "if-no-files-found": "error",
+       "name": "${{ steps.receipt.outputs.receipt }}",
+       "overwrite": true,
+       "path": "ci-validation.txt",
+       "retention-days": 7
+      }
+     }
+    ]
+   },
+   "validation": {
+    "outputs": {
+     "reuse": "${{ steps.reuse.outcome == 'success' && steps.reuse.outputs.reuse || 'false' }}",
+     "run_id": "${{ steps.reuse.outputs.run_id }}"
+    },
+    "permissions": {
+     "actions": "read",
+     "contents": "read",
+     "pull-requests": "read"
+    },
+    "runs-on": "ubuntu-latest",
+    "steps": [
+     {
+      "uses": "actions/checkout@v5",
+      "with": {
+       "ref": "${{ env.TESTED_REVISION }}"
+      }
+     },
+     {
+      "continue-on-error": true,
+      "env": {
+       "GH_TOKEN": "${{ github.token }}"
+      },
+      "id": "reuse",
+      "run": "python3 scripts/ci/reuse_validation.py check --wait-minutes 90",
+      "timeout-minutes": 95
+     }
+    ],
+    "timeout-minutes": 100
+   }
+  },
+  "permissions": {
+   "contents": "read"
+  }
+ }
+}

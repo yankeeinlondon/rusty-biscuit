@@ -1,0 +1,36 @@
+{
+  "failures": [],
+  "ldd": [
+    {
+      "found": "true",
+      "name": "linux-vdso.so.1",
+      "path": "linux-vdso.so.1"
+    },
+    {
+      "found": "true",
+      "name": "libgcc_s.so.1",
+      "path": "/lib/aarch64-linux-gnu/libgcc_s.so.1"
+    },
+    {
+      "found": "true",
+      "name": "libm.so.6",
+      "path": "/lib/aarch64-linux-gnu/libm.so.6"
+    },
+    {
+      "found": "true",
+      "name": "libc.so.6",
+      "path": "/lib/aarch64-linux-gnu/libc.so.6"
+    },
+    {
+      "found": "true",
+      "name": "ld-linux-aarch64.so.1",
+      "path": "/lib/ld-linux-aarch64.so.1"
+    }
+  ],
+  "mode": "ldd",
+  "package": "darkmatter-cli",
+  "passed": true,
+  "schema_version": 1,
+  "source": "ldd-darkmatter-cli-aarch64-unknown-linux-gnu.txt",
+  "target": "aarch64-unknown-linux-gnu"
+}

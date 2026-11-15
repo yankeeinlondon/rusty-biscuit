@@ -1,0 +1,1206 @@
+{
+  "identities": [
+    {
+      "remote": "https://github.com/yankeeinlondon/rusty-biscuit.git",
+      "identity": "github.com/yankeeinlondon/rusty-biscuit",
+      "segments": [
+        "github.com",
+        "yankeeinlondon",
+        "rusty-biscuit"
+      ]
+    },
+    {
+      "remote": "git@github.com:yankeeinlondon/rusty-biscuit.git",
+      "identity": "github.com/yankeeinlondon/rusty-biscuit",
+      "segments": [
+        "github.com",
+        "yankeeinlondon",
+        "rusty-biscuit"
+      ]
+    },
+    {
+      "remote": "ssh://git@github.com/yankeeinlondon/rusty-biscuit",
+      "identity": "github.com/yankeeinlondon/rusty-biscuit",
+      "segments": [
+        "github.com",
+        "yankeeinlondon",
+        "rusty-biscuit"
+      ]
+    },
+    {
+      "remote": "https://user:token@github.com/yankeeinlondon/rusty-biscuit.git/",
+      "identity": "github.com/yankeeinlondon/rusty-biscuit",
+      "segments": [
+        "github.com",
+        "yankeeinlondon",
+        "rusty-biscuit"
+      ]
+    },
+    {
+      "remote": "  github.com/yankeeinlondon/rusty-biscuit//  ",
+      "identity": "github.com/yankeeinlondon/rusty-biscuit",
+      "segments": [
+        "github.com",
+        "yankeeinlondon",
+        "rusty-biscuit"
+      ]
+    },
+    {
+      "remote": "\u001fgithub.com/yankeeinlondon/rusty-biscuit\u001c",
+      "identity": "github.com/yankeeinlondon/rusty-biscuit",
+      "segments": [
+        "github.com",
+        "yankeeinlondon",
+        "rusty-biscuit"
+      ]
+    },
+    {
+      "remote": "ssh://git@github.com:2222/org/repo.git",
+      "identity": "github.com:2222/org/repo",
+      "segments": [
+        "github.com_2222",
+        "org",
+        "repo"
+      ]
+    },
+    {
+      "remote": "/tmp/work/origin.git",
+      "identity": "/tmp/work/origin",
+      "segments": [
+        "tmp",
+        "work",
+        "origin"
+      ]
+    },
+    {
+      "remote": "file:///srv/git/repo.git",
+      "identity": "/srv/git/repo",
+      "segments": [
+        "srv",
+        "git",
+        "repo"
+      ]
+    },
+    {
+      "remote": "C:\\Users\\ken\\origin.git",
+      "identity": "C/\\Users\\ken\\origin",
+      "segments": [
+        "C",
+        "Users",
+        "ken",
+        "origin"
+      ]
+    },
+    {
+      "remote": "../shared/./repo.git",
+      "identity": "../shared/./repo",
+      "segments": [
+        "shared",
+        "repo"
+      ]
+    },
+    {
+      "remote": "./dir:with:colon/repo",
+      "identity": "./dir:with:colon/repo",
+      "segments": [
+        "dir_with_colon",
+        "repo"
+      ]
+    },
+    {
+      "remote": "host/a<b>|c?d*e\"f\u0001g",
+      "identity": "host/a<b>|c?d*e\"f\u0001g",
+      "segments": [
+        "host",
+        "a_b__c_d_e_f_g"
+      ]
+    },
+    {
+      "remote": "git@github.com:org/repo.git.git",
+      "identity": "github.com/org/repo.git",
+      "segments": [
+        "github.com",
+        "org",
+        "repo.git"
+      ]
+    },
+    {
+      "remote": "GitHub.com/Org/Repo",
+      "identity": "GitHub.com/Org/Repo",
+      "segments": [
+        "GitHub.com",
+        "Org",
+        "Repo"
+      ]
+    },
+    {
+      "remote": "",
+      "identity": "",
+      "segments": []
+    },
+    {
+      "remote": "   ",
+      "identity": "",
+      "segments": []
+    }
+  ],
+  "cases": [
+    {
+      "name": "a record with only required fields binds and no plan satisfies it",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "current.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        }
+      },
+      "expected": {
+        "active": [
+          "current.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": [
+          "current.json"
+        ]
+      }
+    },
+    {
+      "name": "expiry binds through its own day",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "yesterday.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2026-11-09"
+        },
+        "today.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2026-11-10"
+        },
+        "tomorrow.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2026-11-11"
+        }
+      },
+      "expected": {
+        "active": [
+          "today.json",
+          "tomorrow.json"
+        ],
+        "expired": [
+          "yesterday.json"
+        ],
+        "malformed": [],
+        "unsatisfied": [
+          "today.json",
+          "tomorrow.json"
+        ]
+      }
+    },
+    {
+      "name": "a missing store binds nothing",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": null,
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": []
+      }
+    },
+    {
+      "name": "records are read recursively in path-component order",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "b.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "a/z.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "a-c.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "a/b/c.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        ".json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "notes.txt": "not a record",
+        "a/b/record.jsonl": "{",
+        "a/b/record.json.bak": "{"
+      },
+      "expected": {
+        "active": [
+          ".json",
+          "a/b/c.json",
+          "a/z.json",
+          "a-c.json",
+          "b.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": [
+          ".json",
+          "a/b/c.json",
+          "a/z.json",
+          "a-c.json",
+          "b.json"
+        ]
+      }
+    },
+    {
+      "name": "a malformed record binds as malformed, even for another repository and branch",
+      "today": "2026-11-10",
+      "repository": "git@github.com:yankeeinlondon/rusty-biscuit.git",
+      "branches": [
+        "feature"
+      ],
+      "store": {
+        "duplicate-key.json": "{\"environment\": \"wsl2-ubuntu\", \"environment\": \"macos-latest\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\"}",
+        "not-json.json": "{not json",
+        "empty.json": "",
+        "whitespace.json": "  \n\t",
+        "array.json": "[]",
+        "null.json": "null",
+        "string.json": "\"wsl2-ubuntu\"",
+        "trailing-content.json": "{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\"} {}",
+        "comment.json": "// a comment\n{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\"}",
+        "trailing-comma.json": "{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\",}",
+        "nan.json": "{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\", \"gate\": NaN}",
+        "infinity.json": "{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\", \"gate\": -Infinity}",
+        "float-overflow.json": "{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\", \"gate\": 1e400}",
+        "integer-overflow.json": "{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\", \"gate\": 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999}",
+        "lone-surrogate.json": "{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\", \"gate\": \"\\ud800\"}",
+        "byte-order-mark.json": "\ufeff{\"environment\": \"wsl2-ubuntu\", \"reason\": \"r\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\"}",
+        "empty-object.json": {},
+        "unknown-field.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "environments": "wsl2-ubuntu"
+        },
+        "two-unknown-fields.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "zeta": "z",
+          "alpha": "a"
+        },
+        "missing-owner.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "expiry": "2099-01-01"
+        },
+        "empty-reason.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "numeric-environment.json": {
+          "environment": 7,
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "boolean-reason.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": true,
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "list-owner.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": [
+            "ken"
+          ],
+          "expiry": "2099-01-01"
+        },
+        "null-environment.json": {
+          "environment": null,
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "numeric-expiry.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": 20991231
+        },
+        "basic-expiry.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "20991231"
+        },
+        "week-expiry.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-W01-4"
+        },
+        "unpadded-expiry.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-1-1"
+        },
+        "timestamp-expiry.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01T00:00:00"
+        },
+        "impossible-expiry.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-02-30"
+        },
+        "year-zero-expiry.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "0000-12-31"
+        },
+        "fullwidth-expiry.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "\uff12\uff10\uff19\uff19-01-01"
+        },
+        "null-gate.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "gate": null
+        },
+        "numeric-gate.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "gate": 2
+        },
+        "list-repository.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "repository": []
+        },
+        "object-branch.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": {}
+        },
+        "null-branch.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": null
+        },
+        "other-repository/broken.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2020-13-01",
+          "repository": "github.com/someone-else/rusty-biscuit",
+          "branch": "main"
+        }
+      },
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [
+          {
+            "path": "array.json",
+            "location": ""
+          },
+          {
+            "path": "basic-expiry.json",
+            "location": "expiry"
+          },
+          {
+            "path": "boolean-reason.json",
+            "location": "reason"
+          },
+          {
+            "path": "byte-order-mark.json",
+            "location": ""
+          },
+          {
+            "path": "comment.json",
+            "location": ""
+          },
+          {
+            "path": "duplicate-key.json",
+            "location": ""
+          },
+          {
+            "path": "empty-object.json",
+            "location": "environment"
+          },
+          {
+            "path": "empty-reason.json",
+            "location": "reason"
+          },
+          {
+            "path": "empty.json",
+            "location": ""
+          },
+          {
+            "path": "float-overflow.json",
+            "location": ""
+          },
+          {
+            "path": "fullwidth-expiry.json",
+            "location": "expiry"
+          },
+          {
+            "path": "impossible-expiry.json",
+            "location": "expiry"
+          },
+          {
+            "path": "infinity.json",
+            "location": ""
+          },
+          {
+            "path": "integer-overflow.json",
+            "location": ""
+          },
+          {
+            "path": "list-owner.json",
+            "location": "owner"
+          },
+          {
+            "path": "list-repository.json",
+            "location": "repository"
+          },
+          {
+            "path": "lone-surrogate.json",
+            "location": ""
+          },
+          {
+            "path": "missing-owner.json",
+            "location": "owner"
+          },
+          {
+            "path": "nan.json",
+            "location": ""
+          },
+          {
+            "path": "not-json.json",
+            "location": ""
+          },
+          {
+            "path": "null-branch.json",
+            "location": "branch"
+          },
+          {
+            "path": "null-environment.json",
+            "location": "environment"
+          },
+          {
+            "path": "null-gate.json",
+            "location": "gate"
+          },
+          {
+            "path": "null.json",
+            "location": ""
+          },
+          {
+            "path": "numeric-environment.json",
+            "location": "environment"
+          },
+          {
+            "path": "numeric-expiry.json",
+            "location": "expiry"
+          },
+          {
+            "path": "numeric-gate.json",
+            "location": "gate"
+          },
+          {
+            "path": "object-branch.json",
+            "location": "branch"
+          },
+          {
+            "path": "other-repository/broken.json",
+            "location": "expiry"
+          },
+          {
+            "path": "string.json",
+            "location": ""
+          },
+          {
+            "path": "timestamp-expiry.json",
+            "location": "expiry"
+          },
+          {
+            "path": "trailing-comma.json",
+            "location": ""
+          },
+          {
+            "path": "trailing-content.json",
+            "location": ""
+          },
+          {
+            "path": "two-unknown-fields.json",
+            "location": "alpha"
+          },
+          {
+            "path": "unknown-field.json",
+            "location": "environments"
+          },
+          {
+            "path": "unpadded-expiry.json",
+            "location": "expiry"
+          },
+          {
+            "path": "week-expiry.json",
+            "location": "expiry"
+          },
+          {
+            "path": "whitespace.json",
+            "location": ""
+          },
+          {
+            "path": "year-zero-expiry.json",
+            "location": "expiry"
+          }
+        ],
+        "unsatisfied": []
+      }
+    },
+    {
+      "name": "a leap day is a calendar date",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "leap.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2028-02-29"
+        }
+      },
+      "expected": {
+        "active": [
+          "leap.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": [
+          "leap.json"
+        ]
+      }
+    },
+    {
+      "name": "optional fields scope a record and empty ones are wildcards",
+      "today": "2026-11-10",
+      "repository": "git@github.com:yankeeinlondon/rusty-biscuit.git",
+      "branches": [
+        "feature"
+      ],
+      "store": {
+        "empty-optional.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "gate": "",
+          "repository": "",
+          "branch": ""
+        },
+        "ours.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "repository": "https://github.com/yankeeinlondon/rusty-biscuit.git"
+        },
+        "ours-plain.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "repository": "github.com/yankeeinlondon/rusty-biscuit"
+        },
+        "theirs.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "repository": "github.com/someone-else/rusty-biscuit"
+        },
+        "theirs-expired.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2020-01-01",
+          "repository": "github.com/someone-else/rusty-biscuit"
+        },
+        "this-branch.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": "feature"
+        },
+        "other-branch.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": "main"
+        }
+      },
+      "expected": {
+        "active": [
+          "empty-optional.json",
+          "ours-plain.json",
+          "ours.json",
+          "this-branch.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": [
+          "empty-optional.json",
+          "ours-plain.json",
+          "ours.json",
+          "this-branch.json"
+        ]
+      }
+    },
+    {
+      "name": "an unknown repository and no branch cannot exempt a record",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "theirs.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "repository": "github.com/someone-else/rusty-biscuit"
+        },
+        "other-branch.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": "main"
+        }
+      },
+      "expected": {
+        "active": [
+          "other-branch.json",
+          "theirs.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": [
+          "other-branch.json",
+          "theirs.json"
+        ]
+      }
+    },
+    {
+      "name": "a blank repository and empty branch names are unknown identities",
+      "today": "2026-11-10",
+      "repository": "   ",
+      "branches": [
+        "",
+        ""
+      ],
+      "store": {
+        "theirs.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "repository": "github.com/someone-else/rusty-biscuit"
+        },
+        "other-branch.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": "main"
+        }
+      },
+      "expected": {
+        "active": [
+          "other-branch.json",
+          "theirs.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": [
+          "other-branch.json",
+          "theirs.json"
+        ]
+      }
+    },
+    {
+      "name": "a branch record binds when any supplied name matches",
+      "today": "2026-11-10",
+      "repository": "git@github.com:yankeeinlondon/rusty-biscuit.git",
+      "branches": [
+        "",
+        "main",
+        "feature"
+      ],
+      "store": {
+        "feature.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": "feature"
+        },
+        "main.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": "main"
+        },
+        "release.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "branch": "release"
+        }
+      },
+      "expected": {
+        "active": [
+          "feature.json",
+          "main.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": [
+          "feature.json",
+          "main.json"
+        ]
+      }
+    },
+    {
+      "name": "executing and prohibited cells violate, reused, accepted-gap, and absent ones do not",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "execute.json": {
+          "environment": "linux-a",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "reuse.json": {
+          "environment": "linux-b",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "prohibited.json": {
+          "environment": "linux-c",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "accepted-gap.json": {
+          "environment": "linux-d",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "absent.json": {
+          "environment": "linux-e",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "other-gate.json": {
+          "environment": "linux-a",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "gate": "L2"
+        },
+        "same-gate.json": {
+          "environment": "linux-f",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "gate": "L2"
+        },
+        "stateless-execute.json": {
+          "environment": "linux-g",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "stateless-omit.json": {
+          "environment": "linux-h",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        },
+        "expired-execute.json": {
+          "environment": "linux-a",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2026-11-09"
+        },
+        "broken.json": {
+          "environment": "linux-a",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01",
+          "gate": null
+        }
+      },
+      "plan": "{\"cells\": [{\"package\": \"repo-deps\", \"environment\": \"linux-a\", \"gate\": \"L1\", \"execution\": \"execute\", \"state\": \"pending\"}, {\"package\": \"repo-deps\", \"environment\": \"linux-b\", \"gate\": \"L1\", \"execution\": \"reuse\", \"state\": \"reused\"}, {\"package\": \"repo-deps\", \"environment\": \"linux-c\", \"gate\": \"L1\", \"execution\": \"omit\", \"state\": \"prohibited\"}, {\"package\": \"repo-deps\", \"environment\": \"linux-d\", \"gate\": \"L1\", \"execution\": \"omit\", \"state\": \"accepted-gap\"}, {\"package\": \"repo-deps\", \"environment\": \"linux-f\", \"gate\": \"L1\", \"execution\": \"reuse\", \"state\": \"reused\"}, {\"package\": \"repo-deps\", \"environment\": \"linux-f\", \"gate\": \"L2\", \"execution\": \"execute\", \"state\": \"pending\"}, {\"package\": \"repo-deps\", \"environment\": \"linux-g\", \"gate\": \"L1\", \"execution\": \"execute\"}, {\"package\": \"repo-deps\", \"environment\": \"linux-h\", \"gate\": \"L1\", \"execution\": \"omit\"}]}",
+      "expected": {
+        "active": [
+          "absent.json",
+          "accepted-gap.json",
+          "execute.json",
+          "other-gate.json",
+          "prohibited.json",
+          "reuse.json",
+          "same-gate.json",
+          "stateless-execute.json",
+          "stateless-omit.json"
+        ],
+        "expired": [
+          "expired-execute.json"
+        ],
+        "malformed": [
+          {
+            "path": "broken.json",
+            "location": "gate"
+          }
+        ],
+        "unsatisfied": [
+          "execute.json",
+          "prohibited.json",
+          "same-gate.json",
+          "stateless-execute.json"
+        ]
+      }
+    },
+    {
+      "name": "a plan's unknown fields are tolerated",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "current.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        }
+      },
+      "plan": "{\"schema_version\": 9, \"base\": \"x\", \"cells\": [{\"package\": \"repo-deps\", \"environment\": \"wsl2-ubuntu\", \"gate\": \"L1\", \"execution\": \"reuse\", \"state\": \"reused\", \"extra\": [1]}]}",
+      "expected": {
+        "active": [
+          "current.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": []
+      }
+    },
+    {
+      "name": "an empty plan satisfies every valid record",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "current.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        }
+      },
+      "plan": "{\"cells\": []}",
+      "expected": {
+        "active": [
+          "current.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "unsatisfied": []
+      }
+    },
+    {
+      "name": "a plan with not JSON blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{not json",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": ""
+      }
+    },
+    {
+      "name": "a plan with empty blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": ""
+      }
+    },
+    {
+      "name": "a plan with an array blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "[]",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": ""
+      }
+    },
+    {
+      "name": "a plan with a duplicate key blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": [], \"cells\": []}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": ""
+      }
+    },
+    {
+      "name": "a plan with trailing content blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": []} []",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": ""
+      }
+    },
+    {
+      "name": "a plan with no cells blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells"
+      }
+    },
+    {
+      "name": "a plan with null cells blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": null}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells"
+      }
+    },
+    {
+      "name": "a plan with string cells blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": \"none\"}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells"
+      }
+    },
+    {
+      "name": "a plan with a non-object cell blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": [7]}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells[0]"
+      }
+    },
+    {
+      "name": "a plan with an empty execution blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": [{\"package\": \"repo-deps\", \"environment\": \"wsl2-ubuntu\", \"gate\": \"L1\", \"execution\": \"\"}]}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells[0].execution"
+      }
+    },
+    {
+      "name": "a plan with a missing gate blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": [{\"package\": \"repo-deps\", \"environment\": \"e\", \"gate\": \"L1\", \"execution\": \"execute\"}, {\"environment\": \"e\", \"execution\": \"execute\"}]}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells[1].gate"
+      }
+    },
+    {
+      "name": "a plan with a numeric environment blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": [{\"environment\": 1, \"gate\": \"L1\", \"execution\": \"execute\"}]}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells[0].environment"
+      }
+    },
+    {
+      "name": "a plan with a null state blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": [{\"package\": \"repo-deps\", \"environment\": \"e\", \"gate\": \"L1\", \"execution\": \"execute\", \"state\": null}]}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells[0].state"
+      }
+    },
+    {
+      "name": "a plan with an empty state blocks even with an empty store",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {},
+      "plan": "{\"cells\": [{\"package\": \"repo-deps\", \"environment\": \"e\", \"gate\": \"L1\", \"execution\": \"execute\", \"state\": \"\"}]}",
+      "expected": {
+        "active": [],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells[0].state"
+      }
+    },
+    {
+      "name": "a plan error blocks whatever the store holds",
+      "today": "2026-11-10",
+      "repository": "",
+      "branches": [],
+      "store": {
+        "current.json": {
+          "environment": "wsl2-ubuntu",
+          "reason": "r",
+          "owner": "ken",
+          "expiry": "2099-01-01"
+        }
+      },
+      "plan": "{\"cells\": {}}",
+      "expected": {
+        "active": [
+          "current.json"
+        ],
+        "expired": [],
+        "malformed": [],
+        "plan_error": "cells"
+      }
+    }
+  ]
+}

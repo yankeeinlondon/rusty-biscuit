@@ -78,8 +78,9 @@ test-browser:
 
 # Real-resource tests (local Ollama / LM Studio / HF). Skip-clean when absent.
 test-real *args="":
-    @just _test_real model-citizen {{args}}
-    @just _test_real model-citizen-cli {{args}}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real model-citizen {{args}}; \
+        just _test_real model-citizen-cli {{args}}
 
 # Lint both the library and CLI
 lint:

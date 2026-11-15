@@ -7,6 +7,31 @@
 
 ## Recent Dependency Notes
 
+- `repo-deps` (`scripts/`) adds a `ci-push` binary and a library target
+  (2026-11-10). Its `local-tools` feature gains optional `gix` (pinned
+  `=0.90.0` with sniff's read features, without `merge`), `git2` 0.20 with
+  default features off, `chrono` 0.4, `dirs` 6, `tempfile` 3, Unix `libc`
+  0.2, and Windows `windows-sys` 0.61 (`Win32_Foundation`, `Win32_Security`,
+  `Win32_System_Console`, `Win32_System_JobObjects`,
+  `Win32_System_Threading`). gix does the repository reads; git2 covers only
+  the writes gix 0.90 has no API for (a detached linked worktree for a
+  committed-tree review, a scope note). `libc` and `windows-sys` let
+  `ci-push` own its children's process tree and signals. It carries the
+  `libgit2-sys >=0.18.3, <0.18.6` ceiling that sniff and tree-hugger carry,
+  because sniff's `hyperpolyglot` links `pcre2-sys` and a newer bundled
+  libgit2 collides with it at MSVC link time. Dev-dependencies add
+  `biscuit-test-harness` and `test-toolkit` (workspace paths). Every crate
+  was already in the lockfile, so no package is added; the
+  `--no-default-features` `ci-rollup` build and the `build-tools` binaries
+  link none of them.
+- `unchained-ai/model_id` drops its `trybuild` dev-dependency (2026-11-10):
+  its compile-pass cases are now modules of an ordinary integration test and
+  its compile-fail cases run the derive's expansion in-process, so no test
+  starts a nested Cargo build. It adds `biscuit-test-harness` (workspace path)
+  for `manifest_dir!` and enables `proc-macro2`'s `span-locations` as a
+  dev-dependency feature, so a diagnostic's line and column can be compared
+  with its `.stderr` file. `trybuild` stays in the lockfile through
+  `schematic`; no package is added.
 - `biscuit-file/lib` adds optional `csv` 1.3 and `csv-core` 0.1.13
   (2026-11-07) behind its off-by-default `delimited` feature (in `full`), for
   the strict CSV/TSV reader `biscuit_file::delimited`. `csv` decodes the
@@ -264,7 +289,9 @@
   enroll it in release-plz or the maintenance audit. Its bins are split across
   three feature levels: `build-tools` carries `biscuit-hash`,
   `biscuit-terminal`, `object`, and `find-msvc-tools`; the default `local-tools`
-  includes `build-tools` and adds `cargo_metadata`, `ctrlc`, and `sniff`; and
+  includes `build-tools` and adds `cargo_metadata`, `ctrlc`, and `sniff`, plus
+  `ci-push`'s `gix`, `git2`, `chrono`, `dirs`, `tempfile`, `libc`, and
+  `windows-sys`; and
   the always-runs merge-gate build stays
   `cargo build -p repo-deps --no-default-features --bin ci-rollup`, which links
   none of them.
@@ -300,6 +327,17 @@
   `typescript`, `tsx`, and `vitest` as dev dependencies. Node is provisioned
   only for `test-toolkit`'s `ubuntu-latest` companion-suite cells, which own
   the tool's typecheck and Vitest suites; Rust test legs never do.
+- `tools/evidence-store` is a TypeScript pnpm-workspace member (registered in
+  the root `pnpm-workspace.yaml`, pinned through the root `pnpm-lock.yaml`),
+  not a Cargo package. It depends on `jose` 6.2.17 (GitHub OIDC JWT
+  verification) and `@noble/hashes` 2.4.0 (incremental SHA-256 over upload
+  parts and synchronous identity hashing), with `wrangler` 4.160.1,
+  `@cloudflare/vitest-plugin` 1.7.0 (Workers-runtime tests; it replaces the
+  deprecated `vitest-pool-workers`), `@cloudflare/workers-types`, `vitest`
+  4.1.12 (newer than `test-audit`'s 3.2.4 because the plugin requires
+  Vitest 4), `typescript`, `tsx`, `yaml`, and `@types/node` as dev
+  dependencies. No CI cell runs it and no job provisions Node for it; its
+  checks run locally through `just evidence-store <recipe>`.
 - `biscuit-test-harness` uses `tempfile` as a regular dependency for the
   private directories its Kitty and Xvfb instances own for their lifetime.
 - `playa/lib` uses `fs4` for its private cross-process spool locks,
@@ -432,7 +470,7 @@
   and uses `biscuit-file` (no default features, `file-reference` only) for
   `canonicalize_simplified` and for `home_dir()`, the environment-first home
   lookup behind `~/.worktree.json` and the setup candidates. Both crates pin
-  `gix = "=0.84.0"`, so the feature builds no second `gix`.
+  `gix = "=0.90.0"`, so the feature builds no second `gix`.
   It uses `fs4` 0.13 (already in the workspace graph through `playa`) for the
   nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
   refresh of the PR store make a request; the PR store binds its answer to a
@@ -461,7 +499,7 @@
   as `worktree/cli` already builds it) to show a process's start time in local
   time in `wt remove`'s warnings (`remove::facts`). Sniff reports the time as a
   `chrono` UTC value; no crate was added to the lockfile.
-- `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
+- `worktree/lib` uses `gix` (pinned `=0.90.0`, the version `sniff` builds, with
   `sha1`, `revision`, and `parallel`, all of which `sniff` already enables) to
   read repository metadata in-process: `origin`'s URL, the default branch,
   branch-name validity, `core.sshCommand`, ref targets, every branch tip, and
@@ -1185,7 +1223,7 @@ This is a Rust workspace with the following modules:
 
 ### Git
 
-- [gix](https://github.com/GitoxideLabs/gitoxide) _v0.84.0_ [📄](https://docs.rs/gix)
+- [gix](https://github.com/GitoxideLabs/gitoxide) _v0.90.0_ [📄](https://docs.rs/gix)
 
     _Pure-Rust Git repository inspection library (status, diff, history, refs, remotes, config, worktrees)._
 

@@ -303,7 +303,7 @@ fn resolve_ancestor(gix: &gix::Repository, tip: gix::ObjectId, hash: &str) -> Re
     // No merge base (unrelated history, or a non-commit object) means the hash
     // cannot be on this history.
     match gix.merge_base(tip, target) {
-        Ok(base) if base.detach() == target => Ok(target),
+        Ok(Some(base)) if base.detach() == target => Ok(target),
         _ => Err(not_reachable()),
     }
 }

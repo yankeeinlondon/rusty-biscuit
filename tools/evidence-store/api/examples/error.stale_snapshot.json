@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "stale_snapshot",
+    "message": "candidate_ids omits stored observation 0f8e4bd2a1c64b0e9d1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f; a certificate must name every observation of the cell",
+    "location": "/cells/0/candidate_ids",
+    "retryable": false,
+    "retry_after_ms": null
+  },
+  "request_id": "2f0d3c1e-6b7a-4c9d-8e5f-a1b2c3d4e5f6"
+}

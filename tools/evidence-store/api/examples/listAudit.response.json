@@ -1,0 +1,30 @@
+{
+  "items": [
+    {
+      "sequence": 41,
+      "at_ms": 1794312000000,
+      "action": "credential.issue",
+      "actor": {
+        "kind": "credential",
+        "credential_id": "56d73dd9e4775084d9596512631ef008"
+      },
+      "repository_id": "873451209",
+      "target_credential_id": "7a7fcdecfd40d6d9be7d8b51348693f1",
+      "request_id": "479edc8b33d5c185de76ae1994bef1d3"
+    },
+    {
+      "sequence": 42,
+      "at_ms": 1794398400000,
+      "action": "credential.revoke",
+      "actor": {
+        "kind": "credential",
+        "credential_id": "56d73dd9e4775084d9596512631ef008"
+      },
+      "repository_id": "873451209",
+      "target_credential_id": "7a7fcdecfd40d6d9be7d8b51348693f1",
+      "request_id": "29cd1fc54420cf2e4b77b9b56d6797dc"
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}

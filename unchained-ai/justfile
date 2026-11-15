@@ -79,10 +79,11 @@ test-browser:
 
 # Live provider-API tests. Skip-clean without credentials.
 test-real *args="":
-    @just _test_real unchained-ai {{ args }}
-    @just _test_real unchained-ai-contract --features real-tests {{ args }}
-    @just _test_real unchained-ai-cli {{ args }}
-    @just _test_real unchained-ai-gen {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real unchained-ai {{ args }}; \
+        just _test_real unchained-ai-contract --features real-tests {{ args }}; \
+        just _test_real unchained-ai-cli {{ args }}; \
+        just _test_real unchained-ai-gen {{ args }}
 
 # not applicable: no criterion benches (work is provider-bound I/O)
 bench:
@@ -125,12 +126,14 @@ lint *args="":
     @just _lint unchained-ai-contract {{ args }}
     @just _lint unchained-ai-cli {{ args }}
     @just _lint unchained-ai-gen {{ args }}
+    @just _lint model_id {{ args }}
 
 # lint and fix with AI if problems found
 lint-fix *args="":
     @just _lint unchained-ai {{ args }} || just _lint_fix unchained-ai
     @just _lint unchained-ai-cli {{ args }} || just _lint_fix unchained-ai-cli
     @just _lint unchained-ai-gen {{ args }} || just _lint_fix unchained-ai-gen
+    @just _lint model_id {{ args }} || just _lint_fix model_id
 
 install *args="":
     @just build --release

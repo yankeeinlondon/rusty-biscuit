@@ -20,7 +20,8 @@ measured results override generic ecosystem guidance.
 | CI scope, pre-push behavior, local evidence, GitHub Actions, release-plz | [CI/CD and releases](./ci-cd.md) |
 | Bumping or reading the version of a CI document (plan, receipts, manifests, results, baseline, environment table) | `docs/cicd/schema-versions.md` — the one changelog, its bump rules, and every mirror that must move together |
 | How release-plz itself works, and how to configure its workflow | `docs/cicd/release-plz-ci.md` (tool-level, repository-neutral) |
-| Distribution channels and installers | [Deployment platforms](./deployment-platforms.md) |
+| rusty-biscuit's binary distribution (approval, ledger, recovery, tap) | `docs/distribution.md`, then [Distribution contract](#distribution-contract-rusty-biscuit) below |
+| Distribution channels and installers in general | [Deployment platforms](./deployment-platforms.md) (research snapshot) |
 | Compiler caching and build storage | [kache](./kache.md), then `docs/kache-strategy.md` for rusty-biscuit |
 | Embedded Git implementation | [git2](./git2.md) or [gitoxide](./gitoxide.md), according to the decision below |
 
@@ -38,6 +39,40 @@ projections of those immutable artifacts.
 For rusty-biscuit, release-plz owns versioning, changelogs, tags, and GitHub
 releases. Crates.io publication remains disabled; do not add a registry or
 installer merely because the deployment survey lists it.
+
+### Distribution contract (rusty-biscuit)
+
+`docs/distribution.md` is the current record; read it before changing anything
+below. No package is approved and no channel is live yet.
+
+- **Workflow.** `.github/workflows/distribute-binaries.yml` attaches assets to
+  a Release release-plz already published; it never creates or edits a
+  Release or moves a tag. Modes: `release: published`, `workflow_dispatch`
+  `recover` (`tag`, optional `bundle-run-id`), and `verify` (publishes
+  nothing). Every decision lives in `scripts/ci/distribution.py` (exit 0/1/2/3:
+  done, refused, invalid, pending setup); the build, installer, tap, and
+  verification helpers are in `scripts/distribution/`.
+- **Authorities.** `docs/deployment.yaml` approves (tagged *and* current
+  copies); only `brew` and `binstall` are publishable channels.
+  `.github/distribution/rollout.json` is the rollout ledger: nothing but
+  `biscuit-hash-cli` is distributed until it holds a verified `bh` entry with
+  every channel `pass` (so `bh` ships both `brew` and `binstall`), tied to a
+  successful run; `disabled`/`unchanged` entries are records, not the first
+  chain. Entries are evidence, never approvals.
+- **Pins.** `dist-workspace.toml` (dist 0.34.0, glibc 2.35 floor, opts no
+  package in), `.github/distribution/build-images.json` (digest-pinned Ubuntu
+  22.04, macOS 15.0, runners), `about.toml` (third-party notices).
+- **Invariants.** Four targets (macOS and Linux GNU, arm64 and x86_64); one
+  command per archive; uploads never replace bytes (fix with a new version);
+  the Homebrew formula never downgrades or takes a prerelease; only `upload`
+  writes, only `homebrew-tap` sees `HOMEBREW_TAP_TOKEN`. A channel result is
+  `pass` only when the job that installs through it succeeded on every target
+  (`smoke`, `install`, `brew-install`, `binstall`); publishing the formula is
+  never installation proof.
+- **Checks.** `just distribution-test` (CI's `distribution` companion suite
+  of `repo-deps`), `just distribution-check` (adds the `distribution_*` Rust
+  workflow contracts), `just distribution-verify OUT --artifacts DIR`
+  (runtime acceptance, never builds; pending evidence is never a pass).
 
 ## Build Caching
 

@@ -476,6 +476,10 @@ pub struct ProduceOptions {
     /// Cargo; `cargo-nextest nextest` where only the standalone binary exists.
     pub nextest: Vec<String>,
     pub json: bool,
+    /// A storage diagnostic run at the owner's start and after every record
+    /// attempt, as `argv` with no shell. The hosted wrapper supplies it; local
+    /// callers leave it unset. Its failure never changes a record's outcome.
+    pub sample_command: Option<Vec<String>>,
 }
 
 /// Cargo's output directory for `profile`.
@@ -1340,6 +1344,7 @@ pub fn run_produce(
     fs::create_dir_all(&options.out_dir)
         .with_context(|| format!("creating {}", options.out_dir.display()))?;
 
+    sample_storage(options, &["--label", "produce-start"]);
     let mut outcomes = Vec::new();
     for record in mine {
         // Per record, not once per leg: two records owned by one producer can
@@ -1371,6 +1376,13 @@ pub fn run_produce(
             format!("{}\n", serde_json::to_string_pretty(&outcome.0)?),
         )
         .with_context(|| format!("writing {}", path.display()))?;
+        // After the status, so a sample taken just before a lost runner still
+        // names the record it followed and how that record ended.
+        let ended = format!("{}:{}", outcome.0.result, outcome.0.stage);
+        sample_storage(
+            options,
+            &["--label", "record", "--record", &record.artifact, "--outcome", &ended],
+        );
         outcomes.push(outcome);
     }
 
@@ -1386,6 +1398,30 @@ pub fn run_produce(
         print!("{}", render_produced(&outcomes, &options.producer, term));
     }
     Ok(outcomes)
+}
+
+/// Run the owner's storage diagnostic, if one was supplied, with `extra`
+/// appended to its argv.
+///
+/// The diagnostic's stdout is discarded so `--json` output stays one document,
+/// and a diagnostic that cannot start or exits non-zero is reported on stderr
+/// and otherwise ignored: storage evidence must never replace a build result.
+fn sample_storage(options: &ProduceOptions, extra: &[&str]) {
+    let Some((program, args)) = options.sample_command.as_ref().and_then(|argv| argv.split_first())
+    else {
+        return;
+    };
+    let result = Command::new(program)
+        .args(args)
+        .args(extra)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .status();
+    match result {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("storage sample {extra:?} exited with {status}; continuing"),
+        Err(error) => eprintln!("storage sample {extra:?} could not start: {error}; continuing"),
+    }
 }
 
 fn render_produced(

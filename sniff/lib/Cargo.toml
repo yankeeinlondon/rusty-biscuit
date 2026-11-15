@@ -20,7 +20,7 @@ globset = "0.4"
 # dev-dependency, and only for the fixture operations gix has no write API for —
 # worktree-snapshot commits, checkout, and linked-worktree creation — plus the
 # libgit2 differential-parity oracle. Everything gix can do uses gix.
-gix = { version = "=0.84.0", default-features = false, features = [
+gix = { version = "=0.90.0", default-features = false, features = [
     "sha1",
     "revision",
     "status",

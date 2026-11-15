@@ -1,0 +1,172 @@
+{
+  "run_id": 42963148323,
+  "head_sha": "9315984f9b38ce8a646e78fe3fbbe02ace9c4b79",
+  "total_count": 33,
+  "jobs": [
+    {
+      "name": "Plan display check",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (schematic) / Run package work / test-auto-nolabel (schematic-gen, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (schematic) / Run package work / Run tests (schematic-gen, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine/rendezvous) / Run package work / test-auto-nolabel (rendezvous-core, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine/rendezvous) / Run package work / Run tests (rendezvous-core: run Level 1 tests on Linux, rendezvous-core, L1, ubuntu-latest, ubunt...",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine/rendezvous) / Run package work / test (rendezvous-core: run Level 1 tests on Linux, rendezvous-core, L1, ubuntu-latest, ubuntu-lat...",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine/rendezvous) / Run package work / Run tests (rendezvous-core, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (schematic) / Run package work / Run tests (schematic-gen: run Level 1 tests on Linux, schematic-gen, L1, ubuntu-latest, ubuntu-la...",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / test (claudine-cli: run Level 1 tests on Linux, claudine-cli, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / test (claudine-cli: run Level 2 tests on Linux, claudine-cli, L2, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / Run tests (claudine-cli: run Level 1 tests on Linux, claudine-cli, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (schematic) / Run package work / test (schematic-gen: run Level 1 tests on Linux, schematic-gen, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / test-auto-nolabel (claudine-cli, L2, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / Run tests (claudine-cli, L2, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / Run tests (claudine-cli, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / test-auto-nolabel (claudine-cli, L1, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / Run tests (claudine-cli: run Level 2 tests on Linux, claudine-cli, L2, ubuntu-latest, ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine/rendezvous) / Run package work / wsl2 (rendezvous-core: run Level 1 tests on WSL2, rendezvous-core, L1, wsl2-ubuntu, windows-latest) / Run guest tests",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (schematic) / Run package work / Run WSL2 tests (schematic-gen: run Level 1 tests on WSL2, schematic-gen, L1, wsl2-ubuntu, windows... / Run guest tests",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (schematic) / Run package work / wsl2 (schematic-gen: run Level 1 tests on WSL2, schematic-gen, L1, wsl2-ubuntu, windows-latest) / Run guest tests",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine/rendezvous) / Run package work / Run WSL2 tests (rendezvous-core: run Level 1 tests on WSL2, rendezvous-core, L1, wsl2-ubuntu, win... / Run guest tests",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work for empty selection",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (tools) / Run package work for empty selection / test-auto-nolabel",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (schematic) / Run package work for empty selection",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (tools) / Run package work",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (tools) / Run package work for empty selection / test",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (claudine/rendezvous) / Run package work for empty selection",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / Run WSL2 tests",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (tools) / Run package work for empty selection / Run tests",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (tools) / Run package work for empty selection / Run tests",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (claudine) / Run package work / wsl2",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (tools) / Run package work for empty selection / wsl2",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "area-ci (tools) / Run package work for empty selection / Run WSL2 tests",
+      "status": "completed",
+      "conclusion": "skipped"
+    }
+  ]
+}

@@ -80,7 +80,22 @@ against that, never against `to_string_lossy()`.
    Model what the child reports (`launched_spelling` in
    `claudine/cli/tests/l1/ctx_launch_anchor.rs`). To reproduce, read a TEMP
    directory's short name (`for %I in ("<dir>") do @echo %~sI` in `cmd`) and
-   run from PowerShell with `$env:TEMP`/`$env:TMP` set to it.
+   run from PowerShell with `$env:TEMP`/`$env:TMP` set to it. On `build-win`
+   that takes three non-obvious steps:
+   - **Use C:.** `fsutil 8dot3name query <drive>:` reports short names enabled
+     on C: only; B: (`CODING_DIR`) and W: generate none, so no directory there
+     has a second spelling.
+   - **Create a long-named directory.** The rig's own TEMP,
+     `C:\Users\ken\AppData\Local\Temp`, has no distinct short name because
+     every component is already 8.3-sized. Make one, e.g.
+     `C:\Users\ken\AppData\Local\Temp\a3-spike-long-temporary`, whose short
+     name is `…\Temp\A3-SPI~1`.
+   - **Run from a private clone, not `just cross-check`.** Cross-check cannot
+     set `TEMP`. Run nextest from PowerShell in a clone on B: (so `target`
+     stays on the large volume), once with `TEMP`/`TMP` set to the long
+     spelling and once to the short one: the same directory under two names.
+     A test that passes long and fails short is this trap; one that fails both
+     ways is not a short-name failure.
 7. **`windows-latest` fails at 260 characters where a dev host may not**
    (`LNK1104: cannot open file`); a host with `LongPathsEnabled=1` cannot
    reproduce it. Nested builds inside an extracted nextest archive
@@ -186,3 +201,31 @@ against that, never against `to_string_lossy()`.
   permits it.
 - Git reuses a worktree admin-directory name after remove, prune, and re-add,
   but deletes anything stored inside the old one.
+
+## Symlink targets: separators and `..`
+
+Measured on the native build host with `std::os::windows::fs::symlink_file`
+and `symlink_dir`, then `read_link` and a read through the link:
+
+- A **relative target spelled with `/`** (`Path::new("inner/subdir")`) is
+  created without error but cannot be followed (error 123,
+  `ERROR_INVALID_NAME`). Build relative targets name by name with
+  `Path::join`; a `\`-spelled target works.
+- **`..` in a relative target is read by name**, before any link the target
+  passes through is followed. With `bridge` a directory link to
+  `inner\subdir`, `alias.rs → bridge\..\..\clean.rs` opens the file *beside*
+  the repository, not the repository's `clean.rs` as on Unix.
+  `bridge\..\clean.rs` opens the repository's `clean.rs`. `read_link` still
+  returns the target verbatim.
+- **An absolute target loses its `..` when the link is created.**
+  `C:\…\foreign\subdir\..\..\repo\clean.rs` is stored, and `read_link`
+  returns it, as `C:\…\repo\clean.rs`. To keep a target that names the
+  directories it passes through, spell it relative.
+- So a walker that judges a link by its target (ownership, containment) must
+  resolve `..` the Windows way on Windows: return to the state before the
+  last *name*, not the physical parent of what that name resolved to. It must
+  still check every name it passes. `tree-hugger/cli/src/changed.rs`
+  (`checkout_path`) does both.
+- `cmd /c mklink alias.rs bridge\..\..\clean.rs` issued from PowerShell over
+  SSH hung on the host; use a small Rust program or the test itself to probe
+  link behavior.

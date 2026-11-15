@@ -1,0 +1,22 @@
+{
+  "job_id": "5e8c9902207afaeb7120430c585a445f",
+  "certificate_id": "7d1e5c3b-2a49-4f86-b0c1-e2d3f4a5b6c7",
+  "state": "completed",
+  "snapshot": {
+    "repository_id": "873451209",
+    "generation": "e661f4c935e8a5a83349afb5e347695c",
+    "retention_epoch": 3,
+    "evidence_revision": 1842,
+    "observation_event_watermark": 1207,
+    "location_event_watermark": 655
+  },
+  "member_count": 1,
+  "progress": {
+    "locations_withdrawn": 1,
+    "objects_deleted": 1,
+    "observations_deleted": 1
+  },
+  "not_before_ms": 1795521600000,
+  "created_at_ms": 1794312000000,
+  "updated_at_ms": 1795521690000
+}

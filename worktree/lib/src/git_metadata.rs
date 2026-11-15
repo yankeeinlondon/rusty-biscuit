@@ -38,7 +38,7 @@ pub(crate) fn origin_url(dir: &Path) -> Option<Option<String>> {
 
 /// `url` with the longest `url.<base>.insteadOf` prefix replaced by its
 /// `<base>`, as git rewrites a fetch URL.
-fn rewrite_instead_of(file: &gix::config::File<'_>, url: &BStr) -> Vec<u8> {
+fn rewrite_instead_of(file: &gix::config::File, url: &BStr) -> Vec<u8> {
     let mut best: Option<(usize, Vec<u8>)> = None;
     for section in file.sections_by_name("url").into_iter().flatten() {
         let Some(base) = section.header().subsection_name() else {
@@ -138,7 +138,7 @@ pub(crate) fn remote_absent(dir: &Path, name: &str) -> Option<bool> {
         .sections_by_name("remote")
         .into_iter()
         .flatten()
-        .any(|section| section.header().subsection_name() == Some(name.as_bytes().as_bstr()) && section.num_values() > 0);
+        .any(|section| section.header().subsection_name() == Some(name.as_bytes().as_bstr()) && section.body().num_values() > 0);
     let common = repo.common_dir();
     let legacy = ["remotes", "branches"].iter().any(|kind| std::fs::symlink_metadata(common.join(kind).join(name)).is_ok());
     Some(!configured && !legacy)

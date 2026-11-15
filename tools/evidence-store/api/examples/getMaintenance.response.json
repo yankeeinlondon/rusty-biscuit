@@ -1,0 +1,14 @@
+{
+  "maintenance": { "mode": "open", "reason": null, "since_ms": null, "boundary_id": null },
+  "changed": false,
+  "repositories": [
+    {
+      "repository_id": "873451209",
+      "generation": "3c9f1e0a7b2d4c58a1e6f09d2b7c4e13",
+      "retention_epoch": 0,
+      "evidence_revision": 42,
+      "observation_event_watermark": 118,
+      "location_event_watermark": 37
+    }
+  ]
+}

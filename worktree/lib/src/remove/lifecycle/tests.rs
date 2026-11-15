@@ -1236,13 +1236,24 @@ fn identity_at(path: &Path) -> FileIdentity {
     rename::identity(path).unwrap()
 }
 
-fn assert_changed(refusal: &Refusal, path: &Path) {
-    assert!(matches!(refusal, Refusal::Replaced(_)), "{refusal:?}");
+/// `refusal` is a [`Refusal::Replaced`] whose whole sentence says the entry
+/// spelled `named` changed after the question. Only the named path, never
+/// the sentence, is rendered portably for the comparison.
+fn assert_changed(refusal: &Refusal, named: &Path) {
+    let Refusal::Replaced(sentence) = refusal else { panic!("expected Refusal::Replaced, got {refusal:?}") };
     assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    // Git spells a Windows worktree path with forward slashes.
-    let sentence = refusal.to_string().replace('\\', "/");
-    let named = path.display().to_string().replace('\\', "/");
-    assert!(sentence.contains(&named) && sentence.contains("after the question"), "{sentence}");
+    let found = ["so nothing was removed", "so it was kept"]
+        .iter()
+        .find_map(|outcome| sentence.strip_suffix(&format!(" changed after the question, {outcome}")));
+    let Some(found) = found else { panic!("not a changed-after-the-question sentence: {sentence}") };
+    assert_eq!(biscuit_file::to_portable_string(Path::new(found)), biscuit_file::to_portable_string(named), "{sentence}");
+}
+
+/// How a refusal names an entry Git or the link resolver reported: the long,
+/// resolved form, never an 8.3 or `/var` alias the test may hold. The entry
+/// itself may be deleted or replaced, so only its parent is resolved.
+fn resolved_spelling(path: &Path) -> PathBuf {
+    biscuit_file::canonicalize_simplified(path.parent().unwrap()).unwrap().join(path.file_name().unwrap())
 }
 
 /// Replaces the link at `path` (a junction on Windows) with a distinct file.
@@ -1272,8 +1283,8 @@ fn a_checkout_replaced_after_the_question_is_refused_and_kept() {
     let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
     let handoff = save_approval(&request(&f, &entry, &facts, &[]), &doubles.env()).unwrap_err();
 
-    assert_changed(&refusal, &f.gone);
-    assert_changed(&handoff, &f.gone);
+    assert_changed(&refusal, &resolved_spelling(&f.gone));
+    assert_changed(&handoff, &resolved_spelling(&f.gone));
     assert!(f.gone.join("stranger.txt").is_file());
     assert!(aside.join("target/debug/a.o").is_file());
     assert!(f.registered());
@@ -1296,7 +1307,7 @@ fn an_unreadable_checkout_replaced_after_the_question_is_refused_and_kept() {
 
     let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
 
-    assert_changed(&refusal, &f.gone);
+    assert_changed(&refusal, &resolved_spelling(&f.gone));
     assert!(f.gone.join("stranger.txt").is_file());
     assert!(f.registered());
 }
@@ -1318,7 +1329,7 @@ fn an_own_links_checkout_replaced_after_the_question_is_kept() {
     let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
 
     let Target::Link { resolved: LinkTarget::Resolved(resolved), .. } = &facts.target else { unreachable!() };
-    assert_changed(&refusal, resolved);
+    assert_changed(&refusal, &resolved_spelling(resolved));
     assert!(real.join("stranger.txt").is_file());
     assert!(real.with_file_name("real-old").join("notes.txt").is_file());
     assert_eq!(identity_at(&f.gone), link, "the link is kept");
@@ -1340,7 +1351,7 @@ fn a_file_replaced_after_the_question_is_kept() {
 
     let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
 
-    assert_changed(&refusal, &f.gone);
+    assert_changed(&refusal, &resolved_spelling(&f.gone));
     assert_eq!(fs::read_to_string(&f.gone).unwrap(), "never shown");
     assert!(f.registered());
 }
@@ -1362,7 +1373,7 @@ fn an_unrelated_link_replaced_by_a_file_after_the_question_is_kept() {
 
     let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
 
-    assert_changed(&refusal, &f.gone);
+    assert_changed(&refusal, &resolved_spelling(&f.gone));
     assert_eq!(fs::read_to_string(&f.gone).unwrap(), "a file that was never shown");
     assert!(unrelated.join("keep.txt").is_file());
     assert!(f.registered());
@@ -1381,7 +1392,7 @@ fn an_own_link_replaced_by_a_file_after_the_question_deletes_neither() {
 
     let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
 
-    assert_changed(&refusal, &f.gone);
+    assert_changed(&refusal, &resolved_spelling(&f.gone));
     assert!(f.gone.is_file());
     assert!(real.join("target/debug/a.o").is_file(), "the real checkout is kept");
     assert!(f.registered());
@@ -1415,6 +1426,8 @@ fn a_worktree_record_rebuilt_after_the_question_is_refused() {
 
     let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
 
+    // The record is named from the repository the request was given, in
+    // that spelling, not from anything Git reports.
     assert_changed(&refusal, &admin);
     assert!(f.gone.join("target/debug/a.o").is_file());
     assert!(admin.join("gitdir").is_file());
@@ -1715,7 +1728,7 @@ fn a_file_replaced_before_a_saved_removal_resumes_is_kept() {
 
     let refusal = refused(finish_pending(&f.base(), &id, &doubles.env()));
 
-    assert_changed(&refusal, &f.gone);
+    assert_changed(&refusal, &resolved_spelling(&f.gone));
     assert_eq!(fs::read_to_string(&f.gone).unwrap(), "never shown");
     assert!(f.registered());
     assert!(f.stored().is_empty(), "the operation is closed");

@@ -17,13 +17,20 @@ pub enum ProviderWithOverrides {
     Bespoke(String),
 }
 
-fn main() {
+#[test]
+fn compiles_and_behaves() {
     // Test normal encoding
     assert_eq!(ProviderWithOverrides::Gpt_4o.model_id(), "gpt.4o");
 
     // Test override
-    assert_eq!(ProviderWithOverrides::Gpt4TurboPreview.model_id(), "gpt-4-turbo-preview");
-    assert_eq!(ProviderWithOverrides::Claude3Opus.model_id(), "claude-3-opus-20240229");
+    assert_eq!(
+        ProviderWithOverrides::Gpt4TurboPreview.model_id(),
+        "gpt-4-turbo-preview"
+    );
+    assert_eq!(
+        ProviderWithOverrides::Claude3Opus.model_id(),
+        "claude-3-opus-20240229"
+    );
 
     // Test FromStr with overridden IDs
     let parsed: ProviderWithOverrides = "gpt-4-turbo-preview".parse().unwrap();

@@ -67,6 +67,7 @@ sanity:
 test *args="":
     #!/usr/bin/env bash
     set -uo pipefail
+    eval "$(just _test_run_scope)"
     exit_code=0
     just _test_all "homelab homelab-cli homelab-server unfolded-integration-helper arcam-amp-integration eversolo-integration sony-receiver-integration" {{ args }} || exit_code=$?
     if (( exit_code == 130 )); then
@@ -94,9 +95,10 @@ test-browser:
 # Real-device integration tests (read-only). See test-integrations-real-base
 # for the legacy single-shot form retained for backwards compatibility.
 test-real *args="":
-    @just _test_real arcam-amp-integration {{ args }}
-    @just _test_real sony-receiver-integration {{ args }}
-    @just _test_real eversolo-integration {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real arcam-amp-integration {{ args }}; \
+        just _test_real sony-receiver-integration {{ args }}; \
+        just _test_real eversolo-integration {{ args }}
 
 # not applicable: homelab has no criterion benches (work is device-bound I/O)
 bench:
@@ -147,9 +149,10 @@ test-integrations-real-base *args="":
     @echo "  Sony:     SONY_REAL_HOST [SONY_REAL_PORT]"
     @echo "  Eversolo: EVERSOLO_REAL_HOST [EVERSOLO_REAL_PORT]"
     @echo ""
-    @cargo test -p arcam-amp-integration real_device -- --ignored --nocapture {{ args }}
-    @cargo test -p sony-receiver-integration real_device -- --ignored --nocapture {{ args }}
-    @cargo test -p eversolo-integration real_device -- --ignored --nocapture {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        cargo test -p arcam-amp-integration real_device -- --ignored --nocapture {{ args }}; \
+        cargo test -p sony-receiver-integration real_device -- --ignored --nocapture {{ args }}; \
+        cargo test -p eversolo-integration real_device -- --ignored --nocapture {{ args }}
 
 # run opt-in ignored write tests against real devices; tests restore prior state
 test-integrations-real-destructive *args="":
@@ -161,9 +164,10 @@ test-integrations-real-destructive *args="":
     @echo "  Sony:     SONY_REAL_HOST [SONY_REAL_PORT] SONY_REAL_ALLOW_DESTRUCTIVE=1"
     @echo "  Eversolo: EVERSOLO_REAL_HOST [EVERSOLO_REAL_PORT] EVERSOLO_REAL_ALLOW_DESTRUCTIVE=1"
     @echo ""
-    @cargo test -p arcam-amp-integration destructive_real_device -- --ignored --nocapture {{ args }}
-    @cargo test -p sony-receiver-integration destructive_real_device -- --ignored --nocapture {{ args }}
-    @cargo test -p eversolo-integration destructive_real_device -- --ignored --nocapture {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        cargo test -p arcam-amp-integration destructive_real_device -- --ignored --nocapture {{ args }}; \
+        cargo test -p sony-receiver-integration destructive_real_device -- --ignored --nocapture {{ args }}; \
+        cargo test -p eversolo-integration destructive_real_device -- --ignored --nocapture {{ args }}
 
 # run clippy on Homelab packages
 lint:
@@ -384,6 +388,7 @@ lint-frontend:
 test-frontend *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     if ! command -v pnpm >/dev/null 2>&1; then
         echo ""
         echo "================================================================"

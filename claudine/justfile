@@ -76,9 +76,10 @@ test-library *args="":
 
 # test the rendezvous core, daemon, and test-client crates
 test-rendezvous *args:
-    @just _test rendezvous-core {{ args }}
-    @just _test rendezvous-daemon {{ args }}
-    @just _test rendezvous-client {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test rendezvous-core {{ args }}; \
+        just _test rendezvous-daemon {{ args }}; \
+        just _test rendezvous-client {{ args }}
 
 # Build darkmatter's `md` into the workspace target dir, where
 # `inline_compose_hash` looks for it before falling back to PATH. The forwarded
@@ -119,6 +120,7 @@ _ensure-md:
 test *args="": _ensure-md
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     packages="claudine-catalog-types; claudine --features work-counters; claudine-contract; claudine-cli --features test-fixtures; claudine-gen"
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         just _test_all "claudine-catalog-types; claudine --features work-counters; claudine-contract; claudine-cli --features daemon-tests,terminal-tests,test-fixtures; claudine-gen --features terminal-tests" {{ args }}
@@ -155,6 +157,7 @@ test-gen *args="":
 test-l2 *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     just _test_l2 claudine-cli --features terminal-tests {{ args }}
     # claudine-gen owns the report-rendering L2 tests (declared in its manifest).
     just _test_l2 claudine-gen --features terminal-tests {{ args }}
@@ -191,6 +194,7 @@ test-browser:
 test-real *args="":
     #!/usr/bin/env bash
     set -uo pipefail
+    eval "$(just _test_run_scope)"
     export CLAUDINE_CONTRACT_REAL=1
     rc=0
     just _test_real claudine-contract --features real-tests {{ args }} || rc=$?

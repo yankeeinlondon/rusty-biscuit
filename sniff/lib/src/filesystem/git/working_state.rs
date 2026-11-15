@@ -95,7 +95,10 @@ pub(crate) fn state_id(head: Option<&str>, changed: &[ChangedContent]) -> String
     let mut hasher = XxHasher::new();
     let _ = writeln!(hasher, "head {}", head.unwrap_or("unborn"));
     for entry in changed {
-        hasher.write(&gix::path::into_bstr(entry.path.as_path()));
+        hasher.write(
+            &gix::path::into_bstr(entry.path.as_path())
+                .expect("prefix path doesn't contain ill-formed UTF-8"),
+        );
         // NUL cannot occur in a Git path, so it separates path from content
         // without ambiguity.
         let _ = writeln!(hasher, "\0{}", entry.content.token());
@@ -114,7 +117,10 @@ fn path_content(path: &Path) -> Result<PathContent> {
     if metadata.is_symlink() {
         let target = std::fs::read_link(path)?;
         let mut hasher = XxHasher::new();
-        hasher.write(&gix::path::into_bstr(target.as_path()));
+        hasher.write(
+            &gix::path::into_bstr(target.as_path())
+                .map_err(|error| crate::SniffError::git("path", error))?,
+        );
         return Ok(PathContent::Symlink(hasher.finish()));
     }
     if metadata.is_dir() {

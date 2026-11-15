@@ -50,6 +50,24 @@ REQUIRED_GOVERNANCE = ("owner", "reason", "expiry")
 #: truncated one would no longer identify the cell.
 NAME_LIMIT = 255
 
+#: The check name's verb phrase for each gate. A gate missing here is refused
+#: rather than published under a name a reader cannot interpret.
+GATE_ACTIONS = {
+    "L1": "run Level 1 tests",
+    "L2": "run Level 2 tests",
+    "browser": "run browser tests",
+    "lint": "lint source",
+    "check": "check compilation",
+}
+
+#: The check name's wording for each CI environment; unknown ones are refused.
+ENVIRONMENT_NAMES = {
+    "ubuntu-latest": "Linux",
+    "macos-latest": "macOS",
+    "windows-latest": "Windows",
+    "wsl2-ubuntu": "WSL2",
+}
+
 
 class Refusal(Exception):
     """A cell that must not be published as an accepted gap, with the reason."""
@@ -147,7 +165,15 @@ def check_run(
     # when the path turns out to be a file.
     tree = f"{server.rstrip('/')}/{repo}/tree/{head_sha}"
 
-    name = f"accepted gap: {area} / {package} / {gate} ({environment})"
+    action = GATE_ACTIONS.get(gate)
+    if action is None:
+        raise Refusal(f"{cell_label(cell)} has unknown gate {gate!r}; no check name for it")
+    wording = ENVIRONMENT_NAMES.get(environment)
+    if wording is None:
+        raise Refusal(
+            f"{cell_label(cell)} has unknown environment {environment!r}; no check name for it"
+        )
+    name = f"{MARKER}: {package}: {action} on {wording}"
     if len(name) > NAME_LIMIT:
         raise Refusal(f"{cell_label(cell)} produces a check name over {NAME_LIMIT} characters")
 

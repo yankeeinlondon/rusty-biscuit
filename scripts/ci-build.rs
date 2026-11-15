@@ -69,7 +69,7 @@ usage:
   ci-build produce --plan <file> --producer <env> --out-dir <dir>
                    [--key <key>] [--workspace <dir>] [--target-dir <dir>] [--sidecars <file>]
                    [--source-tree <id>] [--counter-dir <dir>] [--cargo <cmd>]
-                   [--nextest <cmd>] [--json]
+                   [--nextest <cmd>] [--json] [--sample-command <json-argv>]
   ci-build verify  --manifest <file> --environment <env>
                    [--plan <file>] [--root <dir>] [--workspace <dir>]
                    [--nextest <cmd>] [--json] [--verdict-out <file>]
@@ -663,6 +663,7 @@ struct Flags {
     cargo: Option<String>,
     nextest: Option<Vec<String>>,
     verdict_out: Option<PathBuf>,
+    sample_command: Option<Vec<String>>,
 }
 
 /// Parse the non-wrapper command line.
@@ -711,6 +712,19 @@ fn parse(args: &[String], dir_from_env: Option<PathBuf>) -> Result<Invocation> {
             "--root" => flags.root = Some(PathBuf::from(value()?)),
             "--verdict-out" => flags.verdict_out = Some(PathBuf::from(value()?)),
             "--cargo" => flags.cargo = Some(value()?),
+            // A JSON array rather than a split string: the argv reaches the
+            // diagnostic exactly as given, paths with spaces included, and no
+            // shell ever parses it.
+            "--sample-command" => {
+                let raw = value()?;
+                let argv: Vec<String> = serde_json::from_str(&raw).with_context(|| {
+                    format!("--sample-command must be a JSON array of strings, got {raw}")
+                })?;
+                if argv.first().is_none_or(String::is_empty) {
+                    bail!("--sample-command must name a program as its first element");
+                }
+                flags.sample_command = Some(argv);
+            }
             "--nextest" => {
                 flags.nextest =
                     Some(value()?.split_whitespace().map(str::to_owned).collect::<Vec<_>>());
@@ -750,6 +764,7 @@ fn parse(args: &[String], dir_from_env: Option<PathBuf>) -> Result<Invocation> {
             cargo: flags.cargo.unwrap_or_else(|| "cargo".to_owned()),
             nextest: flags.nextest.unwrap_or_else(default_nextest),
             json: flags.json,
+            sample_command: flags.sample_command,
         }))),
         "verify" => Ok(Invocation::Verify(Box::new(VerifyOptions {
             manifest: flags.manifest.context("verify needs --manifest")?,

@@ -464,3 +464,27 @@ fn a_plan_whose_baseline_approves_nothing_still_names_the_file_it_read() {
     assert!(output.contains("Approved skips"), "{output}");
     assert!(output.contains(".github/ci/ci-baseline.toml"), "{output}");
 }
+
+#[test]
+fn render_document_matches_rendering_the_parsed_plan() {
+    let bytes = std::fs::read(
+        biscuit_test_harness::manifest_dir!()
+            .join("ci/fixtures/pre-push/plans/plan-macos-executing.json"),
+    )
+    .expect("fixture plan is readable");
+    let term = Terminal::new();
+    let parsed =
+        serde_json::from_str::<Plan>(std::str::from_utf8(&bytes).expect("fixture plan is UTF-8"))
+            .expect("fixture plan parses");
+
+    let rendered = render_document(&bytes, &term).expect("fixture plan renders");
+
+    assert_eq!(render(&parsed, &term), rendered);
+}
+
+#[test]
+fn render_document_rejects_malformed_json() {
+    let result = render_document(b"{\"base\":", &Terminal::new());
+
+    assert!(result.is_err(), "malformed JSON rendered: {result:?}");
+}

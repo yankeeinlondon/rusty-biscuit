@@ -1,13 +1,52 @@
-# Better Evidence
+---
+kind: feature
+name: change-detection
+date: 2026-10-26
+status: draft-spec
+depends-on:
+  - 2026-11-06-rust-ci-planner
+related:
+  - 2026-10-26-next-gen-pipeline
+reviewed: false
+implemented: false
+---
 
-Today we build "evidence" during our CI test runs to explicitly show that code passed and that evidence is used in the testing(ci), fuzz, nightly, and release processes in CI/CD.
+# Change detection and blast radius
 
-The evidence is stored in git commit _notes_ and they are queried -- awkwardly -- in today's process. This spec is about defining an explicit schema and data model in Cloudflare's [D1](https://developers.cloudflare.com/d1/) database.
+The detailed thinking is in [`detection-and-blast.md`](./detection-and-blast.md). The
+"Better Evidence" text first drafted in this file moved to
+`2026-10-26-next-gen-pipeline`, which is the spec for the evidence store.
 
-This D1 based solution will:
+## Why
 
-- provide a much cleaner query interface for the business logic of the jobs which interact with evidence
-- allow more durable state (github notes last 90 days)
-- cleaner separation of the git repo from operational state
+Today a change is evaluated per package: touch a package and its whole test suite is in
+scope. A precise statement of what changed, down to config keys and symbols, could mean
+far less testing and better descriptions of what a change affects.
 
-This D1 solution, will need to consider security as an important aspect and ensure that only authorized jobs are able to interact with this D1 instance.
+## Outcome
+
+A `change-detection` library and CLI that wraps `tree-hugger` and `sniff` and describes
+a change, by type, and what it reaches. The Rust planner can then use that to require
+less evidence, wherever doing so is safe.
+
+## Scope
+
+The change types in `detection-and-blast.md`: configuration files, source code,
+dependencies, and test coverage, plus the `kind` and `blast_radius` frontmatter grammar.
+
+## Spikes needed
+
+- **Is it safe?** Skipping tests because a symbol analysis says they are unaffected can
+  hide real regressions from macros, traits, build scripts, and files read at run time.
+  Find out how often static analysis would have wrongly skipped a failing test, by
+  replaying history.
+- **Is it worth it?** With evidence reused per package, measure how much test time
+  remains that finer detection could actually remove.
+- **`tree-hugger` readiness.** What is missing for symbol-level diffs and reference
+  mapping across this workspace?
+
+## Why this is last
+
+It is an optimization of a working system and nothing else depends on it. Value exists
+without CI too, in the CLI's descriptions of a change. If the "is it worth it" spike comes
+back low, this can stop at that CLI.

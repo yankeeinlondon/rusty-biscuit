@@ -1,0 +1,327 @@
+{
+  "dist_version": "0.34.0",
+  "announcement_tag": "git-wt-cli-v0.1.0",
+  "announcement_tag_is_implicit": false,
+  "announcement_is_prerelease": false,
+  "announcement_title": "git-wt-cli-v0.1.0",
+  "announcement_github_body": "## Install git-wt-cli 0.1.0\n\n### Install prebuilt binaries via shell script\n\n```sh\ncurl --proto '=https' --tlsv1.2 -LsSf https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-installer.sh | sh\n```\n\n### Install prebuilt binaries via Homebrew\n\n```sh\nbrew install yankeeinlondon/tap/wt\n```\n\n## Download git-wt-cli 0.1.0\n\n|  File  | Platform | Checksum |\n|--------|----------|----------|\n| [git-wt-cli-aarch64-apple-darwin.tar.xz](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-aarch64-apple-darwin.tar.xz) | Apple Silicon macOS | [checksum](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-aarch64-apple-darwin.tar.xz.sha256) |\n| [git-wt-cli-x86_64-apple-darwin.tar.xz](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-x86_64-apple-darwin.tar.xz) | Intel macOS | [checksum](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-x86_64-apple-darwin.tar.xz.sha256) |\n| [git-wt-cli-aarch64-unknown-linux-gnu.tar.xz](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-aarch64-unknown-linux-gnu.tar.xz) | ARM64 Linux | [checksum](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-aarch64-unknown-linux-gnu.tar.xz.sha256) |\n| [git-wt-cli-x86_64-unknown-linux-gnu.tar.xz](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-x86_64-unknown-linux-gnu.tar.xz) | x64 Linux | [checksum](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-x86_64-unknown-linux-gnu.tar.xz.sha256) |\n\n",
+  "releases": [
+    {
+      "app_name": "git-wt-cli",
+      "app_version": "0.1.0",
+      "env": {
+        "install_dir_env_var": "GIT_WT_CLI_INSTALL_DIR",
+        "unmanaged_dir_env_var": "GIT_WT_CLI_UNMANAGED_INSTALL",
+        "disable_update_env_var": "GIT_WT_CLI_DISABLE_UPDATE",
+        "no_modify_path_env_var": "GIT_WT_CLI_NO_MODIFY_PATH",
+        "print_quiet_env_var": "GIT_WT_CLI_PRINT_QUIET",
+        "print_verbose_env_var": "GIT_WT_CLI_PRINT_VERBOSE",
+        "download_url_env_var": "GIT_WT_CLI_DOWNLOAD_URL",
+        "github_base_url_env_var": "GIT_WT_CLI_INSTALLER_GITHUB_BASE_URL",
+        "ghe_base_url_env_var": "GIT_WT_CLI_INSTALLER_GHE_BASE_URL",
+        "github_token_env_var": "GIT_WT_CLI_GITHUB_TOKEN"
+      },
+      "display_name": "git-wt-cli",
+      "display": true,
+      "artifacts": [
+        "git-wt-cli-installer.sh",
+        "wt.rb",
+        "sha256.sum",
+        "git-wt-cli-aarch64-apple-darwin.tar.xz",
+        "git-wt-cli-aarch64-apple-darwin.tar.xz.sha256",
+        "git-wt-cli-aarch64-unknown-linux-gnu.tar.xz",
+        "git-wt-cli-aarch64-unknown-linux-gnu.tar.xz.sha256",
+        "git-wt-cli-x86_64-apple-darwin.tar.xz",
+        "git-wt-cli-x86_64-apple-darwin.tar.xz.sha256",
+        "git-wt-cli-x86_64-unknown-linux-gnu.tar.xz",
+        "git-wt-cli-x86_64-unknown-linux-gnu.tar.xz.sha256"
+      ],
+      "hosting": {
+        "github": {
+          "artifact_base_url": "https://github.com",
+          "artifact_download_path": "/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0",
+          "owner": "yankeeinlondon",
+          "repo": "rusty-biscuit"
+        }
+      }
+    }
+  ],
+  "artifacts": {
+    "git-wt-cli-aarch64-apple-darwin.tar.xz": {
+      "name": "git-wt-cli-aarch64-apple-darwin.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "aarch64-apple-darwin"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE",
+          "path": "LICENSE",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "SOURCE.txt",
+          "path": "SOURCE.txt",
+          "kind": "unknown"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.md",
+          "path": "THIRD-PARTY-NOTICES.md",
+          "kind": "unknown"
+        },
+        {
+          "id": "git-wt-cli-aarch64-apple-darwin-exe-wt",
+          "name": "wt",
+          "path": "wt",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "git-wt-cli-aarch64-apple-darwin.tar.xz.sha256"
+    },
+    "git-wt-cli-aarch64-apple-darwin.tar.xz.sha256": {
+      "name": "git-wt-cli-aarch64-apple-darwin.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "aarch64-apple-darwin"
+      ]
+    },
+    "git-wt-cli-aarch64-unknown-linux-gnu.tar.xz": {
+      "name": "git-wt-cli-aarch64-unknown-linux-gnu.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "aarch64-unknown-linux-gnu"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE",
+          "path": "LICENSE",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "SOURCE.txt",
+          "path": "SOURCE.txt",
+          "kind": "unknown"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.md",
+          "path": "THIRD-PARTY-NOTICES.md",
+          "kind": "unknown"
+        },
+        {
+          "id": "git-wt-cli-aarch64-unknown-linux-gnu-exe-wt",
+          "name": "wt",
+          "path": "wt",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "git-wt-cli-aarch64-unknown-linux-gnu.tar.xz.sha256"
+    },
+    "git-wt-cli-aarch64-unknown-linux-gnu.tar.xz.sha256": {
+      "name": "git-wt-cli-aarch64-unknown-linux-gnu.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "aarch64-unknown-linux-gnu"
+      ]
+    },
+    "git-wt-cli-installer.sh": {
+      "name": "git-wt-cli-installer.sh",
+      "kind": "installer",
+      "target_triples": [
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "install_hint": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/yankeeinlondon/rusty-biscuit/releases/download/git-wt-cli-v0.1.0/git-wt-cli-installer.sh | sh",
+      "description": "Install prebuilt binaries via shell script"
+    },
+    "git-wt-cli-x86_64-apple-darwin.tar.xz": {
+      "name": "git-wt-cli-x86_64-apple-darwin.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "x86_64-apple-darwin"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE",
+          "path": "LICENSE",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "SOURCE.txt",
+          "path": "SOURCE.txt",
+          "kind": "unknown"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.md",
+          "path": "THIRD-PARTY-NOTICES.md",
+          "kind": "unknown"
+        },
+        {
+          "id": "git-wt-cli-x86_64-apple-darwin-exe-wt",
+          "name": "wt",
+          "path": "wt",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "git-wt-cli-x86_64-apple-darwin.tar.xz.sha256"
+    },
+    "git-wt-cli-x86_64-apple-darwin.tar.xz.sha256": {
+      "name": "git-wt-cli-x86_64-apple-darwin.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "x86_64-apple-darwin"
+      ]
+    },
+    "git-wt-cli-x86_64-unknown-linux-gnu.tar.xz": {
+      "name": "git-wt-cli-x86_64-unknown-linux-gnu.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE",
+          "path": "LICENSE",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "SOURCE.txt",
+          "path": "SOURCE.txt",
+          "kind": "unknown"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.md",
+          "path": "THIRD-PARTY-NOTICES.md",
+          "kind": "unknown"
+        },
+        {
+          "id": "git-wt-cli-x86_64-unknown-linux-gnu-exe-wt",
+          "name": "wt",
+          "path": "wt",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "git-wt-cli-x86_64-unknown-linux-gnu.tar.xz.sha256"
+    },
+    "git-wt-cli-x86_64-unknown-linux-gnu.tar.xz.sha256": {
+      "name": "git-wt-cli-x86_64-unknown-linux-gnu.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "sha256.sum": {
+      "name": "sha256.sum",
+      "kind": "unified-checksum"
+    },
+    "wt.rb": {
+      "name": "wt.rb",
+      "kind": "installer",
+      "target_triples": [
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "install_hint": "brew install yankeeinlondon/tap/wt",
+      "description": "Install prebuilt binaries via Homebrew"
+    }
+  },
+  "systems": {
+    "plan:all:": {
+      "id": "plan:all:",
+      "cargo_version_line": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+      "build_environment": {
+        "macos": {
+          "os_version": "27.2"
+        }
+      }
+    }
+  },
+  "publish_prereleases": false,
+  "force_latest": false,
+  "ci": {
+    "github": {
+      "artifacts_matrix": {
+        "include": [
+          {
+            "runner": "macos-15",
+            "host": "aarch64-apple-darwin",
+            "install_dist": {
+              "shell": "sh",
+              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+            },
+            "dist_args": "--artifacts=local --target=aarch64-apple-darwin",
+            "targets": [
+              "aarch64-apple-darwin"
+            ],
+            "cache_provider": "github"
+          },
+          {
+            "runner": "ubuntu-22.04-arm",
+            "host": "aarch64-unknown-linux-gnu",
+            "install_dist": {
+              "shell": "sh",
+              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+            },
+            "dist_args": "--artifacts=local --target=aarch64-unknown-linux-gnu",
+            "targets": [
+              "aarch64-unknown-linux-gnu"
+            ],
+            "cache_provider": "github"
+          },
+          {
+            "runner": "macos-15-intel",
+            "host": "x86_64-apple-darwin",
+            "install_dist": {
+              "shell": "sh",
+              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+            },
+            "dist_args": "--artifacts=local --target=x86_64-apple-darwin",
+            "targets": [
+              "x86_64-apple-darwin"
+            ],
+            "cache_provider": "github"
+          },
+          {
+            "runner": "ubuntu-22.04",
+            "host": "x86_64-unknown-linux-gnu",
+            "install_dist": {
+              "shell": "sh",
+              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+            },
+            "dist_args": "--artifacts=local --target=x86_64-unknown-linux-gnu",
+            "targets": [
+              "x86_64-unknown-linux-gnu"
+            ],
+            "cache_provider": "github"
+          }
+        ]
+      },
+      "pr_run_mode": "skip"
+    }
+  },
+  "linkage": [],
+  "upload_files": []
+}

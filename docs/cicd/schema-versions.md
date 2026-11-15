@@ -12,7 +12,7 @@ or `fixes/`, in whichever lifecycle directory holds them now.
 
 | Document | Version | Owner (writer and validator) | Mirrors that must move with it |
 |---|---|---|---|
-| [Resolved plan](#resolved-plan) | 7 | `scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION` | `.github/ci/schemas/contract.json` (regenerated), `ci-rollup.rs::PLAN_SCHEMA_VERSION`, `test_toolkit::archive_guard::PLAN_SCHEMA_VERSION`, the `.githooks/tests/fixtures/plan-*.json` fixtures and `affected_scope_stub.py` |
+| [Resolved plan](#resolved-plan) | 7 | `scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION` | `.github/ci/schemas/contract.json` (regenerated), `ci-rollup.rs::PLAN_SCHEMA_VERSION`, `test_toolkit::archive_guard::PLAN_SCHEMA_VERSION`, the `scripts/ci/fixtures/pre-push/plans/plan-*.json` fixtures and `scripts/ci/fixtures/pre-push/affected_scope_stub.py` |
 | [Validation receipt](#validation-receipt) | 2 (reads 1) | `schema.py::RECEIPT_SCHEMA_VERSION`, `LEGACY_RECEIPT_SCHEMA_VERSION` | — |
 | [Observation collection](#observation-collection) | 3 | `schema.py::COLLECTION_SCHEMA_VERSION` | — (its cells are the version-2 receipt cell, so `RECEIPT_SCHEMA_VERSION` does not move) |
 | [Coverage certification](#coverage-certification) | 1 | `schema.py::CERTIFICATION_SCHEMA_VERSION`, `COVERAGE_POLICY_VERSION` | — (read by `reuse_validation.py`; no Rust reader) |
@@ -24,6 +24,7 @@ or `fixes/`, in whichever lifecycle directory holds them now.
 | [Environment table](#environment-table) (`.github/ci/environments.json`) | 3 | `affected_scope.py::ENVIRONMENTS_SCHEMA_VERSION` | `ci-rollup.rs::ENVIRONMENTS_SCHEMA_VERSION` |
 | [Build archive documents](#build-archive-documents) | 3 (manifest); status, verdict, sidecar 1 | `ci-build-archive.rs` | sidecar: `affected_scope.py::SIDECAR_SCHEMA_VERSION` |
 | [Build key and compiler-work documents](#build-key-and-compiler-work-documents) | 1 | `ci-build.rs` | key: `scripts/ci/build_key.py::KEY_SCHEMA_VERSION` |
+| [Execution constraint record](#execution-constraint-record) | unversioned | `scripts/ci/constraints.py::validate_record` and `scripts/ci-push/documents.rs::parse_constraint_record` | each other: both read `scripts/ci/fixtures/pre-push/constraints/parity.json` and must give its every case the same outcome |
 
 ## Rules for changing a version
 
@@ -208,3 +209,51 @@ Written and verified by `scripts/ci-build-archive.rs`.
 Written by `scripts/ci-build.rs`. The event, report, and key documents are all
 at version 1. The key's version is mirrored in `scripts/ci/build_key.py`, so
 the planner and the builder derive the same key.
+
+## Execution constraint record
+
+A hand-written JSON file in the constraint store
+(`<home>/.rusty-biscuit/ci-constraints/<repository>/`, or
+`BISCUIT_CI_CONSTRAINTS_DIR`) that bans executing one environment's cells.
+`just ci-local --plan` (through `constraints.py`) and the pre-push hook
+(through `ci-push`) read it; CI never does. The record carries no version
+field and has never had one: there is only one generation, and both readers
+ship in the same tree.
+
+```json
+{
+  "environment": "wsl2-ubuntu",
+  "gate": "L1",
+  "branch": "feature",
+  "reason": "WSL L1 already ran for this branch on build-wsl",
+  "owner": "maintainer",
+  "expiry": "2099-01-01"
+}
+```
+
+| Field | Shape | Meaning |
+|---|---|---|
+| `environment`, `reason`, `owner` | required, nonempty string | the banned environment; why; who to ask |
+| `expiry` | required, exactly `YYYY-MM-DD`, a real calendar day | the record binds through that day and is announced and ignored after it |
+| `gate`, `repository`, `branch` | optional string | absent or `""` matches every gate, repository, or branch |
+
+Any other shape makes the record **malformed**, and a malformed record blocks
+the push or the `--plan` review, naming the file and the field, because an
+instruction that cannot be read cannot safely be ignored:
+
+| Input | Outcome |
+|---|---|
+| a required field absent, `""`, `null`, or not a string | malformed |
+| an optional field `null` or not a string (`"branch": 7`) | malformed; never read as "every branch" |
+| an expiry in another date spelling (`20991231`, `2099-W01-1`), an impossible day (`2099-02-30`), or year `0000` | malformed |
+| an unknown field (`"branchh": "x"`) | malformed; the alphabetically first unknown field is reported |
+| a duplicate key, `NaN`/`Infinity`, trailing content, or a document that is not one JSON object | malformed |
+
+**Correction without a version change.** The Python reader used to accept any
+truthy value for a required field and convert it to text, and read an optional
+field through a plain lookup, so `"branch": 7` or `"gate": null` was accepted
+and a malformed `branch` silently widened the record to every branch. Both
+readers now apply the rules above. Every record that was valid before keeps
+its meaning and matching; only records that were already wrong change outcome,
+from "silently accepted" to "malformed". No plan, receipt, or scope-receipt
+version moved, because none of those documents carries a constraint record.

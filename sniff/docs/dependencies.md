@@ -90,7 +90,7 @@ Darkmatter's `ctx.tailnet`/`ctx.gateway*` values and `ping()` functions (see
 
 ## Git Access
 
-- **`gix` (pinned `=0.84.0`).** All production git access is pure-Rust gix. The
+- **`gix` (pinned `=0.90.0`).** All production git access is pure-Rust gix. The
   exact-version pin is deliberate — gix's API moves between minor releases.
   Feature selection is explicit (`default-features = false`) and each entry backs
   a specific probe; `merge` in particular exists only for the worktree

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "package": "queue",
+  "environment": "windows-latest",
+  "gate": "L1",
+  "complete": true,
+  "head": "c26823f69310efb3ef13ad6d9ffa92da6dda7e2f",
+  "run": "43053316051",
+  "attempt": 1,
+  "reports": [
+    "L1/queue.xml"
+  ],
+  "nextest_version": "cargo-nextest 0.9.151 (6b3f99457 2026-11-02)",
+  "build": "3af68e4097ab7331",
+  "gate_inputs": [
+    "queue/lib"
+  ]
+}

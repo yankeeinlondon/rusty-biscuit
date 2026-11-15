@@ -122,6 +122,12 @@ fn checkout_path(path: &Path, root: &Path, hops: usize) -> Result<Option<PathBuf
         return Ok(None);
     }
     let mut resolved = PathBuf::new();
+    // Windows reads `..` in a link target by name: `bridge\..` is the
+    // directory holding `bridge`, wherever `bridge` points. So there `..`
+    // returns to the walk's state before the last name, which was already
+    // checked; on Unix it climbs out of whatever that name resolved to.
+    #[cfg(windows)]
+    let mut before_name: Vec<PathBuf> = Vec::new();
     let mut entered = false;
     for component in path.components() {
         if matches!(component, std::path::Component::Prefix(_)) {
@@ -135,8 +141,18 @@ fn checkout_path(path: &Path, root: &Path, hops: usize) -> Result<Option<PathBuf
             if !entered || resolved == root {
                 return Ok(None);
             }
+            #[cfg(windows)]
+            {
+                let Some(before) = before_name.pop() else {
+                    return Ok(None);
+                };
+                resolved = before;
+            }
+            #[cfg(not(windows))]
             resolved.pop();
         } else {
+            #[cfg(windows)]
+            before_name.push(resolved.clone());
             resolved.push(component);
             if !entered {
                 resolved = biscuit_file::canonicalize_simplified(&resolved)

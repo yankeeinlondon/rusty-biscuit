@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites><testsuite name="claudine" tests="9" failures="0" errors="0" skipped="0"><testcase classname="claudine" name="ok_0"/><testcase classname="claudine" name="ok_1"/><testcase classname="claudine" name="ok_2"/><testcase classname="claudine" name="ok_3"/><testcase classname="claudine" name="ok_4"/><testcase classname="claudine" name="ok_5"/><testcase classname="claudine" name="ok_6"/><testcase classname="claudine" name="ok_7"/><testcase classname="claudine" name="ok_8"/></testsuite></testsuites>

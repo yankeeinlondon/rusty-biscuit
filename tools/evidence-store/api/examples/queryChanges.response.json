@@ -1,0 +1,41 @@
+{
+  "stream": "observations",
+  "snapshot": {
+    "repository_id": "873451209",
+    "generation": "e661f4c935e8a5a83349afb5e347695c",
+    "retention_epoch": 3,
+    "evidence_revision": 1842,
+    "observation_event_watermark": 1207,
+    "location_event_watermark": 655
+  },
+  "last_sequence": 1202,
+  "items": [
+    {
+      "type": "accepted",
+      "sequence": 1201,
+      "observation_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+      "environment": "ubuntu-latest",
+      "package": "biscuit-hash",
+      "gate": "L1",
+      "head": "9f2e6d33a3717ee826353a404ba4618d1aeeb687",
+      "tree": "dc9c5edb8b2d479e697b4b0b8ab874f32b325138",
+      "outcome": "pass",
+      "completion": "complete",
+      "recorded_at_ms": 1794225600000
+    },
+    {
+      "type": "pruned",
+      "sequence": 1202,
+      "observation_id": "bb87fab67a46501d93922dcda6a33ab75b2e015659d9b28e08cc706a5a89cd7d",
+      "environment": "ubuntu-latest",
+      "package": "biscuit-hash",
+      "gate": "L1",
+      "head": "872648a548ff41e3da9f8d60ccab494c855c1cb1",
+      "tree": "81c2c308c9cd32dcd88ad24b85142944b5c00868",
+      "job_id": "46a51bf794f62c688662f622fb2e7ede",
+      "recorded_at_ms": 1794308400000
+    }
+  ],
+  "has_more": true,
+  "next_cursor": "djEuY3VyLjBkM2Y3YTEyLm9ic2VydmF0aW9ucy4xMjAy.6Qm1tX3c9pZ0Lk8vB2rJ"
+}

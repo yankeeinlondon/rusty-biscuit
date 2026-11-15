@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "evaluation_publication_disabled",
+    "message": "evaluation publication is disabled until a trusted verifier policy exists",
+    "location": null,
+    "retryable": false,
+    "retry_after_ms": null
+  },
+  "request_id": "320046f4074f3a79983b98c823980a3e"
+}

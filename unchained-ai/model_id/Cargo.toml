@@ -13,7 +13,10 @@ quote = "1.0"
 proc-macro2 = "1.0"
 
 [dev-dependencies]
-trybuild = "1.0"
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+# Line and column on fallback spans, so the compile-fail unit tests can
+# compare a diagnostic's location with its `.stderr` file.
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
 
 # Opt-out of benchmarking: proc-macro crate; compile-time only.
 [package.metadata.benchmarks]

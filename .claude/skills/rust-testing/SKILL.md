@@ -142,6 +142,8 @@ Every curated package area defines these recipes, delegating to the shared
 | `fuzz`         | `cargo +nightly fuzz run` over `<crate>/fuzz/` targets (no-op if none); nightly CI only, never a PR gate. |
 | `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.              |
 
+A recipe that runs tests other than through one `_test*` call starts with `eval "$(just _test_run_scope)"`, so the run ends with one duration line ([testing-strategy](../../../docs/testing-strategy.md#how-long-a-run-took)).
+
 Run fuzzing with `just fuzz`, not a bare `cargo fuzz`. Each `<crate>/fuzz/` is
 its own Cargo workspace whose `Cargo.lock` is **not committed**: `just fuzz`
 and `fuzz-nightly` copy the root `Cargo.lock` over it first, so fuzzing uses the

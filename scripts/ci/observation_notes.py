@@ -438,9 +438,15 @@ def publish(
     collection). Remote problems are returned in [`PublishResult.error`].
     """
     ref = ref_for(environment)
-    commit = _git("rev-parse", "--verify", commit, repo=repo).stdout.strip()
-    tree = tree or _git("rev-parse", "--verify", f"{commit}^{{tree}}", repo=repo).stdout.strip()
-    existing = read_note(ref, commit, repo)
+    # One Git process answers the commit, its tree, and whether the notes ref
+    # exists; anything it could not answer is asked the ordinary way below.
+    known = local_evidence.prefetch_revisions(commit, f"{commit}^{{tree}}", ref, repo=repo)
+    commit = known.get(commit) or _git("rev-parse", "--verify", commit, repo=repo).stdout.strip()
+    tree = tree or known.get(f"{commit}^{{tree}}") or _git(
+        "rev-parse", "--verify", f"{commit}^{{tree}}", repo=repo
+    ).stdout.strip()
+    # No ref, no note: `git notes show` would only fail.
+    existing = None if ref in known and known[ref] is None else read_note(ref, commit, repo)
     current = _collection_from_note(existing, environment, commit, repo) if existing else None
     merged = collection_of(
         environment,
