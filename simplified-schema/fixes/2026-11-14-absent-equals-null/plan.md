@@ -1,9 +1,116 @@
 ---
 total_phases: 6
 created: 2026-11-14
-phase: 1
+phase: 2
 agent: codex/default
-yolo: "true"
+yolo: 'true'
+source_files_during_phase_1:
+- simplified-schema/lib/src/claims.rs
+- simplified-schema/lib/src/defaults.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/phase.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/shipped/registry.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/definitions.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/triggers/envelope.rs
+- simplified-schema/lib/src/triggers/grammar.rs
+- simplified-schema/lib/src/triggers/lint.rs
+- simplified-schema/lib/src/triggers/matcher.rs
+- simplified-schema/lib/generated/shipped.json
+- simplified-schema/schemas/schema.yaml
+- simplified-schema/schemas/yaml-schema.yaml
+- simplified-schema/schemas/schema-trigger.yaml
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/required_presence.rs
+- simplified-schema/lib/tests/l1/not_empty_values.rs
+- simplified-schema/lib/tests/l1/non_null_properties.rs
+- simplified-schema/lib/tests/l1/claimed_values.rs
+- simplified-schema/lib/tests/l1/declaration_grammar.rs
+- simplified-schema/lib/tests/l1/envelope_admission.rs
+- simplified-schema/lib/tests/l1/required_defaults.rs
+- simplified-schema/lib/tests/l1/schema_identities.rs
+- simplified-schema/lib/tests/l1/schema_target_classification.rs
+- simplified-schema/lib/tests/l1/schema_target_inspection.rs
+- simplified-schema/lib/tests/l1/template_type_results.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/schemas/about.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/shipped.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/schemas/darkmatter-config.yaml
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/not_empty_frontmatter.rs
+- darkmatter/lib/tests/l1/non_null_frontmatter.rs
+- darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/function_call_binding.rs
+- darkmatter/lib/tests/l1/kind_semantic_checks.rs
+- darkmatter/lib/tests/l1/meta_schema_phase3.rs
+- darkmatter/lib/tests/l1/recursive_schema_types.rs
+- darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+- darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+- darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+- darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+- darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+- darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+- darkmatter/lib/tests/l1/schemas_effective_presence.rs
+- darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+- darkmatter/lib/tests/l1/schemas_source_projection.rs
+- darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+- darkmatter/lib/tests/l1/shared_acyclic_selection.rs
+- darkmatter/lib/tests/l1/trigger_input_matrix.rs
+- darkmatter/lib/tests/l1/yaml_document_selection.rs
+- darkmatter/lib/tests/l1/yaml_kind_registry.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/tests/l1/standalone_stdio.rs
+- darkmatter/dmls/tests/l1/value_hovers.rs
+- darkmatter/cli/tests/l1/compose_setters.rs
+- darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+- darkmatter/cli/tests/l1/schema_validate_core_types.rs
+- claudine/lib/src/composition/inline_prompt.rs
+- claudine/lib/src/composition/schema/shipped.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/config/persist_tests.rs
+- claudine/lib/src/dispatch/loader/tests.rs
+- claudine/lib/src/steering/automatic/tests.rs
+- claudine/lib/generated/shipped.json
+- claudine/schemas/claudine-config.yaml
+- claudine/lib/tests/l1/claudine_schemas_matrix.rs
+- claudine/lib/tests/l1/config_schema_matrix.rs
+- claudine/cli/src/commands/init/mod.rs
+- claudine/cli/tests/l1/compose_presence_parity.rs
+- claudine/cli/tests/l1/inline_completion_lifecycle.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/simplified-schema/declaration-narrowing.md
+- .claude/skills/simplified-schema/schema-documents.md
+packages:
+- simplified-schema
+- darkmatter
+- darkmatter-lsp
+- darkmatter-cli
+- claudine
+- claudine-cli
 ---
 
 # Absent values, defaults, and written presence
@@ -71,14 +178,14 @@ Paths below are repository-relative. Waves are globally numbered. Tasks within a
 
 ### Wave 1
 
-- [ ] **Separate presence**
+- [x] **Separate presence**
   - Change the two `is_required` implementations and all lowering calculations under Rules 1–3. Resolve inherited/hoisted markers before presence decisions; retain pending-slot refusal.
   - Preserve declared value typing through launch/completion projection and update `schema_identities.rs` for projection revision 2.
   - Add focused tests for null/unknown required properties, nullable unions, imports, generated/eager properties, trigger match presence, and positional null behavior. Use the existing `required_defaults`, declaration, phase, and trigger modules.
 
 ### Wave 2
 
-- [ ] **Replace constraint**
+- [x] **Replace constraint**
   - Prerequisite: Wave 1. Remove `NonNull` and implement Rule 10 in shared `types.rs`/`convert.rs`; the separate wave prevents overlapping edits to those core files.
   - Cover `simplified/{grammar,mod,types,convert,serialize,narrowing,subtype,lint}.rs`, `resolve.rs`, `resolve/recursive.rs`, `schema/export.rs`, `triggers/{grammar,matcher}.rs`, declaration keyword validation, and completion catalogs. Update the existing DMLS completion assertions that explicitly list `non-null`.
   - Test unsupported old spellings, every supported `not-empty` family, invalid scalar families, merged array lower bounds, and null bypass for optional properties.
