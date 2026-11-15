@@ -95,8 +95,10 @@ four spaces, pads tables, puts a blank line around lists, and labels
 unlabeled fences `text`. It leaves directives and spacing between list
 items alone.
 
-Defaults are built in. They are never written into your frontmatter, and they
-still apply when the baseline schema is turned off.
+Defaults are built in, and they still apply when the baseline schema is
+turned off. `md clean` never writes them into your file. When a document
+writes a `style.markdown` mapping, `md compose` fills each rule the mapping
+leaves missing or `null` with its default in the composed frontmatter only.
 
 ### `frontmatter`
 

@@ -53,6 +53,7 @@ fn host_artifact(catalog_text: &str, effects: &[&str]) -> String {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::IgnoreUnprovided(vec![String::from("say")].into()),
         registry: &registry,
     };

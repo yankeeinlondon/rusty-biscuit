@@ -20,7 +20,7 @@ use crate::common::{LspFixture, LspWorkspace};
 const GLOBALS: &str = include_str!("../../../../claudine/schemas/globals.yaml");
 const ARTIFACT: &str = include_str!("../../../../claudine/schemas/globals.lifecycle.json");
 
-/// Two malformed operands in `initialize`: a quoted `gui` in the branch the
+/// Two malformed operands in `initialize`: a numeric `gui` in the branch the
 /// run would not take, and a blank target in the one it would.
 const MALFORMED: &str = "---\n\
 initialize:\n  \
@@ -28,7 +28,7 @@ initialize:\n  \
     then:\n      \
       - edit:\n          \
           file: notes.md\n          \
-          gui: \"yes\"\n    \
+          gui: 5\n    \
     else:\n      \
       - edit: \"   \"\n  \
   - skip\n\
@@ -201,7 +201,7 @@ fn assert_malformed_operands_diagnosed(host: Host) {
     let schema = schema_diagnostics(&found[0]);
     let paths: Vec<&str> = schema.iter().filter_map(|diagnostic| diagnostic["data"]["instance_path"].as_str()).collect();
     for (pointer, offset, needle) in [
-        ("/initialize/0/then/0/edit/gui", at(MALFORMED, "gui: ", "\"yes\""), "boolean literal"),
+        ("/initialize/0/then/0/edit/gui", at(MALFORMED, "gui: ", "5"), "must be a boolean"),
         ("/initialize/0/else/0/edit", at(MALFORMED, "else:", "\"   \""), "must not be blank"),
     ] {
         let diagnostic = schema

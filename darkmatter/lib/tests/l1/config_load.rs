@@ -215,13 +215,15 @@ fn byte_order_marks_crlf_comments_and_document_markers_are_admitted() {
 }
 
 #[test]
-fn a_key_with_no_value_is_an_explicit_null() {
+fn a_key_with_no_value_takes_the_default() {
     let fixture = Fixture::new();
     fixture.write_user("permissions:\nregister: []\n");
-    let error = fixture.load().unwrap().permissions().expect_err("null permissions");
-    assert_eq!(error.kind(), ConfigErrorKind::InvalidSetting);
-    assert_eq!(error.problems()[0].pointer, "/permissions");
-    assert!(error.problems()[0].message.contains("null"), "{error}");
+    let snapshot = fixture.load().unwrap();
+    let permissions = snapshot.permissions().expect("a null block reads as absent");
+    match &permissions.user {
+        PermissionsSetting::Inline(block) => assert_eq!(block.network.value, NetworkAccess::Deny),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

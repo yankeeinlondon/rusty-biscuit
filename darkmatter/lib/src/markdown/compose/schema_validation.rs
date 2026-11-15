@@ -21,11 +21,12 @@
 //! When the effective frontmatter violates the resolved schema, compose aborts
 //! with a styled [`BlockError`] that names the offending property.
 //!
-//! This stage also MUTATES the stored frontmatter. It first materializes each
-//! absent, optional, no-default top-level property owned by the document's
-//! inline or referenced SimplifiedSchema as JSON `null`, and inserts the
-//! default of each absent required property that declares one (the source
-//! file is never edited; the inserted paths are recorded as data). It then converts
+//! This stage also MUTATES the stored frontmatter. It inserts each default the
+//! schema's default preparation applies, filling a missing or `null` value
+//! (the source file is never edited; the inserted paths are recorded as data).
+//! It never writes a key the author did not write and no default supplies: a
+//! declared but unset property stays absent, and the undeclared-name warning
+//! consults the schema's declarations instead of the data. It then converts
 //! values to their declared types through the one conversion engine (e.g. the
 //! string `"yes"` against a `boolean` field becomes a real JSON bool) via
 //! [`coerce_frontmatter_with_pending`] and writes the converted top-level
@@ -49,7 +50,7 @@ use crate::markdown::compose::ComposeReport;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
 use simplified_schema::{
-    CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SchemaOriginKind, SchemaRoot,
+    CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer,
     ValidationProblem, ValidationProblemCode, ValidationProblemKind,
 };
 use simplified_schema::coerce::coerce_frontmatter_with_pending;
@@ -489,11 +490,9 @@ pub(crate) fn prepare_schemas(
 ///    the baseline: the process-cached
 ///    compiled JSON Schema when the baseline is the Darkmatter default (F9),
 ///    else `.with_baseline(...)` for a caller-supplied `SchemaRoot`.
-/// 3. Resolves the effective schema once and materializes absent, optional,
-///    no-default top-level bindings owned by a document or referenced-file
-///    SimplifiedSchema as JSON `null`.
-/// 4. Inserts the default of every absent required property the schema
-///    reports ([`EffectiveSchema::required_defaults`]) into the frontmatter
+/// 3. Resolves the effective schema once.
+/// 4. Inserts every default the schema's default preparation applies
+///    ([`EffectiveSchema::applied_defaults`]) into the frontmatter
 ///    (never into the source file, never into a composition-pending or
 ///    caller-owned key), so conversion, every later stage, and the composed
 ///    output see it.
@@ -572,10 +571,6 @@ pub(crate) fn run_with_registry(
     ensure_projection_stable(effective.as_ref(), markdown, options, projection, data)?;
 
     if let Some(effective) = effective.as_ref() {
-        materialize_optional_document_bindings(markdown, effective);
-    }
-
-    if let Some(effective) = effective.as_ref() {
         // Convert values to their declared types and write the converted
         // top-level properties back, so real types flow to every later stage
         // and into the composed output.
@@ -585,7 +580,7 @@ pub(crate) fn run_with_registry(
         // the whole schema accepts, which an absent required property would
         // prevent. A default the engine refuses is not reported here; the
         // verdict reports it as a problem at the schema default.
-        if let Ok(defaults) = effective.required_defaults(&instance)
+        if let Ok(defaults) = effective.applied_defaults(&instance)
             && insert_defaults(markdown, &defaults, &composition_pending, options, &mut inserted)
         {
             instance = build_validation_instance(markdown, options, data).0;
@@ -786,7 +781,7 @@ fn composition_pending_keys(
 }
 
 /// Writes each of `defaults` into the document's frontmatter where its path
-/// is still absent, and pushes each written path onto `inserted`. A default
+/// is still absent or `null`, and pushes each written path onto `inserted`. A default
 /// below a composition-pending key (a later stage writes that value), a
 /// caller-owned `exclude_keys` key, or `$schema` is skipped. Returns whether
 /// anything was written.
@@ -805,7 +800,8 @@ fn insert_defaults(
         if key == "$schema" || composition_pending.contains(key) || options.exclude_keys.contains(key) {
             continue;
         }
-        if applied.path.resolve_map(fm_map).value().is_some() {
+        // A default replaces a missing or `null` value, never another one.
+        if applied.path.resolve_map(fm_map).value().is_some_and(|value| !value.is_null()) {
             continue;
         }
         if simplified_schema::set_at(fm_map, &applied.path, applied.value.clone()).is_err() {
@@ -947,34 +943,6 @@ pub(crate) fn verify_projection_stability(
         }
     };
     ensure_projection_stable(effective.as_ref(), markdown, options, projection, data)
-}
-
-/// Adds composition bindings for eligible document-owned schema properties.
-///
-/// Eligibility comes from the resolved SimplifiedSchema AST and origin map,
-/// not from nullable JSON Schema shape. This keeps raw JSON Schema, root
-/// unions, nested properties, baseline properties, and trigger payloads out of
-/// the mutation boundary. Presence wins over synthesis, including explicit
-/// `null` and other falsey values; repeated schema passes are therefore
-/// idempotent.
-fn materialize_optional_document_bindings(markdown: &mut Markdown, effective: &EffectiveSchema) {
-    let Some(SchemaRoot::Single(shape)) = effective.simplified.as_ref() else {
-        return;
-    };
-
-    let eligible = shape.properties.iter().filter_map(|(name, definition)| {
-        let origin = effective.origins.get(name)?;
-        let document_owned = matches!(
-            origin.kind,
-            SchemaOriginKind::Document | SchemaOriginKind::ReferencedFile
-        );
-        (document_owned && !definition.is_required() && !definition.has_default())
-            .then(|| name.clone())
-    });
-    let fm_map = markdown.frontmatter_mut().as_map_mut();
-    for name in eligible {
-        fm_map.entry(name).or_insert(serde_json::Value::Null);
-    }
 }
 
 pub(crate) fn prepare_caller_projection(
@@ -2589,42 +2557,21 @@ mod tests {
     }
 
     #[test]
-    fn document_optional_bindings_materialize_before_coercion_and_are_idempotent() {
+    fn absent_optional_document_properties_are_never_written_and_reruns_are_stable() {
         let mut md = md_with_schema("$schema:\n  first: string\n  count: number\n");
         let options = ComposeOptions::new();
-        let effective = DarkmatterSchemas::new(
-            crate::markdown::compose::test_request(options.clone()).resolution_context().clone(),
-        )
-            .effective_for(&md)
-            .unwrap()
-            .unwrap();
-        let expected_order = match effective.simplified.as_ref().unwrap() {
-            SchemaRoot::Single(shape) => {
-                shape.properties.keys().map(String::as_str).collect::<Vec<_>>()
-            }
-            SchemaRoot::Union(_) => panic!("expected a single schema shape"),
-        };
 
         assert!(run(&mut md, &options).is_ok());
         let first_pass = md.frontmatter().as_map().clone();
-        assert_eq!(first_pass.get("first"), Some(&serde_json::Value::Null));
-        assert_eq!(first_pass.get("count"), Some(&serde_json::Value::Null));
-        assert_eq!(
-            first_pass
-                .keys()
-                .filter(|key| matches!(key.as_str(), "first" | "count"))
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            expected_order,
-            "bindings follow resolved SimplifiedSchema declaration order"
-        );
+        assert!(!first_pass.contains_key("first"), "a declared name is not a written key");
+        assert!(!first_pass.contains_key("count"));
 
         assert!(run(&mut md, &options).is_ok());
         assert_eq!(md.frontmatter().as_map(), &first_pass);
     }
 
     #[test]
-    fn referenced_document_optional_binding_materializes() {
+    fn a_referenced_schema_s_absent_optional_property_is_never_written() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("schema.yaml"), "$schema:\n  optional: string\n")
             .unwrap();
@@ -2633,10 +2580,7 @@ mod tests {
         let options = ComposeOptions::new().with_source_file(&doc_path);
 
         assert!(run(&mut md, &options).is_ok());
-        assert_eq!(
-            md.frontmatter().as_map().get("optional"),
-            Some(&serde_json::Value::Null)
-        );
+        assert!(!md.frontmatter().as_map().contains_key("optional"));
     }
 
     #[test]
@@ -2665,7 +2609,7 @@ mod tests {
     }
 
     #[test]
-    fn non_document_owned_and_nested_properties_do_not_materialize() {
+    fn baseline_root_union_and_nested_properties_are_never_written() {
         let mut baseline_only = md_with_schema("title: hi\n");
         let baseline = SchemaRoot::Single({
             let mut shape = SchemaShape::new();
@@ -2700,17 +2644,17 @@ mod tests {
     }
 
     #[test]
-    fn defaulted_document_property_does_not_materialize() {
+    fn defaulted_document_property_takes_its_default_rather_than_null() {
         let mut md = md_with_schema(
             "$schema:\n  mode:\n    - 'string(default(auto))'\n    - 'literal(auto; default(auto))'\n",
         );
 
         assert!(run(&mut md, &ComposeOptions::new()).is_ok());
-        assert!(!md.frontmatter().as_map().contains_key("mode"));
+        assert_eq!(md.frontmatter().as_map().get("mode"), Some(&serde_json::json!("auto")));
     }
 
     #[test]
-    fn raw_json_schema_property_does_not_materialize() {
+    fn a_raw_json_schema_property_is_never_written() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("schema.json"),
@@ -2726,7 +2670,7 @@ mod tests {
     }
 
     #[test]
-    fn trigger_payload_property_does_not_materialize() {
+    fn a_trigger_payload_property_is_never_written() {
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".git")).unwrap();
         std::fs::create_dir_all(repo.path().join("schemas")).unwrap();
@@ -2757,12 +2701,8 @@ mod tests {
 
         assert!(run(&mut md, &options).is_ok());
         let map = md.frontmatter().as_map();
-        assert_eq!(map.get("optional"), Some(&serde_json::Value::Null));
-        assert_eq!(
-            map.len(),
-            3,
-            "only $schema, title, and the document binding remain"
-        );
+        assert!(!map.contains_key("optional"));
+        assert_eq!(map.len(), 2, "only $schema and title remain");
     }
 
     #[test]

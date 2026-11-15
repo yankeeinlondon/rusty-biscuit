@@ -1,6 +1,6 @@
-//! A required property with a resolved `default(...)` is present while
-//! editing: expressions read it as non-null and no missing-property
-//! diagnostic names it. Hover shows the default on the declaration and on a
+//! A property with a resolved `default(...)`, required or not, is present
+//! while editing when its value is missing or `null`: expressions read it as
+//! non-null and no missing-property diagnostic names it. Hover shows the default on the declaration and on a
 //! use, and a default the schema refuses is reported at its declaration,
 //! never at a position in the frontmatter that no text holds.
 //!
@@ -101,39 +101,70 @@ fn findings(diagnostics: &[Value], codes: &[&str]) -> Vec<(u64, String)> {
     found
 }
 
-/// `n` is required with a default, `o` optional with one, `r` required
-/// without one; none is set.
+/// `n` is required with a default, `o` optional with one, `w` required with
+/// one and written `null`, `p` optional without one, `r` required without
+/// one; only `w` is set.
 const PRESENCE: &str = "---
 $schema:
   n: number(required; default(3))
   o: number(default(3))
+  w: number(required; default(3))
+  p: number
   r: number(required)
+w: null
 ---
 
 n {{ min(n, 5) }}
 o {{ min(o, 5) }}
+w {{ min(w, 5) }}
+p {{ min(p, 5) }}
 r {{ min(r, 5) }}
 ";
 
 #[test]
-fn a_required_default_is_present_and_the_controls_are_still_diagnosed() {
+fn a_defaulted_property_is_present_and_the_controls_are_still_diagnosed() {
     let workspace = LspWorkspace::new();
     let mut session = Session::open(&workspace, PRESENCE);
     let diagnostics = session.diagnostics();
 
-    let (o_line, _) = position(PRESENCE, "o {{", 0);
+    let (p_line, _) = position(PRESENCE, "p {{", 0);
     assert_eq!(
         findings(&diagnostics, &[UNCERTAIN]),
-        [(o_line, UNCERTAIN.to_string())],
-        "only the optional default may be null: {diagnostics:#?}"
+        [(p_line, UNCERTAIN.to_string())],
+        "a default fills a missing or null value, required or not; only `p` may be null: {diagnostics:#?}"
     );
     let missing: Vec<&str> = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic["code"] == json!(MISSING_REQUIRED))
         .map(|diagnostic| diagnostic["message"].as_str().unwrap())
         .collect();
-    assert_eq!(missing, ["\"r\" is a required property"], "the default answers `n`: {diagnostics:#?}");
+    assert_eq!(missing, ["\"r\" is a required property"], "the default answers `n` and `w`: {diagnostics:#?}");
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic["data"]["instance_path"] != json!("/w")),
+        "the written null takes the default: {diagnostics:#?}"
+    );
     session.shutdown();
+}
+
+/// An optional property's default is used now that a missing value takes it,
+/// so a default its definition refuses is reported at the declaration. The
+/// session publishes diagnostics only; the document on disk is never edited.
+#[test]
+fn a_refused_optional_default_is_reported_and_the_document_is_unchanged() {
+    let text = "---\n$schema:\n  title: string\n  bad: number(min(5); default(3))\ntitle: Plan\n---\n\nbody\n";
+    let workspace = LspWorkspace::new();
+    let mut session = Session::open(&workspace, text);
+    let diagnostics = session.diagnostics();
+
+    let refused: Vec<&Value> =
+        diagnostics.iter().filter(|diagnostic| diagnostic["code"] == json!(CONSTRAINT)).collect();
+    assert_eq!(refused.len(), 1, "{diagnostics:#?}");
+    let declaration = "number(min(5); default(3))";
+    let (line, start) = position(text, declaration, 0);
+    assert_eq!(refused[0]["range"]["start"], json!({ "line": line, "character": start }), "{refused:#?}");
+    assert_eq!(refused[0]["data"]["instance_path"], json!("/bad"));
+    session.shutdown();
+    assert_eq!(std::fs::read_to_string(workspace.path().join("doc.md")).unwrap(), text);
 }
 
 #[test]

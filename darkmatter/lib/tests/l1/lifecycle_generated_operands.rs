@@ -923,6 +923,7 @@ fn parser_accepts(action: &str) -> bool {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: &registry,
     };

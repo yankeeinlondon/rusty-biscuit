@@ -110,6 +110,7 @@ fn the_strict_profile_still_runs_every_verb_and_rejects_unknown_ones() {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: crate::lifecycle::registry::tests::agent_host(),
     };

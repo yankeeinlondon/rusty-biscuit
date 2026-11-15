@@ -39,10 +39,12 @@
 //! reads as templates ([`template_operands`]): a `set` value written as a
 //! whole-value `$( … )` command, `no_error`, and `break.code` are not.
 //! `edit`'s target and flags are also judged by the parser's own rules
-//! ([`edit_file_problem`](crate::lifecycle::edit_file_problem),
-//! [`edit_flag_problem`](crate::lifecycle::edit_flag_problem)): the
-//! conversion engine reads a YAML number as text and `"yes"` as `true`,
-//! which the parser refuses.
+//! ([`edit_target_problem`](crate::lifecycle::edit_target_problem),
+//! [`edit_flag_problem`](crate::lifecycle::edit_flag_problem)), which convert
+//! as the schema does: a YAML number or boolean target names a file by its
+//! text, and boolean-like flag text such as `"yes"` is a flag. What remains
+//! refused is a blank target, `edit: null`, and a flag that is a number, a
+//! list, or a template.
 //!
 //! A value whose spelling the type does not offer (a long form where only
 //! short forms are typed, as in a bundle) and a long form whose keys select no
@@ -60,7 +62,7 @@ use serde_json::{Map, Value};
 use super::simplified::{DARKMATTER_OPERANDS_KEYWORD, OperandForm, operands_verb};
 use super::{JsonPointer, ValidationProblem, ValidationProblemCode, ValidationProblemKind};
 use crate::lifecycle::{
-    ActionCall, OperandLocation, OperandVerdict, action_call, action_value_to_expr, edit_file_problem, edit_flag_problem, operand_form,
+    ActionCall, OperandLocation, OperandVerdict, action_call, action_value_to_expr, edit_flag_problem, edit_target_problem, operand_form,
     template_operands, validate_action_operands_with,
 };
 use simplified_schema::coercion::PathSegment;
@@ -83,10 +85,9 @@ pub(super) struct BoundOperands {
     refused_targets: Vec<RefusedTarget>,
 }
 
-/// An `edit` operand the lifecycle parser refuses although the conversion
-/// engine would accept it: a target that is a YAML number or boolean (read as
-/// text) or blank, or a flag that is not a literal boolean (`"yes"` reads as
-/// `true`).
+/// An `edit` operand the lifecycle parser refuses: a blank target, a missing
+/// one (`edit: null`), or a flag the shared conversion does not read as a
+/// boolean (a number, a list, a template).
 #[derive(Debug)]
 struct RefusedTarget {
     at: Vec<PathSegment>,
@@ -156,13 +157,12 @@ impl BoundOperands {
             {
                 let path = operand_path(&site.path, &location);
                 if let Some(found) = value_at(stored, &path)
-                    && let Ok(target) = action_value_to_expr(found)
-                    && let Some(message) = edit_file_problem(&target)
+                    && let Some((message, mistyped)) = edit_target_problem(found)
                 {
                     bound.refused_targets.push(RefusedTarget {
                         at: path,
                         message: message.to_string(),
-                        mistyped: !found.is_string(),
+                        mistyped,
                     });
                 }
             }

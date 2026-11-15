@@ -87,9 +87,11 @@ fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
         classify_target_nullability(&parse("optional").unwrap(), Some(&effective), &missing),
         "optional",
     );
-    assert_nullable(
+    // Composition fills a missing or `null` value with its default, so a
+    // defaulted optional property is never null when the target is read.
+    assert_eq!(
         classify_target_nullability(&parse("fm.defaulted").unwrap(), Some(&effective), &missing),
-        "defaulted",
+        TargetNullability::NonNullable,
     );
     assert_eq!(
         classify_target_nullability(&parse("required").unwrap(), Some(&effective), &missing),

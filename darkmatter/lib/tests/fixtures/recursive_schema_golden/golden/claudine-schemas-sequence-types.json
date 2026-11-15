@@ -3134,7 +3134,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3169,7 +3170,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3204,7 +3206,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3239,7 +3242,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3274,7 +3278,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3309,7 +3314,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3344,7 +3350,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3379,7 +3386,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3414,7 +3422,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3449,7 +3458,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -3475,7 +3485,8 @@
             {
               "type": "boolean"
             }
-          ]
+          ],
+          "default": false
         }
       }
     },
@@ -3543,7 +3554,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5283,7 +5295,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               }
             }
@@ -5326,7 +5339,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "x-darkmatter-operands": "error-long"
@@ -5368,7 +5382,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5463,7 +5478,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "x-darkmatter-operands": "retry-long"
@@ -5513,7 +5529,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5558,7 +5575,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5618,7 +5636,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "x-darkmatter-operands": "break-long"
@@ -5662,7 +5681,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [

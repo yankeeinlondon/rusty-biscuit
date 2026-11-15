@@ -186,8 +186,10 @@ types:
             word-wrap: *style-word-wrap
             line-numbers: "boolean -> Whether code blocks show a line-number gutter."
 
-        # Cleanup formatting rules (`md clean`, DMLS formatting). Defaults are
-        # runtime rule defaults, never written into frontmatter; the runtime
+        # Cleanup formatting rules (`md clean`, DMLS formatting). When a
+        # document writes `style.markdown`, composition fills each missing or
+        # `null` rule below with its default; an unwritten `style` or
+        # `markdown` stays absent. The runtime
         # validator (`markdown::cleanup::rules`) is authoritative. It binds
         # each value against these declarations through the same conversion
         # engine as schema validation (so `"80"` reads as `80`), which keeps

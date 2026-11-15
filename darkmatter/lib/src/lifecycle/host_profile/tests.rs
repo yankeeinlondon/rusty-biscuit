@@ -41,6 +41,7 @@ fn options(registry: &EventRegistry) -> LifecycleParseOptions<'_> {
     LifecycleParseOptions {
         is_known_effect: &|name| name == "chime",
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::IgnoreUnprovided((&["say"]).into()),
         registry,
     }
@@ -142,6 +143,7 @@ fn owned_globals_and_ignored_verbs_round_trip_with_unchanged_bytes() {
     let options = LifecycleParseOptions {
         is_known_effect: &|name| name == "chime",
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::IgnoreUnprovided(vec![String::from("say")].into()),
         registry: &owned,
     };

@@ -1,7 +1,8 @@
-//! A required property with a `default(...)` that a document leaves out:
-//! composition writes the default into the composed frontmatter before
-//! anything reads it, validation-only APIs report the default without
-//! inserting it, and expression typing treats the property as present.
+//! A property with a `default(...)`, required or not, whose value a document
+//! leaves missing or `null`: composition writes the default into the composed
+//! frontmatter before anything reads it, validation-only APIs report the
+//! default without inserting it, and expression typing treats the property as
+//! present.
 //!
 //! Every fixture lives in its own temporary directory and every request is
 //! anchored there.
@@ -128,25 +129,23 @@ fn composing_never_edits_the_source_file() {
 }
 
 #[test]
-fn an_explicit_null_is_judged_by_the_type_and_never_defaulted() {
+fn a_written_null_takes_the_default() {
     let dir = TempDir::new().unwrap();
 
-    let failure = try_compose(dir.path(), "---\n$schema:\n  x: string(required; default(hello))\nx: null\n---\n{{ x }}\n")
-        .expect_err("null is not a string");
+    let composed = compose(dir.path(), "---\n$schema:\n  x: string(required; default(hello))\nx: null\n---\n{{ x }}\n");
 
-    let problems = schema_problems(&failure);
-    assert_eq!(problems.len(), 1, "{problems:?}");
-    assert_eq!(problems[0].path, "/x");
-    assert_eq!(problems[0].code, ValidationProblemCode::TypeMismatch);
+    assert_eq!(composed.frontmatter().as_map().get("x"), Some(&json!("hello")));
+    assert!(composed.content().contains("hello"), "{}", composed.content());
 }
 
 #[test]
-fn an_optional_default_is_never_inserted() {
+fn an_optional_default_is_inserted() {
     let dir = TempDir::new().unwrap();
 
-    let composed = compose(dir.path(), "---\n$schema:\n  x: string(default(hello))\n---\nBody\n");
+    let composed = compose(dir.path(), "---\n$schema:\n  x: string(default(hello))\n---\n{{ x }}\n");
 
-    assert!(!composed.frontmatter().as_map().contains_key("x"), "{:?}", composed.frontmatter().as_map());
+    assert_eq!(composed.frontmatter().as_map().get("x"), Some(&json!("hello")), "{:?}", composed.frontmatter().as_map());
+    assert!(composed.content().contains("hello"), "{}", composed.content());
 }
 
 #[test]
@@ -159,8 +158,73 @@ fn a_nested_default_fills_a_present_parent_only() {
 
     assert_eq!(present.frontmatter().as_map().get("server"), Some(&json!({ "port": 80, "name": "web" })));
     assert!(present.content().contains("web"), "{}", present.content());
-    // An absent optional parent stays absent (materialized as `null`).
-    assert!(!matches!(absent.frontmatter().as_map().get("server"), Some(Value::Object(_))));
+    // An absent optional parent stays absent: no key is written for it.
+    assert!(!absent.frontmatter().as_map().contains_key("server"), "{:?}", absent.frontmatter().as_map());
+}
+
+/// Composes `content` as `doc.md` in `dir` under the Darkmatter baseline.
+fn compose_with_baseline(dir: &Path, content: &str) -> Markdown {
+    try_compose_at(dir, "doc.md", content, ComposeOptions::with_darkmatter_baseline_schema)
+        .unwrap_or_else(|failure| panic!("{content:?} failed: {}", failure.error))
+        .0
+}
+
+/// The baseline's `hash.kind` default fills a written `hash` mapping, and the
+/// stored-hash reader then judges the completed value: the default supplied
+/// `kind`, so what remains missing is `value`. An unwritten or `null` `hash`
+/// gains nothing and reads as no stored hash.
+#[test]
+fn a_written_hash_mapping_gains_its_kind_default() {
+    let dir = TempDir::new().unwrap();
+    let options = darkmatter::markdown::hash::MdHashOptions::default();
+
+    let written = compose_with_baseline(dir.path(), "---\nhash: {}\n---\nBody\n");
+    assert_eq!(written.frontmatter().as_map().get("hash"), Some(&json!({ "kind": "simple" })));
+    let error = written.stored_hash(&options).expect_err("a hash with no value is malformed");
+    assert!(error.to_string().contains("'value'"), "{error}");
+
+    let absent = compose_with_baseline(dir.path(), "---\ntitle: T\n---\nBody\n");
+    assert!(!absent.frontmatter().as_map().contains_key("hash"));
+    assert!(absent.stored_hash(&options).unwrap().is_none());
+
+    let null = compose_with_baseline(dir.path(), "---\nhash: null\n---\nBody\n");
+    assert_eq!(null.frontmatter().as_map().get("hash"), Some(&Value::Null));
+    assert!(null.stored_hash(&options).unwrap().is_none());
+}
+
+/// A written `style.markdown` mapping gains every cleanup rule default, a
+/// written rule and a written `null` rule keep (or take) theirs, and the
+/// cleanup rule reader resolves the completed mapping to exactly the runtime
+/// defaults plus the written rule. An unwritten `style` gains nothing.
+#[test]
+fn a_written_markdown_style_mapping_gains_the_cleanup_defaults() {
+    use darkmatter::markdown::cleanup::rules::{ResolvedMarkdownRules, RuleSource, resolve, rules_from_json};
+
+    let dir = TempDir::new().unwrap();
+    let composed = compose_with_baseline(
+        dir.path(),
+        "---\nstyle:\n  markdown:\n    indentation: 2\n    unwrap: null\n---\nBody\n",
+    );
+    let markdown = &composed.frontmatter().as_map()["style"]["markdown"];
+    assert_eq!(markdown["indentation"], json!(2), "{markdown}");
+    assert_eq!(markdown["unwrap"], json!(false), "a written null takes the default: {markdown}");
+    assert_eq!(markdown["default-language"], json!("text"), "{markdown}");
+    assert_eq!(markdown["table-layout"], json!(true), "{markdown}");
+
+    let overrides = rules_from_json(markdown).expect("the completed rules read back");
+    let resolved = resolve(&Default::default(), Some(&overrides), None);
+    let defaults = ResolvedMarkdownRules::defaults();
+    assert_eq!(resolved.indentation.source, RuleSource::Document);
+    assert_ne!(resolved.indentation.value, defaults.indentation.value);
+    assert_eq!(resolved.unwrap.value, defaults.unwrap.value);
+    assert_eq!(resolved.default_language.value, defaults.default_language.value);
+    assert_eq!(resolved.table_layout.value, defaults.table_layout.value);
+    assert_eq!(resolved.list_item_padding.value, defaults.list_item_padding.value);
+
+    let unwritten = compose_with_baseline(dir.path(), "---\ntitle: T\n---\nBody\n");
+    assert!(!unwritten.frontmatter().as_map().contains_key("style"));
+    let empty_style = compose_with_baseline(dir.path(), "---\nstyle: {}\n---\nBody\n");
+    assert_eq!(empty_style.frontmatter().as_map().get("style"), Some(&json!({})), "no `markdown` is created");
 }
 
 /// A repository whose trigger matches `stage: draft` and requires `level`
@@ -216,7 +280,7 @@ fn an_invalid_default_is_reported_at_the_schema_default_without_an_authored_posi
     assert_eq!((problem.line, problem.column), (None, None), "{problem:?}");
     assert_eq!(problem.path, "/n");
     assert_eq!(problem.schema_path.as_ref().map(|pointer| pointer.as_pointer_string()).as_deref(), Some("/properties/n/default"));
-    assert!(problem.message.contains("default of required property `n`"), "{}", problem.message);
+    assert!(problem.message.contains("default of property `n`"), "{}", problem.message);
 }
 
 #[test]
@@ -276,18 +340,49 @@ fn yaml_document_validation_reports_defaults() {
     assert_eq!(validation.report.defaults, [applied("retries", json!(3))]);
 }
 
+/// Whole-YAML validation follows the same rule as frontmatter: an optional
+/// default fills a missing value, a written `null` takes its default, a
+/// required `null` without one is judged by type, and the file is untouched.
+#[test]
+fn yaml_document_validation_defaults_missing_and_null_values() {
+    let dir = TempDir::new().unwrap();
+    write(
+        dir.path(),
+        "settings-schema.yaml",
+        "kind: schema\n$schema:\n  name: string(required)\n  retries: number(default(3))\n  mode: string(default(auto))\n",
+    );
+    let schemas = DarkmatterSchemas::new(context_at(dir.path()));
+
+    let text = "$schema: ./settings-schema.yaml\nname: app\nmode: null\n";
+    let path = write(dir.path(), "settings.yaml", text);
+    let YamlOutcome::Validated(validation) = schemas.validate_yaml_document(text, &path).expect("selects") else {
+        panic!("a schema applies");
+    };
+    assert!(validation.report.valid, "{:?}", validation.report.problems);
+    assert_eq!(validation.report.defaults, [applied("retries", json!(3)), applied("mode", json!("auto"))]);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+
+    let text = "$schema: ./settings-schema.yaml\nname: null\n";
+    let path = write(dir.path(), "null-name.yaml", text);
+    let YamlOutcome::Validated(validation) = schemas.validate_yaml_document(text, &path).expect("selects") else {
+        panic!("a schema applies");
+    };
+    assert!(!validation.report.valid);
+    assert!(validation.report.problems.iter().any(|problem| problem.path == "/name"), "{:?}", validation.report.problems);
+}
+
 fn checks(declared: &DeclaredTypes<'_>, expression: &str) -> Vec<CallCheck> {
     let expr = parse_spanned(expression).expect("the expression parses");
     check_expression_calls(&expr, &TypeScope::unguarded(declared))
 }
 
 #[test]
-fn a_required_default_is_typed_present_and_an_optional_default_is_not() {
+fn a_defaulted_property_is_typed_present_whether_or_not_it_is_required() {
     let dir = TempDir::new().unwrap();
     let path = write(
         dir.path(),
         "doc.md",
-        "---\n$schema:\n  count: number(required; default(4))\n  spare: number(default(4))\n---\nBody\n",
+        "---\n$schema:\n  count: number(required; default(4))\n  spare: number(default(4))\n  bare: number\n---\nBody\n",
     );
     let effective = DarkmatterSchemas::new(context_at(dir.path()))
         .effective_for(&markdown_at(&path))
@@ -297,10 +392,14 @@ fn a_required_default_is_typed_present_and_an_optional_default_is_not() {
     let scope = TypeScope::unguarded(&declared);
     let type_of = |name: &str| scope.type_of_expr(&parse(name).expect("parses")).expect("a subject").shape().clone();
 
+    // Composition fills a missing or `null` value with its default, required
+    // or not, so only the property without a default reads as `null`.
     assert!(!type_of("count").admits_null());
-    assert!(type_of("spare").admits_null());
+    assert!(!type_of("spare").admits_null());
+    assert!(type_of("bare").admits_null());
     assert_eq!(checks(&declared, "min(count, 5)")[0].category(), ArgumentCategory::Compatible);
-    assert_eq!(checks(&declared, "min(spare, 5)")[0].category(), ArgumentCategory::NullableMatch);
+    assert_eq!(checks(&declared, "min(spare, 5)")[0].category(), ArgumentCategory::Compatible);
+    assert_eq!(checks(&declared, "min(bare, 5)")[0].category(), ArgumentCategory::NullableMatch);
 }
 
 #[test]

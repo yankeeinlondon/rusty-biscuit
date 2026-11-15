@@ -269,31 +269,34 @@ expression-typed field is still accepted lexically. See
 
 Validation-only APIs are passive and read-only. Composition may coerce declared
 scalar types and normalize a successful eager `file(eager)` value to its
-repo-relative path. At the same schema seam, after first-pass frontmatter
-interpolation and before coercion, composition materializes an absent optional,
-no-default top-level property as `null` only when the winning declaration comes
-from the document's inline or referenced SimplifiedSchema. Baseline and trigger
-properties, raw JSON Schema, root unions, nested properties, required
-properties, and defaulted properties do not materialize. A compose run with no
-effective schema and all validation-only APIs remain non-mutating. Repeated
-schema passes are idempotent, and present values are preserved exactly.
+repo-relative path. At the same schema seam composition writes each default
+`applied_defaults` reports (a missing or `null` value, required or not) and
+nothing else: a declared but unwritten property never gains a `null` key, so a
+transcluded child's `required` sees only what was written. The undeclared-name
+warning asks `EffectiveSchema::declares_top_level_property`, never the data.
+Never reintroduce synthetic bindings. A compose run with no effective schema
+and all validation-only APIs remain non-mutating. Repeated schema passes are
+idempotent, and present values are preserved exactly. Expression typing
+(`scope/shape.rs::Shape::from_definition`) drops `null` for a required
+property or one with a non-null literal default.
 
-Required defaults: `EffectiveSchema::validate_instance` judges the candidate
-`simplified_schema::defaults::prepare_defaults` completes (soft paths:
+Defaults: `EffectiveSchema::validate_instance` judges the candidate
+`simplified_schema::defaults::prepare_defaults` completes from the schema's
+`DefaultPlan` (`default_plan()`, memoized per layered identity; soft paths:
 defaults, conversion, defaults again, as `Prepared::validate_soft`;
 `converted_candidate`/`complete`), with this schema's validators, nested
 templates, and `SHARED_VALIDATOR_CACHE`; never add a second defaulting walk.
 `ValidationReport::defaults` lists them; the caller's value is never touched
-(`data_copy` excludes defaults, so `md set` never writes one). An engine error
+(`data_copy` converts the default-completed candidate, then withdraws each applied default, so `md set` never writes one). An engine error
 becomes one `ConstraintViolation` problem at the property, `schema_path` = the
 default's pointer, no line/column (`default_problem`). Composition
-(`run_with_registry`) inserts `EffectiveSchema::required_defaults` before
+(`run_with_registry`) inserts `EffectiveSchema::applied_defaults` (every missing or `null` property with a default, required or not) before
 conversion in every pass (skipping composition-pending, `exclude_keys`, and
 present paths), then loops verdict → insert while a re-matched trigger reports
 more; it returns the inserted paths and the pipeline marks them data in
 `FrontmatterProvenance`. Pass 1 interpolation runs before this, so only pass 2
-and later see a default. Presence typing needed no change: `PropertyDef::is_required`
-already makes a required property non-null whether written or defaulted.
+and later see a default. Preparation runs on every value, valid or not; never
+reintroduce an "accepted as written" shortcut before it.
 
 Runtime consumers use `SchemaPhase::Launch` and `SchemaPhase::Completion` on
 an already-resolved `EffectiveSchema`. `required` and `eager` are independent
@@ -1002,8 +1005,8 @@ References; Choosing an Arm: Reporting versus Changing Data).
   default under `[]` fails as `ScalarDefault`. The Rust API can supply an
   actual JSON-array arm default, which hoists to the list; inherited and
   use-site defaults must agree under shared numeric normalization. This adds
-  no list-valued default spelling to the grammar. An optional property's
-  default is never inserted (required ones are; see "Required defaults").
+  no list-valued default spelling to the grammar. A default fills a missing
+  or `null` value whether or not the property is required.
 - Representation: a bare `U` stays `PropertyDef::Union`. A postfixed reference
   is `PropertyDef::Single(atom)` with `atom.ty == TypeExpr::Union(arms)`
   and `atom.is_array` for `U[]`; the parser produces the same atom for the

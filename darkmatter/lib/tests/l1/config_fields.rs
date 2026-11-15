@@ -4,7 +4,9 @@
 //! `file-read` gets the full shape walk of the non-null string-list
 //! validator; `shell-commands` and `register` share that shape and get a
 //! control plus one invalid case each. Every invalid shape is a located
-//! error; none is recovered with a default.
+//! error; none is recovered with a default. A missing key and an explicit
+//! `null` are the same value, so a `null` setting takes its scope's default
+//! (`a_null_setting_takes_its_scope_default`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -122,8 +124,6 @@ fn an_authored_file_read_list_replaces_the_default() {
 #[test]
 fn every_wrong_file_read_shape_is_a_located_error() {
     for (text, pointer, line) in [
-        ("permissions:\n  file-read:\n", "/permissions/file-read", 2),
-        ("permissions:\n  file-read: null\n", "/permissions/file-read", 2),
         ("permissions:\n  file-read: ./*.md\n", "/permissions/file-read", 2),
         ("permissions:\n  file-read: {a: b}\n", "/permissions/file-read", 2),
         ("permissions:\n  file-read: 3\n", "/permissions/file-read", 2),
@@ -229,8 +229,25 @@ fn every_invalid_shell_rule_is_a_located_error() {
     }
     let (_, pointer, _) = refused(Scope::User, "permissions:\n  shell-commands: [prefix ls, 3]\n");
     assert_eq!(pointer, "/permissions/shell-commands/1");
-    let (_, pointer, _) = refused(Scope::User, "permissions:\n  shell-commands: null\n");
-    assert_eq!(pointer, "/permissions/shell-commands");
+}
+
+#[test]
+fn a_null_setting_takes_its_scope_default() {
+    for text in ["permissions:\n  file-read:\n", "permissions:\n  file-read: null\n"] {
+        let user = block(Scope::User, text);
+        assert_eq!(patterns(&user).len(), 10, "{text}");
+        assert!(patterns(&user).iter().all(|pattern| pattern.starts_with("./")), "{text}");
+        let repository = block(Scope::Repository, text);
+        assert!(patterns(&repository).iter().all(|pattern| pattern.starts_with("&**/")), "the repository's own default: {text}");
+    }
+    let shell = block(Scope::User, "permissions:\n  shell-commands: null\n");
+    assert!(shell.shell_commands.value.is_empty());
+    let network = block(Scope::User, "permissions:\n  network: null\n");
+    assert_eq!(network.network.value, NetworkAccess::Deny);
+    let whole = block(Scope::User, "permissions: null\n");
+    assert_eq!((patterns(&whole).len(), whole.network.value), (10, NetworkAccess::Deny));
+    let (snapshot, _) = load(Scope::User, "register: null\n", HashMap::new());
+    assert!(snapshot.registrations().entries.is_empty() && snapshot.registrations().findings.is_empty());
 }
 
 // ---- network --------------------------------------------------------------------
@@ -242,7 +259,7 @@ fn network_defaults_to_deny_and_refuses_every_other_shape() {
     let allow = block(Scope::User, "permissions:\n  network: allow\n");
     assert_eq!((allow.network.value, allow.network.authored), (NetworkAccess::Allow, true));
 
-    for value in ["null", "\"\"", "true", "[allow]", "maybe", "Allow"] {
+    for value in ["\"\"", "true", "[allow]", "maybe", "Allow"] {
         let text = format!("permissions:\n  network: {value}\n");
         let (error, pointer, line) = refused(Scope::User, &text);
         assert_eq!((pointer.as_str(), line), ("/permissions/network", Some(2)), "{value}: {error}");
@@ -280,7 +297,6 @@ fn every_invalid_permissions_value_blocks_permissions_with_a_located_error() {
     for (text, kind, reason) in [
         ("permissions: \"  \"\n", ConfigErrorKind::InvalidReference, "blank"),
         ("permissions: https://example.com/config.yaml\n", ConfigErrorKind::InvalidReference, "remote"),
-        ("permissions: null\n", ConfigErrorKind::InvalidSetting, "null"),
         ("permissions: 3\n", ConfigErrorKind::InvalidSetting, "mapping or a file reference"),
         ("permissions: [a]\n", ConfigErrorKind::InvalidSetting, "mapping or a file reference"),
         ("permissions:\n  file-reads: []\n", ConfigErrorKind::InvalidSetting, "`file-reads`"),
@@ -337,7 +353,7 @@ fn an_invalid_register_entry_omits_only_that_entry_and_leaves_permissions_usable
 
 #[test]
 fn an_invalid_register_list_is_one_finding_and_registers_nothing() {
-    for value in ["null", "./host.yaml", "{a: b}", "[1, 2]"] {
+    for value in ["./host.yaml", "{a: b}", "[1, 2]"] {
         let text = format!("register: {value}\n");
         let (snapshot, _) = load(Scope::User, &text, HashMap::new());
         assert!(snapshot.registrations().entries.is_empty(), "{value}");

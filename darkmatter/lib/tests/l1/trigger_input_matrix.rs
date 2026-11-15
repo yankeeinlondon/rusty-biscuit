@@ -359,7 +359,7 @@ matrix! {
     payload_wrong_type: Payload / WrongType => Edit::Replace("$schema: claudine.yaml\n", "$schema: 42\n"), Expect::Fails(&["`$schema`", "got number"]);
     payload_one_wrong: Payload / OneWrong => Edit::Replace("$schema: claudine.yaml\n", "$schema:\n  provider: string(required)\n  region: 42\n"), Expect::Fails(&["region"]);
     payload_every_wrong: Payload / EveryWrong => Edit::Replace("$schema: claudine.yaml\n", "$schema:\n  provider: 42\n  region: true\n"), Expect::Fails(&["provider"]);
-    payload_empty: Payload / Empty => Edit::Replace("$schema: claudine.yaml\n", "$schema: {}\n"), Expect::Loads(CONTROL_SELECTED, Payload::Nothing);
+    payload_empty: Payload / Empty => Edit::Replace("$schema: claudine.yaml\n", "$schema: {}\n"), Expect::Fails(&["`$schema`", "must not be empty"]);
     payload_duplicate: Payload / Duplicate => Edit::InsertAfter("$schema: claudine.yaml", "$schema: claudine.yaml"), Expect::Fails(DUPLICATE);
     payload_trailing_yaml: Payload / TrailingYaml => Edit::InsertAfter("$schema: claudine.yaml", "notes: a: b"), Expect::FailsOnInsertedLine;
     payload_reference_list: Payload / Extra => Edit::Replace("$schema: claudine.yaml\n", "$schema: [claudine.yaml, 42]\n"), Expect::Fails(&[]);
@@ -469,7 +469,7 @@ const TABLE: &[(Shape, [&str; 11])] = &[
     (Shape::WrongType, ["E", "E", "E", "E", "E", "E", "E", "E", "E", "E", "E"]),
     (Shape::OneWrong, ["N/A", "E", "E", "E", "E", "E", "E", "N/A", "E", "E", "E"]),
     (Shape::EveryWrong, ["N/A", "E", "E", "E", "E", "E", "E", "N/A", "E", "E", "E"]),
-    (Shape::Empty, ["non-trigger empty string", "E", "preserve explicit empty schema", "E", "E", "E", "E", "E", "E", "E", "E"]),
+    (Shape::Empty, ["non-trigger empty string", "E", "E", "E", "E", "E", "E", "E", "E", "E", "E"]),
     (Shape::Duplicate, ["E", "E", "E", "E", "E", "E", "E", "E", "E", "E", "E"]),
     (Shape::TrailingYaml, ["E", "E", "E", "E", "E", "E", "E", "E", "E", "E", "E"]),
 ];

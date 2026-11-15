@@ -49,6 +49,7 @@ fn parse(frontmatter: &Value) -> Result<LifecycleConfig, LifecycleError> {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: &registry,
     };
@@ -212,19 +213,27 @@ fn file_null_is_refused() {
 }
 
 #[test]
+fn a_number_or_boolean_file_names_the_file_by_its_text() {
+    // The shared conversion engine reads a scalar for a `string` parameter
+    // as its text, so these name the files `5`, `true`, and `1.5`.
+    for (operand, name) in [(json!(5), "5"), (json!(true), "true"), (json!(1.5), "1.5"), (json!(false), "false")] {
+        let named = Expr::StringLiteral(name.to_string());
+        assert_eq!(edit_of(json!({ "edit": operand.clone() })).0.file, named, "{operand}");
+        assert_eq!(edit_of(json!({ "edit": [operand.clone()] })).0.file, named, "[{operand}]");
+        assert_eq!(edit_of(json!({ "edit": { "file": operand.clone() } })).0.file, named, "file: {operand}");
+    }
+}
+
+#[test]
 fn file_of_the_wrong_type_is_refused() {
-    assert_refused(json!({ "edit": 5 }), "InvalidArgs", "edit", "`edit.file` must be a string, got number");
-    assert_refused(json!({ "edit": true }), "InvalidArgs", "edit", "`edit.file` must be a string, got boolean");
-    assert_refused(json!({ "edit": { "file": 5 } }), "InvalidArgs", "edit.file", "`edit.file` must be a string, got number");
-    assert_refused(json!({ "edit": { "file": true } }), "InvalidArgs", "edit.file", "must be a string, got boolean");
     assert_refused(json!({ "edit": { "file": ["a.md"] } }), "InvalidLongForm", "edit", "array values are not supported");
     assert_refused(json!({ "edit": { "file": { "a": 1 } } }), "ObjectParameter", "edit", "parameter `file`");
 }
 
 #[test]
 fn a_list_element_of_the_wrong_type_is_refused() {
-    // Every element wrong.
-    assert_refused(json!({ "edit": [1] }), "InvalidArgs", "edit", "`edit.file` must be a string, got number");
+    // Every element wrong (a number element names a file; see
+    // `a_number_or_boolean_file_names_the_file_by_its_text`).
     assert_refused(json!({ "edit": [null] }), "InvalidLongForm", "edit", "`initialize[0].else[0].edit.file` is not a valid value");
     assert_refused(json!({ "edit": [{ "a": 1 }] }), "InvalidLongForm", "edit", "object values are not supported");
     // One element wrong: a second operand is an arity error before its type matters.
@@ -256,14 +265,15 @@ fn a_direct_object_short_operand_is_refused() {
 // ── `create_new` / `gui`: the literal-boolean validator ───────────────────
 
 #[test]
-fn a_flag_that_is_not_a_literal_boolean_is_refused_at_its_key() {
+fn a_flag_the_conversion_does_not_read_as_a_boolean_is_refused_at_its_key() {
     for flag in ["create_new", "gui"] {
         for (value, kind) in [
-            (json!(null), "null"),
-            (json!("yes"), "string"),
-            (json!("true"), "string"),
+            // Flags are literals: a template is never evaluated.
             (json!("{{ true }}"), "string"),
+            (json!("maybe"), "string"),
+            // A native number never becomes a boolean.
             (json!(1), "number"),
+            (json!(0), "number"),
             (json!([true]), "array"),
             (json!({ "a": 1 }), "object"),
         ] {
@@ -272,10 +282,21 @@ fn a_flag_that_is_not_a_literal_boolean_is_refused_at_its_key() {
                 action,
                 "InvalidArgs",
                 &format!("edit.{flag}"),
-                &format!("`edit.{flag}` must be a boolean literal, got {kind}"),
+                &format!("`edit.{flag}` must be a boolean, got {kind}"),
             );
         }
     }
+}
+
+#[test]
+fn a_boolean_like_flag_converts_and_a_null_flag_takes_its_default() {
+    for (value, expected) in [(json!("yes"), true), (json!("true"), true), (json!("no"), false), (json!("False"), false)] {
+        let (edit, _) = edit_of(json!({ "edit": { "file": "a.md", "create_new": value.clone(), "gui": value.clone() } }));
+        assert_eq!((edit.create_new, edit.gui), (expected, Some(expected)), "{value}");
+    }
+    // `null` is no value: `create_new` is false and `gui` states no preference.
+    let (edit, _) = edit_of(json!({ "edit": { "file": "a.md", "create_new": null, "gui": null } }));
+    assert_eq!((edit.create_new, edit.gui), (false, None));
 }
 
 #[test]
@@ -312,11 +333,27 @@ fn a_sibling_no_error_applies_and_a_duplicate_is_refused() {
     assert_eq!(refused.property, "composed.edit.no_error");
     assert!(refused.text.contains("set both beside `edit` and inside it"), "{}", refused.text);
 
+    // Equal placements are still two placements.
+    let refused = refusal(&json!({ "composed": { "edit": { "file": "a.md", "no_error": false }, "no_error": false } }));
+    assert!(refused.text.contains("set both beside `edit` and inside it"), "{}", refused.text);
+
+    // A `null` placement is omitted, so it never conflicts.
+    for frontmatter in [
+        json!({ "composed": { "edit": { "file": "a.md", "no_error": null }, "no_error": true } }),
+        json!({ "composed": { "edit": { "file": "a.md", "no_error": true }, "no_error": null } }),
+    ] {
+        let config = parse(&frontmatter).unwrap_or_else(|error| panic!("{frontmatter}: {error}"));
+        assert!(leaves(&config, LifecycleSignal::Start)[0].no_error, "{frontmatter}");
+    }
+
+    // Boolean-like text converts; a native number does not.
+    let (_, action) = edit_of(json!({ "edit": { "file": "a.md", "no_error": "yes" } }));
+    assert!(action.no_error);
     assert_refused(
-        json!({ "edit": { "file": "a.md", "no_error": "yes" } }),
+        json!({ "edit": { "file": "a.md", "no_error": 1 } }),
         "InvalidLongForm",
         "edit",
-        "`no_error` must be a boolean",
+        "`no_error` must be a boolean, got number",
     );
 }
 

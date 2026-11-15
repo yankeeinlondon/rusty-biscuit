@@ -1816,11 +1816,10 @@ fn nullable_transclusion_diagnostic_matrix() {
         .iter()
         .filter(|diagnostic| diagnostic["code"] == json!("dm.transclusion.nullable_target"))
         .collect();
-    assert_eq!(nullable.len(), 2, "unexpected nullable diagnostics: {diagnostics:?}");
-    for (diagnostic, (expression, root)) in nullable.iter().zip([
-        ("{{optional}}", "optional"),
-        ("{{defaulted}}", "defaulted"),
-    ]) {
+    // `defaulted` is filled whenever it is missing or `null`, so only
+    // `optional` may be null.
+    assert_eq!(nullable.len(), 1, "unexpected nullable diagnostics: {diagnostics:?}");
+    for (diagnostic, (expression, root)) in nullable.iter().zip([("{{optional}}", "optional")]) {
         assert_eq!(diagnostic["source"], json!("darkmatter.compose"));
         assert_eq!(diagnostic["severity"], json!(2));
         assert_eq!(diagnostic["range"], range_of(text, expression));

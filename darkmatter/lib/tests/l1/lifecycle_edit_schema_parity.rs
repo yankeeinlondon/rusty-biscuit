@@ -28,6 +28,24 @@ const ACCEPTED: &[&str] = &[
     "{ edit: { file: notes.md, create_new: false, gui: true } }",
     "{ edit: notes.md, info: hi, no_error: true }",
     "{ edit: notes.md, when: 'true' }",
+    // A number or boolean target names a file by its text.
+    "{ edit: 5 }",
+    "{ edit: true }",
+    "{ edit: [1] }",
+    "{ edit: { file: 5 } }",
+    "{ edit: { file: true } }",
+    // Boolean-like flag text converts; `null` is no value.
+    "{ edit: { file: notes.md, gui: 'yes' } }",
+    "{ edit: { file: notes.md, gui: 'true' } }",
+    "{ edit: { file: notes.md, gui: null } }",
+    "{ edit: { file: notes.md, create_new: 'yes' } }",
+    "{ edit: { file: notes.md, create_new: null } }",
+    "{ edit: { file: notes.md, no_error: 'yes' } }",
+    "{ edit: { file: notes.md, no_error: null } }",
+    "{ edit: notes.md, no_error: null }",
+    // One placement of the flag, beside or inside the long form.
+    "{ edit: { file: notes.md }, no_error: true }",
+    "{ edit: { file: notes.md, no_error: true } }",
 ];
 
 /// Actions both checks refuse, each with the shape it exercises.
@@ -36,27 +54,21 @@ const REFUSED: &[(&str, &str)] = &[
     ("short: empty list", "{ edit: [] }"),
     ("short: two items", "{ edit: [a.md, b.md] }"),
     ("short: one wrong element", "{ edit: [a.md, 1] }"),
-    ("short: every element wrong", "{ edit: [1] }"),
-    ("short: number", "{ edit: 5 }"),
-    ("short: boolean", "{ edit: true }"),
+    ("short: every element wrong", "{ edit: [null] }"),
     ("short: empty string", "{ edit: '' }"),
     ("short: blank string", "{ edit: '   ' }"),
     ("short: blank list element", "{ edit: ['  '] }"),
     ("long: file absent", "{ edit: { create_new: true } }"),
     ("long: file null", "{ edit: { file: null } }"),
-    ("long: file number", "{ edit: { file: 5 } }"),
-    ("long: file boolean", "{ edit: { file: true } }"),
     ("long: file empty", "{ edit: { file: '' } }"),
     ("long: file blank", "{ edit: { file: '  ' } }"),
     ("long: file object", "{ edit: { file: { a: 1 } } }"),
-    ("long: gui text", "{ edit: { file: notes.md, gui: 'yes' } }"),
-    ("long: gui quoted boolean", "{ edit: { file: notes.md, gui: 'true' } }"),
+    ("long: gui text", "{ edit: { file: notes.md, gui: maybe } }"),
     ("long: gui number", "{ edit: { file: notes.md, gui: 1 } }"),
     ("long: gui template", "{ edit: { file: notes.md, gui: '{{ true }}' } }"),
-    ("long: gui null", "{ edit: { file: notes.md, gui: null } }"),
     ("long: gui object", "{ edit: { file: notes.md, gui: { a: 1 } } }"),
-    ("long: create_new text", "{ edit: { file: notes.md, create_new: 'yes' } }"),
-    ("long: create_new null", "{ edit: { file: notes.md, create_new: null } }"),
+    ("long: create_new number", "{ edit: { file: notes.md, create_new: 0 } }"),
+    ("long: no_error number", "{ edit: { file: notes.md, no_error: 1 } }"),
     ("long: unknown key", "{ edit: { file: notes.md, bogus: 1 } }"),
     ("long: with", "{ edit: { file: notes.md, with: { a: 1 } } }"),
     ("long form in a bundle", "{ edit: { file: notes.md }, info: hi }"),
@@ -146,6 +158,94 @@ fn every_refused_cell_fails_schema_validation_at_the_action_and_the_parser() {
             );
             let error = md_parses(&frontmatter).expect_err(&format!("{shape}: md refuses `{frontmatter}`"));
             assert!(error.contains("edit"), "{shape}: the parser names `edit`: {error}");
+        }
+    }
+}
+
+/// Placements of the flag the parser refuses although the schema, which
+/// judges each placement alone, admits them: two authored `no_error`s on one
+/// action, even equal ones.
+const DUPLICATE_FLAGS: &[&str] = &[
+    "{ edit: { file: notes.md, no_error: true }, no_error: true }",
+    "{ edit: { file: notes.md, no_error: false }, no_error: false }",
+    "{ edit: { file: notes.md, no_error: 'yes' }, no_error: false }",
+];
+
+/// `frontmatter` with the defaults the baseline's completion reports
+/// written in: the value a host parses after schema completion.
+fn completed(report: &ValidationReport, frontmatter: &serde_json::Value) -> serde_json::Value {
+    let mut map: indexmap::IndexMap<String, serde_json::Value> =
+        frontmatter.as_object().expect("a mapping").clone().into_iter().collect();
+    for applied in &report.defaults {
+        simplified_schema::set_at(&mut map, &applied.path, applied.value.clone()).expect("the default's path exists");
+    }
+    serde_json::Value::Object(map.into_iter().collect())
+}
+
+/// md's parser over `parsed`, told which values were authored.
+fn md_parses_completed(
+    parsed: &serde_json::Value,
+    authored: Option<&serde_json::Value>,
+) -> Result<darkmatter::lifecycle::LifecycleConfig, String> {
+    let options = darkmatter::lifecycle::LifecycleParseOptions {
+        authored_values: authored,
+        ..darkmatter::lifecycle::md_host::parse_options(None)
+    };
+    darkmatter::lifecycle::parse_lifecycle_config_with(parsed, Path::new("doc.md"), &options)
+        .map_err(|error| error.to_string())
+}
+
+/// Parsing the schema-completed value with its authored source gives the
+/// authored parse, cell for cell: a filled `no_error: false` (beside the
+/// action and inside its long form, which both schemas fill) never counts as
+/// a placement, never meets `then`, and never changes a verdict.
+#[test]
+fn a_completed_cell_parses_with_its_authored_source_as_the_authored_cell_does() {
+    let fixture = Fixture::new();
+    let cells = ACCEPTED
+        .iter()
+        .copied()
+        .chain(REFUSED.iter().map(|(_, action)| *action))
+        .chain(DUPLICATE_FLAGS.iter().copied());
+    let mut filled_inner_and_sibling = false;
+    for action in cells {
+        for (frontmatter, pointer) in placements(action) {
+            let frontmatter = format!("fqn: spec.md\n{frontmatter}");
+            let report = fixture.validate(&frontmatter);
+            let authored: serde_json::Value = serde_yaml_ng::from_str(&frontmatter).expect("YAML frontmatter");
+            let completed = completed(&report, &authored);
+            let filled: Vec<String> = report.defaults.iter().map(|applied| applied.path.segments().join("/")).collect();
+            if action == "{ edit: { file: notes.md } }"
+                && filled.iter().any(|path| path.ends_with("/edit/no_error"))
+                && filled.iter().any(|path| path.ends_with("/0/no_error"))
+            {
+                filled_inner_and_sibling = true;
+                // Read as authored, the two filled flags would be two placements.
+                let unaware = md_parses_completed(&completed, None).expect_err("two placements without the source");
+                assert!(unaware.contains("set both beside `edit` and inside it"), "{unaware}");
+            }
+            assert_eq!(
+                md_parses_completed(&completed, Some(&authored)),
+                md_parses_completed(&authored, None),
+                "`{frontmatter}` at {pointer}, completed as {completed}"
+            );
+        }
+    }
+    assert!(
+        filled_inner_and_sibling,
+        "the baseline fills `no_error` both beside and inside `{{ edit: {{ file: notes.md }} }}`"
+    );
+}
+
+#[test]
+fn two_authored_flag_placements_pass_the_schema_and_fail_the_parser() {
+    let fixture = Fixture::new();
+    for action in DUPLICATE_FLAGS {
+        for (frontmatter, _) in placements(action) {
+            let report = fixture.validate(&frontmatter);
+            assert!(report.valid, "each placement alone is a valid flag: {:?}", problems(&report));
+            let error = md_parses(&frontmatter).expect_err(&format!("md refuses `{frontmatter}`"));
+            assert!(error.contains("set both beside `edit` and inside it"), "{error}");
         }
     }
 }

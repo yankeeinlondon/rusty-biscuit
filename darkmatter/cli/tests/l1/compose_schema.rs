@@ -525,40 +525,11 @@ fn compose_frontmatter_serializes_root_union_write_back() {
     assert_eq!(fm.get("has_review"), Some(&serde_json::json!(false)));
 }
 
+/// Declared optional parameters the document never wrote stay absent from
+/// the composed frontmatter, and writing that output and recomposing it is
+/// stable.
 #[test]
-fn compose_frontmatter_materializes_optional_parameters_as_ordered_nulls() {
-    let process = CliProcessFixture::new();
-    let tmp = process.cwd();
-    let doc = write_file(
-        tmp,
-        "optional-parameters.md",
-        "---\n\
-         $schema:\n\
-        \x20 first_optional: string\n\
-        \x20 required_name: 'string(required)'\n\
-        \x20 second_optional: boolean\n\
-         required_name: ready\n\
-         ---\nBody\n",
-    );
-
-    let (stdout, fm) = composed_document(&process, &doc, &[]);
-    assert_eq!(fm.get("first_optional"), Some(&serde_json::Value::Null));
-    assert_eq!(fm.get("second_optional"), Some(&serde_json::Value::Null));
-
-    let first = stdout
-        .find("first_optional: null")
-        .expect("first optional parameter should serialize as explicit YAML null");
-    let second = stdout
-        .find("second_optional: null")
-        .expect("second optional parameter should serialize as explicit YAML null");
-    assert!(
-        first < second,
-        "materialized parameters should follow declaration order:\n{stdout}"
-    );
-}
-
-#[test]
-fn compose_frontmatter_materialized_null_is_stable_after_write_and_recompose() {
+fn compose_frontmatter_never_writes_unset_optional_parameters_and_is_stable_after_recompose() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let source = write_file(
@@ -574,23 +545,18 @@ fn compose_frontmatter_materialized_null_is_stable_after_write_and_recompose() {
     );
 
     let (first_output, first_frontmatter) = composed_document(&process, &source, &[]);
+    assert!(!first_frontmatter.contains_key("first_optional"), "{first_output}");
+    assert!(!first_frontmatter.contains_key("second_optional"), "{first_output}");
+    assert_eq!(first_frontmatter.get("required_name"), Some(&serde_json::json!("ready")));
+
     let persisted = write_file(tmp, "persisted.md", &first_output);
     let (second_output, second_frontmatter) = composed_document(&process, &persisted, &[]);
-
     assert_eq!(second_frontmatter, first_frontmatter);
     assert_eq!(second_output, first_output);
-    assert_eq!(
-        second_frontmatter.get("first_optional"),
-        Some(&serde_json::Value::Null)
-    );
-    assert_eq!(
-        second_frontmatter.get("second_optional"),
-        Some(&serde_json::Value::Null)
-    );
 }
 
 #[test]
-fn compose_frontmatter_caller_value_wins_over_optional_materialization() {
+fn compose_frontmatter_keeps_a_caller_supplied_optional_parameter() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let doc = write_file(
@@ -689,8 +655,11 @@ fn optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions()
         .stdout(predicate::str::contains("is-string=yes"));
 }
 
+/// The schema stage writes defaults and nothing else: an unwritten optional
+/// property has no key before or after it, while a defaulted one gains its
+/// key there.
 #[test]
-fn first_frontmatter_interpolation_precedes_optional_materialization() {
+fn the_schema_stage_writes_a_default_but_never_an_unset_property() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let doc = write_file(
@@ -699,10 +668,12 @@ fn first_frontmatter_interpolation_precedes_optional_materialization() {
         "---\n\
          $schema:\n\
         \x20 optional: string\n\
+        \x20 defaulted: string(default(x))\n\
          optional_was_present: \"{{ has_key(fm, 'optional') }}\"\n\
          ---\n\
          before-schema={{ optional_was_present }}\n\
-         after-schema={{ has_key(fm, 'optional') }}\n",
+         after-schema={{ has_key(fm, 'optional') }}\n\
+         defaulted={{ has_key(fm, 'defaulted') }}\n",
     );
 
     process
@@ -712,5 +683,46 @@ fn first_frontmatter_interpolation_precedes_optional_materialization() {
         .assert()
         .success()
         .stdout(predicate::str::contains("before-schema=false"))
-        .stdout(predicate::str::contains("after-schema=true"));
+        .stdout(predicate::str::contains("after-schema=false"))
+        .stdout(predicate::str::contains("defaulted=true"));
+}
+
+// ── A missing key and `null` take a default; declared is not written ────────
+
+/// `md schema validate` reports every default it relied on (an optional
+/// one, and one replacing a written `null`) and leaves the file as written;
+/// `md compose --frontmatter` then shows those defaults and no key for the
+/// declared but unwritten `note`, and the source is still unchanged.
+#[test]
+fn defaults_fill_missing_and_null_values_without_editing_the_source() {
+    let fixture = CliProcessFixture::named("compose_schema_defaults_fill_missing_and_null");
+    let text = "---\n$schema:\n  retries: number(default(3))\n  mode: string(required; default(auto))\n  note: string\nmode: null\n---\n[{{ retries }}][{{ mode }}][{{ note }}]\n";
+    let source = fixture.write_file("cwd/doc.md", text);
+
+    let validated = fixture
+        .command()
+        .args(["schema", "validate"])
+        .arg(&source)
+        .args(["--output", "json"])
+        .assert()
+        .success();
+    let report: serde_json::Value = serde_json::from_slice(&validated.get_output().stdout).unwrap();
+    assert_eq!(
+        report["files"][0]["defaults"],
+        serde_json::json!([{ "path": "retries", "value": 3 }, { "path": "mode", "value": "auto" }]),
+        "{report:#}"
+    );
+    assert_eq!(fs::read_to_string(&source).unwrap(), text, "validation never edits the file");
+
+    let composed = fixture.command().arg("compose").arg(&source).arg("--frontmatter").assert().success();
+    let output = String::from_utf8_lossy(&composed.get_output().stdout).to_string();
+    let frontmatter = output.split("---").nth(1).unwrap_or_default();
+    assert!(frontmatter.contains("retries: 3"), "{output}");
+    assert!(frontmatter.contains("mode: auto"), "{output}");
+    assert!(
+        !frontmatter.lines().any(|line| line.starts_with("note:")),
+        "a declared but unwritten key is not written: {output}"
+    );
+    assert!(output.contains("[3][auto][]"), "{output}");
+    assert_eq!(fs::read_to_string(&source).unwrap(), text, "composition never edits the file");
 }

@@ -171,9 +171,16 @@ impl LifecycleHost for FakeHost {
 }
 
 fn parse(document: Value) -> LifecycleConfig {
+    parse_completed(document, None)
+}
+
+/// `document` parsed as a host parses a schema-completed value, with
+/// `authored` as its authored source (`None`: `document` is authored).
+fn parse_completed(document: Value, authored: Option<&Value>) -> LifecycleConfig {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: authored,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: crate::lifecycle::registry::tests::agent_host(),
     };
@@ -524,6 +531,16 @@ impl Fixture {
         StackExecutor::with_services(inputs, &self.effects, &NoCodes).execute_event(&config)
     }
 
+    /// [`Self::run_edit`] over `completed`, parsed with `authored` as its
+    /// authored source.
+    fn run_completed_edit(&self, signal: LifecycleSignal, completed: Value, authored: &Value) -> LifecycleEventOutcome {
+        let config = parse_completed(completed, Some(authored));
+        let fm = SharedFrontmatter::default();
+        let source = self.root().join("doc.md");
+        let inputs = StackInputs { source_path: &source, ..self.inputs(signal, &fm) };
+        StackExecutor::with_services(inputs, &self.effects, &NoCodes).execute_event(&config)
+    }
+
     fn root(&self) -> &Path {
         self._dir.path()
     }
@@ -764,4 +781,85 @@ fn a_compact_dictionary_runs_communication_before_edit() {
     assert!(outcome.action_error.is_some(), "the failing edit ends the stack");
     assert_eq!(fixture.effects.lines(), ["info first", "warn same item"]);
     assert_eq!(fixture.seen().len(), 1);
+}
+
+#[test]
+fn a_number_or_boolean_target_opens_the_file_its_text_names() {
+    for (operand, name) in [(json!(5), "5"), (json!(true), "true"), (json!(2.5), "2.5")] {
+        for short in [operand.clone(), json!([operand.clone()])] {
+            let fixture = Fixture::with_editor(FakeEditor::default());
+            let outcome = fixture.run_edit(LifecycleSignal::Success, json!({}), json!({ "success": [{ "edit": short.clone() }] }));
+            assert_eq!(outcome, LifecycleEventOutcome::default(), "{short}");
+            assert_eq!(fixture.seen()[0].target, fixture.root().join(name), "{short}");
+        }
+
+        let fixture = Fixture::with_editor(FakeEditor::default());
+        fixture.run_edit(LifecycleSignal::Success, json!({}), json!({ "success": [{ "edit": { "file": operand.clone() } }] }));
+        assert_eq!(fixture.seen()[0].target, fixture.root().join(name), "file: {operand}");
+    }
+}
+
+#[test]
+fn converted_and_null_flags_reach_the_editor_as_booleans_and_defaults() {
+    let fixture = Fixture::with_editor(FakeEditor::default());
+    fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": { "file": "a.md", "create_new": "yes", "gui": "no" } }] }),
+    );
+    assert_eq!((fixture.seen()[0].create_new, fixture.seen()[0].gui), (true, Some(false)));
+
+    let fixture = Fixture::with_editor(FakeEditor::default());
+    fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": { "file": "a.md", "create_new": null, "gui": null } }] }),
+    );
+    assert_eq!((fixture.seen()[0].create_new, fixture.seen()[0].gui), (false, None));
+}
+
+#[test]
+fn a_completed_edit_runs_once_and_only_its_authored_flag_suppresses_failure() {
+    // The schema filled `no_error: false` beside and inside the long form,
+    // and `create_new: false` inside it; nothing was authored.
+    let authored = json!({ "success": [{ "edit": { "file": "a.md" } }, { "info": "after" }] });
+    let completed = json!({ "success": [
+        { "edit": { "file": "a.md", "create_new": false, "no_error": false }, "no_error": false },
+        { "info": "after", "no_error": false },
+    ] });
+    let fixture = Fixture::with_editor(FakeEditor { attempted: true, fail: Some(non_zero_exit), ..Default::default() });
+    let outcome = fixture.run_completed_edit(LifecycleSignal::Success, completed, &authored);
+    assert!(outcome.action_error.is_some(), "a filled `false` suppresses nothing");
+    assert_eq!(fixture.seen().len(), 1);
+    assert!(fixture.effects.lines().is_empty());
+
+    // An authored `"yes"` beside the action, converted by the schema, wins
+    // over the filled flag inside it.
+    let authored = json!({ "success": [{ "edit": { "file": "a.md" }, "no_error": "yes" }, { "info": "after" }] });
+    let completed = json!({ "success": [
+        { "edit": { "file": "a.md", "create_new": false, "no_error": false }, "no_error": true },
+        { "info": "after", "no_error": false },
+    ] });
+    let fixture = Fixture::with_editor(FakeEditor { attempted: true, fail: Some(non_zero_exit), ..Default::default() });
+    let outcome = fixture.run_completed_edit(LifecycleSignal::Success, completed, &authored);
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(fixture.effects.lines(), ["info after"]);
+}
+
+#[test]
+fn a_completed_edit_cancelled_while_open_never_continues_even_with_an_authored_flag() {
+    let token = cancellation::CancellationToken::default();
+    let _scope = token.enter();
+    let fixture = Fixture::with_editor(FakeEditor { attempted: true, fail: Some(cancelled_at), ..Default::default() });
+    let authored = json!({ "success": [{ "edit": { "file": "a.md", "no_error": "yes" } }, { "info": "after" }] });
+    let completed = json!({ "success": [
+        { "edit": { "file": "a.md", "create_new": false, "no_error": true }, "no_error": false },
+        { "info": "after", "no_error": false },
+    ] });
+
+    let outcome = fixture.run_completed_edit(LifecycleSignal::Success, completed, &authored);
+
+    let error = outcome.evaluation_error.expect("cancellation is an evaluation failure");
+    assert_eq!(error.msg, "the run was cancelled while an `edit` was open");
+    assert!(fixture.effects.lines().is_empty());
 }

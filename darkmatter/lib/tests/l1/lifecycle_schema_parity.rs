@@ -311,3 +311,77 @@ fn the_bare_verb_suggestions_are_the_md_parsers_bare_verbs() {
         assert_eq!(list, parsed, "every bare-verb suggestion list is the parser's bare verbs");
     }
 }
+
+/// `frontmatter` with the defaults `report` says the completion fills.
+fn completed(report: &ValidationReport, frontmatter: &serde_json::Value) -> serde_json::Value {
+    let mut map: indexmap::IndexMap<String, serde_json::Value> =
+        frontmatter.as_object().expect("a mapping").clone().into_iter().collect();
+    for applied in &report.defaults {
+        simplified_schema::set_at(&mut map, &applied.path, applied.value.clone()).expect("the default's path exists");
+    }
+    serde_json::Value::Object(map.into_iter().collect())
+}
+
+fn md_parse_value(
+    parsed: &serde_json::Value,
+    authored: Option<&serde_json::Value>,
+) -> Result<darkmatter::lifecycle::LifecycleConfig, String> {
+    let options = darkmatter::lifecycle::LifecycleParseOptions {
+        authored_values: authored,
+        ..darkmatter::lifecycle::md_host::parse_options(None)
+    };
+    darkmatter::lifecycle::parse_lifecycle_config_with(parsed, std::path::Path::new("doc.md"), &options)
+        .map_err(|error| error.to_string())
+}
+
+/// Every `no_error` default, beside an action and inside a generated or
+/// hand-written long form, is `false`; the completed document is valid
+/// wherever the authored one is, and md's parser reads the completed value
+/// with its authored source exactly as it reads the authored value. Cells
+/// cover generated side effects and expression functions, bundles,
+/// conditionals, `cancelled`, and `set`.
+#[test]
+fn completed_flags_keep_the_schema_and_the_md_parser_in_agreement() {
+    let fixture = Fixture::new();
+    let accepted = [
+        "composed: [{ set_frontmatter: { file: a.md, prop: k, value: 0 } }]",
+        "composed: [{ set_frontmatter: { file: a.md, prop: k, value: 1 }, no_error: true }]",
+        "composed: [{ ensure_file: { file: a.md } }]",
+        "composed: [{ ensure_file: { file: a.md, content: hi, no_error: 'yes' } }]",
+        "composed: [{ append_line: [a.md, hi], info: hi }]",
+        "composed: { info: hi, warn: careful }",
+        "composed: { shell: { command: ls } }",
+        "composed: [{ shell: { command: ls } , no_error: false }]",
+        "composed: [{ when: 'true', then: [{ info: { text: hi } }], else: { stop: { } } }]",
+        "composed: [{ when: 'true', info: hi }]",
+        "composed: [{ set: { answer: 42 } }]",
+        "composed: { set: { answer: 42 }, info: hi, no_error: true }",
+        "cancelled: [{ info: { text: bye } }, stop]",
+        "cancelled: []",
+        "finalize: [{ is_file_type: { value: a.md } }]",
+        "initialize: [{ abs: { x: 3 } }, skip]",
+    ];
+    for frontmatter in accepted {
+        let report = fixture.validate(frontmatter);
+        assert!(report.valid, "the baseline accepts `{frontmatter}`: {:?}", problems(&report));
+        let authored: serde_json::Value = serde_yaml_ng::from_str(frontmatter).expect("YAML frontmatter");
+        let completed = completed(&report, &authored);
+        assert!(
+            report.defaults.iter().all(|applied| applied.value == serde_json::json!(false)
+                && applied.path.segments().last().is_some_and(|key| key == "no_error" || key == "create_new")),
+            "`{frontmatter}` fills only false flags: {completed}"
+        );
+        let alone = md_parse_value(&authored, None);
+        assert!(alone.is_ok(), "md parses `{frontmatter}`: {alone:?}");
+        assert_eq!(md_parse_value(&completed, Some(&authored)), alone, "`{frontmatter}` completed as {completed}");
+    }
+    // `set` takes no flag, even a written `null`, which the schema's
+    // category admits as an omitted flag: S-accept, P-reject.
+    let frontmatter = "composed: [{ set: { answer: 42 }, no_error: null }]";
+    let authored: serde_json::Value = serde_yaml_ng::from_str(frontmatter).expect("YAML frontmatter");
+    let report = fixture.validate(frontmatter);
+    assert!(report.valid, "a null flag is an omitted one to the schema: {:?}", problems(&report));
+    let error = md_parse_value(&completed(&report, &authored), Some(&authored)).expect_err("set takes no flag");
+    assert!(error.contains("`no_error` does not apply to `set`"), "{error}");
+    assert_eq!(md_parses(frontmatter), Err(error));
+}

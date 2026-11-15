@@ -45,6 +45,7 @@
 //! let options = LifecycleParseOptions {
 //!     is_known_effect: &|_| false,
 //!     authored: None,
+//!     authored_values: None,
 //!     unknown_verbs: UnknownVerbPolicy::Reject,
 //!     registry: &EventRegistry::md(),
 //! };
@@ -100,7 +101,7 @@ mod validate;
 use action_shape::*;
 #[doc(hidden)]
 pub use action_shape::{action_value_to_expr, closest_spelling};
-pub(crate) use action_shape::{edit_file_problem, edit_flag_problem};
+pub(crate) use action_shape::{edit_flag_problem, edit_target_problem};
 pub use authored_order::AuthoredOrder;
 pub use context::{LifecycleCause, LifecycleErrorInfo, LifecycleEvaluationReason, LifecycleTiming};
 pub use effects::{LifecycleEffects, dispatch_communication, render_prose_line, render_status_line};

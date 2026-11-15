@@ -586,12 +586,12 @@ mod passivity {
         assert_eq!(effective.json_schema.as_ref(), &json_before);
     }
 
-    /// Criterion 7: schema-stage `null` materialization is unchanged. Only the
-    /// document's own optional, no-default properties become `null`; a
-    /// property only the baseline declares (now projected) is never inserted,
-    /// a present value is preserved, and recomposing is idempotent.
+    /// The schema stage writes only defaults: an unwritten optional property
+    /// gains no key (it still reads as `null`), a defaulted one gains its
+    /// default, a property only the baseline declares is never inserted, a
+    /// present value is preserved, and recomposing is idempotent.
     #[test]
-    fn null_materialization_is_unchanged() {
+    fn only_defaults_are_written() {
         let dir = TempDir::new().unwrap();
         let path = write(
             dir.path(),
@@ -611,7 +611,8 @@ mod passivity {
         };
         let first = compose();
         let data = first.frontmatter().as_map();
-        assert_eq!(data.get("optional"), Some(&json!(null)));
+        assert!(!data.contains_key("optional"), "{data:?}");
+        assert_eq!(data.get("defaulted"), Some(&json!("x")));
         assert_eq!(data.get("present"), Some(&json!("kept")));
         assert!(!data.contains_key("from_baseline"), "a baseline-only property is never inserted");
         assert_eq!(first.content().trim_end(), "true kept");

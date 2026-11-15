@@ -557,3 +557,45 @@ fn a_provably_wrong_lifecycle_call_rejects_before_any_event() {
         ran.stderr
     );
 }
+
+// ── Flags follow conversion; a declared but unwritten key is not written ────
+
+/// A native number never converts to a Boolean flag, so the document fails
+/// before any effect.
+#[test]
+fn a_numeric_no_error_fails_before_any_effect() {
+    assert_refused_before_any_effect(
+        "lifecycle-numeric-no-error",
+        "composed:\n  - info: \"event:composed\"\n    no_error: 5\n",
+        "no_error",
+    );
+}
+
+/// Two authored placements of one flag conflict even when equal; a filled-in
+/// default never counts as one.
+#[test]
+fn two_authored_no_error_placements_fail_before_any_effect() {
+    assert_refused_before_any_effect(
+        "lifecycle-duplicate-no-error",
+        "composed:\n  - info: { text: \"event:composed\", no_error: true }\n    no_error: true\n",
+        "no_error",
+    );
+}
+
+/// Boolean-like text converts, a `null` flag counts as omitted, and the
+/// lifecycle reads the document's values: `title` is declared but unwritten,
+/// so it reads as `null` and no `title` key reaches the composed output.
+#[test]
+fn converted_and_null_flags_run_and_an_unwritten_declared_key_stays_absent() {
+    let fixture = CliProcessFixture::named("lifecycle-converted-flags");
+    let doc = fixture.write_file(
+        "cwd/doc.md",
+        "---\n$schema:\n  title: string\ncomposed:\n  - info: \"event:composed title-null={{ is_null(title) }}\"\n    no_error: \"yes\"\n\
+         \x20 - info: \"event:second\"\n    no_error: null\n---\nbody\n",
+    );
+    let ran = compose(&fixture, &doc, &["--frontmatter"]);
+    assert_eq!(ran.status, Some(0), "{}", ran.stderr);
+    assert_eq!(events(&ran.stderr), ["composed", "second"], "{}", ran.stderr);
+    assert!(ran.stderr.contains("title-null=true"), "{}", ran.stderr);
+    assert!(!ran.stdout.lines().any(|line| line.starts_with("title:")), "{}", ran.stdout);
+}

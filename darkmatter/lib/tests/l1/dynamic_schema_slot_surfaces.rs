@@ -518,17 +518,17 @@ mod template_types {
     mod composition {
         use super::*;
 
-        /// Composition materializes an absent optional key as `null` only
-        /// when it has no default, so the returned default must be known
-        /// before that decision.
+        /// Composition fills an absent key from its default and otherwise
+        /// writes nothing, so the returned default must be known before that
+        /// decision.
         #[test]
         fn an_inline_template_type_default_is_known_before_the_default_decision() {
             let folder = Folder::new();
             let defaulted = folder.document("$schema:\n    count: \"{{ 'number(default(3))' }}\"\n");
-            assert_eq!(composed_value(&defaulted, "count"), None);
+            assert_eq!(composed_value(&defaulted, "count"), Some(Value::from(3)));
 
             let plain = folder.document("$schema:\n    count: \"{{ 'number' }}\"\n");
-            assert_eq!(composed_value(&plain, "count"), Some(Value::Null));
+            assert_eq!(composed_value(&plain, "count"), None);
         }
 
         #[test]

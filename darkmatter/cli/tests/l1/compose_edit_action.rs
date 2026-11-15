@@ -557,7 +557,7 @@ fn schema_validate_and_compose_refuse_malformed_operands_alike_without_launch() 
     for (name, text, pointer, position, property) in [
         (
             "gui.md",
-            "---\ncomposed:\n  - edit:\n      file: notes.md\n      gui: \"yes\"\n---\nbody\n",
+            "---\ncomposed:\n  - edit:\n      file: notes.md\n      gui: 5\n---\nbody\n",
             "composed/0/edit/gui",
             "line 5, column 12",
             "composed[0].edit.gui",

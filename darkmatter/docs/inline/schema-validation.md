@@ -466,10 +466,11 @@ let opts = ComposeOptions::default()
     .with_baseline_schema(my_baseline);   // SimplifiedSchema
 ```
 
-### Required properties with a default
+### Properties with a default
 
-A `required` property whose definition has a `default(...)` may be absent.
-Every validation entry point (`md schema validate`, `DarkmatterSchemas::validate`,
+A property whose definition has a `default(...)`, required or not, takes that
+default when its value is missing or `null`. A required property with a
+default may therefore be absent. Every validation entry point (`md schema validate`, `DarkmatterSchemas::validate`,
 `EffectiveSchema::validate*`, whole YAML documents, DMLS) accepts the
 document as if the default were written there and lists what it relied on in
 `ValidationReport::defaults`, without changing the value it was given.
@@ -482,7 +483,7 @@ pass 2, the body, and the composed output all see them.
 
 ```mermaid
 flowchart LR
-    A["Frontmatter after<br/>interpolation pass 1"] --> B["Insert defaults of absent<br/>required properties"]
+    A["Frontmatter after<br/>interpolation pass 1"] --> B["Insert defaults of missing<br/>or null properties"]
     B --> C["Convert values"]
     C --> D["Validate; re-match triggers"]
     D -->|"a newly matched trigger<br/>requires more defaults"| B
@@ -491,17 +492,17 @@ flowchart LR
 
 Rules:
 
-- Only an **absent** property is filled. `x: null` is present and is judged by
-  the declared type.
+- A **missing or `null`** property is filled. Any other written value wins,
+  including `0`, `false`, `""`, `[]`, and `{}`.
+- A `default(null)` on an optional property does nothing.
 - A default inside an object applies only when that object exists:
   `server: { port: 80 }` gains `name: web` under
   `server: "{ name: string(required; default(web)), port: number }"`, while a
   document with no `server` gains nothing.
-- An optional property's default is never inserted.
 - A default is never inserted into a value a later stage still resolves (a
   whole-value `$(...)`, a value holding a `{{ }}` template) or into a key the
   caller owns.
-- A trigger whose match a default satisfies is applied, and its own required
+- A trigger whose match a default satisfies is applied, and its own
   defaults are inserted too.
 - The source file is never edited. The inserted value is data: its text is
   never scanned for `{{ }}` or `$(...)`.
@@ -513,34 +514,29 @@ Rules:
   schema location (`/properties/n/default`); it has no line or column in the
   document, because no document text holds it.
 
-### Optional parameter bindings
+### Declared but unset properties
 
-During composition, an absent top-level property becomes an explicit `null`
-binding when the document's inline or referenced SimplifiedSchema declares it
-as optional and gives it no `default(...)`. This happens after the first
-frontmatter-interpolation pass and before coercion and validation. Later stages
-can therefore distinguish a declared-but-unset parameter from an undeclared
-root, while authored values and caller overrides remain unchanged. Explicit
-`null`, an empty string, `false`, zero, and empty collections are all preserved.
+A property the schema declares but the author did not write stays absent.
+Composition never writes a `null` key for it. Reading it still gives `null`,
+which interpolates as empty text, and it produces no "undeclared name" warning:
+that warning asks the schema which names it declares, not the data.
 
-This binding behavior is deliberately narrow:
+```yaml
+---
+$schema:
+  title: string        # optional, no default
+---
+[{{ title }}]          # renders "[]", no warning
+```
 
-- baseline and schema-trigger properties remain validation policy and do not
-  create bindings;
-- raw JSON Schema, root-union declarations, nested properties, required
-  properties, and properties with `default(...)` do not create bindings; and
-- a compose run with no effective schema does not create bindings.
+Because nothing is added, every later reader sees only what was written: a
+transcluded child, `--frontmatter` output, lifecycle actions, and `required`
+checks. A child that declares `title: unknown(required)` therefore reports
+`title` as missing when its parent never wrote it, and accepts it when the
+parent wrote `title: null`.
 
-The standalone validation APIs remain passive and never mutate the document.
-Because the first frontmatter-interpolation pass precedes schema validation, it
-cannot reference a binding that will only be materialized by this stage. Body
-interpolation and later compose stages can use the binding. Repeating the schema
-stage is idempotent, and serialized composed frontmatter retains the `null` key.
-
-For example, the built-in baseline types `content_policy`, but a document that
-omits it gains no `content_policy` key. A document whose own `$schema` declares
-`content_policy` as an optional property, with no default, gets a `null`
-binding as described above.
+A property with a default is different: composition writes the default, so the
+composed frontmatter holds it (see the section above).
 
 ### The shell-deferral contract
 

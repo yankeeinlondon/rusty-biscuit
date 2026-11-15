@@ -5493,10 +5493,21 @@
                             "type": "string",
                             "format": "darkmatter-expression",
                             "description": "the condition choosing then or else"
+                          },
+                          "no_error": {
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "const": false
+                              }
+                            ],
+                            "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                           }
                         },
                         "patternProperties": {
-                          "^(?!(?:when)$)(?:then|else)$": {
+                          "^(?!(?:when|no_error)$)(?:then|else)$": {
                             "anyOf": [
                               {
                                 "type": "array",
@@ -5522,10 +5533,21 @@
                                           "type": "string",
                                           "format": "darkmatter-expression",
                                           "description": "the condition choosing then or else"
+                                        },
+                                        "no_error": {
+                                          "anyOf": [
+                                            {
+                                              "type": "null"
+                                            },
+                                            {
+                                              "const": false
+                                            }
+                                          ],
+                                          "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                                         }
                                       },
                                       "patternProperties": {
-                                        "^(?!(?:when)$)(?:then|else)$": {
+                                        "^(?!(?:when|no_error)$)(?:then|else)$": {
                                           "anyOf": [
                                             {
                                               "type": "array",
@@ -5551,10 +5573,21 @@
                                                         "type": "string",
                                                         "format": "darkmatter-expression",
                                                         "description": "the condition choosing then or else"
+                                                      },
+                                                      "no_error": {
+                                                        "anyOf": [
+                                                          {
+                                                            "type": "null"
+                                                          },
+                                                          {
+                                                            "const": false
+                                                          }
+                                                        ],
+                                                        "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                                                       }
                                                     },
                                                     "patternProperties": {
-                                                      "^(?!(?:when)$)(?:then|else)$": {
+                                                      "^(?!(?:when|no_error)$)(?:then|else)$": {
                                                         "$ref": "#/$defs/md-loose-body",
                                                         "description": "the actions to run when the condition holds (then) or when it does not (else)"
                                                       }
@@ -5562,7 +5595,34 @@
                                                     "required": [
                                                       "when"
                                                     ],
-                                                    "minProperties": 2
+                                                    "x-darkmatter-uncounted-keys": {
+                                                      "keys": [
+                                                        "no_error"
+                                                      ],
+                                                      "min": 2
+                                                    },
+                                                    "allOf": [
+                                                      {
+                                                        "if": {
+                                                          "properties": {
+                                                            "no_error": false
+                                                          }
+                                                        },
+                                                        "then": {
+                                                          "minProperties": 2
+                                                        }
+                                                      },
+                                                      {
+                                                        "if": {
+                                                          "required": [
+                                                            "no_error"
+                                                          ]
+                                                        },
+                                                        "then": {
+                                                          "minProperties": 3
+                                                        }
+                                                      }
+                                                    ]
                                                   },
                                                   {
                                                     "type": "string",
@@ -5601,7 +5661,34 @@
                                       "required": [
                                         "when"
                                       ],
-                                      "minProperties": 2
+                                      "x-darkmatter-uncounted-keys": {
+                                        "keys": [
+                                          "no_error"
+                                        ],
+                                        "min": 2
+                                      },
+                                      "allOf": [
+                                        {
+                                          "if": {
+                                            "properties": {
+                                              "no_error": false
+                                            }
+                                          },
+                                          "then": {
+                                            "minProperties": 2
+                                          }
+                                        },
+                                        {
+                                          "if": {
+                                            "required": [
+                                              "no_error"
+                                            ]
+                                          },
+                                          "then": {
+                                            "minProperties": 3
+                                          }
+                                        }
+                                      ]
                                     },
                                     {
                                       "type": "string",
@@ -5640,7 +5727,34 @@
                         "required": [
                           "when"
                         ],
-                        "minProperties": 2
+                        "x-darkmatter-uncounted-keys": {
+                          "keys": [
+                            "no_error"
+                          ],
+                          "min": 2
+                        },
+                        "allOf": [
+                          {
+                            "if": {
+                              "properties": {
+                                "no_error": false
+                              }
+                            },
+                            "then": {
+                              "minProperties": 2
+                            }
+                          },
+                          {
+                            "if": {
+                              "required": [
+                                "no_error"
+                              ]
+                            },
+                            "then": {
+                              "minProperties": 3
+                            }
+                          }
+                        ]
                       },
                       {
                         "type": "string",
@@ -5754,7 +5868,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5789,7 +5904,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5824,7 +5940,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5859,7 +5976,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5894,7 +6012,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5929,7 +6048,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -5960,6 +6080,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when this action fails"
         }
       },
@@ -6053,7 +6174,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               }
             }
@@ -6082,7 +6204,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               }
             }
@@ -6125,7 +6248,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "x-darkmatter-operands": "error-long"
@@ -6153,6 +6277,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when this action fails"
         }
       },
@@ -6277,7 +6402,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 },
                 "gui": {
                   "anyOf": [
@@ -6297,7 +6423,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -6329,6 +6456,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when this action fails"
         }
       },
@@ -6586,6 +6714,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when one of these actions fails"
         }
       },
@@ -6663,7 +6792,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -6694,6 +6824,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when this action fails"
         }
       },
@@ -6935,6 +7066,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when one of these actions fails"
         }
       },
@@ -6973,10 +7105,21 @@
                     "type": "string",
                     "format": "darkmatter-expression",
                     "description": "the condition choosing then or else"
+                  },
+                  "no_error": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "const": false
+                      }
+                    ],
+                    "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                   }
                 },
                 "patternProperties": {
-                  "^(?!(?:when)$)(?:then|else)$": {
+                  "^(?!(?:when|no_error)$)(?:then|else)$": {
                     "anyOf": [
                       {
                         "type": "array",
@@ -7005,10 +7148,21 @@
                                   "type": "string",
                                   "format": "darkmatter-expression",
                                   "description": "the condition choosing then or else"
+                                },
+                                "no_error": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "const": false
+                                    }
+                                  ],
+                                  "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                                 }
                               },
                               "patternProperties": {
-                                "^(?!(?:when)$)(?:then|else)$": {
+                                "^(?!(?:when|no_error)$)(?:then|else)$": {
                                   "anyOf": [
                                     {
                                       "type": "array",
@@ -7037,10 +7191,21 @@
                                                 "type": "string",
                                                 "format": "darkmatter-expression",
                                                 "description": "the condition choosing then or else"
+                                              },
+                                              "no_error": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "null"
+                                                  },
+                                                  {
+                                                    "const": false
+                                                  }
+                                                ],
+                                                "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                                               }
                                             },
                                             "patternProperties": {
-                                              "^(?!(?:when)$)(?:then|else)$": {
+                                              "^(?!(?:when|no_error)$)(?:then|else)$": {
                                                 "$ref": "#/$defs/md-loose-body",
                                                 "description": "the actions to run when the condition holds (then) or when it does not (else)"
                                               }
@@ -7048,7 +7213,34 @@
                                             "required": [
                                               "when"
                                             ],
-                                            "minProperties": 2
+                                            "x-darkmatter-uncounted-keys": {
+                                              "keys": [
+                                                "no_error"
+                                              ],
+                                              "min": 2
+                                            },
+                                            "allOf": [
+                                              {
+                                                "if": {
+                                                  "properties": {
+                                                    "no_error": false
+                                                  }
+                                                },
+                                                "then": {
+                                                  "minProperties": 2
+                                                }
+                                              },
+                                              {
+                                                "if": {
+                                                  "required": [
+                                                    "no_error"
+                                                  ]
+                                                },
+                                                "then": {
+                                                  "minProperties": 3
+                                                }
+                                              }
+                                            ]
                                           },
                                           {
                                             "type": "string",
@@ -7090,7 +7282,34 @@
                               "required": [
                                 "when"
                               ],
-                              "minProperties": 2
+                              "x-darkmatter-uncounted-keys": {
+                                "keys": [
+                                  "no_error"
+                                ],
+                                "min": 2
+                              },
+                              "allOf": [
+                                {
+                                  "if": {
+                                    "properties": {
+                                      "no_error": false
+                                    }
+                                  },
+                                  "then": {
+                                    "minProperties": 2
+                                  }
+                                },
+                                {
+                                  "if": {
+                                    "required": [
+                                      "no_error"
+                                    ]
+                                  },
+                                  "then": {
+                                    "minProperties": 3
+                                  }
+                                }
+                              ]
                             },
                             {
                               "type": "string",
@@ -7132,7 +7351,34 @@
                 "required": [
                   "when"
                 ],
-                "minProperties": 2
+                "x-darkmatter-uncounted-keys": {
+                  "keys": [
+                    "no_error"
+                  ],
+                  "min": 2
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "no_error": false
+                      }
+                    },
+                    "then": {
+                      "minProperties": 2
+                    }
+                  },
+                  {
+                    "if": {
+                      "required": [
+                        "no_error"
+                      ]
+                    },
+                    "then": {
+                      "minProperties": 3
+                    }
+                  }
+                ]
               },
               {
                 "type": "string",

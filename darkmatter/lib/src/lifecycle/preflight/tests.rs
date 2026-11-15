@@ -122,6 +122,7 @@ fn parse(frontmatter: &Value) -> LifecycleConfig {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: &EventRegistry::md(),
     };

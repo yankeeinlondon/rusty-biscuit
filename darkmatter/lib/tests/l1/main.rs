@@ -231,6 +231,7 @@ mod schema_quoting_safety;
 mod schema_embedded_trigger_bundles;
 mod shipped_artifacts;
 mod prepared_trigger_bundles;
+mod effective_default_preparation;
 mod effective_schema_layering;
 mod layered_validator_identities;
 #[cfg(feature = "work-counters")]

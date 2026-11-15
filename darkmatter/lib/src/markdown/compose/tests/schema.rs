@@ -856,10 +856,9 @@ mod schema_validation_integration {
                 biscuit_file::to_portable_string(spec.parent().unwrap())
             )),
         );
-        assert_eq!(
-            composed.frontmatter().as_map()["optional_input"],
-            serde_json::Value::Null,
-            "an absent optional caller property must not be projected",
+        assert!(
+            !composed.frontmatter().as_map().contains_key("optional_input"),
+            "an absent optional caller property is neither projected nor written",
         );
     }
 
@@ -1981,7 +1980,7 @@ mod schema_validation_integration {
     }
 
     #[test]
-    fn absent_caller_property_does_not_materialize_a_schema_file_default() {
+    fn absent_caller_property_takes_the_document_owned_schema_file_default() {
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".git")).unwrap();
         let launch = repo.path().join("area");
@@ -2017,9 +2016,12 @@ mod schema_validation_integration {
             .unwrap()
             .0;
 
-        assert!(
-            !composed.frontmatter().as_map().contains_key("spec"),
-            "an absent caller property must not turn a document-owned schema default into an effective caller value",
+        // The document's own default fills the absent property as data,
+        // spelled as the schema declares it; the caller supplied nothing.
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("./defaults/spec.md")),
+            "an absent caller property takes the document-owned default, not a caller value",
         );
         assert_eq!(
             composed.frontmatter().as_map()["$schema"]["spec"],

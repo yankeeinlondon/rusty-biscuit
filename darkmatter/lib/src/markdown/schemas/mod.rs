@@ -1083,6 +1083,7 @@ impl DarkmatterSchemas {
             dependencies,
             advisories,
             conversion: OnceLock::new(),
+            default_plan: OnceLock::new(),
             layered_definitions: OnceLock::new(),
             raw_declarations: OnceLock::new(),
         })))
@@ -1551,6 +1552,9 @@ pub struct EffectiveSchema {
     advisories: Vec<SchemaAdvisory>,
     /// The conversion plan for [`Self::json_schema`], found on first use.
     conversion: OnceLock<Arc<simplified_schema::coerce::ConversionPlan>>,
+    /// The default plan for [`Self::json_schema`], compiled on first use (a
+    /// schema with a known identity shares it process-wide).
+    default_plan: OnceLock<Arc<simplified_schema::DefaultPlan>>,
     /// [`Self::layered_definitions`], merged on first use.
     layered_definitions: OnceLock<Arc<DefinitionTable>>,
     /// [`Self::raw_declarations`], projected on first use.
@@ -1570,6 +1574,23 @@ impl EffectiveSchema {
             Some(digest) => simplified_schema::coerce::ConversionPlan::for_identity(digest.identity),
             None => simplified_schema::coerce::ConversionPlan::for_hashed(SHARED_VALIDATOR_CACHE.shared_schema_hash(&self.json_schema)),
         })
+    }
+
+    /// The default plan for [`Self::json_schema`].
+    ///
+    /// ## Errors
+    ///
+    /// The plan's compile error ([`simplified_schema::DefaultPlan::compile`]),
+    /// such as conflicting defaults; an error is not remembered.
+    fn default_plan(&self) -> Result<&simplified_schema::DefaultPlan, SchemaError> {
+        if let Some(plan) = self.default_plan.get() {
+            return Ok(plan);
+        }
+        let plan = match self.digest {
+            Some(digest) => simplified_schema::DefaultPlan::for_identity(digest.identity, &self.json_schema, &SHARED_VALIDATOR_CACHE)?,
+            None => Arc::new(simplified_schema::DefaultPlan::compile(Arc::clone(&self.json_schema), &SHARED_VALIDATOR_CACHE)?),
+        };
+        Ok(self.default_plan.get_or_init(|| plan))
     }
 
     /// Converts `instance` against [`Self::json_schema`] as
@@ -1791,23 +1812,17 @@ impl EffectiveSchema {
         self.validate_instance(candidate, frontmatter, stored, positions, &templates)
     }
 
-    /// `instance` completed with the defaults of its absent required
-    /// properties, through the one default engine
-    /// ([`simplified_schema::defaults::prepare_defaults`]); a value the
-    /// validators accept as written comes back borrowed with no defaults.
-    /// Values at or below one of `templates` are pending and never filled.
+    /// `instance` with its defaults applied, through the one default engine
+    /// ([`simplified_schema::defaults::prepare_defaults`]): each missing or
+    /// `null` property that declares a default is filled, whether or not the
+    /// value is already valid. Values at or below one of `templates` are
+    /// pending and never filled.
     fn complete<'a>(
         &self,
         instance: std::borrow::Cow<'a, Value>,
         templates: &simplified_schema::coerce::NestedTemplates,
     ) -> Result<simplified_schema::DefaultPreparation<'a>, SchemaError> {
-        simplified_schema::defaults::prepare_defaults(
-            &self.json_schema,
-            instance,
-            templates,
-            &self.validators,
-            &SHARED_VALIDATOR_CACHE,
-        )
+        simplified_schema::defaults::prepare_defaults(self.default_plan()?, instance, templates)
     }
 
     /// The soft candidate of `instance`, in the order
@@ -1815,16 +1830,17 @@ impl EffectiveSchema {
     /// then conversion, then any default the conversion made reachable (a
     /// union arm the converted value selects). Conversion commits a nested
     /// value only once the complete schema accepts it, which a missing
-    /// required child would prevent, so defaults go in first.
+    /// required child would prevent, so defaults go in first. A candidate
+    /// the validators accept once its defaults are in needs no conversion.
     fn converted_candidate<'a>(
         &self,
         instance: &'a Value,
         templates: &simplified_schema::coerce::NestedTemplates,
     ) -> Result<simplified_schema::DefaultPreparation<'a>, SchemaError> {
-        if self.accepts_as_is(instance) {
-            return Ok(simplified_schema::DefaultPreparation { candidate: std::borrow::Cow::Borrowed(instance), defaults: Vec::new() });
-        }
         let before = self.complete(std::borrow::Cow::Borrowed(instance), templates)?;
+        if self.accepts_as_is(&before.candidate) {
+            return Ok(before);
+        }
         let converted =
             simplified_schema::coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, &before.candidate, templates);
         let after = self.complete(std::borrow::Cow::Owned(converted), templates)?;
@@ -1837,17 +1853,18 @@ impl EffectiveSchema {
         Ok(simplified_schema::DefaultPreparation { candidate: after.candidate, defaults })
     }
 
-    /// The defaults of the absent required properties of `instance`, a
-    /// composed frontmatter value, in the order
-    /// [`Self::converted_candidate`] finds them. Templates this schema marks
-    /// `deferred` are pending and nothing below them is filled. Composition
-    /// writes these into its working frontmatter; nothing here mutates.
+    /// The defaults that apply to `instance`, a composed frontmatter value,
+    /// in the order [`Self::converted_candidate`] finds them: each missing or
+    /// `null` property with a default, required or not. Templates this
+    /// schema marks `deferred` are pending and nothing below them is filled.
+    /// Composition writes these into its working frontmatter; nothing here
+    /// mutates.
     ///
     /// ## Errors
     ///
     /// The default engine's [`SchemaError`]: a default that breaks its own
-    /// definition, ambiguous union defaults, or a recursive default.
-    pub(crate) fn required_defaults(&self, instance: &Value) -> Result<Vec<AppliedDefault>, SchemaError> {
+    /// definition, conflicting defaults, or a recursive default.
+    pub(crate) fn applied_defaults(&self, instance: &Value) -> Result<Vec<AppliedDefault>, SchemaError> {
         let templates = self.nested_templates(instance);
         self.converted_candidate(instance, &templates).map(|prepared| prepared.defaults)
     }
@@ -1888,6 +1905,7 @@ impl EffectiveSchema {
             dependencies,
             advisories,
             conversion: OnceLock::new(),
+            default_plan: OnceLock::new(),
             layered_definitions: OnceLock::new(),
             raw_declarations: OnceLock::new(),
         })
@@ -1905,23 +1923,40 @@ impl EffectiveSchema {
     }
 
     /// The copy of `instance` [`Self::validate_data`] judges, without the
-    /// defaults of absent required properties: `instance`
-    /// itself when it is accepted as written, the softly converted copy
-    /// otherwise. A host that reads a document's meaning after this schema
-    /// accepted it (an editor reading a `kind: schema` document with
+    /// defaults its preparation applied: `instance` itself when nothing
+    /// converts, the softly converted copy otherwise. Conversion runs on the
+    /// default-completed candidate (a missing required child would block it),
+    /// then each applied default is taken out again, a replaced `null` put
+    /// back, so a reader never mistakes a default for a written value (`md
+    /// set` writes from this copy). A host that reads a document's meaning
+    /// after this schema accepted it (an editor reading a `kind: schema`
+    /// document with
     /// [`simplified_schema::parse_selected_standalone_schema_document`])
     /// reads it from this copy, as the kind checks do.
     pub fn data_copy<'a>(&self, instance: &'a Value) -> std::borrow::Cow<'a, Value> {
-        if self.accepts_as_is(instance) {
-            return std::borrow::Cow::Borrowed(instance);
-        }
         let templates = simplified_schema::coerce::NestedTemplates::default();
-        std::borrow::Cow::Owned(simplified_schema::coerce::validation_copy_with_plan(
-            self.conversion(),
-            &self.json_schema,
-            instance,
-            &templates,
-        ))
+        let prepared = match self.converted_candidate(instance, &templates) {
+            Ok(prepared) => prepared,
+            // The verdict reports why the default cannot be applied.
+            Err(_) => {
+                return std::borrow::Cow::Owned(simplified_schema::coerce::validation_copy_with_plan(
+                    self.conversion(),
+                    &self.json_schema,
+                    instance,
+                    &templates,
+                ));
+            }
+        };
+        match prepared.candidate {
+            std::borrow::Cow::Borrowed(borrowed) => std::borrow::Cow::Borrowed(borrowed),
+            std::borrow::Cow::Owned(mut copy) => {
+                for applied in prepared.defaults.iter().rev() {
+                    let written = applied.path.resolve(instance).value().is_some();
+                    withdraw_default(&mut copy, applied.path.segments(), written);
+                }
+                if copy == *instance { std::borrow::Cow::Borrowed(instance) } else { std::borrow::Cow::Owned(copy) }
+            }
+        }
     }
 
     /// Validates a working frontmatter instance at a runtime schema phase.
@@ -2068,6 +2103,7 @@ impl EffectiveSchema {
             dependencies: self.dependencies.clone(),
             advisories: self.advisories.clone(),
             conversion: OnceLock::new(),
+            default_plan: OnceLock::new(),
             layered_definitions: OnceLock::new(),
             raw_declarations: OnceLock::new(),
         };
@@ -2109,8 +2145,8 @@ impl EffectiveSchema {
     /// Shared validation body over an already-prepared candidate. Callers
     /// choose the preparation: [`Self::validate_with_positions`] passes a
     /// coerced working copy, the `validate_raw` pair passes the instance as
-    /// parsed; either holds the defaults of absent required properties,
-    /// which the report lists. A candidate the default engine refused is
+    /// parsed; either holds the defaults its preparation applied, which the
+    /// report lists. A candidate the default engine refused is
     /// reported as one problem at the schema default. Problems owed to one
     /// of `templates` are left out as they are collected.
     ///
@@ -2391,11 +2427,11 @@ pub struct ValidationReport {
     /// [`DarkmatterSchemas::validate_for_phase`] whether or not an effective
     /// schema exists; empty from an [`EffectiveSchema`]'s own validation.
     pub trigger_findings: Vec<library_triggers::InvalidTriggerFinding>,
-    /// Required properties that were absent and were accepted through their
-    /// `default(...)`, in validator order (parents before children,
-    /// declaration order, ascending array index). Empty for an
-    /// unconditional pass. Validation never inserts them into the caller's
-    /// value; composition writes them into the composed frontmatter.
+    /// The defaults default preparation applied to missing or `null`
+    /// properties, required or not, in walk order (parents before children,
+    /// declaration order, ascending array index). Empty when no default
+    /// applies. Validation never inserts them into the caller's value;
+    /// composition writes them into the composed frontmatter.
     pub defaults: Vec<AppliedDefault>,
 }
 
@@ -2461,6 +2497,28 @@ impl ValidationReport {
     }
 }
 
+/// Takes the default at `segments` out of `copy`: back to `null` where the
+/// input wrote `null` (`written`), removed where the input had no key.
+fn withdraw_default(copy: &mut Value, segments: &[String], written: bool) {
+    let Some((last, parents)) = segments.split_last() else {
+        return;
+    };
+    let holder = parents.iter().try_fold(copy, |holder, segment| match holder {
+        Value::Object(map) => map.get_mut(segment),
+        Value::Array(items) => segment.parse::<usize>().ok().and_then(|index| items.get_mut(index)),
+        _ => None,
+    });
+    if let Some(Value::Object(map)) = holder {
+        if written {
+            if let Some(slot) = map.get_mut(last) {
+                *slot = Value::Null;
+            }
+        } else {
+            map.shift_remove(last);
+        }
+    }
+}
+
 /// The problem a default the engine refused becomes: at the property the
 /// default stands in for (the document root when the error names none),
 /// with the default's JSON Pointer in the lowered schema as its
@@ -2468,7 +2526,7 @@ impl ValidationReport {
 fn default_problem(error: &SchemaError) -> ValidationProblem {
     let (property, schema_pointer) = match error {
         SchemaError::InvalidDefault { path, pointer, .. } => (Some(path), Some(pointer.as_str())),
-        SchemaError::AmbiguousDefaults { path, pointer, .. } => (path.as_ref(), Some(pointer.as_str())),
+        SchemaError::ConflictingDefaults { pointer, .. } => (None, Some(pointer.as_str())),
         SchemaError::RecursiveDefault { path, .. } => (path.as_ref(), None),
         _ => (None, None),
     };

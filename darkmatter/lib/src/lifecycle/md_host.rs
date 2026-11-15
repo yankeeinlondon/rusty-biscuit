@@ -105,12 +105,14 @@ pub fn registry() -> &'static Arc<EventRegistry> {
     REGISTRY.get_or_init(|| Arc::new(EventRegistry::md()))
 }
 
-/// The parse options of the `md` profile.
+/// The parse options of the `md` profile. `md` parses the document as
+/// written, so the parsed value is its own authored source.
 pub fn parse_options(authored: Option<&Frontmatter>) -> LifecycleParseOptions<'_> {
     LifecycleParseOptions {
         // `effect` is unprovided, so no effect name is ever checked.
         is_known_effect: &|_| false,
         authored,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::IgnoreUnprovided(UNPROVIDED_VERBS.into()),
         registry: registry(),
     }

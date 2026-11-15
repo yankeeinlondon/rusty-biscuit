@@ -123,6 +123,7 @@ fn config(frontmatter: serde_json::Value) -> LifecycleConfig {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: crate::lifecycle::registry::tests::agent_host(),
     };

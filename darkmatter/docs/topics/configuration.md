@@ -62,9 +62,11 @@ types:
 
 ## Defaults
 
-An absent setting takes its scope's default. A list you write **replaces**
-the default; it is never merged with it, so `file-read: []` pre-approves no
-file at that scope. Explicit `null` is an error, never "use the default".
+An absent setting takes its scope's default, and so does an explicit `null`:
+`network: null` is `deny`, `permissions: null` holds all three permission
+defaults. A list you write **replaces** the default; it is never merged with
+it, so `file-read: []` pre-approves no file at that scope. A `null` inside a
+list (`register: [null]`) is still an error.
 
 | Setting | User default | Repository default |
 | --- | --- | --- |

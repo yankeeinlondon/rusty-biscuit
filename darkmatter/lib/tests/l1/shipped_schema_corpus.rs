@@ -643,31 +643,6 @@ fn record_core_types(
     }
 }
 
-/// Every `any(…)` or `unknown(…)` constraint group in `source` that names
-/// `required`. A null-admitting whole value is never required, so such a site
-/// would silently stop demanding the presence it was written for; `unknown[]`
-/// arrays are not null-admitting and are not reported.
-fn presence_only_sites(source: &str) -> Vec<String> {
-    let mut sites = Vec::new();
-    for keyword in ["any(", "unknown("] {
-        for (start, _) in source.match_indices(keyword) {
-            let preceded_by_word = source[..start]
-                .chars()
-                .next_back()
-                .is_some_and(|previous| previous.is_alphanumeric() || matches!(previous, '_' | '-'));
-            if preceded_by_word {
-                continue;
-            }
-            let group = &source[start..];
-            let group = &group[..group.find(')').map_or(group.len(), |end| end + 1)];
-            if group.contains("required") {
-                sites.push(group.to_string());
-            }
-        }
-    }
-    sites
-}
-
 /// Every shipped schema artifact parses passively, or fails exactly as its
 /// exception says. Parsing builds no effect engine, attempts no network
 /// access, gives the same result from an empty directory, and mutates nothing.
@@ -713,11 +688,6 @@ fn shipped_schema_artifacts_parse_passively() {
     let mut core_type_users = BTreeMap::new();
     for artifact in &artifacts {
         let label = artifact.label();
-        let sites = presence_only_sites(&artifact.source);
-        assert!(
-            sites.is_empty(),
-            "{label} still relies on a null-admitting type demanding presence: {sites:?}",
-        );
         let document: YamlValue = serde_yaml_ng::from_str(&artifact.source)
             .unwrap_or_else(|error| panic!("{label} is not YAML: {error}"));
         let trigger = parse_trigger_envelope_from_str(&artifact.source);
@@ -1602,8 +1572,6 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
     let mut envelopes = Vec::new();
     for (dialect, trigger, target, required) in &triggers {
         let source = fs::read_to_string(trigger).expect("trigger is readable");
-        let sites = presence_only_sites(&source);
-        assert!(sites.is_empty(), "{dialect}: {sites:?}");
         let envelope = parse_trigger_envelope_from_str(&source)
             .unwrap_or_else(|error| panic!("{dialect} trigger must load: {error}"))
             .unwrap_or_else(|| panic!("{dialect} must be claimed as a trigger"));
