@@ -1,0 +1,33 @@
+{
+  "name": "@rusty-biscuit/evidence-store",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private evidence store: a Cloudflare Worker over D1 metadata and R2 report bytes, plus its operator and ingestion tooling.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "check": "pnpm typecheck && pnpm test",
+    "test-real": "vitest run --project real",
+    "deploy": "tsx cli/deploy.ts",
+    "demo-hosted": "tsx cli/dispatch-demo.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "jose": "6.2.17"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.7.0",
+    "@cloudflare/workers-types": "5.20261110.1",
+    "@types/node": "22.20.1",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12",
+    "wrangler": "4.160.1",
+    "yaml": "2.9.1"
+  }
+}

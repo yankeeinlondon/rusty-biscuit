@@ -1,0 +1,48 @@
+{
+  "manifest_version": 1,
+  "environment": "development",
+  "worker_name": "evidence-store-development",
+  "d1": {
+    "name": "evidence-store-development",
+    "id": "960d8e9e-7a45-4823-bff5-5436c46889a8"
+  },
+  "r2_bucket": "evidence-store-development",
+  "migrations": [
+    {
+      "file": "0001_evidence.sql",
+      "sha256": "2aa09f99d8f735dbe015e0b811900063e3a2d78c754dbc12ebec90ee06b1f94a"
+    },
+    {
+      "file": "0002_retention.sql",
+      "sha256": "58a60635cab95b99e2d8412e4380d513b79dfdc7475d02c6176a759cb24850d4"
+    },
+    {
+      "file": "0003_credentials.sql",
+      "sha256": "dbfc564b6ee36a16adce73d92c3318095c734007d452e792ec6efd6a9dd501e1"
+    },
+    {
+      "file": "0004_uploads.sql",
+      "sha256": "0d37da94260a1a9516aea711aaa9d83b59eb0ef658607f902b59f48998a3f2f0"
+    },
+    {
+      "file": "0005_evaluations.sql",
+      "sha256": "6662ce9d6148b8448617c88ccb3879e1502b5a3f989890b221a7059f9b0c0193"
+    },
+    {
+      "file": "0006_feed_horizons.sql",
+      "sha256": "dc725dce28ca719fa69bd65e1d2b85b8c2bf236822f921f9193e414c7c489d6f"
+    },
+    {
+      "file": "0007_maintenance.sql",
+      "sha256": "5fb13fbb08d6107bd615b3f12187d53df6ddfcb0885f87bbef629df358822e15"
+    },
+    {
+      "file": "0008_retention_state.sql",
+      "sha256": "38342b6ca3e45d5062e5441609506e70bc9742ea93e2d43620e151b29b3854af"
+    }
+  ],
+  "worker_version_id": "b771aae2-c787-40ec-831f-5527c810ea92",
+  "endpoint": "https://evidence-store-development.inocan.workers.dev",
+  "wrangler_version": "4.160.1",
+  "deployed_at": "2026-11-11T20:28:56.836Z"
+}

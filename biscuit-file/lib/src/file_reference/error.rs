@@ -23,7 +23,7 @@ pub enum FileReferenceError {
 
     #[cfg(feature = "file-reference")]
     #[error("could not inspect git repository state: {0}")]
-    Git(#[source] Box<gix::discover::Error>),
+    Git(#[source] Box<gix::Error>),
 
     #[error("git repository is bare and has no working directory")]
     BareRepository,

@@ -15,8 +15,10 @@ macro_rules! command_cases {
 }
 
 
-/// Symlinks `alias` to `target`. On Windows a target spelled with `/` does
-/// not resolve, so callers join relative targets name by name.
+/// Symlinks `alias` to `target`. On Windows a relative target spelled with
+/// `/` is created but cannot be followed, so every relative target in this
+/// file, directory links included, is joined name by name with its `.` and
+/// `..` components kept.
 fn link(target: &Path, alias: &Path) {
     #[cfg(unix)]
     std::os::unix::fs::symlink(target, alias).unwrap();
@@ -184,7 +186,7 @@ fn check_nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout
     std::fs::create_dir(inner.join("subdir")).unwrap();
     link(&Path::new("..").join("..").join("clean.rs"), &inner.join("subdir").join("back.rs"));
     #[cfg(unix)]
-    std::os::unix::fs::symlink(Path::new("inner/subdir"), repo.dir.path().join("bridge")).unwrap();
+    std::os::unix::fs::symlink(Path::new("inner").join("subdir"), repo.dir.path().join("bridge")).unwrap();
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(Path::new("inner").join("subdir"), repo.dir.path().join("bridge")).unwrap();
     link(&Path::new("bridge").join("back.rs"), &repo.dir.path().join("alias.rs"));
@@ -230,24 +232,37 @@ fn parent_traversal(shape: &str, phase: &str, command: &str) {
     let target = match shape {
         "external" => {
             std::fs::create_dir(foreign.dir.path().join("subdir")).unwrap();
-            foreign.dir.path().join("subdir").join("..").join("..").join(repo.dir.path().file_name().unwrap()).join("clean.rs")
+            let through_foreign = |start: &Path| {
+                start.join(foreign.dir.path().file_name().unwrap()).join("subdir").join("..").join("..").join(repo.dir.path().file_name().unwrap()).join("clean.rs")
+            };
+            // Windows removes the `..` from an absolute target when it
+            // creates the link, so only a relative target still names the
+            // other checkout there.
+            if cfg!(windows) { through_foreign(Path::new("..")) } else { through_foreign(foreign.dir.path().parent().unwrap()) }
         }
         "directory-alias" | "ordinary-directory-alias" => {
             std::fs::create_dir(inner.join("subdir")).unwrap();
             #[cfg(unix)]
-            std::os::unix::fs::symlink(Path::new("inner/subdir"), repo.dir.path().join("bridge")).unwrap();
+            std::os::unix::fs::symlink(Path::new("inner").join("subdir"), repo.dir.path().join("bridge")).unwrap();
             #[cfg(windows)]
-            std::os::windows::fs::symlink_dir(Path::new("inner/subdir"), repo.dir.path().join("bridge")).unwrap();
-            Path::new("bridge").join("..").join("..").join("clean.rs")
+            std::os::windows::fs::symlink_dir(Path::new("inner").join("subdir"), repo.dir.path().join("bridge")).unwrap();
+            // A `..` after `bridge` climbs out of the link's target on Unix
+            // but cancels the link's own name on Windows, so each OS gets the
+            // hops that return to `clean.rs`.
+            if cfg!(windows) {
+                Path::new("bridge").join("..").join("clean.rs")
+            } else {
+                Path::new("bridge").join("..").join("..").join("clean.rs")
+            }
         }
         "recursive-file-alias" => {
-            link(Path::new("inner/../clean.rs"), &repo.dir.path().join("middle.rs"));
+            link(&Path::new("inner").join("..").join("clean.rs"), &repo.dir.path().join("middle.rs"));
             repo.stage("middle.rs");
             commit_index(repo.dir.path(), "middle alias", MAIN_BRANCH);
             Path::new("middle.rs").to_path_buf()
         }
-        "dot-parent" => Path::new("inner/./../clean.rs").to_path_buf(),
-        _ => Path::new("inner/../clean.rs").to_path_buf(),
+        "dot-parent" => Path::new("inner").join(".").join("..").join("clean.rs"),
+        _ => Path::new("inner").join("..").join("clean.rs"),
     };
     git2::Repository::open(repo.dir.path()).unwrap().config().unwrap().set_bool("core.symlinks", true).unwrap();
     link(&target, &repo.dir.path().join("alias.rs"));
@@ -280,6 +295,43 @@ fn parent_traversal(shape: &str, phase: &str, command: &str) {
         }
     }
 }
+
+/// A `..` right after a directory link climbs out of the link's target on
+/// Unix but cancels the link's own name on Windows. The alias is judged by
+/// the file the OS opens: a clean file on Unix, another checkout's file on
+/// Windows.
+fn parent_after_directory_link(command: &str) {
+    let repo = Repo::committed(&[("clean.rs", "fn clean() {}\nstruct Clean;\n")]);
+    let root = repo.dir.path();
+    let climbed = root.join("inner").join("nested");
+    std::fs::create_dir_all(root.join("inner").join("subdir")).unwrap();
+    std::fs::create_dir_all(&climbed).unwrap();
+    std::fs::write(climbed.join("leaf.rs"), "fn clean() {}\nstruct Clean;\n").unwrap();
+    let foreign = root.join("nested");
+    std::fs::create_dir(&foreign).unwrap();
+    crate::git_init(&foreign);
+    std::fs::write(foreign.join("leaf.rs"), "fn foreign() {}\nstruct Foreign;\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(Path::new("inner").join("subdir"), root.join("bridge")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(Path::new("inner").join("subdir"), root.join("bridge")).unwrap();
+    git2::Repository::open(root).unwrap().config().unwrap().set_bool("core.symlinks", true).unwrap();
+    link(&Path::new("bridge").join("..").join("nested").join("leaf.rs"), &root.join("alias.rs"));
+    let opened = if cfg!(windows) { foreign.join("leaf.rs") } else { climbed.join("leaf.rs") };
+    assert_eq!(tree_hugger::file_identity(&root.join("alias.rs")), tree_hugger::file_identity(&opened), "the OS opens {}", opened.display());
+    if cfg!(windows) {
+        assert_rejected(&repo, "--changed", "alias.rs", command);
+    } else {
+        let names = match command { "functions" => vec!["clean"], "symbols" => vec!["clean", "Clean"], _ => vec!["Clean"] };
+        let report = repo.json(&[command, "--changed", "--file", "alias.rs", "--json", "--no-cache"]);
+        let files = files_and_names(&report);
+        assert_eq!(files.len(), 1, "{report}");
+        assert_eq!(files[0].1, names);
+        assert_eq!(report["errors"], serde_json::json!([]));
+    }
+}
+
+command_cases!(parent_after_directory_link_untracked => parent_after_directory_link);
 
 macro_rules! parent_cases {
     ($shape:literal, $untracked:ident, $staged:ident, $committed:ident) => {

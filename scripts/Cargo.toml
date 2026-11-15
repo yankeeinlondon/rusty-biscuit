@@ -23,7 +23,7 @@ publish = false
 #       --no-default-features --features build-tools --bin ci-build
 #
 # `local-tools` adds the workspace-inspecting crates `repo-deps`, `drift`,
-# `feature-attribution`, and `slow-tests` need. `slow-tests` runs after every
+# `feature-attribution`, `slow-tests`, and `ci-push` need. `slow-tests` runs after every
 # canonical test recipe, and it is here because it keys each run on sniff's
 # working-tree state; its first recording on a fresh tree pays for sniff.
 [features]
@@ -32,9 +32,25 @@ build-tools = ["dep:biscuit-hash", "dep:biscuit-terminal", "dep:object", "dep:fi
 local-tools = [
     "build-tools",
     "dep:cargo_metadata",
+    "dep:chrono",
     "dep:ctrlc",
+    "dep:dirs",
+    "dep:git2",
+    "dep:gix",
+    "dep:libc",
+    "dep:libgit2-sys",
     "dep:sniff",
+    "dep:tempfile",
+    "dep:windows-sys",
 ]
+
+# The library holds the code more than one binary calls in-process:
+# `ci_plan_render` (`build-tools`), the resolved-plan renderer `ci-plan` and
+# `ci-push` share, and `ci_push` (`local-tools`), whose decisions are tested
+# through `ci_push::run`. `[lib]` cannot declare `required-features`, so
+# `lib.rs` gates each module itself and compiles empty for `ci-rollup`.
+[lib]
+path = "lib.rs"
 
 [[bin]]
 name = "repo-deps"
@@ -70,6 +86,27 @@ required-features = ["local-tools"]
 name = "ci-rollup"
 path = "ci-rollup.rs"
 
+[[bin]]
+name = "ci-push"
+path = "ci-push.rs"
+required-features = ["local-tools"]
+
+# Test fixture only: the gh/just/python/cargo stand-ins `ci-push`'s tests copy
+# under each tool's name. A `[[bin]]` because a test can locate a built binary
+# portably (archives included) only through `CARGO_BIN_EXE_*`, which Cargo
+# sets for integration tests alone; hence the `ci-push` test target below.
+[[bin]]
+name = "ci-push-test-tool"
+path = "ci-push-test-tool.rs"
+required-features = ["local-tools"]
+
+# `ci-push`'s tests that drive a compiled executable. Its decision tests stay
+# lib unit tests (`ci_push::tests`).
+[[test]]
+name = "ci-push"
+path = "ci-push/integration/main.rs"
+required-features = ["local-tools"]
+
 [dependencies]
 anyhow = "1.0"
 quick-xml = "0.38"
@@ -90,8 +127,46 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 
 find-msvc-tools = { version = "0.1.12", optional = true }
 
+# `ci-push` (local-tools). Repository reads go through gix, at sniff's pinned
+# version. git2 covers the two writes gix 0.90 has no API for: creating a
+# detached linked worktree for a committed-tree review, and attaching a scope
+# note. Remote transport (ls-remote, fetch, push) stays on the Git CLI.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"], optional = true }
+dirs = { version = "6", optional = true }
+git2 = { version = "0.20", default-features = false, optional = true }
+gix = { version = "=0.90.0", default-features = false, features = [
+    "sha1",
+    "revision",
+    "status",
+    "blob-diff",
+    "dirwalk",
+    "excludes",
+    "parallel",
+], optional = true }
+# libgit2-sys >= 0.18.6 bundles PCRE2 with unprefixed symbols that collide at
+# MSVC link time with pcre2-sys, which sniff's `hyperpolyglot` already links
+# (LNK2005 -> LNK1169). The same ceiling sniff and tree-hugger carry.
+libgit2-sys = { version = ">=0.18.3, <0.18.6", optional = true }
+tempfile = { version = "3", optional = true }
+
+# `ci-push` owns its children's process tree: a process group and `sigaction`
+# on Unix, a kill-on-close Job Object and console control on Windows.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
+biscuit-test-harness = { path = "../biscuit-test-harness" }
 rstest = "0.23"
+test-toolkit = { path = "../tools/test-toolkit" }
 
 # The L1 suite covers `ci-rollup`, `ci-plan`, `ci-build`, `drift`, `slow-tests`, and
 # `feature-attribution`, all of which need the default `local-tools` feature;
@@ -105,8 +180,10 @@ rstest = "0.23"
 tiers = ["L1"]
 companion-suites = [
     "artifact-publisher",
+    "distribution",
     "test_affected_scope.py",
     "test_build_key.py",
+    "test_build_status.py",
     "test_ci_local.py",
     "test_completion.py",
     "test_constraints.py",
@@ -120,6 +197,7 @@ companion-suites = [
     "test_runner_loss.py",
     "test_schema.py",
     "test_seed.py",
+    "test_storage_sample.py",
 ]
 # `ci-rollup`'s round-trip test runs the real planner, and the planner opens the
 # workspace with `cargo metadata`. Environments without a toolchain render a

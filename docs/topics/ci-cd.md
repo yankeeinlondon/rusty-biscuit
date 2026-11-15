@@ -5,9 +5,10 @@
 Rusty Biscuit's CI/CD runs on **GitHub Actions** and is layered to match the [testing tier
 taxonomy](../testing-strategy.md): fast feedback first, then full coverage, then
 nightly/advisory work. [release-plz](https://release-plz.dev) automates release PRs, version tags,
-and GitHub releases. **Automated crates.io publishing is disabled, and general CLI binary
-distribution to package managers is not implemented.** See [Release Strategy](#release-strategy)
-for the implemented process and planned distribution work.
+and GitHub releases. **Automated crates.io publishing is disabled. Prebuilt CLI binaries are
+built and attached to a package's Release only once that package is approved, and no package is
+approved yet.** See [Release Strategy](#release-strategy) for the release process and
+[Binary distribution](../distribution.md) for the distribution workflow.
 
 Package-area gates use the same `just` recipes developers run locally. Scope selection is handled
 by `scripts/ci/affected_scope.py`, which emits **one canonical resolved plan**: the selected
@@ -36,19 +37,22 @@ The pipeline has four conceptual layers. Each layer answers a different question
 
 ### Layer 1 — Local pre-push hook
 
-For a push that updates a branch, `.githooks/pre-push` runs `just pre-push` before `git push`
+For a push that updates a branch, `.githooks/pre-push` (a launcher for the Rust `ci-push` program;
+see [How the hook runs](#how-the-hook-runs)) runs `just pre-push` before `git push`
 completes. A tag-only or deletion-only push exits without running gates. `just pre-push` is
 `just ci-local --l2`: lint and L1 plus every hostable non-focusing L2 suite for source-changed
 packages. On a clean checkout the gates run FROM the reviewed plan described next (`just ci-local
 --plan-in`, handed over as `BISCUIT_CI_PLAN_IN`): the planner never selects twice, an L1/L2 cell
 that qualifying prior passing evidence already covers is skipped, a cell whose newest prior
-evidence is a failure is rerun, and lint runs as always; a dirty checkout or an
-`RUSTY_BISCUIT_PRE_PUSH_AREAS` override replans from the working tree for wider feedback and
+evidence is a failure is rerun, and lint runs as always; a checkout that is dirty when the push
+starts or just before the gates (or whose HEAD or status cannot then be read), or an
+`RUSTY_BISCUIT_PRE_PUSH_AREAS` override, replans from the working tree for wider feedback and
 publishes no validation outcomes. Committed scope receipts remain independent of that validation.
 A docs-only push gates nothing unless a test reads a changed document, in which
 case it runs that test alone ([test inputs](../cicd/test-inputs.md)). Before any gate, the hook reviews every branch update
 the push carries, in order — each revision's COMMITTED tree (its own planner, manifests, and
-policy, in a temporary worktree unless it is the clean checkout), never the working tree — applies
+policy, in a temporary worktree unless the checkout, re-read just before the tree is chosen, is
+clean at that revision), never the working tree — applies
 published evidence to it, prints it, and refuses on a recorded execution constraint scoped to that
 update's remote branch (either name when the refspec renames) and remote only when a cell in the
 prohibited environment would still execute; reused or absent cells satisfy it.
@@ -119,7 +123,12 @@ cannot pass for a tested cell. An L2 cell is `partial` unless a backend it requi
 a test — an absent backend makes the suite *skip*, and nextest prints PASS in about 0.02 s.
 `lint` stages no test report and remains CI-origin. A `check` cell can reuse the package's
 verified, unfiltered L1 on the same environment; it links that evidence without claiming test
-counts as a check measurement. A check that compiles unchanged dependents always executes.
+counts as a check measurement. A scheduled check that compiles unchanged dependents always
+executes and never reuses a local receipt. A push whose pull request already proved Linux plans no
+Linux cells at all, dependents check included, and the planner refuses any plan whose cell names an
+environment it did not schedule. For example, a change to a library with an unchanged direct
+consumer gets one Linux dependents check on the pull request; the push that merges it, already
+proven by that pull request, plans no cells.
 
 CI reads **every** note on every environment's notes ref from the merge base (included) to the
 outgoing head, so a macOS receipt from this push and a prior `cross-check` WSL receipt combine in
@@ -232,8 +241,112 @@ resolves `git rev-parse --show-toplevel` and executes that worktree's
 `.githooks/pre-push`; this prevents an older checkout's receipt schema from
 silently replacing the branch's current evidence protocol.
 
-Run the hook's local regression suite with
-`bash .githooks/tests/test-pre-push.sh` when changing its contract.
+#### How the hook runs
+
+Everything described above is decided by one Rust program, `ci-push`, in the
+`repo-deps` package (`scripts/ci-push.rs`; its logic is the library function
+`repo_deps::ci_push::run`). The versioned `.githooks/pre-push` is only a
+launcher: it changes to the top level of the checkout being pushed and runs
+
+```sh
+cargo run --quiet -p repo-deps --no-default-features --features local-tools --bin ci-push -- "$@"
+```
+
+passing on Git's arguments (remote name and URL) and the ref updates Git
+writes to its standard input, unchanged. Nothing else is cached: Cargo
+rebuilds `ci-push` exactly when its sources change, so the first push after a
+change to `scripts/` compiles it (the `local-tools` feature, which includes
+`gix`, `git2`, and `sniff`) and later pushes start at once. A failed build
+refuses the push.
+
+```mermaid
+flowchart LR
+    Git[git push] --> Dispatcher[installed dispatcher] --> Launcher[".githooks/pre-push<br/>(this worktree)"]
+    Launcher --> CiPush[ci-push]
+    CiPush --> Review["review every update<br/>(all modes)"]
+    Review -->|blocked| Refuse[push refused]
+    Review --> Scope[publish scope receipt]
+    Scope -->|scope-only, or auto with no CI run| Pass[push continues]
+    Scope -->|strict / warn, or auto starting a run| Gates["just pre-push"]
+    Gates --> Validation[publish validation receipt]
+    Validation --> Pass
+```
+
+**Python.** The planner and evidence helpers are Python 3.10 or newer.
+`ci-push` picks one interpreter before the first review by *running* each
+candidate with a version probe (2 s each), in this order: `python3`, `py -3`
+(native Windows only), `python`. A name that exists but does not answer, such
+as Windows' `python3` App Execution Alias stub or a Cygwin shim, is skipped.
+Every Python helper the hook starts, and the gates, use that interpreter; the
+gates receive it as two variables, which `just ci-local` honors and you can
+set yourself:
+
+| Variable | Contract |
+| --- | --- |
+| `BISCUIT_CI_PYTHON` | Native path of an executable regular file to use instead of `python3`. |
+| `BISCUIT_CI_PYTHON_ARGS_FILE` | A file with the interpreter's leading arguments, each followed by a NUL byte (`-3` for `py -3`); empty or unset for none. Setting it without `BISCUIT_CI_PYTHON` is an error, and so is a final argument with no NUL. |
+
+When no candidate qualifies, the push is refused with one message naming
+every candidate and why it was rejected.
+
+**Review in every mode.** The ref updates are read strictly: a malformed line,
+an object id that is not the repository's hash length in lowercase hex, or a
+destination that is not a `refs/...` name refuses the push before anything
+runs. A revision other than the clean checkout's HEAD is reviewed in a
+temporary detached worktree of its committed tree, named
+`ci-push-review-<pid>-<random>` and created in the system temp directory; it
+is removed before the hook exits, and only that one worktree record is pruned.
+Review failures (an unreadable context, a planner or helper failure, no
+Python) refuse the push in every mode with exit status 2; an execution
+constraint refuses it with status 1. `warn` lets through only an ordinary gate
+failure.
+
+**Gates and reports.** The gates are `just pre-push`, started in the
+checkout's top level with the reviewed plan, the selected Python, and a
+staging directory (`ci-push-*` in the system temp directory) for their JUnit
+reports. Reports move to `$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`
+before any receipt names them. If that move fails, no validation receipt is
+published and the hook prints the path where the staged reports were kept.
+Validation is withheld, with the reason printed, when the push does not carry
+HEAD, `RUSTY_BISCUIT_PRE_PUSH_AREAS` is set, the checkout was dirty before or
+after the gates, HEAD moved, or the run was interrupted or incomplete. A
+withheld or failed publication never blocks the push; CI then plans and runs
+those cells itself.
+
+**Cancellation.** Every child process (planner, helpers, gates, and anything
+they start) runs as one owned process tree: a process group on Unix, a
+kill-on-close Job Object on Windows. Ctrl-C or a termination signal is
+forwarded to the tree, which is killed after a one-second grace; the
+temporary worktree is removed, nothing is published, and the push is refused
+with 130 (interrupt), 143 (terminate), or 129 (hang-up). An interrupted gate
+run blocks even in `warn`. Two limits remain:
+
+- a force-killed `ci-push` (`kill -9`, closing the terminal window on
+  Windows) cleans up nothing: on Windows the Job still ends the children, but
+  a temporary `ci-push-review-*` directory and its worktree record can
+  survive. `git worktree list` shows the record; `git worktree prune` removes
+  it once the directory is deleted;
+- on Windows, where a session forbids nested Jobs (some SSH sessions), a
+  child runs without tree ownership and only that child is ended.
+
+**Testing the hook.** The hook's tests are ordinary `repo-deps` L1 tests:
+decision tests in the library (`ci_push::tests::*`), and the `ci-push`
+integration target, which drives the real binary, a real repository with a
+bare remote, and an actual `git push` through the installed dispatcher and the
+launcher. Fixture tools (`gh`, `just`, Python, `cargo` stand-ins) are one
+compiled binary, `ci-push-test-tool`.
+
+```sh
+just test-pre-push-hook          # ci_push:: library tests, then the ci-push integration target
+just test-pre-push-dispatcher    # the dispatcher's worktree-selection test
+just test-githooks               # both
+just test repo-deps              # the whole package
+```
+
+On native Windows, two integration tests push through the launcher from Git
+Bash (`bash.exe -c`) and from PowerShell (`powershell.exe -NoProfile
+-NonInteractive -Command`), in `auto` and `strict`; a missing shell fails
+them rather than skipping.
 
 ### Layer 2 — Dependency-scoped CI
 
@@ -546,13 +659,8 @@ staging tree. The planner refuses, whole and before dispatch, a
 row set over 256 jobs, an area's rows over 16 KB, or all rows together over 512 KiB. These
 changes are part of current plan schema 7; see [schema versions](../cicd/schema-versions.md).
 
-A called workflow's jobs render as `<caller job name> / <called job name>`, and a matrix job's
-label carries every row value in key order, so a producer reads
-`area-ci (playa) / package-ci / test (playa-cli, L1, macos-latest, macos-latest)`: area first,
-then the whole cell. No display name is parsed for *identity* — that comes from each artifact's
-`manifest.jsonl` and `status.json` — but the composite label **is** parsed by
-`scripts/ci/runner_loss.py` to attribute a dead runner's cell, so renaming a producer job or
-reordering a row is a contract change.
+Each job's displayed name, and which parts of it come from the row, is described under
+[reading job and check names](#reading-job-and-check-names).
 
 A source-changed package receives lint, L1 across its environments, and its declared higher tiers.
 Compile-check is no longer blanket: the planner reads each package's declared Cargo targets from
@@ -606,10 +714,212 @@ receives are the plan's *executing* set. A reused cell is published straight
 into its area's summary, where the grid's "Reused results" table names the receipt's evidence ref,
 counts, duration, and host — no setup, build, archive, or test step runs for it.
 
-Skippable jobs carry **no `name:`**. GitHub never evaluates the matrix context for a job it skips,
-so a declared `name:` containing `${{ matrix.… }}` reaches the Checks tab as raw expression text
-(63 such labels in run 34638047631). Omitting `name:` makes the label the job id when skipped and
-`job-id (matrix values)` when it runs — which is also how `lint`'s environment stays visible.
+### Reading job and check names
+
+This section explains how to read a name on a pull request's Checks tab or in a run's job list:
+what each part means, which parts are fixed by stored data, and what a skipped or neutral entry
+does and does not prove. The names are for people. No job identifier, artifact, or stored result
+is keyed on a displayed name.
+
+#### Workflow titles
+
+| File | Title shown in the Actions tab |
+|---|---|
+| `ci.yml` | `Continuous integration` |
+| `_area-ci.yml` | `Package area checks` |
+| `_package-ci.yml` | `Package checks` |
+| `_wsl-ci.yml` | `WSL2 tests` |
+
+**The `ci.yml` title is load-bearing.** A `workflow_run` trigger (a workflow that starts when
+another one finishes) names the workflow it waits for by its *title*, not its file. Both
+`release-plz.yml` and `ci-infra-retry.yml` wait for `Continuous integration`. Renaming the title
+without changing those two triggers would silently stop release preparation and the lost-runner
+retry; nothing would turn red. The `ci_workflow_contracts` suite compares each trigger with
+`ci.yml`'s actual title, so that mistake fails a test instead.
+
+#### Infrastructure jobs
+
+Jobs that own no result cell carry a fixed, descriptive name. The identifier in the left column
+is what `needs:`, the plan, and the scripts use; the name is only what you see.
+
+| Job identifier | Displayed name | What it does |
+|---|---|---|
+| `validation` | `Check prior pull request validation` | decides whether a passing pull-request run already proved this tree |
+| `scope` | `Choose required work` | computes the one resolved plan |
+| `preflight` | `Verify build prerequisites (<runner>)` | checks toolchains and tools per selected OS; runs no tests |
+| `build` | automatic: `build (<producer>)` | prepares test archives (see below) |
+| `area-ci` | automatic: `area-ci (<area directory>)` | one entry per selected package area |
+| `area-drift` | `Verify package area mapping` | the planner's areas match `sniff` |
+| `ci-gate` | `ci-gate` | the required merge check |
+| `certify-nightly` | `Publish nightly coverage evidence (<environment>)` | records a successful nightly's certification |
+| `publish-observations` | `Publish test observations` | publishes finished cells' proof |
+| `ci-reporting` | `Report CI results (advisory)` | the run report; never blocks |
+| `_area-ci.yml` `package-ci` | `Run package work` | calls `_package-ci.yml` for the area |
+| `_area-ci.yml` `accepted-gaps` | `Publish accepted capability gaps` | posts neutral gap checks |
+| `_area-ci.yml` `coverage-audit` | `Check required results` | the area's coverage audit |
+| `_wsl-ci.yml` `wsl` | `Run guest tests` | runs a WSL2 cell inside the guest |
+
+`ci-gate` keeps its identifier as its name because the `protect-your-bacon` ruleset requires a
+check with exactly that name.
+
+`preflight` and `certify-nightly` run once per runner or environment (a *matrix* job). A fixed
+name does not stop GitHub from adding the matrix value in parentheses, so a leg that runs reads
+`Verify build prerequisites (ubuntu-latest)`. When the whole job is skipped, it shows only the
+fixed name.
+
+**`build (<producer>)` prepares archives; it does not run tests.** The suffix is the build owner's
+runner, not an execution environment. The `ubuntu-latest` owner's Linux archive is consumed by
+both the Linux cell and the WSL2 guest, so `build (ubuntu-latest)` appears in a run that only
+executes WSL2 tests. The name stays automatic because `runner_loss.py` reads it to attribute a
+lost build runner.
+
+#### Package jobs: the automatic suffix
+
+A job in a called workflow renders as `<caller job name> / <called job name>`. A matrix job that
+runs gets its row's values appended in key order: `<job id> (<values>)` with no declared name, and
+`<declared name> (<values>)` with a fixed one. A skipped job shows only its declared name, or its
+job id when it has none. A package job is three levels deep (four for WSL2), and every row carries
+`package, gate, environment, runner`:
+
+```text
+area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)
+└─ area ─────────┘   └─ caller ─────┘   └─ job (package, gate, environment, runner) ────┘
+```
+
+The package matrix jobs (`check`, `test`, `lint`, and `wsl2` in `_package-ci.yml`), together with
+`ci.yml`'s `area-ci` and `build`, deliberately declare **no `name:`**:
+
+- a fixed `name:` keeps the suffix but replaces the job id (`test`, `check`, `lint`, `wsl2`,
+  `build`) that `runner_loss.py` reads to tell which kind of job lost its runner. `area-ci` has
+  no such reader; it keeps no name so the area's entry stays `area-ci (<area directory>)`, the
+  spelling every earlier run used (a fixed name would still show the area, as
+  `<name> (<area directory>)`);
+- a `name:` built from `${{ matrix.… }}` is shown as raw expression text whenever the job is
+  skipped, because GitHub never evaluates the matrix for a skipped job (63 such labels appeared
+  in run 34638047631).
+
+So the suffix keeps the stored values rather than plain words, and the runner appears twice for
+native cells (`ubuntu-latest, ubuntu-latest`).
+
+**Why there is no plain-words label in the suffix.** A natural fix would be one more row value,
+such as `schematic-gen: run Level 1 tests on WSL2`, placed first so it leads the parentheses.
+GitHub cuts every segment of a job name (each part between ` / `) at 100 characters, keeping 97
+and adding `...`. A label repeats the package name, so a segment passes that limit and loses its
+runner, and sometimes part of its environment. GitHub showed these two, cut exactly like this,
+in a small test workflow run (42963148323):
+
+```text
+test (rendezvous-core: run Level 1 tests on Linux, rendezvous-core, L1, ubuntu-latest, ubuntu-lat...
+Run WSL2 tests (schematic-gen: run Level 1 tests on WSL2, schematic-gen, L1, wsl2-ubuntu, windows...
+```
+
+In that run a 13-character package name was already cut under a fixed job name, and a
+15-character one under the plain `test` id; package names in this repository run up to 27
+characters. Without the label the longest possible segment is 75
+characters (`test (unfolded-integration-helper, browser, windows-latest, windows-latest)`), so every
+value stays visible. This is a GitHub limit, not a setting the workflows can change; the rows therefore
+carry only the four identity values. Read the values with these tables:
+
+| Gate value | Meaning |
+|---|---|
+| `L1` | Level 1 tests: in-process, or hermetic subprocess and filesystem tests |
+| `L2` | Level 2 tests: tests that need a real terminal or pseudo-terminal |
+| `browser` | tests that drive a headless browser |
+| `lint` | Clippy and the package's lint suites |
+| `check` | compilation of declared example and bench targets, and of unchanged dependents |
+
+| Environment value | Meaning |
+|---|---|
+| `ubuntu-latest` | Linux |
+| `macos-latest` | macOS |
+| `windows-latest` | native Windows |
+| `wsl2-ubuntu` | WSL2 (Windows Subsystem for Linux 2), an Ubuntu guest on a Windows runner |
+
+A WSL2 cell's identity rides on the delegating `wsl2 (…)` segment, whose runner is the Windows
+host, and the guest job's own name is the static `Run guest tests`. A nested area keeps its whole
+repository-relative directory in the prefix.
+
+The examples below are composed from the declared names; no production run has shown these exact
+names yet. A small check workflow with the same nesting (run 42963148323) showed GitHub rendering
+the same shapes, for example
+`area-ci (claudine/rendezvous) / Run package work / test-auto-nolabel (rendezvous-core, L1, ubuntu-latest, ubuntu-latest)`
+for an unnamed matrix job in a nested area, and `… / wsl2 (…) / Run guest tests` for a WSL2-style
+delegation. The contract test `projected_full_names_compose_from_the_declared_names` builds
+the same strings from the workflows, and `test_runner_loss.py` parses them back to their cells.
+
+```text
+area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)
+area-ci (research) / Run package work / test (research, L2, ubuntu-latest, ubuntu-latest)
+area-ci (schematic) / Run package work / wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) / Run guest tests
+area-ci (claudine/rendezvous) / Check required results
+area-ci (claudine/rendezvous) / Publish accepted capability gaps
+```
+
+For comparison, a name **observed** in nightly run 42491863852 before these names were introduced:
+`area-ci (schematic) / package-ci / wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) / test (wsl2-ubuntu)`.
+
+#### Accepted-gap checks
+
+Each governed, unexpired gap is posted as one `neutral` check named in plain words:
+
+```text
+ACCEPTED GAP: <package>: <action> on <environment>
+ACCEPTED GAP: darkmatter: run Level 2 tests on macOS
+```
+
+The action is `run Level 1 tests`, `run Level 2 tests`, `run browser tests`, `lint source`, or
+`check compilation`; the environment is `Linux`, `macOS`, `Windows`, or `WSL2`.
+`scripts/ci/publish_gaps.py` refuses an unknown gate or environment before it posts anything. The
+area is in the check's summary, not its name.
+
+#### What a skipped or neutral entry means
+
+A skipped job proves nothing by itself; it only says GitHub did not run it. What decides a cell is
+the plan and the area's `Check required results` audit. A skipped name never contains `${{`: it is
+either a literal name or a bare job identifier.
+
+| You see | Example | Why | Blocks? |
+|---|---|---|---|
+| skipped caller, no package jobs | `area-ci (tools) / Run package work` | the area has no executing cells: nothing selected, or every cell reused or a gap | no; the audit still judges the area |
+| skipped bare job | `area-ci (research) / Run package work / test` | no row of that kind for the area | no |
+| cell under "Reused results" in the area summary | the receipt's evidence ref, counts, duration, host | qualifying passing evidence already covers the cell | no |
+| skipped `wsl2` on a pull request | `area-ci (biscuit-file) / Run package work / wsl2` | the event does not schedule WSL2; it is not a required cell for this run | no |
+| neutral check | `ACCEPTED GAP: darkmatter: run browser tests on macOS` | governed, unexpired capability gap | no |
+| failed, missing, or cancelled required work | a red producer, or the audit reporting `MISSING` or `completion-unproven` | the cell was required and is not proven | yes, through `ci-gate` |
+
+```mermaid
+flowchart LR
+    Scope[Choose required work] --> Cell{each required cell}
+    Scope -.->|environment not scheduled<br/>for this event| Deferred[deferred:<br/>not a required cell]
+    Cell -->|qualifying evidence| Reuse[reused,<br/>linked in summary]
+    Cell -->|governed gap| Gap[neutral<br/>ACCEPTED GAP check]
+    Cell -->|otherwise| Run[Run package work]
+    Reuse --> Audit[Check required results]
+    Gap --> Audit
+    Run --> Audit
+    Run -->|failed or cancelled| Gate
+    Audit -->|missing or unproven| Gate[ci-gate blocks]
+    Audit -->|all proven| Pass[ci-gate passes]
+```
+
+#### The only code that reads names
+
+Displayed names are not an identity API. Identity comes from each artifact's `manifest.jsonl` and
+`status.json`. Two readers are grandfathered, and no new one may be added:
+
+- `scripts/ci/runner_loss.py` attributes a lost runner to its cell. It reads the row
+  parenthetical `<job> (<package>, <gate>, <environment>, <runner>)` from the last segment. When
+  the last segment is `Run guest tests`, it takes the cell only from the enclosing
+  `wsl2 (…)` segment and gives up if that segment is missing or malformed. It still accepts the
+  older `package-ci`, `test (wsl2-ubuntu)`, and pre-row names, and reads `build (<producer>)`
+  for archive owners.
+- `scripts/ci/reuse_validation.py` finds each area's audit job by its name, accepting both
+  `Check required results` and the historical `coverage-audit`, so nightly reuse and
+  certification still read runs from before the rename.
+
+Renaming a producer job, the guest job, or the audit job, or reordering a row's fields, therefore
+changes what these readers parse; `test_runner_loss.py` derives its fixtures from the shipped
+workflows, so such a change fails its suite.
 
 ### How the planner reads the workspace
 
@@ -677,7 +987,7 @@ match Cargo's resolve.
 (`rustup show`) and the prebuilt helper, exactly as before. Only the registry is no longer needed.
 
 **Checking the graph against Cargo.** Small all-local workspaces in
-`scripts/ci/test_affected_scope.py` run in the Ubuntu `Companion suites` step: each is compared
+`scripts/ci/test_affected_scope.py` run in the Ubuntu `Run companion test suites` step: each is compared
 with Cargo's full resolve using `--offline`, an empty temporary `CARGO_HOME`, and no compile.
 The real workspace is not compared on every push; that is a local check, run when member
 manifests, features, or the toolchain change:
@@ -701,11 +1011,89 @@ owner projection — one leg per producer environment — that installs the unio
 each package’s Nextest archive in a shared target tree with its manifest and declared sidecars, includes the verifier, and
 uploads `build-<package>-<producer>-<key>` with run-scoped retention.
 
+#### Each archive is uploaded, then released, before the next is built
+
+An owner leg builds many archives, and on the Ubuntu owner they used to accumulate on disk until
+the end of the job. Now the owner publishes **incrementally**: it builds one record, uploads it,
+deletes that record's archive, and only then builds the next one. The shared Cargo target
+directory is kept throughout, so a dependency compiled for one record is reused by the next.
+
+```mermaid
+flowchart TD
+    S[next record, in package then key order] --> P["produce-owner.sh --key (PRODUCE_MODE=record)"]
+    P --> U[upload build-&lt;package&gt;-&lt;producer&gt;-&lt;key&gt;]
+    U -->|upload succeeded| L[write publication-ledger.json]
+    L --> D[delete that archive and its copied sidecars]
+    U -->|upload failed| K[keep the payload; publish a failure status at the upload stage]
+    D --> T[upload build-status-…]
+    K --> T
+    T --> S
+    S -->|no records left| F["always-run finalizer: statuses for records never reached, owner measurement"]
+```
+
+The pieces, for a reader changing them:
+
+- **The coordinator** is `scripts/ci/artifacts/produce.cjs`. It runs inside the job's
+  `actions/github-script` step because GitHub hands the artifact-upload credentials only to
+  JavaScript actions, not to shell steps. It starts `scripts/ci/produce-owner.sh --key <key>`
+  once per record with `PRODUCE_MODE=record` and `CI_BUILD_OUT` naming the output directory, and
+  waits for that record's upload before starting the next. A failed record or upload is
+  remembered and the remaining records are still built.
+- **`produce-owner.sh` without `PRODUCE_MODE`** keeps its local behavior: one `ci-build produce`
+  over every record, nothing uploaded. Any other `PRODUCE_MODE` value is refused with exit 2.
+- **The publication ledger**, `<out>/publication-ledger.json`, records the archive upload and the
+  status upload of each record separately. It is written atomically (temporary file, then rename)
+  after each successful upload and before anything is deleted. Artifact names cannot be reused
+  within a run, so nothing the ledger holds is uploaded again: if only a status upload failed, a
+  later attempt retries the status and never the archive.
+- **Deletion** removes only the uploaded archive and its `<artifact>-sidecars` directory, and only
+  when the path is inside the output directory and is not reached through a symbolic link.
+  Manifests, statuses, the verifier copy, counters, and the shared target directory are never
+  deleted. A payload whose upload failed is kept.
+- **The finalizer** is the `always()` step "Publish package builds and statuses". It uploads only
+  what the ledger says is still outstanding, writes a `failure` status (`cancelled` when the job
+  was cancelled) at the `produce` stage for each record the coordinator never reached, and
+  publishes the owner's compiler-work total (see below). It does not hide a failed schematic
+  guard: the job still fails.
+
+Archives were chosen because they were the only removable storage measured when a
+full-workspace owner plan was replayed with CI's own steps: no cached target entry existed for the
+cache step to restore, and `ci-build produce` had already released its inventory scratch. The cache step and the shared target directory are unchanged. Whether
+incremental publication keeps a full-workspace Ubuntu owner inside its disk is not yet confirmed
+by a hosted run; the [storage samples](#storage-samples) below are where that evidence appears.
+
+With `measure-compiler-work: true`, each `build-…` artifact carries an `<artifact>.compiler-work.json` holding
+that record's counts alone. The owner's total — records requested and measured, compiler
+invocations and time, and owner wall time — is final only after every record has run, so the
+finalizer uploads it once as a separate artifact, `compiler-work-owner-<producer>`
+(`owner-compiler-work.json`), and only when at least one record was measured.
+
 When an owner builds `schematic-gen`, it first runs the package's fresh-output guard
 (`just -f schematic/justfile test-fresh-output`). Those slow L1 tests generate and compile client
 crates with child Cargo processes, so they run on the owner rather than archive consumers.
 The consumers' normal L1 filter excludes them from both execution and expected-test listings;
 the owner keeps the guard's reports and runs it before producing the archive.
+
+#### Storage samples
+
+The Ubuntu owner also records **storage samples**, because that is the owner whose disk fills.
+`scripts/ci/storage_sample.py` appends one JSON line to `$RUNNER_TEMP/build-diagnostics/storage.jsonl`
+before and after the cache restore, before and after the fresh-output guard, at the start of
+production and after every record attempt (success, compile failure, or preflight refusal), and
+before and after publication. The job uploads the file as `build-diagnostics-<producer>` even when
+an earlier step failed. Each line keeps its measurements apart and never adds them up:
+
+| Field | What it measures |
+| ----- | ---------------- |
+| `locations` | free bytes and free inodes for the target, archive-output, and temp filesystems; a missing directory is measured at its nearest existing parent |
+| `shared_filesystem` | whether two of those locations are on the same device |
+| `categories` | allocated bytes of `target`, retained archives and sidecars, inventory scratch, other output metadata, and the guard's `target/schematic-fresh-output` (marked as overlapping `target`) |
+| `restore` | after the cache restore only: which restored target entries are profile directories no planned identity uses (`obsolete`), which are `live`, and which are `unknown` |
+
+A measurement that could not be taken reads `{"unavailable": "<reason>"}`, never zero. The
+samples are boundary observations, not the peak reached while linking or compressing in between,
+and a sampler failure never changes a record's status or the job's result. Other owners and local
+`ci-build produce` runs take no samples.
 
 A consumer downloads that artifact, runs `ci-build verify` — plan key, realized digest, source
 identity, producer/execution compatibility, archive and sidecar checksums, expected binaries, and
@@ -741,8 +1129,32 @@ flowchart LR
 ```
 
 A build record is **plumbing, never a result cell**: no `{package, environment, tier}` identity, no
-JUnit, no baseline entry. A failed, cancelled, or unuploadable owner makes each dependent cell
-`MISSING — blocked by build <key>`, which blocks; unaffected areas and environments proceed.
+JUnit, no baseline entry. Every owner publishes `build-status-<package>-<producer>-<key>` for each
+of its records, whatever the outcome.
+
+#### A consumer checks its build's status before downloading the archive
+
+Before a consumer downloads its archive, it downloads that record's build status and runs
+`scripts/ci/build_status.py`. On native cells this happens only when the cell consumes an archive;
+the WSL2 job does it on the Windows host, before any guest is provisioned. Only the status
+download may fail without failing the step; the check that follows decides.
+
+| Status found | Consumer outcome |
+| ------------ | ---------------- |
+| valid, matching, `success` | continue to the archive download and `ci-build verify` |
+| `failure` or `cancelled` | stop: `not run: producer failed: build <key> for <package> on <producer> concluded <result> at the <stage> stage` |
+| none published | stop: `not run: producer outcome unknown: …`, naming the owner job that should have published it |
+| malformed, wrong identity, unknown result | stop, naming the file and the field at fault |
+
+A successful status whose archive is then missing is an artifact-publication failure, not a test
+result. Nothing compiles a replacement and no completion record is written, so the area's coverage
+audit reports the cell as `MISSING`, which blocks. In the area's rollup, a cell with no results
+reads `not run: producer failed; build <key> (<package> on <producer>) concluded …`, followed by
+the result, stage, realized digest, and detail; a cell that did run tests keeps its own result and adds `producer failed;
+build …` as context. An absent status never makes the rollup infer a compilation failure: when an
+owner's runner was lost, `runner_loss.py` synthesizes a status from the plan whose detail says the
+per-record production and publication outcome is unknown. Unaffected areas and environments
+proceed.
 
 Seven stages are reported separately — producer queue, compile+archive, and upload; consumer
 download, verify, extract, and execute — so no transfer or setup cost hides inside test time. Each
@@ -966,9 +1378,12 @@ changelog locations, and the current limits of internal dependency management. T
 explains what to do when no release proposal appears and how to inspect a calculation without
 publishing anything.
 
-The current configuration disables crates.io publication. General CLI archives, installers,
-Homebrew, npm, and PyPI publication are planned. The four-environment release evidence gate is
-also planned. The specialized integration archive workflow has the limitations described above.
+The current configuration disables crates.io publication. The `Distribute binaries` workflow
+attaches archives, checksums, and a shell installer to an approved CLI package's existing Release,
+and publishes its Homebrew formula when that channel is enabled. No package is approved yet, so
+these channels are **planned** until their first live release; see
+[Binary distribution](../distribution.md). npm and PyPI publication are planned. The
+four-environment release evidence gate is also planned. The specialized integration archive workflow has the limitations described above.
 
 ## Caching and Performance
 
@@ -1117,5 +1532,6 @@ Before adding a new workflow, check:
 - Test tier taxonomy: [`testing-strategy.md`](../testing-strategy.md) and
     `.claude/skills/rust-testing/SKILL.md`
 
-- Pre-push hook: `.githooks/pre-push`, tested by `.githooks/tests/`
+- Pre-push hook: `.githooks/pre-push` (launcher) and `scripts/ci-push.rs`
+    (`repo-deps`), tested by `just test-githooks`
 - Canonical recipe definitions: root `justfile` and `just/*.just`

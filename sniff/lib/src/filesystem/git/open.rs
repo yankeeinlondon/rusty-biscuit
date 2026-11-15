@@ -40,11 +40,18 @@ pub(crate) fn trusted_discover(path: &Path) -> Result<Option<gix::Repository>> {
     match gix::ThreadSafeRepository::discover_opts(path, Default::default(), trusted_options()) {
         Ok(repo) => Ok(Some(repo.to_thread_local())),
         // Upward-search exhaustion is the only "not a repository" outcome.
-        Err(gix::discover::Error::Discover(
-            Up::NoGitRepository { .. }
-            | Up::NoGitRepositoryWithinCeiling { .. }
-            | Up::NoGitRepositoryWithinFs { .. },
-        )) => Ok(None),
+        Err(e)
+            if matches!(
+                e.downcast_any_ref::<Up>(),
+                Some(
+                    Up::NoGitRepository { .. }
+                        | Up::NoGitRepositoryWithinCeiling { .. }
+                        | Up::NoGitRepositoryWithinFs { .. }
+                )
+            ) =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(SniffError::git("discover", e)),
     }
 }

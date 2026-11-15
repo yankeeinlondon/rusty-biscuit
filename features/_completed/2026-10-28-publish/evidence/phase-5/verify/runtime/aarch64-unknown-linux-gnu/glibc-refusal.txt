@@ -1,0 +1,40 @@
+$ uname -a
+Linux a14e61378431 6.18.38-arcbox #1 SMP Sun Sep 27 16:06:14 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux
+
+$ cat /etc/os-release
+NAME="Ubuntu"
+VERSION="20.04.6 LTS (Focal Fossa)"
+ID=ubuntu
+ID_LIKE=debian
+PRETTY_NAME="Ubuntu 20.04.6 LTS"
+VERSION_ID="20.04"
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+VERSION_CODENAME=focal
+UBUNTU_CODENAME=focal
+
+$ ldd --version
+ldd (Ubuntu GLIBC 2.31-0ubuntu9.17) 2.31
+
+$ getconf GNU_LIBC_VERSION
+glibc 2.31
+
+$ dpkg-query (downloader packages)
+curl 7.68.0-1ubuntu2.25
+xz-utils 5.2.4-1ubuntu1.1
+
+install root listing after the run:
+(empty)
+
+HOME listing after the run:
+(empty)
+
+TMPDIR listing after the run:
+(empty)
+
+$ sh biscuit-hash-cli-installer.sh
+ERROR: biscuit-hash-cli 0.1.0 cannot be installed: requires glibc 2.35 or newer; found glibc 2.31
+Supported platforms: Linux aarch64/x86_64 with glibc 2.35+, macOS arm64/x86_64 15.0+
+[exit 1]

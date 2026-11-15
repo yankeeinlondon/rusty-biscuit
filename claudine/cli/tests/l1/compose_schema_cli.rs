@@ -1264,14 +1264,24 @@ mod compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area 
             .success();
         let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
         // `dirname` of the absolute eager spec keeps its absolute anchor, so
-        // the plan is named absolutely, beside the spec.
-        let spec_dir = biscuit_file::canonicalize_simplified(
-            &fixture.cwd().join("claudine/cli/tests/fixtures/shipped_plan_route"),
-        )
-        .unwrap();
+        // the plan is named absolutely, beside the spec. The spec is anchored
+        // on the child's `current_dir()`: symlink-resolved on Unix (macOS
+        // `/var` → `/private/var`), but on Windows the launch spelling as
+        // given, 8.3 short TEMP names included, never the canonical long form.
+        let launched = if cfg!(windows) {
+            launch_dir.to_path_buf()
+        } else {
+            biscuit_file::canonicalize_simplified(launch_dir).unwrap()
+        };
+        let spec_relative = setter
+            .strip_prefix("spec=")
+            .expect("the setter assigns `spec`");
+        let spec = spec_relative
+            .split('/')
+            .fold(launched, |path, component| path.join(component));
         let expected = format!(
             "Save the plan as \"{}/plan.md\"",
-            biscuit_file::to_portable_string(&spec_dir)
+            biscuit_file::to_portable_string(spec.parent().unwrap())
         );
         assert!(
             stdout.contains(&expected),

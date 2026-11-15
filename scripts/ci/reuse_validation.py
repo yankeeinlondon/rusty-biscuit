@@ -162,7 +162,9 @@ NIGHTLY_MAX_PAGES = 4
 JOBS_PAGE_SIZE = 100
 JOBS_MAX_PAGES = 6
 
-AUDIT_JOB = re.compile(r"(^|/ )coverage-audit$")
+#: An area's audit job: `Check required results` today, `coverage-audit` in
+#: historical runs.
+AUDIT_JOB = re.compile(r"(^|/ )(?:coverage-audit|Check required results)$")
 
 
 def git_environments_at(sha: str) -> list[dict[str, Any]] | None:
@@ -300,7 +302,8 @@ def legacy_audits_passed(repo: str, run: dict[str, Any], api: Callable[[str], An
     """Whether the run's normal audits all ran and passed.
 
     A pre-certification run left no per-environment proof, so the run's own
-    jobs are the evidence: at least one `coverage-audit` job, every one of
+    jobs are the evidence: at least one audit job (`coverage-audit` or
+    `Check required results`), every one of
     them `success`. A skipped audit proves nothing about the cells it covers.
     """
     audits = []
@@ -536,7 +539,7 @@ def certification_document(
 
 
 def count_audits(jobs: list[dict[str, Any]], required: int) -> tuple[int, int]:
-    """`(required, passed)` for a finished run's coverage-audit jobs.
+    """`(required, passed)` for a finished run's area audit jobs.
 
     `required` is the number of scheduled areas, each of which owns one audit;
     only audit jobs that concluded `success` count, so a skipped or cancelled

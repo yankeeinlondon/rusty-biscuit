@@ -1201,7 +1201,7 @@ let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | `sysinfo` | 0.38 | CPU, memory, storage detection |
-| `gix` | =0.84.0 | Pure-Rust Git repository inspection (status, diff, history, refs, remotes, config, worktrees) |
+| `gix` | =0.90.0 | Pure-Rust Git repository inspection (status, diff, history, refs, remotes, config, worktrees) |
 | `biscuit-hash` | workspace | xxHash content hashing for document fingerprinting |
 | `biscuit-file` | workspace | TOML/YAML file parsing |
 | `jsonc-parser` | 0.33.2 | Strict JSON-with-comments parsing for `bun.lock` and Rush configuration |

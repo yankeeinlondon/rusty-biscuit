@@ -1,0 +1,92 @@
+$ uname -a
+Linux 4f17d52d0cc6 6.18.38-arcbox #1 SMP Sun Sep 27 16:06:14 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux
+
+$ cat /etc/os-release
+PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.5 LTS (Jammy Jellyfish)"
+VERSION_CODENAME=jammy
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=jammy
+
+$ ldd --version
+ldd (Ubuntu GLIBC 2.35-0ubuntu3.15) 2.35
+
+$ getconf GNU_LIBC_VERSION
+glibc 2.35
+
+$ dpkg-query (downloader packages)
+curl 7.81.0-1ubuntu1.30
+xz-utils 5.2.5-2ubuntu1.2
+
+install root listing after the run:
+bh	f	755
+
+
+HOME listing after the run:
+(empty)
+
+TMPDIR listing after the run:
+(empty)
+
+$ sh biscuit-hash-cli-installer.sh
+downloading biscuit-hash-cli 0.1.0 aarch64-unknown-linux-gnu
+installing to /scratch/root
+  bh
+everything's installed!
+[exit 0]
+
+$ bh --version
+bh 0.1.0
+[exit 0]
+
+$ bh --help
+Hash content using various algorithms (xxHash, BLAKE3, Argon2id)
+
+Usage: bh [OPTIONS] [CONTENT]
+
+Arguments:
+  [CONTENT]  Content to hash (use "-" with --password to read from stdin)
+
+Options:
+  -f, --file <PATH>  Hash contents of a file instead of direct content
+  -c, --crypto       Use BLAKE3 cryptographic hash instead of xxHash
+  -p, --password     Password hashing mode (Argon2id). Use "-" as content to read from stdin
+  -h, --help         Print help
+  -V, --version      Print version
+
+SHELL COMPLETIONS:
+  Enable tab completions by adding one line to your shell config:
+
+  Bash (~/.bashrc):
+    source <(COMPLETE=bash bh)
+
+  Zsh (~/.zshrc):
+    source <(COMPLETE=zsh bh)
+
+  Fish (~/.config/fish/config.fish):
+    COMPLETE=fish bh | source
+
+  PowerShell ($PROFILE):
+    Invoke-Expression (& bh _complete powershell)
+
+EXAMPLES:
+  bh "hello world"              # xxHash of string
+  bh --file Cargo.toml           # xxHash of file contents
+  bh --crypto "hello world"     # BLAKE3 cryptographic hash
+  bh --password "secret"        # Argon2id password hash
+  echo "secret" | bh --password -  # Password from stdin
+[exit 0]
+
+$ ldd bh
+	linux-vdso.so.1 (0x0000ffff83be4000)
+	libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ffff838f0000)
+	/lib/ld-linux-aarch64.so.1 (0x0000ffff83ba0000)
+	libgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000ffff838c0000)
+[exit 0]

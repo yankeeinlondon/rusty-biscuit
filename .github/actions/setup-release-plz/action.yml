@@ -1,0 +1,116 @@
+name: Set up release-plz
+description: >-
+  Install the repository's pinned Rust toolchain and build the one patched
+  release-plz every release job uses, then prove the binary is that version.
+
+# The release jobs invoke `release-plz` directly instead of through
+# `release-plz/action`: that action installs whatever version its moving tag
+# defaults to and rewrites the runner's Git identity. Keeping the build here
+# means the dry run tests exactly the tool the two publishing jobs run.
+#
+# The tool is built from the upstream source archive with one in-repo patch,
+# `release-plz-0.4.3-historical-manifest-path.patch` (its header explains the
+# defect: renamed packages' release tags point at commits that still carry
+# their old names, and published tags are never moved). There is no prebuilt
+# or unpatched fallback: an unpatched 0.4.3 cannot calculate this
+# repository's releases. To drop the patch once an upstream release resolves
+# renamed packages itself, delete the patch file and replace the build steps
+# with a pinned install of that release.
+
+runs:
+  using: composite
+  steps:
+    - name: Read the pinned Rust toolchain
+      id: toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        import re, sys, tomllib
+        with open("rust-toolchain.toml", "rb") as handle:
+            channel = tomllib.load(handle).get("toolchain", {}).get("channel")
+        if not isinstance(channel, str) or not re.fullmatch(r"\d+\.\d+\.\d+", channel):
+            sys.exit(f"rust-toolchain.toml: toolchain.channel must be an exact x.y.z version, found {channel!r}")
+        print(f"channel={channel}")
+        PY
+
+    - name: Pin the release-plz source
+      id: pin
+      shell: bash
+      env:
+        RELEASE_PLZ_VERSION: 0.4.3
+        # SHA-256 of GitHub's archive of the `release-plz-v0.4.3` tag.
+        RELEASE_PLZ_SOURCE_SHA256: aa04f023f883e6d1905a92a9bad860e1af552e76d92c56aea633d00af216bc98
+      run: |
+        set -euo pipefail
+        {
+          echo "version=${RELEASE_PLZ_VERSION}"
+          echo "source-sha256=${RELEASE_PLZ_SOURCE_SHA256}"
+          echo "bin=${RUNNER_TEMP}/release-plz-bin"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
+      with:
+        toolchain: ${{ steps.toolchain.outputs.channel }}
+
+    # Every input of the build is in the key, so a hit is the same binary a
+    # miss would build. The binary is saved only after the steps below prove
+    # it, never by a post-job step that could store an unproven build.
+    - name: Restore the patched release-plz
+      id: cache
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      with:
+        path: ${{ steps.pin.outputs.bin }}
+        key: release-plz-${{ steps.pin.outputs.version }}-${{ steps.pin.outputs.source-sha256 }}-patch-${{ hashFiles('.github/actions/setup-release-plz/release-plz-0.4.3-historical-manifest-path.patch') }}-rust-${{ steps.toolchain.outputs.channel }}-${{ runner.os }}-${{ runner.arch }}
+
+    # The patch's own upstream unit tests run before the build, so a binary
+    # whose patch does not hold is never built or cached. They cost less than
+    # the release build itself, and only on a cache miss.
+    - name: Build the patched release-plz
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        RELEASE_PLZ_VERSION: ${{ steps.pin.outputs.version }}
+        RELEASE_PLZ_SOURCE_SHA256: ${{ steps.pin.outputs.source-sha256 }}
+        RELEASE_PLZ_PATCH: ${{ github.action_path }}/release-plz-0.4.3-historical-manifest-path.patch
+        RELEASE_PLZ_BIN: ${{ steps.pin.outputs.bin }}
+        # The upstream tree has no toolchain file of its own.
+        RUSTUP_TOOLCHAIN: ${{ steps.toolchain.outputs.channel }}
+      run: |
+        set -euo pipefail
+        archive="${RUNNER_TEMP}/release-plz-${RELEASE_PLZ_VERSION}.tar.gz"
+        source_dir="${RUNNER_TEMP}/release-plz-src"
+        curl -fsSL --retry 3 -o "${archive}" \
+          "https://github.com/release-plz/release-plz/archive/refs/tags/release-plz-v${RELEASE_PLZ_VERSION}.tar.gz"
+        echo "${RELEASE_PLZ_SOURCE_SHA256}  ${archive}" | sha256sum --check --strict
+        rm -rf "${source_dir}"
+        mkdir -p "${source_dir}" "${RELEASE_PLZ_BIN}"
+        tar -xzf "${archive}" -C "${source_dir}" --strip-components=1
+        cd "${source_dir}"
+        git apply --verbose "${RELEASE_PLZ_PATCH}"
+        cargo test --locked -p release_plz_core --lib -- git_only_ workspace_lock_comparison_
+        cargo build --locked --release -p release-plz
+        install -m 0755 target/release/release-plz "${RELEASE_PLZ_BIN}/release-plz"
+
+    - name: Put release-plz on PATH
+      shell: bash
+      env:
+        RELEASE_PLZ_VERSION: ${{ steps.pin.outputs.version }}
+        RELEASE_PLZ_BIN: ${{ steps.pin.outputs.bin }}
+      run: |
+        set -euo pipefail
+        installed="$("${RELEASE_PLZ_BIN}/release-plz" --version)"
+        if [ "${installed}" != "release-plz ${RELEASE_PLZ_VERSION}" ]; then
+          echo "::error title=release tool::expected release-plz ${RELEASE_PLZ_VERSION}, found '${installed}'"
+          exit 1
+        fi
+        echo "${RELEASE_PLZ_BIN}" >> "$GITHUB_PATH"
+        echo "${installed} (patched: historical manifest path)"
+
+    - name: Save the patched release-plz
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      with:
+        path: ${{ steps.pin.outputs.bin }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}

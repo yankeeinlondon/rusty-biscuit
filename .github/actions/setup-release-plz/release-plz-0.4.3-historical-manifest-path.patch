@@ -1,0 +1,335 @@
+Patch for release-plz 0.4.3 (tag release-plz-v0.4.3), applied by
+.github/actions/setup-release-plz before it builds the release tool.
+
+Problem: in git-only mode release-plz rebuilds the workspace at each
+package's newest release tag and looks the package up there by its
+current name. A package renamed after its tag was created has its old
+name in that historical workspace, so the lookup fails with
+`cannot find package "<name>" in workspace`. This repository's tags
+git-wt-cli-v0.1.0, sniff-detection-cli-v0.1.0 and darkmatter-lsp-v0.1.0
+point at a commit where those packages were worktree-cli, sniff-cli and
+dmls. Published tags are never moved, so the tool is patched instead.
+
+Change: when no released workspace member has the current name, the
+member whose manifest has the same path relative to the workspace root
+is the package. The current-name match stays first; when neither
+matches, the original error is returned (never an initial release).
+The released package is stored under its current name, and the
+Cargo.lock comparison finds it the same way. Unit tests cover the three
+renamed shapes, the current-name path, a name-or-path miss, and the
+lockfile comparison.
+
+Drop this file (and the build-from-source step) once an upstream
+release resolves renamed packages itself.
+
+diff --git a/crates/release_plz_core/src/lock_compare.rs b/crates/release_plz_core/src/lock_compare.rs
+index fb904c4..875e206 100644
+--- a/crates/release_plz_core/src/lock_compare.rs
++++ b/crates/release_plz_core/src/lock_compare.rs
+@@ -120,8 +120,9 @@ pub(crate) fn are_workspace_lock_dependencies_updated(
+         return Ok(false);
+     }
+     let local = local_lock_dependencies(local_metadata, package_name)?;
++    let local_package = cargo_utils::workspace_package(local_metadata, package_name)?;
+     let released_package =
+-        cargo_utils::workspace_package(&released_workspace.metadata, package_name)?;
++        released_workspace.package_for(&local_metadata.workspace_root, local_package)?;
+     let Some(released) = workspace_lock_dependencies(
+         &released_workspace.metadata,
+         released_package,
+@@ -526,6 +527,48 @@ source = "registry+https://example.com/index"
+         (directory, metadata)
+     }
+ 
++    /// A workspace with `dep` and, at `cli/`, a package named `name` whose
++    /// locked `dep` is `dep_version`.
++    fn renamed_cli_workspace(
++        name: &str,
++        dep_version: &str,
++    ) -> (crate::fs_utils::Utf8TempDir, Metadata) {
++        let directory = crate::fs_utils::Utf8TempDir::new().unwrap();
++        let manifest = directory.path().join("Cargo.toml");
++        fs_err::write(
++            &manifest,
++            "[workspace]\nmembers = [\"cli\", \"dep\"]\nresolver = \"2\"\n",
++        )
++        .unwrap();
++        write_package(&directory.path().join("cli"), name, "0.1.0", "");
++        write_package(&directory.path().join("dep"), "dep", dep_version, "");
++        fs_err::write(
++            directory.path().join("Cargo.lock"),
++            format!(
++                "version = 4\n[[package]]\nname = \"{name}\"\nversion = \"0.1.0\"\ndependencies = [\"dep\"]\n\
++                 [[package]]\nname = \"dep\"\nversion = \"{dep_version}\"\n"
++            ),
++        )
++        .unwrap();
++        let metadata = cargo_utils::get_manifest_metadata(&manifest).unwrap();
++        (directory, metadata)
++    }
++
++    #[test]
++    fn workspace_lock_comparison_finds_a_renamed_package_by_manifest_path() {
++        let (_released_dir, released_metadata) = renamed_cli_workspace("old-name", "1.0.0");
++        let released = released_workspace(released_metadata);
++        for (dep_version, updated) in [("1.0.0", false), ("1.0.1", true)] {
++            let (_local, local_metadata) = renamed_cli_workspace("new-name", dep_version);
++            assert_eq!(
++                are_workspace_lock_dependencies_updated(&local_metadata, &released, "new-name")
++                    .unwrap(),
++                updated,
++                "dep {dep_version}"
++            );
++        }
++    }
++
+     #[test]
+     fn lock_comparison_fails_on_stale_local_lockfile() {
+         let (directory, local_metadata) = stale_workspace();
+diff --git a/crates/release_plz_core/src/next_ver.rs b/crates/release_plz_core/src/next_ver.rs
+index 4504f9c..3819c62 100644
+--- a/crates/release_plz_core/src/next_ver.rs
++++ b/crates/release_plz_core/src/next_ver.rs
+@@ -111,9 +111,6 @@ impl ReconstructedWorkspace {
+         })
+     }
+ 
+-    fn package(&self, package_name: &str) -> anyhow::Result<Package> {
+-        cargo_utils::workspace_package(&self.released.metadata, package_name).cloned()
+-    }
+ }
+ 
+ /// Process a single `git_only` package: find its release tag and commit, reconstruct
+@@ -190,7 +187,10 @@ fn process_git_only_package(
+ 
+     // Metadata paths point into the cached worktree. Any error aborts collection and drops
+     // all reconstructed workspaces, so an unusable artifact cannot be reused.
+-    let single_package = workspace.package(&package.name)?;
++    let single_package = workspace
++        .released
++        .package_for(&input.cargo_metadata().workspace_root, package)?
++        .clone();
+ 
+     let registry_package = RegistryPackage::new(single_package, Some(release_commit))
+         .with_released_workspace(Arc::clone(&workspace.released));
+@@ -316,7 +316,8 @@ fn collect_git_only_packages(
+             is_multi_package,
+             &mut reconstructed_workspaces,
+         )? {
+-            all_packages.insert(registry_package.package.name.to_string(), registry_package);
++            // Key by the current name: a renamed package's released metadata has its old one.
++            all_packages.insert(package.name.to_string(), registry_package);
+         }
+     }
+ 
+@@ -520,6 +521,7 @@ fn canonicalized_path(dependency: &dyn TableLike, package_dir: &Utf8Path) -> Opt
+ #[cfg(test)]
+ mod tests {
+     use crate::test_utils::{package_manifest, write_package};
++    use cargo_metadata::camino::{Utf8Path, Utf8PathBuf};
+     use fake_package::FakePackage;
+ 
+     #[test]
+@@ -638,6 +640,132 @@ mod tests {
+         assert!(released.lockfile().is_some());
+     }
+ 
++    /// Write a workspace with `members` (path, name), commit it as `message`,
++    /// and return the workspace manifest.
++    fn commit_workspace(
++        repo: &git_cmd::Repo,
++        root: &Utf8Path,
++        members: &[(&str, &str)],
++        message: &str,
++    ) -> Utf8PathBuf {
++        let paths: Vec<&str> = members.iter().map(|(path, _)| *path).collect();
++        let manifest = root.join("Cargo.toml");
++        fs_err::write(
++            &manifest,
++            format!("[workspace]\nmembers = {paths:?}\nresolver = \"3\"\n"),
++        )
++        .unwrap();
++        for (path, name) in members {
++            write_package(&root.join(path), name, "0.1.0", "");
++        }
++        repo.add_all_and_commit(message).unwrap();
++        manifest
++    }
++
++    /// Mirror a repository whose packages were renamed after their release tags
++    /// were created: the tags carry the current names, but the tagged manifests
++    /// still declare the old ones.
++    fn renamed_after_release(root: &Utf8Path, renames: &[(&str, &str, &str)]) -> Utf8PathBuf {
++        let repo = git_cmd::Repo::init(root);
++        let old: Vec<(&str, &str)> = renames.iter().map(|(path, old, _)| (*path, *old)).collect();
++        commit_workspace(&repo, root, &old, "release under the old names");
++        for (path, _, new) in renames {
++            fs_err::remove_dir_all(root.join(path)).unwrap();
++            repo.tag(&format!("{new}-v0.1.0"), "initial release").unwrap();
++        }
++        let new: Vec<(&str, &str)> = renames.iter().map(|(path, _, new)| (*path, *new)).collect();
++        commit_workspace(&repo, root, &new, "rename packages")
++    }
++
++    #[test]
++    fn git_only_finds_renamed_packages_by_manifest_path() {
++        let root = crate::fs_utils::Utf8TempDir::new().unwrap();
++        let manifest = renamed_after_release(
++            root.path(),
++            &[
++                ("worktree/cli", "worktree-cli", "git-wt-cli"),
++                ("sniff/cli", "sniff-cli", "sniff-detection-cli"),
++                ("darkmatter/dmls", "dmls", "darkmatter-lsp"),
++                ("stable", "stable", "stable"),
++            ],
++        );
++        let metadata = cargo_utils::get_manifest_metadata(&manifest).unwrap();
++        // An excluded package is still collected: eligibility is decided later.
++        let excluded = crate::PackageUpdateConfig::from(crate::UpdateConfig {
++            release: false,
++            ..Default::default()
++        });
++        let request = super::UpdateRequest::new(metadata.clone())
++            .unwrap()
++            .with_package_config("darkmatter-lsp", excluded);
++        let (packages, workspaces) =
++            super::collect_git_only_packages(metadata.workspace_packages(), &request, true)
++                .unwrap();
++
++        assert_eq!(workspaces.len(), 1);
++        // Keyed by the current name, holding the package as it was released.
++        for (current, released, path) in [
++            ("git-wt-cli", "worktree-cli", "worktree/cli/Cargo.toml"),
++            ("sniff-detection-cli", "sniff-cli", "sniff/cli/Cargo.toml"),
++            ("darkmatter-lsp", "dmls", "darkmatter/dmls/Cargo.toml"),
++            ("stable", "stable", "stable/Cargo.toml"),
++        ] {
++            let package = &packages[current].package;
++            assert_eq!(package.name.as_str(), released, "{current}");
++            assert_eq!(package.version.to_string(), "0.1.0", "{current}");
++            assert!(package.manifest_path.ends_with(path), "{current}");
++            assert!(package.manifest_path.is_file(), "{current}");
++        }
++        assert_eq!(packages.len(), 4);
++    }
++
++    #[test]
++    fn git_only_matches_the_current_name_before_the_manifest_path() {
++        let root = crate::fs_utils::Utf8TempDir::new().unwrap();
++        let repo = git_cmd::Repo::init(root.path());
++        commit_workspace(
++            &repo,
++            root.path(),
++            &[("old", "moved"), ("new", "other")],
++            "release",
++        );
++        repo.tag("moved-v0.1.0", "initial release").unwrap();
++        for path in ["old", "new"] {
++            fs_err::remove_dir_all(root.path().join(path)).unwrap();
++        }
++        // `moved` now lives where `other` was released: the name decides.
++        let manifest = commit_workspace(&repo, root.path(), &[("new", "moved")], "move");
++        let metadata = cargo_utils::get_manifest_metadata(&manifest).unwrap();
++        let request = super::UpdateRequest::new(metadata.clone()).unwrap();
++        let (packages, _workspaces) =
++            super::collect_git_only_packages(metadata.workspace_packages(), &request, true)
++                .unwrap();
++
++        let package = &packages["moved"].package;
++        assert_eq!(package.name.as_str(), "moved");
++        assert!(package.manifest_path.ends_with("old/Cargo.toml"));
++    }
++
++    #[test]
++    fn git_only_rejects_a_released_package_found_by_neither_name_nor_path() {
++        let root = crate::fs_utils::Utf8TempDir::new().unwrap();
++        let repo = git_cmd::Repo::init(root.path());
++        commit_workspace(&repo, root.path(), &[("old", "old-name")], "release");
++        repo.tag("new-name-v0.1.0", "initial release").unwrap();
++        fs_err::remove_dir_all(root.path().join("old")).unwrap();
++        let manifest = commit_workspace(&repo, root.path(), &[("new", "new-name")], "rename");
++        let metadata = cargo_utils::get_manifest_metadata(&manifest).unwrap();
++        let request = super::UpdateRequest::new(metadata.clone()).unwrap();
++
++        // A tag exists, so this is not an initial release.
++        let error =
++            super::collect_git_only_packages(metadata.workspace_packages(), &request, true)
++                .err()
++                .unwrap()
++                .to_string();
++        assert!(error.contains("cannot find package \"new-name\""), "{error}");
++    }
++
+     #[test]
+     fn git_only_reconstructs_package_without_running_build_script() {
+         let root = tempfile::tempdir().unwrap();
+@@ -669,7 +797,10 @@ exclude = ["excluded.txt"]
+         let (_repo, worktree) =
+             super::get_temp_worktree_and_repo(&mut original, "non-verifiable").unwrap();
+         let workspace = super::ReconstructedWorkspace::new(worktree, "HEAD".into()).unwrap();
+-        let package = workspace.package("non-verifiable").unwrap();
++        let package =
++            cargo_utils::workspace_package(&workspace.released.metadata, "non-verifiable")
++                .unwrap()
++                .clone();
+         let package_dir = package.manifest_path.parent().unwrap();
+ 
+         assert_eq!(package.version.to_string(), "0.1.0");
+diff --git a/crates/release_plz_core/src/registry_packages.rs b/crates/release_plz_core/src/registry_packages.rs
+index d688f79..4f8e2fd 100644
+--- a/crates/release_plz_core/src/registry_packages.rs
++++ b/crates/release_plz_core/src/registry_packages.rs
+@@ -4,6 +4,7 @@ use anyhow::Context;
+ use cargo_metadata::{Metadata, Package, camino::Utf8Path};
+ use git_cmd::git_in_dir;
+ use tempfile::{TempDir, tempdir};
++use tracing::info;
+ 
+ use crate::{
+     PackagePath, cargo_vcs_info, download, lock_compare::WorkspaceLockfile, next_ver,
+@@ -57,6 +58,45 @@ impl ReleasedWorkspace {
+     pub(crate) fn lockfile(&self) -> Option<&WorkspaceLockfile> {
+         self.lockfile.as_ref()
+     }
++
++    /// The released member that is the same package as the local `package`.
++    ///
++    /// A renamed package keeps its release tags, which carry its current name
++    /// but point at a commit whose manifest still declares the old one. The
++    /// current name is matched first; when no released member has it, the
++    /// member whose manifest has the same path relative to the workspace root
++    /// is the package. When neither matches, the current-name lookup error is
++    /// returned: the package is never treated as an initial release.
++    pub(crate) fn package_for(
++        &self,
++        local_workspace_root: &Utf8Path,
++        package: &Package,
++    ) -> anyhow::Result<&Package> {
++        let by_name = cargo_utils::workspace_package(&self.metadata, &package.name);
++        if by_name.is_ok() {
++            return by_name;
++        }
++        let Ok(relative_manifest) = package.manifest_path.strip_prefix(local_workspace_root)
++        else {
++            return by_name;
++        };
++        let by_path = self.metadata.workspace_packages().into_iter().find(|released| {
++            released
++                .manifest_path
++                .strip_prefix(&self.metadata.workspace_root)
++                .is_ok_and(|released_manifest| released_manifest == relative_manifest)
++        });
++        match by_path {
++            Some(released) => {
++                info!(
++                    "package {} was released as {} at commit {} ({relative_manifest})",
++                    package.name, released.name, self.commit
++                );
++                Ok(released)
++            }
++            None => by_name,
++        }
++    }
+ }
+ 
+ impl RegistryPackage {

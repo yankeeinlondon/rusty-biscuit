@@ -63,8 +63,9 @@ test-browser:
 
 # Real-resource tests (MaxMind DB / Nominatim). Skip-clean when resources absent.
 test-real *args="":
-    @just _test_real biscuit-location {{args}}
-    @just _test_real biscuit-location-cli {{args}}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real biscuit-location {{args}}; \
+        just _test_real biscuit-location-cli {{args}}
 
 # Lint both the library and CLI
 lint:

@@ -1,0 +1,116 @@
+{
+  "format_version": 1,
+  "restore_id": "3c7193dd55316a277ce7de18ce1c8eeb",
+  "backup_id": "a6873e196555e5c7fa0f432c41eaf312",
+  "source": {
+    "environment": "development",
+    "d1_database_name": "evidence-store-development",
+    "d1_database_id": "960d8e9e-7a45-4823-bff5-5436c46889a8",
+    "r2_bucket": "evidence-store-development"
+  },
+  "destination": {
+    "environment": "restore-test",
+    "d1_database_name": "evidence-store-restore-test",
+    "d1_database_id": "0fd1720f-7dcd-4dda-b017-7306d89060da",
+    "r2_bucket": "evidence-store-restore-test"
+  },
+  "boundary": {
+    "boundary_id": "a6873e196555e5c7fa0f432c41eaf312",
+    "quiesced_at_ms": 1794428964712,
+    "resumed_at_ms": 1794428967832,
+    "repositories": [
+      {
+        "repository_id": "1131837348",
+        "generation": "3197697cd62dfe082ab2e29c6b8d4e5f",
+        "retention_epoch": 0,
+        "evidence_revision": 27,
+        "observation_event_watermark": 22,
+        "location_event_watermark": 25
+      },
+      {
+        "repository_id": "1454439808",
+        "generation": "f4c3bfcf9923f82f8261ec65b85bff27",
+        "retention_epoch": 0,
+        "evidence_revision": 20,
+        "observation_event_watermark": 15,
+        "location_event_watermark": 5
+      }
+    ]
+  },
+  "generations": [
+    {
+      "repository_id": "1131837348",
+      "from": "3197697cd62dfe082ab2e29c6b8d4e5f",
+      "to": "ae0d947c8b921ec887a2380c1a5da89d"
+    },
+    {
+      "repository_id": "1454439808",
+      "from": "f4c3bfcf9923f82f8261ec65b85bff27",
+      "to": "bd69fbb1b95c8d9c84c4da1428c1c8ae"
+    }
+  ],
+  "operator": {
+    "credential_id": "9eeaa42446e3d8e6b6b49fee9539b45b",
+    "token_file": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/secrets/restored-operator.token",
+    "revoked": [
+      "9f20ebda2be5ead1a9361507e7dd66c8"
+    ]
+  },
+  "cursor_key_rotated": true,
+  "revocations_reapplied": [],
+  "objects_restored": 22,
+  "missing_objects": [],
+  "pending_uploads_expired": [],
+  "acknowledged": {
+    "recovered": [],
+    "replayed": [
+      {
+        "repository_id": "1131837348",
+        "observation_id": "00cd03f07eb6ada39365d6c73d09bc18da319306fc93e6cdc27496d4a9741a8b",
+        "state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json"
+      },
+      {
+        "repository_id": "1131837348",
+        "observation_id": "a269b0fd871ce4dc042dc3d0d28d5bffa20a51b0cd5743a83dec553dc16d19b9",
+        "state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json"
+      },
+      {
+        "repository_id": "1131837348",
+        "observation_id": "b369b559f45511a361229bf9bf12dcb7cf7b2e30e54c2bb73cd0ec14e463dd46",
+        "state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json"
+      },
+      {
+        "repository_id": "1131837348",
+        "observation_id": "c52fc88343bb7ff3d723c8be5ec75e4a84bf33adec24a185b726f58f493bc8c4",
+        "state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json"
+      },
+      {
+        "repository_id": "1131837348",
+        "observation_id": "d78ca085f3c9ef028295461b2bfcb483b240b2cd6cee63c5344b08ac790b048c",
+        "state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json"
+      },
+      {
+        "repository_id": "1131837348",
+        "observation_id": "e807342594a7ed2634d958c7efcba34f7775e4e11a40e79feef68ff5debd2368",
+        "state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json"
+      },
+      {
+        "repository_id": "1131837348",
+        "observation_id": "ea6a96797410ee05350a207d347081f028d9f8d09ccd3133f0f30e87f86e44ff",
+        "state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json"
+      }
+    ],
+    "unrecoverable": []
+  },
+  "replays": [
+    {
+      "state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json",
+      "replay_state": "/private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json.restore-3c7193dd55316a277ce7de18ce1c8eeb.json",
+      "outcome": "replayed",
+      "uploads_not_replayed": 0,
+      "finalize_command": "just evidence-finalize /private/tmp/claude-501/-Volumes-coding-rusty-biscuit/97073e30-8549-40c9-ab7d-2db1e2c17eb4/scratchpad/p6/wsl-ingest.json.restore-3c7193dd55316a277ce7de18ce1c8eeb.json --token-file <verifier token path>"
+    }
+  ],
+  "unacknowledged_states": [],
+  "post_boundary_loss": "known only for the 1 replay input(s) given (0 unrecoverable); acknowledgments recorded nowhere else after the boundary cannot be listed"
+}

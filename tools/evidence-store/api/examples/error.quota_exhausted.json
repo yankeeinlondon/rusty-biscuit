@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "quota_exhausted",
+    "message": "storing these bytes would pass the free-tier refusal threshold; nothing was recorded and no evidence was removed",
+    "location": null,
+    "retryable": true,
+    "retry_after_ms": 3600000
+  },
+  "request_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+}

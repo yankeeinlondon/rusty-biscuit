@@ -1,0 +1,37 @@
+# Disposable display check for 2026-11-06-legible-ci-names (review finding
+# R1-F2). Mirrors ci.yml's area-ci -> _area-ci.yml package-ci ->
+# _package-ci.yml test/wsl2 -> _wsl-ci.yml wsl nesting. Every job only echoes.
+name: Display check
+
+on:
+  push:
+    branches: [display-check/legible-ci-names]
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    name: Plan display check
+    runs-on: ubuntu-latest
+    outputs:
+      scheduled_areas: ${{ steps.plan.outputs.scheduled_areas }}
+      area_rows: ${{ steps.plan.outputs.area_rows }}
+    steps:
+      - id: plan
+        env:
+          AREA_ROWS: '{"schematic":{"test":[{"label":"schematic-gen: run Level 1 tests on Linux","package":"schematic-gen","gate":"L1","environment":"ubuntu-latest","runner":"ubuntu-latest"}],"test_plain":[{"package":"schematic-gen","gate":"L1","environment":"ubuntu-latest","runner":"ubuntu-latest"}],"wsl":[{"label":"schematic-gen: run Level 1 tests on WSL2","package":"schematic-gen","gate":"L1","environment":"wsl2-ubuntu","runner":"windows-latest"}],"has_rows":true},"claudine":{"test":[{"label":"claudine-cli: run Level 1 tests on Linux","package":"claudine-cli","gate":"L1","environment":"ubuntu-latest","runner":"ubuntu-latest"},{"label":"claudine-cli: run Level 2 tests on Linux","package":"claudine-cli","gate":"L2","environment":"ubuntu-latest","runner":"ubuntu-latest"}],"test_plain":[{"package":"claudine-cli","gate":"L1","environment":"ubuntu-latest","runner":"ubuntu-latest"},{"package":"claudine-cli","gate":"L2","environment":"ubuntu-latest","runner":"ubuntu-latest"}],"wsl":[],"has_rows":true},"claudine/rendezvous":{"test":[{"label":"rendezvous-core: run Level 1 tests on Linux","package":"rendezvous-core","gate":"L1","environment":"ubuntu-latest","runner":"ubuntu-latest"}],"test_plain":[{"package":"rendezvous-core","gate":"L1","environment":"ubuntu-latest","runner":"ubuntu-latest"}],"wsl":[{"label":"rendezvous-core: run Level 1 tests on WSL2","package":"rendezvous-core","gate":"L1","environment":"wsl2-ubuntu","runner":"windows-latest"}],"has_rows":true},"tools":{"test":[],"test_plain":[],"wsl":[],"has_rows":false}}'
+        run: |
+          echo 'scheduled_areas=["schematic","claudine","claudine/rendezvous","tools"]' >> "$GITHUB_OUTPUT"
+          echo "area_rows=$AREA_ROWS" >> "$GITHUB_OUTPUT"
+
+  area-ci:
+    needs: [scope]
+    strategy:
+      fail-fast: false
+      matrix:
+        area: ${{ fromJSON(needs.scope.outputs.scheduled_areas) }}
+    uses: ./.github/workflows/zz-display-area.yml
+    with:
+      area: ${{ matrix.area }}
+      rows: ${{ toJSON(fromJSON(needs.scope.outputs.area_rows)[matrix.area]) }}

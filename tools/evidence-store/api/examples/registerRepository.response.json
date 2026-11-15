@@ -1,0 +1,14 @@
+{
+  "repository_id": "873451209",
+  "owner_id": "4417321",
+  "slug": "example-owner/rusty-biscuit",
+  "registered_at_ms": 1794312000000,
+  "snapshot": {
+    "repository_id": "873451209",
+    "generation": "e661f4c935e8a5a83349afb5e347695c",
+    "retention_epoch": 0,
+    "evidence_revision": 0,
+    "observation_event_watermark": 0,
+    "location_event_watermark": 0
+  }
+}

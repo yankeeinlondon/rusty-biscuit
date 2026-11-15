@@ -74,7 +74,7 @@ test-browser:
 # opt-in real_ tier: end-to-end against an installed+authenticated provider.
 # Gated by CLAUDINE_CONTRACT_REAL=1 and the provider binary being on PATH.
 test-real *args="":
-    @CLAUDINE_CONTRACT_REAL=1 cargo test -p {{ LIBRARY }} --features real-tests --test real_provider {{args}}
+    @eval "$(just _test_run_scope)"; CLAUDINE_CONTRACT_REAL=1 cargo test -p {{ LIBRARY }} --features real-tests --test real_provider {{args}}
 
 # run clippy on the library
 lint *args="":

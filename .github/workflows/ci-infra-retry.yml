@@ -30,7 +30,7 @@ name: ci-infra-retry
 
 on:
   workflow_run:
-    workflows: [ci]
+    workflows: ["Continuous integration"]
     types: [completed]
 
 permissions:

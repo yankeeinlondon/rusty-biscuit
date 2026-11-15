@@ -1,0 +1,75 @@
+{
+  "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cells": [
+    {
+      "backends": [],
+      "completion": "complete",
+      "counts": {
+        "errored": 0,
+        "failed": 0,
+        "passed": 9,
+        "skipped": 1,
+        "total": 10
+      },
+      "duration_s": 35,
+      "exit_code": 0,
+      "gate": "L1",
+      "gate_input_identity": "deadbeefcafe",
+      "outcome": "pass",
+      "package": "claudine",
+      "report": "claudine-L1.xml"
+    },
+    {
+      "backends": [],
+      "completion": "complete",
+      "counts": {
+        "errored": 0,
+        "failed": 1,
+        "passed": 2,
+        "skipped": 0,
+        "total": 3
+      },
+      "duration_s": 35,
+      "exit_code": 100,
+      "failed_tests": [
+        "darkmatter::render::tables"
+      ],
+      "gate": "L1",
+      "gate_input_identity": "deadbeefcafe",
+      "outcome": "fail",
+      "package": "darkmatter",
+      "report": "darkmatter-L1.xml"
+    },
+    {
+      "backends": [
+        "tmux"
+      ],
+      "completion": "interrupted",
+      "counts": {
+        "errored": 0,
+        "failed": 0,
+        "passed": 0,
+        "skipped": 0,
+        "total": 0
+      },
+      "duration_s": 35,
+      "exit_code": 101,
+      "gate": "L2",
+      "gate_input_identity": "deadbeefcafe",
+      "outcome": "fail",
+      "package": "biscuit-hash",
+      "report": "biscuit-hash-L2.xml"
+    }
+  ],
+  "completion": "partial",
+  "environment": "macos-latest",
+  "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "host": {
+    "kernel": "Darwin 27.0.0",
+    "os": "MacOS",
+    "report_dir": "~/ci-evidence/bbbbbbbbb"
+  },
+  "schema_version": 2,
+  "scope_identity": "0123456789abcdef",
+  "tree": "cccccccccccccccccccccccccccccccccccccccc"
+}

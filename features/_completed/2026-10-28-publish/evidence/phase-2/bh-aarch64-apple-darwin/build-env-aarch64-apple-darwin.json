@@ -1,0 +1,15 @@
+{
+  "target": "aarch64-apple-darwin",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "image": {
+    "command_line_tools": "27.0.0.0.1788430756",
+    "deployment_target": "15.0",
+    "host": "local",
+    "image_os": "local",
+    "image_version": "local",
+    "macos_version": "27.2",
+    "runner": "macos-15",
+    "sdk_version": "27.0",
+    "xcode_build": "unavailable"
+  }
+}

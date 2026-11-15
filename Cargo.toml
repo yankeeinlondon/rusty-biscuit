@@ -148,6 +148,13 @@ opt-level = 3
 [profile.test.package.ttf-parser]
 opt-level = 3
 
+# Binary distribution (`dist build`) compiles release archives with this
+# profile; ordinary developer and release builds are unaffected.
+[profile.dist]
+inherits = "release"
+strip = true
+lto = "thin"
+
 [profile.profiling]
 inherits = "release"
 debug = true

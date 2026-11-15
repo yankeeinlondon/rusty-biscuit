@@ -84,8 +84,9 @@ test-browser:
 
 # Real-resource TTS provider tests. Skip-clean when provider credentials absent.
 test-real *args="":
-    @just _test_real biscuit-speaks --features playa {{args}}
-    @just _test_real biscuit-speaks-cli {{args}}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real biscuit-speaks --features playa {{args}}; \
+        just _test_real biscuit-speaks-cli {{args}}
 
 # Lint both the library and CLI
 lint:

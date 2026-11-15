@@ -1,0 +1,50 @@
+# cargo-about 0.8.4 configuration for the third-party notices bundled with each
+# distributed binary. `scripts/distribution/licenses.sh` is the only caller; it
+# refuses any other cargo-about version because this file's keys and the
+# notice template are only checked against 0.8.4.
+
+# Priority order: for an `A OR B` expression the first accepted license wins.
+# AGPL-3.0-only is the license of this repository's own crates; the template
+# leaves it out of the notices (the archive carries `LICENSE`), and
+# `native_notices.py` refuses a third-party crate under it.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "MIT-0",
+    "MPL-2.0",
+    "AGPL-3.0-only",
+]
+
+# Must equal `TARGETS` in `scripts/ci/distribution.py`. cargo-about evaluates
+# the targets together, so each notice covers the union of their dependencies.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+
+ignore-dev-dependencies = true
+# Build dependencies run on the build host (build scripts, code generators, the
+# C compiler driver) and are not linked into the shipped binary. Native code a
+# normal dependency compiles in its build script is shipped; its license is
+# appended by `native_notices.py`.
+ignore-build-dependencies = true
+# clearlydefined.io answers can change between runs for the same lockfile;
+# local files and the clarifications below keep the notices reproducible.
+no-clearly-defined = true
+
+# content-policy's manifest has no `license` field. It is a first-party crate
+# under the repository's root LICENSE.
+[content-policy.clarify]
+license = "AGPL-3.0-only"
+
+[[content-policy.clarify.files]]
+path = "../../LICENSE"
+checksum = "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"

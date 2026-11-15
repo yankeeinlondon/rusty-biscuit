@@ -63,6 +63,7 @@ sanity:
 test *args="":
     #!/usr/bin/env bash
     set -uo pipefail
+    eval "$(just _test_run_scope)"
     export BISCUIT_TEST_FILTER='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)perf_/))'
     exit_code=0
     just _test_all "{{ LIBRARY }} {{ CLI }}" {{ args }} || exit_code=$?
@@ -83,8 +84,9 @@ test-l2 *args="":
 
 # Not applicable: worktree has no OS-keyboard-injection (Level-3) tests.
 test-l3 *args="":
-    @just _test_l3 {{ LIBRARY }} {{ args }}
-    @just _test_l3 {{ CLI }} {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test_l3 {{ LIBRARY }} {{ args }}; \
+        just _test_l3 {{ CLI }} {{ args }}
 
 # Not applicable: worktree has no browser-target tests.
 test-browser:
@@ -99,6 +101,7 @@ test-real:
 test-perf *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     echo
     echo -e "Perf tests for {{ BOLD }}{{ CLI }}{{ RESET }} (serial)"
     echo

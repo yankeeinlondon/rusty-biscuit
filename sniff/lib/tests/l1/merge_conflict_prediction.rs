@@ -335,7 +335,9 @@ fn conflict_paths_are_direction_sensitive() {
     let ours_into_theirs =
         merge_conflicts_with_branch_at(fixture.path(), "main").expect("ours into theirs");
     assert_eq!(theirs_into_ours, vec![PathBuf::from("node~MERGE_HEAD")]);
-    assert_eq!(ours_into_theirs, vec![PathBuf::from("node")]);
+    // Git moves the file side aside under its own label: `git merge main`
+    // on `incoming` leaves `node~HEAD` unmerged.
+    assert_eq!(ours_into_theirs, vec![PathBuf::from("node~HEAD")]);
     assert_ne!(theirs_into_ours, ours_into_theirs);
 }
 

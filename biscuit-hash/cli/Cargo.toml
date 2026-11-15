@@ -3,6 +3,10 @@ name = "biscuit-hash-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+description = "Hash content using various algorithms (xxHash, BLAKE3, Argon2id)"
+repository = "https://github.com/yankeeinlondon/rusty-biscuit"
+homepage = "https://github.com/yankeeinlondon/rusty-biscuit/tree/main/biscuit-hash"
+readme = "../README.md"
 
 [[bin]]
 name = "bh"
@@ -17,3 +21,16 @@ clap_complete = "4.5"
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
+
+# cargo-binstall reads these from the tagged manifest (`--git`, or `--manifest-path`
+# on a tag checkout). release-plz tags are `{package}-v{version}`, which binstall's
+# default URL guesses never match. Binary distribution is not approved for this
+# package, so `crate-meta-data` is disabled: binstall reports an opt-out instead of
+# probing for archives. Enabling the `binstall` channel in `docs/deployment.yaml`
+# removes `crate-meta-data` here in the same release proposal; distribution preflight
+# refuses the two disagreeing.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{ name }-v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+disabled-strategies = ["crate-meta-data", "quick-install", "compile"]

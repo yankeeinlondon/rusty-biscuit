@@ -1,4 +1,4 @@
-name: ci
+name: Continuous integration
 
 # Dependency-aware CI for pull requests, pushes to main, and a nightly full
 # run. Each environment names the events that schedule it in
@@ -84,7 +84,7 @@ env:
 
 jobs:
   validation:
-    name: Check reusable PR validation
+    name: Check prior pull request validation
     runs-on: ubuntu-latest
     # A PR merged before its own CI finished is waited for (up to 90 min, the
     # long end of a pull request's duration) rather than re-run in full.
@@ -109,7 +109,7 @@ jobs:
         run: python3 scripts/ci/reuse_validation.py check --wait-minutes 90
 
   scope:
-    name: Determine affected scope
+    name: Choose required work
     needs: validation
     # Always, including on a reused PR validation: that reuse proves the
     # environments the pull request event schedules, and the push event may
@@ -567,12 +567,15 @@ jobs:
   # the implicit `success()` provided before the guard existed — a skipped
   # `scope` publishes an empty string, not `[]`, and `fromJSON('')` raises.
   #
-  # No `name:`. GitHub labels a matrix job it EXPANDS from the matrix values
-  # (`preflight (ubuntu-latest)`) but never evaluates the matrix context for a
-  # job it SKIPS, so a declared `name:` carrying `${{ matrix.os }}` reaches the
-  # Checks tab as raw expression text. The default label degrades to the static,
-  # human-readable job id instead (AC10).
+  # A LITERAL `name:`. GitHub never evaluates the matrix context for a job it
+  # SKIPS, so a declared `name:` carrying `${{ matrix.os }}` would reach the
+  # Checks tab as raw expression text (AC10). GitHub still appends the matrix
+  # value to the literal when it expands the job, so a leg reads `Verify build
+  # prerequisites (ubuntu-latest)` (the static-name shape display check run
+  # 42963148323 observed); this job owns no result cell, so nothing reads its
+  # label.
   preflight:
+    name: Verify build prerequisites
     needs: scope
     if: >-
       needs.scope.result == 'success' &&
@@ -646,7 +649,14 @@ jobs:
       - name: Mark the owner's start
         id: job_start
         shell: bash
-        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+        run: |
+          echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+          # Storage samples are an Ubuntu diagnostic: that owner is the one
+          # whose disk fills. Every sampling step below, and the producer's own
+          # per-record samples (`produce-owner.sh`), key off this variable.
+          if [ "$RUNNER_OS" = Linux ]; then
+            echo "BUILD_DIAGNOSTICS=$RUNNER_TEMP/build-diagnostics" >>"$GITHUB_ENV"
+          fi
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.scope.outputs.head }}
@@ -701,14 +711,38 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
+      - name: Sample storage before the cache restore
+        if: ${{ env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label before-cache-restore --inventory || true
       # The producer cache. Both workspaces in one entry: `scripts/` builds the
       # producer tool itself and has no cache of its own anywhere else in this
       # workflow, and a second `rust-cache` step would install a second post-job
       # save racing the first.
       - uses: Swatinem/rust-cache@v2
+        id: cache
         with:
           workspaces: ". -> target"
           shared-key: build-owner-${{ steps.slice.outputs.producer }}
+      # Restored entries are classified against this owner's planned target
+      # triples and profiles; `release` holds the producer tool this job builds
+      # and the guard's child target is live whenever the guard runs.
+      - name: Sample storage after the cache restore
+        if: ${{ env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          PRODUCER: ${{ matrix.build }}
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label after-cache-restore --cache-hit "$CACHE_HIT" --inventory
+          --restored-since before-cache-restore
+          --plan ci-artifacts/ci-resolved-plan/resolved-plan.json --producer "$PRODUCER"
+          --live-path release --live-path schematic-fresh-output || true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       # `--no-default-features --features build-tools` keeps `sniff` — and so
@@ -720,6 +754,13 @@ jobs:
           cargo build --release \
             -p repo-deps \
             --no-default-features --features build-tools --bin ci-build
+      - name: Sample storage before the schematic guard
+        if: ${{ env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label before-schematic-guard || true
       # Schematic's fresh-output guard compiles freshly generated client crates
       # with a child Cargo, which archive consumers do not have. Its tests are
       # schematic-gen's `slow_` L1 tests: the L1 filter already leaves them out
@@ -744,6 +785,13 @@ jobs:
           # The guard builds offline against the generated crate's lockfile.
           cargo fetch --manifest-path schematic/schema/Cargo.toml
           just -f schematic/justfile test-fresh-output
+      - name: Sample storage after the schematic guard
+        if: ${{ always() && env.BUILD_DIAGNOSTICS != '' && steps.fresh_output.outputs.ran == 'true' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label after-schematic-guard || true
       - name: Keep the fresh-output guard report
         if: ${{ always() && steps.fresh_output.outputs.ran == 'true' }}
         uses: actions/upload-artifact@v6
@@ -751,49 +799,83 @@ jobs:
           name: fresh-output-schematic-gen-${{ matrix.build }}
           path: target/nextest/ci/test-results.xml
           if-no-files-found: error
-      - name: Produce the archives
+      # One `produce-owner.sh` child per record, in `ci-build`'s order,
+      # all sharing one target tree; each record's archive is uploaded and its
+      # local copy released before the next record starts, so completed
+      # archives do not accumulate on the runner's disk. A JavaScript action
+      # because the artifact client needs the runtime token GitHub gives only
+      # to those. Not `always()`: a failed guard skips production and the job
+      # stays failed.
+      - name: Produce and publish the archives
         id: produce
-        shell: bash
+        uses: actions/github-script@v8
         env:
           MEASURE: ${{ inputs.measure-compiler-work && 'true' || 'false' }}
           PRODUCER: ${{ matrix.build }}
-        run: bash scripts/ci/produce-owner.sh
+          PLAN_EPOCH: ${{ needs.scope.outputs.plan_epoch }}
+          JOB_EPOCH: ${{ steps.job_start.outputs.epoch }}
+        with:
+          script: |
+            const owner = require(`${process.env.GITHUB_WORKSPACE}/scripts/ci/artifacts/produce.cjs`);
+            if (!await owner.produceOwner(owner.hostedOptions())) {
+              core.setFailed('One or more package builds failed or could not be published');
+            }
+      - name: Sample storage before publication
+        if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label before-publication || true
+      # Whatever production left unpublished: statuses for records it never
+      # reached, uploads that did not complete, and the owner's compiler-work
+      # measurement. The local ledger keeps it from uploading anything twice.
       - name: Publish package builds and statuses
         if: ${{ always() }}
         uses: actions/github-script@v8
         env:
+          MEASURE: ${{ inputs.measure-compiler-work && 'true' || 'false' }}
           PRODUCER: ${{ matrix.build }}
           JOB_STATUS: ${{ job.status }}
           PLAN_EPOCH: ${{ needs.scope.outputs.plan_epoch }}
           JOB_EPOCH: ${{ steps.job_start.outputs.epoch }}
         with:
           script: |
-            const path = require('node:path');
-            const fs = require('node:fs');
             const root = process.env.GITHUB_WORKSPACE;
-            const {DefaultArtifactClient} = require(path.join(root, 'scripts/ci/artifacts/node_modules/@actions/artifact'));
-            const {publish} = require(path.join(root, 'scripts/ci/artifacts/publish.cjs'));
-            const client = new DefaultArtifactClient();
-            const ok = await publish({
-              plan: JSON.parse(fs.readFileSync('ci-artifacts/ci-resolved-plan/resolved-plan.json', 'utf8')),
-              producer: process.env.PRODUCER,
-              out: path.join(process.env.RUNNER_TEMP, 'build'),
-              verifier: path.join(root, 'target/release/ci-build' + (process.platform === 'win32' ? '.exe' : '')),
-              jobStatus: process.env.JOB_STATUS,
-              queueSeconds: process.env.PLAN_EPOCH && process.env.JOB_EPOCH
-                ? Number(process.env.JOB_EPOCH) - Number(process.env.PLAN_EPOCH) : undefined,
-              upload: (...args) => client.uploadArtifact(...args),
-            });
-            if (!ok) core.setFailed('One or more package builds could not be published');
+            const {hostedOptions} = require(`${root}/scripts/ci/artifacts/produce.cjs`);
+            const {finalizeOwner} = require(`${root}/scripts/ci/artifacts/publish.cjs`);
+            if (!await finalizeOwner(hostedOptions())) {
+              core.setFailed('One or more package builds could not be published');
+            }
+      - name: Sample storage after publication
+        if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label after-publication || true
+      # Every sample taken, including those before a failure. A runner lost
+      # outright uploads nothing; each sample also prints a one-line summary
+      # to the job log as it is taken.
+      - name: Keep the storage samples
+        if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-diagnostics-${{ matrix.build }}
+          path: ${{ runner.temp }}/build-diagnostics
+          if-no-files-found: warn
 
   # One caller identity per selected AREA — the top-level entry a reader sees
   # for the tested half of the run (AC2). The area's packages, their gates, and
   # its own rollup all live inside `_area-ci.yml` and render underneath it.
   #
-  # No `name:`, for the reason `preflight` has none: this job carries `needs:`
-  # and can therefore be skipped as a whole, and a skipped matrix job never has
-  # its matrix context evaluated. The default label is `area-ci` when skipped
-  # and `area-ci (claudine)` when it runs.
+  # No `name:`: this job carries `needs:` and can therefore be skipped as a
+  # whole, and a skipped matrix job never has its matrix context evaluated, so
+  # a name built from `${{ matrix.area }}` would show raw. A literal name would
+  # not hide the area (GitHub appends it when the job expands: `<name>
+  # (claudine)`); the automatic label stays because the naming contract and
+  # every recorded run, document, and fixture spell the area's entry `area-ci
+  # (claudine)` when it runs and `area-ci` when skipped.
   #
   # `has_packages` is the scalar guard, read before matrix expansion for the
   # reason `preflight_os` is: a run that schedules no area resolves this job
@@ -868,7 +950,7 @@ jobs:
   # of the equivalence. `ci-gate` folds `skipped` as a pass, so every other
   # pull request pays nothing and is blocked by nothing.
   area-drift:
-    name: area-drift (planner areas match sniff)
+    name: Verify package area mapping
     needs: [scope, preflight]
     if: >-
       !cancelled() &&
@@ -1010,10 +1092,13 @@ jobs:
   # with zero new cells. It is deliberately NOT in `ci-gate`'s `needs` (the
   # gate stays a policy-free fold); a failure here fails the run instead, so
   # a nightly that could not certify is not mistaken for a baseline either.
-  # No `name:`: a skipped matrix job is never labelled from its matrix.
+  # A literal `name:`: a skipped matrix job is never labelled from its matrix.
+  # An expanded leg still gets its value appended: `Publish nightly coverage
+  # evidence (wsl2-ubuntu)`.
   # `actions: read` is for the audit-job count; nothing here writes checks or
   # contents, which stay with the accepted-gaps publisher.
   certify-nightly:
+    name: Publish nightly coverage evidence
     needs: [scope, ci-gate]
     if: >-
       always() &&
@@ -1096,8 +1181,9 @@ jobs:
   # `refs/notes/*`. If they do not, the push is refused, the step fails red
   # with "hosted observations are local to this runner; remote reuse
   # unavailable", and the artifacts stay the only record.
-  # No `name:`: a skipped job is never labelled from its matrix.
+  # A literal `name:`: a skipped job is never labelled from its matrix.
   publish-observations:
+    name: Publish test observations
     needs: [scope, area-ci]
     if: >-
       always() &&
@@ -1180,7 +1266,7 @@ jobs:
   # cell in its own area's coverage audit. On reuse every one of those is
   # skipped, which is why this job also runs then.
   ci-reporting:
-    name: ci-reporting (advisory)
+    name: Report CI results (advisory)
     needs:
       - validation
       - scope

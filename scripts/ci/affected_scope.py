@@ -258,6 +258,7 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
         for suite in (
             "test_affected_scope.py",
             "test_build_key.py",
+            "test_build_status.py",
             "test_ci_local.py",
             "test_completion.py",
             "test_constraints.py",
@@ -271,6 +272,7 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "test_runner_loss.py",
             "test_schema.py",
             "test_seed.py",
+            "test_storage_sample.py",
         )
     },
     # Lint-only on purpose, and the one entry with no `recipe`: a source-policy
@@ -289,6 +291,20 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "the guard answers a source-policy question over files, not a test "
             "cardinality; its two driver assertions are not the measurement"
         ),
+    },
+    # The binary distribution suites (`scripts/ci/test_distribution.py` and
+    # `scripts/distribution/test_*.py`). They need PyYAML and semver at the
+    # versions `scripts/ci/requirements-distribution.txt` pins, which the
+    # companion step's host Python does not carry, so the canonical recipe
+    # provisions a temporary pinned environment and fails on any skipped test.
+    "distribution": {
+        "owner": "repo-deps",
+        "kind": "companion",
+        "environment": "ubuntu-latest",
+        "recipe": "just distribution-test",
+        "just": ((".", "distribution-test"),),
+        "counts": "json",
+        "counts_args": f"--counts-out {COUNTS_OUT_PLACEHOLDER}",
     },
     # The build owner's artifact publisher: no Cargo package and no pnpm
     # workspace entry selects it, so this registration is the only thing that
@@ -341,6 +357,18 @@ SUITE_OWNER_PATHS: dict[str, tuple[str, ...]] = {
     "pnpm-workspace.yaml": ("test-toolkit",),
     "scripts/Cargo.toml": ("repo-deps",),
     "tools/test-toolkit/Cargo.toml": ("test-toolkit",),
+    # The binary distribution configuration. No compiled code reads these; the
+    # `distribution` companion suite validates the real files (the policy as
+    # an all-disabled control, the reviewed dist base, the license targets,
+    # and the pinned build images), so an edit to one schedules that suite.
+    "docs/deployment.yaml": ("repo-deps",),
+    "dist-workspace.toml": ("repo-deps",),
+    "about.toml": ("repo-deps",),
+    ".github/distribution/build-images.json": ("repo-deps",),
+    # The rollout ledger: the suite checks it against the real policy.
+    ".github/distribution/rollout.json": ("repo-deps",),
+    # Defines `distribution-test`, the `distribution` suite's canonical recipe.
+    "just/distribution.just": ("repo-deps",),
 }
 
 # AC15 makes `sniff` the authority on package areas: this planner replicates
@@ -1597,12 +1625,17 @@ def validate_package_ci(
         # a companion nothing can run.
         for directory, recipe in registered.get("just", ()):
             justfile = root / directory / "justfile"
+            # The root justfile's recipes also live in the `just/*.just` files
+            # it imports.
+            if directory == ".":
+                texts = list(just_sources(root).values())
+            else:
+                texts = [justfile.read_text(encoding="utf-8")] if justfile.is_file() else []
             # A recipe DEFINITION, not a substring: `test-frontend-watch:` must
             # not satisfy the check for `test-frontend`.
-            recipe_defined = justfile.is_file() and re.search(
-                rf"^{re.escape(recipe)}(?::|\s)",
-                justfile.read_text(encoding="utf-8"),
-                re.MULTILINE,
+            recipe_defined = any(
+                re.search(rf"^{re.escape(recipe)}(?::|\s)", text, re.MULTILINE)
+                for text in texts
             )
             if not recipe_defined:
                 raise RuntimeError(
@@ -3242,9 +3275,11 @@ def package_cells(
 
     `dependents` are the unchanged direct reverse dependencies this package
     compiles inside its `DEPENDENTS_ENVIRONMENT` check cell (Open Question 1,
-    Option B). They give a package that check cell even when no target kind of
-    its own needs one; the other native environments' check cells still exist
-    only for uncovered kinds.
+    Option B). When no target kind of its own needs a check, they give the
+    package a dependents-only check cell, but only if `environments` schedules
+    `DEPENDENTS_ENVIRONMENT`: an event that does not (a push its pull request
+    already proved) plans no such cell. The other native environments' check
+    cells exist only for uncovered kinds.
     """
     package = record["package"]
     cells: list[dict[str, Any]] = []
@@ -3386,9 +3421,13 @@ def package_cells(
                 reusable=not hosts_seam,
                 compiled_dependents=seam if hosts_seam else (),
             )
-    elif seam:
+    elif seam and any(
+        environment["name"] == DEPENDENTS_ENVIRONMENT for environment in environments
+    ):
         # No kind of its own needs a check, so this cell compiles nothing of
         # the package (`target_kinds` is empty) and exists for the seam alone.
+        # It exists only where the event schedules its host; a proven or
+        # producer-only environment is absent from `environments`.
         add(
             DEPENDENTS_ENVIRONMENT,
             "check",
@@ -4272,8 +4311,9 @@ def calculate_scope(
     One document answers every downstream question: which areas were selected
     and why, which packages contribute to each, and what will happen to each
     `{package, environment, gate}` cell — execute, reuse verified evidence, or
-    stand as a governed policy gap. `schema.validate_resolved_plan` is its
-    contract.
+    stand as a governed policy gap. The plan is checked against
+    `schema.validate_resolved_plan` before it is returned; an invalid plan
+    raises ``RuntimeError`` instead.
 
     `accepted_cells` is the verified per-cell result set, not an environment
     name. Evidence from macOS and from a prior WSL run therefore combine, and
@@ -4755,6 +4795,12 @@ def calculate_scope(
             coverage_anchors, key=lambda entry: entry["environment"]
         )
     plan["rows"] = attach_rows(plan)
+    # Refused here, before the CLI writes `--plan-out` or prints a projection:
+    # a cell naming an environment the event did not schedule would otherwise
+    # surface only when its cell contract fails to resolve in CI.
+    problems = schema.validate_resolved_plan(plan)
+    if problems:
+        raise RuntimeError(f"the calculated plan is invalid: {problems[0]}")
     return plan
 
 

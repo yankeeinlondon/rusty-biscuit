@@ -1,0 +1,90 @@
+// Evidence-store Worker. Deploy only through an explicit environment
+// (`--env development` or `--env restore-test`); the top level declares no
+// bindings and no workers.dev address, so an environment-less deploy has
+// nothing to write to and is unreachable.
+// Each `database_id` is written by `just evidence-store provision`; the
+// all-zero value means that environment has not been provisioned yet.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "evidence-store",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "env": {
+    "development": {
+      "name": "evidence-store-development",
+      // Reachable at its workers.dev address; every route still requires authentication.
+      "workers_dev": true,
+      // No per-version preview addresses: nothing uses them.
+      "preview_urls": false,
+      // Daily staging cleanup, retention jobs, tombstone expiry, and capacity checks (src/daily.ts).
+      "triggers": { "crons": ["17 3 * * *"] },
+      "d1_databases": [
+        {
+          "binding": "EVIDENCE_DB",
+          "database_name": "evidence-store-development",
+          "database_id": "960d8e9e-7a45-4823-bff5-5436c46889a8",
+          "migrations_dir": "migrations"
+        }
+      ],
+      // R2 buckets are private unless public access is enabled on the bucket;
+      // this service never enables it.
+      "r2_buckets": [
+        {
+          "binding": "EVIDENCE_BUCKET",
+          "bucket_name": "evidence-store-development"
+        }
+      ],
+      // Per-principal request rates (Cloudflare rate-limiting bindings).
+      "ratelimits": [
+        { "name": "READ_LIMITER", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } },
+        { "name": "MUTATION_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } },
+        { "name": "OPERATOR_LIMITER", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } }
+      ],
+      "vars": {
+        // `api/schemas/service-config.schema.json`, as JSON text. Allows this
+        // repository and the demo workflow on main, plus an empty private
+        // repository that only gives `just test-real` somewhere to write, so
+        // acceptance data never enters this repository's history. Repositories
+        // are keyed by stable GitHub IDs; anything not listed is denied.
+        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[{\"repository_id\":\"1131837348\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/rusty-biscuit\"},{\"repository_id\":\"1454439808\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/evidence-store-acceptance\"}],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[{\"repository_id\":\"1131837348\",\"workflow\":\".github/workflows/evidence-store-demo.yml\",\"ref\":\"refs/heads/main\",\"event_name\":\"workflow_dispatch\",\"roles\":[\"producer\",\"reader\"]}]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
+      }
+    },
+    "restore-test": {
+      "name": "evidence-store-restore-test",
+      // Reachable at its workers.dev address; every route still requires authentication.
+      "workers_dev": true,
+      // No per-version preview addresses: nothing uses them.
+      "preview_urls": false,
+      // Daily staging cleanup, retention jobs, tombstone expiry, and capacity checks (src/daily.ts).
+      "triggers": { "crons": ["17 3 * * *"] },
+      "d1_databases": [
+        {
+          "binding": "EVIDENCE_DB",
+          "database_name": "evidence-store-restore-test",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "EVIDENCE_BUCKET",
+          "bucket_name": "evidence-store-restore-test"
+        }
+      ],
+      // Per-principal request rates (Cloudflare rate-limiting bindings).
+      "ratelimits": [
+        { "name": "READ_LIMITER", "namespace_id": "2001", "simple": { "limit": 300, "period": 60 } },
+        { "name": "MUTATION_LIMITER", "namespace_id": "2002", "simple": { "limit": 60, "period": 60 } },
+        { "name": "OPERATOR_LIMITER", "namespace_id": "2003", "simple": { "limit": 30, "period": 60 } }
+      ],
+      "vars": {
+        // `api/schemas/service-config.schema.json`, as JSON text. The same
+        // repositories as development, so a restored copy serves them; no
+        // workflow is trusted, because nothing publishes to a restore target.
+        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[{\"repository_id\":\"1131837348\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/rusty-biscuit\"},{\"repository_id\":\"1454439808\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/evidence-store-acceptance\"}],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
+      }
+    }
+  }
+}

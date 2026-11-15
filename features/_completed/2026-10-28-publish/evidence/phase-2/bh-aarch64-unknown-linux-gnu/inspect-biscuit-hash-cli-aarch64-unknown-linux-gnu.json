@@ -1,0 +1,97 @@
+{
+  "archive": "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz",
+  "binary": {
+    "arch": "aarch64",
+    "format": "elf"
+  },
+  "command": "bh",
+  "entries": [
+    {
+      "mode": "0o755",
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu",
+      "size": 0,
+      "type": "dir"
+    },
+    {
+      "mode": "0o755",
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu/bh",
+      "size": 946960,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu/README.md",
+      "size": 5071,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu/SOURCE.txt",
+      "size": 322,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu/THIRD-PARTY-NOTICES.md",
+      "size": 53,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu/LICENSE",
+      "size": 34523,
+      "type": "file"
+    }
+  ],
+  "evidence": {
+    "readelf": "readelf-biscuit-hash-cli-aarch64-unknown-linux-gnu.txt"
+  },
+  "executables": [
+    "biscuit-hash-cli-aarch64-unknown-linux-gnu/bh"
+  ],
+  "failures": [],
+  "linkage": {
+    "glibc_versions": [
+      "GLIBC_2.17",
+      "GLIBC_2.18",
+      "GLIBC_2.28",
+      "GLIBC_2.30",
+      "GLIBC_2.32",
+      "GLIBC_2.33",
+      "GLIBC_2.34"
+    ],
+    "interpreter": "/lib/ld-linux-aarch64.so.1",
+    "max_glibc": "2.34",
+    "needed": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1",
+      "libgcc_s.so.1"
+    ],
+    "rpaths": [],
+    "version_needs": {
+      "ld-linux-aarch64.so.1": [
+        "GLIBC_2.17"
+      ],
+      "libc.so.6": [
+        "GLIBC_2.28",
+        "GLIBC_2.33",
+        "GLIBC_2.18",
+        "GLIBC_2.32",
+        "GLIBC_2.30",
+        "GLIBC_2.34",
+        "GLIBC_2.17"
+      ],
+      "libgcc_s.so.1": [
+        "GCC_4.2.0",
+        "GCC_3.0",
+        "GCC_3.3"
+      ]
+    }
+  },
+  "mode": "archive",
+  "package": "biscuit-hash-cli",
+  "passed": true,
+  "schema_version": 1,
+  "tag": "biscuit-hash-cli-v0.1.0",
+  "target": "aarch64-unknown-linux-gnu"
+}

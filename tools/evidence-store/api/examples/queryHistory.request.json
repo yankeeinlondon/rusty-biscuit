@@ -1,0 +1,9 @@
+{
+  "package": "biscuit-hash",
+  "gate": "L1",
+  "reachable_heads": [
+    "9f2e6d33a3717ee826353a404ba4618d1aeeb687",
+    "0d9596176fd3d19ea901fbd6e113f4fe01e4ec84"
+  ],
+  "page_size": 100
+}

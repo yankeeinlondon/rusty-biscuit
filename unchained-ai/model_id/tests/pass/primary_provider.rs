@@ -10,7 +10,8 @@ pub enum ProviderOpenAi {
     Bespoke(String),
 }
 
-fn main() {
+#[test]
+fn compiles_and_behaves() {
     // Test model_id()
     assert_eq!(ProviderOpenAi::Gpt_4o.model_id(), "gpt.4o");
     assert_eq!(ProviderOpenAi::Gpt_4o__Mini.model_id(), "gpt.4o-mini");
@@ -27,7 +28,10 @@ fn main() {
 
     // Test FromStr with unknown model falls back to Bespoke
     let unknown: ProviderOpenAi = "unknown-model".parse().unwrap();
-    assert_eq!(unknown, ProviderOpenAi::Bespoke("unknown-model".to_string()));
+    assert_eq!(
+        unknown,
+        ProviderOpenAi::Bespoke("unknown-model".to_string())
+    );
 
     // Test ALL constant
     assert_eq!(ProviderOpenAi::ALL.len(), 4);

@@ -1,0 +1,76 @@
+{
+  "archive": "darkmatter-cli-aarch64-apple-darwin.tar.xz",
+  "binary": {
+    "arch": "arm64",
+    "format": "macho"
+  },
+  "command": "md",
+  "entries": [
+    {
+      "mode": "0o755",
+      "name": "darkmatter-cli-aarch64-apple-darwin",
+      "size": 0,
+      "type": "dir"
+    },
+    {
+      "mode": "0o755",
+      "name": "darkmatter-cli-aarch64-apple-darwin/md",
+      "size": 78309616,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "darkmatter-cli-aarch64-apple-darwin/README.md",
+      "size": 9530,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "darkmatter-cli-aarch64-apple-darwin/SOURCE.txt",
+      "size": 316,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "darkmatter-cli-aarch64-apple-darwin/THIRD-PARTY-NOTICES.md",
+      "size": 521271,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "darkmatter-cli-aarch64-apple-darwin/LICENSE",
+      "size": 34523,
+      "type": "file"
+    }
+  ],
+  "evidence": {
+    "otool_libraries": "otool-libraries-darkmatter-cli-aarch64-apple-darwin.txt",
+    "otool_load_commands": "otool-load-commands-darkmatter-cli-aarch64-apple-darwin.txt"
+  },
+  "executables": [
+    "darkmatter-cli-aarch64-apple-darwin/md"
+  ],
+  "failures": [],
+  "linkage": {
+    "dylibs": [
+      "/usr/lib/libSystem.B.dylib",
+      "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+      "/usr/lib/libobjc.A.dylib",
+      "/System/Library/Frameworks/CoreText.framework/Versions/A/CoreText",
+      "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
+      "/System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio",
+      "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+      "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+      "/usr/lib/libiconv.2.dylib"
+    ],
+    "minos": "15.0",
+    "platform": "1",
+    "rpaths": []
+  },
+  "mode": "archive",
+  "package": "darkmatter-cli",
+  "passed": true,
+  "schema_version": 1,
+  "tag": "darkmatter-cli-v0.1.0",
+  "target": "aarch64-apple-darwin"
+}

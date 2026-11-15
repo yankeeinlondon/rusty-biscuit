@@ -1,0 +1,15 @@
+{
+  "target": "aarch64-unknown-linux-gnu",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "image": {
+    "container": "ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11",
+    "glibc": "2.35",
+    "host": "local",
+    "image_os": "local",
+    "image_version": "local",
+    "os_release": "22.04",
+    "platform": "linux/arm64",
+    "platform_digest": "sha256:a8fb2ba88181746111cbbe2969826d6546b71226785b196c93d2c3445a25000d",
+    "runner": "ubuntu-22.04-arm"
+  }
+}

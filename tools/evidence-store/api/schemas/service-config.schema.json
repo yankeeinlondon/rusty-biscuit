@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusty-biscuit.invalid/evidence-store/service-config.schema.json",
+  "title": "Evidence store service configuration",
+  "description": "Deployment configuration read by the Worker: which repositories exist, which GitHub Actions workflows may authenticate with OIDC, and quota limits. Every list is an allowlist: an empty list denies everything, never grants unrestricted access.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "repositories", "oidc", "quotas"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "api_version": { "const": "v1" },
+    "repositories": {
+      "description": "Repository allowlist, keyed by stable numeric GitHub IDs. An empty list denies every repository-scoped request.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/repository" }
+    },
+    "oidc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "audience", "clock_tolerance_seconds", "trusted_workflows"],
+      "properties": {
+        "issuer": { "const": "https://token.actions.githubusercontent.com" },
+        "audience": { "const": "rusty-biscuit-evidence-store" },
+        "clock_tolerance_seconds": {
+          "description": "Tolerance applied to `exp` and `nbf`.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "trusted_workflows": {
+          "description": "Exact workflow/ref/event tuples allowed to authenticate. An empty list denies every OIDC token. The workflow path is pinned from the `workflow_ref` claim; fork and pull-request contexts are always refused. The initial entry is `.github/workflows/evidence-store-demo.yml` on `refs/heads/main` for `workflow_dispatch` with roles producer and reader.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/trusted_workflow" }
+        }
+      }
+    },
+    "quotas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rate_mutations_per_minute", "rate_reads_per_minute", "operator_rate_mutations_per_minute", "capacity"],
+      "properties": {
+        "rate_mutations_per_minute": { "type": "integer", "minimum": 1, "maximum": 60 },
+        "rate_reads_per_minute": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "operator_rate_mutations_per_minute": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "capacity": {
+          "description": "Free-tier allowances after subtracting other account usage. Work that would cross `refuse_ratio` of any allowance is refused with `quota_exhausted`; retained evidence is never evicted.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "alert_ratio",
+            "refuse_ratio",
+            "r2_live_plus_staging_bytes",
+            "r2_class_a_per_month",
+            "r2_class_b_per_month",
+            "d1_database_bytes",
+            "d1_rows_read_per_day",
+            "d1_rows_written_per_day",
+            "worker_requests_per_day"
+          ],
+          "properties": {
+            "alert_ratio": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.7 },
+            "refuse_ratio": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.8 },
+            "r2_live_plus_staging_bytes": { "type": "integer", "minimum": 0, "maximum": 8589934592 },
+            "r2_class_a_per_month": { "type": "integer", "minimum": 0, "maximum": 800000 },
+            "r2_class_b_per_month": { "type": "integer", "minimum": 0, "maximum": 8000000 },
+            "d1_database_bytes": { "type": "integer", "minimum": 0, "maximum": 500000000 },
+            "d1_rows_read_per_day": { "type": "integer", "minimum": 0, "maximum": 5000000 },
+            "d1_rows_written_per_day": { "type": "integer", "minimum": 0, "maximum": 100000 },
+            "worker_requests_per_day": { "type": "integer", "minimum": 0, "maximum": 100000 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "numeric_id": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_id", "owner_id", "slug"],
+      "properties": {
+        "repository_id": { "$ref": "#/$defs/numeric_id", "description": "Stable GitHub repository ID from the GitHub repository API." },
+        "owner_id": { "$ref": "#/$defs/numeric_id", "description": "Stable GitHub owner ID; must equal the OIDC `repository_owner_id` claim." },
+        "slug": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "Display only; never identity." }
+      }
+    },
+    "trusted_workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_id", "workflow", "ref", "event_name", "roles"],
+      "properties": {
+        "repository_id": { "$ref": "#/$defs/numeric_id" },
+        "workflow": { "type": "string", "pattern": "^\\.github/workflows/[A-Za-z0-9_.-]+\\.ya?ml$" },
+        "ref": { "type": "string", "pattern": "^refs/(heads|tags)/.+$" },
+        "event_name": { "type": "string", "enum": ["workflow_dispatch", "push", "schedule"] },
+        "roles": {
+          "description": "OIDC identities never receive verifier, retention-verifier, or operator. An empty list denies all.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["producer", "reader"] }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "api_version": "v1",
+      "repositories": [{ "repository_id": "873451209", "owner_id": "4417321", "slug": "example-owner/rusty-biscuit" }],
+      "oidc": {
+        "issuer": "https://token.actions.githubusercontent.com",
+        "audience": "rusty-biscuit-evidence-store",
+        "clock_tolerance_seconds": 60,
+        "trusted_workflows": [
+          {
+            "repository_id": "873451209",
+            "workflow": ".github/workflows/evidence-store-demo.yml",
+            "ref": "refs/heads/main",
+            "event_name": "workflow_dispatch",
+            "roles": ["producer", "reader"]
+          }
+        ]
+      },
+      "quotas": {
+        "rate_mutations_per_minute": 60,
+        "rate_reads_per_minute": 300,
+        "operator_rate_mutations_per_minute": 30,
+        "capacity": {
+          "alert_ratio": 0.7,
+          "refuse_ratio": 0.8,
+          "r2_live_plus_staging_bytes": 8589934592,
+          "r2_class_a_per_month": 800000,
+          "r2_class_b_per_month": 8000000,
+          "d1_database_bytes": 500000000,
+          "d1_rows_read_per_day": 5000000,
+          "d1_rows_written_per_day": 100000,
+          "worker_requests_per_day": 100000
+        }
+      }
+    }
+  ]
+}
