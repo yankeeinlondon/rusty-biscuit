@@ -1182,9 +1182,9 @@ when the checker errors. It builds the **base** commit's checker
 (`darkmatter::config::widening`, run as
 `darkmatter/lib/examples/permission_widening.rs`) outside the workspace and
 reads the candidate only as Git objects; it never checks out, builds, or runs
-candidate code. When the change may widen, the trusted
-`scripts/ci/permission_scope.py decide --markdown` writes a report that the
-job keeps as one marked pull-request comment (`<!-- permission-report -->`,
+candidate code. When the trusted `scripts/ci/permission_scope.py decide`
+prints `potential_widening=true`, the job turns the lines it wrote to stderr
+(the interface every base copy has) into one marked pull-request comment (`<!-- permission-report -->`,
 rewritten on every push; `pull-requests: write` is the job's only write).
 Nothing waits for an approval: the merge is the decision. User docs:
 `docs/topics/ci-cd.md` ("Permission-change report").

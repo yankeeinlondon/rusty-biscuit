@@ -10229,7 +10229,11 @@ fn a_possible_widening_is_reported_on_the_pull_request_without_an_approval() {
         "the report comment is the job's only write"
     );
     let report = step_containing(&job, "id: report");
-    assert!(report.contains("--markdown \"$report\""), "the trusted checker writes the comment body");
+    assert!(
+        report.contains(r#"if [ "$verdict" = "potential_widening=true" ]; then"#),
+        "only a possible widening writes the comment body"
+    );
+    assert!(!report.contains("--markdown"), "the step uses only the interface every trusted copy has");
     let comment = step_containing(&job, "<!-- permission-report -->");
     for condition in [
         "steps.report.outcome == 'success'",

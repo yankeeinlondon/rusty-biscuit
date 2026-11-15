@@ -14,11 +14,11 @@ or run. Both commands print `key=value` lines for `$GITHUB_OUTPUT`.
   that is a committed symbolic link or whose `permissions` is a reference
   can read any file, so then any change at all is compared.
 * `decide` reads the checker's JSON report, prints
-  `potential_widening=true|false`, and writes the report to the job summary.
-  With `--markdown PATH` it also writes, only when the change may widen, the
-  pull-request comment that tells whoever merges what widens. A failed
-  checker or an unreadable report exits 1, which fails the job: an error never
-  means "no change".
+  `potential_widening=true|false` on stdout, writes the report's lines to
+  stderr and the job summary. CI builds the pull-request comment from those
+  stderr lines, so a base commit's older copy of this script still works. A
+  failed checker or an unreadable report exits 1, which fails the job: an
+  error never means "no change".
 
 User-facing guide: `docs/topics/ci-cd.md` ("Permission-change report").
 
@@ -27,7 +27,7 @@ User-facing guide: `docs/topics/ci-cd.md` ("Permission-change report").
 ```bash
 python3 -I scripts/ci/permission_scope.py scope --repository . \\
     --inputs .github/ci/permission-inputs.json --base "$BASE" --head "$HEAD"
-python3 -I scripts/ci/permission_scope.py decide --report report.json --status 0 --markdown comment.md
+python3 -I scripts/ci/permission_scope.py decide --report report.json --status 0
 ```
 """
 
@@ -190,7 +190,6 @@ def main(argv: list[str] | None = None, out: Callable[[str], None] = print) -> i
     deciding = commands.add_parser("decide")
     deciding.add_argument("--report", type=Path, required=True)
     deciding.add_argument("--status", type=int, required=True)
-    deciding.add_argument("--markdown", type=Path, help="where to write the pull-request comment when the change may widen")
     arguments = parser.parse_args(argv)
     try:
         if arguments.command == "scope":
@@ -206,8 +205,6 @@ def main(argv: list[str] | None = None, out: Callable[[str], None] = print) -> i
     if summary:
         with open(summary, "a", encoding="utf-8") as handle:
             handle.write("## Permission changes\n\n" + body)
-    if arguments.markdown and outputs["potential_widening"] == "true":
-        arguments.markdown.write_text("## This pull request may widen committed permissions\n\n" + body, encoding="utf-8")
     print("\n".join(lines), file=sys.stderr)
     emit(outputs, out)
     return 0

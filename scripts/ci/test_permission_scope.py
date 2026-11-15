@@ -187,29 +187,20 @@ class DecideTests(unittest.TestCase):
             with self.subTest(text=text, status=status), self.assertRaises(ValueError):
                 decide(text, status)
 
-    def test_the_command_fails_the_job_on_an_error_and_writes_the_summary_and_comment_otherwise(self) -> None:
+    def test_the_command_fails_the_job_on_an_error_and_writes_the_summary_otherwise(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.json"
             summary = Path(directory) / "summary.md"
-            comment = Path(directory) / "comment.md"
             path.write_text(report(WIDENING), encoding="utf-8")
             lines: list[str] = []
             original = permission_scope.os.environ.get("GITHUB_STEP_SUMMARY")
             permission_scope.os.environ["GITHUB_STEP_SUMMARY"] = str(summary)
             try:
-                with redirect_stderr(io.StringIO()):
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
                     self.assertEqual(main(["decide", "--report", str(path), "--status", "0"], out=lines.append), 0)
+                    self.assertIn("prefix rm", stderr.getvalue(), "CI builds the comment from these lines")
                     self.assertEqual(lines, ["potential_widening=true"])
-                    self.assertFalse(comment.exists(), "no comment unless --markdown asks for one")
-                    arguments = ["decide", "--report", str(path), "--status", "0", "--markdown", str(comment)]
-                    self.assertEqual(main(arguments, out=lines.append), 0)
-                    self.assertTrue(comment.read_text(encoding="utf-8").startswith(
-                        "## This pull request may widen committed permissions\n"))
-                    self.assertIn("prefix rm", comment.read_text(encoding="utf-8"))
-                    comment.unlink()
-                    path.write_text(report([]), encoding="utf-8")
-                    self.assertEqual(main(arguments, out=lines.append), 0)
-                    self.assertFalse(comment.exists(), "a change that widens nothing writes no comment")
                     missing = Path(directory) / "absent.json"
                     self.assertEqual(main(["decide", "--report", str(missing), "--status", "0"], out=lines.append), 1)
             finally:

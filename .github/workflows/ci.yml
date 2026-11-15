@@ -1105,8 +1105,17 @@ jobs:
               } | tee "$report" >>"$GITHUB_STEP_SUMMARY"
               ;;
             compare)
-              python3 -I "$TRUSTED/scripts/ci/permission_scope.py" decide \
-                --report "$RUNNER_TEMP/permission-report.json" --status "${STATUS:-1}" --markdown "$report"
+              # The verdict is on stdout and the report's lines on stderr, the
+              # interface every trusted copy of the script has, so a base
+              # older than this step still works.
+              lines="$RUNNER_TEMP/permission-lines.md"
+              verdict="$(python3 -I "$TRUSTED/scripts/ci/permission_scope.py" decide \
+                --report "$RUNNER_TEMP/permission-report.json" --status "${STATUS:-1}" 2>"$lines")" \
+                || { cat "$lines" >&2; exit 1; }
+              cat "$lines"
+              if [ "$verdict" = "potential_widening=true" ]; then
+                { echo "## This pull request may widen committed permissions"; echo; cat "$lines"; } >"$report"
+              fi
               ;;
             *) echo "no scope decision was made" >&2; exit 1 ;;
           esac
