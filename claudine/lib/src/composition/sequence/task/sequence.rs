@@ -50,6 +50,11 @@ impl TaskExecution<'_> {
         &self, sequence: &PreflightSequence, runtime: &Arc<RuntimeState>, run_id: &str,
         runner: &mut ContainerRunner<'_>, mut frame: Option<&mut LoopFrame>,
     ) -> PrimaryOutcome {
+        // The container's events and children resolve file targets in its
+        // own document's context; its reread (`prepare_nested_sequence`)
+        // resolves the reference from the calling task's, so keeps the stack's.
+        let own_context = self.authoring_context(&sequence.origin_path);
+        let file_resolution_context: &biscuit_file::FileResolutionContext = &own_context;
         let mut signal = LifecycleSignal::Initialize;
         // Taken as each pass enters `start`; a retry of the pass returns here.
         let mut checkpoint = PassCheckpoint::take(runtime);
@@ -122,6 +127,7 @@ impl TaskExecution<'_> {
                 shell_runner: if shell_enabled { self.stack.shell_runner } else { &disabled },
                 seq: Some(&seq), runtime_state: Some(runtime.as_ref()), frontmatter: &event_frontmatter,
                 live_frontmatter, source_path: &sequence.origin_path, err: error.as_ref(), loop_values,
+                file_resolution_context,
                 ..self.stack.with_signal(signal)
             };
             if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
@@ -198,6 +204,7 @@ impl TaskExecution<'_> {
                             seq: Some(&seq), runtime_state: Some(runtime.as_ref()),
                             frontmatter: state.data(), live_frontmatter, source_path: &task.origin_path, loop_values,
                             prepared_context: run.as_ref().map(|opened| &opened.context).or(self.stack.prepared_context),
+                            file_resolution_context,
                             ..self.stack.with_signal(LifecycleSignal::Start)
                         };
                         let child = TaskExecution {
@@ -307,6 +314,7 @@ impl TaskExecution<'_> {
                         let gate = StackExecutionContext {
                             seq: Some(&gate_seq), runtime_state: Some(runtime.as_ref()), frontmatter: &gate_frontmatter,
                             live_frontmatter, source_path: &sequence.origin_path, err: None, loop_values: Some(&ambient),
+                            file_resolution_context,
                             ..self.stack.with_signal(LifecycleSignal::Loop)
                         };
                         match finish_container_pass(frame, runner.guard_mut(), &gate, runtime) {

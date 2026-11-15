@@ -152,6 +152,7 @@ pub(crate) mod fs_capability;
 pub(crate) mod host_tools;
 pub(crate) mod incomplete_subagents;
 pub(crate) mod lifecycle_set_corpus;
+pub(crate) mod mutation_paths;
 #[cfg(unix)]
 pub(crate) mod launch_recorder;
 pub(crate) mod owned_value_options;

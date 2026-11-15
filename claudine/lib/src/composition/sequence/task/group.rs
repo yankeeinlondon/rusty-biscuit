@@ -74,7 +74,14 @@ impl TaskExecution<'_> {
         let runtime = Arc::new(RuntimeState::from_snapshot(before));
         let live = Mutex::new(self.stack.live_frontmatter_snapshot()
             .unwrap_or_else(|| self.stack.frontmatter.clone()));
-        let private_stack = self.stack.with_private_cells(&runtime, Some(&live));
+        // The group's events and legs resolve file targets in its own
+        // document's context; its reread (`prepare_nested_group`) resolves
+        // the reference from the calling task's, so reads `self.stack`.
+        let own_context = self.authoring_context(&group.origin_path);
+        let private_stack = StackExecutionContext {
+            file_resolution_context: &own_context,
+            ..self.stack.with_private_cells(&runtime, Some(&live))
+        };
         let execution = TaskExecution { runtime: Some(&runtime), stack: &private_stack, ..*self };
         let context = LifecycleRuntimeContext {
             settings: self.stack.settings, messaging: self.stack.messaging, term: self.stack.term,

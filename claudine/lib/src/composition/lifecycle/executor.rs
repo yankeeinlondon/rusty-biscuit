@@ -238,8 +238,9 @@ pub struct StackExecutionContext<'a> {
     /// `None`, it falls back to a demand-driven capture rooted at
     /// `ctx_base_dir`/`base_dir`.
     pub prepared_context: Option<&'a ComposeContext>,
-    /// The request's file-resolution context, used by document-authored file
-    /// expressions.
+    /// The file-resolution context of the document that authored the stack
+    /// (a referenced sequence or group has its own), used by document-authored
+    /// file expressions and lifecycle write targets.
     pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,

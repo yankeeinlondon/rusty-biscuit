@@ -1598,6 +1598,27 @@ impl TaskExecution<'_> {
             || crate::composition::lifecycle::cancellation::requested()
     }
 
+    /// The file-resolution context of a referenced container `document`, for
+    /// the stacks of its events and children; the stack's own when it already
+    /// describes it, or when no invocation can derive one.
+    ///
+    /// Lifecycle targets resolve beside the document that authored them, in
+    /// that document's own tree: the caller's tree may not contain a document
+    /// from a shared library, or may spell the same directory differently
+    /// (a symlinked launch path against a canonical reference). The derived
+    /// context keeps the invocation's launch scope, so the mutation boundary
+    /// stays the caller's root.
+    fn authoring_context(&self, document: &std::path::Path) -> std::borrow::Cow<'_, biscuit_file::FileResolutionContext> {
+        let own = self.stack.file_resolution_context;
+        if own.source_path() == Some(document) {
+            return std::borrow::Cow::Borrowed(own);
+        }
+        match self.document.and_then(|invocation| invocation.derive_source(document).ok()) {
+            Some(source) => std::borrow::Cow::Owned(source.file_resolution_context().clone()),
+            None => std::borrow::Cow::Borrowed(own),
+        }
+    }
+
     /// The task's authored `name:`, falling back to its generated label.
     fn label(&self) -> String {
         self.task

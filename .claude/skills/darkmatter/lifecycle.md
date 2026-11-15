@@ -79,7 +79,12 @@ pages with the behavior.
   task, step guard) builds its `EffectEngine` with the request context's
   `launch_magic_scope().local_root()` (the working tree containing the
   launch directory, else that directory), so a prompt in a sibling library
-  can edit a `{{ ctx.cwd }}` path but not a file beside itself. A failure message is
+  can edit a `{{ ctx.cwd }}` path but not a file beside itself. The resolver
+  derives the document context from `inputs.file_resolution_context`, so a
+  host running a stack for another document (Claudine's referenced sequences
+  and groups) must pass that document's own context, keeping the launch
+  scope, or the reference fails as "does not contain the resolution source".
+  A failure message is
   clamped to one 240-character line (`concise_message`), so `md` puts the
   reason before the target. Terminal-editor success is provable only in L2
   (`cli/tests/level2/level2_edit_action.rs`); L1 process tests use the fake

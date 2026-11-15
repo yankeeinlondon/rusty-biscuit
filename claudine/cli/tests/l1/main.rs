@@ -169,6 +169,7 @@ mod lifecycle_literal_escapes;
 mod lifecycle_traces;
 mod lifecycle_message_drain;
 mod lifecycle_mutation_root;
+mod lifecycle_mutation_lifetime;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;

@@ -11,9 +11,13 @@
 //! The same boundary holds on the sequence routes: a sequence's own
 //! `initialize` and its side-effect tasks write inside the caller's tree, not
 //! inside the directory that holds the sequence document.
+//!
+//! Outside any repository the boundary is the launch directory, even when the
+//! prompt lives inside a repository, and a failed discovery of the launch
+//! repository never widens the boundary to that repository's top.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::common;
 use common::{CliProcessFixture, init_git_repo, strip_ansi, write_executable};
@@ -34,9 +38,16 @@ struct CrossRepo {
 
 impl CrossRepo {
     fn stage() -> Self {
+        let staged = Self::stage_outside_a_repository();
+        staged.fixture.initialize_repository();
+        staged
+    }
+
+    /// [`Self::stage`] without a repository at `cwd`: the launch directory is
+    /// in no working tree, so it is the mutation root itself.
+    fn stage_outside_a_repository() -> Self {
         let fixture = CliProcessFixture::named("lifecycle-mutation-root");
         fixture.seed_user_config();
-        fixture.initialize_repository();
 
         let library = fixture.home().join("prompt-library");
         fs::create_dir_all(library.join("prompts")).unwrap();
@@ -52,11 +63,18 @@ impl CrossRepo {
     /// Run `claudine compose --claude` on `doc_body`; returns its status and
     /// plain stderr.
     fn run(&self, doc_body: &str) -> (std::process::ExitStatus, String) {
-        fs::write(&self.doc, doc_body).unwrap();
+        self.run_at("compose", &self.doc, doc_body)
+    }
+
+    /// Run `claudine <command> --claude` on `doc_body` written at `path`;
+    /// returns its status and plain stderr.
+    fn run_at(&self, command: &str, path: &Path, doc_body: &str) -> (std::process::ExitStatus, String) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, doc_body).unwrap();
         let output = self
             .fixture
             .command()
-            .args(["compose", "--claude", self.doc.to_str().unwrap()])
+            .args([command, "--claude", path.to_str().unwrap()])
             .output()
             .expect("spawn claudine");
         (output.status, strip_ansi(&String::from_utf8_lossy(&output.stderr)))
@@ -212,4 +230,132 @@ fn a_foreign_sequence_cannot_write_beside_itself_from_initialize_or_a_task() {
     assert!(prose.contains("outsidethemutationroot"), "output was:\n{output}");
     assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the sequence");
     assert!(!staged.fixture.cwd().join("events.log").exists(), "never root-joined in the caller");
+}
+
+/// A refusal's stderr with the status-line gutter and wrapping removed, so a
+/// phrase split across lines still matches.
+fn prose(stderr: &str) -> String {
+    stderr.replace('┃', " ").split_whitespace().collect()
+}
+
+/// Launched outside any repository, the launch directory is the boundary even
+/// though the prompt sits inside its library's repository: a relative target
+/// beside the prompt is refused, and a `{{ ctx.cwd }}` target is written.
+#[test]
+fn outside_a_repository_the_launch_directory_bounds_a_prompt_from_inside_one() {
+    let staged = CrossRepo::stage_outside_a_repository();
+    let cwd = staged.fixture.cwd();
+    // The precondition the case depends on: nothing above the launch
+    // directory is a working tree, so no repository can widen the boundary.
+    if let Some(repository) = cwd.ancestors().find(|dir| dir.join(".git").exists()) {
+        panic!("fixture precondition: {} is inside the repository {}", cwd.display(), repository.display());
+    }
+
+    let (status, stderr) = staged.run(
+        "---\n\
+         initialize:\n  \
+           - append_line: [\"events.log\", \"initialize\"]\n\
+         ---\n\
+         Body\n",
+    );
+    assert!(!status.success(), "the refused write fails the run; stderr was:\n{stderr}");
+    let refusal = prose(&stderr);
+    assert!(refusal.contains("outsidethemutationroot"), "stderr was:\n{stderr}");
+    assert!(refusal.contains("events.log"), "names the target; stderr was:\n{stderr}");
+    assert!(refusal.contains("(root:"), "names the root; stderr was:\n{stderr}");
+    assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the prompt");
+    assert!(!cwd.join("events.log").exists(), "never root-joined in the launch directory");
+
+    staged.compose(
+        "---\n\
+         initialize:\n  \
+           - append_line: [\"{{ ctx.cwd }}/events.log\", \"initialize\"]\n\
+         ---\n\
+         Body\n",
+    );
+    let log = fs::read_to_string(cwd.join("events.log")).expect("the launch directory holds the log");
+    assert_eq!(log.lines().collect::<Vec<_>>(), ["initialize"]);
+    assert!(!staged.library.join("prompts/events.log").exists(), "still nothing beside the prompt");
+}
+
+/// `inline-compose` selects relative targets beside its document like
+/// `compose` does: a document at the launch directory creates a bare target
+/// there, and a nested target together with its missing parents.
+#[test]
+fn inline_compose_creates_bare_and_nested_relative_targets_beside_a_document_at_the_launch_directory() {
+    let staged = CrossRepo::stage();
+    let cwd = staged.fixture.cwd();
+    let doc = cwd.join("status.md");
+    // `inline-compose` fails a run whose agent leaves the body empty, so this
+    // provider writes one.
+    let (shim_name, _) = PROVIDER_SHIM;
+    let shim_body = if cfg!(windows) {
+        format!("@echo off\r\necho Body>>\"{}\"\r\nexit /b 0\r\n", doc.display())
+    } else {
+        format!("#!/bin/sh\ncat > /dev/null\nprintf 'Body\\n' >> '{}'\n", doc.display())
+    };
+    write_executable(&staged.fixture.bin_dir().join(shim_name), &shim_body);
+    let (status, stderr) = staged.run_at(
+        "inline-compose",
+        &doc,
+        "---\n\
+         prompt: Summarize the status.\n\
+         initialize:\n  \
+           - ensure_file: [\"notes.md\", \"x\"]\n  \
+           - ensure_file: [\"a/b/c.md\", \"y\"]\n\
+         ---\n",
+    );
+
+    assert!(!stderr.contains("outside the mutation root"), "stderr was:\n{stderr}");
+    assert!(status.success(), "inline-compose failed ({status:?}); stderr was:\n{stderr}");
+    assert_eq!(fs::read_to_string(cwd.join("notes.md")).unwrap(), "x");
+    assert_eq!(fs::read_to_string(cwd.join("a/b/c.md")).unwrap(), "y");
+}
+
+/// Launched from a subdirectory of a repository whose discovery fails (a
+/// `.git/config` that git and sniff refuse to load), a write to the
+/// repository top, outside the launch directory, never happens: a failed
+/// discovery can only narrow the boundary, never widen it.
+#[test]
+fn a_failed_launch_discovery_never_widens_the_boundary_to_the_repository_top() {
+    let staged = CrossRepo::stage();
+    let top = staged.fixture.cwd();
+    let launch = top.join("package");
+    fs::create_dir_all(&launch).unwrap();
+    let target = top.join("events.log");
+    // Single-quoted YAML so Windows backslashes are not read as escapes.
+    fs::write(
+        &staged.doc,
+        format!(
+            "---\n\
+             initialize:\n  \
+               - ensure_file: '{target}'\n\
+             ---\n\
+             Body\n",
+            target = target.display(),
+        ),
+    )
+    .unwrap();
+    let run = || {
+        let output = staged
+            .fixture
+            .command_builder()
+            .ambient_context(&launch)
+            .build()
+            .args(["compose", "--claude", staged.doc.to_str().unwrap()])
+            .output()
+            .expect("spawn claudine");
+        (output.status, strip_ansi(&String::from_utf8_lossy(&output.stderr)))
+    };
+
+    // Control: with a healthy repository the top is inside the boundary.
+    let (status, stderr) = run();
+    assert!(status.success(), "a healthy repository admits the write; stderr was:\n{stderr}");
+    assert!(target.exists(), "the control run writes at the repository top");
+    fs::remove_file(&target).unwrap();
+
+    fs::write(top.join(".git/config"), "[core\n garbage = = =\n").unwrap();
+    let (status, stderr) = run();
+    assert!(!status.success(), "the run must not succeed; stderr was:\n{stderr}");
+    assert!(!target.exists(), "nothing written at the repository top; stderr was:\n{stderr}");
 }
