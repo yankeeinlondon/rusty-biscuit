@@ -237,7 +237,8 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
         "alpha",
         "preflight-expanded and executed shell bytes must contain the launch area"
     );
-    let events = fs::read_to_string(root.join("events.log")).unwrap_or_default();
+    // A missing relative `events.log` is created beside the source document.
+    let events = fs::read_to_string(source_dir.join("events.log")).unwrap_or_default();
     assert!(events.contains("when-held"), "lifecycle when: did not see launch area: {events}");
     assert!(
         events.contains(&format!("ctx=alpha cwd={expected_cwd} fm=alpha/{expected_cwd}")),
@@ -408,7 +409,8 @@ mod loop_route_keeps_launch_area_for_root_and_package_documents {
             2,
             "each equivalent loop document must run its seed attempt and one iteration: {provider}"
         );
-        let events = fs::read_to_string(root.join("loop-events.log")).unwrap_or_default();
+        // A missing relative `loop-events.log` is created beside the loop document.
+        let events = fs::read_to_string(path.parent().unwrap().join("loop-events.log")).unwrap_or_default();
         // D8.4: the lifecycle `{{ spec }}` surface carries the native identity,
         // unlike the portable body rendering asserted through the provider log.
         let expected_spec_native = launched_spelling(&launch_spec)
