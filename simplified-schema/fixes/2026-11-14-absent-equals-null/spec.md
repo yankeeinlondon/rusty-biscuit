@@ -32,8 +32,11 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-14
-review_iterations: 0
+review_iterations: 6
 needs_rulings: false
+implemented: true
+implemented_by: "claude/opus"
+completed: true
 ---
 
 # A missing key and `null` are the same value
@@ -260,6 +263,31 @@ otherwise skip every newly active optional default.
   union `AmbiguousDefaults` error is retired; see "Defaults and unions"), stable declaration/index order, and one report per path. A default
   needed by an optional property can now expose an invalid schema that was
   previously accepted because its default was never used.
+- **Boundary of the used-default check (author ruling, 2026-11-15).**
+  Reviews 1–5 each found a new combination of selectors, unions, and
+  defaults that "the complete property definition" had not yet covered.
+  That phrase is bounded here. The check is required to be exact for:
+    1. the property's own definition, including any union inside it;
+    2. every definition joined with it at the same location: overlapping
+       literal, pattern, and catch-all selectors, `allOf` members, local
+       `$ref` targets, and joined array item and tuple position schemas;
+    3. each independent union beside the property (one the declaring arm
+       makes no choice in), judged as a group where one member must accept
+       the default. A member that defines nothing for the key accepts only
+       if a static reading shows it can hold an object with that key: its
+       `type`, `const`, and `enum` allow an object, it is not `false`, and
+       `additionalProperties: false` does not deny the key. The reading
+       follows local `$ref`s and `allOf`, and a nested `anyOf`/`oneOf`
+       needs one admitting member (review-5.md's R5-F1).
+
+  Outside that boundary the check is a documented approximation, not a
+  guarantee. It does not evaluate conditional keywords (`if`/`then`/`else`,
+  `dependentSchemas`, `not`). It does not decide whether a union member's
+  other constraints on the parent could be met (required siblings,
+  `minProperties`, discriminators). And it never validates the unfinished
+  parent to choose a member. Validation of the completed value still
+  applies in full. A review that finds a default-check gap outside items
+  1–3 reports it as a new dated fix, not as a finding against this spec.
 - **Null defaults terminate.** An optional `default(null)` is a no-op on an
   absent or null value and creates no key or applied-default report. For a
   required null-admitting property, it inserts a missing key with `null` and
