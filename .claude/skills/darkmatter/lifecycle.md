@@ -67,8 +67,14 @@ pages with the behavior.
   `LifecycleRunFailure::EditFailed` (`no_error` applies). The cancellation
   probe is `cancellation::cause_with`, never `requested_with`, which is false
   inside the `CleanupScope` every terminal event runs in. The target resolves
-  through `mutation_target`, the one helper `resolve_effect_path` also uses,
-  with URLs refused first. `md`'s mutation root is the prompt's own
+  through `mutation_target`, the one helper `resolve_effect_path` also uses
+  (the seven `*_frontmatter` verbs included, resolved once and mirrored into
+  live state by `PathIdentity` of the resolved target), with URLs refused
+  first: an existing file by the reference contract, a missing one at its
+  first candidate (beside the document for a bare relative name; an
+  unmatched `%` is refused), then `ensure_within` against the engine's
+  mutation root before anything is opened or created. The root is only the
+  boundary, never a base. `md`'s mutation root is the prompt's own
   directory (Claudine's is the launch workspace), so an `md` prompt in a
   sibling library cannot edit a `{{ ctx.cwd }}` path. A failure message is
   clamped to one 240-character line (`concise_message`), so `md` puts the
