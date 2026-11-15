@@ -218,6 +218,8 @@ Which values are filled:
 | the same | `{}` or `{ "meta": null }` | nothing applied: `meta` has no default, so nothing below it is created |
 | `meta: "{ a: number(default(1)) }(default({}))"` | `{}` | `meta = {}`, then `meta.a = 1` |
 | `rows: "{ on: boolean(default(true)) }[]"` | `{ "rows": [{}, { "on": false }, { "on": null }] }` | `rows.0.on`, then `rows.2.on` |
+| `'<starting::x->': "{ on: boolean(default(true)) }"` | `{ "x-a": {}, "x-b": { "on": null } }` | `x-a.on`, then `x-b.on` |
+| the same | `{}` | nothing applied: no key exists, so no value is created |
 
 The rules behind the table:
 
@@ -234,25 +236,102 @@ The rules behind the table:
   when a value needs it.
 - **Positions are never inserted.** List items and tuple positions are never
   created from a default; objects inside existing items are completed.
+- **A key selected by a pattern is a property like any other.** Every
+  schema that selects an existing key describes it together, as one
+  property definition: its literal property, each `<starting::…>`,
+  `<ending::…>`, or `<pattern::…>` key (raw `patternProperties`) whose
+  pattern the key matches, and the `<string>` catch-all (raw
+  `additionalProperties`) of each object schema that neither names the key
+  nor matches it with one of its own patterns. That one definition decides
+  the key's default, whether it is `required`, and its children, so all of
+  the rules above apply to a dictionary entry as they do to a literal
+  property, in one pass. With `'<string>': number(default(3))`,
+  `{ timeout: null }` becomes `{ timeout: 3 }`; and when two selectors
+  describe one entry, a parent default from one and a child default from
+  the other complete together:
+
+  ```yaml
+  types:
+    Parent:
+      options: "{ enabled: boolean }(default({}))"
+    Nested:
+      options: "{ enabled: boolean(default(true)) }"
+  $schema:
+    '<starting::x->': Parent
+    '<ending::-settings>': Nested
+  ```
+
+  Here `{ x-settings: {} }` becomes
+  `{ x-settings: { options: { enabled: true } } }`, reporting
+  `x-settings.options` and `x-settings.options.enabled`. In
+  SimplifiedSchema a literal key wins over a pattern that would also match
+  it; in raw JSON Schema a declared property matching a pattern is described
+  by both. A pattern or catch-all never creates a key: `{}` stays `{}`, and
+  only a key that is there, or one that some schema names (a literal
+  property, or a raw `required` entry), is prepared. In raw JSON Schema,
+  `{ "required": ["x-a"], "patternProperties": { "^x-": { "default": 3 } } }`
+  turns `{}` into `{ "x-a": 3 }`: the required name is named, and the
+  pattern selecting it supplies the default.
 - **Order is stable.** Properties are visited in declaration order and list
   items by ascending index, parents before their children. Each path is
   reported once. A key containing `.` is spelled with `\.` in the path's
   text (`a\.b`); `path.segments()` holds the key as written.
-- **A default is checked when it is used.** It must satisfy every property
-  definition that declares it, constraints and nested required children
-  included, without conversion or file access. A default that does not is a
-  schema error, not a problem with the value: validation fails with
+- **A default is checked when it is used.** Before its children are
+  completed, it must satisfy every definition that applies to the property
+  together with the one declaring it, constraints and nested required
+  children included, without conversion or file access. Those are the
+  property's other selectors (the overlapping patterns and catch-alls
+  above), the other `allOf` members, named types and `$ref` targets
+  describing the same object, and the item schemas joined for the same list
+  position. Union arms stay alternatives: a definition on another arm of
+  the union the default is declared on is not applied to it, so
+  `- timeout: number(default(3))` beside `- timeout: string` still fills
+  `timeout = 3`. A union the default is declared outside of (a root union
+  beside a common property, or a named type whose alternatives describe
+  the same key) is judged as a group: at least one of its alternatives must
+  accept the default. An alternative that says nothing about the property
+  accepts it only when it could hold the object the property is in: a
+  `string` shorthand beside an object form, any alternative whose `type`,
+  `const`, or `enum` excludes an object, a `false` schema, or a closed
+  object (`additionalProperties: false`) that does not name the property
+  is no alternative there, directly or through a local `$ref`. In raw JSON Schema,
+  `{ "properties": { "timeout": { "default": "3" } }, "anyOf": [{ "properties": { "timeout": { "type": "number" } } }, { "properties": { "timeout": { "type": "boolean" } } }] }`
+  is an invalid default at `timeout` for `{}` in both modes: neither
+  alternative accepts the text `"3"`, and it is not converted to `3`. A
+  default object is never repaired by its children's
+  defaults: if `Nested` in the example above declared
+  `enabled: boolean(required; default(true))`, the parent default `{}`
+  would lack the required `enabled`, and `{ x-settings: {} }` would fail as
+  an invalid default at `x-settings.options` (an authored
+  `options: {}` is still completed). A default that does not satisfy them
+  is a schema error, not a problem with the value: validation fails with
   `ValidationFailure::Unprepared` holding `SchemaError::InvalidDefault`,
   whose `pointer` is the JSON Pointer of the `default` keyword in the lowered
   JSON Schema (for example `/properties/n/default`). A default no value needs
   is never judged, so an optional property's broken default surfaces only
   when a document leaves that property unset.
+- **What the default check reads, and what it does not.** The check above
+  is exact for the definitions that apply to the property: its own
+  definition (including a union inside it), the selectors, `allOf`
+  members, `$ref` targets and item schemas joined with it, and each
+  independent union beside it, whose alternatives are admitted by the rule
+  above. It reads those schemas as written and never validates the
+  unfinished parent to choose an alternative, because that would make
+  defaults part of matching. So it does not follow conditional keywords
+  (`if`/`then`/`else`, `dependentSchemas`, `not`), and it does not decide
+  whether an alternative's other constraints on the parent (its required
+  siblings, `minProperties`, a discriminator) could be met. Such an
+  alternative still counts as accepting a default it says nothing about.
+  Validation of the completed value still applies every keyword, so a
+  document these cases let through is judged in full afterward. A default
+  object whose only defect lies in one of them can be completed by its
+  children's defaults rather than refused as an invalid default.
 - **Defaults never expand forever.** A default whose value keeps creating
   another defaulted parent (a type whose `next` defaults to `{}` of the same
   type) fails with `SchemaError::RecursiveDefault`, naming the path where it
   repeats and the `default` keyword. Recursive types without such a default
   are filled at every depth the value has.
-- **One default per property, decided before any value.** Defaults are
+- **One default per property.** Defaults are
   collected from every schema that can describe a location: a named type,
   `allOf` members, and every arm of a union, without choosing an arm. Equal
   defaults count as one. Different defaults for one property at one location
@@ -261,6 +340,16 @@ The rules behind the table:
   an object union, or raw JSON Schema), and a `SchemaError::Convert` naming
   the property for the arms of a property-level union; see
   [Defaults in unions](./language/unions.md#defaults-in-unions).
+  Conflicts beneath a pattern key's value are found the same way. Only when
+  several patterns (or a pattern and a catch-all) select one key that no
+  schema names, and give that key or one of its children different
+  defaults, is the conflict found while applying defaults, for that key and
+  only when its default is needed, as the same `ConflictingDefaults`.
+- **Conditional keywords are not followed.** Defaults inside raw
+  `if`/`then`/`else`, `dependentSchemas`, `not`, `unevaluatedProperties`,
+  `unevaluatedItems`, or `contains` are never applied: whether those
+  schemas describe a value is decided by judging the value, which is
+  validation's step, not default preparation's.
 - **Matching uses the completed value.** Union arms, discriminants, a root's
   sibling assertions, and key counts (`min-keys`, `maxProperties`) judge the
   candidate after defaults are applied. A default that one arm declares
@@ -355,8 +444,12 @@ failure it is:
   content that names a file it cannot read, or it declares conflicting
   defaults. `problems()` is empty. `Prepared` returns it only for a default
   the value needed that is invalid (`InvalidDefault`) or expands without end
-  (`RecursiveDefault`), since `Prepared::new` already refused conflicting
-  defaults; a `SimplifiedSchema` also returns it for the other causes. A
+  (`RecursiveDefault`), or for a key that several patterns or catch-alls
+  select with different defaults (`ConflictingDefaults`, found only when that
+  key needs its default; see the last rule of "One default per property" in
+  [Applying defaults](#applying-defaults)). `Prepared::new` already refused
+  every other conflicting default. A `SimplifiedSchema` also returns it for
+  the other causes. A
   [template](./language/slots.md) fails this way with
   `SchemaError::UnresolvedSlots` until `resolve_slots` gives a concrete
   schema to validate against.

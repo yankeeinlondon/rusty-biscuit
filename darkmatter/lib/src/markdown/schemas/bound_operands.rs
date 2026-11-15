@@ -54,6 +54,22 @@
 //! every place a host types with a generated verb (event stacks, conditional
 //! branches, bundles, loop keys, container events at any depth) is covered
 //! without naming any of them.
+//!
+//! The same walk finds every action dictionary: an object the schema types
+//! with both `when` and `no_error` (a list item, a stack root, a `then`/`else`
+//! body), or with `no_error` beside `while`/`until` (a `loop:` block). Each
+//! is judged by the lifecycle parser's own placement and branch-shape rules
+//! ([`placement_rule`]): a `no_error` beside `then`, two placements of one
+//! flag, a flag on `set`, a `when` with nothing to guard, a flag that is not
+//! a literal boolean (also inside the long form of a side effect or
+//! expression function, which md's baseline leaves untyped), and
+//! `when`/`then`/`else` in a dictionary of verbs. Whether a flag counts is a
+//! question of who wrote it, so the walk reads it from the instance's
+//! authored counterpart ([`FlagOrigin`]): a `no_error: false` the schema
+//! completion filled is never a placement. A dictionary the schema already
+//! reports a problem in keeps that verdict. A `then`/`else` body no type
+//! reaches (md's baseline stops typing below its third conditional level) is
+//! read as the parser reads a body, so its dictionaries get the same rules.
 
 use std::collections::{HashMap, HashSet};
 
@@ -61,9 +77,11 @@ use serde_json::{Map, Value};
 
 use super::simplified::{DARKMATTER_OPERANDS_KEYWORD, OperandForm, operands_verb};
 use super::{JsonPointer, ValidationProblem, ValidationProblemCode, ValidationProblemKind};
+use crate::lifecycle::actions::{is_known_expression_function_verb, is_known_side_effect};
 use crate::lifecycle::{
-    ActionCall, OperandLocation, OperandVerdict, action_call, action_value_to_expr, edit_flag_problem, edit_target_problem, operand_form,
-    template_operands, validate_action_operands_with,
+    ActionCall, ActionMapPosition, AuthoredSource, OperandLocation, OperandVerdict, action_call, action_value_to_expr,
+    edit_flag_problem, edit_target_problem, operand_form, placement_rule, template_operands,
+    validate_action_operands_with,
 };
 use simplified_schema::coercion::PathSegment;
 use crate::markdown::compose::expression::call_binding::{CallBindingError, CallErrorKind};
@@ -83,6 +101,37 @@ pub(super) struct BoundOperands {
     rejected: Vec<Rejection>,
     malformed: Vec<Malformed>,
     refused_targets: Vec<RefusedTarget>,
+    placements: Vec<Placement>,
+}
+
+/// Which `no_error` flags of a validated instance its author wrote.
+///
+/// A validated value may have been completed by the schema first (composition
+/// inserts every default before its verdict), and a completed flag is
+/// `false`, indistinguishable from an authored one; only the authored
+/// counterpart tells them apart.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum FlagOrigin<'a> {
+    /// The instance is itself authored.
+    Input,
+    /// The instance's authored counterpart; a flag counts where this value
+    /// holds one at the same place. `Value::Null` means nothing is known to
+    /// be authored.
+    Authored(&'a Value),
+}
+
+/// An action dictionary that breaks one of the lifecycle parser's placement
+/// or branch-shape rules.
+#[derive(Debug)]
+struct Placement {
+    /// The dictionary.
+    map: Vec<PathSegment>,
+    /// The offending value.
+    at: Vec<PathSegment>,
+    /// The lifecycle parser's own message.
+    message: String,
+    /// Whether the value has the wrong type rather than the wrong place.
+    mistyped: bool,
 }
 
 /// An `edit` operand the lifecycle parser refuses: a blank target, a missing
@@ -124,15 +173,23 @@ impl BoundOperands {
     /// were decoded into `instance`. A token's decoded text is data: it is
     /// never deferred as a template, so the registration judges it as the
     /// text it is, and it is never scanned for malformed templates.
-    pub(super) fn bind(schema: &Value, instance: &Value, stored: &Value) -> Self {
+    ///
+    /// `origin` tells which of `instance`'s `no_error` flags were authored
+    /// (see [`FlagOrigin`]).
+    pub(super) fn bind(schema: &Value, instance: &Value, stored: &Value, origin: FlagOrigin<'_>) -> Self {
         let mut walker = Walker {
             root: schema,
             seen: HashSet::new(),
             patterns: HashMap::new(),
             sites: Vec::new(),
+            actions: Vec::new(),
         };
         walker.walk(schema, instance, &mut Vec::new(), 0);
-        let mut bound = Self::default();
+        untyped_bodies(instance, &mut walker.actions);
+        let mut bound = Self {
+            placements: placements(instance, &walker.actions, &walker.sites, origin),
+            ..Self::default()
+        };
         for site in walker.sites {
             let Some(value) = value_at(instance, &site.path) else {
                 continue;
@@ -260,6 +317,26 @@ impl BoundOperands {
         }
     }
 
+    /// Adds the lifecycle parser's problem for each action dictionary that
+    /// breaks a placement or branch-shape rule, unless `problems` already
+    /// holds one inside that dictionary. Report this last: a dictionary is
+    /// left to every other verdict on it.
+    pub(super) fn report_placements(&self, problems: &mut Vec<ValidationProblem>) {
+        let reported: Vec<String> = problems.iter().map(problem_pointer).collect();
+        for placement in &self.placements {
+            let map = pointer(&placement.map);
+            if reported.iter().any(|path| within(path, &map)) {
+                continue;
+            }
+            let (kind, code) = if placement.mistyped {
+                (ValidationProblemKind::Type, ValidationProblemCode::TypeMismatch)
+            } else {
+                (ValidationProblemKind::Invalid, ValidationProblemCode::ConstraintViolation)
+            };
+            problems.push(operand_problem(pointer(&placement.at), placement.message.clone(), kind, code));
+        }
+    }
+
     /// Adds a problem for each rejected call that `problems` holds none
     /// inside of. Report [`Self::report_malformed`] first: a call holding a
     /// malformed template is then covered by its syntax problem.
@@ -281,6 +358,110 @@ impl BoundOperands {
             ));
         }
     }
+}
+
+/// The rule each of `actions` (action dictionaries of `instance`) breaks.
+///
+/// A verb's long form is read only where its host parses it: a verb the
+/// schema types (one of `sites`), or a side effect or expression function,
+/// which every host provides. md leaves a verb it does not provide untyped
+/// and its parser never reads its value, so its inner flag breaks no rule.
+fn placements(instance: &Value, actions: &[ActionMap], sites: &[Site], origin: FlagOrigin<'_>) -> Vec<Placement> {
+    let mut found = Vec::new();
+    for ActionMap { path, position, verbs, untyped } in actions {
+        let Some(Value::Object(map)) = value_at(instance, path) else {
+            continue;
+        };
+        let authored = match origin {
+            FlagOrigin::Input => AuthoredSource::Input,
+            FlagOrigin::Authored(authored) => authored_at(authored, path),
+        };
+        let provided = |verb: &str| {
+            is_known_side_effect(verb)
+                || is_known_expression_function_verb(verb)
+                || (*untyped && verbs.contains(verb))
+                || sites.iter().any(|site| {
+                    !site.forms.is_empty()
+                        && site.path.len() == path.len() + 1
+                        && site.path.starts_with(path)
+                        && site.path.last() == Some(&PathSegment::Key(verb.to_string()))
+                })
+        };
+        if let Some(rule) = placement_rule(map, *position, authored, &provided) {
+            let mut at = path.clone();
+            at.extend(rule.at.into_iter().map(PathSegment::Key));
+            found.push(Placement {
+                map: path.clone(),
+                at,
+                message: rule.message,
+                mistyped: rule.mistyped,
+            });
+        }
+    }
+    found
+}
+
+/// Adds to `actions` every action dictionary inside a `then`/`else` body
+/// that no type reached, as the lifecycle parser reads a body: each element
+/// of a list is an item, a dictionary is a dictionary of verbs, and an item
+/// that is a conditional holds bodies of its own.
+///
+/// md's baseline types three conditional levels and leaves the bodies below
+/// them untyped, but the parser judges them with the same rules, so they get
+/// the same placement checks. The conditional level is never counted here:
+/// a stack nested deeper than the parser allows is left to the parser, as
+/// in a recursive profile that types every level. A dictionary found here
+/// provides the verbs of the conditional enclosing its body.
+fn untyped_bodies(instance: &Value, actions: &mut Vec<ActionMap>) {
+    let mut known: HashSet<Vec<PathSegment>> = actions.iter().map(|action| action.path.clone()).collect();
+    let mut next = 0;
+    while next < actions.len() {
+        let (path, verbs) = (actions[next].path.clone(), actions[next].verbs.clone());
+        let is_item = actions[next].position == ActionMapPosition::Item;
+        next += 1;
+        let Some(Value::Object(map)) = value_at(instance, &path).filter(|_| is_item) else {
+            continue;
+        };
+        if !map.contains_key("when") || !map.contains_key("then") {
+            continue;
+        }
+        for branch in ["then", "else"] {
+            let mut body = path.clone();
+            body.push(PathSegment::Key(branch.to_string()));
+            let found: Vec<(Vec<PathSegment>, ActionMapPosition)> = match map.get(branch) {
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| item.is_object())
+                    .map(|(index, _)| {
+                        let mut item = body.clone();
+                        item.push(PathSegment::Index(index));
+                        (item, ActionMapPosition::Item)
+                    })
+                    .collect(),
+                Some(Value::Object(_)) => vec![(body, ActionMapPosition::Dictionary)],
+                _ => Vec::new(),
+            };
+            for (path, position) in found {
+                if known.insert(path.clone()) {
+                    actions.push(ActionMap {
+                        path,
+                        position,
+                        verbs: verbs.clone(),
+                        untyped: true,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// The authored cursor at `path` of `authored`.
+fn authored_at<'v>(authored: &'v Value, path: &[PathSegment]) -> AuthoredSource<'v> {
+    path.iter().fold(AuthoredSource::from_option(Some(authored)), |cursor, segment| match segment {
+        PathSegment::Index(index) => cursor.at(*index),
+        PathSegment::Key(key) => cursor.child(key),
+    })
 }
 
 /// Where `problem` points: its path, extended by the property it names.
@@ -413,6 +594,23 @@ struct Walker<'s> {
     /// not compile, so it matches no key here (the validator reports it).
     patterns: HashMap<&'s str, Option<fancy_regex::Regex>>,
     sites: Vec<Site>,
+    /// Every action dictionary, once each.
+    actions: Vec<ActionMap>,
+}
+
+/// An action dictionary of the instance.
+#[derive(Debug)]
+struct ActionMap {
+    path: Vec<PathSegment>,
+    position: ActionMapPosition,
+    /// The verbs its types declare by name: the verbs its host provides at
+    /// this place.
+    verbs: HashSet<String>,
+    /// Whether no type reaches it: it lies in a `then`/`else` body the schema
+    /// leaves untyped (md's `md-loose-body`), found by
+    /// [`untyped_bodies`], and takes `verbs` from the conditional enclosing
+    /// that body.
+    untyped: bool,
 }
 
 impl<'s> Walker<'s> {
@@ -446,6 +644,9 @@ impl<'s> Walker<'s> {
                 }),
             }
             return;
+        }
+        if instance.is_object() {
+            self.note_action_map(map, path);
         }
         for arm in applicators(map) {
             self.walk(arm, instance, path, hops + 1);
@@ -492,6 +693,43 @@ impl<'s> Walker<'s> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Records `path` as an action dictionary when `map` types one there. A
+    /// value one of whose types is a conditional is a list item wherever it
+    /// sits, since only a list item may be a conditional.
+    fn note_action_map(&mut self, map: &'s Map<String, Value>, path: &[PathSegment]) {
+        let Some(properties) = map.get("properties").and_then(Value::as_object) else {
+            return;
+        };
+        let conditional = properties.contains_key("when")
+            && (properties.contains_key("then")
+                || map.get("patternProperties").and_then(Value::as_object).is_some_and(|patterns| {
+                    patterns.keys().any(|pattern| self.matches(pattern, "then"))
+                }));
+        let position = if conditional {
+            Some(ActionMapPosition::Item)
+        } else {
+            action_map_position(properties, path)
+        };
+        let Some(position) = position else {
+            return;
+        };
+        let verbs = properties.keys().filter(|key| !matches!(key.as_str(), "when" | "then" | "else" | "no_error")).cloned();
+        match self.actions.iter_mut().find(|known| known.path == path) {
+            Some(known) => {
+                if position == ActionMapPosition::Item {
+                    known.position = position;
+                }
+                known.verbs.extend(verbs);
+            }
+            None => self.actions.push(ActionMap {
+                path: path.to_vec(),
+                position,
+                verbs: verbs.collect(),
+                untyped: false,
+            }),
         }
     }
 
@@ -552,6 +790,26 @@ impl<'s> Walker<'s> {
             .or_insert_with(|| fancy_regex::Regex::new(pattern).ok())
             .as_ref()
             .is_some_and(|regex| regex.is_match(key).unwrap_or(false))
+    }
+}
+
+/// Where an action dictionary whose type declares `properties` sits, when it
+/// is one: it declares `no_error` beside `when` (a list item, or a stack root
+/// or body dictionary) or beside `while`/`until` (a `loop:` block). An element
+/// of a list is a list item.
+fn action_map_position(properties: &Map<String, Value>, path: &[PathSegment]) -> Option<ActionMapPosition> {
+    if !properties.contains_key("no_error") {
+        return None;
+    }
+    if properties.contains_key("when") {
+        Some(match path.last() {
+            Some(PathSegment::Index(_)) => ActionMapPosition::Item,
+            _ => ActionMapPosition::Dictionary,
+        })
+    } else if properties.contains_key("while") || properties.contains_key("until") {
+        Some(ActionMapPosition::Loop)
+    } else {
+        None
     }
 }
 

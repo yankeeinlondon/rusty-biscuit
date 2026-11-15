@@ -135,7 +135,8 @@ fn a_retry_with_file_resolves_from_the_retried_document() {
 
     let output = run_compose(&fixture, fixture.cwd(), &document, &[]);
 
-    let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap_or_default();
+    // A missing relative `events.log` is created beside the retried document.
+    let events = std::fs::read_to_string(fixture.cwd().join("prompts/router/events.log")).unwrap_or_default();
     assert!(
         events.contains("attempt=none") && events.contains("attempt=authoring"),
         "events:\n{events}\nstderr:\n{output}"

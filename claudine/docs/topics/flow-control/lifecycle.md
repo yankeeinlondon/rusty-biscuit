@@ -1458,6 +1458,10 @@ It is rejected:
 - when one action carries it both inside its long form and as a bundle
   sibling, even if the two values agree.
 
+The editor and the launch check report each of these as a schema problem at
+the flag, before anything runs, with the same message the parser gives (see
+[Schemas → Placement rules](../schemas.md#placement-rules-are-judged-as-the-parser-judges-them)).
+
 `no_error` never suppresses an expression-layer error: a crashed `when:`, a
 `{{ … }}` that raised, a `with` overlay that failed to evaluate, or a shell
 prohibition always halts. On a `prep` it tolerates a failed call

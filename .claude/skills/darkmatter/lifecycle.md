@@ -111,7 +111,10 @@ pages with the behavior.
   `no_error` is a placement; two placements fail even when equal; a filled
   `false` never conflicts, meets `then`, creates a verb, or gives `set` a flag;
   `set` refuses any authored `no_error`, `null` included
-  (`lifecycle/tests/authored_flags.rs`).
+  (`lifecycle/tests/authored_flags.rs`). Those placement and branch-shape
+  rules are `parse.rs`'s `PlacementRule` helpers, shared with schema
+  validation through `placement_rule` (see `schema.md`); add a new
+  placement rule there, never as a second check in one of them.
 - `initialize` runs before schema validation; a schema refusal is a
   composition failure (`failed`, `finalize`) and `initialize`'s effects stay.
   CLI cells that must prove "no effect on refusal" put the marker in

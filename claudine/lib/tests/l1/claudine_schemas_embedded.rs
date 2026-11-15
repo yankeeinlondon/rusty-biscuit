@@ -1564,3 +1564,42 @@ fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
     }
     bare.assert_untouched();
 }
+
+/// A proxy overlay's lifecycle stack is judged by the flags its author
+/// wrote, in the schema verdict as in the parser: a stack the overlay
+/// replaces lends it no flag (a `set` the overlay supplies is not refused for
+/// the `no_error` the document wrote at the same place), and the overlay's
+/// own flag beside `then` is refused.
+#[test]
+fn a_proxy_overlays_lifecycle_stack_is_judged_by_its_own_authored_flags() {
+    let locations = Locations::new();
+    let context = locations.context();
+    let prepare = |name: &str, frontmatter: &str, overlay: serde_json::Value| {
+        let path = locations.document(name, frontmatter);
+        let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context).expect("resolves");
+        let values: indexmap::IndexMap<String, serde_json::Value> = [("start".to_string(), overlay)].into_iter().collect();
+        let options = claudine::composition::PrepareOptions {
+            proxy_overlay: claudine::composition::AnchoredOverlay::new(values, &context.for_source(&path)),
+            ..locations.prepare_options(&context)
+        };
+        claudine::composition::prepare_direct_with_schema(&source, options).map_err(|error| error.to_string())
+    };
+
+    let prepared = prepare(
+        "replaced",
+        "prompt: hi\nstart:\n  - info: hi\n    no_error: true",
+        serde_json::json!([{ "set": { "answer": 42 } }, { "when": "true", "then": ["stop"] }]),
+    )
+    .unwrap_or_else(|error| panic!("the overlay's stack is valid: {error}"));
+    assert_eq!(prepared.effective_frontmatter["start"][0], serde_json::json!({ "set": { "answer": 42 } }), "the overlay's stack replaced the document's");
+
+    let refused = prepare(
+        "placed",
+        "prompt: hi\nstart:\n  - info: hi",
+        serde_json::json!([{ "when": "true", "then": ["stop"], "no_error": false }]),
+    );
+    let Err(error) = refused else {
+        panic!("the overlay's flag beside `then` is refused");
+    };
+    assert!(error.contains("cannot sit beside `then`/`else`"), "{error}");
+}

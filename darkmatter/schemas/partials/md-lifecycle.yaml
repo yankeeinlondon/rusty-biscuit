@@ -22,15 +22,18 @@
 #
 # Stacks are typed three conditional levels deep (host profiles such as
 # Claudine's are recursive instead): a
-# `then`/`else` body inside a level-3 conditional is accepted loosely, and the
-# lifecycle parser still checks it. `md-initialize-*` excludes shells.
+# `then`/`else` body inside a level-3 conditional is not typed, but validation
+# still applies the parser's placement, branch-shape, and flag rules to every
+# action dictionary in it; its verbs and arguments are left to the lifecycle
+# parser. `md-initialize-*` excludes shells.
 #
 # Named types are inlined, and this baseline is prepared, lowered, and
 # compiled for every document. A conditional therefore types `then` and
 # `else` with one pattern key: two
 # literal keys would inline each body twice per level and make the baseline
-# about twice as large. The cost is that the parser alone requires `then`,
-# and the editor does not complete `then`/`else`.
+# about twice as large. The cost is that the types alone do not require
+# `then` (validation still applies the parser's branch rules to every action
+# dictionary), and the editor does not complete `then`/`else`.
 #
 # The two long pattern keys use YAML's explicit-key form (`? key`), since an
 # implicit key may not exceed 1024 characters.
@@ -129,8 +132,8 @@ types:
             max-keys: 1
     md-bare-verb: "string(suggest(stop, skip, error, and, or, branch_exists_on_remote, ipv4, ipv6, remote_vendor)) -> a zero-argument verb written as a bare list item"
     md-loose-body:
-        - "unknown[] -> a list of actions, checked only by the lifecycle parser"
-        - "{ <string>: unknown } -> a dictionary of verbs, checked only by the lifecycle parser"
+        - "unknown[] -> a list of actions; validation checks their placements and flags, the lifecycle parser their verbs"
+        - "{ <string>: unknown } -> a dictionary of verbs; validation checks its placements and flags, the lifecycle parser its verbs"
     md-stack:
         - md-item-1[]
         - md-communicate

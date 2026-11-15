@@ -662,6 +662,12 @@ pattern-key arm that excludes every md verb lets another host's verb (`say`,
 `retry`) pass untyped and unoffered. md's profile is still a deliberately
 tolerant three-level unroll (`md-stack`, `md-item-1..3`, `md-loose-body`)
 whose side-effect and function arguments are untyped (one pattern key);
+`bound_operands.rs::untyped_bodies` still finds every action dictionary in
+an untyped `md-loose-body` (descending each recorded conditional's
+`then`/`else` as the parser does, inheriting that conditional's typed verbs
+as "provided") so the parser's placement and flag rules
+(`parse.rs::placement_rule`) apply at every depth; neither profile encodes
+the parser's five-level depth limit;
 host profiles built from `partials/lifecycle.yaml` (Claudine's) are
 recursive and typed. The neutral shape of every verb, Claudine's
 included, lives in `partials/lifecycle.yaml`. Its expression-function and
@@ -722,12 +728,34 @@ parser, both over `action_shape.rs::{edit_file_value, literal_flag}` and
 text converts, `null` is no value, a native number or `{{ }}` template flag is
 refused, and `edit: null` is refused (no target; the optional wrapper would
 otherwise admit it). `lib/tests/l1/lifecycle_edit_schema_parity.rs` is its
-parity matrix. Two authored `no_error` placements pass the schema (each is
-judged alone) and fail the parser; that and an authored `no_error: false`
-beside `then` (the conditional's `literal(false)` slot exists for the filled
-default) are pinned gaps in `lifecycle_schema_parity.rs`, as are md's
-`unknown`-typed side-effect/function verbs whose bad flags only the parser
-refuses. So
+parity matrix. The same walk records every action dictionary (an object
+whose type declares `no_error` beside `when`, or beside `while`/`until` for a
+`loop:` block; a value with a conditional arm is a list item wherever it
+sits, else an element of a list is) and judges it with the parser's own
+placement and branch-shape rules, `lifecycle::placement_rule` in `parse.rs`,
+whose helpers the parser calls too (`BoundOperands::report_placements`, run
+last and only where no other problem sits inside the dictionary): a flag
+beside `then` (`false` included; `literal(false)` exists for the filled
+default), two placements, a flag on `set` (`null` included), a `when` guarding
+nothing, `when`/`then`/`else` in a dictionary of verbs, a non-literal sibling
+flag, and a non-literal inner flag of a long form the host reads (a typed verb,
+or any side effect or expression function, so md's `unknown`-typed ones too; a
+verb md does not provide is never read). Flags count only where authored
+(`bound_operands::FlagOrigin`): `validate(&Value)`, `validate(&Markdown)` and
+friends judge the input as given; `EffectiveSchema::validate_completed(completed,
+authored, phase)` takes the authored values explicitly (`Value::Null`: nothing
+authored). Composition completes the document in place, so its verdict
+(`schema_validation::run_with_registry`, `validate_typed_shell_values`) calls
+`DarkmatterSchemas::validate_with_authored` with `authored_view`: per top-level
+key, the loaded text's value (`Frontmatter::authored_values`) while the value
+keeps its written shape, else the current value with every default either pass
+inserted undone (`FilledDefault`, a filled `null` restored), and nothing for a
+key only inherited from the nesting document. Problems on `exclude_keys` (md's
+and Claudine's lifecycle events) are dropped there; their hosts judge them
+(md's parser, Claudine's `post_shell_validate` with
+`authored_lifecycle_values`, the parser's own source). Never validate a
+completed lifecycle through the plain APIs. Rows:
+`lifecycle_schema_parity.rs::agreement_rows!`. So
 `number: [pear, 7]` passes and `length: [true]` fails; never widen a generated
 type to fix a schema/binder disagreement. Bind from the authored value, not
 the converted working copy. `lib/tests/l1/lifecycle_generated_operands.rs`

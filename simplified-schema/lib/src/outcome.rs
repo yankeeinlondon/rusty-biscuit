@@ -63,9 +63,10 @@ pub enum ValidationFailure {
     /// `jsonschema` rejects the lowered form, or it names a file an in-memory
     /// schema cannot read. Validation of every value fails the same way until
     /// the schema changes. Also a defect in the schema's defaults: different
-    /// defaults for one property across union arms (every value fails), or a
-    /// default the value needed that breaks its own definition (see
-    /// [`crate::defaults`]).
+    /// defaults for one property across union arms (every value fails),
+    /// different defaults from the patterns or catch-alls selecting a key the
+    /// value needed a default for, or a default the value needed that breaks
+    /// its own definition (see [`crate::defaults`]).
     Unprepared {
         /// Why preparation failed; shared, so repeated validations report the
         /// one error the schema holds.

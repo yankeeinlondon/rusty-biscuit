@@ -1,2 +1,3 @@
 template git add {{ string }}
 prefix git
+prefix just

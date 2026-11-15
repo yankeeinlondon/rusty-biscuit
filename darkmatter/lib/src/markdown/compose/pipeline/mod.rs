@@ -535,6 +535,9 @@ impl Markdown {
         // disk; the post-shell pass below reuses that registry instead of
         // re-walking it (F8). Matching is re-evaluated against the current
         // frontmatter in each pass regardless.
+        // Every default both passes insert: their verdicts tell a filled
+        // lifecycle flag from a written one by it.
+        let mut filled_defaults = Vec::new();
         {
             let sv_start = perf.is_enabled().then(std::time::Instant::now);
             let schema_consumer = runtime
@@ -554,6 +557,7 @@ impl Markdown {
                 },
                 &schema_consumer,
                 report,
+                &mut filled_defaults,
             )?;
             // A schema default is the schema's value, not authored text:
             // later stages never scan it for `{{ … }}` or `$( … )`.
@@ -709,6 +713,7 @@ impl Markdown {
                     },
                     &schema_consumer,
                     report,
+                    &mut filled_defaults,
                 )?;
                 for path in defaulted {
                     provenance.data_mut().mark(path);
@@ -726,6 +731,7 @@ impl Markdown {
                     options,
                     &prepared_schemas,
                     &fse_report.typed_keys,
+                    &filled_defaults,
                 )?;
             }
         }

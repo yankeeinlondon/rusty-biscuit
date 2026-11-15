@@ -166,9 +166,8 @@ fn every_refused_cell_fails_schema_validation_at_the_action_and_the_parser() {
     }
 }
 
-/// Placements of the flag the parser refuses although the schema, which
-/// judges each placement alone, admits them: two authored `no_error`s on one
-/// action, even equal ones.
+/// Two authored placements of the flag on one action, even equal ones: both
+/// checks refuse them.
 const DUPLICATE_FLAGS: &[&str] = &[
     "{ edit: { file: notes.md, no_error: true }, no_error: true }",
     "{ edit: { file: notes.md, no_error: false }, no_error: false }",
@@ -219,7 +218,10 @@ fn a_completed_cell_parses_with_its_authored_source_as_the_authored_cell_does() 
             let authored: serde_json::Value = serde_yaml_ng::from_str(&frontmatter).expect("YAML frontmatter");
             let completed = completed(&report, &authored);
             let filled: Vec<String> = report.defaults.iter().map(|applied| applied.path.segments().join("/")).collect();
+            // Under `else` the unaware parse meets the filled flag beside
+            // `then` first, so the two-placement refusal shows only here.
             if action == "{ edit: { file: notes.md } }"
+                && pointer == "/initialize/0"
                 && filled.iter().any(|path| path.ends_with("/edit/no_error"))
                 && filled.iter().any(|path| path.ends_with("/0/no_error"))
             {
@@ -242,12 +244,20 @@ fn a_completed_cell_parses_with_its_authored_source_as_the_authored_cell_does() 
 }
 
 #[test]
-fn two_authored_flag_placements_pass_the_schema_and_fail_the_parser() {
+fn two_authored_flag_placements_fail_schema_validation_and_the_parser() {
     let fixture = Fixture::new();
     for action in DUPLICATE_FLAGS {
-        for (frontmatter, _) in placements(action) {
+        for (frontmatter, pointer) in placements(action) {
             let report = fixture.validate(&frontmatter);
-            assert!(report.valid, "each placement alone is a valid flag: {:?}", problems(&report));
+            assert!(!report.valid, "the baseline refuses `{frontmatter}`");
+            let flag = format!("{pointer}/edit/no_error");
+            assert!(
+                report.problems.iter().any(|problem| problem.path == flag
+                    && problem.message.contains("set both beside `edit` and inside it")),
+                "the schema names the second placement at `{flag}`: {:?}",
+                problems(&report)
+            );
+            assert!(report.problems.iter().all(|problem| problem.path.starts_with(pointer)), "{:?}", problems(&report));
             let error = md_parses(&frontmatter).expect_err(&format!("md refuses `{frontmatter}`"));
             assert!(error.contains("set both beside `edit` and inside it"), "{error}");
         }

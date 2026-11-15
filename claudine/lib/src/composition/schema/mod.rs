@@ -257,6 +257,7 @@ fn prepare_with_schema_verdict(
 ) -> Result<PreparedComposition, CompositionError> {
     let mut dropped: Vec<DroppedOptional> = Vec::new();
     let file_ref_fallback_dir = options.file_ref_fallback_dir.clone();
+    let authored = super::prepare::authored_lifecycle_values(source, &options);
     let prepared = match run_prepare(source, options.clone(), &mode) {
         Ok(prepared) => prepared,
         Err(err) => handle_compose_error(source, options, &mode, err, &mut dropped)?,
@@ -265,7 +266,7 @@ fn prepare_with_schema_verdict(
     // the same typed error / drop-and-retry rules so values that became
     // invalid (or now satisfy the schema) after `$(...)` expansion are
     // judged on their final form.
-    post_shell_validate(source, prepared, dropped, &mode, file_ref_fallback_dir.as_deref())
+    post_shell_validate(source, prepared, dropped, &mode, file_ref_fallback_dir.as_deref(), &authored)
 }
 
 fn run_prepare(
@@ -294,6 +295,7 @@ fn post_shell_validate(
     mut dropped: Vec<DroppedOptional>,
     _mode: &PrepareMode<'_>,
     _file_ref_fallback_dir: Option<&std::path::Path>,
+    authored: &serde_json::Value,
 ) -> Result<PreparedComposition, CompositionError> {
     // No `$schema` (or a deferred read that could not prepare it) → no
     // validation work to do. The retained launch schema is the one resolved
@@ -313,16 +315,11 @@ fn post_shell_validate(
         && source.markdown.frontmatter().as_map().contains_key("$schema");
 
     let judge = |instance: &serde_json::Value| -> Result<ValidationReport, CompositionError> {
-        let mut report = match phase {
-            Some(phase) => effective.validate_for_phase(instance, phase).map_err(|error| {
-                schema_error_to_composition_error(
-                    &source.resolved_path,
-                    error.to_string(),
-                    Some(&error),
-                )
-            })?,
-            None => effective.validate(instance),
-        };
+        // The instance is completed; its lifecycle flags count as written
+        // only where the author wrote them, as the lifecycle parser reads them.
+        let mut report = effective.validate_completed(instance, authored, phase).map_err(|error| {
+            schema_error_to_composition_error(&source.resolved_path, error.to_string(), Some(&error))
+        })?;
         if trigger_declared_only {
             report.problems.retain(|problem| {
                 top_level_pointer_segment(&problem.path).is_some_and(|name| {

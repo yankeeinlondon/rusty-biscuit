@@ -123,6 +123,7 @@ pub use parse::{
 };
 #[doc(hidden)]
 pub use parse::{action_type, runs_a_shell, with_mapping_shape};
+pub(crate) use parse::{ActionMapPosition, AuthoredSource, placement_rule};
 #[doc(hidden)]
 pub use source_map::{AuthoredValue, LifecycleSourceMap};
 pub use source_map::AuthoredSegment;

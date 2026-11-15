@@ -947,7 +947,11 @@ pub enum SchemaError {
 
     /// One object location declares different defaults for one property,
     /// typically on different union arms. A default is never chosen by arm,
-    /// so the schema cannot be prepared. `pointer` is the object location's
+    /// so the schema cannot be prepared. A key no schema names, selected by
+    /// several `patternProperties` (or a pattern and a catch-all) with
+    /// different defaults, can only be detected from the key itself, so that
+    /// conflict is raised while defaults are applied, and only when the key
+    /// needs its default. `pointer` is the object location's
     /// JSON Pointer in the lowered JSON Schema and `declarations` the
     /// pointer of each `default` keyword.
     #[error(

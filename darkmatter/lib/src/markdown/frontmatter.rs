@@ -112,6 +112,19 @@ impl Frontmatter {
         self.raw_source.as_deref()
     }
 
+    /// The values [`Self::raw_source`] holds, parsed again: the frontmatter
+    /// as loaded, before anything (an override, interpolation, schema
+    /// completion) changed it. `None` without a raw source or when it no
+    /// longer parses.
+    pub(crate) fn authored_values(&self) -> Option<serde_json::Value> {
+        let raw = self.raw_source.as_deref()?;
+        if raw.trim().is_empty() {
+            return Some(serde_json::Value::Object(serde_json::Map::new()));
+        }
+        let parsed = parse_yaml_with_fallbacks(raw).ok()?;
+        Some(serde_json::Value::Object(parsed.map.into_iter().collect()))
+    }
+
     /// Gets a typed value from frontmatter.
     ///
     /// ## Examples

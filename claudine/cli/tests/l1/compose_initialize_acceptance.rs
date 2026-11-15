@@ -680,7 +680,8 @@ fn the_shipped_router_reaches_the_reported_guarded_log_include_in_a_later_phase(
 //
 // Lifecycle file mutations and `::file` both resolve document-authored values
 // through the invocation's captured `FileResolutionContext`. Existing targets
-// follow normal precedence; an absent creation target uses the first candidate.
+// follow normal precedence; an absent creation target uses the first candidate
+// (beside the document for an implicit relative reference).
 
 /// A document below the repository root whose `initialize` ensures `reference`,
 /// appends a marker to it, and whose body includes the same `reference`. An
@@ -735,12 +736,14 @@ fn an_interpolated_repository_root_reference_ensures_and_includes_one_file() {
     );
 }
 
+/// A missing implicit reference is created at its first candidate, beside
+/// the document, never at the root.
 #[test]
 fn an_unshadowed_implicit_reference_ensures_and_includes_one_file() {
     assert_resolution_parity(
         "init-accept-parity-implicit",
         "generated/notes.md",
-        "generated/notes.md",
+        "docs/area/generated/notes.md",
         None,
     );
 }

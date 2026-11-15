@@ -241,7 +241,7 @@ pub fn is_lifecycle_only_verb(verb: &str) -> bool {
 }
 
 /// Returns `true` when `verb` names a known Darkmatter expression function.
-fn is_known_expression_function_verb(verb: &str) -> bool {
+pub(crate) fn is_known_expression_function_verb(verb: &str) -> bool {
     expression_function_descriptors()
         .iter()
         .any(|d| &*d.name == verb && d.accepts_value_arguments())

@@ -413,3 +413,119 @@ fn composing_a_required_default_raises_no_presence_warning() {
     assert!(composed.content().contains('4'), "{}", composed.content());
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 }
+
+/// The default paths `DarkmatterSchemas::validate` reports for a document
+/// whose frontmatter is `frontmatter`, under the runtime baseline.
+fn baseline_default_paths(frontmatter: &str) -> Vec<String> {
+    let dir = TempDir::new().unwrap();
+    let path = write(dir.path(), "doc.md", &format!("---\n{frontmatter}---\nBody\n"));
+
+    let schemas = DarkmatterSchemas::new(context_at(dir.path())).with_darkmatter_baseline_json_schema().expect("baseline");
+    let report = schemas.validate(&markdown_at(&path)).expect("schema prepares");
+
+    assert!(report.valid, "{:?}", report.problems);
+    report.defaults.iter().map(|applied| applied.path.to_string()).collect()
+}
+
+/// The shipped conditional selects `then` and `else` through a key pattern,
+/// so the actions beneath them are reached only through `patternProperties`.
+#[test]
+fn a_lifecycle_action_inside_a_conditional_branch_reports_its_defaults() {
+    let outside = baseline_default_paths("composed:\n  - edit: { file: notes.md }\n");
+    let then = baseline_default_paths("composed:\n  - when: 'true'\n    then:\n      - edit: { file: notes.md }\n");
+    // `else` needs a `then` beside it, which the schema checks as the
+    // parser does.
+    let otherwise = baseline_default_paths("composed:\n  - when: 'true'\n    then: [stop]\n    else:\n      - edit: { file: notes.md }\n");
+
+    assert_eq!(outside, ["composed.0.no_error", "composed.0.edit.create_new", "composed.0.edit.no_error"]);
+    for (branch, reported) in [("then", then), ("else", otherwise)] {
+        let inner = [
+            "composed.0.no_error".to_string(),
+            format!("composed.0.{branch}.0.no_error"),
+            format!("composed.0.{branch}.0.edit.create_new"),
+            format!("composed.0.{branch}.0.edit.no_error"),
+        ];
+        assert_eq!(reported, inner, "the `{branch}` branch's action defaults are reported as they are outside it");
+    }
+}
+
+/// The md lifecycle parser's verdict on `frontmatter` read as authored, as
+/// a host reads a stack its caller supplied (Claudine's proxy overlay is
+/// authored).
+fn md_parser_accepts(frontmatter: &Value) -> bool {
+    darkmatter::lifecycle::md_host::parse_lifecycle(frontmatter, Path::new("doc.md"), None).is_ok()
+}
+
+/// Composes `content` under the baseline with a caller data override of
+/// `composed` (the way a host passes a caller's values). The lifecycle keys
+/// are not deferred, so composition completes and judges the stack; a host
+/// that defers them (`with_exclude_keys`) owns their verdict instead.
+fn compose_with_composed_override(content: &str, override_value: Value) -> Result<(Markdown, ComposeReport), Box<ComposeFailure>> {
+    let dir = TempDir::new().unwrap();
+    try_compose_at(dir.path(), "doc.md", content, |options| {
+        options.with_darkmatter_baseline_schema().with_data_overrides(json!({ "composed": override_value }))
+    })
+}
+
+/// A caller override replaces an authored lifecycle stack before the
+/// composition's schema verdict, and composition completes the replacement.
+/// The flags of the replaced stack are not the override's: a `set` the
+/// override supplies is not refused for the filled flag beside it, although
+/// the document wrote a flag at the same place.
+#[test]
+fn an_overridden_lifecycle_stack_is_not_judged_by_the_flags_it_replaced() {
+    let content = "---\ncomposed:\n  - info: hi\n    no_error: true\n---\nBody\n";
+    let replacement = json!([{ "set": { "answer": 42 } }]);
+    assert!(md_parser_accepts(&json!({ "composed": replacement })));
+    let (composed, _) = compose_with_composed_override(content, replacement)
+        .unwrap_or_else(|failure| panic!("the replacement is valid: {}", failure.error));
+    assert_eq!(composed.frontmatter().as_map()["composed"][0]["no_error"], json!(false), "the replacement is completed");
+}
+
+/// An override's own placement is authored: a `no_error` beside `then` that
+/// a caller supplies is refused, as the parser refuses it, even where the
+/// document wrote no flag at the same place.
+#[test]
+fn an_overriding_lifecycle_stacks_own_placement_is_refused() {
+    let content = "---\ncomposed:\n  - info: hi\n---\nBody\n";
+    let replacement = json!([{ "when": "true", "then": ["stop"], "no_error": false }]);
+    assert!(!md_parser_accepts(&json!({ "composed": replacement })));
+    let failure = compose_with_composed_override(content, replacement).expect_err("the supplied flag beside `then` is refused");
+    assert!(
+        schema_problems(&failure).iter().any(|problem| problem.path == "/composed/0/no_error"),
+        "{:?}",
+        schema_problems(&failure)
+    );
+}
+
+/// A transcluded document inherits its parent's completed values as data.
+/// The parent judged its own stack; the filled flag beside its `set` is not
+/// the child's placement.
+#[test]
+fn an_inherited_completed_lifecycle_stack_is_not_judged_again_as_authored() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "child.md", "---\ntitle: child\n---\nChild\n");
+    let parent = "---\ncomposed:\n  - set: { answer: 42 }\n---\n::file ./child.md\n";
+    let composed = compose_with_baseline(dir.path(), parent);
+    assert!(composed.content().contains("Child"), "{}", composed.content());
+}
+
+/// Composition completes an authored stack before its verdict, and the
+/// flags it filled are never placements; a written `null` flag is still
+/// written, so `set` refuses it after completion as before.
+#[test]
+fn a_completed_lifecycle_stack_keeps_its_authored_verdict_through_composition() {
+    let dir = TempDir::new().unwrap();
+    let valid = "---\ncomposed:\n  - when: 'true'\n    then: [stop]\n  - edit: { file: notes.md }\n  - set: { answer: 42 }\n---\nBody\n";
+    let composed = compose_with_baseline(dir.path(), valid);
+    assert_eq!(composed.frontmatter().as_map()["composed"][0]["no_error"], json!(false), "the stack is completed");
+
+    let refused = "---\ncomposed:\n  - set: { answer: 42 }\n    no_error: null\n---\nBody\n";
+    let failure = try_compose_at(dir.path(), "refused.md", refused, ComposeOptions::with_darkmatter_baseline_schema)
+        .expect_err("a written flag on `set` is refused");
+    assert!(
+        schema_problems(&failure).iter().any(|problem| problem.path == "/composed/0/no_error"),
+        "{:?}",
+        schema_problems(&failure)
+    );
+}

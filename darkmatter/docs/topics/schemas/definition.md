@@ -522,9 +522,11 @@ composed: "md-stack@darkmatter:md-lifecycle -> actions run after the document co
 Each event takes a list of actions or a dictionary of verbs, and a list item
 can be a `when`/`then`/`else` conditional. md's profile is deliberately
 tolerant, because the baseline is prepared for every document: a stack is
-typed three conditional levels deep, a `then`/`else` body below that is
-accepted loosely, and side-effect and expression-function arguments are not
-typed; the lifecycle parser still checks all of it when the stack runs. A
+typed three conditional levels deep, a `then`/`else` body below that is not
+typed, and side-effect and expression-function arguments are not typed. The
+lifecycle parser checks all of it when the stack runs, and validation already
+applies the parser's placement rules at every depth (see
+[Placement rules](#placement-rules-at-every-depth)). A
 host profile built from the `lifecycle` partial can do more: Claudine's
 stacks are recursive, typed at every depth, and type every generated verb's
 arguments (see [The two lifecycle partials](#the-two-lifecycle-partials)). A
@@ -535,7 +537,7 @@ list item in md's profile is one of:
 | a communicate verb: `stdout`, `stderr`, `info`, `warn`, `success`, `message` | `info: done` or `info: { text: done }` | short form (a string) or closed long form |
 | a flow verb: `stop`, `skip`, `error` | `error: { reason: no title }` | short or closed long form |
 | `shell` (not in `initialize`) | `shell: ./publish.sh` | short or long form |
-| `set`, a side effect, or an expression function | `set: { status: done }` | the key is checked, its arguments are left to the parser |
+| `set`, a side effect, or an expression function | `set: { status: done }` | the key is checked, its arguments are left to the parser; a `no_error` in its long form must still be a boolean |
 | a dictionary of verbs (a bundle) | `{ info: hi, when: draft }` | short forms plus `when` and `no_error` |
 | a conditional | `when: draft` with `then:` / `else:` | `when` is an `expression` |
 | a bare zero-argument verb | `- stop` | a string; completion suggests md's bare verbs |
@@ -561,10 +563,62 @@ initialize:
     - shell: ./prepare.sh            # schema error: no shell in initialize
 ```
 
+#### Placement rules at every depth
+
+Some mistakes are about where a key sits rather than what it holds, and
+the lifecycle parser refuses them before a stack runs. Validation reports
+the same ones, at the same places, so the editor and `md schema validate`
+show them before `md compose` does.
+
 `then` and `else` share one pattern key in md conditionals, which keeps the
-baseline small enough to prepare for every document. Two consequences: only
-the lifecycle parser, not the schema, requires `then`, and the editor does not
-complete `then`/`else` inside these stacks.
+baseline small enough to prepare for every document. As a consequence the
+editor does not complete `then`/`else` inside these stacks. The types alone
+would not require `then` either, but validation also runs the lifecycle
+parser's placement rules on every action dictionary, so these are reported
+just as `md compose` refuses them:
+
+```yaml
+composed:
+    - when: draft                    # error: the `when` guards nothing
+    - when: draft
+      else: [stop]                   # error: `else` requires `then`
+    - when: draft
+      then: [stop]
+      no_error: false                # error: put the flag on the actions in `then`
+    - set: { status: done }
+      no_error: null                 # error: `set` takes no flag
+```
+
+A `no_error: false` that schema completion fills in beside `then` (or beside
+`set`) is not yours and is never reported. A stack a caller supplies in place
+of yours (a `--set` value, or a host's override) is judged by the flags
+written in it, never by the ones it replaced, and a stack a transcluded
+document inherits from the document that includes it is judged there, once.
+
+These rules hold below the third conditional level too, where md's profile
+stops typing: every list item and dictionary of verbs in a deeper
+`then`/`else` body is judged the same way, including a `no_error` that is
+not a boolean inside the long form of an md verb, a side effect, or an
+expression function:
+
+```yaml
+composed:
+    - when: a
+      then:
+          - when: b
+            then:
+                - when: c
+                  then:                          # level 4 and below: not typed
+                      - when: d                  # error: the `when` guards nothing
+                      - info: { text: hi, no_error: 1 }   # error: not a boolean
+                      - say: { text: hi, no_error: 1 }    # valid: md never reads `say`
+```
+
+Below level 3 nothing else is typed: a misspelled long form of an md verb
+or a `shell` in `initialize` there is reported by `md compose`, not by
+validation. Neither md's profile nor Claudine's limits how deep conditionals
+nest; the parser allows five levels and refuses a sixth when the stack is
+parsed.
 
 The baseline types only md's own event names. A key that only another host
 gives meaning, such as Claudine's `start` or `blocked`, is ordinary untyped

@@ -95,8 +95,10 @@ with its keyed spelling, and `json_conversion` rewrites it (`wire::upgrade_flat`
 JSON pointer. A legacy `config.json` beside a canonical
 `<base>/.claudine/config.yaml` is converted by the temporary
 `json_conversion` module through Darkmatter's `ConfigTransaction` and
-migration receipt. The default engine never fills values under
-`patternProperties`, so event and provider maps list their keys explicitly.
+migration receipt. Event and provider maps list their keys explicitly; the
+shared default engine treats an entry selected by `patternProperties` or a
+catch-all as a property like any other, so a pattern-keyed map's existing
+`null` entry would take its own default and its values their child defaults.
 
 **Configuration writes** (`config/persist.rs`): nothing serializes a whole
 config any more. Every writer hands `persist` per-path `YamlEdit`s, applied
@@ -237,7 +239,14 @@ stack), except on `set`, which refuses any authored flag. Flags read through
 Darkmatter's `literal_flag` (boolean or Boolean-like text; never a number or
 template). Conditionals declare `no_error: literal(false)` in
 `schemas/{action,lifecycle}.yaml` so the closed arms accept the filled flag;
-gap: an authored `false` beside `then` passes the schema and fails the parser.
+an authored one there is still refused by schema validation, which runs the
+parser's placement rules on the authored value (Darkmatter's
+`bound_operands.rs`, `parse.rs::placement_rule`). `post_shell_validate` judges
+the completed frontmatter with `EffectiveSchema::validate_completed(…,
+authored_lifecycle_values)`, and the completion verdict with `Value::Null`
+(nothing authored); a bare `validate(&Value)` judges its input as authored, so
+never hand it a completed lifecycle. Tests:
+`lib/tests/l1/claudine_schemas.rs::{single_action_placement_rules_are_judged_alike_by_schema_and_parser, *_in_every_family}`.
 `loop` is a deferred lifecycle key (`PreparedComposition::deferred_lifecycle_keys
 == ["loop"]`): the schema stage judges it but inserts nothing, and an unwritten
 gate `no_error` reads `false` from the parser. Tests:

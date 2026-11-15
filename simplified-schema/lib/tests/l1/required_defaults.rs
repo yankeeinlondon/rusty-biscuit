@@ -901,6 +901,45 @@ mod unions {
         assert!(borrowed(either.validate_strict(&written), &written).defaults.is_empty(), "already valid, still prepared");
     }
 
+    /// A nested default on one arm is checked only against the definitions
+    /// along that arm: the other arm's required child is an alternative,
+    /// not a constraint the default must meet.
+    #[test]
+    fn a_nested_default_on_one_arm_is_not_checked_against_the_other_arm() {
+        let either = schema(
+            "types:\n  Loose:\n    o: \"{ e: boolean }(default({}))\"\n  Strict:\n    o: \"{ e: boolean(required) }\"\n$schema:\n  - x: Loose\n  - x: Strict\n",
+        );
+        let input = json!({ "x": {} });
+
+        assert_eq!(borrowed(either.validate_strict(&input), &input).defaults, [applied("x.o", json!({}))]);
+        let (value, _) = owned(either.validate_soft(&input));
+        assert_eq!(value, json!({ "x": { "o": {} } }));
+    }
+
+    /// Definitions joined by `allOf` inside one arm all apply to a default
+    /// declared on that arm.
+    #[test]
+    fn a_default_is_checked_against_every_definition_along_its_arm() {
+        let raw = json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "anyOf": [
+                {
+                    "allOf": [
+                        { "type": "object", "properties": { "o": { "type": "object", "default": {} } } },
+                        { "type": "object", "properties": { "o": { "required": ["e"], "properties": { "e": { "default": true } } } } }
+                    ]
+                },
+                { "type": "object", "properties": { "o": { "type": "string" } } }
+            ]
+        });
+        let split = schema(&raw.to_string());
+
+        for result in [split.validate_strict(&json!({})), split.validate_soft(&json!({}))] {
+            let error = shared_schema_error(result);
+            assert!(matches!(&*error, SchemaError::InvalidDefault { path, .. } if path.to_string() == "o"), "{error:?}");
+        }
+    }
+
     #[test]
     fn a_default_forbidden_by_every_arm_is_an_ordinary_validation_failure() {
         let exclusive = schema("$schema:\n  - timeout: number(default(3))\n    retries: null\n  - retries: number\n    timeout: null\n");

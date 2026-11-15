@@ -1307,7 +1307,21 @@ impl DarkmatterSchemas {
     /// frontmatter didn't satisfy it) are reported via
     /// [`ValidationReport::problems`] rather than this error path.
     pub fn validate(&self, source: &Markdown) -> Result<ValidationReport, SchemaError> {
-        self.validate_prepared(source, None).map(|(report, _)| report)
+        self.validate_prepared(source, None, bound_operands::FlagOrigin::Input).map(|(report, _)| report)
+    }
+
+    /// [`Self::validate`] (or [`Self::validate_for_phase`] at `phase`) of a
+    /// document whose frontmatter composition already completed, whose
+    /// lifecycle `no_error` flags count as written only where `authored`
+    /// holds one at the same place, as in
+    /// [`EffectiveSchema::validate_completed`].
+    pub(crate) fn validate_with_authored(
+        &self,
+        source: &Markdown,
+        phase: Option<SchemaPhase>,
+        authored: &Value,
+    ) -> Result<ValidationReport, SchemaError> {
+        self.validate_prepared(source, phase, bound_operands::FlagOrigin::Authored(authored)).map(|(report, _)| report)
     }
 
     /// [`Self::validate`], also returning what preparing the effective schema
@@ -1325,7 +1339,7 @@ impl DarkmatterSchemas {
         &self,
         source: &Markdown,
     ) -> Result<(ValidationReport, PreparationSummary), SchemaError> {
-        self.validate_prepared(source, None)
+        self.validate_prepared(source, None, bound_operands::FlagOrigin::Input)
     }
 
     /// [`Self::validate`], also returning the request's stage timings.
@@ -1352,7 +1366,7 @@ impl DarkmatterSchemas {
         source: &Markdown,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
-        self.validate_prepared(source, Some(phase)).map(|(report, _)| report)
+        self.validate_prepared(source, Some(phase), bound_operands::FlagOrigin::Input).map(|(report, _)| report)
     }
 
     /// The one place a document's [`ValidationReport`] is produced: prepares
@@ -1362,10 +1376,14 @@ impl DarkmatterSchemas {
     ///
     /// Source positions are built only when the report holds a problem, once,
     /// and shared by all of its problems ([`positions::ProblemPositions`]).
+    ///
+    /// `origin` tells which lifecycle flags of the frontmatter were written
+    /// ([`bound_operands::FlagOrigin`]).
     fn validate_prepared(
         &self,
         source: &Markdown,
         phase: Option<SchemaPhase>,
+        origin: bound_operands::FlagOrigin<'_>,
     ) -> Result<(ValidationReport, PreparationSummary), SchemaError> {
         let frontmatter_value = frontmatter_as_json(source);
         let positions = ProblemPositions::deferred(source);
@@ -1376,10 +1394,10 @@ impl DarkmatterSchemas {
         };
         let mut report = match (effective, phase) {
             (Some(effective), None) => {
-                effective.validate_converted(&frontmatter_value, &frontmatter_value, &positions)
+                effective.validate_converted(&frontmatter_value, &frontmatter_value, &positions, origin)
             }
             (Some(effective), Some(phase)) => {
-                effective.validate_for_phase_located(&frontmatter_value, &positions, phase)?
+                effective.validate_for_phase_located(&frontmatter_value, &positions, phase, origin)?
             }
             (None, _) => ValidationReport::vacuous(),
         };
@@ -1795,13 +1813,19 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
-        self.validate_converted(frontmatter, frontmatter, &ProblemPositions::Built(positions))
+        self.validate_converted(frontmatter, frontmatter, &ProblemPositions::Built(positions), bound_operands::FlagOrigin::Input)
     }
 
     /// [`Self::validate_with_positions`] of `frontmatter`, whose templates
     /// are found in `stored`, its form before literal tokens were decoded,
     /// so decoded literal text is never taken for a template.
-    fn validate_converted(&self, frontmatter: &Value, stored: &Value, positions: &ProblemPositions<'_>) -> ValidationReport {
+    fn validate_converted(
+        &self,
+        frontmatter: &Value,
+        stored: &Value,
+        positions: &ProblemPositions<'_>,
+        origin: bound_operands::FlagOrigin<'_>,
+    ) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
         let templates = if self.accepts_as_is(frontmatter) {
             simplified_schema::coerce::NestedTemplates::default()
@@ -1809,7 +1833,7 @@ impl EffectiveSchema {
             self.nested_templates(stored)
         };
         let candidate = self.converted_candidate(frontmatter, &templates);
-        self.validate_instance(candidate, frontmatter, stored, positions, &templates)
+        self.validate_instance(candidate, frontmatter, stored, positions, &templates, origin)
     }
 
     /// `instance` with its defaults applied, through the one default engine
@@ -1919,7 +1943,7 @@ impl EffectiveSchema {
         let templates = simplified_schema::coerce::NestedTemplates::default();
         let positions = ProblemPositions::Built(positions);
         let candidate = self.converted_candidate(instance, &templates);
-        self.validate_instance(candidate, instance, instance, &positions, &templates)
+        self.validate_instance(candidate, instance, instance, &positions, &templates, bound_operands::FlagOrigin::Input)
     }
 
     /// The copy of `instance` [`Self::validate_data`] judges, without the
@@ -1979,6 +2003,36 @@ impl EffectiveSchema {
         self.validate_for_phase_with_positions(frontmatter, &PositionMap::new(), phase)
     }
 
+    /// Validates `completed`, a frontmatter value a schema completion (such
+    /// as composition's) already filled with defaults, whose lifecycle was
+    /// written as `authored` shows: unphased like [`Self::validate`], or at
+    /// `phase` like [`Self::validate_for_phase`].
+    ///
+    /// Every other entry point judges its instance as authored. Here a
+    /// lifecycle `no_error` counts as written only where `authored` holds one
+    /// at the same place, so a filled `false` beside `then`, beside a long
+    /// form that already has one, or beside `set` is not a placement, as the
+    /// lifecycle parser reads it ([`crate::lifecycle::LifecycleParseOptions::authored_values`]).
+    /// `Value::Null` means nothing is known to be authored.
+    ///
+    /// ## Errors
+    ///
+    /// See [`Self::validate_for_phase`]; never fails without a phase.
+    pub fn validate_completed(
+        &self,
+        completed: &Value,
+        authored: &Value,
+        phase: Option<SchemaPhase>,
+    ) -> Result<ValidationReport, SchemaError> {
+        let positions = PositionMap::new();
+        let positions = ProblemPositions::Built(&positions);
+        let origin = bound_operands::FlagOrigin::Authored(authored);
+        match phase {
+            Some(phase) => self.validate_for_phase_located(completed, &positions, phase, origin),
+            None => Ok(self.validate_converted(completed, completed, &positions, origin)),
+        }
+    }
+
     /// Phase-aware validation with source positions attached to problems.
     pub fn validate_for_phase_with_positions(
         &self,
@@ -1986,7 +2040,7 @@ impl EffectiveSchema {
         positions: &PositionMap,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
-        self.validate_for_phase_located(frontmatter, &ProblemPositions::Built(positions), phase)
+        self.validate_for_phase_located(frontmatter, &ProblemPositions::Built(positions), phase, bound_operands::FlagOrigin::Input)
     }
 
     /// [`Self::validate_for_phase_with_positions`] locating its problems with
@@ -1996,17 +2050,18 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &ProblemPositions<'_>,
         phase: SchemaPhase,
+        origin: bound_operands::FlagOrigin<'_>,
     ) -> Result<ValidationReport, SchemaError> {
         let projected = self.phase_projection(phase)?;
         Ok(match phase {
-            SchemaPhase::Launch => projected.validate_converted(frontmatter, frontmatter, positions),
+            SchemaPhase::Launch => projected.validate_converted(frontmatter, frontmatter, positions, origin),
             // Raw, as `validate_raw` is, but nested templates at `deferred`
             // places are deferred as in every phase.
             SchemaPhase::Completion => {
                 let _validate = timings::stage(ValidationStage::Validate);
                 let templates = projected.nested_templates(frontmatter);
                 let candidate = projected.complete(std::borrow::Cow::Borrowed(frontmatter), &templates);
-                projected.validate_instance(candidate, frontmatter, frontmatter, positions, &templates)
+                projected.validate_instance(candidate, frontmatter, frontmatter, positions, &templates, origin)
             }
         })
     }
@@ -2052,9 +2107,9 @@ impl EffectiveSchema {
             let _validate = timings::stage(ValidationStage::Validate);
             let templates = self.nested_templates(stored);
             let candidate = self.complete(std::borrow::Cow::Borrowed(decoded), &templates);
-            self.validate_instance(candidate, decoded, stored, positions, &templates)
+            self.validate_instance(candidate, decoded, stored, positions, &templates, bound_operands::FlagOrigin::Input)
         } else {
-            self.validate_converted(decoded, stored, positions)
+            self.validate_converted(decoded, stored, positions, bound_operands::FlagOrigin::Input)
         }
     }
 
@@ -2133,7 +2188,14 @@ impl EffectiveSchema {
         let _validate = timings::stage(ValidationStage::Validate);
         let templates = simplified_schema::coerce::NestedTemplates::default();
         let candidate = self.complete(std::borrow::Cow::Borrowed(frontmatter), &templates);
-        self.validate_instance(candidate, frontmatter, frontmatter, &ProblemPositions::Built(positions), &templates)
+        self.validate_instance(
+            candidate,
+            frontmatter,
+            frontmatter,
+            &ProblemPositions::Built(positions),
+            &templates,
+            bound_operands::FlagOrigin::Input,
+        )
     }
 
     /// The nested templates of `authored` that this schema marks `deferred`
@@ -2162,6 +2224,10 @@ impl EffectiveSchema {
     /// for one in `stored`, `authored` as loaded with its literal tokens
     /// still encoded.
     ///
+    /// Every lifecycle action dictionary is judged by the lifecycle parser's
+    /// placement and branch-shape rules, its `no_error` flags counted only
+    /// where `origin` shows them authored.
+    ///
     /// Problems are located with `positions` once the report is settled, so a
     /// valid instance never asks for a position map.
     fn validate_instance(
@@ -2171,6 +2237,7 @@ impl EffectiveSchema {
         stored: &Value,
         positions: &ProblemPositions<'_>,
         templates: &simplified_schema::coerce::NestedTemplates,
+        origin: bound_operands::FlagOrigin<'_>,
     ) -> ValidationReport {
         let simplified_schema::DefaultPreparation { candidate, defaults } = match candidate {
             Ok(prepared) => prepared,
@@ -2193,7 +2260,7 @@ impl EffectiveSchema {
         let bound = self
             .conversion()
             .marks_operands(&self.json_schema)
-            .then(|| bound_operands::BoundOperands::bind(&self.json_schema, authored, stored));
+            .then(|| bound_operands::BoundOperands::bind(&self.json_schema, authored, stored, origin));
         let widened;
         let templates = match &bound {
             Some(bound) if !bound.settled.is_empty() => {
@@ -2221,6 +2288,7 @@ impl EffectiveSchema {
             bound.report_malformed(&mut problems);
             bound.report_refused_targets(&mut problems);
             bound.report_rejections(&mut problems);
+            bound.report_placements(&mut problems);
         }
         positions.locate_all(&mut problems);
         ValidationReport {

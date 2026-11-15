@@ -398,9 +398,11 @@ loop:
 The schema types a single action with the action categories (`communicate`,
 `flow`, `shell`, `expression`), each of which holds one verb; their
 `uncounted-keys` constraint leaves `when` and `no_error` out of that one-key
-count. The schema does not check where `when` may sit beside an action: a
-`when` in a whole event or body dictionary passes the schema, and the
-lifecycle parser refuses it. A conditional is different, see below.
+count. Where `when` may sit is one of the lifecycle parser's placement rules,
+which schema validation applies too (see
+[Placement rules are judged as the parser judges them](#placement-rules-are-judged-as-the-parser-judges-them)):
+a `when` in a whole event or body dictionary is refused by both. A
+conditional is different, see below.
 
 A **dictionary bundle** puts several verbs in one mapping, optionally guarded
 by `when` and softened by `no_error`. A bundle takes **short forms only**; it
@@ -485,11 +487,10 @@ initialize:
 ```
 
 A conditional requires `when` and `then`, allows `else`, and takes no sibling
-verb, at any depth. An `else` without `then` is a schema error. Beside `then`
-the schema admits `no_error` only as `false` or `null`, because completion
-fills `no_error: false` at every place an action could sit; the parser counts
-only a flag you wrote, so `no_error: null` there is fine and an authored
-`no_error: false` passes the schema but fails at launch:
+verb, at any depth. An `else` without `then` is a schema error, and so is a
+`when` with nothing to guard (`- when: "fm.x"` alone). A `no_error` you write
+beside `then` is refused, `false` included: the flag belongs on the actions in
+the body. A `null` flag is no flag, so it passes:
 
 ```yaml
 start:
@@ -498,11 +499,14 @@ start:
       no_error: null    # valid: a null flag is no flag
     - when: "fm.x"
       then: [{ info: "a" }]
-      no_error: false   # schema valid; the parser refuses it
-    - when: "fm.x"
-      then: [{ info: "a" }]
-      no_error: true    # invalid
+      no_error: false   # invalid: no flag beside `then`
+    - when: "fm.x"         # invalid: `when` guards nothing
 ```
+
+The conditional types still declare `no_error: literal(false)`: completion
+fills `no_error: false` at every place an action could sit, conditionals
+included, and that filled flag must not make a valid document invalid. It is
+not a flag you wrote, so it is never refused.
 
 The schema has **no depth limit**. The parser allows conditionals five levels
 deep and rejects a sixth with `LifecycleStackInvalidShape`, naming the path of
@@ -683,18 +687,12 @@ before anything runs:
   last in its list, and at most one directive per bundle; `prep` returns, so
   another item may follow it
 - `skip` only in `initialize`
-- no `when` beside the actions of a root or body dictionary, or at the
-  `loop:` root, and `gate:` never beside loose loop verbs (a conditional's
-  `then` in such a dictionary is a schema error too)
+- no `when` at the `loop:` root, and `gate:` never beside loose loop verbs
 - the five-level conditional nesting limit, in every event, including a
   guarded bundle (`when` beside verbs, such as `- { when: "fm.x", stop: null }`)
   placed inside a fifth-level `when`, which the parser counts as a sixth level
 - a shell expansion hidden in a `set` value in `initialize`
   (`set: { sha: "$(git rev-parse HEAD)" }`)
-- a `no_error` you wrote beside `then`/`else` (the schema admits `false`
-  there), or on a `set`, even `no_error: null`
-- one action carrying `no_error` both inside its long form and beside it;
-  a flag the schema filled in never counts as a second placement
 - the literal operand rules of the generated verbs: a literal YAML `null`,
   list, or mapping as one operand is rejected with a hint to write a
   whole-value `{{ … }}` template (see
@@ -702,6 +700,32 @@ before anything runs:
 
 Passing the schema, in the editor or at launch, is therefore not proof that a
 lifecycle stack can execute.
+
+### Placement rules are judged as the parser judges them
+
+Some lifecycle rules are about where you wrote something rather than what
+type it has. JSON Schema cannot express them, so schema validation runs the
+lifecycle parser's own rules on every action dictionary it types. The editor
+and the launch check therefore report these as schema problems, at the
+offending key, with the parser's message:
+
+| You wrote | Why it is refused |
+| --- | --- |
+| `- { when: "fm.x", then: [stop], no_error: false }` | a flag belongs on the actions in the body |
+| `- { info: { text: hi, no_error: true }, no_error: true }` | one flag, two places; keep one, even when they agree |
+| `- { set: { done: true }, no_error: null }` | `set` takes no flag, not even `null` |
+| `- { when: "fm.x" }` | the `when` guards nothing |
+| `start: { when: "fm.x", info: hi }` | a dictionary of verbs never carries `when`; use a guarded list item |
+| `- { ensure_file: { file: a.md, no_error: 1 } }` | a flag is a boolean or text such as `"yes"`, never a number |
+
+Only flags you wrote count. Before validation the schema fills
+`no_error: false` wherever an action can sit, beside `then` and both beside
+and inside a long form included, and those filled flags are never a second
+placement or a flag on `set`. The launch check knows which flags those are,
+because it reads the document as you wrote it (with any proxy `with:` overlay
+and `--set` values) beside the completed frontmatter, exactly as the parser
+does.
+
 
 The reverse also holds: the parser does not type-check a literal operand, so
 `pr_list: three` passes the parser. The schema rejects it, and because the

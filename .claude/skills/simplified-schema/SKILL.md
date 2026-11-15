@@ -60,7 +60,9 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   validator judges the candidate; there is no "already valid" shortcut.
   Strict success stays `Cow::Borrowed` and lists `defaults`; soft applies
   them. Conflicting defaults fail at lowering/`Prepared::new`, never by arm
-  at run time. Exported JSON Schema keeps `required`; `default` is only an
+  at run time; the one exception is a key no schema names whose matching
+  patterns/catch-alls disagree, a per-key `ConflictingDefaults` raised only
+  when that key's default is needed (see [defaults.md](defaults.md)). Exported JSON Schema keeps `required`; `default` is only an
   annotation there. Never write a second defaulting walk in a host. Read
   [defaults.md](defaults.md) before touching presence, defaults, or
   `not-empty`.

@@ -78,6 +78,28 @@ union or on one arm of a [root union](#root-level-unions):
     - timeout: string               # runtime: 3 when timeout is unset or null
   ```
 
+- **A default outside a union must suit one of its arms.** A default
+  declared beside a union (a common property next to a root union, or a
+  named type layered with another whose arms describe the same key) is
+  checked against the union as a group when it is used: at least one arm
+  must accept it as written. An arm that does not mention the property
+  accepts it if it can hold the object the property is in; a scalar or
+  list arm (such as a `string` shorthand) and a closed object arm that does
+  not name the property cannot, so they do not count. Here `{}` would lack whichever child each arm requires, so
+  `{ x-settings: {} }` is an invalid default at `x-settings.options`:
+
+  ```yaml
+  types:
+    Parent:
+      options: object(default({}))
+    Nested:
+      - options: "{ enabled: boolean(required; default(true)) }"
+      - options: "{ mode: string(required) }"
+  $schema:
+    '<starting::x->': Parent
+    '<ending::-settings>': Nested
+  ```
+
 - **Matching still uses the values.** Because the default is applied before
   matching, an arm that excludes the property (`timeout: null`) or is
   [closed](objects-and-named-types.md#closed-roots-closed) without it rejects

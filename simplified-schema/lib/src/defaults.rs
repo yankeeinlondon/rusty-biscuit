@@ -22,6 +22,23 @@
 //!   [`SchemaError::ConflictingDefaults`] when the plan is compiled, used or
 //!   not. Which arm the completed value then matches is validation's
 //!   question.
+//! - A key's value is described by every schema that selects it: its
+//!   `properties` entries, every `patternProperties` schema whose pattern
+//!   the key matches (JSON Schema semantics; SimplifiedSchema's literal-key
+//!   precedence is already in the lowered patterns), and the
+//!   `additionalProperties` of each node that neither names the key nor
+//!   matches it with one of its own patterns. Together they are the key's
+//!   one property definition: its default, `required`, default check, and
+//!   children come from all of them at once. A literal name's definition is
+//!   merged when the plan compiles; any other key's is merged from the key
+//!   itself, at preparation, where two of its schemas declaring different
+//!   defaults is [`SchemaError::ConflictingDefaults`]. Only a key that is
+//!   there, or that some schema names, is prepared: a pattern or catch-all
+//!   never creates a key.
+//! - Conditional applicators (`if`/`then`/`else`, `dependentSchemas`), `not`,
+//!   and annotation-dependent keywords (`unevaluatedProperties`,
+//!   `unevaluatedItems`, `contains`) are not followed: whether they describe
+//!   a value is a judgment of that value, which is validation's step.
 //! - A child is filled only inside a parent that exists. A missing or `null`
 //!   parent with no default of its own stays as it is. A parent filled from
 //!   its own default is first checked against its complete definition
@@ -30,8 +47,24 @@
 //! - Array items and function-style tuple positions are never inserted;
 //!   objects inside existing items are completed.
 //! - Every default used is checked strictly, without I/O or conversion,
-//!   against each property definition that declares it; a violation is
-//!   [`SchemaError::InvalidDefault`]. An unused default is never judged.
+//!   before its children are completed, against the definitions of its
+//!   property (the selectors of its key, and the `allOf` members, `$ref`
+//!   targets and array item schemas of its location), judged from the arm
+//!   of each definition declaring it. Every definition on that arm must
+//!   accept the default. A definition on another member of a union the
+//!   declaring arm is on is a sibling alternative and is not consulted. A
+//!   union the declaring arm makes no choice in stays a group of
+//!   alternatives: at least one of its members must accept the default,
+//!   each member judged the same way (its own nested unions within it). A
+//!   member defining nothing for the key accepts only if, read statically,
+//!   it can hold an object with that key, since that object exists: a
+//!   scalar, array, `null`-only or `false` member, or a closed object not
+//!   naming the key, never does. (A `null`-only member beside a single
+//!   other member is no alternative at all, so that member's definitions
+//!   apply directly.) Each such union is required on its own.
+//!   A violation is [`SchemaError::InvalidDefault`]; a default
+//!   object is never repaired by its children's defaults. An unused default
+//!   is never judged.
 //! - Object properties are visited in declaration order and array items in
 //!   ascending index order, depth first, so a parent always comes before its
 //!   children; each changed path is reported once.
@@ -51,6 +84,7 @@ use jsonschema::Validator;
 use serde_json::Value;
 
 use crate::coerce::NestedTemplates;
+use crate::coercion::TextPattern;
 use crate::validate::{SchemaIdentity, ValidatorCache};
 use crate::{PropertyPath, SchemaError, scope, simplified};
 
@@ -81,8 +115,43 @@ const PLAN_CACHE_CAPACITY: usize = 64;
 static PLAN_CACHE: LazyLock<Mutex<HashMap<SchemaIdentity, Arc<DefaultPlan>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// How many compiled key patterns [`key_pattern`] keeps before it starts
+/// over.
+const PATTERN_CACHE_CAPACITY: usize = 1024;
+
+/// Compiled `patternProperties` keys by source: a named type inlined at many
+/// locations (the baseline's lifecycle stacks) repeats one long pattern, and
+/// lowering checks declarations on every call.
+static PATTERN_CACHE: LazyLock<Mutex<HashMap<String, Option<Arc<TextPattern>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// How many accepted documents [`check_declarations`] remembers before it
+/// starts over.
+const CHECKED_CAPACITY: usize = 256;
+
+/// The canonical content hashes of documents [`check_declarations`] has
+/// accepted: hosts lower one baseline again and again, and the check reads
+/// the whole lowered document. A refusal is not remembered.
+static CHECKED: LazyLock<Mutex<std::collections::HashSet<u64>>> = LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
 pub(crate) fn reset_process_caches() {
     PLAN_CACHE.lock().expect("default plan cache poisoned").clear();
+    CHECKED.lock().expect("checked declarations poisoned").clear();
+    PATTERN_CACHE.lock().expect("key pattern cache poisoned").clear();
+}
+
+/// `source` compiled as a key pattern; `None` when it does not compile.
+fn key_pattern(source: &str) -> Option<Arc<TextPattern>> {
+    if let Some(known) = PATTERN_CACHE.lock().expect("key pattern cache poisoned").get(source) {
+        return known.clone();
+    }
+    let compiled = TextPattern::new(source).ok().map(Arc::new);
+    let mut patterns = PATTERN_CACHE.lock().expect("key pattern cache poisoned");
+    if patterns.len() >= PATTERN_CACHE_CAPACITY {
+        patterns.clear();
+    }
+    patterns.insert(source.to_string(), compiled.clone());
+    compiled
 }
 
 /// The defaults one schema declares, per object location, compiled once
@@ -108,20 +177,84 @@ impl std::fmt::Debug for DefaultPlan {
 /// the value there.
 #[derive(Default)]
 struct Scope {
+    /// The first node's JSON Pointer, naming the location in an error.
+    pointer: String,
+    /// Every literal property name, each with every schema that selects it.
     properties: Vec<Property>,
-    /// The location of an undeclared key's value.
-    additional: Option<usize>,
+    /// The names any node lists in `required`.
+    required: Vec<String>,
+    /// The `patternProperties` of every node, for a key no node names.
+    patterns: Vec<KeyPattern>,
+    /// The `additionalProperties` schema of every node that has one.
+    catch_alls: Vec<CatchAll>,
     /// The location of each leading array item.
     prefix: Vec<Option<usize>>,
     /// The location of every array item after `prefix`.
     rest: Option<usize>,
 }
 
-struct Property {
-    name: String,
-    required: bool,
+/// What a set of schemas selecting one key says about its value.
+struct Entry {
     child: Option<usize>,
     default: Option<Declared>,
+    /// Every schema selecting the key, by which a used default is judged
+    /// from its declaring arm (see [`Fill::accepts`]).
+    definitions: Vec<Definition>,
+}
+
+/// The union members a schema node is reached through from the document
+/// root: `(union pointer, member index)`, at most one per union, sorted.
+/// Empty for a node that applies whichever arm a value matches.
+type Arm = Vec<(String, usize)>;
+
+/// One schema selecting a key, as a used default is checked against it.
+struct Definition {
+    pointer: String,
+    arm: Arc<Arm>,
+    /// Its structural validator, compiled on first use.
+    validator: OnceLock<Arc<Validator>>,
+}
+
+/// Whether `context` chooses a member of `union`.
+fn chosen(context: &[(&str, usize)], union: &str) -> bool {
+    context.iter().any(|(other, _)| *other == union)
+}
+
+/// Whether a definition reached through `arm` is on a member of a union
+/// other than the one `context` chooses: a sibling alternative, which a
+/// default judged within `context` is not checked against.
+fn conflicts(arm: &Arm, context: &[(&str, usize)]) -> bool {
+    arm.iter().any(|(union, index)| context.iter().any(|(other, at)| other == union && at != index))
+}
+
+struct Property {
+    name: String,
+    entry: Entry,
+}
+
+/// One `patternProperties` entry of the node at index `node` among its
+/// location's nodes.
+struct KeyPattern {
+    node: usize,
+    pattern: Arc<TextPattern>,
+    entry: Entry,
+}
+
+/// The `additionalProperties` of the node at index `node`: it selects a key
+/// that node neither names nor matches with one of its own patterns.
+struct CatchAll {
+    node: usize,
+    /// The node's own `properties` names.
+    names: Vec<String>,
+    entry: Entry,
+}
+
+impl Scope {
+    /// Whether `catch_all` selects `key`.
+    fn catches(&self, catch_all: &CatchAll, key: &str) -> bool {
+        !catch_all.names.iter().any(|name| name == key)
+            && !self.patterns.iter().any(|entry| entry.node == catch_all.node && entry.pattern.is_match(key))
+    }
 }
 
 /// A property's one default.
@@ -129,30 +262,34 @@ struct Declared {
     value: Value,
     /// The JSON Pointer of the first `default` keyword declaring it.
     pointer: String,
-    /// Each property definition that declares it, which the default must
-    /// satisfy when used.
-    definitions: Vec<String>,
-    /// Their structural validators, compiled on first use.
-    validators: OnceLock<Vec<Arc<Validator>>>,
+    /// The arm of each definition declaring it: a used default must be
+    /// accepted from each (see [`Fill::accepts`]).
+    arms: Vec<Arc<Arm>>,
 }
 
 impl DefaultPlan {
     /// Reads every default `schema` declares, a lowered or raw JSON Schema,
     /// following local `$ref`s, `allOf`, `anyOf`, `oneOf`, properties,
-    /// `additionalProperties`, and array items. Recursive references compile
-    /// once. A used default is checked by structural validators compiled
-    /// through `cache`.
+    /// `patternProperties`, `additionalProperties`, and array items.
+    /// Recursive references compile once. A used default is checked by
+    /// structural validators compiled through `cache`.
     ///
     /// ## Errors
     ///
     /// [`SchemaError::ConflictingDefaults`] when one object location declares
     /// different defaults for one property (on different union arms, say);
+    /// a key that only patterns or catch-alls select is checked later, by
+    /// [`prepare_defaults`];
     /// [`SchemaError::RecursiveDefault`] when a `$ref` chain returns to itself
     /// without describing a child value.
     pub fn compile(schema: Arc<Value>, cache: &ValidatorCache) -> Result<Self, SchemaError> {
         let (root, scopes) = Compiler::run(&schema)?;
-        let declares_defaults =
-            scopes.iter().flat_map(|scope| &scope.properties).any(|property| property.default.is_some());
+        let declares_defaults = scopes.iter().any(|scope| {
+            scope.properties.iter().map(|property| &property.entry)
+                .chain(scope.patterns.iter().map(|pattern| &pattern.entry))
+                .chain(scope.catch_alls.iter().map(|catch_all| &catch_all.entry))
+                .any(|entry| entry.default.is_some())
+        });
         Ok(Self { schema, cache: cache.clone(), root, scopes, declares_defaults })
     }
 
@@ -194,8 +331,10 @@ impl DefaultPlan {
 /// [`SchemaError::InvalidDefault`] when a default the value needs breaks its
 /// own property's definition; [`SchemaError::RecursiveDefault`] when filling
 /// a default keeps creating another defaulted parent;
-/// [`SchemaError::BuildValidator`] when a default's definition does not
-/// compile.
+/// [`SchemaError::ConflictingDefaults`] when a key no schema names is
+/// selected by several `patternProperties` (or a pattern and a catch-all)
+/// that default it, or one of its children, differently; [`SchemaError::BuildValidator`] when a default's
+/// definition does not compile.
 pub fn prepare_defaults<'input>(
     plan: &DefaultPlan,
     instance: Cow<'input, Value>,
@@ -205,159 +344,528 @@ pub fn prepare_defaults<'input>(
         return Ok(DefaultPreparation { candidate: instance, defaults: Vec::new() });
     };
     let mut fill = Fill { plan, templates, active: Vec::new(), out: Vec::new() };
-    fill.visit(root, &instance, &mut Vec::new())?;
+    fill.visit(&[root], &instance, &mut Vec::new())?;
     Ok(finish(instance, fill.out))
 }
 
 // ── Compilation ───────────────────────────────────────────────────────────
 
+/// A schema node reached through an arm: the ids [`Compiler`] interns its
+/// JSON Pointer and its [`Arm`] under.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct Reached {
+    pointer: u32,
+    arm: u32,
+}
+
+/// An interned JSON Pointer, with what compilation reads of its node.
+struct Pointer<'s> {
+    text: String,
+    node: Option<&'s serde_json::Map<String, Value>>,
+    /// Whether the node describes an object's or an array's members.
+    structural: bool,
+    /// The nodes it expands to, resolved on its first expansion.
+    links: Option<Arc<Links<'s>>>,
+    /// The schemas of its members, resolved when a location first holds it.
+    members: Option<Arc<Members<'s>>>,
+}
+
+/// The schemas one structural node gives its object's and array's members.
+struct Members<'s> {
+    properties: Vec<(&'s str, u32)>,
+    /// Each `patternProperties` entry whose pattern compiles.
+    patterns: Vec<(Arc<TextPattern>, &'s str, u32)>,
+    /// The `additionalProperties` schema, when it is one.
+    additional: Option<u32>,
+    /// The `items` schema, when it is one.
+    items: Option<u32>,
+    prefix: Vec<u32>,
+}
+
+/// The nodes one node expands to.
+struct Links<'s> {
+    /// The local `$ref` and its target.
+    reference: Option<(&'s String, u32)>,
+    /// Each `allOf`/`anyOf`/`oneOf`: the union, whether its members are
+    /// alternatives, and the members.
+    unions: Vec<(u32, bool, Vec<u32>)>,
+}
+
+/// An arm as interned: `(union pointer id, member index)`, sorted by id.
+type ArmKey = Vec<(u32, usize)>;
+
+/// The multiply-rotate hasher of Firefox and rustc, for the compiler's id
+/// keys: in a debug build SipHash over them cost more than the rest of
+/// compilation.
+#[derive(Default)]
+struct IdHasher(u64);
+
+impl std::hash::Hasher for IdHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let (chunks, rest) = bytes.as_chunks::<8>();
+        for chunk in chunks {
+            self.write_u64(u64::from_le_bytes(*chunk));
+        }
+        for &byte in rest {
+            self.write_u64(u64::from(byte));
+        }
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write_u64(u64::from(value));
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.0 = (self.0.rotate_left(5) ^ value).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.write_u64(value as u64);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type IdMap<K, V> = HashMap<K, V, std::hash::BuildHasherDefault<IdHasher>>;
+type IdSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<IdHasher>>;
+
 struct Compiler<'s> {
     root: &'s Value,
     scopes: Vec<Scope>,
-    /// Each location's id, keyed by the sorted pointers of its nodes.
-    known: HashMap<Vec<String>, usize>,
+    /// Each location's id, keyed by its sorted nodes.
+    known: IdMap<Vec<Reached>, usize>,
+    /// The location [`Self::scope`] returned for each list of nodes it was
+    /// given, before expansion.
+    entered: IdMap<Vec<Reached>, Option<usize>>,
+    // Pointers and arms are interned: a union-heavy schema (the lifecycle
+    // baseline) reaches one node through thousands of arms, and every
+    // location is keyed by its nodes, so hashing and comparing them as
+    // strings dominated compilation.
+    pointers: Vec<Pointer<'s>>,
+    pointer_ids: IdMap<String, u32>,
+    arms: Vec<ArmKey>,
+    arm_ids: IdMap<ArmKey, u32>,
+    /// Each arm as a [`Definition`] carries it, built on first use.
+    spelled: Vec<Option<Arc<Arm>>>,
+    /// `(arm, union, member)` to the arm that chooses that member.
+    choices: IdMap<(u32, u32, usize), u32>,
+    /// [`Self::expand`] of one node on its own.
+    expansions: IdMap<Reached, Arc<[Reached]>>,
+    /// Whether union members record their choice in the arm.
+    track_arms: bool,
 }
 
 impl<'s> Compiler<'s> {
+    /// Compiles every location of `root`.
     fn run(root: &'s Value) -> Result<(Option<usize>, Vec<Scope>), SchemaError> {
-        let mut compiler = Compiler { root, scopes: Vec::new(), known: HashMap::new() };
-        let root_scope = compiler.scope(&[String::new()])?;
+        let mut compiler = Self::new(root, true);
+        let root_scope = compiler.root_scope()?;
         Ok((root_scope, compiler.scopes))
     }
 
-    fn node(&self, pointer: &str) -> Option<&'s serde_json::Map<String, Value>> {
-        self.root.pointer(pointer).and_then(Value::as_object)
+    /// A compiler for `root`. Without `arms` every node keeps the root's
+    /// empty arm, so each location is compiled once rather than once per arm
+    /// reaching it (see [`check_declarations`]).
+    fn new(root: &'s Value, arms: bool) -> Self {
+        Compiler {
+            root,
+            track_arms: arms,
+            scopes: Vec::new(),
+            known: IdMap::default(),
+            entered: IdMap::default(),
+            pointers: Vec::new(),
+            pointer_ids: IdMap::default(),
+            arms: Vec::new(),
+            arm_ids: IdMap::default(),
+            spelled: Vec::new(),
+            choices: IdMap::default(),
+            expansions: IdMap::default(),
+        }
     }
 
-    /// Every schema node that applies wherever `pointer`'s node applies:
-    /// itself, its local `$ref` target, and its `allOf`/`anyOf`/`oneOf`
-    /// members, transitively, in that order.
-    fn expand(&self, pointer: &str, chain: &mut Vec<String>, out: &mut Vec<String>) -> Result<(), SchemaError> {
-        if out.iter().any(|seen| seen == pointer) {
-            return Ok(());
-        }
-        let Some(map) = self.node(pointer) else {
-            return Ok(());
+    /// Compiles the root location and every location below it.
+    fn root_scope(&mut self) -> Result<Option<usize>, SchemaError> {
+        let pointer = self.pointer(String::new(), Some(self.root));
+        let arm = self.arm(ArmKey::new());
+        self.scope(&[Reached { pointer, arm }])
+    }
+
+    /// Whether a node expanded so far expands, through `$ref`s and
+    /// `allOf`/`anyOf`/`oneOf` members, back to itself: the only way
+    /// [`Self::expand`] fails.
+    fn loops(&self) -> bool {
+        let successors = |at: usize| -> Vec<usize> {
+            let Some(links) = &self.pointers[at].links else { return Vec::new() };
+            links
+                .reference
+                .iter()
+                .map(|(_, target)| *target)
+                .chain(links.unions.iter().flat_map(|(_, _, members)| members.iter().copied()))
+                .map(|next| next as usize)
+                .collect()
         };
-        out.push(pointer.to_string());
-        chain.push(pointer.to_string());
-        if let Some(Value::String(reference)) = map.get("$ref")
-            && let Some(target) = reference.strip_prefix('#')
-        {
-            if chain.iter().any(|ancestor| ancestor == target) {
-                return Err(SchemaError::RecursiveDefault { path: None, reference: reference.clone() });
+        // 0: not yet met, 1: on the current path, 2: finished.
+        let mut state = vec![0u8; self.pointers.len()];
+        for start in 0..self.pointers.len() {
+            if state[start] != 0 {
+                continue;
             }
-            self.expand(target, chain, out)?;
+            state[start] = 1;
+            let mut path: Vec<(usize, Vec<usize>)> = vec![(start, successors(start))];
+            while let Some((at, next)) = path.last_mut() {
+                let Some(next) = next.pop() else {
+                    state[*at] = 2;
+                    path.pop();
+                    continue;
+                };
+                match state[next] {
+                    0 => {
+                        state[next] = 1;
+                        path.push((next, successors(next)));
+                    }
+                    1 => return true,
+                    _ => {}
+                }
+            }
         }
+        false
+    }
+
+    /// The id of the pointer `text`, which names `value` (resolving
+    /// `text` again would only find the same value).
+    fn pointer(&mut self, text: String, value: Option<&'s Value>) -> u32 {
+        if let Some(&id) = self.pointer_ids.get(&text) {
+            return id;
+        }
+        let id = u32::try_from(self.pointers.len()).expect("fewer than 2^32 schema nodes");
+        let node = value.and_then(Value::as_object);
+        let structural = node.is_some_and(|map| {
+            map.keys().any(|key| {
+                matches!(
+                    key.as_str(),
+                    "properties" | "required" | "patternProperties" | "additionalProperties" | "items" | "prefixItems"
+                )
+            })
+        });
+        self.pointer_ids.insert(text.clone(), id);
+        self.pointers.push(Pointer { text, node, structural, links: None, members: None });
+        id
+    }
+
+    fn arm(&mut self, arm: ArmKey) -> u32 {
+        if let Some(&id) = self.arm_ids.get(&arm) {
+            return id;
+        }
+        let id = u32::try_from(self.arms.len()).expect("fewer than 2^32 arms");
+        self.arm_ids.insert(arm.clone(), id);
+        self.arms.push(arm);
+        self.spelled.push(None);
+        id
+    }
+
+    /// The arm `arm` as a [`Definition`] carries it.
+    fn spell(&mut self, arm: u32) -> Arc<Arm> {
+        if let Some(spelled) = &self.spelled[arm as usize] {
+            return Arc::clone(spelled);
+        }
+        let mut choices: Arm =
+            self.arms[arm as usize].iter().map(|&(union, index)| (self.text(union).to_string(), index)).collect();
+        choices.sort();
+        let spelled = Arc::new(choices);
+        self.spelled[arm as usize] = Some(Arc::clone(&spelled));
+        spelled
+    }
+
+    /// `arm` choosing member `index` of the union at `union`, in place of
+    /// any earlier choice of that union.
+    fn choose(&mut self, arm: u32, union: u32, index: usize) -> u32 {
+        if let Some(&id) = self.choices.get(&(arm, union, index)) {
+            return id;
+        }
+        let mut chosen: ArmKey = self.arms[arm as usize].iter().copied().filter(|&(other, _)| other != union).collect();
+        chosen.push((union, index));
+        chosen.sort_unstable();
+        let id = self.arm(chosen);
+        self.choices.insert((arm, union, index), id);
+        id
+    }
+
+    fn node(&self, pointer: u32) -> Option<&'s serde_json::Map<String, Value>> {
+        self.pointers[pointer as usize].node
+    }
+
+    fn text(&self, pointer: u32) -> &str {
+        &self.pointers[pointer as usize].text
+    }
+
+    /// The member schemas of the node at `pointer`, an object.
+    fn members(&mut self, pointer: u32, map: &'s serde_json::Map<String, Value>) -> Arc<Members<'s>> {
+        if let Some(members) = &self.pointers[pointer as usize].members {
+            return Arc::clone(members);
+        }
+        let text = self.text(pointer).to_string();
+        let mut properties = Vec::new();
+        if let Some(Value::Object(entries)) = map.get("properties") {
+            for (name, value) in entries {
+                properties.push((name.as_str(), self.pointer(format!("{text}/properties/{}", escape(name)), Some(value))));
+            }
+        }
+        let mut patterns = Vec::new();
+        if let Some(Value::Object(entries)) = map.get("patternProperties") {
+            for (source, value) in entries {
+                // A pattern the validator's engine also refuses fails
+                // validator compilation; it describes nothing here.
+                if let Some(pattern) = key_pattern(source) {
+                    let pointer = self.pointer(format!("{text}/patternProperties/{}", escape(source)), Some(value));
+                    patterns.push((pattern, source.as_str(), pointer));
+                }
+            }
+        }
+        let additional = map
+            .get("additionalProperties")
+            .filter(|value| value.is_object())
+            .map(|value| self.pointer(format!("{text}/additionalProperties"), Some(value)));
+        let items = map.get("items").filter(|value| value.is_object()).map(|value| self.pointer(format!("{text}/items"), Some(value)));
+        let prefix = match map.get("prefixItems") {
+            Some(Value::Array(prefix)) => prefix
+                .iter()
+                .enumerate()
+                .map(|(index, value)| self.pointer(format!("{text}/prefixItems/{index}"), Some(value)))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let members = Arc::new(Members { properties, patterns, additional, items, prefix });
+        self.pointers[pointer as usize].members = Some(Arc::clone(&members));
+        members
+    }
+
+    /// The nodes the node at `pointer`, an object, expands to.
+    fn links(&mut self, pointer: u32, map: &'s serde_json::Map<String, Value>) -> Arc<Links<'s>> {
+        if let Some(links) = &self.pointers[pointer as usize].links {
+            return Arc::clone(links);
+        }
+        let reference = match map.get("$ref") {
+            Some(Value::String(reference)) => {
+                reference.strip_prefix('#').map(|target| (reference, self.pointer(target.to_string(), self.root.pointer(target))))
+            }
+            _ => None,
+        };
+        let mut unions = Vec::new();
         for keyword in ["allOf", "anyOf", "oneOf"] {
             if let Some(Value::Array(members)) = map.get(keyword) {
-                for index in 0..members.len() {
-                    self.expand(&format!("{pointer}/{keyword}/{index}"), chain, out)?;
-                }
+                let union = format!("{}/{keyword}", self.text(pointer));
+                let alternatives = keyword != "allOf" && members.iter().filter(|member| !admits_only_null(member)).count() > 1;
+                let members =
+                    members.iter().enumerate().map(|(index, member)| self.pointer(format!("{union}/{index}"), Some(member))).collect();
+                unions.push((self.pointer(union, None), alternatives, members));
+            }
+        }
+        let links = Arc::new(Links { reference, unions });
+        self.pointers[pointer as usize].links = Some(Arc::clone(&links));
+        links
+    }
+
+    /// Every schema node that applies wherever `at`'s node applies:
+    /// itself, its local `$ref` target, and its `allOf`/`anyOf`/`oneOf`
+    /// members, transitively, in that order. A `$ref` target and an `allOf`
+    /// member keep the arm; an `anyOf`/`oneOf` member adds its own choice,
+    /// replacing an earlier choice of the same union (a recursive schema
+    /// meets it again one level down), unless it is the union's only member
+    /// admitting a non-null value: a value these nodes describe exists, so
+    /// that member is no alternative.
+    fn expand(
+        &mut self,
+        at: Reached,
+        chain: &mut Vec<u32>,
+        seen: &mut IdSet<Reached>,
+        out: &mut Vec<Reached>,
+    ) -> Result<(), SchemaError> {
+        if seen.contains(&at) {
+            return Ok(());
+        }
+        let Some(map) = self.node(at.pointer) else {
+            return Ok(());
+        };
+        seen.insert(at);
+        out.push(at);
+        chain.push(at.pointer);
+        let links = self.links(at.pointer, map);
+        if let Some((reference, target)) = links.reference {
+            if chain.contains(&target) {
+                return Err(SchemaError::RecursiveDefault { path: None, reference: reference.clone() });
+            }
+            self.expand(Reached { pointer: target, arm: at.arm }, chain, seen, out)?;
+        }
+        for (union, alternatives, members) in &links.unions {
+            for (index, &member) in members.iter().enumerate() {
+                let arm = if *alternatives && self.track_arms { self.choose(at.arm, *union, index) } else { at.arm };
+                self.expand(Reached { pointer: member, arm }, chain, seen, out)?;
             }
         }
         chain.pop();
         Ok(())
     }
 
-    fn expand_all(&self, pointers: &[String]) -> Result<Vec<String>, SchemaError> {
+    fn expand_all(&mut self, reached: &[Reached]) -> Result<Vec<Reached>, SchemaError> {
         let mut out = Vec::new();
-        for pointer in pointers {
-            self.expand(pointer, &mut Vec::new(), &mut out)?;
+        let mut seen = IdSet::default();
+        for node in reached {
+            self.expand(*node, &mut Vec::new(), &mut seen, &mut out)?;
         }
         Ok(out)
     }
 
-    /// The location described by the nodes at `pointers`; `None` when none
-    /// of them describes an object or array.
-    fn scope(&mut self, pointers: &[String]) -> Result<Option<usize>, SchemaError> {
-        let nodes: Vec<String> = self.expand_all(pointers)?.into_iter().filter(|pointer| self.is_structural(pointer)).collect();
+    /// [`Self::expand`] of `node` on its own.
+    fn expansion(&mut self, node: Reached) -> Result<Arc<[Reached]>, SchemaError> {
+        if let Some(expansion) = self.expansions.get(&node) {
+            return Ok(Arc::clone(expansion));
+        }
+        let mut out = Vec::new();
+        self.expand(node, &mut Vec::new(), &mut IdSet::default(), &mut out)?;
+        let expansion: Arc<[Reached]> = out.into();
+        self.expansions.insert(node, Arc::clone(&expansion));
+        Ok(expansion)
+    }
+
+    /// The location described by the nodes `reached`; `None` when none of
+    /// them describes an object or array.
+    fn scope(&mut self, reached: &[Reached]) -> Result<Option<usize>, SchemaError> {
+        if let Some(&known) = self.entered.get(reached) {
+            return Ok(known);
+        }
+        let nodes: Vec<Reached> =
+            self.expand_all(reached)?.into_iter().filter(|node| self.is_structural(node.pointer)).collect();
         if nodes.is_empty() {
+            self.entered.insert(reached.to_vec(), None);
             return Ok(None);
         }
         let mut key = nodes.clone();
         key.sort();
         key.dedup();
         if let Some(&known) = self.known.get(&key) {
+            self.entered.insert(reached.to_vec(), Some(known));
             return Ok(Some(known));
         }
         let id = self.scopes.len();
         self.scopes.push(Scope::default());
         self.known.insert(key, id);
+        self.entered.insert(reached.to_vec(), Some(id));
 
-        let mut declared: IndexMap<&'s str, Vec<String>> = IndexMap::new();
-        let mut required: Vec<&'s str> = Vec::new();
-        let mut additional = Vec::new();
+        let mut declared: IndexMap<&'s str, Vec<Reached>> = IndexMap::new();
+        let mut required: Vec<String> = Vec::new();
+        // `(node, pattern, source, schema)` for every `patternProperties` entry.
+        let mut patterns: Vec<(usize, Arc<TextPattern>, &'s str, Reached)> = Vec::new();
+        // `(node, its own property names, schema)` for every `additionalProperties` schema.
+        let mut catch_alls: Vec<(usize, Vec<String>, Reached)> = Vec::new();
         // Each node's leading item schemas and the schema of the items after them.
-        let mut arrays: Vec<(Vec<String>, Option<String>)> = Vec::new();
-        for pointer in &nodes {
-            let Some(map) = self.node(pointer) else { continue };
-            if let Some(Value::Object(properties)) = map.get("properties") {
-                for name in properties.keys() {
-                    declared.entry(name.as_str()).or_default().push(format!("{pointer}/properties/{}", escape(name)));
-                }
+        let mut arrays: Vec<(Vec<Reached>, Option<Reached>)> = Vec::new();
+        for (node, reached) in nodes.iter().enumerate() {
+            let Some(map) = self.node(reached.pointer) else { continue };
+            let members = self.members(reached.pointer, map);
+            let at = |pointer: u32| Reached { pointer, arm: reached.arm };
+            for &(name, pointer) in &members.properties {
+                declared.entry(name).or_default().push(at(pointer));
             }
             if let Some(Value::Array(names)) = map.get("required") {
-                required.extend(names.iter().filter_map(Value::as_str));
+                required.extend(names.iter().filter_map(Value::as_str).map(str::to_string));
             }
-            // A key a pattern matches is not judged by `additionalProperties`;
-            // without a regex engine here, such objects are left alone.
-            if !map.contains_key("patternProperties") && map.get("additionalProperties").is_some_and(Value::is_object) {
-                additional.push(format!("{pointer}/additionalProperties"));
+            for (pattern, source, pointer) in &members.patterns {
+                patterns.push((node, Arc::clone(pattern), source, at(*pointer)));
             }
-            let items = map.get("items").is_some_and(Value::is_object).then(|| format!("{pointer}/items"));
-            let prefix: Vec<String> = match map.get("prefixItems") {
-                Some(Value::Array(prefix)) => (0..prefix.len()).map(|index| format!("{pointer}/prefixItems/{index}")).collect(),
-                _ => Vec::new(),
-            };
+            if let Some(pointer) = members.additional {
+                let names = members.properties.iter().map(|(name, _)| (*name).to_string()).collect();
+                catch_alls.push((node, names, at(pointer)));
+            }
+            let items = members.items.map(at);
+            let prefix: Vec<Reached> = members.prefix.iter().copied().map(at).collect();
             if !prefix.is_empty() || items.is_some() {
                 arrays.push((prefix, items));
             }
         }
 
+        // A literal name is known now, so every schema selecting it (its
+        // matching patterns, and each catch-all of a node that neither names
+        // nor matches it) merges into its one definition here.
+        for (name, definitions) in &mut declared {
+            definitions.extend(patterns.iter().filter(|(_, pattern, ..)| pattern.is_match(name)).map(|(.., schema)| *schema));
+            definitions.extend(
+                catch_alls
+                    .iter()
+                    .filter(|(node, names, _)| {
+                        !names.iter().any(|own| own == name)
+                            && !patterns.iter().any(|(owner, pattern, ..)| owner == node && pattern.is_match(name))
+                    })
+                    .map(|(.., schema)| *schema),
+            );
+        }
+        let location = self.text(nodes[0].pointer).to_string();
         let mut properties = Vec::with_capacity(declared.len());
         for (name, definitions) in declared {
-            let child = self.scope(&definitions)?;
-            let default = self.declared(&nodes[0], name, definitions)?;
-            properties.push(Property { name: name.to_string(), required: required.contains(&name), child, default });
+            let entry = self.entry(&location, name, definitions)?;
+            properties.push(Property { name: name.to_string(), entry });
         }
-        let additional = if additional.is_empty() { None } else { self.scope(&additional)? };
+        let mut key_patterns = Vec::with_capacity(patterns.len());
+        for (node, pattern, source, schema) in patterns {
+            let entry = self.entry(&location, source, vec![schema])?;
+            key_patterns.push(KeyPattern { node, pattern, entry });
+        }
+        let mut catches = Vec::with_capacity(catch_alls.len());
+        for (node, names, schema) in catch_alls {
+            let entry = self.entry(&location, "additionalProperties", vec![schema])?;
+            catches.push(CatchAll { node, names, entry });
+        }
         let longest = arrays.iter().map(|(prefix, _)| prefix.len()).max().unwrap_or(0);
         let mut prefix = Vec::with_capacity(longest);
         for index in 0..longest {
-            let at: Vec<String> =
-                arrays.iter().filter_map(|(prefix, items)| prefix.get(index).or(items.as_ref()).cloned()).collect();
+            let at: Vec<Reached> =
+                arrays.iter().filter_map(|(prefix, items)| prefix.get(index).or(items.as_ref()).copied()).collect();
             prefix.push(if at.is_empty() { None } else { self.scope(&at)? });
         }
-        let rest: Vec<String> = arrays.into_iter().filter_map(|(_, items)| items).collect();
+        let rest: Vec<Reached> = arrays.into_iter().filter_map(|(_, items)| items).collect();
         let rest = if rest.is_empty() { None } else { self.scope(&rest)? };
-        self.scopes[id] = Scope { properties, additional, prefix, rest };
+        self.scopes[id] =
+            Scope { pointer: location, properties, required, patterns: key_patterns, catch_alls: catches, prefix, rest };
         Ok(Some(id))
     }
 
-    /// Whether the node at `pointer` describes an object's or an array's
-    /// members.
-    fn is_structural(&self, pointer: &str) -> bool {
-        self.node(pointer).is_some_and(|map| {
-            ["properties", "required", "additionalProperties", "items", "prefixItems"].iter().any(|key| map.contains_key(*key))
-        })
+    /// The child location and the one default of the schemas at
+    /// `definitions`, which all select the key `name` at `location`.
+    fn entry(&mut self, location: &str, name: &str, definitions: Vec<Reached>) -> Result<Entry, SchemaError> {
+        let child = self.scope(&definitions)?;
+        let default = self.declared(location, name, &definitions)?;
+        let definitions = definitions
+            .into_iter()
+            .map(|Reached { pointer, arm }| Definition {
+                pointer: self.text(pointer).to_string(),
+                arm: self.spell(arm),
+                validator: OnceLock::new(),
+            })
+            .collect();
+        Ok(Entry { child, default, definitions })
+    }
+
+    fn is_structural(&self, pointer: u32) -> bool {
+        self.pointers[pointer as usize].structural
     }
 
     /// The one default the property `name` declares across `definitions`,
     /// its declarations at the location whose first node is `location`.
-    fn declared(&self, location: &str, name: &str, definitions: Vec<String>) -> Result<Option<Declared>, SchemaError> {
+    fn declared(&mut self, location: &str, name: &str, definitions: &[Reached]) -> Result<Option<Declared>, SchemaError> {
         let mut found: Vec<(&'s Value, String)> = Vec::new();
-        let mut declaring = Vec::new();
+        let mut arms: Vec<u32> = Vec::new();
         for definition in definitions {
+            let expansion = self.expansion(*definition)?;
             let mut held = false;
-            for node in self.expand_all(std::slice::from_ref(&definition))? {
-                if let Some(value) = self.node(&node).and_then(|map| map.get("default")) {
+            for node in expansion.iter() {
+                if let Some(value) = self.node(node.pointer).and_then(|map| map.get("default")) {
                     held = true;
-                    found.push((value, format!("{node}/default")));
+                    found.push((value, format!("{}/default", self.text(node.pointer))));
                 }
             }
-            if held {
-                declaring.push(definition);
+            if held && !arms.contains(&definition.arm) {
+                arms.push(definition.arm);
             }
         }
         let Some((first, pointer)) = found.first().cloned() else {
@@ -370,7 +878,8 @@ impl<'s> Compiler<'s> {
                 declarations: found.into_iter().map(|(_, pointer)| pointer).collect(),
             });
         }
-        Ok(Some(Declared { value: first.clone(), pointer, definitions: declaring, validators: OnceLock::new() }))
+        let arms = arms.into_iter().map(|arm| self.spell(arm)).collect();
+        Ok(Some(Declared { value: first.clone(), pointer, arms }))
     }
 }
 
@@ -382,7 +891,28 @@ impl<'s> Compiler<'s> {
 ///
 /// As [`DefaultPlan::compile`].
 pub(crate) fn check_declarations(schema: &Value) -> Result<(), SchemaError> {
-    Compiler::run(schema).map(drop)
+    let digest = biscuit_hash::xx_hash_json(schema);
+    if CHECKED.lock().expect("checked declarations poisoned").contains(&digest) {
+        return Ok(());
+    }
+    // Arms only decide which definitions a used default is checked against,
+    // which is preparation's step. Without them each location is compiled
+    // once instead of once per arm reaching it (about 13 times fewer
+    // locations for the lifecycle baseline), and every set of nodes compiled
+    // with arms is still compiled, so every conflicting declaration is still
+    // met. Expansion fails only on a reference loop, but whether it meets
+    // one depends on how often it meets a node; a loop or any refusal is
+    // therefore decided, and reported, by the compilation with arms.
+    let mut compiler = Compiler::new(schema, false);
+    if compiler.root_scope().is_err() || compiler.loops() {
+        Compiler::run(schema)?;
+    }
+    let mut checked = CHECKED.lock().expect("checked declarations poisoned");
+    if checked.len() >= CHECKED_CAPACITY {
+        checked.clear();
+    }
+    checked.insert(digest);
+    Ok(())
 }
 
 // ── Application ───────────────────────────────────────────────────────────
@@ -404,55 +934,82 @@ struct Insertion {
 struct Fill<'a> {
     plan: &'a DefaultPlan,
     templates: &'a NestedTemplates,
-    /// The defaults being expanded, as `(location, property index)`: meeting
-    /// one again inside its own expansion would never end.
-    active: Vec<(usize, usize)>,
+    /// The `default` keywords being expanded: meeting one again inside its
+    /// own expansion would never end.
+    active: Vec<&'a str>,
     out: Vec<Insertion>,
 }
 
-impl Fill<'_> {
-    fn visit(&mut self, location: usize, value: &Value, steps: &mut Vec<Step>) -> Result<(), SchemaError> {
+/// Every schema that selects one key of an object, across all the
+/// locations describing that object: the key's one property definition.
+struct Selection<'a> {
+    required: bool,
+    entries: Vec<&'a Entry>,
+}
+
+impl Selection<'_> {
+    /// The locations describing the key's value.
+    fn children(&self) -> Vec<usize> {
+        let mut children: Vec<usize> = Vec::with_capacity(self.entries.len());
+        for child in self.entries.iter().filter_map(|entry| entry.child) {
+            if !children.contains(&child) {
+                children.push(child);
+            }
+        }
+        children
+    }
+}
+
+impl<'a> Fill<'a> {
+    /// Completes `value`, described by every location in `locations` at
+    /// once.
+    fn visit(&mut self, locations: &[usize], value: &Value, steps: &mut Vec<Step>) -> Result<(), SchemaError> {
         if !self.templates.is_empty() && self.templates.holds(&instance_pointer(steps)) {
             return Ok(());
         }
-        let plan = self.plan;
-        let scope = &plan.scopes[location];
+        let plan: &'a DefaultPlan = self.plan;
+        let scopes = || locations.iter().map(|location| &plan.scopes[*location]);
         match value {
             Value::Object(object) => {
-                for (index, property) in scope.properties.iter().enumerate() {
-                    steps.push(Step::Key(property.name.clone()));
-                    let result = match object.get(&property.name) {
-                        Some(child) if !child.is_null() => match property.child {
-                            Some(child_location) => self.visit(child_location, child, steps),
-                            None => Ok(()),
-                        },
-                        written => self.fill(location, index, property, written.is_some(), steps),
-                    };
-                    steps.pop();
-                    result?;
+                let mut named: Vec<&'a str> = Vec::new();
+                // A name listed only in `required` is named too: the schemas
+                // selecting it (a pattern, a catch-all) may default it.
+                let names = scopes().flat_map(|scope| {
+                    scope.properties.iter().map(|property| property.name.as_str()).chain(scope.required.iter().map(String::as_str))
+                });
+                for name in names {
+                    if !named.contains(&name) {
+                        named.push(name);
+                    }
                 }
-                if let Some(additional) = scope.additional {
-                    for (key, child) in object {
-                        if scope.properties.iter().any(|property| property.name == *key) {
-                            continue;
-                        }
-                        steps.push(Step::Key(key.clone()));
-                        let result = self.visit(additional, child, steps);
-                        steps.pop();
-                        result?;
+                for name in &named {
+                    self.key(locations, name, object.get(*name), steps)?;
+                }
+                // A dictionary selector describes only a key that is there.
+                for (key, child) in object {
+                    if !named.contains(&key.as_str()) {
+                        self.key(locations, key, Some(child), steps)?;
                     }
                 }
                 Ok(())
             }
             Value::Array(items) => {
                 for (index, item) in items.iter().enumerate() {
-                    let at = match scope.prefix.get(index) {
+                    let mut at: Vec<usize> = Vec::with_capacity(locations.len());
+                    let found = scopes().filter_map(|scope| match scope.prefix.get(index) {
                         Some(at) => *at,
                         None => scope.rest,
-                    };
-                    let Some(at) = at else { continue };
+                    });
+                    for location in found {
+                        if !at.contains(&location) {
+                            at.push(location);
+                        }
+                    }
+                    if at.is_empty() {
+                        continue;
+                    }
                     steps.push(Step::Index(index));
-                    let result = self.visit(at, item, steps);
+                    let result = self.visit(&at, item, steps);
                     steps.pop();
                     result?;
                 }
@@ -462,14 +1019,64 @@ impl Fill<'_> {
         }
     }
 
-    /// Fills `property`, whose value at `steps` is missing or (when
-    /// `written`) `null`, from its default, then completes the default's own
-    /// children.
-    fn fill(&mut self, location: usize, index: usize, property: &Property, written: bool, steps: &mut Vec<Step>) -> Result<(), SchemaError> {
-        let Some(default) = &property.default else {
+    /// Every schema selecting `key` in an object described by `locations`:
+    /// a location's literal property when it names the key (that already
+    /// merges the location's matching patterns and catch-alls), otherwise
+    /// its matching patterns and the catch-alls that select the key.
+    fn select(&self, locations: &[usize], key: &str) -> Selection<'a> {
+        let plan: &'a DefaultPlan = self.plan;
+        let mut selection = Selection { required: false, entries: Vec::new() };
+        for scope in locations.iter().map(|location| &plan.scopes[*location]) {
+            selection.required |= scope.required.iter().any(|name| name == key);
+            match scope.properties.iter().find(|property| property.name == key) {
+                Some(property) => selection.entries.push(&property.entry),
+                None => {
+                    selection.entries.extend(scope.patterns.iter().filter(|entry| entry.pattern.is_match(key)).map(|entry| &entry.entry));
+                    selection.entries.extend(
+                        scope.catch_alls.iter().filter(|catch_all| scope.catches(catch_all, key)).map(|catch_all| &catch_all.entry),
+                    );
+                }
+            }
+        }
+        selection
+    }
+
+    /// Prepares the value of `key`, which the object holds as `written`.
+    fn key(&mut self, locations: &[usize], key: &str, written: Option<&Value>, steps: &mut Vec<Step>) -> Result<(), SchemaError> {
+        let selection = self.select(locations, key);
+        if selection.entries.is_empty() {
+            return Ok(());
+        }
+        steps.push(Step::Key(key.to_string()));
+        let result = match written {
+            Some(value) if !value.is_null() => {
+                let children = selection.children();
+                if children.is_empty() { Ok(()) } else { self.visit(&children, value, steps) }
+            }
+            written => self.fill(locations, key, &selection, written.is_some(), steps),
+        };
+        steps.pop();
+        result
+    }
+
+    /// Fills `key`, whose value at `steps` is missing or (when `written`)
+    /// `null`, from its selection's one default, then completes the default's
+    /// own children.
+    fn fill(&mut self, locations: &[usize], key: &str, selection: &Selection<'a>, written: bool, steps: &mut Vec<Step>) -> Result<(), SchemaError> {
+        let declared: Vec<&'a Declared> = selection.entries.iter().filter_map(|entry| entry.default.as_ref()).collect();
+        let Some(&first) = declared.first() else {
             return Ok(());
         };
-        if default.value.is_null() && (written || !property.required) {
+        // Schemas chosen by the key alone (patterns, catch-alls) meet here
+        // first, so their disagreement is refused per key, never by order.
+        if declared.iter().any(|other| other.value != first.value) {
+            return Err(SchemaError::ConflictingDefaults {
+                pointer: self.plan.scopes[locations[0]].pointer.clone(),
+                property: key.to_string(),
+                declarations: declared.iter().map(|other| other.pointer.clone()).collect(),
+            });
+        }
+        if first.value.is_null() && (written || !selection.required) {
             return Ok(());
         }
         let Some(path) = property_path(steps) else {
@@ -477,44 +1084,145 @@ impl Fill<'_> {
             // segments) cannot be reported, so the property stays as it is.
             return Ok(());
         };
-        if self.active.contains(&(location, index)) {
-            return Err(SchemaError::RecursiveDefault { path: Some(path), reference: default.pointer.clone() });
+        if let Some(active) = declared.iter().find(|other| self.active.contains(&other.pointer.as_str())) {
+            return Err(SchemaError::RecursiveDefault { path: Some(path), reference: active.pointer.clone() });
         }
-        self.check(default, path)?;
-        self.out.push(Insertion { steps: steps.clone(), value: default.value.clone() });
-        if let Some(child) = property.child {
-            self.active.push((location, index));
-            let result = self.visit(child, &default.value, steps);
-            self.active.pop();
+        self.check(selection, &declared, key, path)?;
+        self.out.push(Insertion { steps: steps.clone(), value: first.value.clone() });
+        let children = selection.children();
+        if !children.is_empty() {
+            let depth = self.active.len();
+            self.active.extend(declared.iter().map(|other| other.pointer.as_str()));
+            let result = self.visit(&children, &first.value, steps);
+            self.active.truncate(depth);
             result?;
         }
         Ok(())
     }
 
-    /// Checks `default`, about to stand at `path`, against every definition
-    /// that declares it.
-    fn check(&self, default: &Declared, path: PropertyPath) -> Result<(), SchemaError> {
-        let validators = match default.validators.get() {
-            Some(validators) => validators,
-            None => {
-                let built = default
-                    .definitions
-                    .iter()
-                    .filter_map(|definition| self.plan.schema.pointer(definition))
-                    .map(|definition| self.structural(definition))
-                    .collect::<Result<Vec<_>, SchemaError>>()?;
-                default.validators.get_or_init(|| built)
+    /// Checks the one default of `declared` (equal values), about to stand
+    /// as `key` at `path` with its children not yet completed, within the
+    /// arm of each definition declaring it (see [`Fill::accepts`]).
+    fn check(&self, selection: &Selection<'a>, declared: &[&'a Declared], key: &str, path: PropertyPath) -> Result<(), SchemaError> {
+        let first = declared[0];
+        let definitions: Vec<&'a Definition> = selection.entries.iter().flat_map(|entry| entry.definitions.iter()).collect();
+        let mut verdicts: HashMap<&'a str, Vec<String>> = HashMap::new();
+        let mut failed: Vec<&'a str> = Vec::new();
+        for arm in declared.iter().flat_map(|default| default.arms.iter()) {
+            let context: Vec<(&str, usize)> = arm.iter().map(|(union, index)| (union.as_str(), *index)).collect();
+            let applicable: Vec<&'a Definition> =
+                definitions.iter().copied().filter(|definition| !conflicts(&definition.arm, &context)).collect();
+            self.accepts(&first.value, key, &context, applicable, &mut verdicts, &mut failed)?;
+        }
+        let mut reported: Vec<&str> = Vec::new();
+        let mut messages: Vec<&str> = Vec::new();
+        for pointer in failed {
+            if !reported.contains(&pointer) {
+                reported.push(pointer);
+                messages.extend(verdicts[pointer].iter().map(String::as_str));
             }
-        };
-        let messages: Vec<String> = validators
-            .iter()
-            .flat_map(|validator| validator.iter_errors(&default.value).map(|error| error.to_string()).collect::<Vec<_>>())
-            .collect();
+        }
         if messages.is_empty() {
             Ok(())
         } else {
-            Err(SchemaError::InvalidDefault { path, pointer: default.pointer.clone(), message: messages.join("; ") })
+            Err(SchemaError::InvalidDefault { path, pointer: first.pointer.clone(), message: messages.join("; ") })
         }
+    }
+
+    /// Whether `value` satisfies `definitions` (none on a member of a union
+    /// other than the one `context` chooses) given the union choices in
+    /// `context`: every definition whose arm lies within `context`, and, for
+    /// each union `context` makes no choice in, at least one member, judged
+    /// the same way with that member chosen. Independent unions are each
+    /// required; a member no definition reaches accepts only when it admits
+    /// an object holding `key` (see [`admits_key`]): the object exists, so a
+    /// member that cannot describe it, or denies the key, is no alternative.
+    /// Pushes the pointer
+    /// of every failing definition of a failing group to `failed`; each
+    /// definition is validated once, into `verdicts`.
+    fn accepts(
+        &self,
+        value: &Value,
+        key: &str,
+        context: &[(&str, usize)],
+        definitions: Vec<&'a Definition>,
+        verdicts: &mut HashMap<&'a str, Vec<String>>,
+        failed: &mut Vec<&'a str>,
+    ) -> Result<bool, SchemaError> {
+        let (inside, mut rest): (Vec<&'a Definition>, Vec<&'a Definition>) =
+            definitions.into_iter().partition(|definition| definition.arm.iter().all(|(union, _)| chosen(context, union)));
+        let mut accepted = true;
+        for definition in inside {
+            if !self.verdict(value, definition, verdicts)?.is_empty() {
+                accepted = false;
+                failed.push(&definition.pointer);
+            }
+        }
+        // Each definition left is on a member of a union `context` does not
+        // choose; the first such union of the first one is judged as a
+        // group, the definitions on no member of it afterwards.
+        while let Some(union) =
+            rest.first().and_then(|definition| definition.arm.iter().find(|(union, _)| !chosen(context, union))).map(|(union, _)| union.as_str())
+        {
+            let (group, others): (Vec<&'a Definition>, Vec<&'a Definition>) =
+                rest.into_iter().partition(|definition| definition.arm.iter().any(|(other, _)| other == union));
+            rest = others;
+            let members = self.plan.schema.pointer(union).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+            let mut member_failures: Vec<&'a str> = Vec::new();
+            let mut any = members.is_empty();
+            for (index, member) in members.iter().enumerate() {
+                let on: Vec<&'a Definition> = group
+                    .iter()
+                    .copied()
+                    .filter(|definition| definition.arm.iter().any(|(other, at)| other == union && *at == index))
+                    .collect();
+                if on.is_empty() {
+                    if !admits_key(self.plan.schema.as_ref(), member, key, &mut Vec::new()) {
+                        continue;
+                    }
+                    any = true;
+                    break;
+                }
+                let mut within_member = context.to_vec();
+                within_member.push((union, index));
+                if self.accepts(value, key, &within_member, on, verdicts, &mut member_failures)? {
+                    any = true;
+                    break;
+                }
+            }
+            if !any {
+                accepted = false;
+                failed.extend(member_failures);
+            }
+        }
+        Ok(accepted)
+    }
+
+    /// The structural validator's messages for `value` against `definition`,
+    /// computed once per check.
+    fn verdict<'v>(
+        &self,
+        value: &Value,
+        definition: &'a Definition,
+        verdicts: &'v mut HashMap<&'a str, Vec<String>>,
+    ) -> Result<&'v [String], SchemaError> {
+        if !verdicts.contains_key(definition.pointer.as_str()) {
+            let messages = match self.plan.schema.pointer(&definition.pointer) {
+                None => Vec::new(),
+                Some(schema) => {
+                    let validator = match definition.validator.get() {
+                        Some(validator) => validator,
+                        None => {
+                            let built = self.structural(schema)?;
+                            definition.validator.get_or_init(|| built)
+                        }
+                    };
+                    validator.iter_errors(value).map(|error| error.to_string()).collect()
+                }
+            };
+            verdicts.insert(&definition.pointer, messages);
+        }
+        Ok(&verdicts[definition.pointer.as_str()])
     }
 
     /// A structural validator for `schema` as a root of its own, the root's
@@ -529,20 +1237,14 @@ impl Fill<'_> {
     }
 }
 
-/// `instance` with `insertions` applied, each first occurrence of a path
-/// only, and the defaults that were.
+/// `instance` with `insertions` applied (each names a different path) and
+/// the defaults that were.
 fn finish(instance: Cow<'_, Value>, insertions: Vec<Insertion>) -> DefaultPreparation<'_> {
-    let mut unique: Vec<Insertion> = Vec::with_capacity(insertions.len());
-    for insertion in insertions {
-        if !unique.iter().any(|seen| seen.steps == insertion.steps) {
-            unique.push(insertion);
-        }
-    }
-    if unique.is_empty() {
+    if insertions.is_empty() {
         return DefaultPreparation { candidate: instance, defaults: Vec::new() };
     }
-    let candidate = apply(instance.into_owned(), &unique);
-    let defaults = unique
+    let candidate = apply(instance.into_owned(), &insertions);
+    let defaults = insertions
         .into_iter()
         .filter_map(|insertion| Some(AppliedDefault { path: property_path(&insertion.steps)?, value: insertion.value }))
         .collect();
@@ -598,6 +1300,72 @@ fn instance_pointer(steps: &[Step]) -> String {
 /// `key` as one JSON Pointer reference token.
 fn escape(key: &str) -> String {
     key.replace('~', "~0").replace('/', "~1")
+}
+
+/// Whether the union member `schema` admits nothing but `null`.
+fn admits_only_null(schema: &Value) -> bool {
+    schema.get("const").is_some_and(Value::is_null)
+        || match schema.get("type") {
+            Some(Value::String(kind)) => kind == "null",
+            Some(Value::Array(kinds)) => !kinds.is_empty() && kinds.iter().all(|kind| kind == "null"),
+            _ => false,
+        }
+}
+
+/// Whether the union member `schema`, which defines nothing for `key`,
+/// admits an object holding `key`, judged from its static form alone: its
+/// `type`, `const` and `enum` allow an object, it is not `false`, and an
+/// `additionalProperties: false` beside it does not deny a key that no
+/// `properties` entry or pattern of its own names. Local `$ref` targets and
+/// `allOf` members must each admit it; a nested `anyOf`/`oneOf` admits when
+/// one member does. Anything else (an open object, an unresolvable
+/// reference) admits: only what the schema states excludes a member.
+fn admits_key(root: &Value, schema: &Value, key: &str, seen: &mut Vec<*const Value>) -> bool {
+    let map = match schema {
+        Value::Bool(admits) => return *admits,
+        Value::Object(map) => map,
+        _ => return true,
+    };
+    if seen.contains(&std::ptr::from_ref(schema)) {
+        return true;
+    }
+    seen.push(std::ptr::from_ref(schema));
+    let admitted = admits_key_here(root, map, key, seen);
+    seen.pop();
+    admitted
+}
+
+/// [`admits_key`] for the object schema `map`, already on the path `seen`.
+fn admits_key_here(root: &Value, map: &serde_json::Map<String, Value>, key: &str, seen: &mut Vec<*const Value>) -> bool {
+    let object_type = match map.get("type") {
+        Some(Value::String(kind)) => kind == "object",
+        Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind == "object"),
+        _ => true,
+    };
+    let object_value = map.get("const").is_none_or(Value::is_object)
+        && map.get("enum").and_then(Value::as_array).is_none_or(|values| values.iter().any(Value::is_object));
+    let denied = map.get("additionalProperties") == Some(&Value::Bool(false))
+        && !map.get("properties").and_then(Value::as_object).is_some_and(|names| names.contains_key(key))
+        && !map
+            .get("patternProperties")
+            .and_then(Value::as_object)
+            .is_some_and(|patterns| patterns.keys().any(|source| key_pattern(source).is_none_or(|pattern| pattern.is_match(key))));
+    if !object_type || !object_value || denied {
+        return false;
+    }
+    let target = match map.get("$ref") {
+        Some(Value::String(reference)) => reference.strip_prefix('#').and_then(|pointer| root.pointer(pointer)),
+        _ => None,
+    };
+    if target.is_some_and(|target| !admits_key(root, target, key, seen)) {
+        return false;
+    }
+    let members = |keyword: &str| map.get(keyword).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    members("allOf").iter().all(|member| admits_key(root, member, key, seen))
+        && ["anyOf", "oneOf"].iter().all(|keyword| {
+            let alternatives = members(keyword);
+            alternatives.is_empty() || alternatives.iter().any(|member| admits_key(root, member, key, seen))
+        })
 }
 
 /// Whether `schema` holds a `$ref` anywhere.
@@ -674,22 +1442,12 @@ mod tests {
 
     #[test]
     fn an_insertion_below_a_missing_parent_is_dropped() {
-        let insertion = Insertion { steps: vec![Step::Key("gone".into()), Step::Key("a".into())], value: json!(1) };
+        let insertion =
+            Insertion { steps: vec![Step::Key("gone".into()), Step::Key("a".into())], value: json!(1) };
 
         let value = apply(json!({ "kept": true }), &[insertion]);
 
         assert_eq!(value, json!({ "kept": true }));
-    }
-
-    #[test]
-    fn the_first_occurrence_of_a_path_wins() {
-        let first = Insertion { steps: vec![Step::Key("a".into())], value: json!(1) };
-        let second = Insertion { steps: vec![Step::Key("a".into())], value: json!(2) };
-
-        let prepared = finish(Cow::Owned(json!({})), vec![first, second]);
-
-        assert_eq!(prepared.candidate.into_owned(), json!({ "a": 1 }));
-        assert_eq!(prepared.defaults.len(), 1);
     }
 
     #[test]
@@ -737,6 +1495,28 @@ mod tests {
         let prepared = prepare(schema, &input).unwrap();
 
         assert!(matches!(prepared.candidate, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn check_declarations_decides_reference_loops_as_compilation_does() {
+        let schemas = [
+            json!({ "$defs": { "a": { "$ref": "#/$defs/b" }, "b": { "$ref": "#/$defs/a" } }, "$ref": "#/$defs/a" }),
+            // Entered at the loop's member, expansion returns to it as a
+            // member, never meeting a reference to a node on its chain.
+            json!({
+                "$defs": { "p": { "allOf": [{ "$ref": "#/$defs/q" }] }, "q": { "$ref": "#/$defs/p" } },
+                "type": "object",
+                "properties": { "a": { "$ref": "#/$defs/p/allOf/0" } },
+            }),
+        ];
+
+        for schema in schemas {
+            let mut without_arms = Compiler::new(&schema, false);
+            assert!(without_arms.root_scope().is_err() || without_arms.loops(), "{schema}");
+            let compiled = DefaultPlan::compile(Arc::new(schema.clone()), &ValidatorCache::new()).map(|_| ());
+
+            assert_eq!(format!("{:?}", check_declarations(&schema)), format!("{compiled:?}"), "{schema}");
+        }
     }
 
     #[test]

@@ -19,9 +19,10 @@
 # item may be a conditional, so every family's cycle runs stack -> item[] ->
 # conditional -> then/else -> stack through child values, and `entry`, which
 # is not recursive, is inlined at both of its references. A root or body
-# dictionary's `when` beside its actions passes the schema, as a bundle's did
-# before single-action dictionaries were typed; the lifecycle parser alone
-# refuses it.
+# dictionary's `when` beside its actions passes these types, as a bundle's
+# did before single-action dictionaries were typed; validation refuses it
+# with the lifecycle parser's own placement rules, which it applies to every
+# action dictionary.
 #
 # A loop's loose verb keys are a bundle of short forms (`loop-bundle`) or a
 # single action in either form (`loop-single`, typed like a category), beside

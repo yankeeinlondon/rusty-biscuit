@@ -60,8 +60,9 @@ A default is checked against the property's complete definition when a
 value needs it, constraints and nested required children included:
 `number(min(5); default(3))` is a schema error as soon as a value leaves
 `retries` unset. Two different defaults for one property, for example on two
-union arms, are a schema error before any value is judged. Nested
-properties, lists, `null` defaults, unions, and slots each have a rule; see
+union arms, are a schema error before any value is judged (a key selected
+only by patterns or catch-alls is the exception, judged when that key needs
+its default). Nested properties, lists, `null` defaults, unions, and slots each have a rule; see
 [Applying defaults](./validation.md#applying-defaults).
 
 ### Limit: other JSON Schema validators

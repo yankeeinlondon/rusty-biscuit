@@ -165,8 +165,10 @@ composed:
       no_error: true     # error: `no_error` is set both beside `edit` and inside it
 ```
 
-`md compose` refuses that document before any event fires. `md schema
-validate` and DMLS judge each placement on its own, so they accept it.
+`md compose` refuses that document before any event fires, and `md schema
+validate` and DMLS report the same error at the inner flag. They also report
+the other placement errors the parser refuses: a flag beside `then`, a flag
+on `set` (even `null`), and a `when` with nothing to guard.
 
 A **filled default** is a different thing. Schema validation completes every
 place an action can carry the flag with `no_error: false`, so

@@ -281,7 +281,9 @@ impl Prepared {
     ///
     /// [`ValidationFailure`] with every problem found, or
     /// [`ValidationFailure::Unprepared`] for a used default that breaks its
-    /// own definition.
+    /// own definition or expands without end, or for a key whose selecting
+    /// patterns or catch-alls declare different defaults (see
+    /// [`crate::defaults::prepare_defaults`]).
     pub fn validate_strict<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
         let prepared = self.complete(Cow::Borrowed(value))?;
         self.judge(prepared).map(|success| ValidationSuccess { value: Cow::Borrowed(value), ..success })
@@ -298,7 +300,9 @@ impl Prepared {
     /// [`ValidationFailure`] with every problem left after conversion. A
     /// failure never carries the partially converted value.
     /// [`ValidationFailure::Unprepared`] for a used default that breaks its
-    /// own definition.
+    /// own definition or expands without end, or for a key whose selecting
+    /// patterns or catch-alls declare different defaults (see
+    /// [`crate::defaults::prepare_defaults`]).
     pub fn validate_soft<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
         // Defaults go in before conversion: conversion commits a nested value
         // only once the complete schema accepts it, which a missing required

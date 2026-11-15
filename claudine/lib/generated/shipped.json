@@ -22,7 +22,7 @@
     },
     {
       "identity": "claudine/lifecycle.yaml",
-      "digest": "a3e19f3a8aa2d8e6"
+      "digest": "70adacdeec3220a2"
     },
     {
       "identity": "claudine/linking.yaml",
@@ -45,7 +45,7 @@
     {
       "owner": "darkmatter",
       "preparation_revision": 4,
-      "digest": "2ae8f787802ca706"
+      "digest": "309162b10e7cb72d"
     },
     {
       "owner": "simplified-schema",

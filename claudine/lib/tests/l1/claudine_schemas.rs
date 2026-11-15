@@ -2649,25 +2649,114 @@ fn loops_take_a_single_loose_long_form_and_gate_dictionaries() {
     );
 }
 
-/// What the schema leaves to the parser at a dictionary: `when` beside the
-/// actions of a stack root or body, which a bundle admitted before
-/// single-action dictionaries were typed and a category admits now;
-/// `no_error` written both beside and inside a long form; and a guarded item
-/// holding no action, which the bundle type admits.
+/// The parser's placement and branch-shape rules at a dictionary, which
+/// schema validation runs on the authored value too: `when` beside the
+/// actions of a stack root or body; `no_error` written both beside and inside
+/// a long form; and a guarded item holding no action.
 #[test]
-fn single_action_placement_rules_stay_the_parsers() {
+fn single_action_placement_rules_are_judged_alike_by_schema_and_parser() {
     let judge = SingleActionJudge::new();
-    for (frontmatter, needle) in [
-        ("start: { when: \"fm.ready\", info: hi }", "never carries `when`"),
-        ("start: { when: \"fm.ready\", ensure_file: { file: a.md } }", "never carries `when`"),
-        ("start: { ensure_file: { file: a.md, no_error: true }, no_error: true }", "both beside"),
-        ("start: [{ when: \"fm.ready\", no_error: true }]", "needs `then` or sibling actions"),
+    for (frontmatter, pointer, needle) in [
+        ("start: { when: \"fm.ready\", info: hi }", "/start/when", "never carries `when`"),
+        ("start: { when: \"fm.ready\", ensure_file: { file: a.md } }", "/start/when", "never carries `when`"),
+        ("start: { ensure_file: { file: a.md, no_error: true }, no_error: true }", "/start/ensure_file/no_error", "both beside"),
+        ("start: [{ when: \"fm.ready\", no_error: true }]", "/start/0", "needs `then` or sibling actions"),
     ] {
-        let (valid, found, parsed) = judge.verdicts(frontmatter);
-        assert!(valid, "the schema leaves `{frontmatter}` to the parser: {found:?}");
-        let error = parsed.expect_err(frontmatter);
-        assert!(error.contains(needle), "`{frontmatter}`: `{needle}` in {error}");
+        judge.assert_both_reject(frontmatter, pointer, needle);
     }
+}
+
+/// The three event families, each with an event that uses it.
+const FAMILY_EVENTS: [&str; 3] = ["start", "initialize", "cancelled"];
+
+/// An authored `no_error` beside `then`, `false` included, is refused by
+/// the schema as by the parser in every family's conditional
+/// (`conditional`, `initialize-conditional`, `cancelled-conditional`); an
+/// absent or `null` one passes both.
+#[test]
+fn an_authored_flag_beside_then_is_refused_in_every_family() {
+    let judge = SingleActionJudge::new();
+    for event in FAMILY_EVENTS {
+        for flag in ["false", "true"] {
+            let frontmatter = format!("{event}: [{{ when: \"fm.ready\", then: [stop], no_error: {flag} }}]");
+            judge.assert_both_reject(&frontmatter, &format!("/{event}/0"), "cannot sit beside `then`/`else`");
+        }
+        let nested = format!("{event}: [{{ when: \"fm.ready\", then: [{{ when: \"fm.ready\", then: [stop], no_error: false }}] }}]");
+        judge.assert_both_reject(&nested, &format!("/{event}/0/then/0"), "cannot sit beside `then`/`else`");
+        judge.assert_both_accept(&format!("{event}: [{{ when: \"fm.ready\", then: [stop] }}]"));
+        judge.assert_both_accept(&format!("{event}: [{{ when: \"fm.ready\", then: [stop], no_error: null }}]"));
+    }
+}
+
+/// Two authored placements of one flag on `info` are refused by both in
+/// every family, as a list item, a stack root, and a branch body; one
+/// placement passes both.
+#[test]
+fn duplicate_flags_are_refused_in_every_family() {
+    let judge = SingleActionJudge::new();
+    for event in FAMILY_EVENTS {
+        for (frontmatter, pointer) in [
+            (format!("{event}: [{{ info: {{ text: hi, no_error: false }}, no_error: false }}]"), format!("/{event}/0/info/no_error")),
+            (format!("{event}: {{ info: {{ text: hi, no_error: true }}, no_error: true }}"), format!("/{event}/info/no_error")),
+            (
+                format!("{event}: [{{ when: \"fm.ready\", then: {{ info: {{ text: hi, no_error: 'yes' }}, no_error: false }} }}]"),
+                format!("/{event}/0/then/info/no_error"),
+            ),
+        ] {
+            judge.assert_both_reject(&frontmatter, &pointer, "set both beside `info` and inside it");
+        }
+        judge.assert_both_accept(&format!("{event}: [{{ info: {{ text: hi }}, no_error: true }}]"));
+        judge.assert_both_accept(&format!("{event}: [{{ info: {{ text: hi, no_error: true }} }}]"));
+    }
+}
+
+/// A `when` with nothing to guard is refused by both in every family, with
+/// or without a flag beside it.
+#[test]
+fn a_bare_when_is_refused_in_every_family() {
+    let judge = SingleActionJudge::new();
+    for event in FAMILY_EVENTS {
+        judge.assert_both_reject(&format!("{event}: [{{ when: \"fm.ready\" }}]"), &format!("/{event}/0"), "needs `then` or sibling actions");
+        judge.assert_both_reject(
+            &format!("{event}: [{{ when: \"fm.ready\", then: [{{ when: \"fm.ready\" }}] }}]"),
+            &format!("/{event}/0/then/0"),
+            "needs `then` or sibling actions",
+        );
+        judge.assert_both_accept(&format!("{event}: [{{ when: \"fm.ready\", info: hi }}]"));
+    }
+}
+
+/// A typed action's flag follows the flag rule in both checks: a number is
+/// refused, at the flag, beside the action and inside its long form; text
+/// that reads as a boolean passes.
+#[test]
+fn a_typed_actions_numeric_flag_is_refused_by_both() {
+    let judge = SingleActionJudge::new();
+    for (frontmatter, pointer) in [
+        ("start: [{ info: { text: hi, no_error: 1 } }]", "/start/0/info"),
+        ("start: [{ ensure_file: { file: a.md, no_error: 1 } }]", "/start/0/ensure_file"),
+        ("start: [{ info: hi, no_error: 1 }]", "/start/0"),
+        ("cancelled: [{ stop: { no_error: 1 } }]", "/cancelled/0/stop"),
+    ] {
+        judge.assert_both_reject(frontmatter, pointer, "no_error");
+    }
+    judge.assert_both_accept("start: [{ ensure_file: { file: a.md, no_error: 'yes' } }]");
+    judge.assert_both_accept("start: [{ info: hi, no_error: 'no' }]");
+}
+
+/// A loop's loose verbs follow the bundle rules: a flag written beside and
+/// inside its single long form is refused by both, and `set` takes no flag.
+#[test]
+fn a_loops_loose_verbs_follow_the_placement_rules() {
+    let judge = SingleActionJudge::new();
+    judge.assert_both_reject(
+        "loop: { until: \"{{ true }}\", ensure_file: { file: review.txt, no_error: true }, no_error: true }",
+        "/loop/ensure_file/no_error",
+        "both beside",
+    );
+    judge.assert_both_reject("loop: { until: \"{{ true }}\", set: { done: true }, no_error: false }", "/loop/no_error", "does not apply to `set`");
+    judge.assert_both_accept("loop: { until: \"{{ true }}\", set: { done: true } }");
+    judge.assert_both_accept("loop: { until: \"{{ true }}\", ensure_file: { file: review.txt, no_error: true } }");
 }
 
 

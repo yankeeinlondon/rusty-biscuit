@@ -7641,13 +7641,13 @@
         {
           "type": "array",
           "items": {},
-          "description": "a list of actions, checked only by the lifecycle parser"
+          "description": "a list of actions; validation checks their placements and flags, the lifecycle parser their verbs"
         },
         {
           "type": "object",
           "additionalProperties": {},
           "properties": {},
-          "description": "a dictionary of verbs, checked only by the lifecycle parser"
+          "description": "a dictionary of verbs; validation checks its placements and flags, the lifecycle parser its verbs"
         }
       ]
     },
