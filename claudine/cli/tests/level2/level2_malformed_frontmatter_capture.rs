@@ -43,7 +43,7 @@ fn stage(name: &str) -> Staged {
 
     let claudine_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
     let launch_count = workspace.path().join("provider-launched.txt");
     write_provider_stub(&bin_dir);

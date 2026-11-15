@@ -549,6 +549,119 @@ fn conforms_schema_validate_success() {
 }
 
 #[test]
+fn conforms_schema_validate_reports_the_defaults_it_relied_on() {
+    let fixture = with_document("output-validate-defaults", "---\n$schema:\n  greeting: string(required; default(hello))\n---\n# H\n");
+    let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "doc.md", "--output", "json"], 0);
+    let record = &value["files"][0];
+    assert_eq!(record["valid"], true, "{value:#}");
+    assert_eq!(
+        record["defaults"],
+        serde_json::json!([{ "path": "greeting", "value": "hello", "schema_location": "/properties/greeting/default" }]),
+        "{value:#}"
+    );
+}
+
+const EAGER_DEFAULT: &str = "---\n$schema:\n  doc: file(required; eager; default(./note.md))\n---\n# H\n";
+
+/// A missing eager-file default target is a problem with the default, not
+/// with an authored value: the record names the default and no position.
+#[test]
+fn conforms_schema_validate_attributes_a_default_problem_to_the_default() {
+    let fixture = with_document("output-validate-eager-default", EAGER_DEFAULT);
+    let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "doc.md", "--output", "json"], 1);
+    let problem = &value["files"][0]["problems"][0];
+    assert_eq!(problem["path"], "/doc", "{value:#}");
+    assert_eq!((&problem["line"], &problem["column"]), (&Value::Null, &Value::Null), "{value:#}");
+    assert_eq!(
+        problem["default"],
+        serde_json::json!({ "path": "doc", "value": "./note.md", "schema_location": "/properties/doc/default" }),
+        "{value:#}"
+    );
+    assert!(problem["message"].as_str().unwrap_or_default().contains("schema default"), "{value:#}");
+}
+
+/// `md compose` reports the same failure as a diagnostic that names the
+/// default and its schema file, with the document and no invented position.
+#[test]
+fn conforms_compose_attributes_a_default_problem_to_the_default() {
+    let fixture = with_document("output-compose-eager-default", "---\n$schema: ./doc-schema.yaml\n---\n# H\n");
+    fixture.write_file("cwd/doc-schema.yaml", "$schema:\n  doc: file(required; eager; default(./note.md))\n");
+    let value = conforms(include_str!("../../schemas/output/compose.yaml"), &fixture, &["compose", "doc.md", "--output", "json"], 1);
+    let diagnostic = &value["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "dm.schema.invalid_file_reference", "{value:#}");
+    assert_eq!((&diagnostic["source"]["line"], &diagnostic["source"]["column"]), (&Value::Null, &Value::Null), "{value:#}");
+    assert_eq!(diagnostic["schema_default"]["path"], "doc", "{value:#}");
+    assert_eq!(diagnostic["schema_default"]["schema_location"], "/properties/doc/default", "{value:#}");
+    let schema_file = diagnostic["schema_default"]["schema_file"].as_str().expect("the schema file is named");
+    assert!(schema_file.ends_with("doc-schema.yaml"), "{value:#}");
+}
+
+/// An existing entry a pattern key selects (prefix, suffix, regex) is
+/// completed with its required child's default: `md schema validate`
+/// accepts it and reports the default, and `md compose` reads it.
+#[test]
+fn conforms_validate_and_compose_complete_an_entry_a_pattern_key_selects() {
+    for (selector, pointer) in [
+        ("<starting::x->", r"/patternProperties/^x\-/properties/retries/default"),
+        ("<ending::-build>", r"/patternProperties/\-build$/properties/retries/default"),
+        ("<pattern::^x-.*$>", "/patternProperties/^x-.*$/properties/retries/default"),
+    ] {
+        let fixture =
+            with_document("output-pattern-key-default", "---\n$schema: ./defaults.yaml\nx-build: {}\n---\nRetries {{ x-build.retries }}\n");
+        fixture.write_file("cwd/defaults.yaml", &format!("$schema:\n  \"{selector}\": \"{{ retries: number(required; default(3)) }}\"\n"));
+
+        let validated =
+            conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "doc.md", "--output", "json"], 0);
+        let composed = conforms(include_str!("../../schemas/output/compose.yaml"), &fixture, &["compose", "doc.md", "--output", "json"], 0);
+
+        let record = &validated["files"][0];
+        assert_eq!(record["valid"], true, "{selector}: {validated:#}");
+        assert_eq!(
+            record["defaults"],
+            serde_json::json!([{ "path": "x-build.retries", "value": 3, "schema_location": pointer }]),
+            "{selector}: {validated:#}"
+        );
+        assert!(composed["document"].as_str().unwrap_or_default().contains("Retries 3"), "{selector}: {composed:#}");
+    }
+}
+
+/// One alternative accepts the value as written and another accepts it
+/// completed with its default, at the root (`root.md`) and beneath `shape`
+/// (`doc.md`, whose raw JSON Schema arms admit each other's keys): both are
+/// ambiguous, located where the alternatives are.
+#[test]
+fn conforms_schema_validate_locates_alternatives_that_complete_a_valid_value_differently() {
+    let fixture = with_document("output-validate-ambiguous", "---\n$schema: ./open.json\nshape:\n  b: y\n---\n# H\n");
+    fixture.write_file("cwd/root.md", "---\n$schema: ./either.yaml\nb: y\n---\n# H\n");
+    fixture.write_file(
+        "cwd/either.yaml",
+        "kind: schema\n$schema:\n  - a: number(required; default(1))\n  - b: string(required; default(z))\n",
+    );
+    let arms = json!([
+        { "type": "object", "properties": { "a": { "type": "number", "default": 1 } }, "required": ["a"] },
+        { "type": "object", "properties": { "b": { "type": "string", "default": "z" } }, "required": ["b"] }
+    ]);
+    fixture.write_file(
+        "cwd/open.json",
+        &json!({ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": { "shape": { "anyOf": arms } } })
+            .to_string(),
+    );
+    let value = conforms(
+        include_str!("../../schemas/output/schema-validate.yaml"),
+        &fixture,
+        &["schema", "validate", "root.md", "doc.md", "--output", "json"],
+        1,
+    );
+    let files = value["files"].as_array().expect("files");
+    let located: Vec<(&Value, &str)> =
+        files.iter().map(|file| (&file["problems"][0]["path"], file["problems"][0]["message"].as_str().unwrap_or_default())).collect();
+    assert_eq!(located[0].0, "", "{value:#}");
+    assert!(located[0].1.contains("ambiguous at the document root"), "{value:#}");
+    assert_eq!(located[1].0, "/shape", "{value:#}");
+    assert!(located[1].1.contains("ambiguous at `shape`"), "{value:#}");
+}
+
+#[test]
 fn conforms_schema_validate_keeps_a_failing_and_an_unopened_file_apart() {
     let fixture = with_document("output-validate-failure", "---\n$schema:\n  name: string(required)\n---\n# H\n");
     fixture.write_file("cwd/good.md", GOOD);
@@ -566,10 +679,12 @@ fn conforms_schema_validate_keeps_a_failing_and_an_unopened_file_apart() {
     assert_eq!(files[2]["valid"], true);
 }
 
-/// A schema template beside a document, outside any repository: its slot's
-/// read gets no automatic grant, so a data output reports it unapproved.
+/// A schema template beside a document, outside any repository, under user
+/// permissions admitting no read (the default would admit `./os.yaml`
+/// beside the schema): a data output reports the slot's read unapproved.
 fn with_template_document(name: &str) -> CliProcessFixture {
     let fixture = with_document(name, "---\n$schema: ./schema.yaml\nos: macOS\n---\n# H\n");
+    fixture.write_file("home/.darkmatter.yaml", "permissions:\n    file-read: []\n");
     fixture.write_file("cwd/schema.yaml", "kind: schema\n$schema:\n    os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\n");
     fixture.write_file("cwd/os.yaml", "- macOS\n- Linux\n");
     fixture
@@ -587,8 +702,7 @@ fn conforms_schema_validate_slots_failure_names_the_grants_needed() {
 
 #[test]
 fn conforms_schema_validate_template_schema_file_resolves_its_slots() {
-    // Outside a repository `os.yaml` has no automatic grant, and a data output
-    // never prompts: the schema file's own check is unavailable, never "valid
+    // Nothing admits `os.yaml`, and a data output never prompts: the schema file's own check is unavailable, never "valid
     // as written".
     let fixture = with_template_document("output-validate-template");
     let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "schema.yaml", "--output", "json"], 1);
@@ -703,6 +817,35 @@ fn conforms_schema_about_carries_the_whole_catalog_at_any_verbosity() {
     let ids: Vec<&str> = quiet["sections"].as_array().unwrap().iter().map(|section| section["id"].as_str().unwrap()).collect();
     assert!(ids.contains(&"expression_functions"), "{ids:?}");
     assert!(ids.contains(&"context_variables"), "{ids:?}");
+}
+
+#[test]
+fn conforms_init_json_names_the_created_user_file() {
+    let fixture = CliProcessFixture::named("output-init-json").without_user_config();
+    let value = conforms(include_str!("../../schemas/output/init.yaml"), &fixture, &["init", "--output", "json"], 0);
+    let path = fixture.home().join(".darkmatter.yaml");
+    assert_eq!(
+        value,
+        json!({
+            "files": [{ "path": path.display().to_string(), "scope": "user", "action": "created" }],
+            "notices": [],
+            "outcome": "success",
+            "diagnostics": [],
+        }),
+        "no `dm.config.missing` for the file init creates"
+    );
+    assert!(path.is_file());
+}
+
+#[test]
+fn conforms_init_json_failure_outside_a_repository() {
+    let fixture = CliProcessFixture::named("output-init-repo-json").without_user_config();
+    let value = conforms(include_str!("../../schemas/output/init.yaml"), &fixture, &["init", "--repo", "--output", "json"], 1);
+    assert_eq!(value["outcome"], "failure");
+    assert_eq!(value["files"], json!([]));
+    let codes: Vec<&str> = value["diagnostics"].as_array().unwrap().iter().map(|record| record["code"].as_str().unwrap()).collect();
+    assert_eq!(codes, ["dm.config.not_saved"], "{value:#}");
+    assert!(!fixture.home().join(".darkmatter.yaml").exists(), "nothing is written outside a repository");
 }
 
 #[test]
@@ -911,6 +1054,7 @@ help_shows_the_default! {
     help_set => ["set"], "markdown";
     help_get => ["get"], "json";
     help_list_themes => ["list-themes"], "terminal";
+    help_init => ["init"], "terminal";
     help_toc => ["toc"], "terminal";
     help_delta => ["delta"], "terminal";
     help_rm => ["rm"], "terminal";

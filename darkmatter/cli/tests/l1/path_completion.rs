@@ -407,7 +407,7 @@ fn commands_fixture(name: &str, schema_line: &str) -> CliProcessFixture {
     let program = fixture.bin_dir().join(format!("argv-recorder{}", std::env::consts::EXE_SUFFIX));
     std::fs::copy(biscuit_test_harness::bin_exe!("darkmatter-argv-recorder"), program).unwrap();
     write_in_cwd(&fixture, "doc.md", &format!("---\n{schema_line}\n{COMMANDS_BODY}"));
-    write_in_cwd(&fixture, ".darkmatter-shell-whitelist", "prefix argv-recorder\n");
+    fixture.shell_permissions(&["prefix argv-recorder"]);
     fixture
 }
 

@@ -14,8 +14,8 @@
 //!
 //! An allowed read keeps the file that defined the reading slot, at whatever
 //! depth it ran: a nested contract's read is judged for another command
-//! against the contract's own file, never the outer slot's, because only
-//! that file decides whether the automatic grant applies.
+//! from the contract's own file, never the outer slot's, because relative
+//! `permissions.file-read` entries are judged from the reading document.
 //!
 //! A captured call is re-checked by calling the function again with the same
 //! arguments, in the same slot context, against the requesting command's own

@@ -266,6 +266,8 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "test_evidence_reuse.py",
             "test_hosted_observations.py",
             "test_local_evidence.py",
+            "test_permission_environment.py",
+            "test_permission_scope.py",
             "test_publish_gaps.py",
             "test_resolved_plan.py",
             "test_reuse_validation.py",

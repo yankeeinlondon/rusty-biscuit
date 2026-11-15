@@ -67,6 +67,12 @@ use super::{
     },
 };
 
+/// The schema file that declares each default a named type imported from
+/// another file supplies, keyed by the object-property path (from the
+/// schema's root) of the property the default stands in for. See
+/// [`ResolvedSchema::default_files`].
+pub type DefaultFiles = std::collections::BTreeMap<Vec<String>, PathBuf>;
+
 /// The product of resolving a document's `$schema`.
 ///
 /// `simplified` is `None` when the effective schema came from a raw JSON
@@ -122,6 +128,18 @@ pub struct ResolvedSchema {
     /// Non-fatal findings discovered while resolving referenced schema files,
     /// sorted and deduplicated by semantic kind and canonical path.
     pub advisories: Vec<SchemaAdvisory>,
+
+    /// The schema file (canonical path) declaring each default that a
+    /// `Name@file` import brought in from a file other than the one
+    /// [`ResolvedSchema::origin`] names, by the property path the default
+    /// stands in for. Expansion inlines a named type without a trace of its
+    /// file, so this is how a problem with an inserted default names the
+    /// file to repair. A default the schema itself declares is absent (its
+    /// file is `origin`'s), as is one inside a list's items, below a
+    /// pattern key, or in a shipped or embedded namespace, which no file
+    /// holds. Where union arms declare the same path, the first arm's file
+    /// is kept.
+    pub default_files: DefaultFiles,
 }
 
 /// Resolves a frontmatter `$schema` value into a JSON Schema.
@@ -488,7 +506,7 @@ fn resolve_inline_mapping(
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
-    let (mut schema, imports) = expand_imports(
+    let (mut schema, imports, default_files) = expand_imports(
         schema,
         None,
         base_dir,
@@ -526,6 +544,7 @@ fn resolve_inline_mapping(
         referenced_files: Vec::new(),
         searched: searched.into_iter().collect(),
         advisories: Vec::new(),
+        default_files,
     })
 }
 
@@ -639,7 +658,7 @@ pub(crate) fn expand_named_types_searched(
                 Some(path) => DefNamespace::File(canonical_path(path)),
                 None => DefNamespace::InlineRoot,
             };
-            let (schema, imports) = expand_document_imports(
+            let (schema, imports, _) = expand_document_imports(
                 schema.clone(),
                 local_types,
                 base_dir,
@@ -669,7 +688,7 @@ pub(crate) fn expand_named_types_searched(
                     Some(path) => DefNamespace::FileRootUnionArm(canonical_path(path), index),
                     None => DefNamespace::RootUnionArm(index),
                 };
-                let (schema, found) = expand_document_imports(
+                let (schema, found, _) = expand_document_imports(
                     SchemaRoot::Single(shape.clone()),
                     local_types,
                     base_dir,
@@ -718,7 +737,7 @@ pub fn check_standalone_named_types(
         )?.imports);
     }
     if let Some(types) = &document.local_types {
-        let (_, read) = expand_imports(
+        let (_, read, _) = expand_imports(
             SchemaRoot::Single(types.clone()),
             Some(types),
             base_dir,
@@ -754,6 +773,7 @@ pub(crate) fn resolve_root_union(
     let mut any_of: Vec<Value> = Vec::with_capacity(items.len());
     let mut all_simplified_arms: Option<Vec<SchemaArm>> = Some(Vec::with_capacity(items.len()));
     let mut imports: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut default_files = DefaultFiles::new();
     let mut examples: BTreeSet<PathBuf> = BTreeSet::new();
     let mut referenced_files: BTreeSet<PathBuf> = BTreeSet::new();
     let mut searched: BTreeSet<PathBuf> = BTreeSet::new();
@@ -773,7 +793,7 @@ pub(crate) fn resolve_root_union(
                     debug_assert!(projected.is_ok(), "{projected:?}");
                 }
                 // Named-type imports are inlined per arm before conversion.
-                let (mut arm_schema, arm_imports) =
+                let (mut arm_schema, arm_imports, arm_default_files) =
                     expand_document_imports(
                         arm_schema,
                         None,
@@ -787,6 +807,9 @@ pub(crate) fn resolve_root_union(
                         shipped,
                     )?;
                 imports.extend(arm_imports);
+                for (path, file) in arm_default_files {
+                    default_files.entry(path).or_insert(file);
+                }
                 let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
                 match crate::slots::apply_active_to_arm(&mut arm_schema, &mut definitions, &site) {
                     Ok(late) => {
@@ -912,6 +935,7 @@ pub(crate) fn resolve_root_union(
         referenced_files: referenced_files.into_iter().collect(),
         searched: searched.into_iter().collect(),
         advisories: advisories.into_iter().collect(),
+        default_files,
     })
 }
 
@@ -1439,6 +1463,7 @@ fn parse_referenced_json_schema(path: &Path, text: &str) -> Result<ResolvedSchem
         referenced_files: Vec::new(),
         searched: Vec::new(),
         advisories: Vec::new(),
+        default_files: DefaultFiles::new(),
     })
 }
 
@@ -1457,7 +1482,7 @@ fn resolve_standalone_schema(
         SchemaRoot::Single(_) => {
             let mut searched = BTreeSet::new();
             let mut definitions = DefinitionTable::default();
-            let (mut schema, imports) = expand_document_imports(
+            let (mut schema, imports, default_files) = expand_document_imports(
                 schema,
                 local_types,
                 file_dir,
@@ -1492,6 +1517,7 @@ fn resolve_standalone_schema(
                 referenced_files: Vec::new(),
                 searched: searched.into_iter().collect(),
                 advisories: Vec::new(),
+                default_files,
             })
         }
         SchemaRoot::Union(arms) => {
@@ -1857,7 +1883,7 @@ fn lower_embedded_schema(
     mode: PreparationMode<'_>,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let mut definitions = DefinitionTable::default();
-    let (schema, mut reads) = expand_imports(
+    let (schema, mut reads, _) = expand_imports(
         schema,
         local_types,
         Path::new(""),
@@ -1900,6 +1926,7 @@ fn lower_embedded_schema(
         referenced_files: Vec::new(),
         searched: Vec::new(),
         advisories: Vec::new(),
+        default_files: DefaultFiles::new(),
     };
     Ok((resolved, reads))
 }
@@ -2025,6 +2052,7 @@ pub(crate) fn resolve_standalone_root_union(
 ) -> Result<ResolvedSchema, SchemaError> {
     let mut any_of = Vec::with_capacity(arms.len());
     let mut simplified_arms = Vec::with_capacity(arms.len());
+    let mut default_files = DefaultFiles::new();
     let mut all_simplified = true;
     let mut imports = BTreeSet::new();
     let mut examples = BTreeSet::new();
@@ -2040,7 +2068,7 @@ pub(crate) fn resolve_standalone_root_union(
         match arm {
             SchemaArm::Inline(shape) => {
                 let schema = SchemaRoot::Single(shape.clone());
-                let (mut schema, arm_imports) = expand_document_imports(
+                let (mut schema, arm_imports, arm_default_files) = expand_document_imports(
                     schema,
                     local_types,
                     base_dir,
@@ -2053,6 +2081,9 @@ pub(crate) fn resolve_standalone_root_union(
                     shipped,
                 )?;
                 imports.extend(arm_imports);
+                for (path, file) in arm_default_files {
+                    default_files.entry(path).or_insert(file);
+                }
                 let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
                 match crate::slots::apply_active_to_arm(&mut schema, &mut definitions, &site) {
                     Ok(late) => {
@@ -2158,6 +2189,7 @@ pub(crate) fn resolve_standalone_root_union(
         referenced_files: referenced_files.into_iter().collect(),
         searched: searched.into_iter().collect(),
         advisories: advisories.into_iter().collect(),
+        default_files,
     })
 }
 
@@ -2204,6 +2236,7 @@ pub(crate) fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<Resolve
         referenced_files: Vec::new(),
         searched: Vec::new(),
         advisories: Vec::new(),
+        default_files: DefaultFiles::new(),
     })
 }
 
@@ -2248,6 +2281,14 @@ struct Namespace {
     /// The unexpanded top-level named types, shared with the namespace cache
     /// and every other resolution of the same namespace. Never mutated.
     named_types: Arc<NamedTypes>,
+}
+
+/// The state of [`ImportEngine::default_files`]: the definitions being
+/// walked (a cycle stops there) and each walked definition's defaults.
+#[derive(Default)]
+struct DefaultWalk {
+    visiting: Vec<DefKey>,
+    memo: HashMap<DefKey, Vec<(Vec<String>, PathBuf)>>,
 }
 
 /// Drives eager, bounded, cycle-checked expansion of `Name@file` imports over
@@ -2569,7 +2610,8 @@ pub(crate) fn pattern_key_source_name(key: &PatternKey) -> String {
 /// `schema_roots` provides bare-name resolution context for import targets
 /// that have no path component.
 ///
-/// Returns the import-free schema plus the sorted dependency edges, and adds
+/// Returns the import-free schema plus the sorted dependency edges and its
+/// [`DefaultFiles`], and adds
 /// every location probed for an import target or a rehomed example to
 /// `searched`. Schemas with no imports are returned untouched
 /// (byte-equivalent to legacy output).
@@ -2589,7 +2631,7 @@ fn expand_document_imports(
     searched: &mut BTreeSet<PathBuf>,
     definitions: &mut DefinitionTable,
     shipped: ShippedSources,
-) -> Result<(SchemaRoot, Vec<PathBuf>), SchemaError> {
+) -> Result<(SchemaRoot, Vec<PathBuf>, DefaultFiles), SchemaError> {
     let source = NamespaceSource::Files {
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
@@ -2663,7 +2705,7 @@ pub(crate) fn expand_template_definition(
         schema_roots: site.schema_roots.to_vec(),
         context: Box::new(site.request_context.clone()),
     };
-    let (root, imports) = crate::slots::reads::expanding(slot, || {
+    let (root, imports, _) = crate::slots::reads::expanding(slot, || {
         expand_imports(
             SchemaRoot::Single(shape),
             Some(&types),
@@ -2748,7 +2790,7 @@ fn expand_imports(
     searched: &mut BTreeSet<PathBuf>,
     definitions: &mut DefinitionTable,
     shipped: ShippedSources,
-) -> Result<(SchemaRoot, Vec<PathBuf>), SchemaError> {
+) -> Result<(SchemaRoot, Vec<PathBuf>, DefaultFiles), SchemaError> {
     let mut schema = schema;
     // A slot evaluates in the file it was written in: stamp the root's own
     // slots here and each lifted definition's in `rehome_definition`.
@@ -2756,7 +2798,7 @@ fn expand_imports(
         crate::slots::stamp_root_origin(&mut schema, file);
     }
     if !schema_has_imports(&schema) {
-        return Ok((schema, Vec::new()));
+        return Ok((schema, Vec::new(), DefaultFiles::new()));
     }
     // `@this` resolves against the document's own (unexpanded) named types.
     // `schema` is consumed by expansion below, so this is the one copy.
@@ -2777,6 +2819,10 @@ fn expand_imports(
     };
     let mut engine = ImportEngine::new(source, shipped);
     let discovery = engine.discover(&schema, &current, root)?;
+    // Expansion keeps no trace of the namespace a definition came from, so
+    // the declaring file of each default is read from the authored schema.
+    // An embedded schema's imports reach no file.
+    let authored = matches!(engine.source, NamespaceSource::Files { .. }).then(|| schema.clone());
     engine.cyclic = discovery.cyclic;
     if sharing == Sharing::Automatic {
         engine.shared = discovery.shared;
@@ -2793,8 +2839,9 @@ fn expand_imports(
         engine.publish_definitions(&expanded, definitions);
         expanded
     };
+    let default_files = authored.map(|authored| engine.default_files(&authored, &current)).unwrap_or_default();
     searched.extend(engine.searched);
-    Ok((expanded, engine.dependencies.into_iter().collect()))
+    Ok((expanded, engine.dependencies.into_iter().collect(), default_files))
 }
 
 impl ImportEngine<'_> {
@@ -3055,6 +3102,131 @@ impl ImportEngine<'_> {
                 related: Vec::new(),
             }),
         }
+    }
+
+    /// The schema file declaring each default of `schema` (authored, not
+    /// yet expanded, in `current`) that a named type imported from another
+    /// file supplies; see [`ResolvedSchema::default_files`]. Runs after
+    /// expansion, so every namespace it names is already loaded and selected.
+    fn default_files(&mut self, schema: &SchemaRoot, current: &Namespace) -> DefaultFiles {
+        let shapes: Vec<&SchemaShape> = match schema {
+            SchemaRoot::Single(shape) => vec![shape],
+            SchemaRoot::Union(arms) => arms
+                .iter()
+                .filter_map(|arm| match arm {
+                    SchemaArm::Inline(shape) => Some(shape),
+                    SchemaArm::FileRef(_) => None,
+                })
+                .collect(),
+        };
+        let mut found = Vec::new();
+        let mut walk = DefaultWalk::default();
+        for shape in shapes {
+            self.shape_default_files(shape, current, &mut walk, &mut found);
+        }
+        let own = current.key.file();
+        let mut out = DefaultFiles::new();
+        // The first declaration of a path wins, as the first union arm's
+        // default does when candidates are compared.
+        for (path, file) in found {
+            if Some(file.as_path()) != own {
+                out.entry(path).or_insert(file);
+            }
+        }
+        out
+    }
+
+    /// Appends the defaults declared below `shape`, in `current`, to `out`,
+    /// each keyed by its object-property path relative to `shape`.
+    fn shape_default_files(
+        &mut self,
+        shape: &SchemaShape,
+        current: &Namespace,
+        walk: &mut DefaultWalk,
+        out: &mut Vec<(Vec<String>, PathBuf)>,
+    ) {
+        for (name, def) in &shape.properties {
+            let atoms: &[PropertyAtom] = match def {
+                PropertyDef::Single(atom) => std::slice::from_ref(atom),
+                PropertyDef::Union(arms) => arms,
+            };
+            let mut nested = Vec::new();
+            for atom in atoms {
+                self.atom_default_files(atom, current, walk, &mut nested);
+            }
+            out.extend(nested.into_iter().map(|(mut path, file)| {
+                path.insert(0, name.clone());
+                (path, file)
+            }));
+        }
+    }
+
+    /// [`Self::shape_default_files`] for one atom: the empty path is the
+    /// atom's own default. A definition's declarations come before the use
+    /// site's, as merged constraints keep the inherited default's origin. A
+    /// list's items have no object-property path and are skipped, as is a
+    /// definition already being walked (a cycle).
+    fn atom_default_files(
+        &mut self,
+        atom: &PropertyAtom,
+        current: &Namespace,
+        walk: &mut DefaultWalk,
+        out: &mut Vec<(Vec<String>, PathBuf)>,
+    ) {
+        if atom.is_array {
+            return;
+        }
+        match &atom.ty {
+            TypeExpr::InlineObject(shape) => self.shape_default_files(shape, current, walk, out),
+            TypeExpr::Union(arms) => {
+                for arm in arms {
+                    self.atom_default_files(arm, current, walk, out);
+                }
+            }
+            TypeExpr::Imported { name, reference } => {
+                if let Ok(target) = self.resolve_namespace(reference, current) {
+                    out.extend(self.definition_default_files(&target, name, walk));
+                }
+            }
+            _ => {}
+        }
+        if let Some(file) = current.key.file()
+            && atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Default(_)))
+        {
+            out.push((Vec::new(), file.to_path_buf()));
+        }
+    }
+
+    /// The defaults the named type `name` of `target` declares, relative to
+    /// its value, found once per definition.
+    fn definition_default_files(
+        &mut self,
+        target: &Namespace,
+        name: &str,
+        walk: &mut DefaultWalk,
+    ) -> Vec<(Vec<String>, PathBuf)> {
+        let frame = DefKey::new(target.key.clone(), name);
+        if let Some(found) = walk.memo.get(&frame) {
+            return found.clone();
+        }
+        let Some(def) = target.named_types.get(name) else {
+            return Vec::new();
+        };
+        if walk.visiting.contains(&frame) {
+            return Vec::new();
+        }
+        let atoms: Vec<PropertyAtom> = match def {
+            PropertyDef::Single(atom) => vec![atom.clone()],
+            PropertyDef::Union(arms) => arms.clone(),
+        };
+        walk.visiting.push(frame.clone());
+        let mut found = Vec::new();
+        for atom in &atoms {
+            self.atom_default_files(atom, target, walk, &mut found);
+        }
+        walk.visiting.pop();
+        walk.memo.insert(frame, found.clone());
+        found
     }
 
     /// Expands the reference written at `path` in `current`.

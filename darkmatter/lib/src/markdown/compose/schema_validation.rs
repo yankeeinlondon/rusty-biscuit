@@ -23,7 +23,9 @@
 //!
 //! This stage also MUTATES the stored frontmatter. It first materializes each
 //! absent, optional, no-default top-level property owned by the document's
-//! inline or referenced SimplifiedSchema as JSON `null`. It then converts
+//! inline or referenced SimplifiedSchema as JSON `null`, and inserts the
+//! default of each absent required property that declares one (the source
+//! file is never edited; the inserted paths are recorded as data). It then converts
 //! values to their declared types through the one conversion engine (e.g. the
 //! string `"yes"` against a `boolean` field becomes a real JSON bool) via
 //! [`coerce_frontmatter_with_pending`] and writes the converted top-level
@@ -170,7 +172,9 @@ pub(crate) fn run(markdown: &mut Markdown, options: &crate::markdown::compose::C
         PendingDeferral::BeforeShell { provenance: &provenance, provisional: &provisional },
         &consumer,
         &mut report,
+        &mut Vec::new(),
     )
+    .map(drop)
 }
 
 /// Request-owned schema state assembled once before frontmatter interpolation.
@@ -231,7 +235,7 @@ impl PreparedSchemas {
 
     /// The schema triggers discovery skipped as invalid, in discovery order;
     /// empty when discovery did not run.
-    pub(crate) fn discovery_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+    pub(crate) fn discovery_findings(&self) -> &[simplified_schema::triggers::InvalidTriggerFinding] {
         self.schemas.as_ref().map_or(&[], DarkmatterSchemas::discovery_findings)
     }
 
@@ -403,7 +407,7 @@ fn discovers_triggers(options: &crate::markdown::compose::ComposeRequest) -> boo
 pub(crate) fn prepare_schemas(
     markdown: &Markdown,
     options: &crate::markdown::compose::ComposeRequest,
-    trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
+    trigger_registry: &mut Option<simplified_schema::triggers::TriggerRegistry>,
 ) -> MarkdownResult<PreparedSchemas> {
     let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
     if !has_document_schema && options.baseline_schema.is_none() && !options.trigger_schemas {
@@ -468,6 +472,14 @@ pub(crate) fn prepare_schemas(
             *trigger_registry = Some(registry.clone());
         }
     }
+    // Registration is its own trigger source, judged in the source's own
+    // context; `--disable schema-triggers` turns it off with the roots, and a
+    // caller's own host options are never replaced.
+    if options.trigger_schemas
+        && let Some(hosts) = options.applied_registered_hosts()
+    {
+        schemas = schemas.with_registered_hosts(std::sync::Arc::clone(hosts));
+    }
 
     Ok(PreparedSchemas {
         schemas: Some(schemas),
@@ -489,7 +501,12 @@ pub(crate) fn prepare_schemas(
 /// 3. Resolves the effective schema once and materializes absent, optional,
 ///    no-default top-level bindings owned by a document or referenced-file
 ///    SimplifiedSchema as JSON `null`.
-/// 4. Converts the frontmatter against that schema via
+/// 4. Inserts the default of every absent required property the schema
+///    reports ([`EffectiveSchema::required_defaults`]) into the frontmatter
+///    (never into the source file, never into a composition-pending or
+///    caller-owned key), so conversion, every later stage, and the composed
+///    output see it.
+/// 5. Converts the frontmatter against that schema via
 ///    [`coerce_frontmatter_with_pending`] and writes converted top-level
 ///    properties back into `markdown.frontmatter_mut()` (skipping any value
 ///    still composition-pending — a `$(...)` shell expression or an unresolved
@@ -497,13 +514,15 @@ pub(crate) fn prepare_schemas(
 ///    conversion is committed when its only residual problems are
 ///    composition-pending keys, letting resolved siblings still convert and
 ///    write back.
-/// 5. Validates the coerced frontmatter through the held [`EffectiveSchema`]
+/// 6. Validates the coerced frontmatter through the held [`EffectiveSchema`]
 ///    (F5); with active triggers, re-resolves via `schemas.validate` because
-///    trigger matching depends on the coerced values.
-/// 6. Converts schema-preparation `SchemaError` into
+///    trigger matching depends on the coerced values. A default the verdict
+///    still reports (a trigger the inserted values newly match can require
+///    more) is inserted and the completed frontmatter judged again.
+/// 7. Converts schema-preparation `SchemaError` into
 ///    `MarkdownError::SchemaValidationFailed`, preserving the original error
 ///    on the variant's `source` field for `Error::source()` recovery.
-/// 7. Projects typed schema advisories into the root compose report, then
+/// 8. Projects typed schema advisories into the root compose report, then
 ///    converts an invalid validation report into the same error variant. On
 ///    success, returns `Ok(())`.
 ///
@@ -511,6 +530,13 @@ pub(crate) fn prepare_schemas(
 /// frontmatter interpolation. `projection` owns launch-resolved caller values;
 /// this stage verifies their selected file mode is still stable before it
 /// mutates frontmatter for validation.
+///
+/// Returns the paths of the defaults it inserted, which the caller records
+/// as data: a schema default is never scanned for `{{ … }}` or `$( … )`.
+/// The defaults themselves are added to `applied`, which the caller keeps
+/// across passes: the frontmatter holds them from then on, so a later
+/// verdict's problem with one of them is attributed to its schema default
+/// through this list, never to an authored position.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
@@ -521,9 +547,11 @@ pub(crate) fn run_with_registry(
     deferral: PendingDeferral<'_>,
     consumer: &Path,
     compose_report: &mut ComposeReport,
-) -> MarkdownResult<()> {
+    applied: &mut Vec<simplified_schema::AppliedDefault>,
+) -> MarkdownResult<Vec<Vec<ValuePathSegment>>> {
+    let mut inserted = Vec::new();
     let Some(schemas) = prepared.schemas.as_ref() else {
-        return Ok(());
+        return Ok(inserted);
     };
 
     let path = source_path(markdown, options);
@@ -542,8 +570,8 @@ pub(crate) fn run_with_registry(
         // A schema that cannot even be prepared is still not this pass's verdict
         // to report when the caller deferred it; coercion simply has nothing to
         // work from.
-        Err(_) if options.defer_schema_verdict => return Ok(()),
-        Err(err) if defers_template(&err, options) => return Ok(()),
+        Err(_) if options.defer_schema_verdict => return Ok(inserted),
+        Err(err) if defers_template(&err, options) => return Ok(inserted),
         Err(err) => {
             return Err(MarkdownError::SchemaValidationFailed {
                 path: path.clone(),
@@ -565,8 +593,17 @@ pub(crate) fn run_with_registry(
         // Convert values to their declared types and write the converted
         // top-level properties back, so real types flow to every later stage
         // and into the composed output.
-        let (instance, mut composition_pending) = build_validation_instance(markdown, options, data);
+        let (mut instance, mut composition_pending) = build_validation_instance(markdown, options, data);
         composition_pending.extend(deferral.later_resolved_keys(markdown, data));
+        // Defaults go in before conversion: conversion commits only a value
+        // the whole schema accepts, which an absent required property would
+        // prevent. A default the engine refuses is not reported here; the
+        // verdict reports it as a problem at the schema default.
+        if let Ok(defaults) = effective.required_defaults(&instance)
+            && insert_defaults(markdown, &defaults, &composition_pending, options, &mut inserted, applied)
+        {
+            instance = build_validation_instance(markdown, options, data).0;
+        }
         let outcome = effective.coerce_frontmatter_with_pending(&instance, &composition_pending);
         if outcome.changed
             && let serde_json::Value::Object(coerced) = outcome.value
@@ -589,13 +626,13 @@ pub(crate) fn run_with_registry(
     // own the verdict stops here, before a validator is even built: a schema
     // that cannot be *prepared* is likewise not this pass's failure to report.
     if options.defer_schema_verdict {
-        return Ok(());
+        return Ok(inserted);
     }
 
     // A launch-preparing caller judges the instance at its runtime phase so a
     // required-but-not-eager property may still be absent; every other caller
     // keeps the unphased authoring verdict.
-    let judge = |schemas: &DarkmatterSchemas| {
+    let judge = |schemas: &DarkmatterSchemas, markdown: &Markdown| {
         match options.schema_phase {
             Some(phase) => schemas.validate_for_phase(markdown, phase),
             None => schemas.validate(markdown),
@@ -608,7 +645,18 @@ pub(crate) fn run_with_registry(
             source: Some(Box::new(err)),
         })
     };
-    let report = judge(schemas)?;
+    let mut report = judge(schemas, markdown)?;
+    // The verdict re-matches triggers on the completed frontmatter; one the
+    // inserted values newly match can require further defaults. Each round
+    // only fills absent paths, so this ends.
+    while !report.defaults.is_empty() {
+        let composition_pending = composition_pending_keys(markdown, options, data, deferral);
+        if !insert_defaults(markdown, &report.defaults, &composition_pending, options, &mut inserted, applied) {
+            break;
+        }
+        report = judge(schemas, markdown)?;
+    }
+    simplified_schema::defaults::attribute_problems(&mut report.problems, applied);
 
     for advisory in &report.advisories {
         compose_report.add_schema_advisory(advisory, consumer);
@@ -624,16 +672,29 @@ pub(crate) fn run_with_registry(
     let defer_shell_pending = options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
         || options.defer_shell_pending_schema_problems;
     let fm_map = markdown.frontmatter().as_map();
+    let authored_frontmatter = std::cell::OnceCell::new();
     let composition_independent: Vec<_> = report
         .problems
         .iter()
         .filter(|p| {
-            // DM1b: problems referencing a deferred (excluded) key are not
-            // user-schema violations — the caller owns those keys' validation.
+            // DM1b: a deferred (excluded) key is never rendered here. A caller
+            // that runs the document's events owns their validation and judges
+            // them later. A caller composing a registered host's document
+            // (`with_selected_host`) runs no host event, so nothing judges
+            // them later: this verdict keeps their problems, setting aside
+            // only what `md schema validate` sets aside as awaiting rendering.
             if let Some(name) = top_level_pointer_segment(&p.path)
                 && options.exclude_keys.contains(&name)
             {
-                return false;
+                return options.selected_host().is_some()
+                    && !crate::markdown::schemas::pending_rendering_sets_aside(
+                        p,
+                        &name,
+                        authored_frontmatter.get_or_init(|| {
+                            serde_json::Value::Object(fm_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                        }),
+                        &report.deferred,
+                    );
             }
             // Caller-originated files were materialized against their
             // invocation-fixed launch context above. A target document may
@@ -684,11 +745,12 @@ pub(crate) fn run_with_registry(
     let authored_copies = projection.authored_copies(fm_map, options);
     if !authored_copies.is_empty() {
         let origins = schemas.caller_origins().clone().without_supplied_values();
-        let problems: Vec<_> = judge(&schemas.clone().with_caller_origins(origins))?
+        let mut problems: Vec<_> = judge(&schemas.clone().with_caller_origins(origins), markdown)?
             .problems
             .into_iter()
             .filter(|problem| authored_copies.contains(&problem.path))
             .collect();
+        simplified_schema::defaults::attribute_problems(&mut problems, applied);
         if !problems.is_empty() {
             return Err(MarkdownError::SchemaValidationFailed {
                 path,
@@ -736,7 +798,77 @@ pub(crate) fn run_with_registry(
         }
     }
 
-    Ok(())
+    Ok(inserted)
+}
+
+/// The top-level keys whose values a later stage resolves, as the
+/// conversion step computes them.
+fn composition_pending_keys(
+    markdown: &Markdown,
+    options: &crate::markdown::compose::ComposeRequest,
+    data: &DataPaths,
+    deferral: PendingDeferral<'_>,
+) -> HashSet<String> {
+    let (_, mut composition_pending) = build_validation_instance(markdown, options, data);
+    composition_pending.extend(deferral.later_resolved_keys(markdown, data));
+    composition_pending
+}
+
+/// Writes each of `defaults` into the document's frontmatter where its path
+/// is still absent, and pushes each written path onto `inserted` and each
+/// written default onto `written`. A default
+/// below a composition-pending key (a later stage writes that value), a
+/// caller-owned `exclude_keys` key, or `$schema` is skipped. Returns whether
+/// anything was written.
+fn insert_defaults(
+    markdown: &mut Markdown,
+    defaults: &[simplified_schema::AppliedDefault],
+    composition_pending: &HashSet<String>,
+    options: &crate::markdown::compose::ComposeRequest,
+    inserted: &mut Vec<Vec<ValuePathSegment>>,
+    written: &mut Vec<simplified_schema::AppliedDefault>,
+) -> bool {
+    let mut wrote = false;
+    let fm_map = markdown.frontmatter_mut().as_map_mut();
+    for applied in defaults {
+        let segments = applied.path.segments();
+        let key = &segments[0];
+        if key == "$schema" || composition_pending.contains(key) || options.exclude_keys.contains(key) {
+            continue;
+        }
+        if applied.path.resolve_map(fm_map).value().is_some() {
+            continue;
+        }
+        if simplified_schema::set_at(fm_map, &applied.path, applied.value.clone()).is_err() {
+            continue;
+        }
+        inserted.push(value_path(fm_map, segments));
+        written.push(applied.clone());
+        wrote = true;
+    }
+    wrote
+}
+
+/// `segments`, a path that exists in `frontmatter`, as value-path steps: a
+/// segment under a list is an index.
+fn value_path(frontmatter: &indexmap::IndexMap<String, serde_json::Value>, segments: &[String]) -> Vec<ValuePathSegment> {
+    let mut steps = vec![ValuePathSegment::Key(segments[0].clone())];
+    let mut node = frontmatter.get(&segments[0]);
+    for segment in &segments[1..] {
+        match node {
+            Some(serde_json::Value::Array(items)) => {
+                let index = segment.parse::<usize>().unwrap_or_default();
+                steps.push(ValuePathSegment::Index(index));
+                node = items.get(index);
+            }
+            Some(serde_json::Value::Object(map)) => {
+                steps.push(ValuePathSegment::Key(segment.clone()));
+                node = map.get(segment);
+            }
+            _ => steps.push(ValuePathSegment::Key(segment.clone())),
+        }
+    }
+    steps
 }
 
 /// Judges the values a frontmatter shell result suffix (`::ok`,
@@ -2194,6 +2326,7 @@ fn caller_projection_failure(
                 origin: origin.clone(),
                 candidate,
             }),
+            default: None,
         }),
     }
 }
@@ -3088,6 +3221,7 @@ mod tests {
                 offending_properties: Vec::new(),
                 file_reference: None,
                 caller_file: None,
+                default: None,
             };
             deferral.defers_problem(&problem, &[], &frontmatter, &data)
         };

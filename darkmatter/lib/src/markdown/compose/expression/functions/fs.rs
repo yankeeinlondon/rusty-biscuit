@@ -604,8 +604,9 @@ pub(super) fn find_index_endpoint(
         .map(|(base, _, _)| base)
         .unwrap_or(input_stem);
 
-    // A slot's gate judges the folder before it is enumerated; a missing
-    // folder stays an existence probe, answered below.
+    // A slot's gate judges the folder before it is enumerated (a listing
+    // needs no approval of its own); a missing folder stays an existence
+    // probe, answered below.
     ctx.authorize_slot_read(name, ReadKind::Listing, || {
         parent
             .is_dir()
@@ -647,6 +648,11 @@ pub(super) fn find_index_endpoint(
         } else {
             continue;
         };
+        // A slot sees only the family members its gate admits without
+        // asking; the rest are left out, never prompted for.
+        if !ctx.admits_listed_file(name, &parent.join(&actual_name)) {
+            continue;
+        }
         candidates.push((ordinal, actual_name));
     }
     ctx.data.observe_listing(crate::markdown::compose::expression::data::ObservationKind::Listing, listed, names);
@@ -1211,6 +1217,10 @@ pub fn try_frontmatter_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
 /// as a [`GLOB_SKIPPED_SYMLINK_CODE`](crate::markdown::compose::ComposeWarning::GLOB_SKIPPED_SYMLINK_CODE)
 /// warning. A `null` pattern lists nothing; a pattern that cannot be parsed or
 /// rooted is an [`ExpressionError::GlobReference`].
+///
+/// Inside a schema slot the result holds only the files the slot may read
+/// without asking (`permissions.file-read`, or an approval for this run);
+/// the others are left out, and nothing is asked about the listed folders.
 pub fn find_files_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     let Some(raw) = call.args().text(0) else {
         return Ok(Value::Array(Vec::new()));
@@ -1223,7 +1233,8 @@ pub fn find_files_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Va
     let pattern = if is_remote_url(raw) { raw.to_string() } else { normalize_path_arg(raw) };
     let globs = biscuit_file::GlobReference::new([pattern]).map_err(glob_error)?;
     // A slot's gate judges each folder the pattern lists below before it is
-    // enumerated.
+    // enumerated; a listing needs no approval of its own, so this refuses
+    // only when the gate cannot decide anything (invalid permissions).
     if ctx.slot_gate.is_some() {
         for root in glob_listing_roots(raw, ctx) {
             ctx.authorize_slot_read("find_files", ReadKind::Listing, || {
@@ -1231,8 +1242,11 @@ pub fn find_files_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Va
             })?;
         }
     }
-    let listing = globs.list_files(&ctx.file_context()).map_err(glob_error)?;
+    let mut listing = globs.list_files(&ctx.file_context()).map_err(glob_error)?;
     ctx.glob_warnings.record("interpolation", &listing);
+    // A slot sees only the files its gate admits without asking; the rest
+    // are dropped silently, never prompted for.
+    listing.matches.retain(|path| ctx.admits_listed_file("find_files", path));
     // The pattern names no single folder, so the listing is observed by the
     // pattern as written and the matched paths, never added to the read set.
     ctx.data.observe_listing(

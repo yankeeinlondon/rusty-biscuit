@@ -10,9 +10,10 @@ description: |-
 usage: |-
     - pass in the `review` property as a file reference to the review baseline
     - (_optionally_) pass in a `partial` property to express that only a _portion_ of the review has been implemented and to ground this review on the just that set of suggestions
-        - **Note:** use this _only_ when the implementation implemented only a subset of the baseline review's 
-iteration: "{{ file_index(review) + 1 }}"
-output: '{{ dirname(review) + "/" + basename_without_index(review) + "-" + iteration }}'
+        - **Note:** use this _only_ when the implementation addressed just a subset of the baseline review's suggestions
+# `review-1.md` -> `review-2.md`; an unindexed `review.md` -> `review-1.md`
+iteration: "{{ is_indexed_file(review) ? file_index(review) + 1 : 1 }}"
+output: "{{ dirname(review) + '/' + replace(basename_without_index(review), '.md', '') + '-' + iteration + '.md' }}"
 ---
 # Review of the Implementation of Suggestions
 
@@ -31,7 +32,7 @@ The subset of the suggestions which are relevant to this review are:
 
 ## Baseline Review
 
-::file @{{review}}
+::file {{review}}
 
 ::file "../_headless-orchestration.md"
 
@@ -75,19 +76,20 @@ The subset of the suggestions which are relevant to this review are:
     - then assess whether you believe the code is now "production ready"
         - explicitly state whether you believe the code to be production ready
         - explain why you came to your conclusion on readiness
-        - Note: 
-            - if there are NO recommendations coming from this review the production readiness should be `true`
-            - if there _are_ recommendations that typically suggests the code is NOT production ready but that is not always the case:
-                - if you have found some ergonomic or performance optimizations that 
+        - every recommendation in `## Suggestions from this Review` blocks readiness, whatever its priority:
+            - if there are NO recommendations the code is production ready
+            - if there is at least one recommendation the code is NOT production ready; do not downgrade a real problem to make the review pass
 - the final step of your review is to set Frontmatter metadata:
     - on your review file -- {{output}} -- you will set the following:
         - `$schema` as "suggestion-review.yaml"
         - `created` as "{{ctx.now}}"
-        - `agent` as "{{ctx.agent/ctx.model}}"
+        - `agent` as "{{ctx.agent}}/{{ctx.model}}"
         - `description` as "reviewed the _implementation success_ of addressing the concerns raised in the '{{parent_dir(review)}}/{{basename(review)}}' review"
         - `parent_scope` as "{{ parent_dir(dirname(review)) }}"
         - `scope` as "{{ parent_dir(review) }}"
         - `baseline` as "{{parent_dir(review)}}/{{basename(review)}}"
+        - `ready` as `true` when the review has no recommendations, otherwise `false`
+        - `findings` as a list with one short line per recommendation (an empty list when there are none)
     - on the baseline review file -- {{review}} -- you will set the following:
         - `implemented` as `true`
         - `follow_up_review` as "{{ basename(output) }}"

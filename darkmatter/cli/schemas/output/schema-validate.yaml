@@ -8,6 +8,7 @@ types:
         valid: boolean(required)
         schema: string -> the document's schema reference or definition
         problems: problem[](required)
+        defaults: applied-default[] -> absent required properties the verdict accepted through their schema default, in validator order; absent when none
         layers: layers -> absent when no validation ran
         error: enum(file_reference,frontmatter_parse,yaml_parse,schema,slots) -> why validation could not run; slots means the schema is a template whose slots did not resolve for this run
         failure: string -> the file-reference failure class
@@ -27,6 +28,12 @@ types:
         column: number
         arm_index: number
         description: string
+        default: applied-default -> the schema default that supplied the value, whose line and column are then null; absent for an authored value
+    applied-default:
+        path: string(required) -> dotted property path from the document root
+        value: unknown -> the default the property stands in for
+        schema_location: string(required) -> JSON Pointer of the default keyword in the lowered schema, e.g. /properties/doc/default
+        schema_file: string -> the schema file declaring the default (the imported file for a Name@file type); absent for an inline or compiled-in schema
     layers:
         document: layer
         triggers: string[](required)
@@ -55,6 +62,7 @@ types:
         included_via: trail-step[] -> outermost first
         data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed and dm.data.contract_mismatch only
         grants_needed: grant-needed[] -> any one of these grants would allow the read; dm.schema.slot_approval_required only
+        schema_default: schema-default -> the schema default that supplied the problem's value; schema problems with an inserted default only
     source:
         file: string -> null for stdin
         line: number -> 1-based authored line; null when unknown
@@ -77,6 +85,10 @@ types:
         column: number -> 1-based column in the data, in characters
         byte_offset: number -> zero-based byte offset of invalid UTF-8; no line or column accompanies it
     grant-needed:
-        kind: enum(file,dir,url,url-any-query,site;required) -> the grant store's kind word
-        target: string(required) -> the path, URL, or scheme://host[:port] the grant covers
-        scope: enum(once,persisted;required) -> once for this run; persisted writes the user's grant store
+        kind: enum(file,url;required) -> what the approval covers (one file or one exact URL)
+        target: string(required) -> the file path or exact URL the approval covers
+        scope: enum(once,persisted;required) -> once for this run; persisted saves the file to the user's permissions.file-read
+    schema-default:
+        path: string(required) -> dotted property path the default stands in for
+        schema_location: string(required) -> JSON Pointer of the default keyword in the lowered schema, e.g. /properties/doc/default
+        schema_file: string -> the schema file declaring the default (the imported file for a Name@file type); absent for an inline or compiled-in schema

@@ -323,7 +323,7 @@ fn fail_with_document(case: &Case, kind: CollectionKind) -> (String, MarkdownErr
     let outcome = compose_with_options(&root, &document, |options| {
         let options = options
             .disable(ComposeOperation::Cleanup)
-            .with_shell_policy_root(&root)
+            .with_config_snapshot(crate::request_support::shell_config(&root, &[]))
             .with_shell_working_directory(&root)
             .with_shell_approval_handler(Arc::new(Approve));
         match case.limit {
@@ -491,5 +491,45 @@ fn a_static_failure_is_reported_once_with_no_iteration() {
         assert!(records[0].iteration_path.is_empty(), "{kind:?}: {records:?}");
         assert!(!records[0].message.contains(" at names["), "{kind:?}: {records:?}");
         assert!(!matches!(error, MarkdownError::InIteration(_)), "{kind:?}");
+    }
+}
+
+/// A file-less document with a context identity (a host's generated text)
+/// has its collection failures named by that identity, from the call
+/// precheck and from the executor alike, so the host can tell them from a
+/// remote child's; one without keeps the placeholder path.
+#[test]
+fn a_context_identity_names_a_file_less_documents_collection_failures() {
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+
+    let identity = std::path::PathBuf::from("<generated>");
+    let cases = [
+        ("static", "---\nnames: [a, b]\n---\n::map names\n- {{i}}\n::end-map\n"),
+        (
+            "runtime",
+            "---\n$schema:\n  d: string[](required)\nd: [z]\n---\n::map d \"x => frontmatter('./missing.md', 'title')\"\n{{x}}\n::end-map\n",
+        ),
+    ];
+    for (case, document) in cases {
+        for identified in [true, false] {
+            let dir = TempDir::new().unwrap();
+            let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+            let markdown = Markdown::from(document.to_string());
+            let markdown = if identified { markdown.with_context_identity(&identity) } else { markdown };
+            let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(&root, ""));
+            let error = markdown
+                .compose_with(&crate::request_support::request_at(&root, options))
+                .expect_err("the collection fails");
+            let MarkdownError::Collection(collection) = &error else {
+                panic!("{case}: expected a collection failure, got {error:?}");
+            };
+            let Some(SourceRef::OnDiskSpan { context, .. }) = collection.site().map(|site| site.source.as_ref()) else {
+                panic!("{case}: expected a located failure, got {collection:?}");
+            };
+            let expected = if identified { identity.as_path() } else { Path::new("document") };
+            assert_eq!(context.absolute, expected, "{case} (identified: {identified})");
+            assert_eq!(context.display, Path::new("document"), "{case} (identified: {identified})");
+        }
     }
 }

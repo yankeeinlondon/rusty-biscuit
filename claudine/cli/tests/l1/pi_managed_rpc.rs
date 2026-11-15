@@ -213,7 +213,7 @@ fn automatic_help_turned_off_by_environment_prints_nothing_and_stops_the_same() 
 fn automatic_help_turned_off_in_user_configuration_prints_nothing_and_stops_the_same() {
     let rig = Rig::new("pi-rpc-auto-config-off");
     crate::common::write(
-        &rig.fixture.home().join(".claudine/config.json"),
+        &rig.fixture.home().join(".claudine/config.yaml"),
         r#"{ "steering": { "automatic": { "enabled": false } } }"#,
     );
     let output = rig.run("repeat");
@@ -225,7 +225,7 @@ fn automatic_help_turned_off_in_user_configuration_prints_nothing_and_stops_the_
     // The environment overrides the configured opt-out.
     let rig_on = Rig::new("pi-rpc-auto-config-env-on");
     crate::common::write(
-        &rig_on.fixture.home().join(".claudine/config.json"),
+        &rig_on.fixture.home().join(".claudine/config.yaml"),
         r#"{ "steering": { "automatic": { "enabled": false } } }"#,
     );
     let output = rig_on.run_with("repeat", &[("CLAUDINE_AUTO_STEER", "on")]);
@@ -247,7 +247,7 @@ fn a_malformed_auto_steer_value_fails_before_pi_is_launched() {
 #[test]
 fn a_malformed_configured_value_fails_before_pi_is_launched() {
     let rig = Rig::new("pi-rpc-auto-config-null");
-    crate::common::write(&rig.fixture.home().join(".claudine/config.json"), r#"{ "steering": { "automatic": { "enabled": null } } }"#);
+    crate::common::write(&rig.fixture.home().join(".claudine/config.yaml"), r#"{ "steering": { "automatic": { "enabled": null } } }"#);
     let output = rig.run("repeat");
     assert!(!output.status.success(), "{}", describe(&output));
     assert!(rig.argv(1).is_none(), "Pi must not be launched: {}", describe(&output));

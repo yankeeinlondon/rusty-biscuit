@@ -181,7 +181,7 @@ async fn dispatch_loads_repo_scoped_config_from_environment_context() {
         }],
     );
 
-    let config_path = repo.path().join(".claudine/config.json");
+    let config_path = repo.path().join(".claudine/config.yaml");
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
@@ -260,7 +260,7 @@ async fn cached_runtime_context_reuses_loaded_config_after_file_removal() {
         }],
     );
 
-    let config_path = repo.path().join(".claudine/config.json");
+    let config_path = repo.path().join(".claudine/config.yaml");
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }

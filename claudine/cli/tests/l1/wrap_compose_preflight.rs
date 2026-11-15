@@ -130,8 +130,14 @@ fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
         preferred_agent: Some(Provider::Goose),
         ..claudine::config::claudine_config::ClaudineConfig::default()
     };
-    let config_path = claudine_dir.join("config.json");
-    claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
+    let config_path = claudine_dir.join("config.yaml");
+    claudine::config::persist::initialize_config(
+        &config_path,
+        claudine::config::schema::ConfigScope::User,
+        &claudine::config::claudine_config::ClaudineConfig::default(),
+        &config,
+    )
+    .unwrap();
 
     // Create a source file outside any git repo.
     let source_dir = fixture.cwd().join("source");
@@ -182,15 +188,8 @@ fn compose_interactive_preflight_with_whitelisted_command() {
     )
     .unwrap();
 
-    // Whitelist "echo" so the ::shell directive passes preflight.
-    fs::write(
-        fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
-
-    // Also create .git so the whitelist is found (policy root = git root).
-    fs::create_dir_all(fixture.cwd().join(".git")).unwrap();
+    // Allow "echo" so the ::shell directive passes preflight.
+    common::write_shell_permissions(fixture.home(), "prefix echo\n");
 
     write_executable(
         &fixture.bin_dir().join("codex"),

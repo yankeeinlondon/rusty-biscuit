@@ -226,7 +226,9 @@ What each family reports:
 | A `when=` condition on `::block` or `::file` that fails or warns | the directive's opener, unless a stage rewrote it (then the file alone) |
 | A `$( … )` frontmatter command | the file and the line of its key; the column is `null` |
 | A `::file` directive that does not parse, or a malformed `::block` | the file |
+| A `::shell-block` with an invalid option or no `::end-block` | the file that holds the block, which may be a child rather than the named document |
 | A transclusion cycle | the document holding the directive that closes the cycle, which may be a child rather than the named document |
+| A `::toc-linking` or `::file-links` directive that fails, or whose failure a `::file` tolerated as a warning | the file that holds the directive, which may be a child rather than the named document; the line is `null` |
 | An undeclared property | the file and the line of its first read (for a read in frontmatter, its key's line); the column is `null` |
 | Another warning | the document that reported it |
 | Any other failure that holds no file, such as a caller's `--set` value that could not bind | the document named on the command line |

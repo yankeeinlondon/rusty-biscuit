@@ -17,6 +17,7 @@ mod bench_plans;
 mod benchmark_workloads;
 #[cfg(feature = "remote")]
 mod branch_head;
+mod committed_tree;
 #[cfg(feature = "remote")]
 mod focused_provider;
 mod git_parity;

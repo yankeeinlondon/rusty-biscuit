@@ -14,6 +14,10 @@ done with a value that is almost right:
   `"4"` becomes the number `4` for a `number` property), then judges the
   result.
 
+Both accept an absent `required` property that declares a `default(...)`:
+the default stands in for the missing value, and the success lists it (see
+[Required properties with a default](#required-properties-with-a-default)).
+
 ```rust
 use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
@@ -50,9 +54,9 @@ flowchart TD
     cached --> ready
     ready -- "no: not lowered,<br/>or not compiled" --> unprepared["Err: ValidationFailure::Unprepared"]
     ready -- yes --> mode{"method"}
-    mode -- validate_strict --> judge["judge the value as written"]
-    mode -- validate_soft --> soft["judge as written;<br/>if rejected, convert a copy"]
-    soft --> judge2["judge the converted copy"]
+    mode -- validate_strict --> judge["judge the value as written,<br/>absent required properties<br/>counting as their defaults"]
+    mode -- validate_soft --> soft["judge as written;<br/>if rejected, convert a copy<br/>and insert defaults"]
+    soft --> judge2["judge the copy"]
     judge --> verdict{"problems?"}
     judge2 --> verdict
     verdict -- none --> success["Ok: ValidationSuccess"]
@@ -73,20 +77,24 @@ Both take the value by reference and return
 flowchart TD
     input["&Value"] --> strict{"validate_strict:<br/>matches as written?"}
     strict -- yes --> borrowed["Ok: value borrowed from the input"]
-    strict -- no --> failure["Err: ValidationFailure"]
+    strict -- no --> completed{"matches with the defaults<br/>of absent required properties?"}
+    completed -- yes --> withdefaults["Ok: value borrowed from the input,<br/>defaults listed"]
+    completed -- no --> failure["Err: ValidationFailure"]
     input --> soft{"validate_soft:<br/>matches as written?"}
     soft -- yes --> borrowed
-    soft -- no --> convert["convert a copy"]
+    soft -- no --> convert["convert a copy and<br/>insert defaults"]
     convert --> judged{"copy matches?"}
-    judged -- yes --> owned["Ok: converted value, owned"]
+    judged -- yes --> owned["Ok: modified value, owned,<br/>defaults listed"]
     judged -- no --> failure
 ```
 
-`ValidationSuccess` holds `value`, a `Cow<'input, Value>`, and `advisories`,
-the schema's non-fatal findings (`Prepared::with_advisories`). The value is
-borrowed from the input whenever it was accepted as written, so validating
-never copies the input; it is owned only when soft validation converted it
-(`is_converted()`).
+`ValidationSuccess` holds `value`, a `Cow<'input, Value>`; `advisories`,
+the schema's non-fatal findings (`Prepared::with_advisories`); and
+`defaults`, the defaults the verdict relied on. The value is borrowed from
+the input whenever it was accepted as written, and always after strict
+validation, so validating never copies the input; it is owned only when soft
+validation converted a value, inserted a default, or both (`is_modified()`).
+An empty `defaults` is an unconditional pass.
 
 | Schema | Value | `validate_strict` | `validate_soft` |
 | --- | --- | --- | --- |
@@ -96,6 +104,7 @@ never copies the input; it is owned only when soft validation converted it
 | `string \| number` | `"4"` | accepted as the string, borrowed | accepted as the string, borrowed |
 | `string(non-null)` | `null` | rejected at the property | rejected the same way: `null` is never converted or read as absent |
 | a [closed](./language/objects-and-named-types.md#closed-roots-closed) root declaring `name` | `{ "name": "Ada", "extra": 1 }` | rejected: unknown key `extra` | rejected the same way |
+| `retries: number(required; default(3))` | `{}` | accepted, borrowed, `defaults` lists `retries = 3` | accepted, owned `{ "retries": 3 }`, same `defaults` |
 
 Soft conversion is exactly the existing engine's: nested values in mappings
 and lists convert, a union keeps the first arm that accepts the value as
@@ -118,6 +127,153 @@ never converts a `null`. See
 [Non-Null Properties](./language/types.md#non-null-properties) for when `null`
 is rejected.
 
+## Required properties with a default
+
+A `required` property whose definition has a `default(...)` satisfies its
+contract when it is absent. Validation judges the value with the default in
+place and reports each default it used as an `AppliedDefault` in
+`ValidationSuccess::defaults`: its `path`, its `value`, its `pointer` (the
+JSON Pointer of the `default` keyword in the lowered JSON Schema, such as
+`/properties/retries/default`), and an `origin` a host may fill with where
+the default is declared (always `None` from this crate).
+
+Expansion inlines a `Name@file` named type, so the lowered schema no longer
+shows which file a default inside it came from. Resolution records that in
+`ResolvedSchema::default_files`: for each default a type imported from
+another schema file supplies, the property path it stands in for and the
+file that declares it. With `doc: Thing@./types.yaml` and `Thing` declaring
+`own: number(required; default(1))`, the entry is `["doc", "own"]` →
+`types.yaml`. A default the resolved schema declares itself is not listed,
+nor is one inside a list's items or below a pattern key.
+
+```rust
+use serde_json::json;
+use simplified_schema::SimplifiedSchema;
+
+let schema = SimplifiedSchema::try_from("$schema:\n  name: string(required)\n  retries: number(required; default(3))\n")?;
+let input = json!({ "name": "Ada" });
+
+// Strict: the input itself, plus the defaults the verdict relied on.
+let strict = schema.validate_strict(&input).unwrap();
+assert!(!strict.is_modified());
+assert_eq!(strict.defaults[0].path.to_string(), "retries");
+
+// Soft: an owned copy with the default inserted.
+let soft = schema.validate_soft(&input).unwrap();
+assert_eq!(*soft.value, json!({ "name": "Ada", "retries": 3 }));
+# Ok::<(), simplified_schema::SimplifiedSchemaError>(())
+```
+
+Strict validation never changes the value, so a caller that wants the
+defaults applied inserts them itself; soft validation has already done so.
+
+Which absent properties are filled:
+
+| Declaration | Value | Result |
+| --- | --- | --- |
+| `n: number(required; default(3))` | `{}` | passes; `n = 3` reported |
+| `n: number(required; default(3))` | `{ "n": null }` | rejected: an explicit `null` is present and judged by the type |
+| `n: number(default(3))` (optional) | `{}` | passes; nothing filled, the default stays metadata |
+| `n: [number(required; default(3)), null]` (null-admitting) | `{}` | passes; nothing filled, the property is optional |
+| `meta: "{ a: number(required; default(1)) }"` | `{ "meta": {} }` | passes; `meta.a = 1` reported |
+| the same | `{}` | passes; `meta` is optional, so nothing below it is filled |
+| `rows: "{ on: boolean(required; default(true)) }[]"` | `{ "rows": [{}, { "on": false }, {}] }` | passes; `rows.0.on`, then `rows.2.on` |
+| `"<starting::x->": "{ retries: number(required; default(3)) }"` | `{ "x-build": {} }` | passes; `x-build.retries = 3` reported (also for `<ending::…>`, `<pattern::…>`, and `<string>`) |
+
+The rules behind the table:
+
+- **A child needs its parent.** A default inside an object applies only when
+  the object exists. A missing parent is the parent's own question: it is
+  reported missing, or filled from its own default when it has one.
+- **Dictionary entries count as parents.** An existing entry is completed
+  under every schema JSON Schema applies to its key in the lowered schema:
+  its literal property, each pattern key (`patternProperties`) whose pattern
+  matches it, and the `<string>` catch-all (`additionalProperties`) only
+  when neither a literal property nor a pattern covers the key. A pattern
+  that does not compile fails the schema's preparation
+  (`SchemaError::BuildValidator`) before any default is considered.
+- **Order is stable.** Properties are visited in declaration order and list
+  items by ascending index, parents before their children. Each path is
+  reported once. A key containing `.` is spelled with `\.` in the path's
+  text (`a\.b`); `path.segments()` holds the key as written.
+- **A default is validated before it is used.** It must satisfy the
+  property's complete definition, constraints and nested required children
+  included, without conversion or file access. A default that does not is a
+  schema error, not a problem with the value: validation fails with
+  `ValidationFailure::Unprepared` holding `SchemaError::InvalidDefault`,
+  whose `pointer` is the JSON Pointer of the `default` keyword in the lowered
+  JSON Schema (for example `/properties/n/default`). A default that is never
+  needed is not judged.
+- **Unions are judged per arm.** For a union, each arm completes the value
+  with its own defaults and the complete result is judged against that arm,
+  discriminants and the root's sibling assertions included; an arm with no
+  default to add offers the value as written. When several arms succeed,
+  equal results count as one; different results fail with
+  `SchemaError::AmbiguousDefaults`, which names the union's pointer and the
+  arms, rather than picking whichever arm comes first. This holds for a value
+  one arm accepts as written, too: if another arm accepts it once completed
+  with a default, the two results differ and the value is ambiguous.
+
+  ```yaml
+  $schema:
+    - kind: literal(post; required)
+      title: string(required; default(untitled))
+    - kind: literal(page; required)
+      slug: string(required; default(home))
+  ```
+
+  `{ kind: page }` passes with `slug = home`: the `post` arm's result is
+  rejected by its `kind`. Without the `kind` properties, `{}` would be
+  ambiguous.
+
+  ```yaml
+  $schema:
+    - a: number(required; default(1))
+    - b: string(required; default(z))
+  ```
+
+  `{ b: y }` is ambiguous: the second arm accepts it as written, and the
+  first, whose root object admits other keys, accepts `{ b: y, a: 1 }`. A
+  nested union of SimplifiedSchema objects does not meet this, because
+  nested objects are closed: under
+  `shape: "{ a: number(required; default(1)) } | { b: string(required; default(z)) }"`,
+  `shape: { b: y }` passes unchanged, since the first arm's result
+  `{ b: y, a: 1 }` is rejected for its unknown `b`. A union whose arms
+  cannot add a default (or that has no union at all) accepts a value its
+  validators accept as written without building any candidate.
+- **A used default is still judged with the whole value.** The check above
+  runs without file access, so an eager file default whose target does not
+  exist (`doc: file(required; eager; default(./note.md))` with no
+  `note.md`) passes it and fails when the completed value is judged. Such a
+  problem belongs to the default, not to anything the author wrote: its
+  `ValidationProblem::default` holds the `AppliedDefault` that supplied the
+  value, its message ends with
+  `(the value is the schema default at schema location `/properties/doc/default`)`,
+  and its `line` and `column` are `None`. A problem with an authored value
+  has no `default`. A host that judges a completed value with its own
+  validators attributes its problems the same way with
+  `simplified_schema::defaults::attribute_problems(problems, defaults)`.
+- **A pending default stays pending.** `default({{ n }})` is a
+  [slot](./language/slots.md); until it is resolved, validation fails with
+  `SchemaError::UnresolvedSlots` as for any template.
+- **Soft validation does both.** It inserts defaults, converts, and then
+  inserts any default the converted value now needs (a union arm the
+  conversion made reachable), so `{ "meta": { "n": "4" } }` against
+  `meta: "{ a: number(required; default(1)), n: number }"` becomes
+  `{ "meta": { "n": 4, "a": 1 } }`.
+
+Exported JSON Schema is unchanged: the property stays in `required`, and
+`default` is only an annotation there. A third-party JSON Schema validator
+therefore rejects the same value as missing the property; accepting it is a
+SimplifiedSchema rule that only this crate and its hosts apply.
+
+A host that compiles its own validators calls the same walk:
+`simplified_schema::defaults::prepare_defaults(json_schema, value, templates,
+validators, cache)` returns a `DefaultPreparation { candidate, defaults }`
+for it to judge. Nothing at or below a deferred template listed in
+`templates` (a `coerce::NestedTemplates`) is filled: that value does not
+exist until the template renders, so its defaults wait for it.
+
 ## Failures
 
 A `ValidationFailure` never holds a value, converted or not. It holds every
@@ -139,7 +295,9 @@ failure it is:
   It holds the shared `SchemaError` (`error`): the schema has a
   function-typed property, `jsonschema` rejected its lowered form, or it is
   content that names a file it cannot read. `problems()` is empty. `Prepared`
-  never returns it; a `SimplifiedSchema` does. A
+  returns it only for a default the value needed that is invalid or
+  ambiguous (see above); a `SimplifiedSchema` also returns it for the
+  other causes. A
   [template](./language/slots.md) fails this way with
   `SchemaError::UnresolvedSlots` until `resolve_slots` gives a concrete
   schema to validate against.

@@ -65,6 +65,35 @@ let snapshot = RequestSnapshot::new("/work/project")
 extra roots but anchors the request elsewhere, for example at a document that
 lives in another repository.
 
+### Configuration
+
+Every request holds one configuration snapshot (`request.config_snapshot()`),
+which all its derivations share. `prepare` loads it passively when you supply
+none. A caller of `ComposeRequest::with_context` whose context names a
+repository must supply its own, because only the caller's capture holds that
+repository's committed policy:
+
+```rust
+use std::sync::Arc;
+use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot};
+use darkmatter::markdown::compose::{
+    ComposeOptions, ComposeRequest, RequestSnapshot, capture_resolution_context,
+};
+
+let snapshot = RequestSnapshot::new("/work/project").with_home(Some("/home/me".into()));
+let (context, committed) = capture_resolution_context(&snapshot)?;
+let config = Arc::new(ConfigSnapshot::load_captured(&context, committed.as_ref(), ConfigLoadMode::Passive)?);
+let request = ComposeRequest::with_context(ComposeOptions::new().with_config_snapshot(config), context)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+An embedder that composes many documents attaches its capture to the `ctx`
+it composes under (`ComposeContext::with_config_source`) instead of supplying
+a snapshot to each request. Leaving a repository context without a snapshot
+is `ContextBuildError::ConfigSnapshotRequired`; the request never discovers
+the repository again and never runs without its policy. See
+[Configuration Files](configuration.md#one-snapshot-per-request).
+
 ```mermaid
 flowchart LR
     P["RequestSnapshot::from_process()\n(binaries only)"] --> S[RequestSnapshot]
@@ -291,6 +320,8 @@ later as a missing file:
 | The request directory is relative (`RequestSnapshot::new("docs")`) | `Invalid` (`RelativeContextDirectory`) | `MissingContext` |
 | The opening reference resolves outside the request's repository (`~/notes/x.md` opened from inside a repository) | `Invalid` (`RepositoryRootNotContainingSource`) | `MissingContext` |
 | Repository discovery fails, for example a corrupt `.git/config` | `Discovery` | `MissingContext` |
+| `with_context` gets a context naming a repository and no configuration snapshot | `ConfigSnapshotRequired` | `MissingContext` |
+| The configuration does not load, for example an unknown key in `~/.darkmatter.yaml` | `Config` (the located `ConfigError`) | `MissingContext` |
 
 Finding no repository is not an error: the request directory becomes the
 tree root. `resolution_failure()` uses the same classes as biscuit-file's

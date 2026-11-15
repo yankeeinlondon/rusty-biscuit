@@ -33,7 +33,6 @@ use crate::markdown::compose::preflight::collect::resolve_executable;
 use crate::markdown::compose::shell_expansion::alias::AliasResolutions;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::probe::login_shell;
-use crate::markdown::compose::shell_expansion::store::resolve_policy_paths;
 use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use crate::markdown::compose::shell_expansion::types::{
     ShellExpansionError, ShellExpansionRuntime, ShellPipeline,
@@ -312,10 +311,7 @@ pub fn execute_shell_values_with(
     holes: Option<&dyn HoleEvaluator>,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {
     let options = request;
-    let shell_opts = options.shell_options();
-    let policy_paths = resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
     let mut shell = ShellExpansionRuntime::new();
-    shell.ensure_loaded(&policy_paths)?;
     let resolution = options.frontmatter_resolution_context();
     let seed = FrontmatterSeedState::new(state, options.context().clone())
         .with_current_authority(resolution.current.clone())
@@ -329,7 +325,7 @@ pub fn execute_shell_values_with(
         let ctx = value_context(&value.key, &value.authored);
         let directive = &value.directive;
         if let Some(template) = &value.template {
-            let prepared = prepare_template_value(value, template, holes, options, &policy_paths, &mut shell, &ctx)?;
+            let prepared = prepare_template_value(value, template, holes, options, &mut shell, &ctx)?;
             pending.push((value.key.clone(), directive.result, Pending::Execute(Box::new(prepared))));
             continue;
         }
@@ -340,7 +336,6 @@ pub fn execute_shell_values_with(
                     directive.raw_command.clone(),
                     directive,
                     options,
-                    &policy_paths,
                     &mut shell,
                     &ctx,
                 )?,
@@ -388,7 +383,6 @@ pub fn execute_shell_values_with(
                             pipeline.display_string(),
                             directive,
                             options,
-                            &policy_paths,
                             &mut shell,
                             &ctx,
                         )?))
@@ -420,7 +414,6 @@ fn prepare_template_value(
     template: &CommandTemplate,
     holes: &dyn HoleEvaluator,
     options: &crate::markdown::compose::ComposeRequest,
-    policy_paths: &crate::markdown::compose::shell_expansion::ShellPolicyPaths,
     shell: &mut ShellExpansionRuntime,
     ctx: &SourceContext,
 ) -> Result<crate::markdown::compose::shell_expansion::PreparedShellDirective, ShellExpansionError> {
@@ -454,7 +447,7 @@ fn prepare_template_value(
     let site = TemplateSite::new(candidate, holes, ctx.clone(), frame)
         .ok_or_else(unread)?
         .with_late_values(value.late.clone());
-    prepare_site(Err(unread()), Some(&site), options, policy_paths, shell)
+    prepare_site(Err(unread()), Some(&site), options, shell)
 }
 
 /// Interpolates one command branch of a ternary from its authored text and

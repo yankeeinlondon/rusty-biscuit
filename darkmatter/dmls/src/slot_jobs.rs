@@ -15,8 +15,9 @@
 //! ```
 //!
 //! Each job resolves with a fresh [`SlotSession`] in full mode **without**
-//! an approval handler: the automatic, persisted, and in-memory (this server
-//! process) grants decide every read, and anything else is
+//! an approval handler: the configured `permissions.file-read` and the
+//! in-memory (this server process) approvals decide every read, and
+//! anything else is
 //! `dm.schema.slot_approval_required`, never a prompt. The installed session
 //! keeps the snapshots it pinned; requests serve them through
 //! [`DarkmatterSchemas::with_slot_pins_only`](darkmatter::markdown::schemas::DarkmatterSchemas::with_slot_pins_only),
@@ -39,7 +40,7 @@ use crossbeam_channel::{Receiver, Sender};
 use darkmatter::markdown::compose::DataRuntime;
 use darkmatter::markdown::compose::expression::data::ObservationKind;
 use darkmatter::markdown::compose::expression::iteration::IterationLimits;
-use darkmatter::markdown::schemas::TriggerRegistry;
+use simplified_schema::triggers::TriggerRegistry;
 use darkmatter::markdown::schemas::slots::SlotSession;
 use darkmatter::markdown::schemas::slots::grants::Grant;
 use lsp_types::Uri;
@@ -468,9 +469,10 @@ pub(crate) fn run_job(job: SlotJob) -> SlotResult {
 }
 
 /// Every local path the resolution observed (content reads, existence
-/// answers, missing probes, listings), plus the repository's index and
-/// `HEAD` when any of them lies inside it: an automatic grant depends on
-/// what the index and `HEAD` record for the file.
+/// answers, missing probes, listings), plus, for a document in a
+/// repository, that repository's index and `HEAD`: its `permissions` decided
+/// every read and count only as committed at `HEAD` (the commit rule), so a
+/// commit can admit a read the resolution was refused and never observed.
 fn slot_reads(data: &DataRuntime, repository: Option<&Path>) -> Vec<WatchedRead> {
     let mut paths: BTreeSet<PathBuf> = BTreeSet::new();
     for observation in data.observations_since(Default::default()) {
@@ -483,13 +485,37 @@ fn slot_reads(data: &DataRuntime, repository: Option<&Path>) -> Vec<WatchedRead>
         }
     }
     if let Some(root) = repository
-        && paths.iter().any(|path| path.starts_with(root))
         && let Some(git_dir) = git_dir(root)
     {
         paths.insert(SourceBuffers::key(&git_dir.join("index")));
         paths.insert(SourceBuffers::key(&git_dir.join("HEAD")));
     }
     paths.into_iter().map(WatchedRead::now).collect()
+}
+
+/// The repository at `root`'s `HEAD` and the ref it names (a branch's ref
+/// file, which a commit rewrites while `HEAD` stays the same), in the
+/// common Git directory for a linked worktree. Empty outside a repository.
+pub(crate) fn head_files(root: &Path) -> Vec<PathBuf> {
+    let Some(git_dir) = git_dir(root) else {
+        return Vec::new();
+    };
+    let head = git_dir.join("HEAD");
+    let mut files = vec![SourceBuffers::key(&head)];
+    let named = std::fs::read_to_string(&head).ok().and_then(|text| {
+        text.lines().next().and_then(|line| line.strip_prefix("ref:")).map(|name| name.trim().to_string())
+    });
+    if let Some(name) = named.filter(|name| !name.is_empty()) {
+        let common = std::fs::read_to_string(git_dir.join("commondir"))
+            .ok()
+            .map(|text| {
+                let named = Path::new(text.trim());
+                if named.is_absolute() { named.to_path_buf() } else { git_dir.join(named) }
+            })
+            .unwrap_or_else(|| git_dir.clone());
+        files.push(SourceBuffers::key(&common.join(name)));
+    }
+    files
 }
 
 /// The Git directory of the repository at `root`: `.git` itself, or the
@@ -549,8 +575,13 @@ pub(crate) fn template_shape(
 mod tests {
     use super::*;
 
+    /// The context of a document in `dir`, whose home (`dir/.home`) holds a
+    /// configuration pre-approving no read, so only once approvals allow one.
     fn context(dir: &Path) -> FileResolutionContext {
-        FileResolutionContext::from_snapshot(dir, None, std::collections::HashMap::new())
+        let home = dir.join(".home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".darkmatter.yaml"), "permissions:\n    file-read: []\n").unwrap();
+        FileResolutionContext::from_snapshot(dir, Some(home), std::collections::HashMap::new())
     }
 
     fn inputs(dir: &Path) -> JobInputs {
@@ -636,16 +667,18 @@ mod tests {
         assert!(store.view(&doc).refreshing);
     }
 
-    /// A job for `text` at `dir/doc.md`, reading with a once grant for the
-    /// whole folder.
+    /// A job for `text` at `dir/doc.md`, reading with once approvals for
+    /// the folder's `os.yaml` and `types.yaml`.
     fn granted_job(dir: &Path, text: &str) -> SlotJob {
         let store = SlotSnapshots::default();
         let doc = dir.join("doc.md");
-        store.add_once(Grant {
-            decision: darkmatter::markdown::schemas::slots::grants::GrantDecision::Allow,
-            target: darkmatter::markdown::schemas::slots::grants::GrantTarget::Dir(dir.to_path_buf()),
-            scope: darkmatter::markdown::schemas::slots::grants::GrantScope::Once,
-        });
+        for name in ["os.yaml", "types.yaml"] {
+            store.add_once(Grant {
+                decision: darkmatter::markdown::schemas::slots::grants::GrantDecision::Allow,
+                target: darkmatter::markdown::schemas::slots::grants::GrantTarget::File(dir.join(name)),
+                scope: darkmatter::markdown::schemas::slots::grants::GrantScope::Once,
+            });
+        }
         store.demand(&doc, 1, true, || JobInputs { text: text.to_string(), ..inputs(dir) });
         store.take_demands().pop().unwrap()
     }

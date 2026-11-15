@@ -27,7 +27,7 @@ use common::pty::{read_for, stage_default_config};
 use common::{CliProcessFixture, pty_available, write_executable};
 
 /// The last static line the approval handler writes before it reads a choice.
-const PROMPT_END: &str = "the blacklist; stops the run)";
+const PROMPT_END: &str = "stops the run; asks again next time)";
 
 /// One approval prompt: the token of the command it asked about, and whether
 /// any provider had launched when it appeared.

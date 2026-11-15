@@ -23,7 +23,7 @@
 //! explicit environment inside a temporary directory; neither the checkout,
 //! the process environment, nor the process CWD is consulted.
 
-use darkmatter::markdown::schemas::TriggerOrigin;
+use simplified_schema::triggers::TriggerOrigin;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -39,10 +39,11 @@ use claudine::composition::{
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use simplified_schema::simplified::{DefKey, DefNamespace};
-use darkmatter::markdown::schemas::triggers::parse_trigger_envelope_from_str;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, SchemaRootKind, SchemaRoots, TriggerSource,
-};
+use simplified_schema::triggers::parse_trigger_envelope_from_str;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::embedded::EmbeddedSchemaBundle;
+use simplified_schema::roots::{SchemaRootKind, SchemaRoots};
+use simplified_schema::triggers::TriggerSource;
 use simplified_schema::{SchemaOriginKind, StandaloneSchemaEnvelope, parse_standalone_schema_document};
 
 use crate::claudine_schemas::{AC5_GROUPS, BundleFile, SchemaRepo, problems, shipped_bundle};
@@ -479,7 +480,8 @@ fn embedded_payloads_apply_without_disk_schemas() {
     assert!(effective.dependencies().is_empty(), "{:?}", effective.dependencies());
     for (frontmatter, property) in [
         ("start: [{ inf0: hi }]", "start"),
-        ("initialize: [{ shell: ls }]", "initialize"),
+        // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+        ("agent: claude\ninitialize: [{ shell: ls }]", "initialize"),
         ("loop: { gate: [{ inf0: hi }] }", "loop"),
         ("start: [stop]\nname: { a: 1 }", "name"),
     ] {
@@ -683,11 +685,28 @@ impl Locations {
     /// The launch context: the documents' folder, the fixture home, and
     /// `SCHEMAS_DIR` naming `{dir}/defs`.
     fn context(&self) -> FileResolutionContext {
+        build_resolution_context(&self.snapshot()).expect("fixture context")
+    }
+
+    fn snapshot(&self) -> RequestSnapshot {
         let env = HashMap::from([("SCHEMAS_DIR".to_string(), self.folder(Root::SchemasDir).display().to_string())]);
-        let snapshot = RequestSnapshot::new(self.root.join("repo/area/pkg/docs"))
-            .with_home(Some(self.root.join("home")))
-            .with_env(env);
-        build_resolution_context(&snapshot).expect("fixture context")
+        RequestSnapshot::new(self.root.join("repo/area/pkg/docs")).with_home(Some(self.root.join("home"))).with_env(env)
+    }
+
+    /// Options preparing against `context` with the fixture repository's
+    /// configuration, which a library caller with no invocation supplies.
+    fn prepare_options(&self, context: &FileResolutionContext) -> claudine::composition::PrepareOptions {
+        let (_, tree) = darkmatter::markdown::compose::capture_resolution_context(&self.snapshot()).expect("fixture context");
+        let snapshot = darkmatter::config::load::ConfigSnapshot::load_captured(
+            context,
+            tree.as_ref(),
+            darkmatter::config::load::ConfigLoadMode::Passive,
+        )
+        .expect("fixture configuration");
+        claudine::composition::PrepareOptions {
+            config_snapshot: Some(std::sync::Arc::new(snapshot)),
+            ..claudine::composition::PrepareOptions::new(context.clone())
+        }
     }
 
     /// Claudine's launch verdict for a document holding `frontmatter`.
@@ -837,7 +856,8 @@ fn disk_bundle_resolves_its_relative_imports_from_disk() {
     let schemas = locations.schemas();
     for (frontmatter, property) in [
         ("start: [{ inf0: hi }]", "start"),
-        ("initialize: [{ shell: ls }]", "initialize"),
+        // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+        ("agent: claude\ninitialize: [{ shell: ls }]", "initialize"),
         ("loop: { gate: [{ inf0: hi }] }", "loop"),
         ("start: [stop]\nname: { a: 1 }", "name"),
         ("prompt: hi\nhash: [1]", "hash"),
@@ -1193,7 +1213,7 @@ fn longhand_hash_kind_default_is_declared_and_never_inserted() {
     let prepared_hash = |name: &str, frontmatter: &str, inline: bool| {
         let path = both.document(name, frontmatter);
         let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context).expect("resolves");
-        let options = claudine::composition::PrepareOptions::new(context.clone());
+        let options = both.prepare_options(&context);
         let prepared = if inline {
             claudine::composition::prepare_inline_with_schema(&source, options)
         } else {
@@ -1205,7 +1225,7 @@ fn longhand_hash_kind_default_is_declared_and_never_inserted() {
     // longhand without `kind` is refused there rather than after the agent runs.
     let inline_longhand = both.document("prepared", "prompt: hi\nhash: { value: 42 }");
     let source = resolve_composition_source_in_context(inline_longhand.to_str().expect("UTF-8 path"), &context).expect("resolves");
-    let refused = claudine::composition::prepare_inline_with_schema(&source, claudine::composition::PrepareOptions::new(context.clone()));
+    let refused = claudine::composition::prepare_inline_with_schema(&source, both.prepare_options(&context));
     assert!(
         matches!(refused, Err(claudine::composition::CompositionError::InlineBaselineUnstampable { .. })),
         "inline longhand without `kind` is refused at launch: {refused:?}"
@@ -1512,8 +1532,9 @@ fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
             &[("/success/0/then/1", 5, 9, BARE_VERB)],
         ),
         ("start:\n  - say: hi\n    inf0: hi\n", &[("/start/0", 2, 5, BARE_VERB)]),
-        // `cancelled` admits a shell; `initialize` never does.
-        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\n", &[("/initialize/0", 2, 5, BARE_VERB)]),
+        // `cancelled` admits a shell; `initialize` never does. The shared
+        // events select nothing alone, so `agent` selects claudine.yaml.
+        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\nagent: claude\n", &[("/initialize/0", 2, 5, BARE_VERB)]),
         // A loop action missing its required `prop`.
         ("loop:\n  action:\n    op: set\n", &[("/loop/action", 3, 5, "an iteration action such as increment(iteration)")]),
     ];

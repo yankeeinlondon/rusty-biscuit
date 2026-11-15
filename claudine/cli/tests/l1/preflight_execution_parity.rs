@@ -91,18 +91,8 @@ fn run(
         if command.starts_with("template ") { format!("{command}\n") }
         else { format!("exact {command}\n") }
     }).collect();
-    // Outside a repository, a document's shell policy is read from its own
-    // directory, so every directory a row writes a document into gets the list.
-    let mut policy_dirs: Vec<std::path::PathBuf> = vec![fixture.cwd().to_path_buf()];
-    for (name, _) in files {
-        let dir = fixture.cwd().join(name).parent().expect("a file has a parent").to_path_buf();
-        if !policy_dirs.contains(&dir) {
-            policy_dirs.push(dir);
-        }
-    }
-    for dir in policy_dirs {
-        write(&dir.join(".darkmatter-shell-whitelist"), &whitelist);
-    }
+    // Every document, wherever it lives, decides with the user's permissions.
+    common::write_shell_permissions(fixture.home(), &whitelist);
     let output = fixture
         .command_builder()
         // `git` runs the command under test; Git for Windows is outside the

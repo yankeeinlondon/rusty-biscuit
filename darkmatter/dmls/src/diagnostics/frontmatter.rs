@@ -21,7 +21,7 @@ use simplified_schema::{
     locate_standalone_definition_failure, parse_property_definition_with_source, parse_type_definition_value,
     parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema,
 };
-use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
+use simplified_schema::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Position,
@@ -43,8 +43,8 @@ use crate::providers::frontmatter::ExpressionValue;
 use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
 
-/// All frontmatter/schema diagnostics for the current document, discovering
-/// its lifecycle host when a lifecycle check needs it.
+/// All frontmatter/schema diagnostics for the current document, reading
+/// its selected lifecycle host when a lifecycle check needs it.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     diagnostics_under(ctx, None)
 }
@@ -76,6 +76,10 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
             code::FM_YAML_PARSE,
             error.message.clone(),
         ));
+    }
+
+    if let Some(view) = overlay.host.as_deref() {
+        host_diagnostics(ctx, overlay.ast.as_deref().filter(|_| !overlay.stale), view, &mut out);
     }
 
     // A whole YAML document is judged by its selected schema alone: the
@@ -184,6 +188,83 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     }
 
     out
+}
+
+/// A configuration-level host registration warning (a refused entry, a
+/// same-host conflict), published on the file it names at its line and
+/// column, or at the top when it has none.
+pub(crate) fn registration_diagnostic(found: &darkmatter::config::registration::RegistrationDiagnostic) -> Diagnostic {
+    let range = match found.line {
+        Some(line) => {
+            let start = lsp_types::Position {
+                line: u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX),
+                character: u32::try_from(found.column.unwrap_or(1).saturating_sub(1)).unwrap_or(u32::MAX),
+            };
+            Range { start, end: start }
+        }
+        None => zero_range(),
+    };
+    diagnostic(range, registration_severity(found), source::SCHEMA, found.code, found.message.clone())
+}
+
+fn registration_severity(found: &darkmatter::config::registration::RegistrationDiagnostic) -> DiagnosticSeverity {
+    match found.severity {
+        darkmatter::markdown::compose::expression::Severity::Info => DiagnosticSeverity::INFORMATION,
+        _ => DiagnosticSeverity::WARNING,
+    }
+}
+
+/// The document's host-selection warnings: each `dm.host.*` warning of its
+/// selection (the configuration's own are published on the files they
+/// name), and one `dm.lifecycle.unknown_host` warning at each root key that
+/// is a host-only event of a registered host that did not identify it (none
+/// on a stale tree, whose spans are another buffer's).
+fn host_diagnostics(
+    ctx: &DocumentContext,
+    ast: Option<&FrontmatterAst>,
+    view: &crate::overlay::hosts::HostView,
+    out: &mut Vec<Diagnostic>,
+) {
+    for found in view.diagnostics() {
+        let severity = registration_severity(found);
+        let here = found.file == ctx.path;
+        let range = match (here, found.line) {
+            (true, Some(line)) => {
+                let start = lsp_types::Position {
+                    line: u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX),
+                    character: u32::try_from(found.column.unwrap_or(1).saturating_sub(1)).unwrap_or(u32::MAX),
+                };
+                Range { start, end: start }
+            }
+            _ => zero_range(),
+        };
+        let message = match (here, found.line) {
+            (true, _) => found.message.clone(),
+            (false, Some(line)) => format!("{} ({}:{line})", found.message, found.file.display()),
+            (false, None) => format!("{} ({})", found.message, found.file.display()),
+        };
+        out.push(diagnostic(range, severity, source::SCHEMA, found.code, message));
+    }
+    let Some(ast) = ast else {
+        return;
+    };
+    for event in view.unknown_events() {
+        let Some(span) = ast.top_level().find(|entry| entry.key == event.key).and_then(|entry| entry.key_span.clone()) else {
+            continue;
+        };
+        let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
+        out.push(diagnostic(
+            range,
+            DiagnosticSeverity::WARNING,
+            source::SCHEMA,
+            code::LIFECYCLE_UNKNOWN_HOST,
+            format!(
+                "`{key}` is a lifecycle event of the registered host `{host}`, but `{host}` does not identify this document, so `{key}` is ordinary data here",
+                key = event.key,
+                host = event.host,
+            ),
+        ));
+    }
 }
 
 pub(crate) fn schema_advisory_diagnostics(
@@ -523,7 +604,10 @@ pub(crate) fn schema_problem_diagnostics(
             }
             _ => None,
         };
-        let Some(range) = located.or_else(|| problem_range(ctx.text, ast, ctx.source_map, problem)) else {
+        let Some(range) = located
+            .or_else(|| refused_default_range(ctx, ast, bundle, problem))
+            .or_else(|| problem_range(ctx.text, ast, ctx.source_map, problem))
+        else {
             continue;
         };
         let mut diagnostic = diagnostic(
@@ -547,7 +631,9 @@ pub(crate) fn schema_problem_diagnostics(
 
 /// The `data` payload of a schema-problem diagnostic:
 /// `{"instance_path": "/content_policy/1/rule"}`, plus `resolution_failure`
-/// for a file-reference failure.
+/// for a file-reference failure and `schema_default` (`path`,
+/// `schema_location`, and `schema_file` when a file declares it) for a
+/// problem with a value a schema default supplied.
 ///
 /// The range already marks the node, but a missing key ranges its parent
 /// mapping and a list item shares its line with its fields, so the validator's
@@ -556,6 +642,15 @@ pub(crate) fn schema_problem_diagnostics(
 fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
     let mut data = serde_json::Map::new();
     data.insert("instance_path".to_string(), problem.path.clone().into());
+    if let Some(applied) = &problem.default {
+        data.insert(
+            "schema_default".to_string(),
+            serde_json::json!({ "path": applied.path.to_string(), "schema_location": applied.pointer }),
+        );
+        if let Some(file) = applied.origin.as_ref().and_then(simplified_schema::SchemaOrigin::file) {
+            data["schema_default"]["schema_file"] = file.to_string_lossy().into_owned().into();
+        }
+    }
     if let Some(reference) = &problem.file_reference
         && let serde_json::Value::Object(failure) =
             resolution_failure_data(reference.resolution_failure())
@@ -779,6 +874,37 @@ fn semantic_problem_range(
         entry.value_span.clone()
     };
     ctx.source_map.byte_range_to_lsp(span)
+}
+
+/// The range of a problem with a schema default, which no frontmatter text
+/// holds: a refused `default(...)` (a constraint violation at a path with no
+/// authored value) or any problem validation attributed to the default it
+/// inserted ([`ValidationProblem::default`], such as an eager file default
+/// whose target is refused). It ranges the property's declaration in the
+/// document's inline `$schema`, or the `$schema` value when the declaration
+/// is elsewhere (a referenced file, a root union). A property the baseline
+/// or a trigger declares keeps the ordinary ranging.
+fn refused_default_range(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    bundle: &SchemaBundle,
+    problem: &ValidationProblem,
+) -> Option<Range> {
+    let refused = problem.code == ValidationProblemCode::ConstraintViolation
+        && !problem.path.is_empty()
+        && ast.entry_by_pointer(&problem.path).is_none();
+    if !refused && problem.default.is_none() {
+        return None;
+    }
+    let key = problem.instance_path.first()?;
+    let origin = bundle.effective.origins.get(key)?;
+    if !matches!(origin.kind, SchemaOriginKind::Document | SchemaOriginKind::ReferencedFile) {
+        return None;
+    }
+    let schema = ast.schema_entry()?;
+    let declaration = format!("/$schema/{}", key.replace('~', "~0").replace('/', "~1"));
+    let span = ast.entry_by_pointer(&declaration).unwrap_or(schema).value_span.clone();
+    ctx.source_map.byte_range_to_lsp(complete_flow_value_span(ctx.text, span))
 }
 
 /// The concrete range for one validation problem (R-5 ranging rules).
@@ -1815,6 +1941,7 @@ mod tests {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
         f(&diagnostics(&ctx), &source_map)
     }
@@ -2735,6 +2862,7 @@ mod tests {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         let diagnostics = diagnostics(&ctx);
         f(&ctx, &diagnostics)

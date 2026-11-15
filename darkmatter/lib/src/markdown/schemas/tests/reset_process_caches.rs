@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::super::triggers::PayloadMemoTally;
+use simplified_schema::triggers::PayloadMemoTally;
 use super::super::{DarkmatterSchemas, SHARED_VALIDATOR_CACHE, reset_process_caches_for_bench};
 use crate::markdown::Markdown;
 

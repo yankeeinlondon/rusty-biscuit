@@ -50,7 +50,8 @@ use darkmatter::markdown::cleanup::rules::{
 use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, CleanResult, clean_document};
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::extract_frontmatter_block;
-use darkmatter::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding};
+use darkmatter::markdown::schemas::CleanSchemaConfig;
+use simplified_schema::triggers::InvalidTriggerFinding;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use tracing::instrument;
@@ -78,6 +79,22 @@ struct DocumentRequest<'a> {
     /// The run may ask about a schema slot's read: a formatted output on a
     /// terminal. A data output never prompts.
     prompts: bool,
+    /// The schema-slot session, once the schema tier built one: the run
+    /// reports the "always allow" approvals it could not save.
+    slot_session: std::cell::OnceCell<std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
+}
+
+impl DocumentRequest<'_> {
+    /// Writes each `dm.config.not_saved` warning the slot session left to
+    /// stderr. Only a prompting run can leave one, and a data output never
+    /// prompts.
+    fn report_not_saved(&self) {
+        if let Some(session) = self.slot_session.get() {
+            for warning in session.take_not_saved_warnings() {
+                crate::output::stderr_warning(&warning.message);
+            }
+        }
+    }
 }
 
 /// Everything `md clean` needs beyond its input path.
@@ -187,8 +204,11 @@ fn clean_value(
         request,
         opening: opened.as_ref().map(|opened| opened.reference()),
         prompts: !is_data && crate::approval::can_prompt_interactively(),
+        slot_session: std::cell::OnceCell::new(),
     };
-    let result = match clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request) {
+    let cleaned = clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request);
+    document_request.report_not_saved();
+    let result = match cleaned {
         Ok(result) => result,
         Err(CleanFailure { error, trigger_findings: None }) => return Err(error),
         Err(CleanFailure { error, trigger_findings: Some(findings) }) => {
@@ -334,7 +354,7 @@ fn clean(
         workspace: None,
         document_path,
     };
-    clean_document(&clean_request, || schema_config(flags, document_path, request)).map_err(
+    clean_document(&clean_request, || schema_config(raw, flags, document_path, request)).map_err(
         |error| match error {
             FrontmatterRepairError::Extraction(error) => {
                 CleanFailure { error: Report::new(error), trigger_findings: None }
@@ -353,6 +373,7 @@ fn clean(
 /// frontmatter block, so contexts are built — and repository discovery paid
 /// for — only when the schema tier runs.
 fn schema_config(
+    raw: &str,
     flags: &CleanSchemaFlags,
     document_path: Option<&Path>,
     request: &DocumentRequest<'_>,
@@ -362,10 +383,10 @@ fn schema_config(
         Some(path) => request.request.document_context(request.opening, path)?,
         None => request.request.launch_context()?.clone(),
     };
-    // A schema template resolves through one session: its automatic grants
-    // judged against the document's repository, the user's grant store, and
-    // a prompt only when the run may ask. An unapproved read leaves the
-    // document unchecked, which fails the run rather than reporting it clean.
+    // A schema template resolves through one session: the `permissions`
+    // the document's context names, and a prompt only when the run may ask.
+    // An unapproved read leaves the document unchecked, which fails the run
+    // rather than reporting it clean.
     let mut session = darkmatter::markdown::schemas::slots::SlotSession::for_context(
         darkmatter::markdown::compose::DataRuntime::new(),
         &context,
@@ -373,7 +394,10 @@ fn schema_config(
     if request.prompts {
         session = session.with_handler(std::sync::Arc::new(crate::approval::CliShellApprovalHandler));
     }
-    let mut config = CleanSchemaConfig::new(context).with_slot_session(std::sync::Arc::new(session));
+    let session = std::sync::Arc::new(session);
+    // The library builds the configuration at most once per run.
+    let _ = request.slot_session.set(std::sync::Arc::clone(&session));
+    let mut config = CleanSchemaConfig::new(context.clone()).with_slot_session(session);
 
     if flags.no_baseline_schema || crate::commands::compose::env_disables_baseline_schema() {
         config = config.without_baseline_schema();
@@ -390,6 +414,24 @@ fn schema_config(
         config = config.with_schema_override(serde_json::Value::String(
             schema.to_string_lossy().into_owned(),
         ));
+    }
+
+    // The run's registered hosts; the document's selection warnings are
+    // reported once with the load's.
+    if !flags.no_schema_triggers
+        && let Some(hosts) = request.request.registered_hosts(&context)
+    {
+        let mut document = Markdown::from(raw);
+        if let Some(path) = document_path {
+            document = document.with_source(darkmatter::markdown::compose::ComposeSource::File(path.to_path_buf()));
+        }
+        let identified = hosts.identify(
+            &darkmatter::markdown::schemas::frontmatter_as_json(&document),
+            document_path,
+            &context,
+        );
+        request.request.report_host_diagnostics(&identified.diagnostics);
+        config = config.with_registered_hosts(hosts);
     }
 
     Ok(config.with_trigger_schemas(!flags.no_schema_triggers))

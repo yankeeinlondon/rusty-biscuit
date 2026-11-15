@@ -143,7 +143,7 @@ impl Repo {
         let document = Markdown::try_from(path.as_path()).map_err(|error| error.to_string())?;
         let options = ComposeOptions::new()
             .with_source_file(&path)
-            .with_shell_policy_root(self.path())
+            .with_config_snapshot(crate::request_support::shell_config(self.path(), &[]))
             .with_shell_timeout(timeout)
             .with_allow_shell_timeout(allow_timeout)
             .with_caller_owned_post_shell_verdict(caller_owned);
@@ -427,7 +427,7 @@ fn a_transcluded_document_reads_a_result_and_shares_the_cache() {
     let document = Markdown::try_from(path.as_path()).unwrap();
     let options = ComposeOptions::new()
         .with_source_file(&path)
-        .with_shell_policy_root(repo.path())
+        .with_config_snapshot(crate::request_support::shell_config(repo.path(), &[]))
         .with_shell_timeout(std::time::Duration::from_secs(60));
     let approved = document.compose_preflight(&crate::request_support::request(options.clone())).unwrap().approval_set().into_iter().collect::<std::collections::HashSet<String>>();
     let (composed, _) = document.compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved))).unwrap();

@@ -914,7 +914,7 @@ When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict c
 1. **Explicit flag** (`--provider <slug>`, or the catalog-derived shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`, `--kilo`, `--pi`, `--antigravity`) — highest priority
 2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
 3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
-4. **Config favorite** — `preferred_agent` from `~/.claudine/config.json` (the older key `favorite_agent` is still read; set it with `claudine config set favorite-agent <slug>`)
+4. **Config favorite** — `preferred_agent` from `~/.claudine/config.yaml` (the older key `favorite_agent` is still read; set it with `claudine config set favorite-agent <slug>`)
 5. **Hard error** — if none of the above resolve, the command fails with a structured error
 
 The old "single installed" auto-selection shortcut has been removed. Even when only one provider is installed, non-TTY sessions still require an explicit signal (flag, frontmatter, or favorite).
@@ -1067,6 +1067,13 @@ plus any other matching trigger schema, under the document's authored
 `$schema`. A document with no `$schema` is still checked: a lifecycle stack,
 `loop`, `agent`, `model`, timeout, or linking key with the wrong shape blocks
 the launch.
+
+A template schema (one whose `{{ … }}` slots read files or URLs) resolves
+through the same schema-slot session the document was composed with, so the
+verdict judges the snapshot composition already approved: a read the
+captured `permissions` (or the network permission) allow resolves without
+asking, and one they do not is `dm.schema.slot_approval_required`, exactly
+as `md compose` decides it.
 
 ```yaml
 ---
@@ -1306,6 +1313,33 @@ constraint. `eager` means "validate at launch when present"; `required` means
 `file(eager)` expresses an optional file that is resolved and validated at
 launch when supplied.
 
+#### A required property with a default is never collected
+
+A `required` property that declares `default(...)` is answered by its default
+when it is absent, so claudine never prompts for it and never reports it as
+missing, in either mode. Composition writes the default into the composed
+frontmatter (never into your file), and the status report marks the property
+as using its default:
+
+```yaml
+$schema:
+  retries: number(required; default(3))   # absent: runs with retries = 3
+  topic: string(required)                 # absent: prompted, as before
+```
+
+- An **optional** property's default is documentation only: the property is
+  not collected and no value is inserted.
+- An explicit `retries: null` is present, so it is judged by its type
+  (`SchemaValidation`), not replaced by the default.
+- A default the schema refuses (`number(required; min(5); default(3))`) blocks
+  the launch with a `SchemaValidation` error that names the default's schema
+  location, `/properties/retries/default`, instead of prompting. This holds
+  for `inline-compose` too, even for a property that is not `eager`, because
+  composition would otherwise fill it from that default.
+- A required property inside an absent object is the object's question: with
+  `config: '{ level: number(required; default(1)) }(required)'` and no
+  `config`, claudine collects `config`.
+
 Raw JSON Schema has no phase vocabulary: its `required` entries are enforced
 before either mode starts and are checked again at completion. Use
 SimplifiedSchema when an actor inside the run is meant to produce the value.
@@ -1323,7 +1357,7 @@ When required properties are missing, claudine offers to collect them interactiv
 
 When Interactive Mode is denied, claudine emits a `MissingProperties` error with the prompt file (OSC8-linked), the list of missing property names in declaration order with their type labels and descriptions, the frontmatter `description` (when present), and a remediation hint: `Pass key=value, use --set, or set prompt_for_missing to true in an interactive terminal.`
 
-When Interactive Mode is allowed, claudine first prints a per-property status report to stderr (required and optional, with valid/invalid/missing glyphs) and then drives `biscuit-tui` widgets sized to each property's `SimplifiedType`:
+When Interactive Mode is allowed, claudine first prints a per-property status report to stderr (required and optional, with valid/invalid/missing glyphs; a required property its default answers is marked as using its default) and then drives `biscuit-tui` widgets sized to each property's `SimplifiedType`:
 
 | Property type                                  | Widget                                  |
 | ---------------------------------------------- | --------------------------------------- |
@@ -1434,10 +1468,10 @@ Documents without an `initialize` are unaffected: nothing can change their front
 
 ### User Config
 
-The user-scoped Claudine config (`~/.claudine/config.json` or `.json5`) exposes a single switch:
+The user-scoped Claudine config (`~/.claudine/config.yaml`) exposes a single switch:
 
-```json
-{ "prompt_for_missing": true }
+```yaml
+prompt_for_missing: true
 ```
 
 The default is `true`. The field is scoped to the user config only — the repo-scoped config rejects it. The interactive `claudine config` TUI offers a boolean toggle, and the non-interactive setter accepts `claudine config set prompt-for-missing true|false`.
@@ -1964,7 +1998,7 @@ Resolve → Shell-free bootstrap → Initialize → Stabilized reread → Full a
 
 - **Resolve**: canonical commands use `composition::resolve_composition_source_in_context()` with the invocation's launch `FileResolutionContext`, then derive one `SourceContext` from the resolved path
 - **Bootstrap and initialize**: `prepare_bootstrap()` produces only the effective frontmatter/lifecycle surface. The coordinator rejects initialization shell actions and bootstrap shell expansion, dispatches `initialize` once, and rereads before full body discovery; `skip` exits before reading the body. Provider selection supplies early-binding context before composition.
-- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
+- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks the captured permissions, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
 - **Prepare**: `composition::prepare::service::prepare_document()` — the canonical preparation service every entry reason routes through (direct, proxy target, retry, resume, loop iteration) — composes through Darkmatter via `prepare_direct()` / `prepare_inline()` with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`. There is exactly one composer per mode; see [Document Handoffs](#document-handoffs-and-the-equivalence-contract)
 - **Start**: `LifecycleRunGuard::emit_start_once()` fires the `start` lifecycle event after schema validation and shell audit pass
 - **Select**: `composition::select_provider()` applies the precedence chain
@@ -2046,6 +2080,7 @@ The model and its invariants:
 - **Headline is true wall-clock.** The `Performance` total is sampled once at report-build from a single process-start baseline, so it can never disagree with the body the way a mid-flight timer could.
 - **Structural buckets reconcile.** Every `Structural` node's children (plus a synthetic `unattributed` remainder) sum back to the node's own total. The top-level buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) therefore sum back to the headline. A debug assertion enforces this at runtime; a unit test (TR-4) enforces it for every command shape.
 - **Breakdown rows itemize without double-counting.** Darkmatter composition stages, system-prompt internals, child-environment internals, and the `pre-dispatch`/agent sub-rows are `Breakdown` children — shown and percentaged, but excluded from the reconciliation sum so no cost appears twice. Single-shot `compose`/`inline-compose` nest the `composition` subtree under `prep phase`; sequence composition appears under the step where it ran.
+- **`prep phase` ends where provider setup begins.** It runs from the command's entry until the execution request is built. For a document with `initialize`, that includes the event itself and the reread that follows it, so the composition of the rewritten document sits inside the window; the event's own time is part of `prep → unattributed`.
 - **Direct-wrapper setup is attributed.** `environment setup` structurally separates launch discovery, system prompt, child environment, MCP composition, harness eligibility, and enabled-harness materialization. System prompt expands into `lookup`, `runtime capture`, `primary compose`, `appendix compose`, and provider `delivery`; child environment may expand into `env sanitize` and `provider overlay → repo root detect`. Harness materialization is omitted when eligibility finds no enabled harness.
 - **Percent column** shows each row's share of wall-clock (`100%` at the root, `<1%` for sub-one-percent slivers).
 - **`HOT` marker** flags the single dominant leaf when it clears the materiality floor (≥20% of wall-clock).

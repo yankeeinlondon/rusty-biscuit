@@ -105,7 +105,7 @@ pub(super) fn is_eager(shape: Option<&SchemaShape>, name: &str) -> bool {
 /// the value or the array. The alternatives of a resolved union-typed
 /// reference (`U(required)`, `U[]`) count as arms, because Darkmatter hoists
 /// their presence markers to the property.
-fn any_atom_constraint(def: &PropertyDef, predicate: impl Fn(&Constraint) -> bool + Copy) -> bool {
+pub(super) fn any_atom_constraint(def: &PropertyDef, predicate: impl Fn(&Constraint) -> bool + Copy) -> bool {
     fn atom_matches(atom: &PropertyAtom, predicate: impl Fn(&Constraint) -> bool + Copy) -> bool {
         atom.constraints
             .iter()
@@ -119,6 +119,18 @@ fn any_atom_constraint(def: &PropertyDef, predicate: impl Fn(&Constraint) -> boo
         PropertyDef::Single(atom) => atom_matches(atom, predicate),
         PropertyDef::Union(atoms) => atoms.iter().any(|atom| atom_matches(atom, predicate)),
     }
+}
+
+/// The top-level properties `report` accepted through their default.
+fn defaulted_properties(report: &ValidationReport) -> std::collections::BTreeSet<&str> {
+    report
+        .defaults
+        .iter()
+        .filter_map(|applied| match applied.path.segments() {
+            [name] => Some(name.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Reclassify a required top-level property whose effective value is `null`
@@ -496,6 +508,9 @@ pub enum PropertyState {
     /// `last_updated`) is expected to supply it. Only reported when the
     /// report was judged at [`SchemaPhase::Launch`] for `inline-compose`.
     Deferred,
+    /// The property is required, absent, and answered by its schema
+    /// `default(...)`, which composition inserts; it is never collected.
+    Defaulted,
 }
 
 /// Build a [`SchemaStatusReport`] for `source` under the supplied
@@ -566,6 +581,7 @@ pub fn build_schema_status_report_for_mode(
         file_resolution_context,
         &callers,
         trigger_findings,
+        None,
     )?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still
@@ -599,12 +615,9 @@ pub fn build_schema_status_report_for_mode(
     // Judged on the text composition reads, which Darkmatter decodes from
     // the stored tokens and never defers as a template; `fm_map` keeps them
     // so the status below still sees them as data rather than pending.
+    let stored = serde_json::Value::Object(fm_map.clone());
     let mut report = effective
-        .validate_stored(
-            &serde_json::Value::Object(fm_map.clone()),
-            &simplified_schema::PositionMap::new(),
-            phase,
-        )
+        .validate_stored(&stored, &simplified_schema::PositionMap::new(), phase)
     .map_err(|error| {
         schema_error_to_composition_error(
             &source.resolved_path,
@@ -612,6 +625,7 @@ pub fn build_schema_status_report_for_mode(
             Some(&error),
         )
     })?;
+    complete_launch_defaults(&effective, phase, &stored, &mut report);
     let caller_resolved =
         caller_resolved_file_properties(
             &report.problems,
@@ -682,6 +696,8 @@ pub(in crate::composition) fn status_report_from_validation(
         }
     }
 
+    let defaulted = defaulted_properties(report);
+
     let shape = match effective.simplified.as_ref() {
         Some(SchemaRoot::Single(s)) => s,
         // Root-level unions don't expose a single property table; report
@@ -714,6 +730,8 @@ pub(in crate::composition) fn status_report_from_validation(
             && (!is_present || is_null);
         let state = if is_invalid {
             PropertyState::Invalid
+        } else if !is_present && defaulted.contains(name.as_str()) {
+            PropertyState::Defaulted
         } else if deferred {
             PropertyState::Deferred
         } else if is_missing || !is_present {

@@ -21,8 +21,8 @@ fn walks_past_wrapper_error_to_typed_inner() {
     let shell = ShellExpansionError::ApprovalRequired {
         ctx: Box::new(ctx),
         command: "gh repo list".into(),
-        whitelist_path: Box::new(PathBuf::from("/tmp/wl")),
-        blacklist_path: Box::new(PathBuf::from("/tmp/bl")),
+        save_target: Some(Box::new(PathBuf::from("/tmp/home/.darkmatter.yaml"))),
+        exclusion: None,
         origin: ShellCommandOrigin::Body { line: 7 },
         suggested_rules: Box::default(),
     };
@@ -33,7 +33,7 @@ fn walks_past_wrapper_error_to_typed_inner() {
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
     let plain = strip_escape_codes(&rendered);
     assert!(plain.contains("approval required"), "got:\n{plain}");
-    assert!(plain.contains("/tmp/wl"), "got:\n{plain}");
+    assert!(plain.contains("/tmp/home/.darkmatter.yaml"), "got:\n{plain}");
 }
 
 #[test]

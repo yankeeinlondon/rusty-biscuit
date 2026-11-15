@@ -31,7 +31,8 @@ pub use file_types::{
 };
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
-    BehindStatus, ChangedBase, ChangedContent, CommitInfo, CommitLink, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
+    BehindStatus, ChangedBase, ChangedContent, CommitInfo, CommitLink, CommittedEntry,
+    CommittedTreeSnapshot, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
     DEFAULT_RECENT_COMMIT_COUNT, DeltaKind, FileChange, GitHostingProvider, GitInfo, GitRepo,
     LocalBranchInfo, NamedDate, PathHistoryOptions, PathHistoryResult,
     RecentCommit, RecentCommitAuthor, RecentCommitFile, RecentCommitFileKind,
@@ -244,6 +245,13 @@ impl FilesystemObservation {
     /// non-repository observation.
     pub fn detect_merge_conflicts(&self) -> Result<Option<Vec<PathBuf>>> {
         self.with_repository(GitRepo::merge_conflicts)
+    }
+
+    /// The tree committed at `HEAD`, pinned with the retained repository
+    /// handle ([`GitRepo::committed_tree`]); an unborn `HEAD` is an empty
+    /// view. Returns `Ok(None)` for a retained non-repository observation.
+    pub fn committed_tree(&self) -> Result<Option<CommittedTreeSnapshot>> {
+        self.with_repository(GitRepo::committed_tree)
     }
 
     fn with_repository<T>(&self, f: impl FnOnce(&GitRepo) -> Result<T>) -> Result<Option<T>> {

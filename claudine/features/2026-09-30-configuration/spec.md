@@ -2,6 +2,18 @@
 
 Claudine provides configuration files in both the user's home directory (`~/.claudine/config.json`) as well as in a repo (`{repo-root}/.claudine/config.json`) but currently that configuration is constrained by a schema and also has become very stale as well as being poorly organized. In addition the configuration TUI that Claudine provides is ineffective at addressing the actual configuration that Claudine has grown to support.
 
+## Moved to `2026-11-12-registration`
+
+That feature changes the configuration's format, not its organization:
+`config.json` (JSON5) becomes `config.yaml` at both scopes, described by a
+SimplifiedSchema with every property's default, plus a `permissions`
+property typed by Darkmatter's configuration schema, and writers
+(`claudine init`, the configuration editor) that edit per key and keep
+comments. This spec keeps the reorganization: scope asymmetry, inconsistent
+readers, orphaned types, the configuration editor's coverage, and the
+portable environment variables below. Read the inventory's file names as
+`config.yaml` once that feature lands.
+
 ## Current Config
 
 The current configuration today is:

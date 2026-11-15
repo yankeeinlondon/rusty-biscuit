@@ -49,6 +49,7 @@ fn claudine_config_with_tts(tts: TtsValue) -> ClaudineConfig {
         exit_expressions: None,
         guard_settings: Default::default(),
         steering: Default::default(),
+        permissions: None,
     }
 }
 

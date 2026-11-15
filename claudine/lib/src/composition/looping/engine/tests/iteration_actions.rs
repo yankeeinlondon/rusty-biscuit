@@ -34,6 +34,7 @@ fn loop_iterations_share_one_exact_document_epoch() {
         &source,
         &prepare_options,
         &crate::harness::ShellApprovalOptions::default(),
+        crate::composition::CompositionMode::ChainedDocument,
     )
     .unwrap();
 

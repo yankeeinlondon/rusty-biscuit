@@ -44,7 +44,62 @@ task `with` keys wait for their event. A lifecycle `set` changes runtime state,
 not the reread, so a phrase reading a `set` key misses the cache (never wrong
 audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm).
 
-**`tts` in `~/.claudine/config.json`** (`config/tts.rs::TtsValue`) is `true`,
+**Configuration loading** (`config/{schema,load,json_conversion}.rs`,
+`dispatch/loader.rs`): both files are YAML judged strictly by
+`claudine/schemas/claudine-config.yaml` (`include_str!`, prepared with
+Darkmatter's shipped sources so `permissions@darkmatter:config` resolves; not
+part of the trigger bundle or shipped artifact). Schema defaults are inserted
+before serde reads `ClaudineConfig` (no top-level serde defaults;
+`ClaudineConfig::default()` is the projection of `{}`); `RepoOverrideConfig`
+keeps presence-sensitive serde defaults and gets nothing inserted. Errors are
+`ClaudineError::ConfigInvalid`/`ConfigConversion` with file:line:column and
+JSON pointer. A legacy `config.json` beside a canonical
+`<base>/.claudine/config.yaml` is converted by the temporary
+`json_conversion` module through Darkmatter's `ConfigTransaction` and
+migration receipt. Event and provider maps list their keys explicitly.
+
+**Configuration writes** (`config/persist.rs`): nothing serializes a whole
+config any more. Every writer hands `persist` per-path `YamlEdit`s, applied
+under Darkmatter's `ConfigTransaction` lock to the re-read file and judged by
+the scope's schema plus `ClaudineConfig::validate` before replacement
+(`ConfigEditRefused` / `ConfigWrite` on failure; the file is untouched).
+`edit_config` takes explicit edits (setters); `save_changes(path, scope,
+opened, edited)` diffs two serialized values (`changed_edits`: mappings
+recurse while the file holds a mapping, sequences/scalars are replaced whole,
+a lost key is removed or set `null` when it came from a default) — the config
+TUI keeps `App::opening_config`/`opening_repo_config` for this;
+`initialize_config(path, scope, defaults, chosen)` is setup's form, always
+creating a missing file from `initial_text(scope)`. Edits that already hold
+are dropped, so an unchanged save starts no transaction. A user file spelling
+`favorite_agent` has `preferred_agent` edits applied to that key.
+
+**Setup handshake** (`config/setup.rs::setup_with_darkmatter`): first-run
+initialization (`init_wizard::write_with_darkmatter_setup`, used by the
+headless and interactive wizard and the test-only `commands/init`) passes its
+own config write as a closure; the service refuses a missing home or
+repository before calling it, records Claudine's pre-existing `permissions`,
+then moves an inline `~/.darkmatter.yaml` block into Claudine's file (only
+when Claudine had none or a semantically equal one, compared through
+`darkmatter::config::init::effective_permissions`) and rewrites
+`.darkmatter.yaml` to `~/.claudine/config.yaml` (`./.claudine/config.yaml`
+at repository scope) in one two-target transaction with the Darkmatter file
+`published_last`. Differing blocks are `SetupError::Conflict`; a reference
+to Claudine is left, a third-party reference is kept. The CLI turns every
+handshake error except Claudine's own write into a warning, and with no home
+writes only Claudine's file at its old fallback. Tests:
+`lib/tests/l1/darkmatter_setup.rs` (the interrupted-transfer case uses
+darkmatter's `fail_replacement_after`, enabled by the lib dev-dependency
+feature). A first claudine run in a fixture with no Claudine config therefore
+rewrites `~/.darkmatter.yaml` to the reference; read saved rules from
+`~/.claudine/config.yaml` there. The full setup order is
+`config/setup.rs::setup_claudine`: `composition::registration::publish` the
+immutable host revision (failure aborts setup), then this handshake, then
+`darkmatter::config::init::register_manifest` adds
+`~/.claudine/darkmatter-host.yaml` to the user `~/.darkmatter.yaml` (failure
+is a warning). User docs:
+[Schemas → published host registration](topics/schemas.md#the-published-host-registration).
+
+**`tts` in `~/.claudine/config.yaml`** (`config/tts.rs::TtsValue`) is `true`,
 `false`, or an object whose keys are all optional: `provider` (absent = default
 provider, as `true`), `voice` (string or `{ male, female }`), `gender`
 (`female` default), `prewarm` (default `true`). Explicit `null` is rejected
@@ -214,6 +269,15 @@ home read also needs its `context_construction_guard.rs` allowance. Because
 `~/.claudine` fixtures run on Windows too: do not gate them `cfg(unix)` for the
 home.
 
+Every Claudine composition of a document starts from
+`composition::compose_options_with_context` (canonical preparation, the
+system prompt, the passthrough harness seed, sequence approval discovery):
+it switches on Darkmatter's remote transclusion, as `md compose` does, so
+the captured `network` permission alone decides whether a `::file`/`::code`/
+`prologue`/`epilogue` URL is fetched. A bare `ComposeOptions::new_with_context`
+leaves those targets failing even under `network: allow`. Tests:
+`lib/tests/l1/network_transclusion.rs` (loopback responder).
+
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
 suppress lifecycle audio. Tests of literal shipped prompts should set child-only
@@ -223,7 +287,7 @@ remove pending work under `queue.lock` before releasing the scheduler lock,
 including unwinding. See `claudine/docs/topics/testing.md` for the fixture
 boundaries.
 
-The **10 providers** above are the compiled `Provider` enum (`PROVIDER_COUNT = 10`); the research roster (`claudine/docs/providers.yaml`) is currently in sync with it (Kilo, Pi, and Antigravity graduated through the Phase H provider ladder, 2026-07-08). The roster is designed to run *ahead* of the enum during onboarding (a new entry is active-but-unwired until its variant lands) and carries `skip_research: true` for keep-identity-but-pause deprecations. Roo Code support was removed in 2026-07; major provider version changes enter the roster as new entries rather than mutating existing ones (see "Major-version changes are new providers" in the spec below). The provider-metadata automation workstream — research-driven metadata, codegen, signal catalog, the model ground-truth catalog, and the unified dispatch guard — is **complete** (RATIFIED & IMPLEMENTED, `claudine/features/_completed/2026-07-02-provider-metadata/spec.md`); consult it before extending provider metadata by hand. Each `lib/src/provider/<slug>/data.rs` is GENERATED by `claudine-gen` (in `claudine/gen`, using shared vocab from the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI) — only `behavior.rs` is hand-written. A single site-level drift guard (`claudine-cli/tests/l1/dispatch_inventory.rs`) prevents new decentralized `match Provider` dispatch from regrowing across **both** `lib/src` and `cli/src`.
+The **10 providers** above are the compiled `Provider` enum (`PROVIDER_COUNT = 10`); the research roster (`claudine/docs/providers.yaml`) is currently in sync with it (Kilo, Pi, and Antigravity graduated through the Phase H provider ladder, 2026-07-08). The roster is designed to run *ahead* of the enum during onboarding (a new entry is active-but-unwired until its variant lands) and carries `skip_research: true` for keep-identity-but-pause deprecations. Roo Code support was removed in 2026-07; major provider version changes enter the roster as new entries rather than mutating existing ones. The provider-metadata automation — research-driven metadata, codegen, signal catalog, the model ground-truth catalog, and the unified dispatch guard — is complete; read [Provider metadata](topics/provider-metadata.md) before extending provider metadata by hand. Each `lib/src/provider/<slug>/data.rs` is GENERATED by `claudine-gen` (in `claudine/gen`, using shared vocab from the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI) — only `behavior.rs` is hand-written. A single site-level drift guard (`claudine-cli/tests/l1/dispatch_inventory.rs`) prevents new decentralized `match Provider` dispatch from regrowing across **both** `lib/src` and `cli/src`.
 
 The package follows the monorepo `lib` + `cli` split: library crate `claudine`, CLI crate `claudine-cli` (binary `claudine`). A third sub-crate, `claudine-contract` (`claudine/contract`), implements `biscuit_contract::inference::InferenceAdapter` by running a provider as a single non-interactive, **tool-free, filesystem-isolated** session and returning its final assistant text — letting deterministic consumers (Reaper, Darkmatter) delegate to an agentic CLI via `Arc<dyn InferenceAdapter>` without depending on `claudine` directly. It depends on `claudine` (lib) but **not** `claudine-cli`. v1 enables Claude and Codex; other providers are reported `Unsupported`. See `claudine/contract/README.md` for the provider support matrix and security posture, and the `biscuit-contract` skill for the contract itself.
 
@@ -427,8 +491,18 @@ declares `composed`/`failed` as `null` with descriptions naming `start`/`blocked
 The sequence trigger is `schemas/sequence.yaml` (matches any non-null
 `sequence`; payload `sequence`, `template`, and `fail_fast: null` so a root
 `fail_fast` is reported by name), and it is the only declaration of
-`sequence`: `claudine.yaml` no longer declares it, and a sequence document's
-events and `loop` are typed by `claudine.yaml`, which they select. The
+`sequence`: `claudine.yaml` does not declare it but selects on it (its
+selectors equal the identifying trigger's nine keys, pinned by
+`claudine_identification.rs`), so a sequence document gets the whole main
+contract. The
+shared Darkmatter events `initialize`, `cancelled`, and `finalize` never
+select `claudine.yaml` alone (it still types them once selected), so a probe
+of their Claudine types adds a Claudine key (`claudine_schemas.rs::CLAUDINE_SELECTOR`,
+`agent: claude`). `schemas/claudine-document.yaml` is the identifying trigger
+(the nine keys `sequence`/`start`/`blocked`/`success`/`failure`/`loop`/`prompt`/`agent`/`model`,
+empty payload) named only by the published `darkmatter-host` manifest; it is
+not in `CLAUDINE_SCHEMA_FILES`, so Claudine's runtime never applies it
+(`lib/tests/l1/claudine_identification.rs`). The
 container types live in `schemas/sequence-types.yaml`, not `lifecycle.yaml`.
 The lifecycle families (`stack`/`item`/`conditional`, `initialize-*`,
 `cancelled-*`, literal `then`/`else` keys) and the containers (`task`
@@ -533,6 +607,27 @@ builds the whole root once per session. `LoopAmbient.last_output` is an
 `Arc<Value>`, so the `'static` binding clones the ambient without copying it.
 
 ## Structured shell authorization
+
+**Shell permissions** come only from Darkmatter's captured configuration:
+`ShellApprovalOptions::permissions` is a `harness::CapturedPermissions`
+(`Policy(Arc<PermissionPolicy>)`, `Invalid(ConfigError)`, or `Absent` for a
+library caller that captured none), built per source document with
+`CapturedPermissions::for_source(invocation, context)` (the invocation's
+`darkmatter_config_for`, so each repository gets its own HEAD ∧ working-copy
+layers) or `for_prepared`/`resolve` where only a prepared `ComposeContext`
+exists. There is no policy root, whitelist/blacklist file, or directory
+fallback. `harness/shell.rs` decides in `md`'s order: built-in blacklist
+(before yolo, cache, or rules) → `Invalid` fails with
+`HarnessError::ShellPermissionsInvalid` (`config.invalid`) → a `!` match asks
+(the request carries `exclusion`) → `ShellPermissions::preapproves` per
+segment → cache → handler. "Always allow" saves through
+`config::permissions::persist::save_user_approval` and into
+`ShellApprovalOptions::run_rules` (the rest of the run); a `NotSaved` keeps the
+approval and warns `dm.config.not_saved`. There is no permanent deny. A
+template fill meets `check_filled_chain` then
+`filled_template_needs_approval` against the exclusions of the graph's
+recorded permissions (sequence) or `StackExecutionContext::shell_exclusions`
+(lifecycle). Parity with `md` is pinned by `lib/tests/l1/shell_permission_parity.rs`.
 
 Document, lifecycle and sequence shells share Darkmatter's typed template
 filler. An exact approval fixes resolved bytes; a template approval permits
@@ -687,8 +782,8 @@ event placeholders require templates. Membership is checked before filling and
 before policy evaluation, so `--yolo` cannot authorize a command introduced by a
 reread after execution begins. The shell runtime rejection chain omits rejected
 values; earlier document schema validation can disclose them. Approval is
-separate from result caching: current membership, validators, blacklists, and
-direct targets still apply.
+separate from result caching: current membership, validators, the built-in
+blacklist, the `!` entries, and direct targets still apply.
 
 ## Initialization shell boundary
 
@@ -703,15 +798,14 @@ as `null`.
 `initialize` runs before preflight and is shell-free. Reject shell actions and
 `set` values written as a whole-value `$( … )` even in dead branches
 (`parse.rs::runs_a_shell`), and reject bootstrap frontmatter `$(...)` expansion; approval
-flags, whitelists, caches, and handlers cannot grant an exception. Non-shell
+flags, permissions, caches, and handlers cannot grant an exception. Non-shell
 effects keep their existing restrictions. Early blocked/failure/finalize chains
 cannot execute shells either, including catch evaluation-error routes, and
 `no_error` cannot suppress the prohibition. The shared runtime permits lifecycle
 shells only from `start`, after preflight, and proxy adoption resets that boundary.
 Keep parser rejection and the runtime backstop together (`DisabledShellRunner`
 refuses `run`, `run_values`, and `run_structured` alike, and its
-`ensure_permitted` answers before a template site reads any placeholder). See the binding ruling
-in `claudine/fixes/2026-09-15-initialize-after-proxy/spec.md` (R2).
+`ensure_permitted` answers before a template site reads any placeholder).
 
 ## Library Module Map
 
@@ -771,6 +865,7 @@ authoritative docs, not copies. Edit them there; never add a skill-local copy
 of a topic doc.
 
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
+- [Configuration](topics/configuration.md) — the YAML `~/.claudine/config.yaml` and `{repo-root}/.claudine/config.yaml`, validated against `claudine/schemas/claudine-config.yaml`, and the automatic conversion of a legacy JSON5 `config.json`
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
 - [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
 - [Lifecycle](topics/flow-control/lifecycle.md) — Claudine as a host of Darkmatter's lifecycle (renames, registrations, how failures route, the `finalize` exceptions), the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors. The host-neutral model (Darkmatter's five events, host registration, the `md` host, recovery modes) is `darkmatter/docs/topics/lifecycle/index.md` and `error-handling.md`

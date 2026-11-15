@@ -23,11 +23,11 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Report, Result};
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, InvalidTriggerFinding, LoadedYamlDocument, SchemaLayers, TriggerSource, YamlOutcome,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaLayers, YamlOutcome};
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerSource};
+use simplified_schema::yaml_documents::LoadedYamlDocument;
 use simplified_schema::{
-    SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemCode, ValidationProblemKind, ValidationTimings,
+    AppliedDefault, SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemCode, ValidationProblemKind, ValidationTimings,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -44,6 +44,9 @@ enum FileOutcome {
         report_valid: bool,
         problems: Vec<ValidationProblem>,
         advisories: Vec<SchemaAdvisory>,
+        /// Absent required properties the verdict accepted through their
+        /// schema default, in validator order.
+        defaults: Vec<AppliedDefault>,
         schema_label: Option<String>,
         layers: AppliedLayers,
     },
@@ -289,8 +292,9 @@ fn validate_all(
             .map(|context| (DarkmatterSchemas::new(context.clone()), Baseline::None))
             .map_err(|error| SchemaError::Baseline { message: format!("{error:#}"), source: None })
     };
+    let session = slot_session(request, is_data);
     let (api, baseline) = match loaded {
-        Ok((api, baseline)) => (api.with_slot_session(slot_session(request, is_data)), baseline),
+        Ok((api, baseline)) => (api.with_slot_session(std::sync::Arc::clone(&session)), baseline),
         Err(err) if is_data => {
             // A baseline holding a slot keeps its own code.
             let code = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(&err).unwrap_or("dm.schema.baseline");
@@ -322,6 +326,11 @@ fn validate_all(
         if let Some(terminal) = &stderr {
             // Warnings, so `--quiet` (which hides successes) keeps them.
             emit_warnings(&findings, terminal);
+            // Only a formatted run prompts, so only it can leave an "always
+            // allow" that could not be saved.
+            for warning in session.take_not_saved_warnings() {
+                crate::output::stderr_warning(&warning.message);
+            }
             if verbose > 1
                 && let Some(timings) = &timings
             {
@@ -355,10 +364,9 @@ fn pretty_report(results: &[FileResult], quiet: bool, verbose: u8, options: &Out
 
 /// The command's one schema-slot session: every document's template resolves
 /// through it, so a grant decided for one file holds for the rest of the run.
-/// Its automatic grants are judged against the launch context's repository,
-/// and its grant store is the one below the request's home. A formatted run
-/// on a terminal asks; a data output never prompts, so an unapproved read is
-/// `dm.schema.slot_approval_required`.
+/// Its reads are decided by the `permissions` the launch context names. A
+/// formatted run on a terminal asks; a data output never prompts, so an
+/// unapproved read is `dm.schema.slot_approval_required`.
 fn slot_session(request: &MdRequest, is_data: bool) -> std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession> {
     use darkmatter::markdown::schemas::slots::SlotSession;
     let data = darkmatter::markdown::compose::DataRuntime::new();
@@ -439,14 +447,19 @@ pub(crate) fn request_schemas(request: &MdRequest) -> Result<DarkmatterSchemas, 
 }
 
 /// [`request_schemas`] for a document in `context`: its own resolution context,
-/// with trigger discovery when it is inside a repository. The caller decides how
-/// to report what discovery skipped.
+/// with trigger discovery when it is inside a repository and the request's
+/// registered hosts. The caller decides how to report what discovery skipped.
 ///
 /// ## Errors
 ///
 /// As [`load_api`], or when trigger discovery fails.
 pub(crate) fn document_schemas(request: &MdRequest, context: biscuit_file::FileResolutionContext) -> Result<DarkmatterSchemas, SchemaError> {
-    discover_document_triggers(request_schemas(request)?.with_file_resolution_context(context))
+    let hosts = request.registered_hosts(&context);
+    let schemas = discover_document_triggers(request_schemas(request)?.with_file_resolution_context(context))?;
+    Ok(match hosts {
+        Some(hosts) => schemas.with_registered_hosts(hosts),
+        None => schemas,
+    })
 }
 
 /// `schemas` with trigger discovery when its context is inside a repository.
@@ -560,7 +573,12 @@ fn validate_one(
         Err(err) => return early(FileOutcome::ParseError(format!("{err:#}")), None),
     };
     let in_repository = document_context.repository_root().is_some();
-    let api = api.clone().with_file_resolution_context(document_context);
+    let hosts = (!no_schema_triggers).then(|| request.registered_hosts(&document_context)).flatten();
+    let mut api = api.clone().with_file_resolution_context(document_context);
+    if let Some(hosts) = hosts {
+        api = api.with_registered_hosts(hosts);
+        request.report_host_diagnostics(&api.registered_selection_for(&md).diagnostics);
+    }
     let (api, mut timings) = if in_repository && !no_schema_triggers {
         match ValidationTimings::record(|| api.with_trigger_discovery()) {
             (Ok(api), discovery) => (api, discovery),
@@ -608,6 +626,7 @@ fn validate_one(
             report_valid: report.valid,
             problems: report.problems,
             advisories: report.advisories,
+            defaults: report.defaults,
             schema_label,
             layers: AppliedLayers::for_markdown(summary.layers, &md, baseline),
         },
@@ -673,6 +692,7 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
             report_valid: true,
             problems: Vec::new(),
             advisories: Vec::new(),
+            defaults: Vec::new(),
             schema_label: None,
             layers: AppliedLayers::default(),
         },
@@ -680,6 +700,7 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
             report_valid: validation.report.valid,
             problems: validation.report.problems,
             advisories: validation.report.advisories,
+            defaults: validation.report.defaults,
             layers: AppliedLayers {
                 document: Some(DocumentSchema::Definition(validation.definition.clone())),
                 ..AppliedLayers::default()
@@ -972,6 +993,15 @@ fn push_problem_bullet(out: &mut String, problem: &ValidationProblem, terminal: 
         );
         push_row(out, &Prose::new(sub_line).render(terminal));
     }
+    // A value a schema default supplied is repaired in the schema, not in
+    // the frontmatter that never held it.
+    if let Some(applied) = problem.default.as_ref() {
+        let sub_line = format!(
+            "        <dim>hint:</dim> {}",
+            Prose::escape_text_outside_code_spans(&darkmatter::markdown::errors::schema_default_repair(applied))
+        );
+        push_row(out, &Prose::new(sub_line).render(terminal));
+    }
 }
 
 /// When `jsonschema` reports a `Required` failure, the message already starts
@@ -1025,13 +1055,14 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             report_valid,
             problems,
             advisories,
+            defaults,
             schema_label,
             layers,
         } => {
             let problems_json: Vec<serde_json::Value> = problems
                 .iter()
                 .map(|p| {
-                    json!({
+                    let mut problem = json!({
                         "path": p.path,
                         "property": p.property,
                         "message": p.message,
@@ -1040,7 +1071,11 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                         "column": p.column,
                         "arm_index": p.arm_index,
                         "description": p.description,
-                    })
+                    });
+                    if let Some(applied) = &p.default {
+                        problem["default"] = applied_default_record(applied);
+                    }
+                    problem
                 })
                 .collect();
             warnings_json.extend(advisories.iter().map(|advisory| {
@@ -1051,13 +1086,17 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                     "message": advisory.message(),
                 })
             }));
-            json!({
+            let mut record = json!({
                 "file": file_str,
                 "valid": report_valid,
                 "schema": schema_label,
                 "layers": layers.to_json(),
                 "problems": problems_json,
-            })
+            });
+            if !defaults.is_empty() {
+                record["defaults"] = defaults.iter().map(applied_default_record).collect();
+            }
+            record
         }
         FileOutcome::Unopened(err) => json!({
             "file": file_str,
@@ -1134,6 +1173,20 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
     // `serde_json/preserve_order`.
     value.sort_all_objects();
     value
+}
+
+/// One default's data record: where it stands in, its value, and where the
+/// schema declares it.
+fn applied_default_record(applied: &AppliedDefault) -> serde_json::Value {
+    let mut record = serde_json::json!({
+        "path": applied.path.to_string(),
+        "value": applied.value,
+        "schema_location": applied.pointer,
+    });
+    if let Some(file) = applied.origin.as_ref().and_then(simplified_schema::SchemaOrigin::file) {
+        record["schema_file"] = file.to_string_lossy().into_owned().into();
+    }
+    record
 }
 
 /// Stable lowercase token for a problem's kind, used in a data output; a YAML
@@ -1215,8 +1268,8 @@ mod tests {
     }
 
     /// `schema.yaml` and its `status.yaml` type in a temp folder outside any
-    /// repository, so no automatic grant applies, resolved by the CLI's
-    /// function under `handler`.
+    /// repository, with no configuration pre-approving a read, resolved by
+    /// the CLI's function under `handler`.
     fn resolve_under(handler: Arc<Scripted>) -> Result<(), SchemaError> {
         let temp = tempfile::tempdir().expect("temp dir");
         let root = biscuit_file::canonicalize_simplified(temp.path()).expect("canonical temp dir");

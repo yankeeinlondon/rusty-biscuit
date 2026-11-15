@@ -402,11 +402,10 @@ fn a_shell_command_installed_by_the_overlay_stays_subject_to_target_side_policy(
         .as_ref()
         .expect("the overlay's lifecycle surface is parsed");
 
-    // Only `echo` is whitelisted, and there is no approval handler, so anything
+    // Only `echo` is allowed, and there is no approval handler, so anything
     // else is refused rather than silently run.
-    std::fs::write(fx.dir().join(".darkmatter-shell-whitelist"), "prefix echo\n").unwrap();
     let options = claudine::harness::ShellApprovalOptions {
-        policy_root: Some(fx.dir().to_path_buf()),
+        permissions: crate::commands::wrap::harness_orch::test_permissions::user_permissions(&fx.dir().join("home"), &["prefix echo"]),
         approval_handler: None,
         ..Default::default()
     };

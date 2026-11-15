@@ -173,6 +173,11 @@ See [Steering Routing](topics/steering-routing.md).
   (`biscuit_hash::xx_hash`), so digests are comparable across the two crates. It
   replaced an ad-hoc `std::collections::hash_map::DefaultHasher`, whose output is
   not a stable, cross-crate authority.
+- The `claudine` library enables `biscuit-hash`'s `json` feature beside
+  `blake3` for the content identity of its published `darkmatter-host`
+  revision (`composition::registration`, `blake3_hash_json` over the revision's
+  roles and file texts). It adds no crate: the feature reuses `serde` and
+  `serde_json`, which the library already depends on.
 
 ## Multi-Target Render Components
 

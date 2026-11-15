@@ -76,6 +76,18 @@ pub enum Work {
     /// validator-cache identity (`validate::SchemaDigest::canonical`). A
     /// known layered or prepared digest avoids it.
     CanonicalSchemaSerialization,
+    /// A trigger-registry scan of a document's schema roots.
+    TriggerDiscovery,
+    /// A trigger payload's merge-compatibility (simple-object) check run;
+    /// an accepted prepared trigger skips it.
+    PayloadMergeCheck,
+    /// A trigger payload's compile check run; an accepted prepared trigger
+    /// skips it.
+    PayloadCompileCheck,
+    /// The file-reading kind checks of a `schema` or `yaml-schema` document
+    /// run (its own imports resolved). The threads are recorded
+    /// ([`threads`]).
+    YamlKindCheck,
 }
 
 impl Work {
@@ -103,7 +115,16 @@ impl Work {
         Work::ArtifactFallbackRecord,
         Work::PositionMapConstruction,
         Work::CanonicalSchemaSerialization,
+        Work::TriggerDiscovery,
+        Work::PayloadMergeCheck,
+        Work::PayloadCompileCheck,
+        Work::YamlKindCheck,
     ];
+
+    /// Whether [`add`] records the thread this work ran on.
+    fn records_thread(self) -> bool {
+        matches!(self, Work::YamlKindCheck)
+    }
 }
 
 static COUNTS: [AtomicU64; Work::ALL.len()] = [const { AtomicU64::new(0) }; Work::ALL.len()];
@@ -111,6 +132,23 @@ static COUNTS: [AtomicU64; Work::ALL.len()] = [const { AtomicU64::new(0) }; Work
 /// Adds `count` units of `work`.
 pub fn add(work: Work, count: u64) {
     COUNTS[work as usize].fetch_add(count, Ordering::Relaxed);
+    if work.records_thread() {
+        let thread = std::thread::current().id();
+        let mut threads = THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !threads.contains(&(work, thread)) {
+            threads.push((work, thread));
+        }
+    }
+}
+
+/// Distinct `(work, thread)` pairs, for the kinds that record their thread.
+static THREADS: std::sync::Mutex<Vec<(Work, std::thread::ThreadId)>> = std::sync::Mutex::new(Vec::new());
+
+/// Every thread `work` has run on, in first-run order; empty for a kind
+/// that does not record its thread.
+pub fn threads(work: Work) -> Vec<std::thread::ThreadId> {
+    let threads = THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    threads.iter().filter(|(kind, _)| *kind == work).map(|(_, thread)| *thread).collect()
 }
 
 /// Every counter's value at one moment, or the work between two

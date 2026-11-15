@@ -7,10 +7,10 @@ repository's CI, pre-push hook, or release automation. The live authorities are
 
 ## The jobs of `ci.yml`
 
-`ci.yml` defines exactly 10 top-level jobs and a contract test pins the set:
-`validation`, `scope`, `preflight`, `build`, `area-ci`, `area-drift`, `ci-gate`,
-`certify-nightly`, `publish-observations`, and `ci-reporting`. The first seven
-block merges; certification and observation publication are outside the gate
+`ci.yml` defines exactly 12 top-level jobs and a contract test pins the set:
+`validation`, `scope`, `preflight`, `build`, `area-ci`, `area-drift`,
+`permission-scope`, `permission-widening`, `ci-gate`, `certify-nightly`,
+`publish-observations`, and `ci-reporting`. The first nine block merges; certification and observation publication are outside the gate
 but can fail the scheduled run. `ci-reporting` is advisory and carries
 `continue-on-error: true`.
 
@@ -37,7 +37,7 @@ expression text. `preflight` carries the literal `Verify build prerequisites`;
 `scripts/ci/affected_scope.py` is the canonical deterministic calculator for
 local and hosted runs. Its package policy is deliberately narrow:
 
-- **Environments are scheduled by event** (fixes/2026-09-18-ci-cadence). Each
+- **Environments are scheduled by event.** Each
   record in `environments.json` names the GitHub events that schedule it; the
   planner takes `--event`, plans nothing (no cell, build, or preflight runner)
   for an environment the event does not schedule, and records it in the
@@ -192,7 +192,7 @@ committed mapping file.
 
 `RESOLVED_PLAN_SCHEMA_VERSION` is **7**, the union of two lines of work that
 each numbered themselves 5: the archive-path guard's scope
-(`fixes/2026-09-19-less-brittle`, below) on `main`, and the
+(below) on `main`, and the
 direct-cell-execution work, which reached 6 on its own branch. That is the
 version-4 situation again, resolved the same way. Direct cell execution makes a
 hosted job expand one matrix row per executing cell and answer every execution
@@ -281,7 +281,7 @@ it before bumping any version, and record the bump there in the same change;
 a constant.
 
 The required `archive_guard` scope and the `deleted` half of the change
-inventory it reads come from `fixes/2026-09-19-less-brittle`. The archive-path
+inventory it reads were added together. The archive-path
 guard scans repository source for compile-time paths that no archived run
 resolves; the planner is the only thing that knows which files an event put in
 scope, and a plan carrying no answer would leave the guard choosing between an
@@ -635,7 +635,7 @@ Two rules the presentation depends on, both cheap to break:
 
 ## Producing and consuming a Nextest archive
 
-`fixes/2026-09-12-single-os-compile/` splits a test cell in two: a native
+CI splits a test cell in two: a native
 **producer** compiles one immutable archive per planned build key, and every
 **consumer** verifies and executes those exact outputs without a compiler.
 `ci-build produce` and `ci-build verify` (`scripts/ci-build-archive.rs`) are the
@@ -875,7 +875,7 @@ dependency's identity** match. One third-party flag that only some owners
 enable therefore gives a new identity to every workspace crate above it,
 and that crate is rebuilt. The dependency cache restores the third-party
 variants, so only the workspace crates cost time. Measured for a ten-package
-selection (`fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md`):
+selection (2026-09-21 attribution):
 25 workspace crates in 90 configurations on Linux, and 93% of the divergent
 compile seconds came from third-party flags.
 
@@ -961,8 +961,8 @@ GNU `date -d` on Linux and BSD `date -jf` on macOS.
 
 **`RUSTC_WRAPPER` is per-command, never per-job.** All four reader-facing
 workflows set `RUSTC_WRAPPER: ""` at workflow level to clear a stray host
-value. The Phase 1 compiler-work counter of
-`fixes/2026-09-12-single-os-compile/` is the only thing that ever sets a
+value. The compiler-work counter of the
+producer/consumer split is the only thing that ever sets a
 non-empty one, and it does so in a single gate step's own `env:`, sourced from
 the preceding step's output. A job-level value would also wrap the runner-tool
 stub builds and the counter's own build, mixing wrapped and unwrapped units in
@@ -1167,7 +1167,7 @@ The operating guide is `docs/cicd/evidence-store.md`.
 `ci.yml`'s `ci-gate` job is the single required check: a policy-free fold
 (Open Question 3, ruled 2026-09-12; the ruleset "require workflows" rule is
 organization-only, so the fixed-name conjunction job was selected and proven in
-`fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`). It `needs`
+a scratch repository fixture on 2026-09-12). It `needs`
 every blocking top-level job, runs `if: always()`, and passes only when each
 `needs.*.result` is `success` or `skipped`. An unselected area's skipped job
 does not block; `failure` and `cancelled` do; a `MISSING` cell is caught by
@@ -1176,6 +1176,18 @@ artifact — `ci_gate_is_the_single_required_check` in
 `tools/test-toolkit/tests/ci_workflow_contracts.rs` pins that, and
 `WorkflowGateStepTests` in `scripts/ci/test_ci_local.py` runs the extracted
 fold against every result shape.
+
+`permission-scope` and `permission-widening` are ordinary blocking needs of the
+fold. `permission-scope` builds the **base** commit's checker
+(`darkmatter::config::widening`, run as
+`darkmatter/lib/examples/permission_widening.rs`) outside the workspace and
+reads the candidate only as Git objects; it never checks out, builds, or runs
+candidate code. `permission-widening` runs only when that check reports
+possible widening, under `environment: permission-widening`, whose required
+reviewer approval holds the gate pending. The environment is configured once
+with `python3 scripts/ci/permission_environment.py --apply` (bare = dry run,
+`verify` = read-only check); `permission-scope` fails if it is missing or
+weaker. User docs: `docs/topics/ci-cd.md` ("Permission-widening approval").
 
 Ruleset `protect-your-bacon` (19747338) has required `ci-gate` since
 2026-09-13. It named `ci-verdict` until then, and because that job no longer
@@ -1292,7 +1304,7 @@ files are the one input read finer than a file: `just_gate_inputs` takes the
 same recipe closure `just_change_gates` uses for selection, so a recipe CI
 never runs (`pre-push`, `cross-check`, all of `just/plan.just`) moves no
 identity, while an edit to `_test` or `_tier_filter` moves every test-tier
-cell (fixes/2026-09-19-just-recipe-identity; before it, any edit under
+cell (before this rule, any edit under
 `just/` invalidated every published cell). Verification recomputes that over
 both trees rather than trusting the identity the receipt stored. The planner's orchestration files
 (`ORCHESTRATION_PATHS`: `ci.yml`, `_area-ci.yml`, `_package-ci.yml`,

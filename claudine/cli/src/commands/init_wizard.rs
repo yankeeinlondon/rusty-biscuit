@@ -15,6 +15,7 @@ use claudine::config::{
     ProviderHookPlan, RegistrationResult, SkipReason, discover_agents_full, get_configurator,
 };
 use claudine::events::{AgenticEvent, recommended_sound};
+use claudine::config::schema::ConfigScope;
 use claudine::provider::Provider;
 
 #[derive(Debug, Args)]
@@ -34,8 +35,7 @@ pub async fn run_initialization() -> Result<()> {
 
 async fn run_headless_initialization() -> Result<()> {
     let config = build_headless_config();
-    let path = claudine::dispatch::loader::user_config_path();
-    claudine::dispatch::loader::save_claudine_config(&config, &path)?;
+    write_with_darkmatter_setup(ConfigScope::User, |path| write_initial_config(path, &config))?;
     Ok(())
 }
 
@@ -73,8 +73,7 @@ async fn run_interactive_initialization() -> Result<()> {
         .prompt()?;
 
     let config = build_config(tts, preferred_agent, messenger);
-    let path = claudine::dispatch::loader::user_config_path();
-    claudine::dispatch::loader::save_claudine_config(&config, &path)?;
+    let path = write_with_darkmatter_setup(ConfigScope::User, |path| write_initial_config(path, &config))?;
 
     register_hooks_all_providers().await?;
 
@@ -249,6 +248,94 @@ fn configure_messenger() -> Result<Option<ClaudineMessengerConfig>> {
     }))
 }
 
+/// Writes the values setup chose, the ones that differ from the schema's
+/// defaults, to the user file at `path`: a new file starts from the defaults,
+/// and an existing one keeps every comment and every other key.
+/// Writes Claudine's configuration of `scope` with `write`, then completes
+/// the setup handshake with Darkmatter's `.darkmatter.yaml`
+/// ([`claudine::config::setup`]), and returns the path written.
+///
+/// Claudine's own write is the only failure: a handshake that cannot finish
+/// (both files hold different `permissions` blocks, an invalid
+/// `.darkmatter.yaml`, a failed write) is a warning, and the original
+/// Darkmatter block stays in force. With no home directory the handshake is
+/// skipped and Claudine writes its file at its long-standing fallback path.
+pub(crate) fn write_with_darkmatter_setup(
+    scope: ConfigScope,
+    write: impl FnOnce(&std::path::Path) -> claudine::error::Result<claudine::config::persist::SaveOutcome>,
+) -> Result<std::path::PathBuf> {
+    use claudine::config::setup::{PermissionsHandoff, SetupError, setup_claudine};
+
+    let snapshot = crate::request::snapshot();
+    // The user scope reads only the context's home; the repository scope
+    // needs the repository this capture discovers.
+    let context = claudine::composition::capture_file_resolution_context(snapshot)?;
+    let mut write = Some(write);
+    let outcome = setup_claudine(&context, scope, |path| (write.take().expect("written once"))(path));
+    match outcome {
+        Ok(setup) => {
+            // Publishing and registering Claudine is setup's documented
+            // default, as quiet as Claudine's own first write (a headless
+            // first run prints nothing); only a failure is reported.
+            let claudine_config = match setup.darkmatter {
+                Ok(handshake) => {
+                    let darkmatter = biscuit_file::to_portable_string(&handshake.darkmatter_config);
+                    let claudine = biscuit_file::to_portable_string(&handshake.claudine_config);
+                    match handshake.permissions {
+                        // Pointing a file with no block of its own at Claudine's is
+                        // the documented default, as quiet as Claudine's own first
+                        // write; moving an authored block is reported.
+                        PermissionsHandoff::Referenced => {}
+                        PermissionsHandoff::Transferred => log::message(&format!(
+                            "  Darkmatter permissions: moved the block from `{darkmatter}` into `{claudine}`; `{darkmatter}` now points at it"
+                        )),
+                        PermissionsHandoff::AlreadyReferenced => {}
+                        PermissionsHandoff::ThirdParty { reference } => log::warn(&format!(
+                            "  `{darkmatter}` takes its permissions from `{reference}`; Claudine left that reference in place"
+                        )),
+                        _ => {}
+                    }
+                    handshake.claudine_config
+                }
+                Err(error) => {
+                    log::warn(&format!("  Darkmatter permissions were not set up: {error}"));
+                    claudine::config::setup::claudine_config_path(&context, scope)?
+                }
+            };
+            if let Err(error) = setup.registration {
+                log::warn(&format!("  Claudine was not registered with Darkmatter: {error}"));
+            }
+            Ok(claudine_config)
+        }
+        Err(SetupError::Claudine(error)) => Err(error.into()),
+        Err(SetupError::NoHome) => {
+            let path = claudine::dispatch::loader::user_config_path();
+            if let Some(write) = write.take() {
+                write(&path)?;
+            }
+            log::warn("  There is no home directory, so Darkmatter's `~/.darkmatter.yaml` was not set up");
+            Ok(path)
+        }
+        Err(SetupError::Publish(error)) => Err(error.into()),
+        Err(error) => {
+            log::warn(&format!("  Darkmatter permissions were not set up: {error}"));
+            Ok(claudine::config::setup::claudine_config_path(&context, scope)?)
+        }
+    }
+}
+
+fn write_initial_config(
+    path: &std::path::Path,
+    config: &ClaudineConfig,
+) -> claudine::error::Result<claudine::config::persist::SaveOutcome> {
+    claudine::config::persist::initialize_config(
+        path,
+        claudine::config::schema::ConfigScope::User,
+        &ClaudineConfig::default(),
+        config,
+    )
+}
+
 fn build_config(
     tts: TtsValue,
     preferred_agent: Option<Provider>,
@@ -285,6 +372,7 @@ fn build_config(
         exit_expressions: None,
         guard_settings: Default::default(),
         steering: Default::default(),
+        permissions: None,
     }
 }
 
@@ -492,6 +580,45 @@ fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn initialized() -> ClaudineConfig {
+        build_config(TtsValue::Boolean(true), Some(Provider::Codex), None)
+    }
+
+    fn values(config: &ClaudineConfig) -> serde_json::Value {
+        serde_json::to_value(config).unwrap()
+    }
+
+    #[test]
+    fn a_new_user_file_is_the_defaults_plus_the_setup_values_and_rerunning_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claudine/config.yaml");
+
+        assert!(write_initial_config(&path, &initialized()).unwrap().created);
+        let loaded = claudine::dispatch::loader::load_claudine_config(Some(&path), None).unwrap();
+        assert_eq!(values(&loaded), values(&initialized()));
+
+        let first = std::fs::read(&path).unwrap();
+        assert!(!write_initial_config(&path, &initialized()).unwrap().written);
+        assert_eq!(std::fs::read(&path).unwrap(), first);
+    }
+
+    #[test]
+    fn setup_over_an_existing_file_keeps_what_it_does_not_manage() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let original = "# mine\nlogging: false   # quiet\n\npermissions:\n  network: deny\n";
+        std::fs::write(&path, original).unwrap();
+
+        write_initial_config(&path, &initialized()).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with(original), "{text}");
+        let loaded = claudine::dispatch::loader::load_claudine_config(Some(&path), None).unwrap();
+        assert!(!loaded.logging, "an unmanaged value is kept");
+        assert_eq!(loaded.preferred_agent, Some(Provider::Codex));
+        assert_eq!(loaded.default_sounds.attention.as_deref(), Some("doorbell"));
+    }
 
     #[test]
     fn macos_with_brew_uses_auto_install() {

@@ -188,23 +188,55 @@ pub enum ContextBuildError {
         #[source]
         source: FileReferenceError,
     },
+    /// [`ComposeRequest::with_context`] was given a context that names a
+    /// repository but no configuration snapshot
+    /// ([`ComposeOptions::with_config_snapshot`], or a host capture on the
+    /// options' `ctx` that answers for that repository). The request would need the
+    /// repository's committed policy, which only the caller's capture holds;
+    /// it is never rediscovered and never skipped.
+    #[error(
+        "the request at `{}` names the repository `{}` but was given no configuration snapshot for it",
+        dir.display(),
+        repository.display()
+    )]
+    ConfigSnapshotRequired {
+        /// The request directory.
+        dir: PathBuf,
+        /// The repository root the context names.
+        repository: PathBuf,
+    },
+    /// The request's configuration could not be loaded.
+    #[error("{source}")]
+    Config {
+        /// The request directory.
+        dir: PathBuf,
+        /// The load failure, with every located problem.
+        #[source]
+        source: crate::config::load::ConfigError,
+    },
 }
 
 impl ContextBuildError {
     /// The request directory the failing build was anchored at.
     pub fn request_dir(&self) -> &Path {
         match self {
-            Self::Discovery { dir, .. } | Self::Invalid { dir, .. } => dir,
+            Self::Discovery { dir, .. }
+            | Self::Invalid { dir, .. }
+            | Self::ConfigSnapshotRequired { dir, .. }
+            | Self::Config { dir, .. } => dir,
         }
     }
 
     /// The failure class, as file-reference errors report it.
     ///
-    /// A discovery failure is [`ResolutionFailure::MissingContext`], the class
-    /// biscuit-file gives its own Git discovery errors.
+    /// A discovery or configuration failure is
+    /// [`ResolutionFailure::MissingContext`], the class biscuit-file gives its
+    /// own Git discovery errors.
     pub fn resolution_failure(&self) -> ResolutionFailure {
         match self {
-            Self::Discovery { .. } => ResolutionFailure::MissingContext,
+            Self::Discovery { .. } | Self::ConfigSnapshotRequired { .. } | Self::Config { .. } => {
+                ResolutionFailure::MissingContext
+            }
             Self::Invalid { source, .. } => source.resolution_failure(),
         }
     }
@@ -230,6 +262,28 @@ pub fn build_resolution_context(
 ) -> Result<FileResolutionContext, ContextBuildError> {
     let observation = discover_repository(snapshot.request_dir())?.observation;
     build_with_observation(snapshot, observation.as_deref())
+}
+
+/// [`build_resolution_context`], also returning the tree committed at `HEAD`
+/// of the repository its discovery found, pinned by that same discovery.
+///
+/// For a host that keeps the context and loads the request's configuration
+/// itself ([`ConfigSnapshot::load_captured`]), so the repository is
+/// discovered once. The tree is `None` outside a (non-bare) repository.
+///
+/// ## Errors
+///
+/// As [`build_resolution_context`]. A failure to read the committed tree is
+/// not an error here; it is returned for the configuration load to report.
+///
+/// [`ConfigSnapshot::load_captured`]: crate::config::load::ConfigSnapshot::load_captured
+pub fn capture_resolution_context(
+    snapshot: &RequestSnapshot,
+) -> Result<(FileResolutionContext, Option<crate::config::load::CommittedTreeCapture>), ContextBuildError> {
+    let observation = discover_repository(snapshot.request_dir())?.observation;
+    let context = build_with_observation(snapshot, observation.as_deref())?;
+    let committed = observation.and_then(|observation| observation.committed.clone());
+    Ok((context, committed))
 }
 
 /// One `Repo`-group capture at a directory: the projected `ctx` values and the
@@ -258,6 +312,36 @@ pub(crate) fn discover_repository(dir: &Path) -> Result<RepositoryDiscovery, Con
         return Err(ContextBuildError::Discovery { dir: dir.to_path_buf(), detail });
     }
     Ok(RepositoryDiscovery { values, observation: observations.repository().cloned() })
+}
+
+/// The snapshot the caller supplied: on the options, else from the host's
+/// configuration capture on their `ctx` ([`ComposeContext::with_config_source`]).
+///
+/// [`ComposeContext::with_config_source`]: super::runtime::ComposeContext::with_config_source
+fn supplied_config(
+    options: &ComposeOptions,
+    context: &FileResolutionContext,
+) -> Result<Option<Arc<crate::config::load::ConfigSnapshot>>, ContextBuildError> {
+    if let Some(config) = options.config_snapshot() {
+        return Ok(Some(Arc::clone(config)));
+    }
+    options
+        .context()
+        .config_source()
+        .and_then(|source| source.config_snapshot_for(context))
+        .transpose()
+        .map_err(|source| ContextBuildError::Config { dir: context.request_cwd().to_path_buf(), source })
+}
+
+/// The passive configuration load of a request whose caller supplied no
+/// snapshot.
+fn load_passively(
+    context: &FileResolutionContext,
+    committed: Option<&crate::config::load::CommittedTreeCapture>,
+) -> Result<Arc<crate::config::load::ConfigSnapshot>, ContextBuildError> {
+    crate::config::load::ConfigSnapshot::load_captured(context, committed, crate::config::load::ConfigLoadMode::Passive)
+        .map(Arc::new)
+        .map_err(|source| ContextBuildError::Config { dir: context.request_cwd().to_path_buf(), source })
 }
 
 /// [`build_resolution_context`] over a repository observation already made
@@ -352,6 +436,9 @@ pub fn build_resolution_context_with_catalog(
 pub struct ComposeRequest {
     options: ComposeOptions,
     context: FileResolutionContext,
+    /// The request's one configuration snapshot; `options` mirrors it so
+    /// every stage reads it through `Deref` too.
+    config: Arc<crate::config::load::ConfigSnapshot>,
 }
 
 impl std::ops::Deref for ComposeRequest {
@@ -373,6 +460,7 @@ impl std::fmt::Debug for ComposeRequest {
         f.debug_struct("ComposeRequest")
             .field("options", &self.options)
             .field("context", &self.context)
+            .field("config", &self.config)
             .finish()
     }
 }
@@ -387,9 +475,15 @@ impl ComposeRequest {
     /// from. The repository discovery the builder makes becomes the request's
     /// observation when the request has none yet.
     ///
+    /// Without a supplied snapshot ([`ComposeOptions::with_config_snapshot`],
+    /// or the host capture on the options' `ctx`), the configuration is loaded
+    /// passively once the context exists, reading the repository's committed
+    /// policy from the tree that observation pinned.
+    ///
     /// ## Errors
     ///
-    /// Returns the builder's [`ContextBuildError`].
+    /// Returns the builder's [`ContextBuildError`], or
+    /// [`ContextBuildError::Config`] when the configuration cannot be loaded.
     pub fn prepare(
         mut options: ComposeOptions,
         snapshot: &RequestSnapshot,
@@ -407,19 +501,33 @@ impl ComposeRequest {
         };
         options.establish_request_repository();
         let context = build_with_observation(snapshot, observation.as_deref())?;
-        Ok(Self::assemble(options, context))
+        let config = match supplied_config(&options, &context)? {
+            Some(config) => config,
+            None => load_passively(&context, observation.as_ref().and_then(|observation| observation.committed.as_ref()))?,
+        };
+        Ok(Self::assemble(options, context, config))
     }
 
     /// Pairs `options` with a context the caller built or derived from one
     /// that was built.
     ///
     /// For callers that hold a context already: a source derivation, a source
-    /// in another repository, or an embedder's own built context.
+    /// in another repository, or an embedder's own built context. A context
+    /// that names a repository needs the caller's configuration snapshot
+    /// ([`ComposeOptions::with_config_snapshot`], or the host capture its
+    /// `ctx` carries, [`ComposeContext::with_config_source`]); one that names
+    /// none loads the user configuration passively when no snapshot was
+    /// supplied.
+    ///
+    /// [`ComposeContext::with_config_source`]: super::runtime::ComposeContext::with_config_source
     ///
     /// ## Errors
     ///
-    /// Returns [`ContextBuildError::Invalid`] when `context` fails
-    /// [`validate`](FileResolutionContext::validate).
+    /// - [`ContextBuildError::Invalid`] when `context` fails
+    ///   [`validate`](FileResolutionContext::validate);
+    /// - [`ContextBuildError::ConfigSnapshotRequired`] when `context` names a
+    ///   repository and `options` holds no configuration snapshot;
+    /// - [`ContextBuildError::Config`] when the passive load fails.
     pub fn with_context(
         options: ComposeOptions,
         context: FileResolutionContext,
@@ -428,14 +536,58 @@ impl ComposeRequest {
             dir: context.request_cwd().to_path_buf(),
             source,
         })?;
+        let config = match (supplied_config(&options, &context)?, context.repository_root()) {
+            (Some(config), _) => config,
+            (None, Some(repository)) => {
+                return Err(ContextBuildError::ConfigSnapshotRequired {
+                    dir: context.request_cwd().to_path_buf(),
+                    repository: repository.to_path_buf(),
+                });
+            }
+            (None, None) => load_passively(&context, None)?,
+        };
         options.establish_request_repository();
-        Ok(Self::assemble(options, context))
+        Ok(Self::assemble(options, context, config))
     }
 
-    fn assemble(mut options: ComposeOptions, context: FileResolutionContext) -> Self {
+    /// The local-only expression context `options`' source evaluates in when
+    /// it resolves through `context`, without building a request.
+    ///
+    /// For hosts that evaluate document-authored expressions outside the
+    /// compose pipeline (Claudine's lifecycle, loop, and sequence
+    /// expressions), as [`Self::local_expression_resolution_context`] does for
+    /// a request. A local-only context fetches nothing remote, runs no shell
+    /// command, and evaluates no schema slot, so it consults no configuration
+    /// and needs no snapshot, whichever repository `context` names.
+    ///
+    /// ## Errors
+    ///
+    /// [`ContextBuildError::Invalid`] when `context` fails
+    /// [`validate`](FileResolutionContext::validate).
+    pub fn local_expression_context(
+        mut options: ComposeOptions,
+        context: &FileResolutionContext,
+    ) -> Result<crate::markdown::compose::expression::ResolutionContext, ContextBuildError> {
+        context.validate().map_err(|source| ContextBuildError::Invalid {
+            dir: context.request_cwd().to_path_buf(),
+            source,
+        })?;
+        options.establish_request_repository();
+        options.align_context_environment(context.env());
+        options.admit_source_in(context);
+        Ok(options.local_expression_resolution_context_in(context))
+    }
+
+    fn assemble(
+        mut options: ComposeOptions,
+        context: FileResolutionContext,
+        config: Arc<crate::config::load::ConfigSnapshot>,
+    ) -> Self {
         options.align_context_environment(context.env());
         options.admit_source_in(&context);
-        Self { options, context }
+        options.config_snapshot = Some(Arc::clone(&config));
+        options.align_remote_network();
+        Self { options, context, config }
     }
 
     /// This request with its options changed by `change`, keeping its
@@ -445,7 +597,14 @@ impl ComposeRequest {
     /// set pre-flight computes.
     #[must_use]
     pub fn map_options(self, change: impl FnOnce(ComposeOptions) -> ComposeOptions) -> Self {
-        Self::assemble(change(self.options), self.context)
+        Self::assemble(change(self.options), self.context, self.config)
+    }
+
+    /// The configuration snapshot this request was captured with, shared by
+    /// every derivation of it (transcluded children, inline passes,
+    /// `as_markdown`).
+    pub fn config_snapshot(&self) -> &Arc<crate::config::load::ConfigSnapshot> {
+        &self.config
     }
 
     /// The options this request composes under.
@@ -488,6 +647,7 @@ impl ComposeRequest {
     #[must_use]
     pub(crate) fn derive(mut self, change: impl FnOnce(ComposeOptions) -> ComposeOptions) -> Self {
         self.options = change(self.options);
+        self.options.config_snapshot = Some(Arc::clone(&self.config));
         self
     }
 
@@ -635,6 +795,33 @@ mod tests {
         });
     }
 
+    /// One discovery serves the context, the repository observation, and the
+    /// committed policy, and every derivation keeps the one snapshot.
+    #[test]
+    fn prepare_discovers_once_and_derivations_share_the_snapshot() {
+        use std::sync::atomic::Ordering;
+
+        use super::super::capture::GIT_DISCOVERY_COUNT;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(temp.path()).unwrap();
+        gix::init(&root).unwrap();
+        GIT_DISCOVERY_COUNT.store(0, Ordering::Relaxed);
+
+        let request = ComposeRequest::prepare(ComposeOptions::new(), &RequestSnapshot::new(&root)).unwrap();
+
+        assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1);
+        assert_eq!(request.config_snapshot().repository().map(|repository| repository.root.clone()), Some(root.clone()));
+        let child = request.clone().with_source_file(root.join("child.md"));
+        let accepted = request.clone().with_accepted_source_file(root.join("other.md"), None);
+        let derived = request.clone().derive(|_| ComposeOptions::new());
+        for view in [&child, &accepted, &derived] {
+            assert!(Arc::ptr_eq(request.config_snapshot(), view.config_snapshot()));
+            assert!(Arc::ptr_eq(request.config_snapshot(), view.options().config_snapshot().unwrap()));
+        }
+        assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1, "no derivation rediscovers");
+    }
+
     #[test]
     #[tracing_test::traced_test]
     fn a_failed_build_emits_no_debug_event() {
@@ -663,9 +850,27 @@ pub(crate) mod test_support {
     }
 
     /// A request that resolves through `context`, as the options' old
-    /// context field did.
+    /// context field did. A context naming a repository gets the user-only
+    /// configuration of its home (see [`user_config`]).
     pub(crate) fn request_in(options: ComposeOptions, context: FileResolutionContext) -> ComposeRequest {
+        let options = match (options.config_snapshot(), context.repository_root()) {
+            (None, Some(_)) => options.with_config_snapshot(user_config(&context)),
+            _ => options,
+        };
         ComposeRequest::with_context(options, context).expect("test request context")
+    }
+
+    /// The configuration of `context`'s home and no repository: what a test
+    /// whose repository is a synthetic catalog (no Git) supplies, since such a
+    /// repository has no committed policy to read.
+    pub(crate) fn user_config(context: &FileResolutionContext) -> Arc<crate::config::load::ConfigSnapshot> {
+        let snapshot = RequestSnapshot::new(context.request_cwd())
+            .with_home(context.home_dir().map(Path::to_path_buf))
+            .with_env(context.env().clone());
+        Arc::new(
+            crate::config::load::ConfigSnapshot::load_user(&snapshot, crate::config::load::ConfigLoadMode::Passive)
+                .expect("test configuration"),
+        )
     }
 
     /// A file source's directory, else the context's anchor, else a

@@ -9,17 +9,16 @@ use renderable::markdown::code_span;
 use renderable::OutputOptions;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::command::{CommandValue, TriggersData, prose_document};
+use darkmatter::markdown::output::command::{CommandValue, TriggerRegisteredData, TriggersData, prose_document};
 use crate::args::Cli;
 use crate::commands::trigger_findings::{emit_warnings, finding_diagnostic};
 use crate::io::{DocumentOutsideRepository, open_argument};
 use crate::output::command::{CommandRun, Completed, DataShape};
 use crate::output::stderr_terminal;
 use crate::request::MdRequest;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, InvalidSchemasDir, InvalidTriggerFinding, SchemaSearchRoot, SchemaRootKind, SchemaRootState, TriggerTrace,
-    trace_registry,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, RegisteredTrace};
+use simplified_schema::roots::{InvalidSchemasDir, SchemaSearchRoot, SchemaRootKind, SchemaRootState};
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerTrace, TriggerTraceEntry, trace_registry};
 use std::path::Path;
 
 /// Reports the five schema roots, shadowing, the triggers discovery skipped as
@@ -35,6 +34,7 @@ pub fn run_triggers(file: &Path, output: OutputTarget, cli: &Cli, request: &MdRe
         shadowed: Vec::new(),
         skipped: Vec::new(),
         triggers: Vec::new(),
+        registered: None,
     };
     let mut run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::typed(&skeleton))?;
     let result = triggers_value(&mut run, file, request);
@@ -56,7 +56,14 @@ fn triggers_value(run: &mut CommandRun, file: &Path, request: &MdRequest) -> Res
     if context.repository_root().is_none() {
         return Err(DocumentOutsideRepository { document: opened.path().to_path_buf() }.into());
     }
-    let api = DarkmatterSchemas::new(context).with_trigger_discovery()?;
+    let hosts = request.registered_hosts(&context);
+    let mut api = DarkmatterSchemas::new(context).with_trigger_discovery()?;
+    if let Some(hosts) = hosts {
+        api = api.with_registered_hosts(hosts);
+    }
+    let selected = api.registered_selection_for(&markdown);
+    request.report_host_diagnostics(&selected.diagnostics);
+    let registered = api.registered_trace(&markdown);
     let registry = api
         .trigger_registry()
         .expect("trigger discovery always installs a registry");
@@ -71,9 +78,10 @@ fn triggers_value(run: &mut CommandRun, file: &Path, request: &MdRequest) -> Res
     let trace = trace_registry(registry, &frontmatter, Some(&document_path));
     let findings = registry.findings().to_vec();
 
-    let data = TriggersData::new(file.display().to_string(), &trace, &findings);
+    let mut data = TriggersData::new(file.display().to_string(), &trace, &findings);
+    data.registered = registered.as_ref().map(TriggerRegisteredData::new);
     let document = opened.path().to_path_buf();
-    let prose = prose_document(&trace_markdown(&document, &trace, &findings));
+    let prose = prose_document(&trace_markdown(&document, &trace, &findings, registered.as_ref()));
     let diagnostics = findings.iter().map(finding_diagnostic).collect();
     // The warning itself (with its reason) goes to stderr like every other
     // command's; the trace names only which triggers were skipped, so the
@@ -82,7 +90,7 @@ fn triggers_value(run: &mut CommandRun, file: &Path, request: &MdRequest) -> Res
         emit_warnings(&findings, &stderr_terminal());
     }
     let value = CommandValue::new(data, prose)
-        .with_terminal(move |options| trace_report(&document, &trace, &findings, options));
+        .with_terminal(move |options| trace_report(&document, &trace, &findings, registered.as_ref(), options));
     Ok(Completed::success(value).with_diagnostics(diagnostics))
 }
 
@@ -91,7 +99,13 @@ fn row(out: &mut String, terminal: &Terminal, content: String) {
     out.push('\n');
 }
 
-fn trace_report(document: &Path, trace: &TriggerTrace, findings: &[InvalidTriggerFinding], options: &OutputOptions) -> String {
+fn trace_report(
+    document: &Path,
+    trace: &TriggerTrace,
+    findings: &[InvalidTriggerFinding],
+    registered: Option<&RegisteredTrace>,
+    options: &OutputOptions,
+) -> String {
     let terminal = Terminal::from_output_options(options);
     let mut out = String::new();
     row(&mut out, &terminal, format!("<bold>Document:</bold> {}", escaped(document)));
@@ -124,33 +138,60 @@ fn trace_report(document: &Path, trace: &TriggerTrace, findings: &[InvalidTrigge
         ));
     }
 
+    row(&mut out, &terminal, "<bold>Registered host:</bold>".to_string());
+    match registered {
+        None => row(&mut out, &terminal, "- <dim>none</dim>".to_string()),
+        Some(registered) => {
+            let origin = &registered.origin;
+            row(&mut out, &terminal, format!(
+                "- {} {} <dim>(manifest {}, revision {})</dim>",
+                Prose::escape_text(&origin.host),
+                Prose::escape_text(&origin.version),
+                escaped(&origin.manifest),
+                Prose::escape_text(&origin.revision)
+            ));
+            for trigger in &registered.triggers {
+                terminal_trigger(&mut out, &terminal, trigger);
+            }
+        }
+    }
+
     row(&mut out, &terminal, "<bold>Triggers:</bold>".to_string());
     if trace.triggers.is_empty() {
         row(&mut out, &terminal, "- <dim>none</dim>".to_string());
     }
     for trigger in &trace.triggers {
-        let status = if trigger.matched { "<green>matched</green>" } else { "<red>not matched</red>" };
-        let pending = if trigger.pending { " <dim>(payload pending: holds schema slots)</dim>" } else { "" };
-        row(&mut out, &terminal, format!("- {} — {status}{pending}", Prose::escape_text(&trigger.source.to_string())));
-        for condition in &trigger.conditions {
-            let result = if condition.matched {
-                "<green>matched</green>".to_string()
-            } else {
-                format!(
-                    "<red>defeated</red>: {}",
-                    Prose::escape_text_outside_code_spans(
-                        condition.defeat.as_deref().unwrap_or("condition did not match")
-                    )
-                )
-            };
-            row(&mut out, &terminal, format!("  - condition {} — {result}", condition.index + 1));
-        }
+        terminal_trigger(&mut out, &terminal, trigger);
     }
     out
 }
 
+fn terminal_trigger(out: &mut String, terminal: &Terminal, trigger: &TriggerTraceEntry) {
+    let status = if trigger.matched { "<green>matched</green>" } else { "<red>not matched</red>" };
+    let pending = if trigger.pending { " <dim>(payload pending: holds schema slots)</dim>" } else { "" };
+    row(out, terminal, format!("- {} — {status}{pending}", Prose::escape_text(&trigger.source.to_string())));
+    for condition in &trigger.conditions {
+        let result = if condition.matched {
+            "<green>matched</green>".to_string()
+        } else {
+            format!(
+                "<red>defeated</red>: {}",
+                Prose::escape_text_outside_code_spans(
+                    condition.defeat.as_deref().unwrap_or("condition did not match")
+                )
+            )
+        };
+        row(out, terminal, format!("  - condition {} — {result}", condition.index + 1));
+    }
+}
+
 /// The trace as a Markdown document, for the Markdown and HTML outputs.
-fn trace_markdown(document: &Path, trace: &TriggerTrace, findings: &[InvalidTriggerFinding]) -> String {
+fn trace_markdown(
+    document: &Path,
+    trace: &TriggerTrace,
+    findings: &[InvalidTriggerFinding],
+    registered: Option<&RegisteredTrace>,
+) -> String {
     let mut out = format!("**Document:** {}\n\n**Schema roots (search order):**\n\n", code_span(&document.display().to_string()));
     for (index, root) in trace.roots.entries().iter().enumerate() {
         let line = RootLine::of(root);
@@ -179,24 +220,46 @@ fn trace_markdown(document: &Path, trace: &TriggerTrace, findings: &[InvalidTrig
         out.push_str(&format!("- {} {}\n", code_span(&finding.source().to_string()), code_span(finding.code())));
     }
 
+    out.push_str("\n**Registered host:**\n\n");
+    match registered {
+        None => out.push_str("- none\n"),
+        Some(registered) => {
+            let origin = &registered.origin;
+            out.push_str(&format!(
+                "- {} {} (manifest {}, revision {})\n",
+                code_span(&origin.host),
+                code_span(&origin.version),
+                code_span(&origin.manifest.display().to_string()),
+                code_span(&origin.revision)
+            ));
+            for trigger in &registered.triggers {
+                markdown_trigger(&mut out, trigger);
+            }
+        }
+    }
+
     out.push_str("\n**Triggers:**\n\n");
     if trace.triggers.is_empty() {
         out.push_str("- none\n");
     }
     for trigger in &trace.triggers {
-        let status = if trigger.matched { "matched" } else { "not matched" };
-        let pending = if trigger.pending { " (payload pending: holds schema slots)" } else { "" };
-        out.push_str(&format!("- {} — {status}{pending}\n", code_span(&trigger.source.to_string())));
-        for condition in &trigger.conditions {
-            let result = if condition.matched {
-                "matched".to_string()
-            } else {
-                format!("defeated: {}", condition.defeat.as_deref().unwrap_or("condition did not match"))
-            };
-            out.push_str(&format!("  - condition {} — {result}\n", condition.index + 1));
-        }
+        markdown_trigger(&mut out, trigger);
     }
     out
+}
+
+fn markdown_trigger(out: &mut String, trigger: &TriggerTraceEntry) {
+    let status = if trigger.matched { "matched" } else { "not matched" };
+    let pending = if trigger.pending { " (payload pending: holds schema slots)" } else { "" };
+    out.push_str(&format!("- {} — {status}{pending}\n", code_span(&trigger.source.to_string())));
+    for condition in &trigger.conditions {
+        let result = if condition.matched {
+            "matched".to_string()
+        } else {
+            format!("defeated: {}", condition.defeat.as_deref().unwrap_or("condition did not match"))
+        };
+        out.push_str(&format!("  - condition {} — {result}\n", condition.index + 1));
+    }
 }
 
 /// What a formatted output says about one root.

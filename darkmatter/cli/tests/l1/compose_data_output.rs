@@ -428,7 +428,7 @@ fn a_blocking_runtime_warning_stops_the_later_shell() {
             fixture.bin_dir().join(format!("argv-recorder{}", std::env::consts::EXE_SUFFIX)),
         )
         .expect("the recorder fixture binary is built with `test-fixtures`");
-        fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact argv-recorder marker\n");
+        fixture.shell_permissions(&["exact argv-recorder marker"]);
         let document = fixture.write_file(format!("cwd/{name}"), &content);
         let marker = fixture.cwd().join("marker");
         let composed = fixture.cwd().join("composed-marker");

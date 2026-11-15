@@ -33,10 +33,8 @@ use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
 use simplified_schema::resolve::ResolvedSchema;
 use simplified_schema::validate::build_position_map;
 use darkmatter::markdown::schemas::catalog::{DARKMATTER_GLOBALS, GlobalCatalog};
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, ValidationOptions, ValidationReport,
-    darkmatter_base_json_schema, darkmatter_base_schema,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationOptions, ValidationReport, darkmatter_base_json_schema, darkmatter_base_schema};
+use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::{
     PropertyAtom, PropertyDef, SchemaArm, SchemaPhase, SchemaRoot, TypeExpr, ValidationProblemCode,
     is_definition_subtype_with_definitions, to_json_schema, to_json_schema_with_definitions,

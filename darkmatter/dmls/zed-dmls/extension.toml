@@ -8,4 +8,4 @@ repository = "https://github.com/ken/zed-dmls"
 
 [language_servers.dmls]
 name = "Darkmatter Language Server"
-languages = ["Markdown"]
+languages = ["Markdown", "YAML"]

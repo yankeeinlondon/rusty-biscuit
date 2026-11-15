@@ -233,15 +233,13 @@ fn rule_coverage_follows_the_structural_relation_for_string_like_holes() {
 }
 
 #[test]
-fn session_reservations_are_keyed_by_mode_and_policy_root() {
+fn session_reservations_are_keyed_by_mode() {
     use crate::markdown::compose::shell_expansion::types::{ReserveOutcome, ShellExpansionRuntime};
-    use std::path::Path;
 
     let mut runtime = ShellExpansionRuntime::new();
-    let root = Path::new("/policy/a");
     let shape = TemplateShape::parse_rule("git --version {{ string }}").unwrap();
-    let exact = ApprovalKey::exact(Some(root), "git --version {{ string }}");
-    let template = ApprovalKey::template(Some(root), shape.clone());
+    let exact = ApprovalKey::exact("git --version {{ string }}");
+    let template = ApprovalKey::template(shape);
 
     assert_eq!(runtime.reserve_allow_once(&exact, false), ReserveOutcome::Reserved);
     runtime.complete_allow_once(&exact, true);
@@ -253,9 +251,6 @@ fn session_reservations_are_keyed_by_mode_and_policy_root() {
     assert_eq!(runtime.reserve_allow_once(&template, false), ReserveOutcome::Reserved);
     runtime.complete_allow_once(&template, true);
     assert_eq!(runtime.reserve_allow_once(&template, false), ReserveOutcome::AlreadyAllowed);
-    // Another policy root's approval does not answer.
-    let elsewhere = ApprovalKey::template(Some(Path::new("/policy/b")), shape);
-    assert_eq!(runtime.reserve_allow_once(&elsewhere, false), ReserveOutcome::Reserved);
 }
 
 #[test]

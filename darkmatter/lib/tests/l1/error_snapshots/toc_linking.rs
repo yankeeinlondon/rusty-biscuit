@@ -11,6 +11,7 @@ fn parse_directive_shows_syntax_hint() {
     let err = TocLinkingError::ParseDirective {
         line: 2,
         message: "unexpected token".into(),
+        document: None,
     };
     let out = render(&err);
     assert_contains_all(
@@ -30,6 +31,7 @@ fn invalid_cleanup_service_enumerates_valid_values() {
     let err = TocLinkingError::InvalidCleanupService {
         service: "bogus".into(),
         line: 4,
+        document: None,
     };
     let out = render(&err);
     for name in [
@@ -60,6 +62,7 @@ fn invalid_level_shows_range() {
     let err = TocLinkingError::InvalidLevel {
         level: "9".into(),
         line: 3,
+        document: None,
     };
     let out = render(&err);
     assert_contains_all(
@@ -75,6 +78,7 @@ fn unresolved_target_names_its_failure_and_hints_at_fallback_chain() {
         line: 6,
         failure: Some(biscuit_file::ResolutionFailure::NoMatch),
         glob_hint: None,
+        document: None,
     };
     let out = render(&err);
     assert_contains_all(
@@ -95,6 +99,7 @@ fn invalid_glob_shows_pattern_and_message() {
         pattern: "**{".into(),
         line: 9,
         message: "unbalanced braces".into(),
+        document: None,
     };
     let out = render(&err);
     assert_contains_all(

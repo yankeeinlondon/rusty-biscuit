@@ -178,6 +178,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &resolution,
+            host: None,
         };
         formatting(&ctx)
     }

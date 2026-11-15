@@ -98,7 +98,7 @@ fn composed_recording(document: &str) -> (Result<String, darkmatter::markdown::M
     let output = compose_with_options(&root, document, |options| {
         options
             .disable(ComposeOperation::Cleanup)
-            .with_shell_policy_root(&root)
+            .with_config_snapshot(crate::request_support::shell_config(&root, &[]))
             .with_shell_working_directory(&root)
             .with_shell_approval_handler(handler)
     });

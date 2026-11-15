@@ -125,11 +125,13 @@ unaffected.
 | Where | Setting | Wins over |
 | --- | --- | --- |
 | Environment | `CLAUDINE_AUTO_STEER` | everything |
-| Repo config (`<repo>/.claudine/config.json`) | `steering.automatic.enabled` | user config |
-| User config (`~/.claudine/config.json`) | `steering.automatic.enabled` | built-in default (on) |
+| Repo config (`<repo>/.claudine/config.yaml`) | `steering.automatic.enabled` | user config |
+| User config (`~/.claudine/config.yaml`) | `steering.automatic.enabled` | built-in default (on) |
 
-```json
-{ "steering": { "automatic": { "enabled": false } } }
+```yaml
+steering:
+  automatic:
+    enabled: false
 ```
 
 ```sh

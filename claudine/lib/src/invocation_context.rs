@@ -19,6 +19,7 @@ use sniff::request::{
     DetectionPlan, FilesystemRequest, GitMetadataRequest, GitRequest, HardwareRequest, OsRequest, RepoRequest,
 };
 
+use darkmatter::config::load::{ConfigError, ConfigLoadMode, ConfigSnapshot, ConfigSnapshotSource};
 use darkmatter::markdown::compose::{
     ContextBuildError, CurrentProvider, CurrentRefresh, RequestSnapshot,
     build_resolution_context_with_catalog,
@@ -353,6 +354,9 @@ struct RepositoryEntry {
     failure: Option<Arc<sniff::SniffError>>,
     diagnostic: OnceLock<DiagnosticSnapshot>,
     source_evidence: Mutex<HashMap<PathBuf, Arc<SourceEvidence>>>,
+    /// The tree committed at `HEAD`, pinned from the retained handle on first
+    /// use; `None` inside means no (non-bare) repository.
+    committed_tree: OnceLock<Option<darkmatter::config::load::CommittedTreeCapture>>,
 }
 
 /// Source-scanned evidence that keeps its invocation lifetime.
@@ -427,6 +431,7 @@ impl RepositoryEntry {
             failure: None,
             diagnostic: OnceLock::new(),
             source_evidence: Mutex::new(HashMap::new()),
+            committed_tree: OnceLock::new(),
         }
     }
 
@@ -445,6 +450,7 @@ impl RepositoryEntry {
             failure: Some(failure),
             diagnostic: diagnostic_cell,
             source_evidence: Mutex::new(HashMap::new()),
+            committed_tree: OnceLock::new(),
         }
     }
 
@@ -466,11 +472,27 @@ impl RepositoryEntry {
             failure: None,
             diagnostic: OnceLock::new(),
             source_evidence: Mutex::new(HashMap::new()),
+            committed_tree: OnceLock::new(),
         }
     }
 
     fn repo_root(&self) -> Option<&Path> {
         self.identity.as_ref().map(GitRepositoryIdentity::repo_root)
+    }
+
+    /// The committed tree of this repository, pinned once from the retained
+    /// discovery handle; `None` for a non-repository, a bare repository, or a
+    /// failed discovery.
+    fn committed_tree(&self) -> Option<darkmatter::config::load::CommittedTreeCapture> {
+        if self.failure.is_some() || self.identity.as_ref().is_none_or(GitRepositoryIdentity::is_bare) {
+            return None;
+        }
+        self.committed_tree
+            .get_or_init(|| match self.observation.committed_tree() {
+                Ok(tree) => tree.map(|tree| Ok(Arc::new(tree))),
+                Err(error) => Some(Err(Arc::new(error))),
+            })
+            .clone()
     }
 
     fn repo_info(&self) -> Option<&RepoInfo> {
@@ -817,6 +839,10 @@ struct InvocationInner {
     gpus: OnceLock<Vec<GpuInfo>>,
     work: InvocationWork,
     trigger_findings: crate::composition::TriggerFindings,
+    /// Darkmatter's user configuration, read once per invocation.
+    darkmatter_config: OnceLock<Result<Arc<ConfigSnapshot>, ConfigError>>,
+    /// One projection of it per repository root a request names.
+    darkmatter_projections: Mutex<HashMap<Option<PathBuf>, Arc<ConfigSnapshot>>>,
 }
 
 /// Everything in an invocation that reads one document's environment.
@@ -1260,6 +1286,8 @@ impl InvocationContext {
                 gpus: OnceLock::new(),
                 work,
                 trigger_findings: crate::composition::TriggerFindings::default(),
+                darkmatter_config: OnceLock::new(),
+                darkmatter_projections: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -1272,6 +1300,40 @@ impl InvocationContext {
     /// invocation, shared by every document view, so each is shown once.
     pub fn trigger_findings(&self) -> &crate::composition::TriggerFindings {
         &self.inner.trigger_findings
+    }
+
+    /// Supplies the Darkmatter user configuration the CLI loaded at startup
+    /// ([`ConfigLoadMode::MigrateLegacy`]), so every request of this
+    /// invocation projects that one snapshot. Ignored once a configuration
+    /// was read.
+    #[must_use]
+    pub fn with_darkmatter_config(self, snapshot: Arc<ConfigSnapshot>) -> Self {
+        let _ = self.inner.darkmatter_config.set(Ok(snapshot));
+        self
+    }
+
+    /// Darkmatter's user configuration for this invocation: the supplied
+    /// one, else a passive load of the launch home's file, read once.
+    ///
+    /// ## Errors
+    ///
+    /// The load's [`ConfigError`], kept for every later caller.
+    pub fn darkmatter_config(&self) -> Result<&Arc<ConfigSnapshot>, &ConfigError> {
+        self.inner.darkmatter_config()
+    }
+
+    /// The Darkmatter configuration snapshot for a request resolving through
+    /// `context`: the invocation's user file projected onto the repository
+    /// `context` names, using the committed tree this invocation's own
+    /// discovery pinned; cached per repository.
+    ///
+    /// ## Errors
+    ///
+    /// The configuration's [`ConfigError`]: the user or repository file does
+    /// not load, or `context` names a repository this invocation never
+    /// observed.
+    pub fn darkmatter_config_for(&self, context: &FileResolutionContext) -> Result<Arc<ConfigSnapshot>, ConfigError> {
+        self.inner.darkmatter_config_for(context)
     }
 
     pub fn home_dir(&self) -> Option<&Path> {
@@ -1526,7 +1588,8 @@ impl InvocationContext {
             &self.inner.launch_cwd,
             requirements,
             &evidence,
-        );
+        )
+        .with_config_source(Arc::new(InvocationConfigSource(Arc::downgrade(&self.inner))));
         self.inner
             .work
             .launch_context_constructions
@@ -1689,6 +1752,9 @@ impl InvocationContext {
                     repository_root.map(Path::to_path_buf),
                     repository.repo_info().cloned(),
                 );
+                if let Some(tree) = repository.committed_tree() {
+                    evidence = evidence.with_committed_tree(tree);
+                }
             }
         }
         let source_evidence = {
@@ -2537,6 +2603,54 @@ impl darkmatter::markdown::compose::ContextExtension for DocumentEpoch {
         required: &darkmatter::markdown::compose::ContextRequirements,
     ) -> bool {
         self.extend_launch_context(context, required)
+    }
+}
+
+impl InvocationInner {
+    fn darkmatter_config(&self) -> Result<&Arc<ConfigSnapshot>, &ConfigError> {
+        self.darkmatter_config
+            .get_or_init(|| {
+                ConfigSnapshot::load_user(&self.launch_document.snapshot, ConfigLoadMode::Passive).map(Arc::new)
+            })
+            .as_ref()
+    }
+
+    fn darkmatter_config_for(&self, context: &FileResolutionContext) -> Result<Arc<ConfigSnapshot>, ConfigError> {
+        let key = context.repository_root().map(Path::to_path_buf);
+        let lock = || self.darkmatter_projections.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(snapshot) = lock().get(&key) {
+            return Ok(Arc::clone(snapshot));
+        }
+        let tree = key.as_deref().and_then(|root| self.observed_committed_tree(root));
+        let snapshot = Arc::new(self.darkmatter_config().map_err(Clone::clone)?.with_repository_projection(context, tree.as_ref())?);
+        Ok(Arc::clone(lock().entry(key).or_insert(snapshot)))
+    }
+
+    /// The committed tree of the repository rooted at `root`, from the entry
+    /// this invocation already discovered; never a new discovery.
+    fn observed_committed_tree(&self, root: &Path) -> Option<darkmatter::config::load::CommittedTreeCapture> {
+        let key = canonical_key(root);
+        let entry = {
+            let cache = self.repositories.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            cache.repositories.iter().find(|(candidate, _)| candidate.worktree_root == key).map(|(_, entry)| Arc::clone(entry))
+        };
+        let entry = entry.or_else(|| {
+            (self.launch_repository.repo_root().map(canonical_key).as_ref() == Some(&key))
+                .then(|| Arc::clone(&self.launch_repository))
+        })?;
+        entry.committed_tree()
+    }
+}
+
+/// The invocation's Darkmatter configuration, attached to every context it
+/// captures so a request built over one receives the invocation's snapshot.
+/// Weak, so a captured context never keeps its invocation alive.
+#[derive(Debug)]
+struct InvocationConfigSource(std::sync::Weak<InvocationInner>);
+
+impl ConfigSnapshotSource for InvocationConfigSource {
+    fn config_snapshot_for(&self, context: &FileResolutionContext) -> Option<Result<Arc<ConfigSnapshot>, ConfigError>> {
+        self.0.upgrade().map(|inner| inner.darkmatter_config_for(context))
     }
 }
 

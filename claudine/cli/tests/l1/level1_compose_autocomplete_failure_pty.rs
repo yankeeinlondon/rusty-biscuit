@@ -65,7 +65,7 @@ fn stage_workspace() -> (CliProcessFixture, PathBuf) {
 
     let claudine_dir = fixture.home().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
     let marker = fixture.cwd().join("provider-launched.flag");
     write_executable(

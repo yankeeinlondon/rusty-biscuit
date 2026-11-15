@@ -83,6 +83,13 @@
   coverage audit to catch. It has been the `protect-your-bacon` required
   context since 2026-09-13, replacing `ci-verdict`. Load the `rust-devops`
   skill before changing CI scope, evidence reuse, or the gate.
+- **Permission widening needs an approval.** `permission-scope` runs the
+  **base** commit's checker against the candidate's Git objects and never runs
+  candidate code; when a change may widen committed `permissions`, the
+  conditional `permission-widening` job (`environment: permission-widening`)
+  waits for a reviewer. Both feed `ci-gate` like any blocking job. The
+  environment is created by
+  `python3 scripts/ci/permission_environment.py --apply`.
 
 ## CI/CD Test-scope Discipline
 

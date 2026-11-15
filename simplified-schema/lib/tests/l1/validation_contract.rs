@@ -49,7 +49,8 @@ fn borrowed<'a>(result: &'a Result<ValidationSuccess<'_>, ValidationFailure>, in
 fn owned(result: Result<ValidationSuccess<'_>, ValidationFailure>) -> Value {
     match result {
         Ok(success @ ValidationSuccess { value: Cow::Owned(_), .. }) => {
-            assert!(success.is_converted());
+            assert!(success.is_modified());
+            assert!(success.defaults.is_empty(), "a conversion, not an inserted default");
             success.value.into_owned()
         }
         other => panic!("expected an owned converted value, got {other:?}"),
@@ -238,7 +239,7 @@ mod immutability {
             let _ = schema.validate_soft(input);
             assert_eq!(input, &before, "validation changed its input");
         }
-        assert!(schema.validate_soft(&inputs[1]).unwrap().is_converted(), "the probe must exercise a conversion");
+        assert!(schema.validate_soft(&inputs[1]).unwrap().is_modified(), "the probe must exercise a conversion");
         borrowed(&schema.validate_strict(&inputs[2]), &inputs[2]);
         assert_eq!(schema.json_schema().as_ref(), &schema_before, "validation changed the schema");
     }

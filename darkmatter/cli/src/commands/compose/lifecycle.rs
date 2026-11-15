@@ -25,6 +25,7 @@ use std::time::Instant;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Report, Result, eyre};
+use darkmatter::config::registration::RegisteredHostProfile;
 use darkmatter::effects::EffectEngine;
 use darkmatter::lifecycle::md_host::{
     self, CommandOutput, MdEvent, MdRunHost, MdRuntimeState, MdStackContext,
@@ -37,7 +38,7 @@ use darkmatter::lifecycle::executor::LifecycleEventOutcome;
 use darkmatter::lifecycle::run::ApprovalEpoch;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
-use darkmatter::markdown::compose::shell_expansion::{ShellApprovalHandler, ShellCommandEntry, ShellRuleSet};
+use darkmatter::markdown::compose::shell_expansion::{ShellApprovalHandler, ShellCommandEntry};
 use darkmatter::markdown::compose::report_diagnostics::lifecycle_failure_diagnostics;
 use darkmatter::markdown::compose::{ComposeOperation, ComposeReport, ComposeRequest, ComposeWarning};
 use serde_json::{Map, Value};
@@ -56,11 +57,20 @@ use crate::output::stderr_terminal;
 /// The root document's lifecycle under the `md` profile, or `None` when it
 /// authors none of `md`'s events.
 ///
+/// A document the registered host `foreign` identifies is read through its
+/// execution-only projection ([`md_host::execution_projection`]): only the
+/// events `md` shares with that host are stacks; the host's own events and
+/// its renamed spellings of `composed` and `failed` never run here.
+///
 /// ## Errors
 ///
 /// A malformed lifecycle, before anything runs.
-pub(super) fn root_lifecycle(md: &Markdown, source_path: &Path) -> Result<Option<LifecycleConfig>> {
-    let frontmatter = frontmatter_value(md);
+pub(super) fn root_lifecycle(
+    md: &Markdown,
+    source_path: &Path,
+    foreign: Option<&RegisteredHostProfile>,
+) -> Result<Option<LifecycleConfig>> {
+    let frontmatter = lifecycle_frontmatter(md, foreign);
     if !md_host::authors_lifecycle(&frontmatter) {
         return Ok(None);
     }
@@ -92,8 +102,9 @@ pub(super) fn reject_incompatible_calls(
 ) -> Result<Vec<ComposeWarning>> {
     let (schema, triggers) = darkmatter::markdown::compose::effective_schema_for(md, request).map_err(compose_error)?;
     pending_triggers.hold(&triggers);
+    let foreign = request.options().selected_host().map(AsRef::as_ref);
     darkmatter::lifecycle::reject_incompatible_calls(
-        &frontmatter_value(md),
+        &lifecycle_frontmatter(md, foreign),
         config,
         source_path,
         md.loaded_text(),
@@ -103,9 +114,26 @@ pub(super) fn reject_incompatible_calls(
     .map_err(Report::new)
 }
 
-/// The keys composition keeps deferred for a lifecycle run.
-pub(super) fn event_keys() -> Vec<&'static str> {
-    md_host::registry().authored_event_keys()
+/// The keys composition keeps deferred: `md`'s event keys for a lifecycle
+/// run, or every event key of the registered host `foreign` identifies the
+/// document for ([`md_host::foreign_deferred_keys`]), whether or not `md`
+/// runs a lifecycle; `None` when nothing is deferred.
+pub(super) fn deferred_keys(lifecycle: bool, foreign: Option<&RegisteredHostProfile>) -> Option<Vec<String>> {
+    match foreign {
+        Some(profile) => Some(md_host::foreign_deferred_keys(profile.lifecycle().registry())),
+        None => lifecycle.then(|| md_host::registry().authored_event_keys().into_iter().map(str::to_string).collect()),
+    }
+}
+
+/// The frontmatter `md` reads a lifecycle from: the whole frontmatter, or the
+/// execution-only projection of a document the registered host `foreign`
+/// identifies.
+fn lifecycle_frontmatter(md: &Markdown, foreign: Option<&RegisteredHostProfile>) -> Value {
+    let frontmatter = frontmatter_value(md);
+    match foreign {
+        Some(profile) => md_host::execution_projection(&frontmatter, profile.lifecycle().registry()),
+        None => frontmatter,
+    }
 }
 
 /// The lifecycle's shell commands for the report-only `--shell` mode,
@@ -352,7 +380,6 @@ struct ComposeHost<'a> {
     live: Mutex<darkmatter::markdown::compose::SharedFrontmatter>,
     state: MdRuntimeState,
     approved: ShellPreApprovals,
-    user_blacklist: ShellRuleSet,
     effect_engine: EffectEngine,
     effects: &'a TerminalEffects<'a>,
     interrupted: Arc<AtomicBool>,
@@ -376,7 +403,6 @@ impl<'a> ComposeHost<'a> {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| compose.request.resolution_context().cwd().to_path_buf(), Path::to_path_buf);
-        let user_blacklist = md_host::user_blacklist(&compose.request);
         let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(bootstrap);
         Self {
             md: compose.md,
@@ -394,7 +420,6 @@ impl<'a> ComposeHost<'a> {
             frontmatter,
             state: MdRuntimeState::default(),
             approved: ShellPreApprovals::new(),
-            user_blacklist,
             effect_engine: EffectEngine::builder().mutation_root(mutation_root).build(),
             effects,
             interrupted,
@@ -500,7 +525,7 @@ impl<'a> ComposeHost<'a> {
                     approvals.stats.total_discovered, approvals.stats.already_whitelisted, approvals.stats.user_approved
                 );
             }
-            md_host::settle_lifecycle_shells(&self.config, &approvals.pre_approved_commands, &self.request);
+            md_host::settle_lifecycle_shells(&self.config, &approvals.pre_approved_commands);
             self.approved = approvals.pre_approved_commands.clone();
             self.request = self.request.clone().map_options(|options| {
                 options
@@ -586,7 +611,6 @@ impl MdRunHost for ComposeHost<'_> {
             live_frontmatter: &self.live,
             state: &self.state,
             approved: &self.approved,
-            user_blacklist: &self.user_blacklist,
             effect_engine: &self.effect_engine,
             effects: self.effects,
             output: self.effects,

@@ -174,7 +174,7 @@ mod tests {
             .approval_cache
             .lock()
             .unwrap()
-            .insert(darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact(None, "echo hello"), CachedApprovalDecision::Allowed);
+            .insert(darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact("echo hello"), CachedApprovalDecision::Allowed);
         options
     }
 
@@ -232,14 +232,9 @@ mod tests {
 
     #[test]
     fn audit_policy_denied_command() {
-        // Use an isolated policy root with no whitelist and no approval handler.
-        // A non-blacklisted command ("echo") is denied by policy, not blacklisted.
-        let dir = tempfile::TempDir::new().unwrap();
-        let options = ShellApprovalOptions {
-            policy_root: Some(dir.path().to_path_buf()),
-            approval_handler: None,
-            ..Default::default()
-        };
+        // No permissions captured and no approval handler: a command the
+        // built-in blacklist does not refuse ("echo") is denied by policy.
+        let options = ShellApprovalOptions::default();
         let cmd = make_audited_command(AuditedCommandSource::ComposeSourceLine { line: 1 });
         let report = audit_shell_commands(&[cmd], &options);
         assert_eq!(report.outcomes.len(), 1);

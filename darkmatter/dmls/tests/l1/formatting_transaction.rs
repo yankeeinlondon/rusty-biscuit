@@ -44,6 +44,10 @@ impl Session {
     fn start(root: &Path, encodings: &[&str]) -> Self {
         let (server_side, client_side) = Connection::memory();
         let (outcome_tx, outcome) = mpsc::channel();
+        // A configured home: a missing user configuration is a session
+        // notice of its own, which these message counts are not about.
+        std::fs::create_dir_all(root.join("home")).expect("create home");
+        std::fs::write(root.join("home/.darkmatter.yaml"), "{}\n").expect("write user configuration");
         let snapshot = RequestSnapshot::new(root).with_home(Some(root.join("home")));
         let server = std::thread::spawn(move || {
             let result = dmls::run_server(server_side, dmls::RunOptions::new(snapshot))

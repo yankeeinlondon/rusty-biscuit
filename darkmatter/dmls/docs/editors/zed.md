@@ -31,8 +31,12 @@ the sibling `vscode-dmls` directory or a checkout/worktree directory.
 
 Re-running the recipe atomically refreshes the stable copy, so removing a
 source worktree cannot break the installed extension. After extension-source
-changes, rebuild the bundled `extension.wasm` and re-run the recipe; restart
-the language server or Zed after a native `dmls` update.
+changes, rebuild the bundled `extension.wasm` and re-run the recipe.
+
+Re-running the recipe while Zed is open makes Zed reload the extension, which
+stops `dmls` in every open window. Zed does not start it again on its own, so
+completion, hover, and diagnostics go silent with no error shown. Restart Zed
+after every run of the recipe.
 
 ## Troubleshooting
 

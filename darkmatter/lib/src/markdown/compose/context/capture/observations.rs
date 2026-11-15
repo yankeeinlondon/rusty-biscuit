@@ -50,11 +50,17 @@ impl CapturedObservations {
         &self.clock
     }
 
-    pub(super) fn with_packages(mut self, root: Option<&Path>, repo: Option<&RepoInfo>) -> Self {
+    pub(super) fn with_packages(
+        mut self,
+        root: Option<&Path>,
+        repo: Option<&RepoInfo>,
+        committed: Option<crate::config::load::CommittedTreeCapture>,
+    ) -> Self {
         self.packages = Some(Arc::new(PackageLookup::new(root, repo)));
         self.repository = Some(Arc::new(RepositoryObservation {
             root: root.map(Path::to_path_buf),
             info: repo.cloned(),
+            committed,
         }));
         self
     }
@@ -74,7 +80,7 @@ impl CapturedObservations {
     /// The `Repo` part from `repository`, the request's one repository
     /// observation, so a later reader never discovers it again.
     pub(crate) fn with_repository(self, repository: &RepositoryObservation) -> Self {
-        self.with_packages(repository.root.as_deref(), repository.info.as_ref())
+        self.with_packages(repository.root.as_deref(), repository.info.as_ref(), repository.committed.clone())
     }
 
     /// Whether the part `group` owns was captured; `false` for a group that
@@ -108,7 +114,7 @@ impl CapturedObservations {
 
     #[cfg(test)]
     pub(crate) fn for_test_packages(root: &Path, repo: &RepoInfo) -> Self {
-        Self::default().with_packages(Some(root), Some(repo))
+        Self::default().with_packages(Some(root), Some(repo), None)
     }
 
     /// The package lookup, or `None` when the `Repo` group was not captured.
@@ -167,7 +173,7 @@ mod tests {
         let mut first = CapturedObservations::default().with_addresses(Some(std::slice::from_ref(&address)));
         let second = CapturedObservations::default()
             .with_addresses(Some(&[]))
-            .with_packages(None, None);
+            .with_packages(None, None, None);
         first.fill_from(&second, &ContextRequirements::from_groups([ContextGroup::Network]));
         assert_eq!(first.addresses(), Some(&[address.clone()][..]));
         assert!(first.packages().is_none(), "Repo was not among the filled groups");

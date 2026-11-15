@@ -93,7 +93,7 @@ fn a_prompt_without_schema_composes_beside_the_incident_trigger() {
     assert!(!warning.message.contains("merge-conflicts.md"), "never blames the prompt: {}", warning.message);
     assert_eq!(
         warning.invalid_trigger_source(),
-        Some(crate::markdown::schemas::TriggerSource::File(repo.trigger())),
+        Some(simplified_schema::triggers::TriggerSource::File(repo.trigger())),
         "a host recognizes the trigger by its discovery identity"
     );
     assert_eq!(ComposeWarning::new("schema_validation", "other").invalid_trigger_source(), None);
@@ -168,8 +168,8 @@ fn a_payload_failure_names_the_payload_but_never_places_it_on_the_trigger() {
 
 #[test]
 fn an_embedded_trigger_record_has_no_source_even_with_a_position() {
-    let finding = crate::markdown::schemas::InvalidTriggerFinding::new(
-        crate::markdown::schemas::TriggerSource::Embedded { bundle: "host".into(), name: "broken.yaml".into() },
+    let finding = simplified_schema::triggers::InvalidTriggerFinding::new(
+        simplified_schema::triggers::TriggerSource::Embedded { bundle: "host".into(), name: "broken.yaml".into() },
         simplified_schema::errors::SchemaError::TriggerEnvelopeYaml {
             message: "did not find expected ',' or ']'".into(),
             line: Some(3),
@@ -471,18 +471,19 @@ fn preflight_approvals_carry_a_skipped_childs_trigger() {
 fn assert_policy_error_keeps_the_trigger(
     body: &str,
     child_only: bool,
-    prepare: impl FnOnce(&Repo),
+    prepare: impl FnOnce(&Repo, ComposeOptions) -> ComposeOptions,
     expect: impl FnOnce(&ShellExpansionError) -> bool,
 ) {
     assert_handled_policy_error_keeps_the_trigger(body, child_only, prepare, None, expect);
 }
 
 /// [`assert_policy_error_keeps_the_trigger`] with `handler` asked for what
-/// the policy files leave undecided.
+/// the permissions leave undecided. `prepare` sets up the repository and
+/// returns the options to compose with.
 fn assert_handled_policy_error_keeps_the_trigger(
     body: &str,
     child_only: bool,
-    prepare: impl FnOnce(&Repo),
+    prepare: impl FnOnce(&Repo, ComposeOptions) -> ComposeOptions,
     handler: Option<Arc<dyn ShellApprovalHandler>>,
     expect: impl FnOnce(&ShellExpansionError) -> bool,
 ) {
@@ -493,9 +494,9 @@ fn assert_handled_policy_error_keeps_the_trigger(
         std::fs::remove_file(&fixture.trigger).unwrap();
         fixture.repo.write("schemas/memory.yaml", MEMORY_TRIGGER)
     };
-    prepare(&fixture.repo);
+    let options = prepare(&fixture.repo, ComposeOptions::new());
     let prompt = fixture.prompt(body);
-    let request = fixture.request(&prompt, ComposeOptions::new());
+    let request = fixture.request(&prompt, options);
 
     let error = Markdown::try_from(prompt.as_path())
         .unwrap()
@@ -512,40 +513,45 @@ const CHILD_AND_SHELL: &str = "Parent body\n\n::file ../alpha/docs/child.md\n\n:
 
 #[test]
 fn approval_required_keeps_the_root_trigger() {
-    assert_policy_error_keeps_the_trigger(ROOT_SHELL, false, |_| {}, |error| {
+    assert_policy_error_keeps_the_trigger(ROOT_SHELL, false, |_, options| options, |error| {
         matches!(error, ShellExpansionError::ApprovalRequired { .. })
     });
 }
 
 #[test]
 fn approval_required_keeps_a_child_only_trigger() {
-    assert_policy_error_keeps_the_trigger(CHILD_AND_SHELL, true, |_| {}, |error| {
+    assert_policy_error_keeps_the_trigger(CHILD_AND_SHELL, true, |_, options| options, |error| {
         matches!(error, ShellExpansionError::ApprovalRequired { .. })
     });
 }
 
-fn blacklist_probe(repo: &Repo) {
-    repo.write(".darkmatter-shell-blacklist", "exact echo review-probe\n");
+/// A user whose home is the repository root and whose permissions allow
+/// the probe but exclude it.
+fn excluded_probe(repo: &Repo, options: ComposeOptions) -> ComposeOptions {
+    options.with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(
+        &repo.root,
+        &["prefix echo", "!exact echo review-probe"],
+    ))
 }
 
 #[test]
-fn a_user_blacklist_keeps_the_root_trigger() {
-    assert_policy_error_keeps_the_trigger(ROOT_SHELL, false, blacklist_probe, |error| {
-        matches!(error, ShellExpansionError::Blacklisted { .. })
+fn an_exclusion_keeps_the_root_trigger() {
+    assert_policy_error_keeps_the_trigger(ROOT_SHELL, false, excluded_probe, |error| {
+        matches!(error, ShellExpansionError::ApprovalRequired { exclusion: Some(_), .. })
     });
 }
 
 #[test]
-fn a_user_blacklist_keeps_a_child_only_trigger() {
-    assert_policy_error_keeps_the_trigger(CHILD_AND_SHELL, true, blacklist_probe, |error| {
-        matches!(error, ShellExpansionError::Blacklisted { .. })
+fn an_exclusion_keeps_a_child_only_trigger() {
+    assert_policy_error_keeps_the_trigger(CHILD_AND_SHELL, true, excluded_probe, |error| {
+        matches!(error, ShellExpansionError::ApprovalRequired { exclusion: Some(_), .. })
     });
 }
 
 #[test]
 fn the_builtin_blacklist_keeps_a_child_only_trigger() {
     let body = "Parent body\n\n::file ../alpha/docs/child.md\n\n::shell rm -rf /\n";
-    assert_policy_error_keeps_the_trigger(body, true, |_| {}, |error| {
+    assert_policy_error_keeps_the_trigger(body, true, |_, options| options, |error| {
         matches!(error, ShellExpansionError::Blacklisted { .. })
     });
 }
@@ -615,20 +621,22 @@ impl ShellApprovalHandler for DenyingApproval {
 fn a_handler_denial_keeps_a_child_only_trigger() {
     let asked = Arc::new(AtomicUsize::new(0));
     let handler: Arc<dyn ShellApprovalHandler> = Arc::new(DenyingApproval(Arc::clone(&asked)));
-    assert_handled_policy_error_keeps_the_trigger(CHILD_AND_SHELL, true, |_| {}, Some(handler), |error| {
+    assert_handled_policy_error_keeps_the_trigger(CHILD_AND_SHELL, true, |_, options| options, Some(handler), |error| {
         matches!(error, ShellExpansionError::Denied { .. })
     });
     assert_eq!(asked.load(Ordering::SeqCst), 1, "the handler decided the shell");
 }
 
-/// A whitelist that is not UTF-8 cannot be read on any OS.
+/// An invalid `shell-commands` entry makes the permissions unusable, so no
+/// command runs.
 #[test]
-fn an_unreadable_whitelist_keeps_a_child_only_trigger() {
-    let unreadable = |repo: &Repo| {
-        std::fs::write(repo.root.join(".darkmatter-shell-whitelist"), [0xff, 0xfe, b'\n']).unwrap();
+fn invalid_permissions_keep_a_child_only_trigger() {
+    let invalid = |repo: &Repo, options: ComposeOptions| {
+        repo.write(".darkmatter.yaml", "permissions:\n  shell-commands:\n    - \"exact \"\n");
+        options.with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(&repo.root, &[]))
     };
-    assert_policy_error_keeps_the_trigger(CHILD_AND_SHELL, true, unreadable, |error| {
-        matches!(error, ShellExpansionError::PolicyIo { .. })
+    assert_policy_error_keeps_the_trigger(CHILD_AND_SHELL, true, invalid, |error| {
+        matches!(error, ShellExpansionError::Config(_))
     });
 }
 

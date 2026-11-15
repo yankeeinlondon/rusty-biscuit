@@ -105,9 +105,17 @@ pub trait LifecycleHost {
     /// [`PrepError::Failed`] when the target did not return successfully.
     fn prep(&self, call: &PrepRequest<'_>) -> Result<(), PrepError>;
 
-    /// The user blacklist a template-mode command approved under
-    /// `policy_root` must also pass once it is filled.
-    fn user_blacklist(&self, policy_root: Option<&Path>) -> ShellRuleSet;
+    /// The exclusions (`!` entries of every layer) of the run's captured
+    /// `permissions.shell-commands`. A template-mode command whose shape an
+    /// allow rule approved needs an approval of its own once filled values
+    /// an exclusion matches
+    /// ([`filled_template_needs_approval`](crate::markdown::compose::shell_expansion::filled_template_needs_approval)).
+    ///
+    /// ## Errors
+    ///
+    /// The configuration error when the `permissions` block is invalid; the
+    /// command then does not run.
+    fn shell_exclusions(&self) -> Result<ShellRuleSet, crate::config::load::ConfigError>;
 
     /// Whether the user interrupted the run; the cancellation probe.
     fn interrupted(&self) -> bool;

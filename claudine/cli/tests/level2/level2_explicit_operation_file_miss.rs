@@ -32,7 +32,7 @@ fn stage_workspace(name: &str) -> TestWorkspace {
 
     let claudine_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
     write_fixture(
         workspace.path(),

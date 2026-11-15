@@ -935,16 +935,15 @@ fn compose_approval_failure_keeps_a_child_only_warning() {
     }
 }
 
-/// A user blacklist refusing the shell keeps the walk's child-only trigger.
+/// An exclusion asking about the shell keeps the walk's child-only trigger.
 #[test]
-fn compose_blacklist_refusal_keeps_a_child_only_warning() {
+fn compose_exclusion_keeps_a_child_only_warning() {
     let process = CliProcessFixture::new();
     child_only_trigger_repository(&process);
-    // The policy files sit beside the document.
-    write(process.cwd(), "docs/.darkmatter-shell-blacklist", "exact echo review-probe\n");
+    process.shell_permissions(&["prefix echo", "!exact echo review-probe"]);
     for lifecycle in LIFECYCLES {
         let document = prompt_with(&process, lifecycle, CHILD_AND_SHELL);
-        assert_compose_warns_once(&process, &document, 1, "blacklist", &format!("{lifecycle:?} blacklisted"));
+        assert_compose_warns_once(&process, &document, 1, "excluded by", &format!("{lifecycle:?} excluded"));
     }
 }
 
@@ -991,7 +990,7 @@ fn run_with_git(process: &CliProcessFixture, args: &[&str]) -> Output {
 /// Writes a prompt whose approved `git init` of `docs/{marker}` comes before
 /// `child`, and returns it with the marker the shell would create.
 fn approved_effect_prompt(process: &CliProcessFixture, lifecycle: &str, marker: &str, child: &str) -> (PathBuf, PathBuf) {
-    write(process.cwd(), "docs/.darkmatter-shell-whitelist", "prefix git\n");
+    process.shell_permissions(&["prefix git"]);
     let document = prompt_with(process, lifecycle, &format!("::shell git init --quiet {marker}\n\n{child}\n"));
     (document, process.cwd().join("docs").join(marker))
 }

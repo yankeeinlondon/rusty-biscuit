@@ -15,7 +15,7 @@ fn messenger_discord_deserializes_with_env_default() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let messenger = config.messenger.unwrap();
     assert_eq!(messenger.active_config.as_deref(), Some("work"));
     match messenger.configurations.get("work").unwrap() {
@@ -44,7 +44,7 @@ fn messenger_slack_deserializes() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let messenger = config.messenger.unwrap();
     assert!(messenger.active_config.is_none());
     match messenger.configurations.get("alerts").unwrap() {
@@ -73,7 +73,7 @@ fn messenger_signal_deserializes_with_defaults() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let messenger = config.messenger.unwrap();
     match messenger.configurations.get("personal").unwrap() {
         MessengerProviderConfig::Signal {
@@ -103,7 +103,7 @@ fn messenger_whatsapp_deserializes_with_defaults() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let messenger = config.messenger.unwrap();
     match messenger.configurations.get("biz").unwrap() {
         MessengerProviderConfig::Whatsapp {
@@ -134,9 +134,9 @@ fn messenger_round_trip() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json.clone()).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json.clone()).unwrap();
     let serialized = serde_json::to_value(&config).unwrap();
-    let back: ClaudineConfig = serde_json::from_value(serialized).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(serialized).unwrap();
     let messenger = back.messenger.unwrap();
     assert_eq!(messenger.active_config.as_deref(), Some("main"));
 }
@@ -154,7 +154,7 @@ fn messenger_discord_webhook_deserializes_with_defaults() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let messenger = config.messenger.unwrap();
     match messenger.configurations.get("alerts").unwrap() {
         MessengerProviderConfig::DiscordWebhook {
@@ -181,7 +181,7 @@ fn messenger_discord_webhook_accepts_hyphenated_provider_alias() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let messenger = config.messenger.unwrap();
     assert!(matches!(
         messenger.configurations.get("alerts").unwrap(),
@@ -203,7 +203,7 @@ fn messenger_slack_webhook_deserializes_with_inline_url() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let messenger = config.messenger.unwrap();
     match messenger.configurations.get("deploys").unwrap() {
         MessengerProviderConfig::SlackWebhook {
@@ -238,9 +238,9 @@ fn messenger_webhook_round_trip() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json.clone()).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json.clone()).unwrap();
     let serialized = serde_json::to_value(&config).unwrap();
-    let back: ClaudineConfig = serde_json::from_value(serialized).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(serialized).unwrap();
     let messenger = back.messenger.unwrap();
     assert_eq!(messenger.active_config.as_deref(), Some("deploys"));
     assert!(messenger.configurations.contains_key("deploys"));
@@ -249,7 +249,7 @@ fn messenger_webhook_round_trip() {
 
 #[test]
 fn validate_rejects_invalid_discord_webhook_url() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "messenger": {
             "configurations": {
@@ -273,7 +273,7 @@ fn validate_rejects_invalid_discord_webhook_url() {
 
 #[test]
 fn validate_rejects_invalid_slack_webhook_url() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "messenger": {
             "configurations": {
@@ -297,7 +297,7 @@ fn validate_rejects_invalid_slack_webhook_url() {
 
 #[test]
 fn validate_accepts_env_only_webhook_config() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "messenger": {
             "configurations": {
@@ -314,7 +314,7 @@ fn validate_accepts_env_only_webhook_config() {
 
 #[test]
 fn validate_accepts_valid_inline_webhook_url() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "messenger": {
             "configurations": {
@@ -331,7 +331,7 @@ fn validate_accepts_valid_inline_webhook_url() {
 
 #[test]
 fn validate_rejects_blank_webhook_url_env_when_no_inline() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "messenger": {
             "configurations": {

@@ -274,7 +274,8 @@ impl Rehearsal {
         stage_shipped_prompts(&repository, &repo.join("prompts"), PROMPTS);
         write(&repo.join(".claudine/memory/commits.md"), "# Commit lessons\n");
         write(&repo.join(".gitignore"), ".claudine/tmp/\n");
-        write(&repo.join(".darkmatter-shell-whitelist"), "prefix git\nprefix just\n");
+        // Committed below, so the repository's permissions take effect.
+        write(&repo.join(".darkmatter.yaml"), "permissions:\n  shell-commands: [\"prefix git\", \"prefix just\"]\n");
         write(&repo.join("README.md"), "rehearsal\n");
         git_in(&repo, &["add", "-A"]);
         git_in(&repo, &["commit", "-q", "-m", "initial"]);

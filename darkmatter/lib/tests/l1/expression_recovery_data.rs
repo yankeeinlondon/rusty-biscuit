@@ -683,7 +683,7 @@ impl ShellApprovalHandler for Recording {
 /// Options that run every command `dir`'s documents ask for, sharing `runtime`.
 fn shell_options(dir: &Path, runtime: &DataRuntime) -> ComposeOptions {
     ComposeOptions::new()
-        .with_shell(ShellExpansionOptions { policy_root: Some(dir.to_path_buf()), ..Default::default() })
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(Arc::new(AllowAll))
         .with_data_runtime(runtime.clone())

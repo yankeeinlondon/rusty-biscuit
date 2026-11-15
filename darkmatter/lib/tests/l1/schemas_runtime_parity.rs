@@ -51,7 +51,7 @@ impl ShellApprovalHandler for Approvals {
 fn options(dir: &Path, approvals: Arc<Approvals>) -> ComposeOptions {
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(dir.join("doc.md"))
-        .with_shell_policy_root(dir)
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[]))
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(approvals)
 }

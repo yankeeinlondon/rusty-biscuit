@@ -32,9 +32,10 @@ It exits with status 0 when nothing is broken and 1 when something is. Scripts
 should read the status, not the report's text.
 
 A document whose schema is a [template](../topics/schemas/schema-slots.md) is
-prepared with the reads its slots are already granted (a data file committed in the
-schema's repository, or a grant in the user's grant store). The command never asks:
-a template a read nobody granted stops is left unchecked here, as the check leaves
+prepared with the reads its slots are already approved: the files your
+`permissions.file-read` pre-approves (see
+[Permissions](../topics/permissions.md)). The command never asks:
+a template a read nobody approved stops is left unchecked here, as the check leaves
 any value only composition can judge, and `md compose` reports it.
 
 ## Options

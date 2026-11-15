@@ -21,7 +21,7 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         "protect": { "enabled": false }
     });
     write(
-        &home_dir.join(".claudine/config.json"),
+        &home_dir.join(".claudine/config.yaml"),
         &serde_json::to_string_pretty(&user_config).unwrap(),
     );
 
@@ -39,7 +39,7 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         }
     });
     write(
-        &repo_root.join(".claudine/config.json"),
+        &repo_root.join(".claudine/config.yaml"),
         &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
@@ -79,7 +79,7 @@ fn handle_logs_wrapper_package_context_from_env() {
         "protect": { "enabled": false }
     });
     write(
-        &home_dir.join(".claudine/config.json"),
+        &home_dir.join(".claudine/config.yaml"),
         &serde_json::to_string_pretty(&user_config).unwrap(),
     );
 
@@ -97,7 +97,7 @@ fn handle_logs_wrapper_package_context_from_env() {
         }
     });
     write(
-        &repo_root.join(".claudine/config.json"),
+        &repo_root.join(".claudine/config.yaml"),
         &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 

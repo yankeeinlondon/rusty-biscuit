@@ -2,7 +2,7 @@
 //! (design `signal-detection.md` §Harvest, v1 scope).
 //!
 //! When harvesting is enabled (`harvest_unmatched` in
-//! `~/.claudine/config.json`, or the `CLAUDINE_HARVEST` env override), the
+//! `~/.claudine/config.yaml`, or the `CLAUDINE_HARVEST` env override), the
 //! per-run [`SignalHub`] buffers every payload that fired ZERO detection
 //! records (declarative and bespoke) and passes the deliberately minimal
 //! [`is_error_or_warning_class`] test. Candidates are scrubbed through

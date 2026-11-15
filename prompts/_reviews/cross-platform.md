@@ -16,7 +16,7 @@ start:
 success:
     - when: "frontmatter(review, 'ready') == true"
       then:
-          - message: "✅ **cross-platform** review in **{{ctx.area}}** completed successfully (_all platforms are deemed to be in good shape_). Review took: {{timing.duration}}."
+          - message: "✅ **cross-platform** review in **{{ctx.area}}** completed successfully (_all platforms are deemed to be in good shape_). Review took: {{ round(timing.document_ms / 1000) }}s."
           - effect: small-group-cheer
     - when: "frontmatter(review, 'ready') != true"
       then:

@@ -42,7 +42,7 @@ impl DarkmatterSchemas {
         let document = parse(path, text)?;
         with_text(path, text, || {
             let template = biscuit_file::to_portable_string(path);
-            let roots = super::roots::SchemaRoots::for_document(&self.file_resolution_context)?;
+            let roots = simplified_schema::roots::SchemaRoots::for_document(&self.file_resolution_context)?;
             let export = if document.exports_schema {
                 Some(match self.prepare_export(&document, path, text, roots.search_paths()) {
                     Err(unresolved @ SchemaError::UnresolvedSlots(_)) => self.resolve_template(unresolved, &template)?,
@@ -75,7 +75,7 @@ impl DarkmatterSchemas {
         let Ok(document) = parse(path, text) else {
             return Vec::new();
         };
-        let Ok(roots) = super::roots::SchemaRoots::for_document(&self.file_resolution_context) else {
+        let Ok(roots) = simplified_schema::roots::SchemaRoots::for_document(&self.file_resolution_context) else {
             return Vec::new();
         };
         let mut templates = Vec::new();

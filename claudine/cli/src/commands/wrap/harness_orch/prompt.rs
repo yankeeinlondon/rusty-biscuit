@@ -250,9 +250,8 @@ fn harness_prepare_options(
 /// Run the active document's pre-flight shell audit and fold any newly-approved
 /// commands into the invocation's approved set.
 ///
-/// Only [`HarnessPromptMode::Compose`] re-runs a body compose that expands
-/// shell; `Inline` runs its own `prepare_inline` audit and `Passthrough` has no
-/// compose-time shell, so both are left untouched.
+/// `Compose` audits the body it composes and `Inline` the `prompt` it
+/// composes; `Passthrough` has no compose-time shell and is left untouched.
 ///
 /// ## Errors
 ///
@@ -265,9 +264,11 @@ pub(crate) fn preflight_harness_document(
     approval_options: &claudine::harness::ShellApprovalOptions,
     child_cwd: &Path,
 ) -> Result<(), Box<claudine::composition::CompositionError>> {
-    if state.mode != HarnessPromptMode::Compose {
-        return Ok(());
-    }
+    let mode = match state.mode {
+        HarnessPromptMode::Compose => claudine::composition::CompositionMode::ChainedDocument,
+        HarnessPromptMode::Inline => claudine::composition::CompositionMode::InlineFrontmatterPrompt,
+        HarnessPromptMode::Passthrough => return Ok(()),
+    };
     // A failed preflight ends the retried attempt's preparation, so a pending
     // retry overlay is spent here rather than left for a later read.
     let source = load_overlaid_source(state).map_err(|error| {
@@ -276,7 +277,7 @@ pub(crate) fn preflight_harness_document(
     })?;
     let options = harness_prepare_options(state, &source, child_cwd);
     let approved =
-        claudine::composition::preflight_document_shell(&source, &options, approval_options)
+        claudine::composition::preflight_document_shell(&source, &options, approval_options, mode)
             .map_err(|error| {
                 state.pending_retry_overlay = None;
                 Box::new(error)

@@ -6,20 +6,25 @@
 //! `2026-10-23-shell-template-approval`, at the library boundary).
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::shell_expansion::store::{append_whitelist_template, load_ruleset};
 use darkmatter::markdown::compose::shell_expansion::template::{
     ApprovalType, DeferredShellRoots, HoleTiming, ModeRequirement, ShellCandidate, ShellPreApprovals,
     TemplateShape,
 };
 use darkmatter::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellCommandOrigin, ShellExpansionError,
-    ShellPolicyPaths, ShellRuleEntry,
 };
 use darkmatter::markdown::compose::{ComposeContext, ComposeOperation, ComposeOptions};
 use darkmatter::markdown::MarkdownError;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
+
+/// Writes `rules` (one per line) as the `permissions.shell-commands` of the
+/// user configuration under `dir`, the home every request here uses.
+fn allow(dir: &Path, rules: &str) {
+    let rules: Vec<&str> = rules.lines().collect();
+    crate::request_support::shell_config(dir, &rules);
+}
 
 fn write(dir: &Path, name: &str, content: &str) -> PathBuf {
     let path = dir.join(name);
@@ -31,7 +36,7 @@ fn write(dir: &Path, name: &str, content: &str) -> PathBuf {
 fn options_for(dir: &Path, path: &Path) -> ComposeOptions {
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.to_path_buf())
-        .with_shell_policy_root(dir)
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[]))
 }
 
 fn preflight(dir: &Path, path: &Path, configure: impl FnOnce(ComposeOptions) -> ComposeOptions) -> Result<
@@ -195,7 +200,7 @@ fn compose_fails_with_the_missing_value_before_any_command_runs() {
         "doc.md",
         "---\ntarget: null\nfirst: $(git init --quiet ran)\n---\n::shell ls {{ target }}\n",
     );
-    write(dir.path(), ".darkmatter-shell-whitelist", "prefix git\nprefix ls\n");
+    allow(dir.path(), "prefix git\nprefix ls\n");
     let markdown = Markdown::try_from(path.as_path()).unwrap();
     let request = crate::request_support::request(options_for(dir.path(), &path));
     let error = markdown
@@ -629,13 +634,6 @@ fn approvals_for(
     )
 }
 
-fn policy(dir: &Path) -> ShellPolicyPaths {
-    ShellPolicyPaths {
-        whitelist: dir.join(".darkmatter-shell-whitelist"),
-        blacklist: dir.join(".darkmatter-shell-blacklist"),
-    }
-}
-
 #[test]
 fn a_resolved_site_prompt_offers_exact_and_shape_and_each_choice_persists_its_row() {
     for (decision, persisted) in [
@@ -659,8 +657,8 @@ fn a_resolved_site_prompt_offers_exact_and_shape_and_each_choice_persists_its_ro
             Some("git --version {{ word: string }}")
         );
 
-        let whitelist = std::fs::read_to_string(dir.path().join(".darkmatter-shell-whitelist")).unwrap_or_default();
-        assert_eq!(whitelist.lines().next(), persisted, "{decision:?}");
+        let saved = crate::request_support::saved_shell_rules(dir.path());
+        assert_eq!(saved.first().map(String::as_str), persisted, "{decision:?}");
         let by_template = decision == ShellApprovalDecision::AllowTemplatePersist;
         assert_eq!(approvals.pre_approved_commands.contains_exact("git --version hello"), !by_template);
         assert_eq!(
@@ -700,7 +698,7 @@ fn a_template_required_site_is_offered_no_exact_choice() {
     )
     .expect_err("exact is not offered");
     assert!(matches!(error, ShellExpansionError::Denied { .. }), "{error:?}");
-    assert!(!refused.path().join(".darkmatter-shell-whitelist").exists());
+    assert!(!refused.path().join(".darkmatter.yaml").exists());
 }
 
 #[test]
@@ -713,7 +711,7 @@ fn rules_are_preferred_exact_then_template_then_prefix() {
         ("template git --version {{ string }}\nprefix git\n", false, true),
         ("prefix git\n", true, false),
     ] {
-        write(dir.path(), ".darkmatter-shell-whitelist", rules);
+        allow(dir.path(), rules);
         let approvals = approvals_for(dir.path(), &path, None, &[]).unwrap();
         assert_eq!(approvals.pre_approved_commands.contains_exact("git --version hello"), exact, "{rules}");
         assert_eq!(approvals.pre_approved_commands.contains_template(&shape), template, "{rules}");
@@ -725,73 +723,51 @@ fn rules_are_preferred_exact_then_template_then_prefix() {
 fn a_persisted_template_rule_covers_a_late_site_without_prompting() {
     let dir = TempDir::new().unwrap();
     let path = write(dir.path(), "doc.md", "::shell git --version {{ last(outputs) }}\n");
-    append_whitelist_template(&policy(dir.path()), &TemplateShape::parse_rule("git --version {{ string }}").unwrap())
-        .unwrap();
+    allow(dir.path(), "template git --version {{ string }}");
     let approvals = approvals_for(dir.path(), &path, None, &["outputs"]).unwrap();
     assert_eq!(approvals.pre_approved_commands.templates().count(), 1);
 
     // An exact rule for some fill of it does not.
     let other = TempDir::new().unwrap();
     let path = write(other.path(), "doc.md", "::shell git --version {{ last(outputs) }}\n");
-    write(other.path(), ".darkmatter-shell-whitelist", "exact git --version\nexact git --version x\n");
+    allow(other.path(), "exact git --version\nexact git --version x\n");
     let error = approvals_for(other.path(), &path, None, &["outputs"]).expect_err("approval required");
     assert!(matches!(error, ShellExpansionError::ApprovalRequired { .. }), "{error:?}");
 }
 
 #[test]
-fn a_shape_blacklist_refuses_a_late_site_and_blacklisting_persists_the_shape() {
+fn a_shape_exclusion_asks_about_a_late_site_even_under_an_allow() {
     let dir = TempDir::new().unwrap();
     let path = write(dir.path(), "doc.md", "::shell git --version {{ last(outputs) }}\n");
-    write(dir.path(), ".darkmatter-shell-blacklist", "template git --version {{ string }}\n");
-    write(dir.path(), ".darkmatter-shell-whitelist", "template git --version {{ string }}\n");
-    let error = approvals_for(dir.path(), &path, None, &["outputs"]).expect_err("blacklisted");
-    assert!(matches!(error, ShellExpansionError::Blacklisted { .. }), "{error:?}");
-
-    let fresh = TempDir::new().unwrap();
-    let path = write(fresh.path(), "doc.md", "::shell git --version {{ last(outputs) }}\n");
-    let error = approvals_for(
-        fresh.path(),
-        &path,
-        Some(Scripted::new(ShellApprovalDecision::BlacklistPersist)),
-        &["outputs"],
-    )
-    .expect_err("blacklisted");
-    assert!(matches!(error, ShellExpansionError::Blacklisted { .. }), "{error:?}");
-    let blacklist = load_ruleset(&policy(fresh.path()).blacklist).unwrap();
-    assert_eq!(
-        blacklist.entries,
-        [ShellRuleEntry::Template(TemplateShape::parse_rule("git --version {{ string }}").unwrap())]
+    allow(dir.path(), "template git --version {{ string }}\n!template git --version {{ string }}\n");
+    let error = approvals_for(dir.path(), &path, None, &["outputs"]).expect_err("excluded");
+    assert!(
+        matches!(&error, ShellExpansionError::ApprovalRequired { exclusion: Some(exclusion), .. }
+            if exclusion.entry == "!template git --version {{ string }}"),
+        "{error:?}"
     );
-}
 
-/// Replaces the whitelist file with a directory when asked to approve, so
-/// the policy loaded before the prompt but the append after it fails.
-struct BreaksTheWhitelist {
-    whitelist: PathBuf,
-}
-
-impl ShellApprovalHandler for BreaksTheWhitelist {
-    fn approve(&self, _request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
-        let _ = std::fs::remove_file(&self.whitelist);
-        std::fs::create_dir(&self.whitelist).unwrap();
-        Ok(ShellApprovalDecision::AllowTemplatePersist)
-    }
+    // An approval of this run admits the excluded shape; nothing is saved.
+    let handler = Scripted::new(ShellApprovalDecision::AllowOnce);
+    let approvals = approvals_for(dir.path(), &path, Some(handler.clone()), &["outputs"]).unwrap();
+    assert_eq!(approvals.pre_approved_commands.templates().count(), 1);
+    assert!(handler.requests.lock().unwrap()[0].exclusion.is_some());
 }
 
 #[test]
-fn a_failed_template_write_is_a_policy_failure_and_approves_nothing() {
+fn an_always_allow_an_exclusion_still_matches_is_not_saved_but_approves_the_run() {
     let dir = TempDir::new().unwrap();
     let path = write(dir.path(), "doc.md", "::shell git --version {{ last(outputs) }}\n");
-    write(dir.path(), ".darkmatter-shell-whitelist", "prefix ls\n");
-    let options = options_for(dir.path(), &path).with_deferred_shell_roots(DeferredShellRoots::new(["outputs"]));
-    let handler = Arc::new(BreaksTheWhitelist {
-        whitelist: policy(dir.path()).whitelist,
-    });
-    let error = Markdown::try_from(path.as_path())
-        .unwrap()
-        .compose_preflight_approvals(&crate::request_support::request(options), Some(handler))
-        .expect_err("policy write fails");
-    assert!(matches!(error, ShellExpansionError::PolicyIo { .. }), "{error:?}");
+    allow(dir.path(), "prefix ls\n!prefix git\n");
+    let before = std::fs::read(dir.path().join(".darkmatter.yaml")).unwrap();
+    let handler = Scripted::new(ShellApprovalDecision::AllowTemplatePersist);
+    let approvals = approvals_for(dir.path(), &path, Some(handler), &["outputs"]).unwrap();
+    assert_eq!(approvals.pre_approved_commands.templates().count(), 1);
+    let not_saved: Vec<_> =
+        approvals.warnings.iter().filter(|warning| warning.code.as_deref() == Some("dm.config.not_saved")).collect();
+    assert_eq!(not_saved.len(), 1, "{:?}", approvals.warnings);
+    assert!(not_saved[0].message.contains("!prefix git"), "{}", not_saved[0].message);
+    assert_eq!(std::fs::read(dir.path().join(".darkmatter.yaml")).unwrap(), before);
 }
 
 #[test]
@@ -811,10 +787,9 @@ fn a_hole_type_follows_the_owner_schema_into_the_persisted_rule() {
         "just test {{ last(outputs): string }} --package {{ pkg: alphanumeric(allow-dashes) }} \
          --jobs {{ count: string (validated as number) }}"
     );
-    let whitelist = std::fs::read_to_string(dir.path().join(".darkmatter-shell-whitelist")).unwrap();
     assert_eq!(
-        whitelist.trim_end(),
-        "template just test {{ string }} --package {{ alphanumeric(allow-dashes) }} --jobs {{ string }}"
+        crate::request_support::saved_shell_rules(dir.path()),
+        ["template just test {{ string }} --package {{ alphanumeric(allow-dashes) }} --jobs {{ string }}"]
     );
     let shape = &request.template.as_ref().unwrap().shape;
     let holes: Vec<&ApprovalType> = shape

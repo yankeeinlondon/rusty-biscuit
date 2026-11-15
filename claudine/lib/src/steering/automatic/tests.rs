@@ -7,6 +7,8 @@ use std::ffi::OsStr;
 use std::path::Path;
 
 use super::*;
+use crate::config::persist;
+use crate::config::schema::ConfigScope;
 use crate::dispatch::loader;
 
 fn user(enabled: Option<bool>) -> SteeringConfig {
@@ -106,16 +108,12 @@ fn cells() -> Vec<(&'static str, &'static str, Expected)> {
         ("unknown key beside", r#"{ "steering": { "automatic": { "enabled": false, "enable": true } } }"#, Err(())),
         ("unknown steering key", r#"{ "steering": { "automatic": { "enabled": false }, "auto": {} } }"#, Err(())),
         ("trailing content", r#"{ "steering": { "automatic": { "enabled": false } } } false"#, Err(())),
-        // Known gap, loader-wide: config files are parsed as JSON5 into a
-        // `serde_json::Value` first, which keeps the last duplicate, so no
-        // Claudine config key can reject one. Pinned here so a stricter
-        // parser shows up as a deliberate change.
-        ("duplicate key", r#"{ "steering": { "automatic": { "enabled": false, "enabled": true } } }"#, Ok(Some(true))),
+        ("duplicate key", r#"{ "steering": { "automatic": { "enabled": false, "enabled": true } } }"#, Err(())),
     ]
 }
 
 fn write(dir: &Path, text: &str) -> std::path::PathBuf {
-    let path = dir.join("config.json");
+    let path = dir.join("config.yaml");
     std::fs::write(&path, text).unwrap();
     path
 }
@@ -147,11 +145,11 @@ fn a_repo_file_merged_by_the_user_loader_overrides_only_what_it_sets() {
     let repo_root = tmp.path().join("repo");
     std::fs::create_dir_all(repo_root.join(".claudine")).unwrap();
 
-    std::fs::write(repo_root.join(".claudine/config.json"), r#"{ "canonical_provider": "claude" }"#).unwrap();
+    std::fs::write(repo_root.join(".claudine/config.yaml"), r#"{ "canonical_provider": "claude" }"#).unwrap();
     let merged = loader::load_claudine_config(Some(&user_path), Some(&repo_root)).unwrap();
     assert_eq!(merged.steering.automatic.enabled, Some(false), "an absent repo value keeps the user opt-out");
 
-    std::fs::write(repo_root.join(".claudine/config.json"), r#"{ "steering": { "automatic": { "enabled": true } } }"#).unwrap();
+    std::fs::write(repo_root.join(".claudine/config.yaml"), r#"{ "steering": { "automatic": { "enabled": true } } }"#).unwrap();
     let merged = loader::load_claudine_config(Some(&user_path), Some(&repo_root)).unwrap();
     assert_eq!(merged.steering.automatic.enabled, Some(true));
 }
@@ -159,15 +157,19 @@ fn a_repo_file_merged_by_the_user_loader_overrides_only_what_it_sets() {
 #[test]
 fn a_saved_config_round_trips_the_setting_and_omits_it_when_unset() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.json");
-    let mut config = crate::config::claudine_config::ClaudineConfig::default();
-    loader::save_claudine_config(&config, &path).unwrap();
-    assert!(!std::fs::read_to_string(&path).unwrap().contains("steering"));
+    let path = tmp.path().join("config.yaml");
+    let defaults = crate::config::claudine_config::ClaudineConfig::default();
+    persist::initialize_config(&path, ConfigScope::User, &defaults, &defaults.clone()).unwrap();
+    let created: serde_json::Value =
+        biscuit_file::serde_yaml_ng::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(created.pointer("/steering/automatic/enabled").is_none(), "{created}");
 
-    config.steering.automatic.enabled = Some(false);
     for _ in 0..2 {
-        loader::save_claudine_config(&config, &path).unwrap();
-        config = loader::load_claudine_config(Some(&path), None).unwrap();
+        let opened = loader::load_claudine_config(Some(&path), None).unwrap();
+        let mut edited = opened.clone();
+        edited.steering.automatic.enabled = Some(false);
+        persist::save_changes(&path, ConfigScope::User, &opened, &edited).unwrap();
+        let config = loader::load_claudine_config(Some(&path), None).unwrap();
         assert_eq!(config.steering.automatic.enabled, Some(false));
     }
 }

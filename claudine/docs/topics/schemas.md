@@ -67,7 +67,10 @@ package `schemas/`, its package area's `schemas/`, the repository root's
 `schemas/`, and `~/schemas`. A trigger has a `match:` condition over the frontmatter and a
 `$schema` payload that applies whenever the condition holds. See
 [Repository Trigger Schemas](../../../darkmatter/docs/topics/schemas/definition.md#repository-trigger-schemas).
-Claudine's own schemas, described next, are delivered this way.
+Claudine's own schemas, described next, are trigger schemas too. Outside
+the Claudine area they reach `md` and DMLS through the
+[host registration](#the-published-host-registration) Claudine's setup
+publishes, not through these locations.
 
 ## Claudine's Schemas
 
@@ -111,7 +114,7 @@ but a document they accept can still be rejected by the parser (see
 | [`sequence-types.yaml`](../../schemas/sequence-types.yaml) | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
 | [`linking.yaml`](../../schemas/linking.yaml) | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
 | [`document.yaml`](../../schemas/document.yaml) | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that both `claudine.yaml` and `inline-compose.yaml` import, so the two triggers declare them identically |
-| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model`; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
+| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model` (exactly the documents identified as Claudine's); types `initialize`, `cancelled`, and `finalize` on those documents; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
 | [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
@@ -141,6 +144,16 @@ So `prompt`, `hash` (shorthand string or longhand mapping), and
 The library is not a trigger: the two triggers still match, apply, and are
 shadowed independently.
 
+`claudine/schemas/` also holds `claudine-document.yaml`, Claudine's
+**identifying trigger**. It is not part of the bundle: the `claudine` binary
+only publishes it and never applies it. It decides whether a document is a Claudine document
+at all, and the `darkmatter-host` manifest Claudine publishes names it (see
+[The published host registration](#the-published-host-registration)). It
+matches a non-null `sequence`, `start`, `blocked`, `success`, `failure`,
+`loop`, `prompt`, `agent`, or `model`, and its payload is empty, so when
+Darkmatter discovers it as an ordinary trigger for a document under
+`claudine/`, it adds no types.
+
 Copy all eight files together (see [On disk](#on-disk)). For editor analysis of
 Claudine's host globals and lifecycle events, also copy `globals.yaml` and
 `globals.lifecycle.json`; these describe the host rather than adding document
@@ -159,6 +172,8 @@ can reject it:
 | `start: 42` | applies | — | invalid: `start` is not a stack |
 | `agent: []` | applies | — | invalid: an agent list needs at least one entry |
 | `start: null` or `start:` | — | — | no Claudine trigger |
+| `finalize: [{ info: "done" }]` alone | — | — | no Claudine trigger: `initialize`, `cancelled`, and `finalize` belong to Darkmatter's `md` host too |
+| `finalize: [{ info: "done" }]` with `prompt: "write it"` | applies | applies | `finalize` is typed by `claudine.yaml` |
 | `ticket: 123` alone | — | — | no Claudine trigger |
 | `prompt: "write it"` | applies | applies | judged by both |
 | `prompt: "write it"` with `sequence: [a, b]` | applies | — | a sequence is not an inline document (`sequence.yaml` applies too) |
@@ -177,9 +192,33 @@ sequence document with no other control is judged too:
 | `fail_fast: true` beside `sequence:` | applies | invalid at `/fail_fast`: a sequence document has no `fail_fast` |
 | `fail_fast: null` beside `sequence:` | applies | valid to the schema; the sequence parser rejects any root `fail_fast`, null included, before anything runs |
 
-Only `sequence.yaml` declares `sequence`. A sequence document's lifecycle
-events and `loop` select `claudine.yaml` whenever they are set, and are typed
-there, so no key has two declarations to keep in step.
+Only `sequence.yaml` declares `sequence`. A non-null `sequence` also selects
+`claudine.yaml`, so a sequence document's events, `loop`, and every other
+Claudine control (`timeout`, `agent`, …) are typed there, and Darkmatter's
+`composed:` is refused as it is in any Claudine document. No key has two
+declarations to keep in step.
+
+`initialize`, `cancelled`, and `finalize` never select `claudine.yaml` on
+their own, because Darkmatter's `md` host owns those events too. A document
+whose only Claudine-looking keys are those three (a router prompt with only
+an `initialize` stack and no `prompt`, `agent`, or `sequence`) is not judged by Claudine's catalog: its schema verdict comes from
+Darkmatter's baseline. Claudine's lifecycle parser still checks the stacks at
+launch, so a misspelled verb or a `shell` in `initialize` is still refused
+before anything runs, by the parser rather than the schema. Add any Claudine
+key, such as `agent:`, to have the schema check them as well:
+
+```yaml
+# no Claudine key: the parser refuses this at launch, the schema does not
+initialize:
+    - shell: "git fetch"
+```
+
+```yaml
+# `agent` selects claudine.yaml, so this is also a schema error
+agent: claude
+initialize:
+    - shell: "git fetch"
+```
 
 Darkmatter's match grammar does not accept a property-level union inside a
 condition, so each identifying key is written as five single-type alternatives
@@ -288,7 +327,7 @@ communicate:
 `Name` in Darkmatter's shipped partial `<stem>.yaml`, read from the schemas
 compiled into Darkmatter, never from disk. It therefore resolves the same way
 whether the referring file is in the monorepo checkout, embedded in the
-`claudine` binary, or copied into `~/schemas` without Darkmatter's files, where a relative path to
+`claudine` binary, or published in a host revision folder without Darkmatter's files, where a relative path to
 `darkmatter/schemas/` would not exist. An unknown stem is a schema error
 naming the reference.
 
@@ -344,7 +383,7 @@ Which names are typed depends on which schemas apply:
 
 | Key | Darkmatter's baseline alone | With Claudine's trigger |
 |---|---|---|
-| `initialize`, `cancelled`, `finalize` | typed with the `md` host's verbs | typed with Claudine's verbs; Claudine's declaration replaces the baseline's |
+| `initialize`, `cancelled`, `finalize` | typed with the `md` host's verbs; these keys alone never select Claudine's trigger | typed with Claudine's verbs; Claudine's declaration replaces the baseline's |
 | `composed`, `failed` | typed with the `md` host's verbs | declared `null`, so any non-null value is an error |
 | `start`, `blocked` | untyped frontmatter data | typed lifecycle events |
 
@@ -1008,30 +1047,28 @@ is `claudine/` therefore reaches `claudine/schemas/` with no setup. `md schema
 triggers <file>` lists the locations, the shadowed files, and which triggers
 matched.
 
-Anywhere else, install a **complete** bundle of regular files in one of
-these locations:
+Anywhere else, nothing needs to be copied. Claudine's
+setup publishes them with a `darkmatter-host.yaml` manifest and registers
+that manifest in `~/.darkmatter.yaml`, so `md` and DMLS type a Claudine
+document in any folder (see
+[The published host registration](#the-published-host-registration) and
+[Host registration](../../../darkmatter/docs/topics/host-registration.md)).
+The five locations remain the place for your own schemas, `~/schemas`
+included.
 
-- the repository root's `schemas/` folder (a real directory, not a symlink)
-- the folder an absolute `SCHEMAS_DIR` names, such as
-  `SCHEMAS_DIR=/opt/team/claudine-schemas`
-- `~/schemas`
-
-Complete means all eight bundle files side by side, so the relative imports
+A trigger file in one of the locations still applies on top of the
+registered ones, so a modified Claudine trigger placed there overrides the
+properties it declares. It must come with what it imports. A bundle is **complete**
+when all eight files sit side by side, so the relative imports
 (`@./document.yaml`, `@./lifecycle.yaml`, …) resolve:
 
 - the triggers `claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml`;
 - the libraries `action.yaml`, `document.yaml`, `lifecycle.yaml`,
   `linking.yaml`, and `sequence-types.yaml`.
 
-Darkmatter's own schema files need not be copied: the
+Darkmatter's own schema files are never needed: the
 `@darkmatter:lifecycle` references resolve from the copy built into `md`, DMLS,
-and `claudine`. This command copies the bundle together with the host files
-`globals.yaml` and `globals.lifecycle.json`:
-
-```sh
-mkdir -p ~/schemas
-cp claudine/schemas/*.yaml claudine/schemas/globals.lifecycle.json ~/schemas/
-```
+and `claudine`.
 
 A disk trigger imports only from disk, never from the `claudine` binary's
 embedded files. This matters most when you place one trigger on disk to
@@ -1072,8 +1109,9 @@ bundle. The embedded copy is the **last** location:
   it applies alone: when the embedded `claudine.yaml` matches too, its
   declarations of those three properties win.
 
-`md` and DMLS register no embedded bundle. They see Claudine's schemas only
-when a disk bundle is reachable.
+`md` and DMLS have no embedded bundle. They see Claudine's schemas through
+the [published host registration](#the-published-host-registration), or
+from a bundle in one of the five locations.
 
 ### How the built-in copy is prepared
 
@@ -1222,9 +1260,10 @@ optional; a property declared only by a trigger is never cleaned away.)
 
 ### In the editor
 
-DMLS has no Claudine dependency and reads the schemas only from disk, through
-the same five locations. When the bundle is reachable, a Claudine prompt with
-no `$schema` gets diagnostics, completion, and hover from the matching
+DMLS has no Claudine dependency and reads the schemas only from disk: the
+host manifest registered in `~/.darkmatter.yaml`, and the same five
+locations. When either reaches the bundle, a Claudine prompt with no
+`$schema` gets diagnostics, completion, and hover from the matching
 triggers:
 
 - top-level keys (`mod` completes to `mode` and `model`) and their values
@@ -1245,17 +1284,90 @@ Key completion works in block mappings only: DMLS offers no keys inside a
 YAML flow mapping such as `ensure_file: { fi }`.
 
 Each key is declared by exactly one trigger, and completion offers only the
-keys of triggers that already apply. A sequence document whose root has only
-`sequence` (and `template`) matches `sequence.yaml` alone, so it is not
-offered `start`, `loop`, or the other root event keys. Once one of those keys
-is written, `claudine.yaml` applies and the rest are offered and typed.
+keys of triggers that already apply. A sequence document matches both
+`sequence.yaml` and `claudine.yaml`, because `sequence` identifies a Claudine
+document, so it is offered `start`, `loop`, and the other root keys too. A
+document whose only Claudine-looking keys are shared events (`initialize`,
+`cancelled`, `finalize`) matches neither and is completed as an `md` document.
 
 A property the document's own `$schema` redeclares is completed and hovered
 from the author's declaration, as it is validated (see below). One limit
-remains: a document outside the Claudine area gets editor help only when a
-complete bundle is reachable on disk, even though the CLI validates it.
+remains: a document outside the Claudine area gets editor help only when
+Claudine's host registration is in place (run Claudine's setup once), even
+though the CLI validates it without one.
 
 See [DMLS Schema Support](../../../darkmatter/docs/topics/schemas/dmls-schema-support.md).
+
+### The published host registration
+
+Darkmatter can also learn Claudine's schemas without a checkout: a
+`register` entry in `~/.darkmatter.yaml` naming `~/.claudine/darkmatter-host.yaml`
+points `md` and DMLS at a `darkmatter-host` manifest that Claudine writes
+from its embedded copies (see
+[Host registration](../../../darkmatter/docs/topics/host-registration.md)).
+Claudine publishes it like this:
+
+```text
+~/.claudine/
+├── darkmatter-host.yaml                  the manifest a `register` entry names
+└── darkmatter-host/
+    ├── 0.1.0-3f9a0c1d2e4b5a69/schemas/    one revision: every file below
+    └── 0.1.0-3f9a0c1d2e4b5a69-2/schemas/  the same revision, republished
+```
+
+- A revision folder is named `<version>-<digest>`: Claudine's version and the
+  first 16 hex characters of a BLAKE3 digest over the files' exact texts and
+  their roles. It holds the eight bundle files, `globals.yaml`,
+  `globals.lifecycle.json`, the identifying trigger `claudine-document.yaml`,
+  and `claudine-config.yaml`.
+- The manifest names `claudine-document.yaml` as `identify`, the triggers
+  `claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml` in that order,
+  `globals.yaml`, `globals.lifecycle.json`, and `functions: []`. Its paths
+  are relative to the manifest and point into one revision folder:
+
+  ```yaml
+  identify: "./darkmatter-host/0.1.0-3f9a0c1d2e4b5a69/schemas/claudine-document.yaml"
+  ```
+
+- `claudine-config.yaml` is there only so you can inspect what is installed.
+  The manifest never names it, and it selects no document.
+- A revision folder is never changed once it exists. A new revision is
+  written into a staging folder beside it and renamed into place whole, and
+  the manifest is replaced atomically only after that, so a reader never
+  sees half a revision. Every older revision stays, so a reader that already
+  read the old manifest keeps working; nothing removes old revisions yet.
+- When the manifest already names a revision whose files match, publishing
+  writes nothing. A revision folder whose files were damaged is left as it is
+  and the revision is published again under the next free name (`-2`,
+  `-3`, …).
+- If publishing fails, the previous manifest and every revision stay as they
+  were.
+
+#### When Claudine publishes and registers
+
+- **Setup.** Claudine's setup (the wizard a first run starts, interactive or
+  headless) does three things in order:
+  1. publishes the revision; if that fails, setup stops with an error and
+     writes nothing else;
+  2. writes Claudine's configuration and completes the `permissions`
+     handshake with `.darkmatter.yaml` of the same scope;
+  3. adds `~/.claudine/darkmatter-host.yaml` to the `register` list of the
+     **user's** `~/.darkmatter.yaml`, whichever scope was set up.
+
+  Step 3 keeps every existing entry and comment. If an entry already names
+  the same manifest file, even spelled differently (an absolute path instead
+  of `~/…`), nothing is added. A failure there is a warning; Claudine's own
+  configuration is already saved.
+- **Every launch.** Each `claudine` command except a provider hook
+  (`handle`), `steer`, shell completion, and `uninstall` publishes the
+  revision again when the manifest is missing or stale. An upgraded binary
+  therefore updates its registration on its next run. This refresh rewrites
+  only Claudine's own manifest and revisions, never `~/.darkmatter.yaml`. A
+  failure is a warning, and the last complete revision stays in use.
+
+Registration is for `md` and DMLS only. A `claudine` run always uses the
+schemas and event registry compiled into the binary, even when a repository
+registers some other manifest that claims to be `claudine`.
 
 ### The authored `$schema` applies last
 

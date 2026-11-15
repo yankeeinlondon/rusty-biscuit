@@ -292,7 +292,7 @@ shell_variants! {
         ctx: context(), command: "c".into(), reason: "r".into(), origin,
     };
     shell_approval_required: "dm.shell.failure", |origin| ShellExpansionError::ApprovalRequired {
-        ctx: context(), command: "c".into(), whitelist_path: Box::default(), blacklist_path: Box::default(), origin,
+        ctx: context(), command: "c".into(), save_target: None, exclusion: None, origin,
         suggested_rules: Box::default(),
     };
     shell_denied: "dm.shell.failure", |origin| ShellExpansionError::Denied {
@@ -360,7 +360,7 @@ fn excerpt() -> SourceExcerpt {
 fn a_shell_block_failure_names_its_file() {
     let file = work("block.md");
     for error in [
-        ShellBlockError::Parse { line: 40, message: "m".into(), excerpt: excerpt(), source_file: Some(file.clone()) },
+        ShellBlockError::Parse { line: 40, message: "m".into(), excerpt: excerpt(), source_file: Some(file.clone()), note: None },
         ShellBlockError::Unterminated { line: 40, opening_text: "o".into(), excerpt: excerpt(), source_file: Some(file.clone()) },
     ] {
         let error: MarkdownError = error.into();
@@ -457,7 +457,7 @@ fn an_unproven_interpolation_keeps_its_file() {
 /// R1-F2.24: the parser's line counts the current body, so the file alone.
 #[test]
 fn a_page_block_directive_failure_publishes_no_body_line() {
-    let error: MarkdownError = PageBlockError::ParseDirective { ctx: context(), line: 40, message: "m".into() }.into();
+    let error: MarkdownError = PageBlockError::ParseDirective { ctx: context(), line: 40, message: "m".into(), note: None }.into();
     let records = error_diagnostics(&error);
     assert_eq!(records[0].code, "dm.directive.parse_failure");
     assert_eq!(records[0].source, file_only(work("doc.md").as_path()));

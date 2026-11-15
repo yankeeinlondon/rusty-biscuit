@@ -75,7 +75,8 @@ pub(crate) struct StartupTimings {
     pub config_loading: Duration,
     /// Duration from process start to subcommand dispatch (Phase A).
     pub pre_dispatch: Duration,
-    /// Duration from subcommand entry to the start of `execute_composition_request_inner` (Phase B).
+    /// Duration from subcommand entry until the execution request is built (Phase B):
+    /// for an initialized document, after `initialize` and its stabilized reread.
     pub prep_phase: Duration,
     /// The single wall-clock zero point, captured at the top of `run()`.
     ///

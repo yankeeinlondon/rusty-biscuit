@@ -373,9 +373,9 @@ fn pending_template_refresh_reports_once() {
     let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
     let data = root.join("roles.yaml");
     std::fs::write(&data, "- web\n").unwrap();
-    let store = root.join("home").join(".config").join("darkmatter").join("schema-read-policy");
-    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    std::fs::write(&store, format!("allow file {}\n", data.display())).unwrap();
+    let config = root.join("home").join(".darkmatter.yaml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "permissions:\n    file-read:\n        - ./roles.yaml\n").unwrap();
     let text = "---
 $schema:
   server: \"{ name: string, role: enum({{ load_data(\\\"./roles.yaml\\\", \\\"string[]\\\") }}) }\"
@@ -450,7 +450,6 @@ fn library_and_editor(text: &str, files: &[(&str, &str)]) -> (Vec<darkmatter::ma
     std::fs::write(&path, text).unwrap();
     let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.clone())
-        .with_shell_policy_root(dir)
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(std::sync::Arc::new(AllowAll));
     let snapshot = RequestSnapshot::new(dir).with_home(Some(dir.join("home")));

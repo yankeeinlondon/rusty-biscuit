@@ -49,7 +49,9 @@ fn zed_extension_manifest_and_crate_shape_are_loadable() {
         .get("languages")
         .and_then(Value::as_array)
         .unwrap_or_else(|| panic!("`language_servers.dmls.languages` must be an array"));
-    assert_eq!(languages, &[Value::String("Markdown".to_owned())]);
+    // YAML too: DMLS serves whole YAML documents (configuration files, kinded
+    // YAML) as well as Markdown.
+    assert_eq!(languages, &[Value::String("Markdown".to_owned()), Value::String("YAML".to_owned())]);
 
     let crate_manifest = parse_toml(&crate_manifest_path);
     let crate_version = crate_manifest

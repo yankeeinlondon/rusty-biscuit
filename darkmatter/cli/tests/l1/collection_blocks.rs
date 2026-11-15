@@ -37,7 +37,8 @@ impl Recorder {
     }
 
     pub(crate) fn whitelist(&self, rules: &str) {
-        self.fixture.write_file("cwd/.darkmatter-shell-whitelist", rules);
+        let rules: Vec<&str> = rules.lines().filter(|line| !line.trim().is_empty()).collect();
+        self.fixture.shell_permissions(&rules);
     }
 
     /// `md compose doc.md` with `args` after the document.

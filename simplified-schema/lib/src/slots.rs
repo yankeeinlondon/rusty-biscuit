@@ -44,6 +44,26 @@ use crate::simplified::{
     Slot, TypeExpr,
 };
 
+/// Code of the error for a kind definition that holds a slot. A kind
+/// definition decides which documents it judges before anything could
+/// resolve a slot, so it never holds one.
+pub const SLOT_NOT_ALLOWED_IN_KIND_CODE: &str = "dm.schema.slot_not_allowed_in_kind";
+
+/// The message for slots found where `place` (a kind definition, a host's
+/// baseline or editor extension layer, a global catalog) may not hold any.
+#[must_use]
+pub fn slots_not_allowed_message(place: &str, unresolved: &crate::UnresolvedSlots) -> String {
+    let count = unresolved.slots.len();
+    let mut message = format!(
+        "{place} cannot hold `{{{{ … }}}}` slots; it holds {count} slot{}",
+        if count == 1 { "" } else { "s" }
+    );
+    if let Some(first) = unresolved.slots.first() {
+        message.push_str(&format!(" (first: `{{{{ {} }}}}`)", first.expression));
+    }
+    message
+}
+
 /// Every slot `root` and `definitions` hold, in declaration order (the
 /// root first, then each stored definition in allocation order), with the
 /// slot of a definition reached from several places listed once.

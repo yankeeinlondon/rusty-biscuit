@@ -157,6 +157,7 @@ mod tests {
             exit_expressions: None,
             guard_settings: Default::default(),
             steering: Default::default(),
+            permissions: None,
         }
     }
 
@@ -300,10 +301,10 @@ mod tests {
         ));
     }
 
-    /// The `tts` value as a user writes it in `config.json`.
+    /// The `tts` value as a user writes it in `config.yaml`.
     fn hook_config_for(tts: serde_json::Value) -> (bool, TtsConfig) {
         let config: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude", "tts": tts }))
+            ClaudineConfig::from_user_document(serde_json::json!({ "preferred_agent": "claude", "tts": tts }))
                 .unwrap();
         let hook_speech_on = !matches!(config.tts, TtsValue::Boolean(false));
         (hook_speech_on, tts_config_from_claudine(&config, None, None))
@@ -350,7 +351,7 @@ mod tests {
         let (on, _) = hook_config_for(serde_json::json!(false));
         assert!(!on);
         let config: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
+            ClaudineConfig::from_user_document(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
         assert!(matches!(config.tts, TtsValue::Boolean(false)));
     }
 }

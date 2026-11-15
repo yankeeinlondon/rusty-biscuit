@@ -75,7 +75,7 @@ fn compose_single_shell_block() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -107,7 +107,7 @@ fn compose_multiple_shell_blocks() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -136,7 +136,7 @@ fn compose_shell_block_with_multiple_commands() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler))
         .disable(ComposeOperation::Cleanup);
@@ -166,7 +166,7 @@ fn compose_shell_block_with_empty_output_commands() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -198,7 +198,7 @@ fn shell_block_inside_true_page_block_executes() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -226,7 +226,7 @@ fn shell_block_inside_false_page_block_is_removed() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -262,7 +262,7 @@ fn shell_block_in_transcluded_document_executes() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("parent.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -293,7 +293,7 @@ fn shell_block_with_conditional_transclusion() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("parent.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -324,7 +324,7 @@ fn shell_block_skipped_when_transclusion_condition_false() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("parent.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -356,7 +356,7 @@ fn compose_fails_when_shell_block_command_denied() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(DenyAllHandler));
 
@@ -407,7 +407,7 @@ fn shell_block_after_interpolation() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -438,7 +438,7 @@ fn compose_shell_blocks(block_count: usize) -> (String, usize) {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -490,7 +490,7 @@ fn compose_shell_block_with_when_error() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -518,7 +518,7 @@ fn compose_shell_block_with_timeout() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -550,7 +550,7 @@ fn compose_mixed_shell_directive_and_shell_block() {
 
     let options = context_free_options()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
@@ -571,4 +571,41 @@ fn compose_mixed_shell_directive_and_shell_block() {
         "Expected shell block output b, got: {output}"
     );
     assert_eq!(report.shell_blocks_applied, 1);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Pairing errors of an ordinary file
+// ═══════════════════════════════════════════════════════════════════
+
+/// A pairing error of an ordinary file names, besides the line it is
+/// reported at, the other line its reason refers to: the region a crossed
+/// closer does not close, the shell block a `::map` is inside, and where the
+/// file ends for an unclosed block. Each stage that reports a pairing error
+/// (collection, page-block, shell-block) keeps it.
+#[test]
+fn pairing_errors_keep_their_secondary_lines_for_an_ordinary_file() {
+    let fm = "---\n$schema:\n  items: string[]\nitems: [a]\n---\n";
+    let crossed = format!("{fm}# T\n\n::map items \"i => i\"\n::block when=true\nx\n::end-map\n::end-block\n");
+    let in_shell = format!("{fm}# T\n\n::shell-block\n::map items \"i => i\"\n::end-map\n::end-block\n");
+    let unclosed = "# T\n\n::shell-block\necho hi\n";
+    let cases: [(&str, &str, &[ComposeOperation], &str); 5] = [
+        ("crossed close", &crossed, &[], "opened at line 4"),
+        ("crossed close, page blocks", &crossed, &[ComposeOperation::CollectionBlocks], "opened at line 4"),
+        ("map in a shell block", &in_shell, &[], "opened at line 3"),
+        ("map in a shell block, shell stage", &in_shell, &[ComposeOperation::CollectionBlocks, ComposeOperation::PageBlocks], "opened at line 3"),
+        ("unclosed shell block, shell stage", unclosed, &[ComposeOperation::CollectionBlocks, ComposeOperation::PageBlocks], "file ends at line 5"),
+    ];
+    for (case, content, disabled, secondary) in cases {
+        let dir = TempDir::new().unwrap();
+        write_files(&dir, &[("doc.md", content)]);
+        let options = disabled
+            .iter()
+            .fold(context_free_options().with_source_file(dir.path().join("doc.md")), |options, operation| {
+                options.disable(*operation)
+            });
+        let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+        let error = md.compose_with(&crate::request_support::request(options)).expect_err(case);
+        let message = error.to_string();
+        assert!(message.contains(secondary), "{case}: expected {secondary:?} in {message}");
+    }
 }

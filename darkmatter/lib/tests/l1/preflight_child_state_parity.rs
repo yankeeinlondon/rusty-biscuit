@@ -162,7 +162,7 @@ fn write_files(dir: &Path, files: &[(&str, &str)]) -> std::path::PathBuf {
 fn base_options(root: &Path, dir: &Path) -> ComposeOptions {
     ComposeOptions::new()
         .with_source_file(root)
-        .with_shell_policy_root(dir)
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[]))
         // Real `echo` subprocesses can be starved past the 10 s default under
         // full-suite load.
         .with_shell_timeout(std::time::Duration::from_secs(60))

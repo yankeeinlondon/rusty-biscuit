@@ -165,6 +165,42 @@ pub fn resolution_failure_row(
     ))
 }
 
+/// The repair a schema problem about a value a schema default supplied
+/// calls for ([`simplified_schema::ValidationProblem::default`]): no
+/// frontmatter text holds that value, so the author repairs the default
+/// where the schema file declares it, or sets the property so the default
+/// is never used. Plain text (no markup).
+///
+/// ## Examples
+///
+/// ```
+/// use simplified_schema::{AppliedDefault, PropertyPath, SchemaOrigin};
+/// use darkmatter::markdown::errors::schema_default_repair;
+///
+/// let applied = AppliedDefault {
+///     path: PropertyPath::parse("doc").unwrap(),
+///     value: "./missing.md".into(),
+///     pointer: "/properties/doc/default".into(),
+///     origin: Some(SchemaOrigin::referenced_file("types.yaml")),
+/// };
+/// assert_eq!(
+///     schema_default_repair(&applied),
+///     "Repair the schema default at schema location `/properties/doc/default` in `types.yaml`, \
+///      or set `doc` in the frontmatter so the default is not used.",
+/// );
+/// ```
+pub fn schema_default_repair(applied: &simplified_schema::AppliedDefault) -> String {
+    let file = applied.origin.as_ref().and_then(simplified_schema::SchemaOrigin::file);
+    let declared = match file {
+        Some(file) => format!("`{}` in `{}`", applied.pointer, file.display()),
+        None => format!("`{}`", applied.pointer),
+    };
+    format!(
+        "Repair the schema default at schema location {declared}, or set `{}` in the frontmatter so the default is not used.",
+        applied.path
+    )
+}
+
 pub use simplified_schema::errors::{with_glob_hint, with_hint_line};
 
 /// Prose markup for a [`StatusBlock::hint`] whose text spans rows, such as a
@@ -298,20 +334,39 @@ mod tests {
     }
 
     #[test]
-    fn shell_approval_required_names_whitelist_paths() {
+    fn shell_approval_required_names_the_configuration() {
         let err = ShellExpansionError::ApprovalRequired {
             ctx: Box::new(test_ctx()),
             command: "gh repo list".into(),
-            whitelist_path: Box::new("/tmp/wl".into()),
-            blacklist_path: Box::new("/tmp/bl".into()),
+            save_target: Some(Box::new("/tmp/home/.darkmatter.yaml".into())),
+            exclusion: None,
             origin: ShellCommandOrigin::Body { line: 3 },
             suggested_rules: Box::default(),
         };
         let out = render(&err);
         assert!(out.contains("approval required"));
-        assert!(out.contains("/tmp/wl"));
-        assert!(out.contains("/tmp/bl"));
-        assert!(out.contains("--approve-shell"));
+        assert!(out.contains("/tmp/home/.darkmatter.yaml"));
+        assert!(out.contains("shell-commands rule"), "{out}");
+        assert!(!out.contains("lacklist"), "{out}");
+    }
+
+    #[test]
+    fn shell_approval_required_names_the_exclusion() {
+        let err = ShellExpansionError::ApprovalRequired {
+            ctx: Box::new(test_ctx()),
+            command: "gh repo list".into(),
+            save_target: None,
+            exclusion: Some(Box::new(crate::config::permissions::PolicyExclusion {
+                revision: crate::config::load::ConfigRevision::User,
+                file: "/tmp/home/.darkmatter.yaml".into(),
+                entry: "!prefix gh".into(),
+            })),
+            origin: ShellCommandOrigin::Body { line: 3 },
+            suggested_rules: Box::default(),
+        };
+        let out = render(&err);
+        assert!(out.contains("!prefix gh"), "{out}");
+        assert!(out.contains("approve it when prompted"), "{out}");
     }
 
     #[test]
@@ -365,6 +420,7 @@ mod tests {
         let err = TocLinkingError::InvalidCleanupService {
             service: "bogus".into(),
             line: 4,
+            document: None,
         };
         let out = render(&err);
         assert!(out.contains("invalid cleanup service"));

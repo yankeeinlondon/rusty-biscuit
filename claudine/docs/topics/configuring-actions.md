@@ -4,24 +4,21 @@ kind: canonical-documentation
 
 # Configuring Actions
 
-Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.json` specifies an ordered list of actions that run sequentially. Most actions do not block the pipeline; only `call` can return a response to influence agent behavior on blocking events.
+Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.yaml` (see [Configuration](configuration.md)) specifies an ordered list of actions that run sequentially. Most actions do not block the pipeline; only `call` can return a response to influence agent behavior on blocking events.
 
 ## Event Binding Structure
 
 Actions live under the top-level `actions` map, keyed by canonical event name. Each value is the ordered list of actions for that event, and the same bindings apply to every provider:
 
-```json
-{
-  "actions": {
-    "before_tool": [
-      { "type": "report" },
-      { "type": "sound_effect", "effect": "space-alarm", "volume": 0.5 }
-    ]
-  },
-  "matchers": {
-    "before_tool": "^Bash$"
-  }
-}
+```yaml
+actions:
+  before_tool:
+    - type: report
+    - type: sound_effect
+      effect: space-alarm
+      volume: 0.5
+matchers:
+  before_tool: "^Bash$"
 ```
 
 | Key | Type | Default | Description |
@@ -29,17 +26,17 @@ Actions live under the top-level `actions` map, keyed by canonical event name. E
 | `actions.<event>` | `HookAction[]` | absent | Ordered list of actions to execute when `<event>` fires |
 | `matchers.<event>` | `string` | absent | Optional filter for that event's actions (a regex over `tool_name` for tool events and `notification_type` for notifications, or a Darkmatter condition) |
 
-An event with no `actions` entry runs no actions. A file that still uses the old `version` + `providers.<provider>.events` shape is treated as the old format: Claudine renames it to `config.json.bak` and treats the configuration as missing, so setup runs again.
+An event with no `actions` entry runs no actions. A legacy `config.json` that still uses the old `version` + `providers.<provider>.events` shape is treated as the old format: Claudine renames it to `config.json.bak` and treats the configuration as missing, so setup runs again.
 
 Every dispatched event is also appended to a daily JSONL log under `~/.claudine/logs/` while the top-level `logging` setting is `true` (the default); this is independent of the actions bound to the event.
 
-When a matcher is set, the event's actions run only if the matcher matches. For example, `"before_tool": "^Bash$"` restricts the `before_tool` actions to Bash tool invocations.
+When a matcher is set, the event's actions run only if the matcher matches. For example, `before_tool: "^Bash$"` restricts the `before_tool` actions to Bash tool invocations.
 
-A matcher can also be a Darkmatter condition over the same paths as [`when`](#available-paths), such as `"before_tool": "hook.tool_name == 'Bash' && git.branch == 'main'"`. Claudine tries the string as a condition first; a bare word such as `Bash`, or a string that is not a valid condition, is compiled as a regex.
+A matcher can also be a Darkmatter condition over the same paths as [`when`](#available-paths), such as `before_tool: "hook.tool_name == 'Bash' && git.branch == 'main'"`. Claudine tries the string as a condition first; a bare word such as `Bash`, or a string that is not a valid condition, is compiled as a regex.
 
 ## Action Types
 
-Every action is a JSON object with a `"type"` discriminator. Claudine supports six action types; an unknown `type`, or an unknown field on an action, fails to load.
+Every action is a mapping with a `type` discriminator. Claudine supports six action types; an unknown `type`, or an unknown field on an action, fails to load.
 
 ### `sound_effect`
 
@@ -53,8 +50,11 @@ The global scheduler serializes it with lifecycle, speech, and other Playa jobs.
 | `volume` | `f32` | `1.0` | Playback volume (0.0 to 1.0) |
 | `speed` | `f32` | `1.0` | Playback speed multiplier |
 
-```json
-{ "type": "sound_effect", "effect": "confirmation", "volume": 0.8, "speed": 1.2 }
+```yaml
+type: sound_effect
+effect: confirmation
+volume: 0.8
+speed: 1.2
 ```
 
 ### `speak`
@@ -75,8 +75,9 @@ redact private preparation text.
 | `voice` | `string?` | `null` | Voice override for this action |
 | `gender` | `male` \| `female` | `null` | Gender preference for voice selection |
 
-```json
-{ "type": "speak", "message": "Tool {{tool_name}} completed on {{git.branch}}" }
+```yaml
+type: speak
+message: "Tool {{tool_name}} completed on {{git.branch}}"
 ```
 
 The provider and default voice come from the [`tts` setting](#text-to-speech-settings-tts);
@@ -106,18 +107,15 @@ Print event information to stdout, making it visible in the agent's output strea
 | `json` | Full event metadata as a JSON object |
 | `compact` | `[EVENT] tool_name` |
 
-```json
-{ "type": "report" }
+```yaml
+type: report
 ```
 
-```json
-{
-  "type": "report",
-  "handler": {
-    "format": "compact",
-    "template": "[TOOL] {{tool_name}}: executing on {{os.type}}"
-  }
-}
+```yaml
+type: report
+handler:
+  format: compact
+  template: "[TOOL] {{tool_name}}: executing on {{os.type}}"
 ```
 
 ### `bash`
@@ -131,8 +129,10 @@ Run an external command without inspecting its output. The command is spawned di
 
 Both fields support template interpolation. Quote a placeholder whose value may contain spaces (`--message '{{tool_name}}'`); otherwise the value splits into several arguments.
 
-```json
-{ "type": "bash", "command": "notify-send", "params": "Claudine '{{event}} fired'" }
+```yaml
+type: bash
+command: notify-send
+params: "Claudine '{{event}} fired'"
 ```
 
 ### `message`
@@ -146,16 +146,15 @@ Requires messaging configuration under the top-level `messenger` key (see [Messa
 | `message` | `string` | (required) | Template message with `{{variable}}` placeholders (rendered as Markdown where supported) |
 | `image` | `string?` | `null` | File path to a raster image attachment (Discord only in v1; ignored with a warning for other providers) |
 
-```json
-{ "type": "message", "message": "**{{provider}}** `{{event}}` in `{{cwd}}`" }
+```yaml
+type: message
+message: "**{{provider}}** `{{event}}` in `{{cwd}}`"
 ```
 
-```json
-{
-  "type": "message",
-  "message": "Build artifact ready",
-  "image": "{{cwd}}/.claudine/artifacts/last-run.png"
-}
+```yaml
+type: message
+message: Build artifact ready
+image: "{{cwd}}/.claudine/artifacts/last-run.png"
 ```
 
 Image path resolution: absolute paths stay absolute, `~/` expands to the home directory, relative paths resolve from `{{cwd}}` then the repo root.
@@ -176,9 +175,9 @@ Execute an external command synchronously and map its output to a `HookResponse`
 | Type | Config | Behavior |
 |------|--------|----------|
 | `exit_code` | -- | Exit 0 = Allow, 2 = Deny, other = Allow. Stdout/stderr becomes `reason`. |
-| `json_field` | `{ "field": "decision" }` | Parse stdout as JSON, extract a dot-separated path as the decision. Also reads `reason`. |
+| `json_field` | `field: decision` | Parse stdout as JSON, extract a dot-separated path as the decision. Also reads `reason`. |
 | `json_object` | -- | Parse stdout as a full `HookResponse` JSON object. |
-| `regex` | `{ "pattern": "..." }` | Match stdout with named capture groups: `decision`, `reason`, `context`. |
+| `regex` | `pattern: "..."` | Match stdout with named capture groups: `decision`, `reason`, `context`. |
 
 **HookResponse fields** (returned to the agent on blocking events):
 
@@ -192,23 +191,22 @@ Execute an external command synchronously and map its output to a `HookResponse`
 
 When multiple `call` actions appear in a binding, the last non-`continue` decision wins.
 
-```json
-{
-  "type": "call",
-  "command": "security-check",
-  "args": ["--tool", "{{tool_name}}"],
-  "timeout_ms": 4000,
-  "mapper": { "type": "exit_code" }
-}
+```yaml
+type: call
+command: security-check
+args: ["--tool", "{{tool_name}}"]
+timeout_ms: 4000
+mapper:
+  type: exit_code
 ```
 
-```json
-{
-  "type": "call",
-  "command": "policy-engine",
-  "args": ["--event", "{{event}}"],
-  "mapper": { "type": "json_field", "field": "result.decision" }
-}
+```yaml
+type: call
+command: policy-engine
+args: ["--event", "{{event}}"]
+mapper:
+  type: json_field
+  field: result.decision
 ```
 
 ## Conditional Execution (`when`)
@@ -237,22 +235,18 @@ The following paths can be referenced in `when` expressions:
 
 Only speak when on the `main` branch:
 
-```json
-{
-  "type": "speak",
-  "message": "Deploying to production",
-  "when": "git.branch == 'main'"
-}
+```yaml
+type: speak
+message: Deploying to production
+when: "git.branch == 'main'"
 ```
 
 Only call a policy engine when `ctx.today` is available:
 
-```json
-{
-  "type": "call",
-  "command": "policy-engine",
-  "when": "!is_empty(ctx.today)"
-}
+```yaml
+type: call
+command: policy-engine
+when: "!is_empty(ctx.today)"
 ```
 
 ### The `hook` root
@@ -262,8 +256,10 @@ payload (its event fields, `extra`, and the `os`, `hardware`, `git`, and
 `project` groups), and `hook.<path>` is one field of it. The unprefixed paths
 above read the same fields, so `tool_name` and `hook.tool_name` agree.
 
-```json
-{ "type": "speak", "message": "{{ hook.tool_name }} finished", "when": "hook.tool_name == 'Bash'" }
+```yaml
+type: speak
+message: "{{ hook.tool_name }} finished"
+when: "hook.tool_name == 'Bash'"
 ```
 
 - A missing `hook.<path>` is absent (`null`); it never falls back to an
@@ -352,7 +348,7 @@ The single-pipe `|` form is no longer supported (see the migration note in unifi
 
 ## Text-to-speech settings (`tts`)
 
-The top-level `tts` key in `~/.claudine/config.json` (JSON5 accepted) chooses
+The top-level `tts` key in `~/.claudine/config.yaml` chooses
 how Claudine speaks. It is read in three places: hook [`speak`](#speak)
 actions, the voice that composition lifecycle `say`/`speak` plays with, and
 [pre-warm](flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm),
@@ -361,13 +357,15 @@ fire. It is a user-scope setting only; it is never a frontmatter key.
 
 `tts` is either a boolean or an object:
 
-```json5
-{ tts: true }                                                      // hook speech on, default provider
-{ tts: false }                                                     // hook speech off (the default)
-{ tts: { provider: "kokoro", voice: "af_heart" } }                 // hook speech on, this provider and voice
-{ tts: { provider: "kokoro", voice: "af_heart", prewarm: false } } // same, without pre-warm
-{ tts: { prewarm: false } }                                        // default provider, without pre-warm
+```yaml
+tts: true                                                    # hook speech on, default provider
+tts: false                                                   # hook speech off (the default)
+tts: { provider: kokoro, voice: af_heart }                   # hook speech on, this provider and voice
+tts: { provider: kokoro, voice: af_heart, prewarm: false }   # same, without pre-warm
+tts: { prewarm: false }                                      # default provider, without pre-warm
 ```
+
+Each line is an alternative; a file holds one `tts` key.
 
 Every key of the object is optional:
 
@@ -395,7 +393,8 @@ object form, so turning pre-warm off always writes an object, and an object
 also turns hook `speak` actions on. A user with `tts: false` who wants
 pre-warm off therefore gets hook speech with the default provider as well.
 
-The value is validated strictly when `config.json` loads:
+The value is validated strictly against the shipped schema
+(`claudine/schemas/claudine-config.yaml`) when `config.yaml` loads:
 
 - an unknown key in the object (for example `enabled` or `pre_warm`) is
   rejected;
@@ -403,7 +402,7 @@ The value is validated strictly when `config.json` loads:
   as absent;
 - a wrong type (`tts: "say"`, `provider: 1`, `prewarm: "no"`) is rejected;
 - `{}` loads as an object with every key at its default;
-- a key written twice keeps its last value, as every key in `config.json` does.
+- a key written twice is rejected, as it is anywhere in `config.yaml`.
 
 The configuration editor's TTS tab keeps `prewarm` when you change the
 object's provider, voice, or gender, and when it saves. Switching the tab's
@@ -412,13 +411,13 @@ on.
 
 ## Messaging Configuration
 
-The `message` action requires a destination configured under the top-level `messenger` key in your user config (`~/.claudine/config.json`). A repo config (`.claudine/config.json`) can only choose which named configuration is active, through `active_messenger`.
+The `message` action requires a destination configured under the top-level `messenger` key in your user config (`~/.claudine/config.yaml`). A repo config (`.claudine/config.yaml`) can only choose which named configuration is active, through `active_messenger`.
 
 ### Named Config Pattern
 
 Multiple provider configurations are stored under a `configurations` map keyed by user-chosen names. An `active_config` field selects which named configuration is currently in use; it must name a key in `configurations`. Omitting `active_config` disables messaging.
 
-Scope resolution: a repo-scope `active_messenger` string replaces the user-scope `active_config` for that repo. A repo-scope `"active_messenger": null` disables messaging for that repo. When the repo config omits `active_messenger`, the user-scope `active_config` applies.
+Scope resolution: a repo-scope `active_messenger` string replaces the user-scope `active_config` for that repo. A repo-scope `active_messenger: null` disables messaging for that repo. When the repo config omits `active_messenger`, the user-scope `active_config` applies.
 
 ### Provider Configs
 
@@ -426,77 +425,63 @@ Secrets are read from the environment variables named by the `*_env` fields (e.g
 
 **Discord:**
 
-```json
-{
-  "provider": "discord",
-  "channel_id": "123456789012345678",
-  "bot_token_env": "DISCORD_BOT_TOKEN"
-}
+```yaml
+provider: discord
+channel_id: "123456789012345678"
+bot_token_env: DISCORD_BOT_TOKEN
 ```
 
 **Slack:**
 
-```json
-{
-  "provider": "slack",
-  "channel_id": "C012345ABC",
-  "bot_token_env": "SLACK_BOT_TOKEN"
-}
+```yaml
+provider: slack
+channel_id: C012345ABC
+bot_token_env: SLACK_BOT_TOKEN
 ```
 
 **Discord Webhook:**
 
-```json
-{
-  "provider": "discord_webhook",
-  "webhook_url": "https://discord.com/api/webhooks/123456789/abcdef...",
-  "webhook_url_env": "DISCORD_WEBHOOK_URL"
-}
+```yaml
+provider: discord_webhook
+webhook_url: https://discord.com/api/webhooks/123456789/abcdef...
+webhook_url_env: DISCORD_WEBHOOK_URL
 ```
 
 **Slack Webhook:**
 
-```json
-{
-  "provider": "slack_webhook",
-  "webhook_url": "https://hooks.slack.com/services/T00/B00/XXXX",
-  "webhook_url_env": "SLACK_WEBHOOK_URL"
-}
+```yaml
+provider: slack_webhook
+webhook_url: https://hooks.slack.com/services/T00/B00/XXXX
+webhook_url_env: SLACK_WEBHOOK_URL
 ```
 
 **Signal:**
 
-```json
-{
-  "provider": "signal",
-  "recipient": "+15551234567",
-  "rpc_url_env": "SIGNAL_RPC_URL",
-  "account_env": "SIGNAL_ACCOUNT"
-}
+```yaml
+provider: signal
+recipient: "+15551234567"
+rpc_url_env: SIGNAL_RPC_URL
+account_env: SIGNAL_ACCOUNT
 ```
 
 Recipients starting with `+` are treated as phone numbers; other values are treated as Signal group IDs.
 
 **WhatsApp:**
 
-```json
-{
-  "provider": "whatsapp",
-  "recipient": "+15559876543",
-  "access_token_env": "WHATSAPP_ACCESS_TOKEN",
-  "phone_number_id_env": "WHATSAPP_PHONE_NUMBER_ID"
-}
+```yaml
+provider: whatsapp
+recipient: "+15559876543"
+access_token_env: WHATSAPP_ACCESS_TOKEN
+phone_number_id_env: WHATSAPP_PHONE_NUMBER_ID
 ```
 
 ### Env-Only Webhook Configuration
 
 Webhook routes can omit the inline `webhook_url` and rely solely on an environment variable:
 
-```json
-{
-  "provider": "slack_webhook",
-  "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
-}
+```yaml
+provider: slack_webhook
+webhook_url_env: DEPLOY_SLACK_WEBHOOK_URL
 ```
 
 This is useful when the config file is shared or backed up and the webhook secret should not be stored in it.
@@ -507,68 +492,57 @@ Desktop notifications are **zero-config** and are not managed through `claudine 
 
 ### Example Messenger Block
 
-```json
-{
-  "messenger": {
-    "active_config": "work-slack",
-    "configurations": {
-      "work-slack": {
-        "provider": "slack",
-        "channel_id": "C012345ABC",
-        "bot_token_env": "SLACK_BOT_TOKEN"
-      },
-      "personal-discord": {
-        "provider": "discord",
-        "channel_id": "123456789012345678",
-        "bot_token_env": "DISCORD_BOT_TOKEN"
-      },
-      "deploy-webhook": {
-        "provider": "slack_webhook",
-        "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
-      },
-      "alerts-webhook": {
-        "provider": "discord_webhook",
-        "webhook_url_env": "DISCORD_WEBHOOK_URL"
-      }
-    }
-  }
-}
+```yaml
+messenger:
+  active_config: work-slack
+  configurations:
+    work-slack:
+      provider: slack
+      channel_id: C012345ABC
+      bot_token_env: SLACK_BOT_TOKEN
+    personal-discord:
+      provider: discord
+      channel_id: "123456789012345678"
+      bot_token_env: DISCORD_BOT_TOKEN
+    deploy-webhook:
+      provider: slack_webhook
+      webhook_url_env: DEPLOY_SLACK_WEBHOOK_URL
+    alerts-webhook:
+      provider: discord_webhook
+      webhook_url_env: DISCORD_WEBHOOK_URL
 ```
 
 ## Full Example
 
 A complete set of event bindings with multiple actions:
 
-```json
-{
-  "actions": {
-    "before_tool": [
-      {
-        "type": "call",
-        "command": "security-check",
-        "args": ["--tool", "{{tool_name}}", "--branch", "{{git.branch}}"],
-        "timeout_ms": 5000,
-        "mapper": { "type": "exit_code" }
-      },
-      {
-        "type": "report",
-        "handler": { "format": "compact" }
-      }
-    ],
-    "turn_complete": [
-      { "type": "sound_effect", "effect": "confirmation" },
-      { "type": "speak", "message": "Turn complete on {{git.branch}}" },
-      { "type": "message", "message": "Turn complete on **{{git.branch}}**" }
-    ],
-    "tool_error": [
-      { "type": "sound_effect", "effect": "error-1", "volume": 0.6 },
-      { "type": "speak", "message": "{{tool_name}} failed: {{error}}" }
-    ]
-  },
-  "matchers": {
-    "before_tool": "^Bash$"
-  }
-}
+```yaml
+actions:
+  before_tool:
+    - type: call
+      command: security-check
+      args: ["--tool", "{{tool_name}}", "--branch", "{{git.branch}}"]
+      timeout_ms: 5000
+      mapper:
+        type: exit_code
+    - type: report
+      handler:
+        format: compact
+  turn_complete:
+    - type: sound_effect
+      effect: confirmation
+    - type: speak
+      message: "Turn complete on {{git.branch}}"
+    - type: message
+      message: "Turn complete on **{{git.branch}}**"
+  tool_error:
+    - type: sound_effect
+      effect: error-1
+      volume: 0.6
+    - type: speak
+      message: "{{tool_name}} failed: {{error}}"
+matchers:
+  before_tool: "^Bash$"
 ```
 
 This configuration runs a security check that can block each Bash tool invocation, then reports it. Turn completions get a sound, a TTS announcement, and a message. Tool errors get an alert sound and a spoken error summary. Every event is also written to the JSONL event log, because `logging` defaults to `true`.

@@ -165,6 +165,7 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
         }),
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     }
 }
 
@@ -191,6 +192,9 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
 pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
     let mut current = Some(error);
     while let Some(error) = current {
+        if let Some(config) = error.downcast_ref::<crate::config::load::ConfigError>() {
+            return config_error_diagnostics(config);
+        }
         if let Some(markdown) = as_markdown_error(error) {
             return markdown_error_diagnostics(markdown);
         }
@@ -225,6 +229,59 @@ pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
         current = cause.source();
     }
     vec![unlocated(COMPOSE_FAILURE_CODE, Severity::Error, error.to_string())]
+}
+
+/// A configuration load failure as one error record per located problem,
+/// each with its file, line, and column, under the error's code
+/// (`dm.config.invalid` or `dm.config.reference`).
+pub fn config_error_diagnostics(error: &crate::config::load::ConfigError) -> Vec<Diagnostic> {
+    error
+        .problems()
+        .iter()
+        .map(|problem| Diagnostic {
+            source: Some(config_problem_source(problem)),
+            ..unlocated(error.code(), Severity::Error, problem.to_string())
+        })
+        .collect()
+}
+
+/// A finding a configuration load recorded without failing (the missing
+/// user file, a permissions error, an omitted registration) as warnings: one
+/// per located problem, or one naming the file when it has none.
+pub fn config_notice_diagnostics(notice: &crate::config::load::ConfigDiagnostic) -> Vec<Diagnostic> {
+    if notice.problems.is_empty() {
+        return vec![Diagnostic {
+            source: Some(DiagnosticSource::file_only(Some(notice.file.clone()))),
+            ..unlocated(notice.code, Severity::Warning, notice.message.clone())
+        }];
+    }
+    notice
+        .problems
+        .iter()
+        .map(|problem| Diagnostic {
+            source: Some(config_problem_source(problem)),
+            ..unlocated(notice.code, Severity::Warning, problem.to_string())
+        })
+        .collect()
+}
+
+/// A refused host registration or a same-host conflict
+/// ([`crate::config::registration`]) as one record at the file, line, and
+/// column the problem is in.
+pub fn registration_diagnostic(diagnostic: &crate::config::registration::RegistrationDiagnostic) -> Diagnostic {
+    let file = Some(diagnostic.file.clone());
+    let source = match (diagnostic.line, diagnostic.column) {
+        (Some(line), Some(column)) => DiagnosticSource::at(file, line, column),
+        _ => DiagnosticSource::file_only(file),
+    };
+    Diagnostic { source: Some(source), ..unlocated(diagnostic.code, diagnostic.severity, diagnostic.message.clone()) }
+}
+
+fn config_problem_source(problem: &crate::config::load::ConfigProblem) -> DiagnosticSource {
+    match (problem.line, problem.column) {
+        (Some(line), Some(column)) => DiagnosticSource::at(Some(problem.file.clone()), line, column),
+        _ => DiagnosticSource::file_only(Some(problem.file.clone())),
+    }
 }
 
 /// The diagnostics of a failed lifecycle event: its Darkmatter cause's
@@ -318,6 +375,7 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                 reference_details: None,
                 data_location: None,
                 grants_needed: None,
+                schema_default: problem.default.as_ref().map(crate::markdown::compose::expression::SchemaDefaultOrigin::from),
             })
             .collect(),
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
@@ -668,6 +726,11 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
             (PARAMETER_BINDING_CODE, None)
         }
         MarkdownError::Setter { .. } => (SETTER_INVALID_CODE, None),
+        // The document holding the directive, which for a transcluded child
+        // is not the composed one; the line counts the current body. A
+        // context identity is no file.
+        MarkdownError::TocLinking(inner) => (COMPOSE_FAILURE_CODE, file_only(inner.document().and_then(named))),
+        MarkdownError::FileLinks(inner) => (COMPOSE_FAILURE_CODE, file_only(inner.document().and_then(named))),
         _ => (COMPOSE_FAILURE_CODE, None),
     };
     Diagnostic {
@@ -685,6 +748,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         },
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     }
 }
 
@@ -709,10 +773,6 @@ fn condition_source(
 fn shell_source(error: &ShellExpansionError) -> Option<DiagnosticSource> {
     if let ShellExpansionError::PolicyIo { path, .. } = error {
         return file_only(named(path));
-    }
-    if let ShellExpansionError::SlotGrantStore(store) = error {
-        let line = (store.line > 0).then_some(store.line);
-        return Some(DiagnosticSource { line, ..DiagnosticSource::file_only(Some(store.path.clone())) });
     }
     let file = context_file(error.context()?)?;
     let line = match error.origin() {
@@ -746,7 +806,8 @@ fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
     match error {
         ShellExpansionError::Preflight(inner) => markdown_error_diagnostics(inner),
         ShellExpansionError::ParseDirective { .. } => vec![shell_record(DIRECTIVE_PARSE_CODE, error)],
-        ShellExpansionError::SlotGrantStore(store) => vec![shell_record(store.code(), error)],
+        // An invalid `permissions` block reports its own located problems.
+        ShellExpansionError::Config(config) => config_error_diagnostics(config),
         _ => vec![shell_record(SHELL_FAILURE_CODE, error)],
     }
 }
@@ -1035,5 +1096,6 @@ fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
         reference_details: None,
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     }
 }

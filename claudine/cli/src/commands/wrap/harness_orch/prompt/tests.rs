@@ -317,14 +317,11 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
 /// Issue #1 regression: a proxy target's own frontmatter `$(...)` shell
 /// command must be discovered and approved at hand-off and folded into the
 /// carried pre-approved set, so the subsequent re-materialize compose does
-/// not reject a whitelisted command with `NotPreApproved`.
+/// not reject a pre-approved command with `NotPreApproved`.
 #[test]
 fn proxy_target_preflight_approves_frontmatter_shell_and_rematerializes() {
     let dir = tempfile::TempDir::new().unwrap();
-    // Whitelist `basename` so the audit auto-approves without a handler,
-    // mirroring the real review prompt's reliance on the repo whitelist.
-    std::fs::write(dir.path().join(".darkmatter-shell-whitelist"), "prefix basename\n")
-        .unwrap();
+    // `permissions` allow `basename`, so the audit approves without a handler.
     let target = dir.path().join("target.md");
     std::fs::write(
         &target,
@@ -341,7 +338,10 @@ fn proxy_target_preflight_approves_frontmatter_shell_and_rematerializes() {
     );
 
     let approval_options = claudine::harness::ShellApprovalOptions {
-        policy_root: Some(dir.path().to_path_buf()),
+        permissions: crate::commands::wrap::harness_orch::test_permissions::user_permissions(
+            &dir.path().join("home"),
+            &["prefix basename"],
+        ),
         approval_handler: None,
         ..Default::default()
     };
@@ -351,7 +351,7 @@ fn proxy_target_preflight_approves_frontmatter_shell_and_rematerializes() {
     assert!(state.input_layers.pre_approved_commands.is_none());
 
     preflight_harness_document(&mut state, &approval_options, dir.path())
-        .expect("whitelisted proxy-target command must pre-flight cleanly");
+        .expect("a pre-approved proxy-target command must pre-flight cleanly");
 
     let approved = state
         .input_layers

@@ -69,7 +69,7 @@ fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
     // Under a PTY claudine sees an interactive stdin and runs the first-run
     // wizard when the user config is absent; it would swallow the transcript.
     // (Before the fixture, this passed only because it inherited the
-    // developer's own `~/.claudine/config.json`.)
+    // developer's own `~/.claudine/config.yaml`.)
     fixture.seed_user_config();
     let md_file = fixture.cwd().join("doc.md");
     write(&md_file, MISMATCH_FIXTURE);

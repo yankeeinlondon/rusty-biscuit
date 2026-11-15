@@ -67,6 +67,10 @@ pub enum ConfigCause {
     /// A JSON5 document failed to parse.
     #[error(transparent)]
     Json5(#[from] biscuit_file::Json5Error),
+
+    /// A configuration value's location is not a property path.
+    #[error(transparent)]
+    Path(#[from] simplified_schema::PropertyPathError),
 }
 
 /// All errors that can occur within the Claudine library.
@@ -110,6 +114,50 @@ pub enum ClaudineError {
         /// The typed failure that prose describes.
         #[source]
         source: ConfigCause,
+    },
+
+    /// A configuration file is invalid: not one admissible YAML mapping, or a
+    /// value its schema refuses. Every problem names the file, position, and
+    /// JSON pointer; nothing configured has run.
+    #[error("invalid configuration:\n{}", crate::config::load::join_problems(problems))]
+    ConfigInvalid {
+        /// Every problem found, never empty.
+        problems: Vec<crate::config::load::ConfigProblem>,
+    },
+
+    /// A legacy `config.json` could not be converted to `config.yaml`, or an
+    /// interrupted conversion could not be finished. The legacy file is kept.
+    #[error("configuration conversion stopped:\n{}", crate::config::load::join_problems(problems))]
+    ConfigConversion {
+        /// Every problem found, never empty; each names the file concerned.
+        problems: Vec<crate::config::load::ConfigProblem>,
+    },
+
+    /// A configuration edit was refused because the edited file would be
+    /// invalid. The file is unchanged; every problem is located in the text
+    /// that would have been written.
+    #[error(
+        "configuration {} was not saved; the edited file would be invalid:\n{}",
+        path.display(),
+        crate::config::load::join_problems(problems)
+    )]
+    ConfigEditRefused {
+        /// The configuration file.
+        path: PathBuf,
+        /// Every problem found, never empty.
+        problems: Vec<crate::config::load::ConfigProblem>,
+    },
+
+    /// A configuration file could not be saved: the edit cannot be made in
+    /// place, another writer held the file's lock, or replacing it failed.
+    /// The file is unchanged.
+    #[error("configuration {} was not saved: {source}", path.display())]
+    ConfigWrite {
+        /// The configuration file.
+        path: PathBuf,
+        /// The locked writer's failure.
+        #[source]
+        source: Box<darkmatter::config::write::ConfigWriteError>,
     },
 
     /// Requested provider is not available or not detected.
@@ -451,11 +499,16 @@ impl Diagnostic for ClaudineError {
             ClaudineError::Sqlite(_)
             | ClaudineError::SystemPromptFileNotFound(_)
             | ClaudineError::SystemPromptFileUnresolvable { .. } => "io.read_failed",
-            ClaudineError::LockError { .. } | ClaudineError::LinkingError(_) => "io.write_failed",
+            ClaudineError::LockError { .. }
+            | ClaudineError::LinkingError(_)
+            | ClaudineError::ConfigWrite { .. } => "io.write_failed",
             // `config.*` — Claudine/user configuration is invalid.
             ClaudineError::ConfigNotFound(_)
             | ClaudineError::ConfigValidation(_)
             | ClaudineError::ConfigValidationWithCause { .. }
+            | ClaudineError::ConfigInvalid { .. }
+            | ClaudineError::ConfigConversion { .. }
+            | ClaudineError::ConfigEditRefused { .. }
             | ClaudineError::JsonParse(_)
             | ClaudineError::TomlParse(_)
             | ClaudineError::YamlParse(_)
@@ -556,7 +609,7 @@ impl Diagnostic for ClaudineError {
                 base["path"] = json!(path);
             }
             // `io.write_failed` declares `path`.
-            ClaudineError::LockError { path } => {
+            ClaudineError::LockError { path } | ClaudineError::ConfigWrite { path, .. } => {
                 base["path"] = json!(biscuit_file::to_portable_string(path));
             }
             // `io.network` declares `url`, `message`. The typed source carries
@@ -572,6 +625,14 @@ impl Diagnostic for ClaudineError {
             | ClaudineError::PolicySourceDiscovery(message)
             | ClaudineError::PolicyAmbiguousContext(message) => {
                 base["message"] = json!(message);
+            }
+            ClaudineError::ConfigInvalid { problems }
+            | ClaudineError::ConfigConversion { problems }
+            | ClaudineError::ConfigEditRefused { problems, .. } => {
+                if let Some(first) = problems.first() {
+                    base["field"] = json!(first.pointer);
+                }
+                base["message"] = json!(self.to_string());
             }
             ClaudineError::PolicyApplyFailed { path, message, .. } => {
                 base["field"] = json!(biscuit_file::to_portable_string(path));

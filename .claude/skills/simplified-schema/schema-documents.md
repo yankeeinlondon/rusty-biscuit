@@ -45,4 +45,18 @@ admission; metadata from `accepted`) and prepares a `yaml-schema` with
 judges its shape twice. Tests: `envelope_admission.rs`,
 `yaml_schema_envelope.rs`.
 
-Ownership boundary: this crate owns the `schema` and `yaml-schema`
+Ownership boundary: this crate owns all three shipped definitions
+(`schemas/{schema,yaml-schema,schema-trigger}.yaml`, compiled into
+`envelope::ENVELOPE_DEFINITIONS`; only the first two admit envelopes, the
+trigger definition is a kind definition), envelope admission, trigger
+discovery and matching (`triggers/`), the schema roots (`roots.rs`), and whole
+YAML documents (`yaml_documents/`: `load.rs`, `select.rs`, `registry.rs`'s
+`KindRegistry`, `semantic.rs`'s kind checks). A host supplies only its inputs:
+its `ShippedSources` and its prepared shipped definitions (`KindHost`;
+`prepare_shipped_definitions(sources)` when it records none). Darkmatter
+passes `kind_host()`, records the prepared definitions in its own shipped
+artifact (`kind_definitions`), and keeps the adaptation of a selected schema
+into its `EffectiveSchema`/`ValidationReport` (`YamlContract`, `YamlValidation`,
+`Route`). Its user docs: the "YAML documents" section of
+[definition.md](../../../darkmatter/docs/topics/schemas/definition.md) and
+[Schema Discovery](../../../darkmatter/docs/topics/schemas/schema-discovery.md).

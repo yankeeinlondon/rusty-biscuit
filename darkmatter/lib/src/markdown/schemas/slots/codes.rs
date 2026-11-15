@@ -31,11 +31,9 @@ pub const SLOT_FAILED_CODE: &str = "dm.schema.slot_failed";
 /// A newer request superseded the resolution.
 pub const SLOT_CANCELED_CODE: &str = "dm.schema.slot_canceled";
 /// A kind definition holds a slot.
-pub const SLOT_NOT_ALLOWED_IN_KIND_CODE: &str = "dm.schema.slot_not_allowed_in_kind";
+pub use simplified_schema::slots::SLOT_NOT_ALLOWED_IN_KIND_CODE;
 /// The baseline or an editor extension layer holds a slot.
 pub const SLOT_NOT_ALLOWED_IN_BASELINE_CODE: &str = "dm.schema.slot_not_allowed_in_baseline";
-/// The user's slot-read grant store could not be read.
-pub const SLOT_GRANT_STORE_INVALID_CODE: &str = "dm.schema.slot_grant_store_invalid";
 /// A template type's value is not a type definition: neither a string nor
 /// an array, or text the definition parser rejects.
 pub const SLOT_NOT_A_TYPE_CODE: &str = "dm.schema.slot_not_a_type";
@@ -69,7 +67,6 @@ pub const SLOT_DIAGNOSTIC_CODES: &[&str] = &[
     SLOT_CANCELED_CODE,
     SLOT_NOT_ALLOWED_IN_KIND_CODE,
     SLOT_NOT_ALLOWED_IN_BASELINE_CODE,
-    SLOT_GRANT_STORE_INVALID_CODE,
     SLOT_NOT_A_TYPE_CODE,
     SLOT_NESTED_CODE,
     SLOT_REACHABLE_CODE,
@@ -77,6 +74,16 @@ pub const SLOT_DIAGNOSTIC_CODES: &[&str] = &[
     SLOT_SUFFIX_CONFLICT_CODE,
     SLOT_INVALID_EXPANSION_CODE,
 ];
+
+/// Whether `code` reports a read the session's permissions or approvals
+/// refused: a missing approval, a deny for this run, or invalid
+/// `permissions` (a `dm.config.*` code). Such a failure depends on the
+/// session, so it is never cached for another and a reference check defers
+/// only the first two.
+#[must_use]
+pub(crate) fn is_permission_code(code: &str) -> bool {
+    matches!(code, SLOT_APPROVAL_REQUIRED_CODE | SLOT_DENIED_CODE) || code.starts_with("dm.config.")
+}
 
 /// The code of a slot whose value the library could not use.
 #[must_use]
@@ -116,19 +123,7 @@ pub fn slot_prohibition_code(error: &simplified_schema::SchemaError) -> Option<&
     }
 }
 
-/// The message for slots found where `place` (a kind definition, the
-/// baseline, an editor extension layer) may not hold any.
-pub(crate) fn slots_not_allowed_message(place: &str, unresolved: &simplified_schema::UnresolvedSlots) -> String {
-    let count = unresolved.slots.len();
-    let mut message = format!(
-        "{place} cannot hold `{{{{ … }}}}` slots; it holds {count} slot{}",
-        if count == 1 { "" } else { "s" }
-    );
-    if let Some(first) = unresolved.slots.first() {
-        message.push_str(&format!(" (first: `{{{{ {} }}}}`)", first.expression));
-    }
-    message
-}
+pub(crate) use simplified_schema::slots::slots_not_allowed_message;
 
 /// `error` as a baseline failure when it is a template: the baseline and
 /// every editor extension layer apply to documents before any slot could be
@@ -171,7 +166,7 @@ mod tests {
             assert!(segments[2].starts_with("slot_"), "{code}");
             assert!(seen.insert(code), "{code} repeats");
         }
-        assert_eq!(SLOT_DIAGNOSTIC_CODES.len(), 21);
+        assert_eq!(SLOT_DIAGNOSTIC_CODES.len(), 20);
     }
 
     /// Each template-type result kind has its own code, so a script can tell

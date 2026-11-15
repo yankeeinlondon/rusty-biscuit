@@ -50,10 +50,7 @@ fn write(dir: &Path, name: &str, content: &str) -> PathBuf {
 fn options(dir: &Path, path: &Path) -> ComposeOptions {
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.to_path_buf())
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(dir.to_path_buf()),
-            ..Default::default()
-        })
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_approval_handler(Arc::new(AllowAll))
 }
 
@@ -413,7 +410,7 @@ fn a_matched_trigger_schema_property_is_known() {
             .with_repository_root(repo.path())
             .with_source_path(&path);
         let options = options(repo.path(), &path).with_trigger_schemas(triggers);
-        let request = darkmatter::markdown::compose::ComposeRequest::with_context(options, context).unwrap();
+        let request = crate::request_support::request_in(options, context);
 
         let (content, report) = compose_request(&path, &request);
 

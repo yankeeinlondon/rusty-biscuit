@@ -16,6 +16,10 @@ mod union_fixtures;
 mod position_fixtures;
 #[path = "../../../lib/tests/content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
+// Only its host texts and lifecycle writer are used here.
+#[allow(dead_code)]
+#[path = "../../../lib/tests/host_fixtures/mod.rs"]
+mod host_fixtures;
 
 mod approval_prompt;
 mod claudine_schema_bundle;
@@ -30,6 +34,8 @@ mod clean_parity;
 mod clean_rules;
 mod clean_schema;
 mod code_block;
+mod host_registration;
+mod compose_foreign_documents;
 mod compose_array_rendering;
 mod compose_base_schema;
 mod compose_basic;
@@ -54,6 +60,8 @@ mod compose_perf;
 mod compose_refs_and_missing;
 mod compose_report_diagnostics;
 mod compose_data_output;
+mod config_notices;
+mod init_command;
 mod link_titles;
 mod compose_remote_caching;
 mod compose_schema;

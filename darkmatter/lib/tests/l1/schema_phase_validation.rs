@@ -388,7 +388,7 @@ fn eager_is_universal_in_catalog_and_round_trips() {
 
 #[test]
 fn passive_trigger_schemas_reject_eager_on_every_shape_and_placement() {
-    use darkmatter::markdown::schemas::parse_trigger_envelope_from_str;
+    use simplified_schema::triggers::parse_trigger_envelope_from_str;
 use simplified_schema::SchemaError;
 
     for definition in [
@@ -551,7 +551,7 @@ fn yaml_files_in(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// covered the day it lands.
 #[test]
 fn shipped_schema_and_trigger_corpus_parses_passively() {
-    use darkmatter::markdown::schemas::parse_trigger_envelope_from_str;
+    use simplified_schema::triggers::parse_trigger_envelope_from_str;
 
     use simplified_schema::parse_property_definition;
 
@@ -662,9 +662,16 @@ fn shipped_inline_schema_uses_normal_resolution_and_phase_path() {
 
     let empty = json!({});
     assert_eq!(missing(&empty, SchemaPhase::Launch), vec!["plan".to_string()]);
+    // `phase` is required with `default(1)`, so its absence passes through
+    // the default at completion.
     assert_eq!(
         missing(&empty, SchemaPhase::Completion),
-        vec!["phase".to_string(), "plan".to_string(), "total_phases".to_string()],
+        vec!["plan".to_string(), "total_phases".to_string()],
+    );
+    let defaults = schema.validate_for_phase(&empty, SchemaPhase::Completion).expect("phase schema builds").defaults;
+    assert_eq!(
+        defaults.iter().map(|applied| (applied.path.to_string(), applied.value.clone())).collect::<Vec<_>>(),
+        [("phase".to_string(), json!(1))],
     );
 
     // The shipped document's own null-yielding `spec` expression is the input

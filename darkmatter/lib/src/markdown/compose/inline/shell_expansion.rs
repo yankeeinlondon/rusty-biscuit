@@ -157,9 +157,6 @@ pub(crate) fn run_stage(
         directives.push((parsed, site, line.span, extent, line.indent));
     }
 
-    let shell_opts = options.shell_options();
-    let policy_paths = shell_expansion::resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
-    runtime.shell.ensure_loaded(&policy_paths)?;
 
     let mut replacements = Vec::new();
     if matches!(window, StageWindow::First { .. }) {
@@ -175,7 +172,7 @@ pub(crate) fn run_stage(
             StageWindow::First { refreshed: true, .. } => prepare_refreshed_site,
             _ => prepare_site,
         };
-        let prepared = prepare(parsed, site.as_ref(), options, &policy_paths, &mut runtime.shell)
+        let prepared = prepare(parsed, site.as_ref(), options, &mut runtime.shell)
             .map_err(|error| body.scope_failure(markdown, span.clone(), error))?;
         let execution = execute_prepared_directive(&prepared, options, &runtime.shell)
             .map_err(|error| body.scope_failure(markdown, span.clone(), error))?;
@@ -210,6 +207,7 @@ pub(crate) fn run_stage(
     let edits = apply_replacements_with_edits(markdown.content_mut(), replacements, EditOrigin::Data);
     body.advance(&before, &edits, markdown.content())?;
     report.shell_approvals_used += runtime.shell.take_recent_approval_count();
+    report.warnings.extend(runtime.shell.take_recent_warnings());
     Ok(())
 }
 

@@ -428,7 +428,7 @@ Apply --set / --state overrides
   └─ Materialize schema-selected caller files (captured per-property origin)
       └─ Call Check (declared types only; nothing evaluated)
           └─ Frontmatter Interpolation ({{ var }})
-              └─ Schema Validation      ◄── here (bind + coerce + validate)
+              └─ Schema Validation      ◄── here (bind + default + coerce + validate)
                   └─ Frontmatter Shell Expansion ($(cmd))
                       └─ … rest of pipeline
 ```
@@ -465,6 +465,77 @@ Library callers can inject a workspace-wide baseline directly:
 let opts = ComposeOptions::default()
     .with_baseline_schema(my_baseline);   // SimplifiedSchema
 ```
+
+### Required properties with a default
+
+A `required` property whose definition has a `default(...)` may be absent.
+Every validation entry point (`md schema validate`, `DarkmatterSchemas::validate`,
+`EffectiveSchema::validate*`, whole YAML documents, DMLS) accepts the
+document as if the default were written there and lists what it relied on in
+`ValidationReport::defaults`, without changing the value it was given.
+`md schema validate --output json` lists them in each file record's
+`defaults` array (`[{ "path": "greeting", "value": "hello" }]`).
+
+Composition goes one step further: the schema stage writes those defaults
+into the composed frontmatter, so frontmatter shell expansion, interpolation
+pass 2, the body, and the composed output all see them.
+
+```mermaid
+flowchart LR
+    A["Frontmatter after<br/>interpolation pass 1"] --> B["Insert defaults of absent<br/>required properties"]
+    B --> C["Convert values"]
+    C --> D["Validate; re-match triggers"]
+    D -->|"a newly matched trigger<br/>requires more defaults"| B
+    D --> E["Shell expansion, pass 2,<br/>body stages"]
+```
+
+Rules:
+
+- Only an **absent** property is filled. `x: null` is present and is judged by
+  the declared type.
+- A default inside an object applies only when that object exists:
+  `server: { port: 80 }` gains `name: web` under
+  `server: "{ name: string(required; default(web)), port: number }"`, while a
+  document with no `server` gains nothing.
+- An optional property's default is never inserted.
+- A default is never inserted into a value a later stage still resolves (a
+  whole-value `$(...)`, a value holding a `{{ }}` template) or into a key the
+  caller owns.
+- In a union, each alternative completes the value with its own defaults.
+  Alternatives that succeed with the same result count as one; alternatives
+  that succeed with different results are an ambiguity reported at the union
+  (the document root, or the property holding it), never a choice of the
+  first. A value one alternative accepts as written is included: under
+  `$schema: ./either.yaml` with the root alternatives
+  `- a: number(required; default(1))` and `- b: string(required; default(z))`,
+  the document `b: y` fails with
+  `required defaults are ambiguous at the document root`, because the first
+  alternative also accepts it as `{ b: y, a: 1 }`. A `kind`-style literal
+  that only one alternative accepts settles the choice.
+- A trigger whose match a default satisfies is applied, and its own required
+  defaults are inserted too.
+- The source file is never edited. The inserted value is data: its text is
+  never scanned for `{{ }}` or `$(...)`.
+- Interpolation pass 1 runs before this stage, so a frontmatter template that
+  pass 1 resolves sees the property as absent. A template that waits for pass 2
+  (one that reads a `$(...)` value) sees the default.
+- A default that breaks its own definition (`n: number(required; default("x"))`)
+  is a schema problem at the default. Its message names the property and the
+  schema location (`/properties/n/default`); it has no line or column in the
+  document, because no document text holds it.
+- An inserted default is judged with the rest of the frontmatter, in every
+  pass, so a check that needs the file system can still fail on it: with
+  `doc: file(required; eager; default(./note.md))` and no `note.md`, the
+  document fails with `dm.schema.invalid_file_reference`. That problem is the
+  default's too. Its message ends with
+  `(the value is the schema default at schema location `/properties/doc/default`)`,
+  adding `in `<schema file>`` when a schema file declares the default (a
+  referenced schema file, a trigger file, or the file a `Name@file` import
+  read the type from), and it has no line or column. The error's hint names
+  that default to repair instead of asking for a frontmatter correction. In a
+  data output the diagnostic's `schema_default` gives the same path, schema
+  location, and schema file. A problem with a value the document wrote keeps
+  its own position.
 
 ### Optional parameter bindings
 

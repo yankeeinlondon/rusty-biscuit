@@ -11,8 +11,12 @@
 //!   a host's ordinary validation performs. Conversion never repairs a
 //!   violated constraint: `"2.5"` against `number(integer)` fails both ways.
 //!
-//! Both borrow the input and never change it. On success the accepted value
-//! is the input itself, borrowed, unless soft validation converted it.
+//! Both borrow the input and never change it. An absent required property
+//! with a `default(...)` passes through its default ([`crate::defaults`]):
+//! both judge the completed value and report the defaults they relied on.
+//! On success the accepted value is the input itself, borrowed, unless soft
+//! validation converted it or inserted a default; strict success is always
+//! borrowed.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -22,6 +26,7 @@ use jsonschema::Validator;
 use serde_json::Value;
 
 use crate::coerce::{self, ConversionPlan, NestedTemplates};
+use crate::defaults::{self, AppliedDefault, DefaultPreparation};
 use crate::outcome::{ValidationFailure, ValidationSuccess};
 use crate::validate::{self, FileRefAnchors, SHARED_VALIDATOR_CACHE, SchemaDigest, ValidatorCache};
 use crate::{SchemaAdvisory, SchemaError, ValidationProblem, discriminant};
@@ -186,6 +191,9 @@ pub struct Prepared {
     json_schema: Arc<Value>,
     validators: CompiledValidators,
     conversion: Arc<ConversionPlan>,
+    /// The cache `validators` came from, which also compiles the structural
+    /// validators that judge defaults.
+    cache: ValidatorCache,
     /// The directory a relative file value resolves from; `context`'s `cwd`
     /// when `None`.
     base_dir: Option<PathBuf>,
@@ -234,6 +242,7 @@ impl Prepared {
             json_schema,
             validators,
             conversion,
+            cache: cache.clone(),
             base_dir,
             context,
             file_checks: true,
@@ -261,47 +270,118 @@ impl Prepared {
     }
 
     /// Accepts `value` only if it already matches the schema's types and
-    /// constraints; nothing is converted. On success the accepted value is
-    /// `value` itself, borrowed.
+    /// constraints, an absent required property counting as its default;
+    /// nothing is converted or inserted. On success the accepted value is
+    /// `value` itself, borrowed, and `defaults` lists the defaults the
+    /// verdict relied on.
     ///
     /// ## Errors
     ///
-    /// [`ValidationFailure`] with every problem found.
+    /// [`ValidationFailure`] with every problem found, or
+    /// [`ValidationFailure::Unprepared`] for a default that breaks its own
+    /// definition or is ambiguous.
     pub fn validate_strict<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
-        self.judge(Cow::Borrowed(value))
+        if self.accepted_as_written(value)? {
+            return Ok(self.accepted(Cow::Borrowed(value), Vec::new()));
+        }
+        let prepared = self.complete(Cow::Borrowed(value), false)?;
+        self.judge(prepared).map(|success| ValidationSuccess { value: Cow::Borrowed(value), ..success })
     }
 
     /// Accepts `value` as written or after a conversion the conversion
     /// engine permits (the string `"4"` for a `number`). On success the
     /// accepted value is `value` itself, borrowed, when it was accepted as
-    /// written, and the converted value, owned, otherwise.
+    /// written, and an owned copy with the conversions and the defaults of
+    /// absent required properties inserted otherwise.
     ///
     /// ## Errors
     ///
     /// [`ValidationFailure`] with every problem left after conversion. A
     /// failure never carries the partially converted value.
+    /// [`ValidationFailure::Unprepared`] for a default that breaks its own
+    /// definition or is ambiguous.
     pub fn validate_soft<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
-        if self.validators.accepts(value) {
-            return Ok(self.accepted(Cow::Borrowed(value)));
+        if self.accepted_as_written(value)? {
+            return Ok(self.accepted(Cow::Borrowed(value), Vec::new()));
         }
-        let working = coerce::validation_working_copy(&self.conversion, &self.json_schema, value, &NestedTemplates::default());
-        self.judge(working)
+        // Defaults go in before conversion too: conversion commits a nested
+        // value only once the complete schema accepts it, which a missing
+        // required child would prevent. Defaults found only after conversion
+        // (a union arm that the converted value selects) follow.
+        let before = self.complete(Cow::Borrowed(value), false)?;
+        let converted = match coerce::validation_working_copy(
+            &self.conversion,
+            &self.json_schema,
+            &before.candidate,
+            &NestedTemplates::default(),
+        ) {
+            Cow::Owned(converted) => Some(converted),
+            Cow::Borrowed(_) => None,
+        };
+        let working = converted.map_or(before.candidate, Cow::Owned);
+        let after = self.complete(working, true)?;
+        let mut defaults = before.defaults;
+        for late in after.defaults {
+            if !defaults.iter().any(|early| early.path == late.path) {
+                defaults.push(late);
+            }
+        }
+        self.judge(DefaultPreparation { candidate: after.candidate, defaults })
     }
 
-    /// Accepts `instance` when it has no problems.
-    fn judge<'input>(&self, instance: Cow<'input, Value>) -> Result<ValidationSuccess<'input>, ValidationFailure> {
-        let problems = self.problems(&instance);
+    /// Whether `value` is accepted as written with no default: the
+    /// validators accept it and no union arm completes it differently.
+    ///
+    /// ## Errors
+    ///
+    /// [`ValidationFailure::Unprepared`] when one arm accepts `value` as
+    /// written and another accepts it completed with a default.
+    fn accepted_as_written(&self, value: &Value) -> Result<bool, ValidationFailure> {
+        if !self.validators.accepts(value) {
+            return Ok(false);
+        }
+        if !defaults::alternatives_supply_defaults(&self.json_schema) {
+            return Ok(true);
+        }
+        // An accepted value's union arms settle on the value as written or
+        // are ambiguous; `false` for anything else keeps the full path.
+        Ok(self.complete(Cow::Borrowed(value), false)?.defaults.is_empty())
+    }
+
+    /// `instance` completed with the defaults of its absent required
+    /// properties; `check` first returns an instance the validators accept
+    /// unchanged.
+    fn complete<'input>(
+        &self,
+        instance: Cow<'input, Value>,
+        check: bool,
+    ) -> Result<DefaultPreparation<'input>, ValidationFailure> {
+        let none = NestedTemplates::default();
+        let prepared = if check {
+            defaults::prepare_defaults(&self.json_schema, instance, &none, &self.validators, &self.cache)
+        } else {
+            defaults::prepare_unaccepted(&self.json_schema, instance, &none, &self.validators, &self.cache)
+        };
+        prepared.map_err(|error| ValidationFailure::Unprepared { error: Arc::new(error) })
+    }
+
+    /// Accepts the completed candidate when it has no problems; a problem
+    /// about an inserted value is attributed to its default.
+    fn judge<'input>(&self, prepared: DefaultPreparation<'input>) -> Result<ValidationSuccess<'input>, ValidationFailure> {
+        let mut problems = self.problems(&prepared.candidate);
+        defaults::attribute_problems(&mut problems, &prepared.defaults);
         if problems.is_empty() {
-            Ok(self.accepted(instance))
+            Ok(self.accepted(prepared.candidate, prepared.defaults))
         } else {
             Err(ValidationFailure::from_problems(problems, self.file_checks))
         }
     }
 
-    fn accepted<'input>(&self, value: Cow<'input, Value>) -> ValidationSuccess<'input> {
+    fn accepted<'input>(&self, value: Cow<'input, Value>, defaults: Vec<AppliedDefault>) -> ValidationSuccess<'input> {
         ValidationSuccess {
             value,
             advisories: self.advisories.clone(),
+            defaults,
         }
     }
 

@@ -13,7 +13,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::context::context_variable_descriptors;
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
-use darkmatter::markdown::schemas::triggers::{MatchExpr, PathSubject, matches};
+use simplified_schema::triggers::{MatchExpr, PathSubject, matches};
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, DetectOptions, EffectiveSchema, darkmatter_base_schema, detect_schema,
     effective_property_shape, schema_shape_descriptors, schema_to_yaml,

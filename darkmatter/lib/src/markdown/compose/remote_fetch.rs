@@ -13,7 +13,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
-use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern, PolicyClient};
+use biscuit_file::file_reference::fetch::{FetchPolicy, PolicyClient};
 use dashmap::DashMap;
 use url::Url;
 
@@ -22,6 +22,7 @@ use super::cache::FileStore;
 use super::cache::remote_cache::{RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache};
 use super::expression::{ExpressionError, RemoteReadKind};
 use super::remote::{RemoteReadConfig, RemoteReadError};
+use crate::config::network::NetworkPermission;
 
 mod error;
 
@@ -128,6 +129,9 @@ struct RemoteFetchInner {
     provider_in_flight: Mutex<usize>,
     provider_notify: Condvar,
     policy: FetchPolicy,
+    /// The configured `network` permission `policy` was projected from; a
+    /// denial under [`NetworkPermission::Invalid`] reports its error.
+    network: NetworkPermission,
     stats: Mutex<RemoteFetchStats>,
     /// Shared redirect-disabled HTTP client reused for every fetch in a compose
     /// run. Built lazily on first fetch so construction happens *inside* the
@@ -410,19 +414,33 @@ impl RemoteFetchRuntime {
         Arc::strong_count(&self.inner)
     }
 
+    /// The configured `network` permission this runtime's policy was
+    /// projected from.
+    pub(crate) fn network(&self) -> &NetworkPermission {
+        &self.inner.network
+    }
+
     /// Creates a runtime from the remote-read config with an optional
-    /// persistent cache store for cross-run remote artifact caching.
+    /// persistent cache store for cross-run remote artifact caching. Only the
+    /// config's exact hosts are allowed (`network: deny`).
     pub fn with_store(config: &RemoteReadConfig, store: Option<Arc<FileStore>>) -> Self {
-        let mut policy = FetchPolicy::deny_all();
-        for host in config.http_hosts() {
-            policy = policy.allow(HostPattern::Exact(host.clone()));
-        }
+        Self::with_store_and_network(config, store, NetworkPermission::Deny)
+    }
+
+    /// [`Self::with_store`] under the configured `network` permission: its
+    /// [`NetworkPermission::fetch_policy`] over the config's exact hosts.
+    pub fn with_store_and_network(
+        config: &RemoteReadConfig,
+        store: Option<Arc<FileStore>>,
+        network: NetworkPermission,
+    ) -> Self {
         let cache_config = RemoteCacheConfig {
             ttl_override: config.remote_ttl,
             refresh: config.refresh,
             mode: config.freshness_mode,
         };
-        Self::build(policy, config.remote_concurrency, store, cache_config)
+        let policy = network.fetch_policy(config.http_hosts());
+        Self::build(policy, network, config.remote_concurrency, store, cache_config)
     }
 
     /// Creates a runtime with a pre-built policy and the default concurrency
@@ -431,6 +449,7 @@ impl RemoteFetchRuntime {
     pub fn with_policy(policy: FetchPolicy) -> Self {
         Self::build(
             policy,
+            NetworkPermission::Deny,
             RemoteReadConfig::default().remote_concurrency,
             None,
             test_cache_config(),
@@ -441,7 +460,7 @@ impl RemoteFetchRuntime {
     /// cap (for testing the cap directly).
     #[cfg(test)]
     pub fn with_policy_and_concurrency(policy: FetchPolicy, concurrency: usize) -> Self {
-        Self::build(policy, concurrency, None, test_cache_config())
+        Self::build(policy, NetworkPermission::Deny, concurrency, None, test_cache_config())
     }
 
     /// Creates a runtime with a pre-built policy, a persistent store, and an
@@ -452,11 +471,12 @@ impl RemoteFetchRuntime {
         store: Option<Arc<FileStore>>,
         cache_config: RemoteCacheConfig,
     ) -> Self {
-        Self::build(policy, 4, store, cache_config)
+        Self::build(policy, NetworkPermission::Deny, 4, store, cache_config)
     }
 
     fn build(
         policy: FetchPolicy,
+        network: NetworkPermission,
         concurrency: usize,
         store: Option<Arc<FileStore>>,
         cache_config: RemoteCacheConfig,
@@ -468,6 +488,7 @@ impl RemoteFetchRuntime {
                 provider_in_flight: Mutex::new(0),
                 provider_notify: Condvar::new(),
                 policy,
+                network,
                 stats: Mutex::new(RemoteFetchStats::default()),
                 client: OnceLock::new(),
                 // A zero cap would deadlock every fetch; clamp to at least one.
@@ -487,7 +508,13 @@ impl RemoteFetchRuntime {
     /// state: the runtime schema slots fetch through, whose hosts are the
     /// slot grants', so a slot grant never widens the document's reads.
     pub(crate) fn with_other_policy(&self, policy: FetchPolicy) -> Self {
-        Self::build(policy, self.inner.concurrency, self.inner.store.clone(), self.inner.cache_config)
+        Self::build(
+            policy,
+            self.inner.network.clone(),
+            self.inner.concurrency,
+            self.inner.store.clone(),
+            self.inner.cache_config,
+        )
     }
 
     /// Shares one normalized provider result across every surface in this run.
@@ -534,8 +561,10 @@ impl RemoteFetchRuntime {
         Ok(ProviderPermit { runtime: self })
     }
 
-    /// Checks whether a URL is allowed by policy, returning a
-    /// `RemoteReadError::DeniedByPolicy` if not.
+    /// Checks whether a URL is allowed by policy, returning
+    /// `RemoteReadError::InvalidConfiguration` when the configured `network`
+    /// permission is invalid (whatever hosts the run allows) and
+    /// `RemoteReadError::DeniedByPolicy` when the host is not allowed.
     pub fn check_allowed(&self, url: &Url) -> Result<(), RemoteReadError> {
         let host = url
             .host_str()
@@ -543,17 +572,18 @@ impl RemoteFetchRuntime {
                 url: url.to_string(),
                 reason: "missing host".to_string(),
             })?;
-        if self.inner.policy.is_allowed(host) {
-            Ok(())
-        } else {
-            {
-                let mut stats = self.inner.stats.lock().unwrap();
-                stats.policy_denials += 1;
-            }
-            Err(RemoteReadError::DeniedByPolicy {
+        // The configuration error outranks a per-run `--allow host=HOST`:
+        // an invalid policy never yields a permissive result.
+        let refusal = match self.inner.network.config_error() {
+            Some(error) => RemoteReadError::InvalidConfiguration {
                 host: host.to_string(),
-            })
-        }
+                message: error.to_string(),
+            },
+            None if self.inner.policy.is_allowed(host) => return Ok(()),
+            None => RemoteReadError::DeniedByPolicy { host: host.to_string() },
+        };
+        self.inner.stats.lock().unwrap().policy_denials += 1;
+        Err(refusal)
     }
 
     /// Registers a URL and starts an eager fetch on the Tokio runtime.

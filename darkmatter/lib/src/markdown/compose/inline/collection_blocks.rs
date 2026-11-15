@@ -115,11 +115,14 @@ fn rejection(markdown: &Markdown, body: &BodyProvenance, error: CollectionError)
 
 /// A collection failure, or a gate failure inside a repeated copy, located in
 /// the loaded file the way body interpolation locates its own: the engine
-/// located it in the body text.
+/// located it in the body text. A document with no loaded file keeps the
+/// engine's location, named by its context identity when it has one.
 fn anchor(markdown: &Markdown, body: &BodyProvenance, error: MarkdownError) -> MarkdownError {
     let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
     let relocate = |source: Option<&SourceRef>| -> Option<SourceRef> {
-        let context = markdown.loaded_source_context_for_errors()?;
+        let Some(context) = markdown.loaded_source_context_for_errors() else {
+            return source.and_then(|source| markdown.identified_unfiled(source));
+        };
         let span = match source {
             Some(SourceRef::OnDiskSpan { span, .. }) => Some(span.range()),
             _ => None,
@@ -142,7 +145,8 @@ fn anchor(markdown: &Markdown, body: &BodyProvenance, error: MarkdownError) -> M
         }
         MarkdownError::InIteration(mut failure) => {
             // The engine's body-relative site names no real file, so it is
-            // replaced even when only the file can be proven.
+            // replaced even when only the file can be proven, and kept only
+            // under a file-less document's identity.
             failure.location = relocate(failure.location.as_deref()).map(Box::new);
             MarkdownError::InIteration(failure)
         }

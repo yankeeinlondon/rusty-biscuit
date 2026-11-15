@@ -329,10 +329,9 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             .prompt_state
             .repository_root_or(run.repo_root)
             .map(Path::to_path_buf);
-        let mutation_root = source_repo_root
-            .as_deref()
-            .unwrap_or(run.child_cwd)
-            .to_path_buf();
+        // Lifecycle writes land in the launch workspace, not the prompt's own
+        // repository (they differ when the prompt comes from a shared library).
+        let mutation_root = run.child_cwd.to_path_buf();
         let effect_engine = EffectEngine::builder()
             .mutation_root(&mutation_root)
             .auto_rehash(false)
@@ -565,16 +564,12 @@ fn prepare_attempt_phase(
         source_path = %prompt.prompt_state.source_path.display(),
     )
     .entered();
-    if let Some(source_context) = prompt.prompt_state.source_context.as_ref() {
-        prompt.harness_context.refresh_for_source(
-            &prompt.prompt_state.source_path,
-            source_context.repository_root(),
-        );
-    } else {
-        prompt
-            .harness_context
-            .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
-    }
+    let permissions = prompt.prompt_state.shell_permissions();
+    prompt.harness_context.refresh(
+        &prompt.prompt_state.source_path,
+        prompt.prompt_state.repository_root_or(prompt.repo_root),
+        permissions,
+    );
     if let Some(step) = initialize_adopted_target_phase(&mut prompt, &mut lifecycle, &mut control)? {
         return Ok(PhaseResult::Transition(Box::new(step)));
     }

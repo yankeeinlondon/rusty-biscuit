@@ -250,6 +250,15 @@ ignore an unreadable `docs/locked/`. A dangling symlink is skipped.
 All errors render as line-aware `StatusBlock` diagnostics with hints showing
 valid syntax.
 
+Every error with a line also names its `document`: the file whose body holds
+the directive, which for a directive in a transcluded file is that file, not
+the one you composed. `reason()` gives the message without the line. A
+library caller composing text it generated, rather than a file, gives the
+document an identity (`Markdown::with_context_identity`); the error then names
+that identity, and a warning for a failure composition tolerates (for example
+`No matching files for ::file-links directive`) says what went wrong without a
+line, because a line of generated text is not a position in any file.
+
 ---
 
 [< back to **Pipeline Documentation**](../darkmatter-compose-pipeline.md)

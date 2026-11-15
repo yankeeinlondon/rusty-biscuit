@@ -2,7 +2,7 @@
 "header": {
   "wire_version": 1,
   "owner": "claudine",
-  "preparation_revision": 2,
+  "preparation_revision": 3,
   "sources": [
     {
       "identity": "claudine/action.yaml",
@@ -10,7 +10,7 @@
     },
     {
       "identity": "claudine/claudine.yaml",
-      "digest": "5df4cd6615839b0c"
+      "digest": "60a536968edb9af6"
     },
     {
       "identity": "claudine/document.yaml",
@@ -38,19 +38,19 @@
     },
     {
       "identity": "claudine/sequence.yaml",
-      "digest": "e12effa34f4caa3b"
+      "digest": "3e03ad35281e416c"
     }
   ],
   "dependencies": [
     {
       "owner": "darkmatter",
-      "preparation_revision": 2,
-      "digest": "aa2430f740b737f0"
+      "preparation_revision": 3,
+      "digest": "92100dd264a63a11"
     },
     {
       "owner": "simplified-schema",
-      "preparation_revision": 1,
-      "digest": "f93af5267b7035ce"
+      "preparation_revision": 2,
+      "digest": "cff9a460e95d0aee"
     }
   ],
   "configuration": []

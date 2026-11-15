@@ -9,7 +9,8 @@
 //!   reach.
 //! - [`evaluator`] runs one admitted slot in its defining file's context and
 //!   reports what it depended on.
-//! - [`grants`] holds the read grants, the user's grant store, and matching.
+//! - [`grants`] holds this run's read approvals, the read gate that judges
+//!   them with the captured `permissions.file-read`, and matching.
 //! - [`host`] joins them as [`DarkmatterSlotHost`].
 //! - [`dependencies`] records what evaluations consumed besides the files
 //!   they observed (captured calls, volatility, context inputs), for the

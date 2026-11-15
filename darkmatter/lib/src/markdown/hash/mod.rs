@@ -17,6 +17,7 @@ mod compute;
 mod explain;
 mod kind;
 mod options;
+pub(crate) mod node_edit;
 mod path_edit;
 mod save;
 mod stored;

@@ -31,9 +31,8 @@ use std::sync::OnceLock;
 
 use darkmatter::markdown::schemas::catalog::{GlobalCatalog, GlobalCatalogRecord};
 use darkmatter::markdown::schemas::shipped::{self as darkmatter_shipped, FreshDarkmatter};
-use darkmatter::markdown::schemas::triggers::{
-    PreparedBundleDescriptor, PreparedTriggerBundle, TriggerBundleRecord, prepare_trigger_bundle,
-};
+use darkmatter::markdown::schemas::triggers::prepare_trigger_bundle;
+use simplified_schema::triggers::{PreparedBundleDescriptor, PreparedTriggerBundle, TriggerBundleRecord};
 use serde::{Deserialize, Serialize};
 use simplified_schema::embedded::EmbeddedDocument;
 use simplified_schema::shipped::{
@@ -50,7 +49,7 @@ pub const OWNER: &str = "claudine";
 /// Claudine's preparation revision. Increment it whenever code changes what
 /// the shipped sources prepare to (a record's shape, or how the bundle or the
 /// host catalog is prepared), then run `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 2;
+pub const PREPARATION_REVISION: u32 = 3;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "claudine/lib/generated/shipped.json";

@@ -154,8 +154,7 @@ A command runs in the first of these that applies:
 
 1. the directory set with `ComposeOptions::with_shell_working_directory()`;
 2. the directory of the document that holds the command, so `::shell ls` in `docs/guide.md` lists `docs/`;
-3. the shell policy root (`ComposeOptions::with_shell_policy_root()`), which `md compose -` sets to the directory it was launched from;
-4. the request directory, which a library caller names in its `RequestSnapshot`.
+3. the request directory, which a library caller names in its `RequestSnapshot` and `md compose -` sets to the directory it was launched from.
 
 The process's own current directory is never consulted, so a library that composes a string document gets the same directory whatever the process is doing.
 
@@ -211,14 +210,31 @@ line, and for the next item of a `::map` body:
 ```
 
 The second line runs as `… r.v 2`. Pre-flight approval saw `… r.v 1`, so
-the new bytes need an `exact` whitelist rule or the line's `template` shape;
+the new bytes need an `exact` rule in `permissions.shell-commands` or the line's `template` shape;
 see [Pre-flight checks](./preflight-checks.md#approval-vs-execution). See
 [Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command)
 for the full rule.
 
 ## Approval
 
-A command runs only if it is approved: whitelisted, or approved interactively when the composition starts. A few commands can never be approved. Both checks happen before anything runs, and both cover every `::shell` line in the document and in every file it transcludes, including lines inside a `::block` whose condition is false.
+A command runs only if it is approved: allowed by a rule in
+`permissions.shell-commands` of your configuration, or approved interactively
+when the composition starts. The rules live in `~/.darkmatter.yaml` (and, for
+a repository, its committed `.darkmatter.yaml`):
+
+```yaml
+permissions:
+  shell-commands:
+    - prefix just
+    - exact git rev-parse HEAD
+    - "!prefix git push"
+```
+
+A `!` entry is an exclusion: a command it matches is never pre-approved, so
+it is asked about every time. A few commands, those on the built-in
+blacklist, can never be approved at all. These checks happen before anything
+runs, and they cover every `::shell` line in the document and in every file
+it transcludes, including lines inside a `::block` whose condition is false.
 
 ```text
 Error: Blocked command at line 3: 'rm -rf build'
@@ -227,19 +243,19 @@ Reason: 'rm' is a dangerous command
 
 ```text
 Error: Approval required for 'just ci-local --plan'.
-To allow in non-interactive mode, add one of these to <repo>/.darkmatter-shell-whitelist:
+To allow in non-interactive mode, add one of these to `permissions.shell-commands` in /home/me/.darkmatter.yaml:
   exact just ci-local --plan
   prefix just
 ```
 
-Each suggested line is a whitelist rule that approves the command as it is
-now, and the list holds only the choices an interactive approval would
-offer. A command with a placeholder also gets its shape, and its `exact` line
-holds the resolved bytes, never the `{{ }}` text:
+Each suggested line is a rule that approves the command as it is now, and
+the list holds only the choices an interactive approval would offer. A
+command with a placeholder also gets its shape, and its `exact` line holds
+the resolved bytes, never the `{{ }}` text:
 
 ```text
 Error: Approval required for 'git commit -m "{{ msg }}"'.
-To allow in non-interactive mode, add one of these to <repo>/.darkmatter-shell-whitelist:
+To allow in non-interactive mode, add one of these to `permissions.shell-commands` in /home/me/.darkmatter.yaml:
   exact git commit -m ""
   template git commit -m {{ string }}
   prefix git
@@ -248,7 +264,15 @@ To allow in non-interactive mode, add one of these to <repo>/.darkmatter-shell-w
 A command whose value is not known yet, or whose value holds command syntax,
 gets no `exact` line. A chain needs one `exact` or `prefix` line per command,
 so each alternative is then headed by a `# all of:` or `# or all of:`
-comment, which the whitelist loader ignores.
+comment line.
+
+A command an exclusion matches cannot be approved by adding a rule, so the
+error names the exclusion instead:
+
+```text
+Error: Approval required for 'git push origin main': it is excluded by '!prefix git push' in /home/me/.darkmatter.yaml.
+An excluded command runs only when approved interactively.
+```
 
 An approved program that is not installed is reported separately, so the two are easy to tell apart:
 
@@ -257,7 +281,7 @@ Error: Command not found: 'ripgrep' (line 7)
 Ensure 'ripgrep' is installed and available on your PATH.
 ```
 
-A misspelled program name usually shows up as the *approval* message instead, because the misspelling has never been approved. The full policy, the blacklist, and the whitelist file format are in [Pre-Flight Shell Approval](./preflight-checks.md).
+A misspelled program name usually shows up as the *approval* message instead, because the misspelling has never been approved. The full policy, the built-in blacklist, and the rule format are in [Pre-Flight Shell Approval](./preflight-checks.md); where the rules live and how layers combine is in [Permissions](../topics/permissions.md).
 
 ---
 

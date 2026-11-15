@@ -230,7 +230,7 @@ fn skills_fix_shows_summary() {
     assert!(init_git_repo(&repo_root));
     fs::create_dir_all(&cwd).unwrap();
     write(
-        &repo_root.join(".claudine/config.json"),
+        &repo_root.join(".claudine/config.yaml"),
         r#"{ "canonical_provider": "claude" }"#,
     );
     setup_skill(&skills_dir, "fixable", "A fixable skill");

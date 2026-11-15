@@ -396,17 +396,15 @@ $schema:
 - With `[]`, an arm's default could only become the list's default. A scalar
   default cannot, so the declaration fails with `ScalarDefault`, naming the
   arm and the value. The default is neither dropped nor wrapped in a one-item
-  list. Because the grammar reads every `default(...)` argument as a scalar
-  (see [Array Constraints](types.md#array-constraints)), any arm default fails this
-  way.
+  list.
 - A `default(...)` written after `[]` at the use site lowers exactly as on any
   other array.
-- A caller constructing schema definitions through the Rust API can supply
-  an actual JSON array as an arm's default. That array becomes the containing
-  list's default. Multiple inherited and use-site defaults must be equal;
-  conflicting defaults fail schema preparation. This does not add a
-  list-valued default spelling to the authoring grammar.
-- Darkmatter never inserts a default value into a document.
+- An arm whose default is a list (`default(["a"])`, or a JSON array supplied
+  through the Rust API) gives that list to the containing list as its
+  default. Multiple inherited and use-site defaults must be equal;
+  conflicting defaults fail schema preparation.
+- Darkmatter's composition inserts a required property's default into the
+  composed value only; it never writes a default into the authored file.
 
 #### Lowering
 

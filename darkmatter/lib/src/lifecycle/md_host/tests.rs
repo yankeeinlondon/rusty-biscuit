@@ -428,7 +428,6 @@ fn evaluate_event(config: &LifecycleConfig, signal: LifecycleSignal, interrupted
     let live = Mutex::new(SharedFrontmatter::default());
     let state = MdRuntimeState::default();
     let approved = ShellPreApprovals::new();
-    let blacklist = ShellRuleSet::default();
     let engine = EffectEngine::builder().mutation_root(dir.path()).auto_rehash(false).build();
     let timing = LifecycleTiming::default();
     let probe = move || interrupted;
@@ -439,7 +438,6 @@ fn evaluate_event(config: &LifecycleConfig, signal: LifecycleSignal, interrupted
         live_frontmatter: &live,
         state: &state,
         approved: &approved,
-        user_blacklist: &blacklist,
         effect_engine: &engine,
         effects: &lines,
         output: &lines,

@@ -643,7 +643,7 @@ fn assert_help_without_input(command: &str, tail: &[&str]) {
     );
     assert_composition_help(command, &help);
     assert!(
-        !cli.home().join(".claudine/config.json").exists(),
+        !cli.home().join(".claudine/config.yaml").exists(),
         "help must not create user configuration"
     );
 }
@@ -850,7 +850,7 @@ fn assert_inline_help_has_no_effects(help_token: &str) {
     assert!(!cli.cwd().join("help-lifecycle.log").exists(), "help must not run `initialize`");
     assert_eq!(fs::read_to_string(&document).unwrap(), TRAP_DOC, "help must not touch the input");
     assert!(
-        !cli.home().join(".claudine/config.json").exists(),
+        !cli.home().join(".claudine/config.yaml").exists(),
         "help must not create user configuration"
     );
     assert!(!cli.audio_spool().exists(), "help must publish no audio");

@@ -86,7 +86,7 @@ every `<TAB>`. The supplement engine applies these rules in order:
     come from the authored template with nothing evaluated; a value request
     for a slot-bearing property resolves the whole template through a
     Darkmatter `SlotSession` in `SessionMode::ReferenceCheck` with no handler
-    (automatic and persisted grants only, never a prompt or a printed line;
+    (the captured `permissions` only, never a prompt or a printed line;
     `schema_completion::setter_value_candidates`), and an ungranted or failed
     resolution offers nothing. See
     [Shell Completions](completions/shell-completions.md).
@@ -172,14 +172,14 @@ Scans all shell command sources in the document before execution begins.
 
 1. Builds `ComposeOptions` with source file and set overrides
 2. Creates a shared approval cache (`Arc<Mutex<HashMap>>`) for reuse across harness commands
-3. Builds `ShellApprovalOptions` with interactive approval handler (when TTY is available) and policy root from git root or source directory
+3. Builds `ShellApprovalOptions` with interactive approval handler (when TTY is available) and the `permissions` the invocation captured for the source document's repository (`CapturedPermissions::for_source`)
 4. Calls `composition::resolve_shell_approvals()`:
 
     - **Source 1**: Template `::shell` directives via Darkmatter's document graph walker
     - **Source 2**: Harness pre/post checks and handlers (none at this stage for compose — only template directives)
     - Deduplicates commands
-    - Each command is validated against whitelist via `validate_and_approve_command_parts()`
-    - Interactive approval handler prompts user for non-whitelisted commands
+    - Each command is validated against the built-in blacklist and the captured `permissions.shell-commands` via `validate_and_approve_command_parts()`
+    - Interactive approval handler prompts user for commands nothing pre-approves
 
 5. Returns `PreFlightResult { approved_commands, total_discovered, ... }`
 
@@ -781,7 +781,7 @@ When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict c
 1. **Explicit flag** (`--provider <slug>`, or its catalog-derived `--<provider>` shorthand boolean) — highest priority
 2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
 3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
-4. **Config favorite** — `preferred_agent` from `~/.claudine/config.json` (the older key `favorite_agent` is still read; set it with `claudine config set favorite-agent <slug>`)
+4. **Config favorite** — `preferred_agent` from `~/.claudine/config.yaml` (the older key `favorite_agent` is still read; set it with `claudine config set favorite-agent <slug>`)
 5. **Hard error** — if none of the above resolve, the command fails with a structured error
 
 The old "single installed" auto-selection shortcut has been removed. Even when only one provider is installed, non-TTY sessions still require an explicit signal (flag, frontmatter, or favorite).
@@ -990,7 +990,7 @@ still requires all includes before any task starts. See the current
 
 
 - **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
-- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
+- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks the captured permissions, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
 - **Prepare**: `composition::prepare_direct()` or `composition::prepare_inline()` composes through Darkmatter with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`
 - **Select**: Provider selection applies the precedence chain described in [Provider Selection](#provider-selection)
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)

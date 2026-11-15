@@ -205,6 +205,13 @@ fn run() -> Result<()> {
         validate_subcommand_usage(&cli)?;
     }
 
+    // Once per invocation, after help, completion, and usage errors returned.
+    if cli.is_init() {
+        request.report_config_notices_for_init(cli.requests_data_output());
+    } else {
+        request.report_config_notices(cli.requests_data_output());
+    }
+
     run_subcommand(cli.command_or_render(), &cli, &request)?;
 
     Ok(())

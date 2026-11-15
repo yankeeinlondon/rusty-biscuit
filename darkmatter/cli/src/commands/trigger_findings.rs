@@ -13,7 +13,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::prelude::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
-use darkmatter::markdown::schemas::{InvalidTriggerFinding, TriggerSource};
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerSource};
 
 /// The findings one invocation has already delivered, keyed by the trigger's
 /// full identity (never its file name), so a trigger shared by several

@@ -150,14 +150,13 @@ fn write_slot_prompt<W: Write>(output: &mut W, request: &SlotGrantRequest) -> io
     writeln!(output, "  {} {read}\n", label("Read:"))?;
 
     let sep = Prose::new("<dim>\u{2502}</dim>").render_optimistic(None);
-    let labels: Vec<String> = request.choices.iter().map(|grant| slot_choice_label(grant, request)).collect();
+    let labels: Vec<String> = request.choices.iter().map(slot_choice_label).collect();
     let width = labels.iter().map(String::len).max().unwrap_or(0);
     for (index, (grant, text)) in request.choices.iter().zip(&labels).enumerate() {
         let color = match (grant.decision, grant.scope) {
             (GrantDecision::Allow, GrantScope::Persisted) => "green",
             (GrantDecision::Allow, GrantScope::Once) => "cyan",
-            (GrantDecision::Deny, GrantScope::Once) => "yellow",
-            (GrantDecision::Deny, GrantScope::Persisted) => "red",
+            (GrantDecision::Deny, _) => "yellow",
         };
         let number = Prose::new(format!("<{color}>{}</{color}>", index + 1)).render_optimistic(None);
         let effect = Prose::new(format!("<dim>({})</dim>", escape_prose(&slot_choice_effect(grant))))
@@ -170,37 +169,29 @@ fn write_slot_prompt<W: Write>(output: &mut W, request: &SlotGrantRequest) -> io
     output.flush()
 }
 
-/// What a choice covers, in words: the folder of a file read is "this
-/// file's folder", of a listing "this folder".
-fn slot_choice_label(grant: &Grant, request: &SlotGrantRequest) -> String {
+/// What a choice covers, in words. The library offers only allow for this
+/// run, "always allow" (a file), and deny for this run.
+fn slot_choice_label(grant: &Grant) -> String {
     let what = match &grant.target {
-        GrantTarget::File(_) => "this file",
-        GrantTarget::Dir(_) if request.kind == ReadKind::Listing => "this folder",
-        GrantTarget::Dir(_) => "this file's folder",
-        GrantTarget::Url(_) => "this exact URL",
-        GrantTarget::UrlAnyQuery(_) => "this URL with any query",
-        GrantTarget::Site { .. } => "this site",
+        GrantTarget::Url(_) | GrantTarget::UrlAnyQuery(_) | GrantTarget::Site { .. } => "this URL",
+        GrantTarget::File(_) | GrantTarget::Dir(_) => "this file",
     };
     match (grant.decision, grant.scope) {
         (GrantDecision::Allow, GrantScope::Once) => format!("Allow {what} for this run"),
         (GrantDecision::Allow, GrantScope::Persisted) => format!("Always allow {what}"),
-        (GrantDecision::Deny, GrantScope::Persisted) => format!("Always deny {what}"),
-        (GrantDecision::Deny, GrantScope::Once) => "Deny for this run".to_string(),
+        (GrantDecision::Deny, _) => "Deny for this run".to_string(),
     }
 }
 
-/// What choosing a line does, naming the grant-store line a persisted
-/// choice saves.
+/// What choosing a line does: "always allow" saves the file to the user's
+/// `permissions.file-read`.
 fn slot_choice_effect(grant: &Grant) -> String {
-    match grant.scope {
-        GrantScope::Persisted => format!(
-            "saves \"{} {} {}\" to the schema read grants",
-            grant.decision.word(),
-            grant.target.kind_word(),
-            grant.target
-        ),
-        GrantScope::Once if grant.decision == GrantDecision::Deny => "the slot fails; this run only".to_string(),
-        GrantScope::Once => format!("{}; this run only", grant.target),
+    match (grant.decision, grant.scope) {
+        (GrantDecision::Allow, GrantScope::Persisted) => {
+            format!("{}; saved to your permissions.file-read", grant.target)
+        }
+        (GrantDecision::Deny, _) => "the slot fails; this run only".to_string(),
+        (GrantDecision::Allow, GrantScope::Once) => format!("{}; this run only", grant.target),
     }
 }
 
@@ -213,7 +204,6 @@ enum Choice {
     Prefix,
     Once,
     Deny,
-    Blacklist,
 }
 
 impl Choice {
@@ -227,7 +217,6 @@ impl Choice {
             (offered.prefix, Choice::Prefix),
             (true, Choice::Once),
             (true, Choice::Deny),
-            (true, Choice::Blacklist),
         ]
         .into_iter()
         .filter_map(|(available, choice)| available.then_some(choice))
@@ -241,7 +230,6 @@ impl Choice {
             Choice::Prefix => ShellApprovalDecision::AllowCommandPersist,
             Choice::Once => ShellApprovalDecision::AllowOnce,
             Choice::Deny => ShellApprovalDecision::Deny,
-            Choice::Blacklist => ShellApprovalDecision::BlacklistPersist,
         }
     }
 
@@ -250,7 +238,6 @@ impl Choice {
             Choice::Exact | Choice::Shape | Choice::Prefix => "green",
             Choice::Once => "cyan",
             Choice::Deny => "yellow",
-            Choice::Blacklist => "red",
         }
     }
 
@@ -260,26 +247,29 @@ impl Choice {
             Choice::Shape => "Allow this command shape",
             Choice::Prefix => "Allow this program with any arguments",
             Choice::Once => "Allow once",
-            Choice::Deny => "Deny",
-            Choice::Blacklist => "Blacklist and stop",
+            Choice::Deny => "Deny for this run",
         }
     }
 
-    /// What choosing this line does, naming each policy rule it saves.
+    /// What choosing this line does, naming each `shell-commands` rule it
+    /// saves to the user configuration.
     fn effect(self, request: &ShellApprovalRequest) -> String {
         let shape = request
             .template
             .as_ref()
             .map(|template| template.shape.canonical_text());
         let resolved = request.offered.exact && !request.normalized_exact.is_empty();
+        let saves = |rules: String| match &request.save_target {
+            Some(_) => format!("saves {rules} to your shell-commands"),
+            // Without a home there is no user configuration to save to.
+            None => format!("allows {rules} for this run; there is no home to save it to"),
+        };
         match self {
-            Choice::Exact if !request.chain_executables.is_empty() => {
-                "saves an exact rule for each command of the chain to the whitelist".to_string()
-            }
-            Choice::Exact => format!("saves {} to the whitelist", rule("exact", &request.normalized_exact)),
+            Choice::Exact if !request.chain_executables.is_empty() => saves("an exact rule for each command of the chain".to_string()),
+            Choice::Exact => saves(rule("exact", &request.normalized_exact)),
             Choice::Shape => format!(
-                "saves {} to the whitelist; runs as a template",
-                rule("template", shape.as_deref().unwrap_or_default())
+                "{}; runs as a template",
+                saves(rule("template", shape.as_deref().unwrap_or_default()))
             ),
             Choice::Prefix => {
                 let rules = prefix_programs(request)
@@ -287,25 +277,11 @@ impl Choice {
                     .map(|program| rule("prefix", program))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("saves {rules} to the whitelist")
+                saves(rules)
             }
             Choice::Once if !resolved && shape.is_some() => "this command shape, this session only".to_string(),
             Choice::Once => "this session only".to_string(),
-            Choice::Deny => "stops the run".to_string(),
-            Choice::Blacklist => match (resolved, shape) {
-                (true, _) if !request.chain_executables.is_empty() => {
-                    "saves an exact rule for each command of the chain to the blacklist; stops the run".to_string()
-                }
-                (true, _) => format!(
-                    "saves {} to the blacklist; stops the run",
-                    rule("exact", &request.normalized_exact)
-                ),
-                (false, Some(shape)) => format!("saves {} to the blacklist; stops the run", rule("template", &shape)),
-                (false, None) => format!(
-                    "saves {} to the blacklist; stops the run",
-                    rule("exact", &request.normalized_exact)
-                ),
-            },
+            Choice::Deny => "stops the run; asks again next time".to_string(),
         }
     }
 }
@@ -333,8 +309,8 @@ fn prefix_programs(request: &ShellApprovalRequest) -> Vec<&str> {
 ///
 /// ## Errors
 ///
-/// `PolicyIo` (naming the whitelist path) when reading the answer or writing
-/// the prompt fails.
+/// `PolicyIo` (naming the terminal) when reading the answer or writing the
+/// prompt fails.
 #[allow(clippy::result_large_err)]
 pub fn approve_with_io<R: BufRead, W: Write>(
     request: &ShellApprovalRequest,
@@ -347,10 +323,7 @@ pub fn approve_with_io<R: BufRead, W: Write>(
         darkmatter::markdown::compose::ComposeSource::Unknown => "<stdin>".to_string(),
     };
     let choices = Choice::offered(request);
-    let io_error = |source| ShellExpansionError::PolicyIo {
-        path: request.whitelist_path.clone(),
-        source,
-    };
+    let io_error = |source| ShellExpansionError::PolicyIo { path: PathBuf::from(PROMPT_STREAM), source };
 
     loop {
         write_prompt(output, request, &source_desc, &choices)?;
@@ -388,14 +361,10 @@ fn write_prompt<W: Write>(
     source_desc: &str,
     choices: &[Choice],
 ) -> Result<(), ShellExpansionError> {
-    let p = &request.whitelist_path;
     let w = |output: &mut W, args: std::fmt::Arguments| -> Result<(), ShellExpansionError> {
         output
             .write_fmt(args)
-            .map_err(|source| ShellExpansionError::PolicyIo {
-                path: p.to_path_buf(),
-                source,
-            })
+            .map_err(|source| ShellExpansionError::PolicyIo { path: PathBuf::from(PROMPT_STREAM), source })
     };
     // Padded before styling so the values line up.
     let label = |text: &str| Prose::new(format!("<dim>{text:<9}</dim>")).render_optimistic(None);
@@ -436,6 +405,17 @@ fn write_prompt<W: Write>(
         }
         None => w(output, format_args!("  {} {}\n", label("Command:"), command(&request.raw_command)))?,
     }
+    // An exclusion is why a command a rule would allow is asked about; no
+    // choice removes it.
+    if let Some(exclusion) = &request.exclusion {
+        let value = Prose::new(format!(
+            "<bold>{}</bold> <dim>in {}</dim>",
+            escape_prose(&exclusion.entry),
+            escape_prose(&exclusion.file.display().to_string())
+        ))
+        .render_optimistic(None);
+        w(output, format_args!("  {} {value}\n", label("Excluded:")))?;
+    }
     w(output, format_args!("\n"))?;
 
     let sep = Prose::new("<dim>\u{2502}</dim>").render_optimistic(None);
@@ -457,11 +437,11 @@ fn write_prompt<W: Write>(
 
     output
         .flush()
-        .map_err(|source| ShellExpansionError::PolicyIo {
-            path: request.whitelist_path.clone(),
-            source,
-        })
+        .map_err(|source| ShellExpansionError::PolicyIo { path: PathBuf::from(PROMPT_STREAM), source })
 }
+
+/// What a prompt I/O failure names instead of a file.
+const PROMPT_STREAM: &str = "<terminal>";
 
 /// Escape text so it renders exactly as written inside Prose markup; code
 /// spans it marks with backticks stay literal.
@@ -497,8 +477,8 @@ mod tests {
             executable: "echo".to_string(),
             args: vec!["hello".to_string()],
             normalized_exact: "echo hello".to_string(),
-            whitelist_path: PathBuf::from("/tmp/.darkmatter-shell-whitelist"),
-            blacklist_path: PathBuf::from("/tmp/.darkmatter-shell-blacklist"),
+            save_target: Some(PathBuf::from("/home/.darkmatter.yaml")),
+            exclusion: None,
             alias_name: None,
             chain_executables: Vec::new(),
             offered: darkmatter::markdown::compose::shell_expansion::template::OfferedChoices::resolved_bytes(),
@@ -549,19 +529,18 @@ mod tests {
 
         assert_eq!(decision, ShellApprovalDecision::AllowOnce);
         let prompt = strip_ansi(&String::from_utf8(output).unwrap());
-        assert!(prompt.contains("Invalid choice. Please enter 1-5."));
+        assert!(prompt.contains("Invalid choice. Please enter 1-4."));
         // Prompt should appear twice (once for invalid, once for retry)
         assert_eq!(prompt.matches("Shell Approval Required").count(), 2);
     }
 
     #[test]
-    fn all_five_choices_produce_correct_decisions() {
+    fn all_four_choices_produce_correct_decisions() {
         let cases = [
             ("1\n", ShellApprovalDecision::AllowExactPersist),
             ("2\n", ShellApprovalDecision::AllowCommandPersist),
             ("3\n", ShellApprovalDecision::AllowOnce),
             ("4\n", ShellApprovalDecision::Deny),
-            ("5\n", ShellApprovalDecision::BlacklistPersist),
         ];
 
         for (input_str, expected) in cases {
@@ -592,13 +571,13 @@ mod tests {
         assert!(prompt.contains("Source:"));
         assert!(prompt.contains("Command:"));
         assert!(prompt.contains("Allow this exact command"));
-        assert!(prompt.contains("saves \"exact echo hello\" to the whitelist"));
+        assert!(prompt.contains("saves \"exact echo hello\" to your shell-commands"));
         assert!(prompt.contains("Allow this program with any arguments"));
-        assert!(prompt.contains("saves \"prefix echo\" to the whitelist"));
+        assert!(prompt.contains("saves \"prefix echo\" to your shell-commands"));
         assert!(prompt.contains("Allow once"));
-        assert!(prompt.contains("Deny"));
-        assert!(prompt.contains("Blacklist and stop"));
-        assert!(prompt.contains("saves \"exact echo hello\" to the blacklist"));
+        assert!(prompt.contains("Deny for this run"));
+        assert!(!prompt.contains("lacklist"), "no permanent deny is offered: {prompt}");
+        assert!(!prompt.contains("Excluded:"), "nothing excluded it: {prompt}");
         assert!(!prompt.contains("command shape"), "no template, no shape: {prompt}");
     }
 
@@ -615,7 +594,7 @@ mod tests {
 
         // Every distinct program of the chain gets its own prefix rule.
         assert!(
-            prompt.contains("saves \"prefix echo\", \"prefix pwd\" to the whitelist"),
+            prompt.contains("saves \"prefix echo\", \"prefix pwd\" to your shell-commands"),
             "expected both programs in prompt: {prompt}"
         );
     }
@@ -697,7 +676,7 @@ mod tests {
         );
         assert!(prompt.contains("Resolved: some-command src/build"), "{prompt}");
         assert!(
-            prompt.contains("saves \"template some-command {{ string }}/build\" to the whitelist"),
+            prompt.contains("saves \"template some-command {{ string }}/build\" to your shell-commands"),
             "{prompt}"
         );
     }
@@ -721,6 +700,7 @@ mod tests {
         let resolved = template_request("ls {{ dir }}", "ls {{ dir: string }}", ALL);
         let (_, prompt) = session(&resolved, "5\n");
         assert!(prompt.contains("1 │ Allow this exact command"), "{prompt}");
+        assert!(prompt.contains("5 │ Deny for this run"), "{prompt}");
         assert!(prompt.contains("2 │ Allow this command shape"), "{prompt}");
         assert!(prompt.contains("3 │ Allow this program with any arguments"), "{prompt}");
 
@@ -734,10 +714,7 @@ mod tests {
         assert!(!prompt.contains("Resolved:"), "an unknown value is never shown: {prompt}");
         assert!(prompt.contains("1 │ Allow this command shape"), "{prompt}");
         assert!(prompt.contains("this command shape, this session only"), "{prompt}");
-        assert!(
-            prompt.contains("saves \"template just clean --out {{ string }}/build\" to the blacklist"),
-            "{prompt}"
-        );
+        assert!(prompt.contains("4 │ Deny for this run"), "{prompt}");
     }
 
     #[test]
@@ -766,11 +743,11 @@ mod tests {
     fn a_number_naming_no_listed_choice_is_refused_and_asked_again() {
         let request = template_request("ls {{ dir }}", "ls {{ dir: string }}", TEMPLATE_ONLY);
 
-        // Five lines are listed; 6 would have been "Blacklist" with all six.
-        let (decision, prompt) = session(&request, "6\n0\nexact\n3\n");
+        // Four lines are listed; 5 would have been "Deny" with all five.
+        let (decision, prompt) = session(&request, "5\n0\nexact\n3\n");
 
         assert_eq!(decision, ShellApprovalDecision::AllowOnce);
-        assert_eq!(prompt.matches("Invalid choice. Please enter 1-5.").count(), 3, "{prompt}");
+        assert_eq!(prompt.matches("Invalid choice. Please enter 1-4.").count(), 3, "{prompt}");
     }
 
     #[test]
@@ -781,12 +758,10 @@ mod tests {
             (ALL, "3", ShellApprovalDecision::AllowCommandPersist),
             (ALL, "4", ShellApprovalDecision::AllowOnce),
             (ALL, "5", ShellApprovalDecision::Deny),
-            (ALL, "6", ShellApprovalDecision::BlacklistPersist),
             (TEMPLATE_ONLY, "1", ShellApprovalDecision::AllowTemplatePersist),
             (TEMPLATE_ONLY, "2", ShellApprovalDecision::AllowCommandPersist),
             (TEMPLATE_ONLY, "3", ShellApprovalDecision::AllowOnce),
             (TEMPLATE_ONLY, "4", ShellApprovalDecision::Deny),
-            (TEMPLATE_ONLY, "5", ShellApprovalDecision::BlacklistPersist),
         ];
         for (offered, answer, expected) in cases {
             let request = template_request("ls {{ dir }}", "ls {{ dir: string }}", offered);
@@ -807,7 +782,36 @@ mod tests {
         let (_, prompt) = session(&request, "4\n");
 
         assert!(
-            prompt.contains("saves \"prefix just\", \"prefix git\" to the whitelist"),
+            prompt.contains("saves \"prefix just\", \"prefix git\" to your shell-commands"),
+            "{prompt}"
+        );
+    }
+
+    #[test]
+    fn an_excluded_command_names_the_exclusion_that_asks() {
+        let mut request = request();
+        request.exclusion = Some(darkmatter::config::permissions::PolicyExclusion {
+            revision: darkmatter::config::load::ConfigRevision::User,
+            file: PathBuf::from("/home/.darkmatter.yaml"),
+            entry: "!prefix echo".to_string(),
+        });
+
+        let (decision, prompt) = session(&request, "3\n");
+
+        assert_eq!(decision, ShellApprovalDecision::AllowOnce);
+        assert!(prompt.contains("Excluded: !prefix echo in /home/.darkmatter.yaml"), "{prompt}");
+    }
+
+    #[test]
+    fn without_a_home_an_always_choice_approves_the_run_only() {
+        let mut request = request();
+        request.save_target = None;
+
+        let (decision, prompt) = session(&request, "1\n");
+
+        assert_eq!(decision, ShellApprovalDecision::AllowExactPersist);
+        assert!(
+            prompt.contains("allows \"exact echo hello\" for this run; there is no home to save it to"),
             "{prompt}"
         );
     }
@@ -831,7 +835,6 @@ mod tests {
 
         fn file_request() -> SlotGrantRequest {
             let file = PathBuf::from("/repo/data/os.yaml");
-            let dir = PathBuf::from("/repo/data");
             let allow = GrantDecision::Allow;
             SlotGrantRequest {
                 function: "load_data".into(),
@@ -841,9 +844,6 @@ mod tests {
                 choices: vec![
                     grant(allow, GrantTarget::File(file.clone()), GrantScope::Once),
                     grant(allow, GrantTarget::File(file.clone()), GrantScope::Persisted),
-                    grant(allow, GrantTarget::Dir(dir.clone()), GrantScope::Once),
-                    grant(allow, GrantTarget::Dir(dir), GrantScope::Persisted),
-                    grant(GrantDecision::Deny, GrantTarget::File(file.clone()), GrantScope::Persisted),
                     grant(GrantDecision::Deny, GrantTarget::File(file), GrantScope::Once),
                 ],
             }
@@ -857,7 +857,7 @@ mod tests {
         }
 
         #[test]
-        fn every_choice_is_numbered_and_names_what_it_saves() {
+        fn every_choice_is_numbered_and_always_allow_names_the_permissions() {
             let (decisions, prompt) = ask(&[file_request()], "2\n");
             assert_eq!(
                 decisions,
@@ -869,18 +869,14 @@ mod tests {
             assert!(prompt.contains("Schema Read Approval Required"), "{prompt}");
             assert!(prompt.contains("/repo/schemas/sandbox.yaml"), "{prompt}");
             assert!(prompt.contains("load_data() reads /repo/data/os.yaml"), "{prompt}");
-            for (number, label) in [
-                (1, "Allow this file for this run"),
-                (2, "Always allow this file"),
-                (3, "Allow this file's folder for this run"),
-                (4, "Always allow this file's folder"),
-                (5, "Always deny this file"),
-                (6, "Deny for this run"),
-            ] {
+            for (number, label) in
+                [(1, "Allow this file for this run"), (2, "Always allow this file"), (3, "Deny for this run")]
+            {
                 assert!(prompt.contains(&format!("{number} \u{2502} {label}")), "{label}: {prompt}");
             }
-            assert!(prompt.contains("saves \"allow file /repo/data/os.yaml\" to the schema read grants"), "{prompt}");
-            assert!(prompt.contains("saves \"deny file /repo/data/os.yaml\""), "{prompt}");
+            assert!(prompt.contains("saved to your permissions.file-read"), "{prompt}");
+            assert!(!prompt.contains("Always deny"), "no persistent deny: {prompt}");
+            assert!(!prompt.contains("folder"), "no folder approval: {prompt}");
         }
 
         #[test]
@@ -889,7 +885,7 @@ mod tests {
                 target: GrantTarget::File(PathBuf::from("/repo/data/os.yaml")),
                 scope: GrantScope::Once,
             };
-            let (picked, _) = ask(&[file_request()], "6\n");
+            let (picked, _) = ask(&[file_request()], "3\n");
             assert_eq!(picked, std::slice::from_ref(&deny_once));
             // Input ends before the first answer: this and every later
             // request are denied for the run, and only one prompt is shown.
@@ -908,35 +904,26 @@ mod tests {
                     scope: GrantScope::Once
                 }]
             );
-            assert_eq!(prompt.matches("Invalid choice. Please enter 1-6.").count(), 2);
+            assert_eq!(prompt.matches("Invalid choice. Please enter 1-3.").count(), 2);
         }
 
         #[test]
-        fn a_url_read_offers_the_url_its_queryless_form_and_the_site() {
+        fn a_url_read_offers_this_run_only() {
             let url = biscuit_file::url::Url::parse("https://example.com/os.yaml?v=2").unwrap();
-            let mut stripped = url.clone();
-            stripped.set_query(None);
-            let allow = GrantDecision::Allow;
             let request = SlotGrantRequest {
                 function: "load_data".into(),
                 kind: ReadKind::Content,
                 location: ReadLocation::Remote(url.clone()),
                 schema: None,
                 choices: vec![
-                    grant(allow, GrantTarget::Url(url.clone()), GrantScope::Once),
-                    grant(allow, GrantTarget::UrlAnyQuery(stripped), GrantScope::Once),
-                    grant(
-                        allow,
-                        GrantTarget::Site { scheme: "https".into(), host: "example.com".into(), port: None },
-                        GrantScope::Once,
-                    ),
+                    grant(GrantDecision::Allow, GrantTarget::Url(url.clone()), GrantScope::Once),
                     grant(GrantDecision::Deny, GrantTarget::Url(url), GrantScope::Once),
                 ],
             };
-            let (_, prompt) = ask(&[request], "4\n");
-            for label in ["Allow this exact URL for this run", "Allow this URL with any query for this run", "Allow this site for this run"] {
-                assert!(prompt.contains(label), "{label}: {prompt}");
-            }
+            let (_, prompt) = ask(&[request], "2\n");
+            assert!(prompt.contains("1 \u{2502} Allow this URL for this run"), "{prompt}");
+            assert!(prompt.contains("2 \u{2502} Deny for this run"), "{prompt}");
+            assert!(!prompt.contains("Always"), "a URL is never saved: {prompt}");
             assert!(!prompt.contains("Schema:"), "an inline schema names no file");
         }
     }

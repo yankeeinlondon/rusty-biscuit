@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use darkmatter::markdown::compose::{ContextRequirements, RequestSnapshot};
-use darkmatter::markdown::schemas::{SchemaRootKind, SchemaRoots};
+use simplified_schema::roots::{SchemaRootKind, SchemaRoots};
 use tempfile::TempDir;
 
 use super::{DocumentEnvironment, EnvironmentSource, InvocationContext};
@@ -56,11 +56,8 @@ impl Fixture {
         let document = work.join("doc.md");
         fs::write(&document, DOCUMENT).unwrap();
         fs::write(work.join("child.md"), format!("child=[{{{{ env.{PROBE} }}}}]\n")).unwrap();
-        let policy = root.join("policy");
-        fs::create_dir_all(&policy).unwrap();
-        fs::write(policy.join(".darkmatter-shell-whitelist"), "prefix echo\n").unwrap();
         let approval = ShellApprovalOptions {
-            policy_root: Some(policy),
+            permissions: crate::harness::shell::test_support::user_permissions(&root.join("policy"), &["prefix echo"]),
             approval_handler: None,
             ..Default::default()
         };
@@ -127,7 +124,7 @@ fn prepare_under(fixture: &Fixture, invocation: &InvocationContext) -> Prepared 
         file_ref_fallback_dir: Some(invocation.launch_cwd().to_path_buf()),
         ..PrepareOptions::new(source_context.file_resolution_context().clone())
     };
-    let approved = approve_document_shell(&source, &options, &fixture.approval)
+    let approved = approve_document_shell(&source, &options, &fixture.approval, crate::composition::CompositionMode::ChainedDocument)
         .unwrap()
         .approved_commands;
     options.pre_approved_commands = Some(approved.clone());

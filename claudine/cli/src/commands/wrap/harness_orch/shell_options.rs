@@ -1,74 +1,13 @@
-use color_eyre::eyre::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub(crate) fn harness_policy_root(source_path: &Path, repo_root: Option<&Path>) -> Option<PathBuf> {
-    let source_dir = source_path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())?;
+use claudine::harness::CapturedPermissions;
 
-    if let Some(repo_root) = repo_root
-        && source_path.starts_with(repo_root)
-    {
-        return Some(repo_root.to_path_buf());
-    }
-
-    if let Some(source_repo_root) = find_git_root(source_dir) {
-        return Some(source_repo_root);
-    }
-
-    Some(source_dir.to_path_buf())
-}
-
-fn find_git_root(start: &Path) -> Option<PathBuf> {
-    let mut current = start;
-
-    loop {
-        if current.join(".git").exists() {
-            return Some(current.to_path_buf());
-        }
-
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => break,
-        }
-    }
-
-    None
-}
-
-#[allow(dead_code)]
-pub(crate) fn build_harness_shell_options(
-    source_path: &Path,
-    repo_root: Option<&Path>,
-) -> claudine::harness::ShellApprovalOptions {
-    build_harness_shell_options_with_cache(source_path, repo_root, None)
-}
-
-/// Build shell approval policy from an already-derived source repository.
-///
-/// `None` is an observed non-repository source, so its directory is the policy
-/// root. This path never searches ancestors for `.git`.
-pub(crate) fn build_harness_shell_options_for_source(
-    source_path: &Path,
-    source_repo_root: Option<&Path>,
-) -> claudine::harness::ShellApprovalOptions {
-    build_harness_shell_options_for_source_with_cache(source_path, source_repo_root, None)
-}
-
-/// Build source-scoped shell policy while reusing an invocation approval cache.
-pub(crate) fn build_harness_shell_options_for_source_with_cache(
-    source_path: &Path,
-    source_repo_root: Option<&Path>,
-    shared_cache: Option<claudine::composition::SharedApprovalCache>,
-) -> claudine::harness::ShellApprovalOptions {
-    let policy_root = source_repo_root.map(Path::to_path_buf).or_else(|| {
-        source_path
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-            .map(Path::to_path_buf)
-    });
-    build_harness_shell_options_for_policy_root(policy_root, shared_cache)
+/// Shell approval options deciding with `permissions`, the configuration
+/// captured for the source document (see
+/// [`CapturedPermissions::for_source`]).
+pub(crate) fn build_harness_shell_options(permissions: CapturedPermissions) -> claudine::harness::ShellApprovalOptions {
+    build_harness_shell_options_with_cache(permissions, None)
 }
 
 /// Build shell approval options, optionally reusing a shared approval
@@ -83,23 +22,12 @@ pub(crate) fn build_harness_shell_options_for_source_with_cache(
 /// so there is no TTY contention. Non-TTY environments (CI, piped input)
 /// get no handler and unapproved commands hard-fail as before.
 pub(crate) fn build_harness_shell_options_with_cache(
-    source_path: &Path,
-    repo_root: Option<&Path>,
-    shared_cache: Option<claudine::composition::SharedApprovalCache>,
-) -> claudine::harness::ShellApprovalOptions {
-    build_harness_shell_options_for_policy_root(
-        harness_policy_root(source_path, repo_root),
-        shared_cache,
-    )
-}
-
-fn build_harness_shell_options_for_policy_root(
-    policy_root: Option<PathBuf>,
+    permissions: CapturedPermissions,
     shared_cache: Option<claudine::composition::SharedApprovalCache>,
 ) -> claudine::harness::ShellApprovalOptions {
     let approval_handler = prompt_handler(darkmatter_cli::approval::can_prompt_interactively());
     let mut opts = claudine::harness::ShellApprovalOptions {
-        policy_root,
+        permissions,
         approval_handler,
         ..Default::default()
     };
@@ -120,9 +48,9 @@ fn prompt_handler(can_prompt: bool) -> Option<SharedApprovalHandler> {
 /// Approval handler that auto-approves every command it is asked about.
 ///
 /// Installed for composition preflight when `--yolo` is active so that
-/// unapproved shell commands clear the gate without prompting. Blacklisted
-/// commands are rejected upstream, before the handler is consulted, so YOLO
-/// never widens the blacklist.
+/// unapproved shell commands clear the gate without prompting. Commands the
+/// built-in blacklist matches are refused upstream, before the handler is
+/// consulted, so YOLO never overrides it.
 struct YoloApprovalHandler;
 
 impl darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler for YoloApprovalHandler {
@@ -187,8 +115,9 @@ impl CachedHarnessLoopContext {
         }
     }
 
-    /// Re-point the policy root at `source_path`, and — when the active
-    /// document actually changed — reopen the approval window.
+    /// Re-point the options at `source_path` and the `permissions` captured
+    /// for it, and — when the active document actually changed — reopen the
+    /// approval window.
     ///
     /// The thaw is what makes a proxy target's shell approval equivalent to
     /// invoking that target directly (R9). A freeze is scoped to the document
@@ -201,37 +130,12 @@ impl CachedHarnessLoopContext {
     /// document mid-run, where the freeze is the point: their unchanged
     /// commands hit the invocation-wide cache and new ones stay denied rather
     /// than prompting behind a live agent.
-    pub(crate) fn refresh(&mut self, source_path: &Path, repo_root: Option<&Path>) {
-        let policy_root = harness_policy_root(source_path, repo_root);
-        self.refresh_with_policy_root(source_path, repo_root, policy_root);
-    }
-
-    /// Refresh from definitive source evidence without searching for `.git`.
-    pub(crate) fn refresh_for_source(
-        &mut self,
-        source_path: &Path,
-        source_repo_root: Option<&Path>,
-    ) {
-        let policy_root = source_repo_root.map(Path::to_path_buf).or_else(|| {
-            source_path
-                .parent()
-                .filter(|path| !path.as_os_str().is_empty())
-                .map(Path::to_path_buf)
-        });
-        self.refresh_with_policy_root(source_path, source_repo_root, policy_root);
-    }
-
-    fn refresh_with_policy_root(
-        &mut self,
-        source_path: &Path,
-        repo_root: Option<&Path>,
-        policy_root: Option<PathBuf>,
-    ) {
+    pub(crate) fn refresh(&mut self, source_path: &Path, repo_root: Option<&Path>, permissions: CapturedPermissions) {
         let repo_root = repo_root.map(Path::to_path_buf);
         if self.source_path != source_path || self.repo_root != repo_root {
             self.source_path = source_path.to_path_buf();
             self.repo_root = repo_root;
-            self.shell_options.policy_root = policy_root;
+            self.shell_options.permissions = permissions;
             self.shell_options.approval_handler = self.thawed_handler.clone();
         }
     }
@@ -241,7 +145,7 @@ impl CachedHarnessLoopContext {
     }
 
     /// Strip the interactive approval handler so subsequent harness-loop
-    /// iterations operate in deny-only mode.  Cached and whitelisted
+    /// iterations operate in deny-only mode.  Cached and pre-approved
     /// commands still pass; new uncached commands are denied without
     /// prompting.  This enforces the spec contract: "all shell approvals
     /// are resolved before the provider workflow begins."
@@ -253,81 +157,123 @@ impl CachedHarnessLoopContext {
     }
 }
 
+/// Permissions captured from a temporary home, so a test never reads or
+/// writes the process's home.
+#[cfg(test)]
+pub(crate) mod test_permissions {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use claudine::harness::CapturedPermissions;
+
+    /// The configuration of a user whose home is `home`, with `rules` as the
+    /// `permissions.shell-commands` of `~/.darkmatter.yaml` (no file is
+    /// written when there are none), and no repository.
+    pub(crate) fn user_config(home: &Path, rules: &[&str]) -> Arc<darkmatter::config::load::ConfigSnapshot> {
+        std::fs::create_dir_all(home).unwrap();
+        if !rules.is_empty() {
+            let mut text = String::from("permissions:\n  shell-commands:\n");
+            for rule in rules {
+                text.push_str(&format!("    - {}\n", serde_json::to_string(rule).unwrap()));
+            }
+            std::fs::write(home.join(".darkmatter.yaml"), text).unwrap();
+        }
+        let context = biscuit_file::FileResolutionContext::from_snapshot(home, Some(home.to_path_buf()), Default::default());
+        Arc::new(
+            darkmatter::config::load::ConfigSnapshot::load(&context, None, darkmatter::config::load::ConfigLoadMode::Passive)
+                .unwrap(),
+        )
+    }
+
+    /// [`user_config`]'s evaluated permissions.
+    pub(crate) fn user_permissions(home: &Path, rules: &[&str]) -> CapturedPermissions {
+        CapturedPermissions::of_snapshot(&user_config(home, rules))
+    }
+
+    /// The `permissions.shell-commands` entries saved under `home`, as written.
+    pub(crate) fn saved_rules(home: &Path) -> Vec<String> {
+        let snapshot = user_config(home, &[]);
+        let policy = snapshot.policy().unwrap();
+        policy.user().permissions().shell_commands.value.iter().map(|entry| entry.authored.clone()).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn initialize_repository(path: &Path) {
+    /// `git init`s `path` and commits `files` (relative path, text).
+    fn committed_repository(path: &Path, files: &[(&str, &str)]) {
         std::fs::create_dir_all(path).unwrap();
-        let status = std::process::Command::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(path)
-            .status()
-            .unwrap();
-        assert!(status.success());
+        for (relative, text) in files {
+            let file = path.join(relative);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, text).unwrap();
+        }
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(path)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "--quiet"]);
+        git(&["add", "-A"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "fixture"]);
+    }
+
+    /// Whether `options` pre-approve `command` without asking.
+    fn preapproved(options: &claudine::harness::ShellApprovalOptions, command: &str) -> bool {
+        claudine::harness::validate_and_approve_command(command, options).is_ok()
     }
 
     #[test]
-    fn source_policy_uses_explicit_same_repository_root() {
+    fn each_source_decides_with_its_own_repository_permissions() {
         let directory = tempfile::TempDir::new().unwrap();
-        initialize_repository(directory.path());
-        let source = directory.path().join("docs/CLAUDE.md");
-        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
-        let invocation = claudine::invocation_context::InvocationContext::capture_at(
-            crate::request::snapshot(),
-            directory.path(),
-        )
-        .unwrap();
-        let source_context = invocation.derive_source(&source).unwrap();
-
-        let options = build_harness_shell_options_for_source(
-            &source,
-            source_context.repository_root(),
-        );
-
-        assert_eq!(options.policy_root.as_deref(), Some(directory.path()));
-    }
-
-    #[test]
-    fn source_policy_uses_explicit_sibling_repository_root() {
-        let directory = tempfile::TempDir::new().unwrap();
+        let home = directory.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
         let launch = directory.path().join("launch");
         let sibling = directory.path().join("sibling");
-        initialize_repository(&launch);
-        initialize_repository(&sibling);
-        let source = sibling.join("docs/CLAUDE.md");
-        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
-        let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), &launch).unwrap();
-        let source_context = invocation.derive_source(&source).unwrap();
-
-        let options = build_harness_shell_options_for_source(
-            &source,
-            source_context.repository_root(),
+        committed_repository(&launch, &[("docs/CLAUDE.md", "launch\n")]);
+        committed_repository(
+            &sibling,
+            &[(".darkmatter.yaml", "permissions:\n  shell-commands:\n    - prefix ls\n"), ("docs/CLAUDE.md", "sibling\n")],
         );
+        let snapshot = crate::request::snapshot().clone().with_home(Some(home));
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(&snapshot, &launch).unwrap();
+        let options_for = |source: &Path| {
+            let source_context = invocation.derive_source(source).unwrap();
+            build_harness_shell_options(CapturedPermissions::for_source(&invocation, source_context.file_resolution_context()))
+        };
 
-        assert_eq!(options.policy_root.as_deref(), Some(sibling.as_path()));
-        assert_ne!(options.policy_root.as_deref(), Some(launch.as_path()));
+        let sibling_options = options_for(&sibling.join("docs/CLAUDE.md"));
+        let launch_options = options_for(&launch.join("docs/CLAUDE.md"));
+
+        assert!(preapproved(&sibling_options, "ls -la"));
+        assert!(!preapproved(&launch_options, "ls -la"));
     }
 
     #[test]
-    fn authoritative_non_repository_source_keeps_its_directory_as_policy_root() {
+    fn a_refresh_to_another_document_takes_that_documents_permissions() {
         let directory = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir(directory.path().join(".git")).unwrap();
-        let nested = directory.path().join("outside");
-        std::fs::create_dir(&nested).unwrap();
-        let source = nested.join("target.md");
-
-        let options = build_harness_shell_options_for_source(&source, None);
-        assert_eq!(options.policy_root.as_deref(), Some(nested.as_path()));
-
+        let home = directory.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".darkmatter.yaml"), "permissions:\n  shell-commands:\n    - prefix ls\n").unwrap();
+        let allowing = super::test_permissions::user_permissions(&home, &[]);
         let initial = directory.path().join("router.md");
+        let target = directory.path().join("target.md");
         let mut cached = CachedHarnessLoopContext::with_shell_options(
             &initial,
-            Some(directory.path()),
-            build_harness_shell_options_for_source(&initial, Some(directory.path())),
+            None,
+            build_harness_shell_options(CapturedPermissions::Absent),
         );
-        cached.refresh_for_source(&source, None);
-        assert_eq!(cached.shell_options.policy_root.as_deref(), Some(nested.as_path()));
+        assert!(!preapproved(cached.shell_options(), "ls"));
+
+        cached.refresh(&target, None, allowing);
+
+        assert!(preapproved(cached.shell_options(), "ls"));
     }
 
     // ── The installed prompt, answered with scripted input ───────────────
@@ -381,8 +327,16 @@ mod tests {
         }
     }
 
+    fn user_config(dir: &Path) -> Arc<darkmatter::config::load::ConfigSnapshot> {
+        super::test_permissions::user_config(&dir.join("home"), &[])
+    }
+
+    fn saved_rules(dir: &Path) -> Vec<String> {
+        super::test_permissions::saved_rules(&dir.join("home"))
+    }
+
     fn scripted_options(dir: &Path, prompt: &Arc<ScriptedPrompt>) -> claudine::harness::ShellApprovalOptions {
-        let mut options = build_harness_shell_options_for_policy_root(Some(dir.to_path_buf()), None);
+        let mut options = build_harness_shell_options(CapturedPermissions::of_snapshot(&user_config(dir)));
         options.approval_handler = Some(Arc::clone(prompt) as SharedApprovalHandler);
         options
     }
@@ -423,10 +377,7 @@ mod tests {
         assert!(transcript.contains("Resolved: just clean --out dist/build"), "{transcript}");
         assert!(transcript.contains("1 │ Allow this exact command"), "{transcript}");
         assert!(transcript.contains("2 │ Allow this command shape"), "{transcript}");
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join(".darkmatter-shell-whitelist")).unwrap(),
-            "template just clean --out {{ string }}/build\n"
-        );
+        assert_eq!(saved_rules(dir.path()), ["template just clean --out {{ string }}/build"]);
         assert!(!result.approved_commands.contains_exact("just clean --out dist/build"));
         assert_eq!(result.approved_commands.templates().count(), 1);
     }
@@ -434,8 +385,8 @@ mod tests {
     #[test]
     fn a_late_command_offers_no_exact_choice_and_refuses_an_unlisted_number() {
         let dir = tempfile::TempDir::new().unwrap();
-        // Five choices are listed, so "6" is refused before "5" blacklists.
-        let prompt = ScriptedPrompt::new(&["6\n5"]);
+        // Four choices are listed, so "5" is refused before "4" denies.
+        let prompt = ScriptedPrompt::new(&["5\n4"]);
         let markdown: darkmatter::markdown::Markdown =
             "::shell just clean --out {{ last(seq.outputs) }}/build && git add {{ last(seq.outputs) }}\n".into();
         let candidates = markdown.compose_preflight(&compose_request(dir.path(), true)).unwrap().candidates;
@@ -444,9 +395,9 @@ mod tests {
             &candidates[0],
             &scripted_options(dir.path(), &prompt),
         )
-        .expect_err("blacklisted");
+        .expect_err("denied");
 
-        assert!(matches!(error, claudine::harness::HarnessError::ShellCommandBlacklisted { .. }), "{error:?}");
+        assert!(matches!(error, claudine::harness::HarnessError::ShellCommandDenied { .. }), "{error:?}");
         let transcript = prompt.transcript();
         assert!(
             transcript.contains("Command:  just clean --out {{ last(seq.outputs): string }}/build && git add"),
@@ -454,11 +405,9 @@ mod tests {
         );
         assert!(!transcript.contains("exact command"), "{transcript}");
         assert!(!transcript.contains("Resolved:"), "{transcript}");
-        assert!(transcript.contains("saves \"prefix just\", \"prefix git\" to the whitelist"), "{transcript}");
-        assert!(transcript.contains("Invalid choice. Please enter 1-5."), "{transcript}");
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join(".darkmatter-shell-blacklist")).unwrap(),
-            "template just clean --out {{ string }}/build && git add {{ string }}\n"
-        );
+        assert!(transcript.contains("saves \"prefix just\", \"prefix git\" to your shell-commands"), "{transcript}");
+        assert!(transcript.contains("Invalid choice. Please enter 1-4."), "{transcript}");
+        assert!(!transcript.contains("blacklist"), "{transcript}");
+        assert!(saved_rules(dir.path()).is_empty());
     }
 }

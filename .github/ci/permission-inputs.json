@@ -1,0 +1,23 @@
+{
+  "policy-files": [
+    { "path": ".darkmatter.yaml", "format": "darkmatter-config" },
+    { "path": ".claudine/config.yaml", "format": "permissions-key" }
+  ],
+  "default-schemas": [
+    { "path": "darkmatter/schemas/darkmatter-config.yaml", "format": "darkmatter-config" },
+    { "path": "claudine/schemas/claudine-config.yaml", "format": "host-config" }
+  ],
+  "checker-inputs": [
+    ".github/ci/permission-inputs.json",
+    ".github/workflows/ci.yml",
+    "scripts/ci/permission_scope.py",
+    "scripts/ci/permission_environment.py",
+    "darkmatter/lib/Cargo.toml",
+    "darkmatter/lib/examples/permission_widening.rs",
+    "darkmatter/lib/src/config/",
+    "darkmatter/lib/src/markdown/compose/shell_expansion/store.rs",
+    "darkmatter/lib/src/markdown/compose/shell_expansion/types.rs",
+    "sniff/lib/Cargo.toml",
+    "sniff/lib/src/filesystem/git/committed_tree.rs"
+  ]
+}

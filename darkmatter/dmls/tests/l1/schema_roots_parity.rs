@@ -22,9 +22,9 @@ use common::{LspFixture, LspWorkspace};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::triggers::scan;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, SchemaRootKind, SchemaRootState, SchemaRoots, parse_trigger_envelope_from_str,
-};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::roots::{SchemaRootKind, SchemaRootState, SchemaRoots};
+use simplified_schema::triggers::parse_trigger_envelope_from_str;
 use dmls::context::RepositoryContexts;
 use dmls::overlay::SchemaOutcome;
 use dmls::{DmlsConfig, OverlayState};

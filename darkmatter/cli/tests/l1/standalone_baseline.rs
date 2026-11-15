@@ -350,18 +350,17 @@ fn schema_validate_reports_damaged_policy_frontmatter_as_a_parse_error() {
     }
 }
 
-/// Commands the shell-resolution tests run, approved by the launch
-/// directory's own whitelist.
-const SHELL_WHITELIST: &str =
-    "exact echo words\nexact cat policy.txt\nexact echo TimeSensitive\nexact echo Duration\n";
+/// Commands the shell-resolution tests run, approved by the fixture home's
+/// `permissions.shell-commands`.
+const SHELL_RULES: [&str; 4] = ["exact echo words", "exact cat policy.txt", "exact echo TimeSensitive", "exact echo Duration"];
 
 /// Runs `md compose --frontmatter [extra…]` on a `doc.md` holding
-/// `frontmatter`, beside a fixture-owned shell whitelist and a `policy.txt`
+/// `frontmatter`, under a home allowing [`SHELL_RULES`], beside a `policy.txt`
 /// whose text is a JSON list of one unknown rule.
 fn compose_shell_resolved(frontmatter: &str, extra: &[&str]) -> (Option<i32>, String, String) {
     let process = CliProcessFixture::new();
     let document = process.write_file("cwd/doc.md", &format!("---\n{frontmatter}---\nBody\n"));
-    process.write_file("cwd/.darkmatter-shell-whitelist", SHELL_WHITELIST);
+    process.shell_permissions(&SHELL_RULES);
     process.write_file("cwd/policy.txt", "[\"Duration(3mo)\"]\n");
     // `echo` and `cat` run as programs; on Windows they exist only as Git's
     // executables outside System32, so the host PATH is declared.

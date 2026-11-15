@@ -1,4 +1,4 @@
-use darkmatter::markdown::schemas::TriggerOrigin;
+use simplified_schema::triggers::TriggerOrigin;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use darkmatter::markdown::compose::directive_targets::{

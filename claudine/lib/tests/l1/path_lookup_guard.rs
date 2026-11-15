@@ -24,7 +24,7 @@ const EXCEPTIONS: &[Exception] = &[
         2,
         "both the local root and the home are canonicalized; only the \"local root is home\" verdict leaves",
     ),
-    private("claudine/lib/src/dispatch/loader.rs", "load_claudine_config", ".canonicalize()", 2, SAME_FILE),
+    private("claudine/lib/src/dispatch/loader.rs", "load_claudine_config_with_notices", ".canonicalize()", 2, SAME_FILE),
     private(
         "claudine/lib/src/linking/hashing.rs",
         "hash_skill_dir",

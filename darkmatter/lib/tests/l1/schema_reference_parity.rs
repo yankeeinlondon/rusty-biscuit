@@ -14,7 +14,8 @@ use std::process::Command;
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaRootKind, SchemaRootState, SchemaRoots};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::roots::{SchemaRootKind, SchemaRootState, SchemaRoots};
 use simplified_schema::SchemaError;
 use simplified_schema::resolve::{SelectionOutcome, select_schema_file};
 

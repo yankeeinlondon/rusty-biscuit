@@ -19,6 +19,9 @@ mod characterization_error_routes;
 mod cli_process_fixture;
 mod codex_app_server;
 mod command_routing;
+#[cfg(unix)]
+mod config_yaml_wiring;
+mod darkmatter_config_gate;
 mod completion_cli;
 mod completion_delayed;
 mod completion_committed_prompt_schema;
@@ -75,6 +78,9 @@ mod ctx_per_run;
 mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
+// Reads the `CLAUDINE_TEST_DOCUMENT_ENVIRONMENTS` seam, which only
+// `test-fixtures` builds compile into the binary.
+#[cfg(feature = "test-fixtures")]
 mod document_environment_routes;
 mod effective_diagnostic_render;
 mod entry_point_parity;
@@ -93,6 +99,7 @@ mod handle_repo_config;
 mod handoff_owners;
 mod home_lookup_round_trip;
 mod hooks_cli;
+mod host_registration_refresh;
 // Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
 // binaries, which only `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -107,6 +114,9 @@ mod inline_compose_hash;
 #[cfg(feature = "test-fixtures")]
 mod inline_compose_indented_frontmatter;
 mod inline_compose_sequence_mismatch;
+// Agent stubs are `/bin/sh` scripts (`InlineAgentStub`).
+#[cfg(unix)]
+mod inline_prompt_shell_preflight;
 // Installs the `claudine-fake-goose` fixture binary, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -159,6 +169,7 @@ mod lifecycle_literal_escapes;
 #[cfg(unix)]
 mod lifecycle_traces;
 mod lifecycle_message_drain;
+mod lifecycle_mutation_root;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;

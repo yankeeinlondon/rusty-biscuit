@@ -39,7 +39,8 @@ use super::link_titles;
 use super::rules::{Leaf, MarkdownRuleOverrides, ResolvedMarkdownRules, document_rules, resolve};
 use crate::markdown::extract_frontmatter_block;
 use crate::markdown::frontmatter::load_frontmatter_yaml;
-use crate::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding};
+use crate::markdown::schemas::CleanSchemaConfig;
+use simplified_schema::triggers::InvalidTriggerFinding;
 
 /// The inputs to one [`clean_document`] run.
 #[derive(Debug, Clone, Copy)]

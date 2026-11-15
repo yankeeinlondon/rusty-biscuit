@@ -99,6 +99,16 @@ pub enum SniffError {
         paths: Vec<PathBuf>,
     },
 
+    /// A path given as repository-relative is not one: empty, absolute, or
+    /// with an empty, `.`, or `..` component, a `\`, or a NUL.
+    #[error("invalid repository-relative path '{path}': {reason}")]
+    InvalidRepositoryPath {
+        /// The path exactly as the caller supplied it.
+        path: String,
+        /// Why it was rejected.
+        reason: &'static str,
+    },
+
     /// The specified path is not a git repository.
     #[error("Not a git repository: {0}")]
     NotARepository(PathBuf),

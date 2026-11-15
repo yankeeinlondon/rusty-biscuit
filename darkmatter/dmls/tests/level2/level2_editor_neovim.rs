@@ -105,6 +105,10 @@ fn stage_workspace() -> (tempfile::TempDir, PathBuf) {
     for name in ["home", "cache", "config", "data"] {
         fs::create_dir(dir.path().join(name)).unwrap();
     }
+    // A missing user configuration is a once-per-session `window/showMessage`
+    // warning, which interactive Neovim answers with a hit-enter prompt that
+    // stalls the repaint this file asserts on.
+    fs::write(dir.path().join("home/.darkmatter.yaml"), "{}\n").unwrap();
     #[cfg(windows)]
     let root = dir.path().to_path_buf();
     #[cfg(not(windows))]

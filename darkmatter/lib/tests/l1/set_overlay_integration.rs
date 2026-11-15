@@ -22,7 +22,7 @@ fn compose_file(dir: &TempDir, root_name: &str, extra_options: Option<ComposeOpt
     let root = dir.path().join(root_name);
     let base = ComposeOptions::new()
         .with_source_file(&root)
-        .with_shell_policy_root(dir.path());
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]));
     let options = extra_options.unwrap_or(base);
     let (composed, _) = Markdown::try_from(root.as_path())
         .unwrap()
@@ -39,7 +39,7 @@ fn compose_file_result(
     let root = dir.path().join(root_name);
     let base = ComposeOptions::new()
         .with_source_file(&root)
-        .with_shell_policy_root(dir.path());
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]));
     let options = extra_options.unwrap_or(base);
     Markdown::try_from(root.as_path())
         .unwrap()
@@ -399,7 +399,7 @@ fn permissive_invalid_assignment_warns_and_keeps_siblings() {
     let root = dir.path().join("parent.md");
     let options = ComposeOptions::new()
         .with_source_file(&root)
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_allow_invalid_frontmatter_assignment(true);
     let (composed, report) = Markdown::try_from(root.as_path())
         .unwrap()
@@ -438,7 +438,7 @@ fn permissive_reassigned_property_warns_and_rightmost_wins() {
     let root = dir.path().join("parent.md");
     let options = ComposeOptions::new()
         .with_source_file(&root)
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_allow_reassigned_frontmatter_property(true);
     let (composed, report) = Markdown::try_from(root.as_path())
         .unwrap()

@@ -144,6 +144,7 @@ impl Markdown {
         // `current.*` read raised anywhere under this root.
         let current = options.current_authority();
         let glob_warnings = options.glob_warnings.clone();
+        let slot_session = options.slot_session.clone();
         let node = Self::pipeline_node(&options);
         let mut report = match self.run_compose_pipeline_node(options, &mut runtime, node, hook) {
             Ok(report) => report,
@@ -156,6 +157,11 @@ impl Markdown {
         report.warnings.extend(icmp.take_warnings());
         report.warnings.extend(current.take_warnings());
         report.add_warnings(glob_warnings.take_warnings());
+        // An "always allow" a slot read could not save still applied; the
+        // composition reports it.
+        if let Some(session) = slot_session {
+            report.warnings.extend(session.take_not_saved_warnings());
+        }
         report.read_set = data_runtime.read_set();
         (Ok(report), Vec::new())
     }
@@ -410,6 +416,9 @@ impl Markdown {
         let mut provenance = prepare_frontmatter_for_compose(self, options);
         let mut deferred_keys = Vec::new();
         let mut provisional_keys = std::collections::HashSet::new();
+        // Every schema default either schema-validation pass inserts, so the
+        // later pass attributes a problem with one to its default.
+        let mut applied_defaults = Vec::new();
 
         // Caller file parameters are invocation-owned semantic inputs.
         // Project them from their captured origins before the
@@ -536,7 +545,7 @@ impl Markdown {
                 .root_path()
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| schema_validation::source_path(self, options));
-            schema_validation::run_with_registry(
+            let defaulted = schema_validation::run_with_registry(
                 self,
                 options,
                 &prepared_schemas,
@@ -548,7 +557,13 @@ impl Markdown {
                 },
                 &schema_consumer,
                 report,
+                &mut applied_defaults,
             )?;
+            // A schema default is the schema's value, not authored text:
+            // later stages never scan it for `{{ … }}` or `$( … )`.
+            for path in defaulted {
+                provenance.data_mut().mark(path);
+            }
             if let Some(start) = sv_start {
                 perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
             }
@@ -685,7 +700,7 @@ impl Markdown {
                     .root_path()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| schema_validation::source_path(self, options));
-                schema_validation::run_with_registry(
+                let defaulted = schema_validation::run_with_registry(
                     self,
                     options,
                     &prepared_schemas,
@@ -698,7 +713,11 @@ impl Markdown {
                     },
                     &schema_consumer,
                     report,
+                    &mut applied_defaults,
                 )?;
+                for path in defaulted {
+                    provenance.data_mut().mark(path);
+                }
             } else {
                 schema_validation::verify_projection_stability(
                     self,

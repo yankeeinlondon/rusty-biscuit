@@ -294,8 +294,13 @@ sniff detects packages by (`PACKAGE_MANIFEST_FILE_NAMES`: `Cargo.toml`,
 ([`watch.rs`](../../dmls/src/workspace/watch.rs)). These context inputs
 only drop contexts; they are never indexed as documents. A client that
 supports watchers rooted at a folder (`relativePatternSupport`) is also
-asked to watch each folder the trigger registries read, wherever it lives,
-including a schema root that does not exist yet. A client without that
+asked to watch each folder the trigger registries and the host
+registrations read, wherever it lives, including a schema root that does
+not exist yet, the folder of an absent configuration file, and a manifest's
+member folders (YAML and JSON alike); the repository `HEAD` and the branch
+ref it names are watched by path with the schema-slot watches. The
+registration is replaced whenever a preparation changes that set. A client
+without that
 support, or one that rejects the registration, gets the save fallback
 instead: every save marks the trigger registries stale. A client that
 rejects the workspace registration is switched to server-rescan mode. In server-rescan
@@ -406,9 +411,11 @@ never replace a newer one.
 
 Each installed resolution records every local path it depended on: files
 it read, files it probed and found missing, folders it listed, and, when
-any of those lies in the document's Git repository, that repository's
-`.git/index` and `HEAD` (the automatic grant depends on what they record;
-for a linked worktree, the Git directory its `.git` file names).
+the document lies in a Git repository, that repository's `.git/index` and
+`HEAD` (for a linked worktree, the Git directory its `.git` file names).
+The repository's `permissions` count only as committed, so a commit can
+admit a read the resolution was refused and therefore never recorded; the
+index event of that commit refreshes the document.
 
 | Event | Resolutions marked stale |
 |---|---|

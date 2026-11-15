@@ -1,67 +1,54 @@
-//! The grants that decide which reads a schema slot may make.
+//! The approvals that decide which reads a schema slot may make, beyond
+//! what the captured configuration pre-approves.
 //!
-//! A grant pairs a [`GrantDecision`] (allow or deny) with a [`GrantTarget`]
-//! (a file, a folder, a URL, a URL whatever its query, or a whole site) and a
-//! [`GrantScope`]: a `Once` grant lasts for one run, a `Persisted` grant is
-//! read from the user's grant store.
+//! A local read is pre-approved when the request's `permissions.file-read`
+//! admits the file ([`PermissionPolicy::file_read`]), and a URL read when the
+//! effective network permission or the command's `--allow host=HOST` allows
+//! it. Anything else needs an approval for this run: a [`Grant`] pairing a
+//! [`GrantDecision`] (allow, or deny for this run) with a [`GrantTarget`] (one
+//! file or one exact URL). An "always allow" answer for a file
+//! ([`GrantScope::Persisted`]) is saved to the user's `permissions.file-read`
+//! as an exact entry and also applies for the rest of the run; the captured
+//! configuration is never reloaded mid-run.
 //!
-//! ## Grant store
+//! Nothing is denied persistently, and no approval covers a folder or a
+//! site: a listing needs no approval of its own (it returns only the files
+//! the slot may read without asking), and blanket URL consent is the
+//! configured `network: allow`.
 //!
-//! The store is one user-level file, `<home>/.config/darkmatter/schema-read-policy`
-//! on every OS ([`GrantStore::path_for_home`]). Without a home there is no
-//! store: nothing persisted applies and nothing can be persisted. It is UTF-8
-//! text with one grant per line:
-//!
-//! ```text
-//! # comments and blank lines are ignored
-//! allow file /home/me/data/people.yaml
-//! allow dir /home/me/schemas
-//! deny dir /home/me/schemas/private
-//! allow url https://example.com/types.yaml?v=2
-//! allow url-any-query https://example.com/types.yaml
-//! allow site https://schemas.example.com
-//! ```
-//!
-//! A missing or empty file grants nothing. Any invalid line makes the whole
-//! file grant nothing and is reported as a located
-//! [`GrantStoreError`] (`dm.schema.slot_grant_store_invalid`): skipping the
-//! line could silently drop a deny.
-//!
-//! ## Deny wins
-//!
-//! [`GrantBook::decide`] answers `Deny` when any deny grant, persisted or for
-//! this run, covers the read, even when an allow grant covers it too. Only
-//! then do allow grants (and the command's `--allow host=HOST` values) count.
+//! [`PermissionPolicy::file_read`]: crate::config::permissions::PermissionPolicy::file_read
 
-pub(crate) mod auto;
 pub(crate) mod gate;
+mod legacy;
 mod matching;
 mod request;
-mod store;
 pub(crate) mod targets;
 
 use std::fmt;
 use std::path::PathBuf;
 
+pub use legacy::GRANT_STORE_RELATIVE_PATH;
 pub use matching::GrantBook;
 pub use request::{SlotGrantDecision, SlotGrantRequest};
-pub use store::{
-    GRANT_STORE_RELATIVE_PATH, GrantStore, GrantStoreError, GrantStoreErrorKind, GrantStoreWriteError,
-};
 
-/// What a grant covers.
+/// What an approval covers.
+///
+/// Only [`Self::File`] and [`Self::Url`] are ever offered or applied.
+/// [`Self::Dir`], [`Self::UrlAnyQuery`], and [`Self::Site`] are the retired
+/// grant store's line forms, parsed only so the one-time migration into
+/// `permissions.file-read` can convert or report them; an approval naming
+/// one is ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GrantTarget {
     /// One file, by its absolute (canonical when it exists) path.
     File(PathBuf),
-    /// A folder and everything below it, by its absolute (canonical when it
-    /// exists) path.
+    /// A retired store form: a folder and everything below it.
     Dir(PathBuf),
     /// One URL, exactly, query included.
     Url(url::Url),
-    /// A URL whatever its query; stored without one.
+    /// A retired store form: a URL whatever its query.
     UrlAnyQuery(url::Url),
-    /// Every URL with this scheme, host, and port; no subdomains.
+    /// A retired store form: every URL with this scheme, host, and port.
     Site {
         /// `http` or `https`.
         scheme: String,
@@ -73,19 +60,20 @@ pub enum GrantTarget {
 }
 
 impl GrantTarget {
-    /// The target a grant-store line spells as `kind` and `argument` (the
-    /// [`Self::kind_word`] and [`Display`](fmt::Display) forms), judged as
-    /// the store judges a line: an absolute path, an `http`/`https` URL, a
-    /// `url-any-query` URL without a query, a site without a path.
+    /// The target the kind word and argument name (`file /abs/path`,
+    /// `url https://…`, and the retired `dir`, `url-any-query`, and `site`
+    /// forms), judged as the retired store judged a line: an absolute path,
+    /// an `http`/`https` URL, a `url-any-query` URL without a query, a site
+    /// without a path.
     ///
     /// ## Errors
     ///
-    /// The reason the words name no target, worded as a store-line error.
+    /// The reason the words name no target.
     pub fn parse(kind: &str, argument: &str) -> Result<Self, String> {
-        store::target_from_words(kind, argument.trim())
+        legacy::target_from_words(kind, argument.trim())
     }
 
-    /// The store's kind word for this target.
+    /// The kind word for this target.
     pub fn kind_word(&self) -> &'static str {
         match self {
             Self::File(_) => "file",
@@ -95,10 +83,15 @@ impl GrantTarget {
             Self::Site { .. } => "site",
         }
     }
+
+    /// Whether an approval may name this target: one file or one exact URL.
+    pub fn is_approvable(&self) -> bool {
+        matches!(self, Self::File(_) | Self::Url(_))
+    }
 }
 
-/// The store-line argument form: a path as the host spells it, a URL as
-/// `url::Url` serializes it, a site as `scheme://host[:port]`.
+/// The argument form: a path as the host spells it, a URL as `url::Url`
+/// serializes it, a site as `scheme://host[:port]`.
 impl fmt::Display for GrantTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -110,26 +103,28 @@ impl fmt::Display for GrantTarget {
     }
 }
 
-/// How long a grant lasts.
+/// How long an approval lasts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GrantScope {
     /// This run only.
     Once,
-    /// Read from, or written to, the grant store.
+    /// "Always allow" a file: saved to the user's `permissions.file-read` as
+    /// an exact entry, and applied for the rest of this run whether or not
+    /// the save succeeded. Never a deny, and never a URL.
     Persisted,
 }
 
-/// Whether a grant allows or denies.
+/// Whether an approval allows or denies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GrantDecision {
     /// The read may happen.
     Allow,
-    /// The read may not happen, whatever else allows it.
+    /// The read may not happen for the rest of this run.
     Deny,
 }
 
 impl GrantDecision {
-    /// The store's verb for this decision.
+    /// The decision's word (`allow`, `deny`).
     pub fn word(self) -> &'static str {
         match self {
             Self::Allow => "allow",
@@ -138,7 +133,7 @@ impl GrantDecision {
     }
 }
 
-/// One grant.
+/// One approval.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Grant {
     /// Allow or deny.
@@ -147,6 +142,20 @@ pub struct Grant {
     pub target: GrantTarget,
     /// How long it lasts.
     pub scope: GrantScope,
+}
+
+impl Grant {
+    /// Whether this approval can be applied: an allow or deny of one file or
+    /// one exact URL, with only a file allow ever persisted.
+    pub fn is_applicable(&self) -> bool {
+        self.target.is_approvable()
+            && match self.scope {
+                GrantScope::Once => true,
+                GrantScope::Persisted => {
+                    self.decision == GrantDecision::Allow && matches!(self.target, GrantTarget::File(_))
+                }
+            }
+    }
 }
 
 #[cfg(test)]

@@ -761,8 +761,8 @@ fn trigger_matcher_large_integer_literal_is_exact() {
     // `literal(...)` discriminant equality used to layer content-triggered
     // schemas. A required literal gate must accept the exact large integer and
     // reject its f64-colliding off-by-one neighbor.
-    use darkmatter::markdown::schemas::triggers::{PathSubject, matches};
-    use darkmatter::markdown::schemas::MatchExpr;
+    use simplified_schema::triggers::{PathSubject, matches};
+    use simplified_schema::triggers::MatchExpr;
 use simplified_schema::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 
     fn version_frontmatter(value: &Value) -> Value {

@@ -51,7 +51,7 @@ use lsp_types::{
 };
 use darkmatter::markdown::compose::RequestSnapshot;
 use simplified_schema::ValidationStage;
-use darkmatter::markdown::schemas::triggers::{PayloadMemoCounts, PayloadMemoTally};
+use simplified_schema::triggers::{PayloadMemoCounts, PayloadMemoTally};
 use thiserror::Error;
 
 use crate::capabilities::{ClientProfile, negotiate_position_encoding, server_capabilities};
@@ -393,6 +393,8 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         facts_events: std::cell::RefCell::new(facts::FactsEvents::default()),
         store_inputs,
         slot_jobs,
+        registration_files: std::cell::RefCell::default(),
+        hosts_generation: std::cell::Cell::new(0),
     };
     let mut router = Router::new(connection, state).with_internal(
         (internal_tx, internal_rx),
@@ -773,6 +775,12 @@ pub struct ServerState {
     store_inputs: facts::StoreInputs,
     /// The slot worker's job queue.
     slot_jobs: Sender<crate::slot_jobs::SlotJob>,
+    /// The configuration-level host registration warnings last published,
+    /// by the normalized path of the file each names.
+    registration_files: std::cell::RefCell<HashMap<PathBuf, Vec<lsp_types::Diagnostic>>>,
+    /// The [`OverlayState::hosts_generation`] the open documents were last
+    /// refreshed at.
+    hosts_generation: std::cell::Cell<u64>,
 }
 
 impl ServerState {
@@ -997,6 +1005,10 @@ impl ServerState {
                 &self.timings,
             )
         });
+        let host = match overlay.as_ref().and_then(|overlay| overlay.host.as_ref()) {
+            Some(_) => None,
+            None => self.overlay.unframed_host(&path, &resolution),
+        };
         let ctx = DocumentContext {
             uri,
             path: &path,
@@ -1008,6 +1020,7 @@ impl ServerState {
             profile: &self.profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host,
         };
         Some(self.timings.time(Stage::ProviderChain, || f(&ctx)))
     }
@@ -1066,35 +1079,54 @@ impl ServerState {
         self.snapshot.store(index.snapshot());
     }
 
-    /// Applies one schema-slot grant: a `persisted` one is appended to the
-    /// user's grant store (`<home>/.config/darkmatter/schema-read-policy`),
-    /// a `once` one is kept in memory for this server process. Every slot
-    /// snapshot then goes stale.
+    /// Applies one schema-slot approval: a `once` one is kept in memory for
+    /// this server process; a `persisted` one ("always allow" a file) is
+    /// saved to the user's `permissions.file-read` and kept for this process
+    /// too. Every slot snapshot then goes stale.
     ///
     /// ## Errors
     ///
-    /// A message naming why the choice is not a grant, or why the store
-    /// could not be written.
+    /// A message naming why the choice is not an approval, or why it could
+    /// not be saved (it still applies for this process).
     fn grant_slot_read(&self, choice: &crate::diagnostics::slots::SlotGrantChoice) -> Result<(), String> {
-        use darkmatter::markdown::schemas::slots::grants::{Grant, GrantDecision, GrantScope, GrantStore, GrantTarget};
+        use darkmatter::markdown::schemas::slots::grants::{Grant, GrantDecision, GrantScope, GrantTarget};
         let decision = match choice.decision.as_str() {
             "allow" => GrantDecision::Allow,
             "deny" => GrantDecision::Deny,
             other => return Err(format!("unknown decision `{other}`; expected `allow` or `deny`")),
         };
         let target = GrantTarget::parse(&choice.kind, &choice.target)?;
-        match choice.scope.as_str() {
-            "once" => self.overlay.slots().add_once(Grant { decision, target, scope: GrantScope::Once }),
-            "persisted" => {
-                let path = GrantStore::path_for_home(self.contexts.home())
-                    .ok_or_else(|| "there is no home folder to keep the grant store in".to_string())?;
-                let mut store = GrantStore::load(Some(&path)).map_err(|error| error.to_string())?;
-                store.append(decision, target).map_err(|error| error.to_string())?;
-                tracing::info!(store = %path.display(), "schema-slot grant persisted");
-                self.overlay.slots().invalidate_all();
-            }
+        let scope = match choice.scope.as_str() {
+            "once" => GrantScope::Once,
+            "persisted" => GrantScope::Persisted,
             other => return Err(format!("unknown scope `{other}`; expected `once` or `persisted`")),
+        };
+        let grant = Grant { decision, target, scope };
+        if !grant.is_applicable() {
+            return Err("only one file or one exact URL can be approved, and only a file can be always allowed".to_string());
         }
+        self.overlay.slots().add_once(Grant { scope: GrantScope::Once, ..grant.clone() });
+        if let (GrantScope::Persisted, GrantTarget::File(path)) = (scope, &grant.target) {
+            self.save_slot_read_approval(path)?;
+        }
+        Ok(())
+    }
+
+    /// Saves an "always allow" of `path` to the user's `permissions.file-read`.
+    ///
+    /// The file is judged from its own document context (the builder's, so
+    /// its repository's exclusions still refuse the save), with the
+    /// configuration that context names loaded passively.
+    fn save_slot_read_approval(&self, path: &std::path::Path) -> Result<(), String> {
+        use darkmatter::config::permissions::persist::{PersistentApproval, save_user_approval};
+        use darkmatter::markdown::schemas::slots::session::load_passively;
+        let resolution = self.contexts.for_document(path);
+        let context = resolution.context().map_err(ToString::to_string)?;
+        let snapshot = load_passively(context).map_err(|error| error.to_string())?;
+        let policy = snapshot.policy().map_err(|error| error.to_string())?;
+        let approval = PersistentApproval::FileRead { target: path.to_path_buf(), reading: Box::new(context.clone()) };
+        let saved = save_user_approval(policy, &approval).map_err(|error| error.to_string())?;
+        tracing::info!(file = %saved.file.display(), entry = %saved.entry, "schema-slot read approval saved");
         Ok(())
     }
 
@@ -1133,11 +1165,15 @@ impl ServerState {
             validation.emit(path, threshold);
         }
         let listing = self.snapshot.load().listing();
+        // A file a host registration names (a configuration, a manifest, a
+        // member) keeps those warnings beside its own diagnostics.
+        let registration = computed.as_ref().map(|(_, path)| self.registration_file_diagnostics(path)).unwrap_or_default();
         let diagnostics = computed
             .map(|(diagnostics, _)| diagnostics)
             .unwrap_or_default()
             .into_iter()
             .filter(|diagnostic| !listing_gates(listing, diagnostic))
+            .chain(registration)
             .collect();
         self.diagnostics.publish(uri.clone(), version, diagnostics);
     }
@@ -1170,8 +1206,18 @@ impl ServerState {
 
     /// Publishes the skipped-trigger warnings registry preparations changed
     /// since the last call (see
-    /// [`OverlayState::take_trigger_diagnostic_transitions`]).
+    /// [`OverlayState::take_trigger_diagnostic_transitions`]), then the host
+    /// registration warnings ([`Self::publish_registration_files`]).
     fn publish_trigger_transitions(&self) {
+        // A changed registration reaches documents that did not wait for it
+        // (those without frontmatter) and every other open document of its
+        // configuration.
+        let generation = self.overlay.hosts_generation();
+        if self.hosts_generation.replace(generation) != generation {
+            for uri in self.documents.open_uris() {
+                self.refresh_diagnostics(&uri);
+            }
+        }
         let mut trigger_transitions = HashMap::new();
         for transition in self.overlay.take_trigger_diagnostic_transitions() {
             trigger_transitions.insert(transition.path, transition.finding);
@@ -1192,18 +1238,79 @@ impl ServerState {
                 .as_ref()
                 .map(crate::diagnostics::frontmatter::invalid_trigger_diagnostic)
                 .into_iter()
+                .chain(self.registration_file_diagnostics(&path))
                 .collect();
             self.diagnostics.publish(uri, None, diagnostics);
         }
+        self.publish_registration_files();
+    }
+
+    /// Publishes each configuration-level host registration warning (a
+    /// refused entry, a same-host conflict) on the file it names: the
+    /// declaring configuration file, the manifest, or the member. Only a
+    /// file whose warnings changed since the last call is published again,
+    /// an open one through its full refresh, so its own diagnostics stay
+    /// beside them; a file that no longer has any is cleared.
+    fn publish_registration_files(&self) {
+        let mut current: HashMap<PathBuf, Vec<lsp_types::Diagnostic>> = HashMap::new();
+        for found in self.overlay.host_registration_diagnostics() {
+            current
+                .entry(crate::overlay::registry::normalized(&found.file))
+                .or_default()
+                .push(crate::diagnostics::frontmatter::registration_diagnostic(&found));
+        }
+        let changed: std::collections::BTreeSet<PathBuf> = {
+            let mut published = self.registration_files.borrow_mut();
+            let changed = current
+                .keys()
+                .chain(published.keys())
+                .filter(|file| current.get(*file) != published.get(*file))
+                .cloned()
+                .collect();
+            *published = current;
+            changed
+        };
+        for file in changed {
+            let open = self
+                .documents
+                .open_uris()
+                .into_iter()
+                .find(|uri| uri_to_file_path(uri).is_some_and(|path| crate::overlay::registry::normalized(&path) == file));
+            match open {
+                Some(uri) => self.refresh_diagnostics(&uri),
+                None => {
+                    let Some(uri) = crate::workspace::file_path_to_uri(&file) else {
+                        continue;
+                    };
+                    let kept = self.closed_file_diagnostics(&uri);
+                    self.diagnostics.publish(uri, None, kept);
+                }
+            }
+        }
+    }
+
+    /// The host registration warnings last published for the file at
+    /// `path`.
+    fn registration_file_diagnostics(&self, path: &Path) -> Vec<lsp_types::Diagnostic> {
+        let published = self.registration_files.borrow();
+        if published.is_empty() {
+            return Vec::new();
+        }
+        published.get(&crate::overlay::registry::normalized(path)).cloned().unwrap_or_default()
     }
 
     /// The diagnostics a closed file keeps: the skipped-trigger warning a
-    /// prepared registry still reports for it, or none.
+    /// prepared registry still reports for it and the host registration
+    /// warnings that name it, or none.
     fn closed_file_diagnostics(&self, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
-        uri_to_file_path(uri)
-            .and_then(|path| self.overlay.trigger_finding(&path))
+        let Some(path) = uri_to_file_path(uri) else {
+            return Vec::new();
+        };
+        self.overlay
+            .trigger_finding(&path)
             .map(|finding| crate::diagnostics::frontmatter::invalid_trigger_diagnostic(&finding))
             .into_iter()
+            .chain(self.registration_file_diagnostics(&path))
             .collect()
     }
 
@@ -1659,6 +1766,9 @@ pub struct Router {
     /// Renames whose build just revalidated the index store for them, in
     /// fallback watch mode (see [`Router::needs_index_build`]).
     revalidated: HashSet<RequestId>,
+    /// The configuration notices already shown this session, by code and
+    /// file (by code alone for `dm.config.missing`).
+    config_notices_shown: HashSet<(&'static str, PathBuf)>,
 }
 
 impl Router {
@@ -1677,6 +1787,7 @@ impl Router {
             index_build: IndexBuildState::NotStarted,
             next_build: 0,
             revalidated: HashSet::new(),
+            config_notices_shown: HashSet::new(),
         }
     }
 
@@ -1759,11 +1870,13 @@ impl Router {
     }
 
     /// Keeps the schema-location watches equal to the folders the
-    /// prepared trigger registries read plus the folders holding parsed
-    /// Markdown dependencies (which may lie outside every workspace folder,
-    /// beyond the workspace globs), re-registering when that set changes. A
-    /// client without `relativePatternSupport` gets none and is served by the
-    /// save-driven fallback.
+    /// prepared trigger registries and the installed host registrations
+    /// read (configuration files present or absent, manifests, members, and
+    /// their imports and artifacts, whatever their extension) plus the
+    /// folders holding parsed Markdown dependencies (which may lie outside
+    /// every workspace folder, beyond the workspace globs), re-registering
+    /// when that set changes. A client without `relativePatternSupport` gets
+    /// none and is served by the save-driven fallback.
     fn sync_schema_watches(&mut self) {
         if self.state.watch_mode != WatchMode::ClientWatched || self.state.schema_watch_fallback {
             return;
@@ -1774,6 +1887,7 @@ impl Router {
             return;
         }
         let mut folders = self.state.overlay.trigger_watch_folders();
+        folders.extend(self.state.overlay.host_watch_folders());
         folders.extend(
             self.state
                 .dependency_folders()
@@ -1803,6 +1917,25 @@ impl Router {
         self.sync_schema_watches();
         self.dispatch_slot_jobs();
         self.sync_slot_watches();
+        self.show_config_notices();
+    }
+
+    /// Shows each session-level notice of the passive configuration loads
+    /// once per session as a `window/showMessage`: the missing user file
+    /// (`dm.config.missing`, a warning naming the file and `md init`) once
+    /// however many configurations report it, and each legacy policy file
+    /// awaiting migration (`dm.config.migration`, information) once. DMLS
+    /// only reports them: it never creates, migrates, or prompts.
+    fn show_config_notices(&mut self) {
+        for notice in self.state.overlay.host_config_notices() {
+            let missing = notice.code == darkmatter::config::load::CONFIG_MISSING_CODE;
+            let key = (notice.code, if missing { PathBuf::new() } else { notice.file.clone() });
+            if !self.config_notices_shown.insert(key) {
+                continue;
+            }
+            let typ = if missing { MessageType::WARNING } else { MessageType::INFO };
+            show_message(&self.connection.sender, typ, format!("dmls: {}: {}", notice.code, notice.message));
+        }
     }
 
     /// Sends every schema-slot job demanded since the last message to the
@@ -1816,9 +1949,11 @@ impl Router {
     }
 
     /// Keeps the schema-slot watches equal to the paths the installed slot
-    /// resolutions read: one watcher per path, whatever its extension. A
-    /// client that cannot root a watcher at a folder (or rejected one) is
-    /// served by the save-driven `stat` re-check instead.
+    /// resolutions read, plus each repository `HEAD` (and the branch ref it
+    /// names) the installed host registrations depend on: one watcher per
+    /// path, whatever its extension. A client that cannot root a watcher at
+    /// a folder (or rejected one) is served by the save-driven `stat`
+    /// re-check instead.
     fn sync_slot_watches(&mut self) {
         if self.state.watch_mode != WatchMode::ClientWatched || self.state.schema_watch_fallback {
             return;
@@ -1826,7 +1961,8 @@ impl Router {
         if !self.state.profile.supports_relative_watch_patterns {
             return;
         }
-        let paths = self.state.overlay.slots().watched_paths();
+        let mut paths = self.state.overlay.slots().watched_paths();
+        paths.extend(self.state.overlay.host_head_paths());
         if paths == self.watches.slot_paths {
             return;
         }
@@ -2558,9 +2694,9 @@ impl Router {
         Response::new_ok(id, CompletionResponse::Array(items))
     }
 
-    /// Runs a `workspace/executeCommand`: a schema-slot grant (written to
-    /// the user's grant store, or kept for this server process) or a slot
-    /// refresh. Either marks every slot snapshot stale; the refreshes it
+    /// Runs a `workspace/executeCommand`: a schema-slot grant (saved to the
+    /// user's `permissions.file-read`, or kept for this server process) or a
+    /// slot refresh. Either marks every slot snapshot stale; the refreshes it
     /// demands run on the slot worker, so the answer never waits for one.
     fn execute_command(&mut self, id: RequestId, params: serde_json::Value) -> Response {
         use crate::diagnostics::slots::{GRANT_SLOT_READ_COMMAND, REFRESH_SCHEMA_SLOTS_COMMAND, SlotGrantChoice};

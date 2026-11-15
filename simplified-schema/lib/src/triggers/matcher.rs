@@ -1,0 +1,1021 @@
+//! Trigger-expression matcher.
+//!
+//! [`matches`] evaluates a [`MatchExpr`] against a parsed frontmatter snapshot
+//! and a [`PathSubject`] (the document path and its context). It performs no
+//! I/O beyond what [`GlobReference::matches`] does to judge one known path
+//! (it canonicalizes the path's existing prefix but never walks), and
+//! compiles no validator. This makes it viable
+//! per-keystroke in DMLS and composes with the content-hash effective-schema
+//! cache.
+//!
+//! ## Guard vs gate semantics
+//!
+//! - A bare type-expr key (no `required`) is a **guard**: the key may be
+//!   absent, in which case the condition holds vacuously. A present value that
+//!   contradicts the declared type **defeats** the match.
+//! - `required` makes the condition a **gate**: the key must be present *and*
+//!   conform.
+//! - `enum(...)` members and `pattern(...)` are value predicates checked when
+//!   the value is present (or always, under a gate).
+//! - `$path` is inherently a gate — there is no "absent" case for a document
+//!   path.
+//!
+//! ## `$path` glob matching
+//!
+//! `$path` patterns are [`GlobReference`] patterns judged with
+//! [`GlobReference::matches`] and the file-name view, as `match()` validation
+//! judges a value: case-sensitive on every OS, nearest root, and a pattern
+//! whose glob names no directory (`SKILL.md`) matches that name at any depth.
+//! A path matches when some positive pattern admits it and no `!` pattern
+//! does. Bare, `./`, and `../` patterns are read from the trigger's
+//! [`pattern_cwd`](super::LoadedTrigger::pattern_cwd); every other prefix
+//! from the document's context.
+
+use std::cell::OnceCell;
+use std::path::Path;
+
+use biscuit_file::FileResolutionContext;
+use serde_json::Value;
+
+use crate::format::{judge_schema, judge_type_definition};
+use crate::simplified::{
+    Constraint, PropertyAtom, SimplifiedType, TypeExpr, parse_type_definition_value,
+    parse_schema_declaration,
+};
+
+use super::grammar::{MatchExpr, PathGlobs};
+
+/// The document a `$path` predicate judges, for one trigger.
+pub struct PathSubject<'a> {
+    document: Option<(&'a Path, &'a FileResolutionContext)>,
+    pattern_cwd: Option<&'a Path>,
+    /// The document context re-anchored on `pattern_cwd`, built on first use.
+    #[cfg_attr(not(feature = "file"), allow(dead_code))]
+    relative_context: OnceCell<FileResolutionContext>,
+}
+
+impl<'a> PathSubject<'a> {
+    /// A subject with no document: every `$path` predicate is defeated.
+    #[must_use]
+    pub fn detached() -> Self {
+        Self {
+            document: None,
+            pattern_cwd: None,
+            relative_context: OnceCell::new(),
+        }
+    }
+
+    /// `document` judged in its own `context`. Bare and `./` patterns are read
+    /// from `context`'s `cwd` until [`with_pattern_cwd`](Self::with_pattern_cwd)
+    /// says otherwise.
+    #[must_use]
+    pub fn new(document: &'a Path, context: &'a FileResolutionContext) -> Self {
+        Self {
+            document: Some((document, context)),
+            pattern_cwd: None,
+            relative_context: OnceCell::new(),
+        }
+    }
+
+    /// Read bare and `./` patterns from `cwd`: the trigger's
+    /// [`pattern_cwd`](super::LoadedTrigger::pattern_cwd).
+    #[must_use]
+    pub fn with_pattern_cwd(mut self, cwd: &'a Path) -> Self {
+        self.pattern_cwd = Some(cwd);
+        self
+    }
+
+    /// The document path, when there is one.
+    #[must_use]
+    pub fn document(&self) -> Option<&Path> {
+        self.document.map(|(path, _)| path)
+    }
+
+    /// Without the `file` feature a `$path` pattern cannot be judged in a
+    /// context, so it never admits a document: a trigger with a `$path`
+    /// condition never matches, never silently matches.
+    #[cfg(not(feature = "file"))]
+    pub(crate) fn admits(&self, _globs: &PathGlobs) -> bool {
+        false
+    }
+
+    #[cfg(feature = "file")]
+    pub(crate) fn admits(&self, globs: &PathGlobs) -> bool {
+        let Some((document, context)) = self.document else {
+            return false;
+        };
+        let mut included = false;
+        for pattern in &globs.compiled {
+            let pattern_context = if pattern.relative {
+                self.relative_context(context)
+            } else {
+                context
+            };
+            if pattern.reference.matches(document, pattern_context) {
+                if pattern.negated {
+                    return false;
+                }
+                included = true;
+            }
+        }
+        included
+    }
+
+    #[cfg(feature = "file")]
+    fn relative_context<'s>(&'s self, context: &'s FileResolutionContext) -> &'s FileResolutionContext {
+        match self.pattern_cwd {
+            Some(cwd) => self.relative_context.get_or_init(|| context.for_cwd(cwd)),
+            None => context,
+        }
+    }
+}
+
+/// Evaluates `expr` against `frontmatter` and the document in `subject`.
+///
+/// Returns `true` when the trigger activates. Side-effect-free: nothing is
+/// written, and a `$path` predicate judges the known path without a walk.
+pub fn matches(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<'_>) -> bool {
+    match expr {
+        MatchExpr::All(children) => children.iter().all(|c| matches(c, frontmatter, subject)),
+        MatchExpr::Group(children) => children.iter().any(|c| matches(c, frontmatter, subject)),
+        MatchExpr::None(children) => !children.iter().any(|c| matches(c, frontmatter, subject)),
+        MatchExpr::MinMatch { count, of } => {
+            let met = of
+                .iter()
+                .filter(|c| matches(c, frontmatter, subject))
+                .count();
+            met >= *count
+        }
+        MatchExpr::Property { name, atom } => {
+            property_matches(frontmatter, name, atom)
+        }
+        MatchExpr::Path(globs) => subject.admits(globs),
+    }
+}
+
+/// Returns the first defeating condition for a non-matching expression, for
+/// the `md schema triggers` trace. Returns `None` when the expression matches.
+pub fn first_defeat(
+    expr: &MatchExpr,
+    frontmatter: &Value,
+    subject: &PathSubject<'_>,
+) -> Option<String> {
+    if matches(expr, frontmatter, subject) {
+        return None;
+    }
+    Some(describe_defeat(expr, frontmatter, subject))
+}
+
+fn describe_defeat(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<'_>) -> String {
+    match expr {
+        MatchExpr::Property { name, atom } => {
+            let value = frontmatter.get(name);
+            match value {
+                None if is_required(atom) => format!("`{name}` is required but absent"),
+                None => format!("`{name}` absent (guard not satisfied)"),
+                Some(v) if !type_conforms(atom, v) => {
+                    format!("`{name}` has value `{}` which does not conform", summarize(v))
+                }
+                Some(v) => format!("`{name}` value `{}` failed a constraint", summarize(v)),
+            }
+        }
+        MatchExpr::Path(globs) => match subject.document() {
+            Some(path) => format!(
+                "path `{}` does not match globs {}",
+                path.display(),
+                fmt_globs(&globs.patterns)
+            ),
+            None => format!("no document path to match globs {}", fmt_globs(&globs.patterns)),
+        },
+        MatchExpr::All(children) => children
+            .iter()
+            .find_map(|c| first_defeat(c, frontmatter, subject))
+            .unwrap_or_else(|| "all-children".into()),
+        MatchExpr::Group(_) => "no group alternative matched".into(),
+        MatchExpr::None(_) => "a none-child matched".into(),
+        MatchExpr::MinMatch { count, of } => {
+            let met = of.iter().filter(|c| matches(c, frontmatter, subject)).count();
+            format!("min-match met {met}/{count}")
+        }
+    }
+}
+
+fn summarize(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn fmt_globs(globs: &[String]) -> String {
+    globs.iter().map(|g| format!("{g:?}")).collect::<Vec<_>>().join(", ")
+}
+
+/// Evaluates one property condition against the frontmatter root.
+pub(crate) fn property_matches(frontmatter: &Value, name: &str, atom: &PropertyAtom) -> bool {
+    let value = frontmatter.get(name);
+    let required = is_required(atom);
+    match value {
+        None => {
+            // Absent: a gate (`required`) defeats; a guard passes.
+            !required
+        }
+        Some(v) => {
+            // A present null is treated like an absent value (SimplifiedSchema
+            // nullable semantics): required fails, guard passes, and
+            // `non-null`, which keeps the key optional but rejects null,
+            // defeats.
+            if v.is_null() {
+                return !required && !atom.marks_non_null();
+            }
+            type_conforms(atom, v)
+        }
+    }
+}
+
+/// Returns `true` when `value` conforms to the atom's type-expr and the
+/// match-safe constraints.
+fn type_conforms(atom: &PropertyAtom, value: &Value) -> bool {
+    // Array semantics: when `is_array`, the value must be an array and each
+    // item must conform to the item type + item constraints; array-level
+    // constraints then apply to the array as a whole.
+    if atom.is_array {
+        let Some(items) = value.as_array() else {
+            return false;
+        };
+        for item in items {
+            if !scalar_conforms(atom, item) {
+                return false;
+            }
+        }
+        return array_constraints_hold(atom, items);
+    }
+    scalar_conforms(atom, value)
+}
+
+/// Checks a non-array value against the type-expr and value constraints.
+fn scalar_conforms(atom: &PropertyAtom, value: &Value) -> bool {
+    if !value_matches_type(&atom.ty, value) {
+        return false;
+    }
+    if !declaration_options_hold(atom, value) {
+        return false;
+    }
+    if let Some(options) = atom.alphanumeric_options()
+        && !value.as_str().is_some_and(|text| options.accepts(text))
+    {
+        return false;
+    }
+    for constraint in &atom.constraints {
+        if !constraint_holds(constraint, value) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Judges a `schema` / `type-definition` value against the atom's declaration
+/// options with the same judge the lowered keyword uses. Atoms without
+/// options were already judged by `primitive_matches`.
+fn declaration_options_hold(atom: &PropertyAtom, value: &Value) -> bool {
+    let has_options = atom.constraints.iter().any(|constraint| {
+        matches!(
+            constraint,
+            Constraint::Mapping
+                | Constraint::Property { .. }
+                | Constraint::Forms(_)
+                | Constraint::DeclaredRequired
+                | Constraint::Container
+        )
+    });
+    match &atom.ty {
+        _ if !has_options => true,
+        TypeExpr::Primitive(SimplifiedType::TypeDefinition) => judge_type_definition(&atom.constraints, value).is_ok(),
+        TypeExpr::Primitive(SimplifiedType::Schema) => judge_schema(&atom.constraints, value).is_ok(),
+        _ => true,
+    }
+}
+
+/// Checks the declared structural type against a value.
+fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
+    match ty {
+        TypeExpr::Primitive(p) => primitive_matches(*p, value),
+        // Loaded match conditions cannot import types, so only a caller
+        // passing a resolved atom reaches this. A value (for `U[]`, each
+        // item) conforms when some arm accepts it; the container's own
+        // markers and array constraints are checked by `type_conforms`.
+        TypeExpr::Union(arms) => arms.iter().any(|arm| type_conforms(arm, value)),
+        // A tuple conforms by length; its positions are checked by full
+        // validation, not by a trigger condition.
+        TypeExpr::Tuple(tuple) => value.as_array().is_some_and(|items| {
+            items.len() >= tuple.required_len()
+                && (tuple.spread.is_some() || items.len() <= tuple.elements.len())
+        }),
+        // A function describes a callable; no frontmatter value is one. A
+        // template type is refused in a match condition; a pending one
+        // proves no match.
+        TypeExpr::Function(_) | TypeExpr::Slot(_) => false,
+        TypeExpr::InlineObject(shape) => {
+            let Some(map) = value.as_object() else {
+                return false;
+            };
+            for (name, def) in &shape.properties {
+                let atom = match def {
+                    crate::simplified::PropertyDef::Single(a) => a,
+                    crate::simplified::PropertyDef::Union(arms) => {
+                        let v = map.get(name);
+                        match v {
+                            None => {
+                                // Guard/pass unless the union is effectively
+                                // required (a marked arm and no null-admitting arm).
+                                if def.is_required() {
+                                    return false;
+                                }
+                                continue;
+                            }
+                            Some(val) => {
+                                if val.is_null() {
+                                    if def.is_required() || def.marks_non_null() {
+                                        return false;
+                                    }
+                                    continue;
+                                }
+                                if !arms.iter().any(|a| {
+                                    if a.is_array {
+                                        val.as_array().is_some_and(|items| {
+                                            items.iter().all(|i| scalar_conforms(a, i))
+                                        }) && array_constraints_hold(a, val.as_array().expect("checked"))
+                                    } else {
+                                        scalar_conforms(a, val)
+                                    }
+                                }) {
+                                    return false;
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                };
+                let v = map.get(name);
+                match v {
+                    None => {
+                        if is_required(atom) {
+                            return false;
+                        }
+                    }
+                    Some(val) if val.is_null() => {
+                        if is_required(atom) || atom.marks_non_null() {
+                            return false;
+                        }
+                    }
+                    Some(val) => {
+                        if atom.is_array {
+                            let Some(items) = val.as_array() else {
+                                return false;
+                            };
+                            for item in items {
+                                if !scalar_conforms(atom, item) {
+                                    return false;
+                                }
+                            }
+                            if !array_constraints_hold(atom, items) {
+                                return false;
+                            }
+                        } else if !scalar_conforms(atom, val) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            true
+        }
+        TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {
+            // Imports are rejected at load time; unreachable in a loaded trigger.
+            false
+        }
+    }
+}
+
+fn primitive_matches(ty: SimplifiedType, value: &Value) -> bool {
+    match ty {
+        SimplifiedType::String
+        | SimplifiedType::Date
+        | SimplifiedType::DateTime
+        | SimplifiedType::Time
+        | SimplifiedType::Url
+        | SimplifiedType::Email
+        | SimplifiedType::Yaml
+        | SimplifiedType::Json => value.is_string(),
+        SimplifiedType::File => {
+            // `file` is testable only as a string-shaped value.
+            value.is_string()
+        }
+        SimplifiedType::Number | SimplifiedType::NumberLike => value.is_number(),
+        SimplifiedType::Boolean => value.is_boolean(),
+        SimplifiedType::Boolish => value.is_boolean() || value.is_string(),
+        SimplifiedType::Enum => value.is_string(),
+        // `expression` is a content-format string type (like `yaml` / `json`):
+        // any string is shape-compatible; parseability is a format concern.
+        SimplifiedType::Expression => value.is_string(),
+        // `literal` accepts any scalar shape here; typed identity is enforced by
+        // the `LiteralValue` equality constraint in `constraint_holds`.
+        SimplifiedType::Literal => true,
+        SimplifiedType::Object => value.is_object(),
+        SimplifiedType::TypeDefinition => serde_yaml_ng::to_value(value)
+            .ok()
+            .is_some_and(|yaml| parse_type_definition_value("<trigger>", &yaml).is_ok()),
+        SimplifiedType::Schema => serde_yaml_ng::to_value(value)
+            .ok()
+            .is_some_and(|yaml| parse_schema_declaration(&yaml).is_ok()),
+        SimplifiedType::Unknown => true,
+        SimplifiedType::Null => value.is_null(),
+        // The character set lives in the atom's options; `scalar_conforms`
+        // checks it.
+        SimplifiedType::Alphanumeric => value.is_string(),
+        SimplifiedType::Shell => value
+            .as_str()
+            .is_some_and(|text| text.chars().any(|ch| !ch.is_whitespace())),
+    }
+}
+
+/// Checks a single match-safe constraint against a value.
+fn constraint_holds(constraint: &Constraint, value: &Value) -> bool {
+    match constraint {
+        Constraint::Required => {
+            // Presence is handled at the property level; for inline-object
+            // nested properties the type walk already enforced it. Treat as
+            // satisfied here.
+            true
+        }
+        Constraint::Members(members) => value
+            .as_str()
+            .is_some_and(|s| members.iter().any(|m| m == s)),
+        // Typed equality for `literal(...)` discriminants: a document value
+        // matches only when it equals the authored scalar, type-sensitively
+        // (string `'2'` never satisfies number `literal(2)`).
+        Constraint::LiteralValue(expected) => literal_value_matches(value, expected),
+        Constraint::Pattern(pattern) => {
+            let Some(s) = value.as_str() else { return false };
+            regex_match(pattern, s)
+        }
+        Constraint::MinLen(n) => value.as_str().is_some_and(|s| s.chars().count() >= *n),
+        Constraint::MaxLen(n) => value.as_str().is_some_and(|s| s.chars().count() <= *n),
+        Constraint::Min(n) => value.as_f64().is_some_and(|x| x >= *n),
+        Constraint::Max(n) => value.as_f64().is_some_and(|x| x <= *n),
+        Constraint::Integer => value.as_f64().is_some_and(|x| x.fract() == 0.0),
+        Constraint::NotEmpty => value.as_str().is_some_and(|s| !s.trim().is_empty()),
+        // `Unique`, item/key-count constraints are array/object-level and
+        // checked in `array_constraints_hold` / object walks; they are no-ops
+        // on a scalar value.
+        Constraint::Unique
+        | Constraint::MinItems(_)
+        | Constraint::MaxItems(_)
+        | Constraint::MinKeys(_)
+        | Constraint::MaxKeys(_) => true,
+        // The remaining constraints are forbidden at load time; unreachable.
+        _ => true,
+    }
+}
+
+/// Type-sensitive equality between a document value and a `literal(...)`
+/// discriminant. Equal JSON values match directly; two numbers additionally
+/// match when their representations differ only in integer-vs-float encoding
+/// (`literal(2)` authored as `i64` versus a decoded `2` scalar). A string and a
+/// number never match — that type sensitivity is what makes discriminated
+/// unions unambiguous.
+fn literal_value_matches(value: &Value, expected: &Value) -> bool {
+    if value == expected {
+        return true;
+    }
+    match (value, expected) {
+        (Value::Number(a), Value::Number(b)) => numbers_equal(a, b),
+        _ => false,
+    }
+}
+
+/// Exact numeric equality across integer/float JSON encodings. Integer pairs
+/// compare exactly (never through `f64`, which cannot represent integers past
+/// `2^53`); an integer matches a float only when the float equals it exactly.
+fn numbers_equal(a: &serde_json::Number, b: &serde_json::Number) -> bool {
+    match (json_int(a), json_int(b)) {
+        (Some(x), Some(y)) => x == y,
+        (Some(x), None) => float_eq_int(b.as_f64(), x),
+        (None, Some(y)) => float_eq_int(a.as_f64(), y),
+        (None, None) => a.as_f64() == b.as_f64(),
+    }
+}
+
+/// Exact integer value of a JSON number, or `None` for a float-encoded number.
+fn json_int(n: &serde_json::Number) -> Option<i128> {
+    n.as_u64().map(|u| u as i128).or_else(|| n.as_i64().map(|i| i as i128))
+}
+
+/// True when `f` is present, integral, and exactly equals integer `x`.
+/// (float→int `as` casts saturate in Rust, so an out-of-range float simply
+/// fails the equality rather than misbehaving.)
+fn float_eq_int(f: Option<f64>, x: i128) -> bool {
+    f.is_some_and(|f| f.fract() == 0.0 && f as i128 == x)
+}
+
+/// Checks array-level constraints against an array value.
+fn array_constraints_hold(atom: &PropertyAtom, items: &[Value]) -> bool {
+    for constraint in &atom.array_constraints {
+        let ok = match constraint {
+            Constraint::Unique => {
+                let mut seen = Vec::with_capacity(items.len());
+                for item in items {
+                    if seen.contains(item) {
+                        return false;
+                    }
+                    seen.push(item.clone());
+                }
+                true
+            }
+            Constraint::MinItems(n) => items.len() >= *n,
+            Constraint::MaxItems(n) => items.len() <= *n,
+            _ => true,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+/// The shared effective presence ([`PropertyAtom::is_required`]): a marker
+/// after `[]` counts, a union type's arms count, and a whole value that admits
+/// null (`null`, `unknown`, or a union with such an arm) is never required.
+fn is_required(atom: &PropertyAtom) -> bool {
+    atom.is_required()
+}
+
+thread_local! {
+    /// [`regex_match`]'s compiled patterns.
+    static REGEX_CACHE: std::cell::RefCell<Vec<(String, regex::Regex)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Empties the calling thread's matcher regex cache (see
+/// [`crate::reset_process_caches`]).
+pub(crate) fn reset_thread_caches() {
+    REGEX_CACHE.with_borrow_mut(Vec::clear);
+}
+
+fn regex_match(pattern: &str, input: &str) -> bool {
+    REGEX_CACHE.with(|cell| {
+        if let Some(re) = cell.borrow().iter().find(|(p, _)| p == pattern) {
+            return re.1.is_match(input);
+        }
+        match regex::Regex::new(pattern) {
+            Ok(re) => {
+                let ok = re.is_match(input);
+                cell.borrow_mut().push((pattern.to_string(), re));
+                ok
+            }
+            Err(_) => false,
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simplified::{
+        Constraint, PropertyAtom, SimplifiedType, TypeExpr,
+    };
+    use crate::triggers::grammar::{MatchExpr, PathGlobs};
+    use serde_json::json;
+
+    fn prop(name: &str, ty: SimplifiedType, constraints: Vec<Constraint>) -> MatchExpr {
+        MatchExpr::Property {
+            name: name.to_string(),
+            atom: PropertyAtom {
+                ty: TypeExpr::Primitive(ty),
+                is_array: false,
+                constraints,
+                array_constraints: vec![],
+                description: None,
+            },
+        }
+    }
+
+    fn frontmatter(pairs: &[(&str, Value)]) -> Value {
+        let mut map = serde_json::Map::new();
+        for (k, v) in pairs {
+            map.insert(k.to_string(), v.clone());
+        }
+        Value::Object(map)
+    }
+
+    // ── combinators ──────────────────────────────────────────────────────
+
+    #[test]
+    fn all_requires_every_child() {
+        let expr = MatchExpr::All(vec![
+            prop("a", SimplifiedType::String, vec![Constraint::Required]),
+            prop("b", SimplifiedType::String, vec![]),
+        ]);
+        let fm = frontmatter(&[("a", json!("x")), ("b", json!("y"))]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+        // `a` is required but absent → all fails.
+        let fm = frontmatter(&[("b", json!("y"))]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn group_needs_one_child() {
+        let expr = MatchExpr::Group(vec![
+            prop("a", SimplifiedType::String, vec![Constraint::Required]),
+            prop("b", SimplifiedType::String, vec![Constraint::Required]),
+        ]);
+        // `a` present but type-contradicts → defeats; `b` absent → required
+        // gate fails → the group fails.
+        let fm = frontmatter(&[("a", json!(42))]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+        let fm = frontmatter(&[("b", json!("y"))]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn none_inverts() {
+        let expr = MatchExpr::None(vec![
+            prop("a", SimplifiedType::String, vec![Constraint::Required]),
+        ]);
+        // `a` present → child holds → none fails.
+        let fm = frontmatter(&[("a", json!("x"))]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+        // `a` absent → required gate fails → child does not hold → none holds.
+        let fm = frontmatter(&[]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn guard_in_none_does_not_forbid_absence() {
+        // A guard inside `none` holds when absent, so `none:[guard]` forbids
+        // the key from being absent-as-conforming. Use `required` to express
+        // "forbid presence".
+        let expr = MatchExpr::None(vec![
+            prop("a", SimplifiedType::String, vec![]),
+        ]);
+        // `a` present + conforms → child holds → none fails.
+        let fm = frontmatter(&[("a", json!("x"))]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+        // `a` absent → guard holds → child holds → none fails.
+        let fm = frontmatter(&[]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn min_match_n_of_m() {
+        let expr = MatchExpr::MinMatch {
+            count: 2,
+            of: vec![
+                prop("a", SimplifiedType::String, vec![Constraint::Required]),
+                prop("b", SimplifiedType::String, vec![Constraint::Required]),
+                prop("c", SimplifiedType::String, vec![Constraint::Required]),
+            ],
+        };
+        let fm = frontmatter(&[("a", json!("x")), ("b", json!("y"))]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+        let fm = frontmatter(&[("a", json!("x"))]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn free_nesting() {
+        let expr = MatchExpr::All(vec![MatchExpr::Group(vec![
+            MatchExpr::None(vec![prop("kind", SimplifiedType::String, vec![])]),
+            prop("tag", SimplifiedType::String, vec![Constraint::Required]),
+        ])]);
+        let fm = frontmatter(&[("tag", json!("x"))]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    // ── guard vs gate ────────────────────────────────────────────────────
+
+    #[test]
+    fn guard_absent_passes() {
+        let expr = prop("maybe", SimplifiedType::String, vec![]);
+        let fm = frontmatter(&[]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn guard_present_contradiction_defeats() {
+        let expr = prop("maybe", SimplifiedType::String, vec![]);
+        let fm = frontmatter(&[("maybe", json!(42))]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn gate_required_absent_defeats() {
+        let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
+        let fm = frontmatter(&[]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn gate_required_present_conforms() {
+        let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
+        let fm = frontmatter(&[("must", json!("hi"))]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn null_treated_as_absent() {
+        let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
+        let fm = frontmatter(&[("must", Value::Null)]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+
+        let guard = prop("maybe", SimplifiedType::String, vec![]);
+        assert!(matches(&guard, &fm, &PathSubject::detached()));
+    }
+
+    /// Loads `conditions` through the trigger grammar, as a trigger file's
+    /// `match:` is loaded, so load-time match safety is exercised too.
+    fn loaded(conditions: &str) -> crate::triggers::grammar::MatchConditions {
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(conditions).expect("yaml");
+        crate::triggers::grammar::parse_match_conditions(&yaml)
+            .unwrap_or_else(|error| panic!("`{conditions}` loads: {error}"))
+    }
+
+    #[test]
+    fn non_null_guard_passes_when_absent_and_defeats_on_null() {
+        let conditions = loaded("title: string(non-null)");
+        let detached = PathSubject::detached();
+        assert!(conditions.matches(&frontmatter(&[]), &detached));
+        assert!(conditions.matches(&frontmatter(&[("title", json!("x"))]), &detached));
+        assert!(!conditions.matches(&frontmatter(&[("title", Value::Null)]), &detached));
+        assert!(!conditions.matches(&frontmatter(&[("title", json!(1))]), &detached));
+        let nested = loaded("meta: '{ title: string(non-null) }'");
+        assert!(nested.matches(&frontmatter(&[("meta", json!({}))]), &detached));
+        assert!(!nested.matches(&frontmatter(&[("meta", json!({ "title": null }))]), &detached));
+    }
+
+    #[test]
+    fn declaration_options_judge_a_matched_declaration() {
+        let detached = PathSubject::detached();
+        let mapping = loaded("declares: schema(mapping; required)");
+        assert!(mapping.matches(&frontmatter(&[("declares", json!({ "title": "string" }))]), &detached));
+        assert!(!mapping.matches(&frontmatter(&[("declares", json!("./a.yaml"))]), &detached));
+        let forms = loaded("kind: type-definition(forms(literal); required)");
+        assert!(forms.matches(&frontmatter(&[("kind", json!("literal(a)"))]), &detached));
+        assert!(!forms.matches(&frontmatter(&[("kind", json!("enum(a, b)"))]), &detached));
+        let plain = loaded("kind: type-definition(required)");
+        assert!(plain.matches(&frontmatter(&[("kind", json!("enum(a, b)"))]), &detached), "control");
+    }
+
+    /// A quoted bracket list is the union of its items, with or without
+    /// declaration options, as the lowered keyword judges it.
+    #[test]
+    fn a_quoted_bracket_list_is_a_type_definition_union() {
+        let detached = PathSubject::detached();
+        let plain = loaded("kind: type-definition(required)");
+        assert!(plain.matches(&frontmatter(&[("kind", json!("[string, number]"))]), &detached));
+        assert!(!plain.matches(&frontmatter(&[("kind", json!("[string,"))]), &detached));
+        let container = loaded("kind: type-definition(container; required)");
+        assert!(!container.matches(&frontmatter(&[("kind", json!("[string, number]"))]), &detached));
+        assert!(container.matches(&frontmatter(&[("kind", json!("['string[]', null]"))]), &detached));
+    }
+
+    // ── value predicates ─────────────────────────────────────────────────
+
+    #[test]
+    fn enum_predicate() {
+        let expr = MatchExpr::Property {
+            name: "kind".into(),
+            atom: PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::Enum),
+                is_array: false,
+                constraints: vec![Constraint::Members(vec!["prompt".into(), "schema".into()])],
+                array_constraints: vec![],
+                description: None,
+            },
+        };
+        let fm = frontmatter(&[("kind", json!("prompt"))]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+        let fm = frontmatter(&[("kind", json!("other"))]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    #[test]
+    fn pattern_predicate() {
+        let expr = prop(
+            "title",
+            SimplifiedType::String,
+            vec![Constraint::Pattern("^Hello".into())],
+        );
+        let fm = frontmatter(&[("title", json!("Hello world"))]);
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
+        let fm = frontmatter(&[("title", json!("Goodbye"))]);
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
+    }
+
+    // ── $path ────────────────────────────────────────────────────────────
+
+    fn path_expr(patterns: &[&str]) -> MatchExpr {
+        MatchExpr::Path(PathGlobs::new(patterns.iter().map(|p| p.to_string()).collect()).unwrap())
+    }
+
+    /// A repository root and a context for a document inside it.
+    #[cfg(feature = "file")]
+    fn repo() -> (tempfile::TempDir, FileResolutionContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = FileResolutionContext::from_snapshot(dir.path(), None, std::collections::HashMap::new())
+            .with_repository_root(dir.path());
+        (dir, ctx)
+    }
+
+    #[cfg(feature = "file")]
+    fn path_matches(expr: &MatchExpr, ctx: &FileResolutionContext, document: &Path) -> bool {
+        let doc_ctx = ctx.for_cwd(document.parent().unwrap());
+        matches(expr, &json!({}), &PathSubject::new(document, &doc_ctx).with_pattern_cwd(ctx.cwd()))
+    }
+
+    #[test]
+    #[cfg(feature = "file")]
+    fn path_bare_basename_matches_any_dir() {
+        let (dir, ctx) = repo();
+        let expr = path_expr(&["SKILL.md"]);
+        assert!(path_matches(&expr, &ctx, &dir.path().join("docs/SKILL.md")));
+        assert!(path_matches(&expr, &ctx, &dir.path().join("SKILL.md")));
+        assert!(!path_matches(&expr, &ctx, &dir.path().join("docs/OTHER.md")));
+    }
+
+    #[test]
+    #[cfg(feature = "file")]
+    fn path_glob_with_separator() {
+        let (dir, ctx) = repo();
+        let expr = path_expr(&["prompts/**/*.md"]);
+        assert!(path_matches(&expr, &ctx, &dir.path().join("prompts/foo/bar.md")));
+        assert!(!path_matches(&expr, &ctx, &dir.path().join("docs/foo.md")));
+    }
+
+    #[test]
+    #[cfg(feature = "file")]
+    fn path_negation() {
+        let (dir, ctx) = repo();
+        let expr = path_expr(&["**/*.md", "!**/_*.md"]);
+        assert!(path_matches(&expr, &ctx, &dir.path().join("docs/foo.md")));
+        assert!(!path_matches(&expr, &ctx, &dir.path().join("docs/_draft.md")));
+    }
+
+    #[test]
+    #[cfg(feature = "file")]
+    fn path_case_sensitive() {
+        let (dir, ctx) = repo();
+        let expr = path_expr(&["SKILL.md"]);
+        assert!(path_matches(&expr, &ctx, &dir.path().join("dir/SKILL.md")));
+        assert!(!path_matches(&expr, &ctx, &dir.path().join("dir/skill.md")));
+    }
+
+    #[test]
+    fn path_without_a_document_never_matches() {
+        let expr = path_expr(&["**"]);
+        assert!(!matches(&expr, &json!({}), &PathSubject::detached()));
+    }
+
+    // ── first_defeat ─────────────────────────────────────────────────────
+
+    #[test]
+    fn first_defeat_describes_missing_required() {
+        let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
+        let defeat = first_defeat(&expr, &frontmatter(&[]), &PathSubject::detached());
+        assert!(defeat.as_deref().unwrap().contains("required"));
+    }
+
+    // ── literal / expression discriminants ───────────────────────────────
+
+    #[test]
+    fn literal_matches_typed_equality() {
+        // `kind: literal(spec)` behaves as a value-equality discriminant.
+        let expr = prop(
+            "kind",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!("spec"))],
+        );
+        assert!(matches(&expr, &frontmatter(&[("kind", json!("spec"))]), &PathSubject::detached()));
+        assert!(!matches(&expr, &frontmatter(&[("kind", json!("other"))]), &PathSubject::detached()));
+    }
+
+    #[test]
+    fn literal_number_equality_is_type_sensitive() {
+        // `version: literal(2)` (number) must not match the string `'2'`.
+        let expr = prop(
+            "version",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!(2))],
+        );
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2))]), &PathSubject::detached()));
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2.0))]), &PathSubject::detached()));
+        assert!(!matches(&expr, &frontmatter(&[("version", json!("2"))]), &PathSubject::detached()));
+    }
+
+    #[test]
+    fn literal_boolean_equality() {
+        let expr = prop(
+            "archived",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!(false))],
+        );
+        assert!(matches(&expr, &frontmatter(&[("archived", json!(false))]), &PathSubject::detached()));
+        assert!(!matches(&expr, &frontmatter(&[("archived", json!(true))]), &PathSubject::detached()));
+        // Type-sensitive: the string "false" is not the boolean literal.
+        assert!(!matches(&expr, &frontmatter(&[("archived", json!("false"))]), &PathSubject::detached()));
+    }
+
+    #[test]
+    fn optional_literal_guard_passes_when_absent() {
+        // A bare (non-required) literal is a guard: absence holds vacuously.
+        let expr = prop(
+            "kind",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!("spec"))],
+        );
+        assert!(matches(&expr, &frontmatter(&[]), &PathSubject::detached()));
+        // Present-but-wrong still defeats.
+        assert!(!matches(&expr, &frontmatter(&[("kind", json!("plan"))]), &PathSubject::detached()));
+    }
+
+    #[test]
+    fn literal_number_matches_float_encoded_equivalent() {
+        // AC7 regression: an integer literal still matches its float encoding for
+        // small values (`literal(2)` accepts `2.0`).
+        let expr = prop(
+            "version",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!(2))],
+        );
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2.0))]), &PathSubject::detached()));
+    }
+
+    #[test]
+    fn literal_large_integer_rejects_f64_neighbor() {
+        // Boundary integers past f64's 2^53 exact range: 2^53+1, i64::MAX,
+        // i64::MAX + 1 (a u64), and u64::MAX. Each neighbor collides with the
+        // literal under f64 rounding but must be rejected by exact comparison.
+        let cases: &[(Value, Value)] = &[
+            (json!(9007199254740993_u64), json!(9007199254740992_u64)),
+            (json!(9223372036854775807_u64), json!(9223372036854775806_u64)),
+            (json!(9223372036854775808_u64), json!(9223372036854775807_u64)),
+            (json!(18446744073709551615_u64), json!(18446744073709551614_u64)),
+        ];
+        for (lit, neighbor) in cases {
+            let expr = prop(
+                "version",
+                SimplifiedType::Literal,
+                vec![Constraint::LiteralValue(lit.clone())],
+            );
+            assert!(
+                matches(&expr, &frontmatter(&[("version", lit.clone())]), &PathSubject::detached()),
+                "literal({lit}) must accept {lit}"
+            );
+            assert!(
+                !matches(&expr, &frontmatter(&[("version", neighbor.clone())]), &PathSubject::detached()),
+                "literal({lit}) must reject f64-colliding neighbor {neighbor}"
+            );
+        }
+    }
+
+    #[test]
+    fn expression_is_string_shaped_like_yaml_json() {
+        // `expression` mirrors the content-format string types in triggers: any
+        // string is shape-compatible; a non-string defeats.
+        let expr = prop("when", SimplifiedType::Expression, vec![]);
+        assert!(matches(&expr, &frontmatter(&[("when", json!("is_agent()"))]), &PathSubject::detached()));
+        assert!(!matches(&expr, &frontmatter(&[("when", json!(3))]), &PathSubject::detached()));
+    }
+
+    #[test]
+    fn presence_follows_the_shared_effective_calculation() {
+        let detached = PathSubject::detached();
+        // `unknown(required)` and `null(required)` are satisfied by absence.
+        for ty in [SimplifiedType::Unknown, SimplifiedType::Null] {
+            let expr = prop("p", ty, vec![Constraint::Required]);
+            assert!(matches(&expr, &frontmatter(&[]), &detached), "{ty:?} absent");
+            assert!(matches(&expr, &frontmatter(&[("p", Value::Null)]), &detached), "{ty:?} null");
+        }
+        // A `required` written after `[]` is a gate; a present non-list fails.
+        let steps = MatchExpr::Property {
+            name: "steps".into(),
+            atom: PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::Unknown),
+                is_array: true,
+                constraints: vec![],
+                array_constraints: vec![Constraint::Required],
+                description: None,
+            },
+        };
+        assert!(matches(&steps, &frontmatter(&[("steps", json!([]))]), &detached));
+        assert!(matches(&steps, &frontmatter(&[("steps", json!([1, "a", null]))]), &detached));
+        for value in [Value::Null, json!("oops"), json!({ "a": 1 }), json!(5)] {
+            assert!(!matches(&steps, &frontmatter(&[("steps", value.clone())]), &detached), "{value}");
+        }
+        assert!(!matches(&steps, &frontmatter(&[]), &detached), "absent");
+        assert_eq!(
+            first_defeat(&steps, &frontmatter(&[]), &detached).as_deref(),
+            Some("`steps` is required but absent")
+        );
+    }
+}
+

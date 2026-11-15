@@ -1,0 +1,34 @@
+{
+  "about": "One permission fixture decided by every consumer: md's compose pre-flight and slot gate (darkmatter/lib/tests/l1/permission_parity.rs), Claudine's preparation (claudine/lib/tests/l1/shell_permission_parity.rs), and DMLS's passive classification (darkmatter/dmls/tests/l1/shell_permission_classification.rs). Each test writes `user_permissions` (plus a `network` line) to a temporary home's `.darkmatter.yaml` and `home_files` below that home. A decision is `preapproved` (runs without asking), `approval-required` (nothing approves it and nothing may ask), or `refused` (the built-in blacklist, whatever is approved). A command row with `command` is composed as `::shell <command>`; a row with `document` only is composed as written. DMLS classifies every row by its hover on the document's shell command, typed with the document's schema.",
+  "user_permissions": "permissions:\n  file-read:\n    - \"~/data/*.yaml\"\n    - \"!~/data/secret.yaml\"\n  shell-commands:\n    - prefix echo\n    - prefix chmod\n    - template git --version {{ string }}\n    - \"!exact echo secret\"\n    - \"!template echo --quiet {{ string }}\"\n",
+  "home_files": {
+    "data/os.yaml": "- macOS\n- Linux\n",
+    "data/secret.yaml": "- macOS\n- Linux\n",
+    "elsewhere/os.yaml": "- macOS\n- Linux\n"
+  },
+  "commands": [
+    { "name": "a prefix allow", "command": "echo hello", "decision": "preapproved" },
+    { "name": "a chain with an unlisted segment", "command": "echo hello && cat notes.md", "decision": "approval-required" },
+    { "name": "an exclusion over a prefix allow", "command": "echo secret", "decision": "approval-required" },
+    { "name": "no rule", "command": "cat notes.md", "decision": "approval-required" },
+    { "name": "the built-in blacklist over a prefix allow", "command": "chmod 600 notes.md", "decision": "refused" },
+    { "name": "the built-in blacklist in one segment of an allowed chain", "command": "echo hello && chmod 600 notes.md", "decision": "refused" },
+    { "name": "a template rule approves its shape", "document": "---\nword: hello\n---\n::shell git --version {{ word }}\n", "decision": "preapproved" },
+    { "name": "a template rule never approves a literal", "command": "git --version hello", "decision": "approval-required" },
+    { "name": "a template rule approves a declared string's shape", "document": "---\n$schema:\n  title: string\ntitle: hello\n---\n::shell git --version {{ title }}\n", "decision": "preapproved" },
+    { "name": "a template chain with an unlisted segment", "document": "---\nword: hello\n---\n::shell git --version {{ word }} && cat notes.md\n", "decision": "approval-required" },
+    { "name": "a template exclusion over a prefix allow, literal", "command": "echo --quiet hi", "decision": "approval-required" },
+    { "name": "a template exclusion over a prefix allow, by shape", "document": "---\nword: hello\n---\n::shell echo --quiet {{ word }}\n", "decision": "approval-required" }
+  ],
+  "file_reads": [
+    { "name": "a home entry", "target": "~/data/os.yaml", "decision": "preapproved" },
+    { "name": "an exclusion over a home entry", "target": "~/data/secret.yaml", "decision": "approval-required" },
+    { "name": "no entry", "target": "~/elsewhere/os.yaml", "decision": "approval-required" }
+  ],
+  "url_reads": [
+    { "name": "network deny", "network": "deny", "allow_hosts": [], "decision": "approval-required" },
+    { "name": "network allow", "network": "allow", "allow_hosts": [], "decision": "preapproved" },
+    { "name": "the exact host allowed for the run", "network": "deny", "allow_hosts": ["127.0.0.1"], "decision": "preapproved" },
+    { "name": "another host allowed for the run", "network": "deny", "allow_hosts": ["localhost"], "decision": "approval-required" }
+  ]
+}

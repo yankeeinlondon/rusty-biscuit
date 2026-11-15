@@ -290,65 +290,39 @@ fn interpolation_candidates(
     lower_candidates(expressions::completion_candidates(partial, frontmatter_keys))
 }
 
-/// The host catalogs in the document's schema roots; none without a
-/// resolution context. A catalog that fails to load contributes no globals
-/// here; [`diagnostics`] reports it ([`host_catalog_diagnostics`]).
-pub(crate) fn host_catalogs(ctx: &DocumentContext) -> Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog> {
-    host_catalog_results(ctx).0
+/// The host global catalogs of the document's selected host view
+/// ([`DocumentContext::host_view`]); none for an `md` document. A legacy
+/// catalog that failed to load contributes no globals here; [`diagnostics`]
+/// reports it ([`host_catalog_diagnostics`]).
+pub(crate) fn host_catalogs(ctx: &DocumentContext) -> HostCatalogs {
+    HostCatalogs(ctx.host_view())
 }
 
-/// The host catalogs in the document's schema roots that loaded, and the
-/// load failures of the others.
-fn host_catalog_results(
-    ctx: &DocumentContext,
-) -> (
-    Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
-    Vec<darkmatter::markdown::schemas::catalog::CatalogError>,
-) {
-    let mut loaded = Vec::new();
-    let mut failed = Vec::new();
-    if let Ok(context) = ctx.file_context() {
-        for result in darkmatter::markdown::schemas::catalog::host_catalogs(context) {
-            match result {
-                Ok(catalog) => loaded.push(catalog),
-                Err(error) => failed.push(error),
-            }
-        }
+/// The selected view's host global catalogs, borrowed as a slice.
+pub(crate) struct HostCatalogs(std::sync::Arc<crate::overlay::hosts::HostView>);
+
+impl std::ops::Deref for HostCatalogs {
+    type Target = [darkmatter::markdown::schemas::catalog::GlobalCatalog];
+
+    fn deref(&self) -> &Self::Target {
+        self.0.catalogs()
     }
-    (loaded, failed)
 }
 
-/// The analysis-only host function sets of the function catalogs in the
-/// document's schema roots
-/// ([`darkmatter::markdown::schemas::catalog::host_function_catalogs`]), and
-/// the load failures of the others; none without a resolution context.
-fn host_function_results(
-    ctx: &DocumentContext,
-) -> (
-    Vec<darkmatter::markdown::compose::expression::HostFunctions>,
-    Vec<darkmatter::markdown::schemas::catalog::HostFunctionCatalogError>,
-) {
-    let mut loaded = Vec::new();
-    let mut failed = Vec::new();
-    if let Ok(context) = ctx.file_context() {
-        for result in darkmatter::markdown::schemas::catalog::host_function_catalogs(context) {
-            match result {
-                Ok(functions) => loaded.push(functions),
-                Err(error) => failed.push(error),
-            }
-        }
-    }
-    (loaded, failed)
-}
-
-/// Makes the document's host functions visible to Darkmatter's analysis on
-/// this thread while the guards live, so its call checks type, narrow, and
-/// report host calls by the document's own schema roots. Each set has no
-/// handler; nothing is ever invoked. An earlier schema root wins a name.
+/// Makes the document's host functions (its selected view's) visible to
+/// Darkmatter's analysis on this thread while the guards live, so its call
+/// checks type, narrow, and report host calls. Each set has no handler;
+/// nothing is ever invoked. An earlier set wins a name.
 pub(crate) fn enter_host_functions(
     ctx: &DocumentContext,
 ) -> Vec<darkmatter::markdown::compose::expression::HostFunctionScope> {
-    host_function_results(ctx).0.iter().rev().map(|functions| functions.enter()).collect()
+    enter_view_functions(&ctx.host_view())
+}
+
+fn enter_view_functions(
+    view: &crate::overlay::hosts::HostView,
+) -> Vec<darkmatter::markdown::compose::expression::HostFunctionScope> {
+    view.functions().iter().rev().map(|functions| functions.enter()).collect()
 }
 
 /// One `dm.schema.host_catalog` warning per host function catalog that
@@ -393,7 +367,7 @@ fn host_catalog_diagnostics(
 /// frontmatter, when no other catalog's could: the document's lifecycle
 /// stacks are then analyzed as the `md` host's, so a host-only event, verb,
 /// or rename is not seen. The message is the artifact's reason.
-/// Without a supplied `host`, the document's is discovered.
+/// Without a supplied `host`, the document's selected one is read.
 fn lifecycle_host_diagnostics(
     ctx: &DocumentContext,
     host: Option<&crate::overlay::event_views::LifecycleHost>,
@@ -495,7 +469,7 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     if directive.kind == DirectiveKind::Shell
         && let Some(command) = &directive.target
     {
-        lines.push(shell_verdict_markdown(&command.value, ctx));
+        lines.push(shell_verdict_markdown(shell::parse_directive_command(&command.value), Some(command.span.start), ctx));
         if let Some(line) = shell_hole_type_line(ctx, offset) {
             lines.push(format!("\n{line}"));
             // The hole's type is read from the document's schema.
@@ -659,7 +633,7 @@ fn frontmatter_shell_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover
     }
     let command = &ctx.text[shift_span(&parsed.inner_span, value_span.start)];
     let mut markdown = format!("**Shell value**\n\n`{}`", command.trim());
-    markdown.push_str(&shell_verdict_markdown(command, ctx));
+    markdown.push_str(&shell_verdict_markdown(shell::parse_command(command), None, ctx));
     Some(markup_hover(ctx, value_span, markdown))
 }
 
@@ -672,23 +646,30 @@ fn shell_block_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         .into_iter()
         .find(|(_, span)| span.start <= offset && offset <= span.end)?;
     let mut markdown = format!("**Shell command**\n\n`{command}`");
-    markdown.push_str(&shell_verdict_markdown(&command, ctx));
+    markdown.push_str(&shell_verdict_markdown(shell::parse_command(&command), Some(span.start), ctx));
     if let Some(line) = shell_hole_type_line(ctx, offset) {
         markdown.push_str(&format!("\n\n{line}"));
     }
     Some(markup_hover(ctx, span, markdown))
 }
 
-/// A Markdown line describing a command's policy verdict.
-fn shell_verdict_markdown(command: &str, ctx: &DocumentContext) -> String {
-    let Some(parsed) = shell::parse_command(command) else {
+/// A Markdown line describing the policy verdict of a command at body
+/// offset `site` (`None` for frontmatter), typed with that site's scope.
+fn shell_verdict_markdown(parsed: Option<shell::ParsedCommand>, site: Option<usize>, ctx: &DocumentContext) -> String {
+    let Some(parsed) = parsed else {
         return String::new();
     };
-    let whitelist = shell::load_whitelist(ctx.config);
-    match shell::verdict(&parsed, whitelist.as_ref()) {
-        PolicyVerdict::Approved => "\n\nPolicy: ✅ approved (whitelisted).".to_string(),
+    let permissions = match ctx.file_context() {
+        Ok(context) => shell::load_permissions(context),
+        Err(failure) => Err(failure.to_string()),
+    };
+    match with_site_scope(ctx, site, |scope| shell::verdict(&parsed, scope, &permissions)) {
+        PolicyVerdict::Approved => "\n\nPolicy: ✅ approved (pre-approved by `permissions.shell-commands`).".to_string(),
         PolicyVerdict::Denied(reason) => format!("\n\nPolicy: ⛔ denied — {reason}."),
-        PolicyVerdict::Unknown => "\n\nPolicy: ❔ unknown (compose would prompt for approval).".to_string(),
+        PolicyVerdict::Unknown => match &permissions {
+            Ok(_) => "\n\nPolicy: ❔ unknown (compose would prompt for approval).".to_string(),
+            Err(error) => format!("\n\nPolicy: ❔ unknown (the permissions do not load: {error})."),
+        },
     }
 }
 
@@ -820,7 +801,7 @@ pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
 
 // ── Diagnostics ─────────────────────────────────────────────────────────────
 
-/// All Layer-3 DSL diagnostics for the document, discovering its lifecycle
+/// All Layer-3 DSL diagnostics for the document, reading its lifecycle
 /// host for the incomplete-analysis check.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     diagnostics_under(ctx, None)
@@ -834,11 +815,11 @@ pub fn diagnostics_with_host(ctx: &DocumentContext, host: &crate::overlay::event
 
 fn diagnostics_under(ctx: &DocumentContext, host: Option<&crate::overlay::event_views::LifecycleHost>) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    let (functions, failed_functions) = host_function_results(ctx);
-    let _host_functions: Vec<_> = functions.iter().rev().map(|functions| functions.enter()).collect();
-    let (catalogs, failed_catalogs) = host_catalog_results(ctx);
-    host_catalog_diagnostics(&failed_catalogs, &mut out);
-    host_function_catalog_diagnostics(&failed_functions, &mut out);
+    let view = ctx.host_view();
+    let _host_functions = enter_view_functions(&view);
+    host_catalog_diagnostics(view.catalog_errors(), &mut out);
+    host_function_catalog_diagnostics(view.function_errors(), &mut out);
+    let catalogs = HostCatalogs(view);
     lifecycle_host_diagnostics(ctx, host, &mut out);
     unknown_directive_diagnostics(ctx, &mut out);
     malformed_option_diagnostics(ctx, &mut out);
@@ -1078,7 +1059,7 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 /// the enclosing `::block when` guards.
 fn expression_diagnostics(
     ctx: &DocumentContext,
-    catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+    catalogs: HostCatalogs,
     out: &mut Vec<Diagnostic>,
 ) {
     let body_base = body_base(ctx.text);
@@ -1206,7 +1187,7 @@ fn expression_diagnostics(
 ///
 /// [`BindingView`]: darkmatter::markdown::compose::expression::BindingView
 pub(crate) struct KnownRoots<'a> {
-    catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+    catalogs: HostCatalogs,
     ast: &'a crate::overlay::FrontmatterAst,
     shape: &'a simplified_schema::SchemaShape,
 }
@@ -1219,7 +1200,7 @@ impl<'a> KnownRoots<'a> {
     /// [`Self::for_document`] with the document's already-loaded host catalogs.
     fn with_catalogs(
         ctx: &DocumentContext<'a>,
-        catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+        catalogs: HostCatalogs,
     ) -> Option<Self> {
         let ast = ctx.overlay.and_then(|overlay| overlay.ast.as_ref())?;
         Some(Self { catalogs, ast, shape: frontmatter::known_shape(ctx) })
@@ -1325,11 +1306,10 @@ pub(crate) fn undeclared_property_diagnostic(
     }
 }
 
-/// Shell commands the built-in policy blacklist disallows (`::shell`,
+/// Shell commands the built-in blacklist disallows (`::shell`,
 /// `::shell-block` body lines, and frontmatter `$()`), and a frontmatter
 /// `$()` suffix the suffix grammar rejects.
 fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
-    let whitelist = shell::load_whitelist(ctx.config);
     for directive in directives::directives(ctx.text) {
         if directive.kind != DirectiveKind::Shell {
             continue;
@@ -1337,8 +1317,8 @@ fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         let Some(command) = directive.target else {
             continue;
         };
-        if let Some(parsed) = shell::parse_command(&command.value)
-            && let PolicyVerdict::Denied(reason) = shell::verdict(&parsed, whitelist.as_ref())
+        if let Some(parsed) = shell::parse_directive_command(&command.value)
+            && let Some(reason) = shell::builtin_refusal(&parsed)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(command.span.clone())
         {
             out.push(diagnostic(
@@ -1366,7 +1346,7 @@ fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         }
         let command = &ctx.text[shift_span(&parsed.inner_span, value_span.start)];
         if let Some(command) = shell::parse_command(command)
-            && let PolicyVerdict::Denied(reason) = shell::verdict(&command, whitelist.as_ref())
+            && let Some(reason) = shell::builtin_refusal(&command)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(value_span)
         {
             out.push(diagnostic(
@@ -1384,7 +1364,7 @@ fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     // `block_pairing_diagnostics`, so an unpaired block simply yields no lines.
     for (command, span) in shell_block_commands(ctx.text) {
         if let Some(parsed) = shell::parse_command(&command)
-            && let PolicyVerdict::Denied(reason) = shell::verdict(&parsed, whitelist.as_ref())
+            && let Some(reason) = shell::builtin_refusal(&parsed)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(span)
         {
             out.push(diagnostic(
@@ -2199,6 +2179,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
         let registry = ProviderRegistry::with_substrate();
 
@@ -2287,6 +2268,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
         let registry = ProviderRegistry::with_substrate();
         let hover_value = |literal: &str| {
@@ -2381,6 +2363,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &crate::context::test_support::resolution_for("/t.md"),
+            host: None,
         };
         let token_start = text.find("ctx.pa").unwrap();
         let item = text_edit_item(

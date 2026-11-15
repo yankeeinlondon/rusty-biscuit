@@ -1,7 +1,7 @@
 //! Messaging configuration types for outbound notifications.
 //!
 //! This module defines the configuration structures that users write in their
-//! `config.json` files to configure messaging routes (Discord, Slack, Signal, WhatsApp).
+//! `config.yaml` files to configure messaging routes (Discord, Slack, Signal, WhatsApp).
 
 use crate::error::{ClaudineError, Result};
 use regex::Regex;

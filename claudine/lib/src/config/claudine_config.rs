@@ -1,8 +1,11 @@
 //! Top-level configuration type for the Claudine tool.
 //!
-//! This module defines [`ClaudineConfig`], the canonical flat configuration
-//! schema written to `~/.claudine/config.json`. It replaces the old
-//! per-provider config format with a single cross-provider event map.
+//! This module defines [`ClaudineConfig`], the user file
+//! `~/.claudine/config.yaml`, and [`RepoOverrideConfig`], the repository file
+//! `{repo-root}/.claudine/config.yaml`. Their shape and the user file's
+//! defaults are the shipped schema's ([`super::schema`]): a file is judged
+//! and its defaults put in place ([`super::load`]) before serde reads it, so
+//! the serde attributes below never decide a file's defaults.
 
 use std::collections::HashMap;
 
@@ -178,34 +181,32 @@ impl ProviderModelOverride {
     }
 }
 
-/// Top-level configuration for the Claudine tool.
+/// Top-level configuration for the Claudine tool: `~/.claudine/config.yaml`.
 ///
-/// Written to `~/.claudine/config.json` (JSON5 is also accepted).
+/// Every field without `Option` is required here: the schema's defaults are
+/// in place before serde reads a file ([`Self::from_user_document`]), and
+/// [`Default`] is the schema's projection of an empty file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClaudineConfig {
     /// Text-to-speech configuration; see [`TtsValue`] for what each shape
     /// means for hook speech, lifecycle playback, and pre-warm.
-    #[serde(default)]
     pub tts: TtsValue,
 
     /// Messaging platform configuration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub messenger: Option<ClaudineMessengerConfig>,
 
     /// Whether the logging service is enabled.
-    #[serde(default = "default_logging")]
     pub logging: bool,
 
     /// Protect service configuration.
     ///
     /// `true` enables protect with defaults; `false` disables it.
     /// An object allows fine-grained rule control.
-    #[serde(default = "default_protect")]
     pub protect: ProtectConfig,
 
     /// Actions bound to canonical Claudine events (cross-provider).
-    #[serde(default)]
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
 
     /// Optional per-event matcher strings.
@@ -217,7 +218,7 @@ pub struct ClaudineConfig {
     /// neither produce a warning and the binding fires unconditionally.
     ///
     /// [`RuntimeMatcher`]: crate::dispatch::matcher::RuntimeMatcher
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub matchers: HashMap<AgenticEvent, String>,
 
     /// Favorite agent provider for lazy composition operations.
@@ -225,15 +226,11 @@ pub struct ClaudineConfig {
     /// Stored on disk as `preferred_agent` (with `favorite_agent` accepted
     /// as a serde alias on read). When absent, composition resolution
     /// simply has one fewer signal to consider — it is never an error.
-    #[serde(
-        default,
-        alias = "favorite_agent",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(alias = "favorite_agent", skip_serializing_if = "Option::is_none")]
     pub preferred_agent: Option<Provider>,
 
     /// The canonical provider for this scope.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub canonical_provider: Option<Provider>,
 
     /// Per-provider model catalog overrides.
@@ -241,11 +238,10 @@ pub struct ClaudineConfig {
     /// Augments or replaces the dynamically fetched model catalog used to
     /// validate frontmatter `model` hints during composition resolution.
     /// User-scope only; repo configs may not declare this field.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub models: HashMap<Provider, ProviderModelOverride>,
 
     /// Default sound effects for outcome categories.
-    #[serde(default)]
     pub default_sounds: DefaultSounds,
 
     /// Whether to prompt for missing required schema properties.
@@ -256,7 +252,7 @@ pub struct ClaudineConfig {
     /// `MissingProperties` error instead.
     ///
     /// User-scope only; repo configs may not declare this field.
-    #[serde(default = "default_prompt_for_missing", skip_serializing_if = "is_true")]
+    #[serde(skip_serializing_if = "is_true")]
     pub prompt_for_missing: bool,
 
     /// Opt-in harvest of unmatched error/warning-class signal payloads.
@@ -269,7 +265,7 @@ pub struct ClaudineConfig {
     /// only for v1 — deliberately not surfaced in the config TUI.
     ///
     /// User-scope only; repo configs may not declare this field.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(skip_serializing_if = "is_false")]
     pub harvest_unmatched: bool,
 
     /// Exit-expression rules for the runaway-output guard (Cluster E).
@@ -283,7 +279,7 @@ pub struct ClaudineConfig {
     /// layer combines with this one per its own combine mode. The
     /// frontmatter layer is parsed from the composition document and
     /// participates in resolution at run time.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_expressions: Option<ExitExpressionsValue>,
 
     /// Scalar knobs for the repetition + volume guards (Cluster F).
@@ -291,21 +287,19 @@ pub struct ClaudineConfig {
     /// Follows last-writer precedence (frontmatter > repo > user >
     /// built-in) like `timeout` / `step_timeout` — there is no combine
     /// mode here, only the list-typed `exit_expressions` carries one.
-    #[serde(default, skip_serializing_if = "is_default_guard_settings")]
+    #[serde(skip_serializing_if = "is_default_guard_settings")]
     pub guard_settings: GuardSettings,
 
     /// Steering settings; `steering.automatic.enabled` turns automatic
-    /// repetition help off or on. An absent section inherits.
-    #[serde(default, skip_serializing_if = "SteeringConfig::is_unset")]
+    /// repetition help off or on.
+    #[serde(skip_serializing_if = "SteeringConfig::is_unset")]
     pub steering: SteeringConfig,
-}
 
-fn default_logging() -> bool {
-    true
-}
-
-fn default_prompt_for_missing() -> bool {
-    true
+    /// Darkmatter's `permissions` block (or a reference to the file holding
+    /// it), exactly as written. Darkmatter's imported type validates it and
+    /// Darkmatter interprets it; Claudine only keeps it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<serde_json::Value>,
 }
 
 fn is_true(value: &bool) -> bool {
@@ -314,10 +308,6 @@ fn is_true(value: &bool) -> bool {
 
 fn is_false(value: &bool) -> bool {
     !*value
-}
-
-fn default_protect() -> ProtectConfig {
-    ProtectConfig::default()
 }
 
 /// Skip-serializing helper for [`GuardSettings`]: omit the field when it
@@ -332,10 +322,12 @@ fn is_default_guard_settings(value: &GuardSettings) -> bool {
 
 /// Repo-scoped configuration override.
 ///
-/// A repo config file (`{repo}/.claudine/config.json`) only contains the
+/// A repo config file (`{repo}/.claudine/config.yaml`) only contains the
 /// fields that are allowed to differ per-repo. Unlike [`ClaudineConfig`],
-/// all fields are optional, so a repo file that contains only
-/// `{ "canonical_provider": "gemini" }` will deserialize successfully.
+/// every field is an override: absent inherits the user's value, so the
+/// schema inserts nothing here and the `#[serde(default)]`s below read an
+/// absent override as "no override", which is presence-sensitive and
+/// deliberate.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepoOverrideConfig {
@@ -387,6 +379,11 @@ pub struct RepoOverrideConfig {
     /// an absent one inherits it.
     #[serde(default, skip_serializing_if = "SteeringConfig::is_unset")]
     pub steering: SteeringConfig,
+
+    /// Darkmatter's repository `permissions` block, exactly as written; see
+    /// [`ClaudineConfig::permissions`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<serde_json::Value>,
 }
 
 impl RepoOverrideConfig {
@@ -398,6 +395,23 @@ impl RepoOverrideConfig {
             && self.exit_expressions.is_none()
             && self.guard_settings.is_none()
             && self.steering.is_unset()
+            && self.permissions.is_none()
+    }
+
+    /// Reads a whole repository document, judged by the repository schema.
+    /// Nothing is inserted: an absent override inherits.
+    ///
+    /// ## Errors
+    ///
+    /// [`ClaudineError::ConfigInvalid`] with each problem's JSON pointer.
+    pub fn from_repository_document(document: serde_json::Value) -> Result<Self> {
+        let effective = super::load::project_value(super::schema::ConfigScope::Repository, &document)?;
+        Self::from_effective(effective, None)
+    }
+
+    /// Reads a judged document's effective value.
+    pub(crate) fn from_effective(effective: serde_json::Value, file: Option<&std::path::Path>) -> Result<Self> {
+        serde_json::from_value(effective).map_err(|error| typed_read_failure(file, &error))
     }
 }
 
@@ -411,29 +425,39 @@ where
     Ok(Some(value))
 }
 
+/// The schema's projection of an empty user file.
 impl Default for ClaudineConfig {
     fn default() -> Self {
-        Self {
-            tts: TtsValue::default(),
-            messenger: None,
-            logging: true,
-            protect: ProtectConfig::default(),
-            actions: HashMap::new(),
-            matchers: HashMap::new(),
-            preferred_agent: None,
-            canonical_provider: None,
-            models: HashMap::new(),
-            default_sounds: DefaultSounds::default(),
-            prompt_for_missing: true,
-            harvest_unmatched: false,
-            exit_expressions: None,
-            guard_settings: GuardSettings::default(),
-            steering: SteeringConfig::default(),
-        }
+        Self::from_user_document(serde_json::Value::Object(serde_json::Map::new()))
+            .expect("the shipped schema's defaults read as a ClaudineConfig")
+    }
+}
+
+/// A judged document serde could not read: a defect of the schema or the
+/// types, reported against the file rather than panicking.
+fn typed_read_failure(file: Option<&std::path::Path>, error: &serde_json::Error) -> ClaudineError {
+    ClaudineError::ConfigInvalid {
+        problems: vec![super::load::ConfigProblem::whole(file, format!("the configuration cannot be read: {error}"))],
     }
 }
 
 impl ClaudineConfig {
+    /// Reads a whole user document: judged by the user schema, with its
+    /// defaults in place. Semantic checks are [`Self::validate`]'s.
+    ///
+    /// ## Errors
+    ///
+    /// [`ClaudineError::ConfigInvalid`] with each problem's JSON pointer.
+    pub fn from_user_document(document: serde_json::Value) -> Result<Self> {
+        let effective = super::load::project_value(super::schema::ConfigScope::User, &document)?;
+        Self::from_effective(effective, None)
+    }
+
+    /// Reads a judged document's effective value.
+    pub(crate) fn from_effective(effective: serde_json::Value, file: Option<&std::path::Path>) -> Result<Self> {
+        serde_json::from_value(effective).map_err(|error| typed_read_failure(file, &error))
+    }
+
     /// Validate the configuration for semantic correctness.
     ///
     /// Checks:

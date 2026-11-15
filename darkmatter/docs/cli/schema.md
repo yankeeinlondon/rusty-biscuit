@@ -49,7 +49,28 @@ parsed, or a schema cannot be loaded.
 A data output is one object whose `files` array has one record per file argument, in
 order. A failing run has `outcome: "failure"` and an empty run-level `diagnostics`:
 the problems stay in each file's record, and only a problem with the invocation
-itself is a run diagnostic. `-vv` timings are absent from data.
+itself is a run diagnostic. `-vv` timings are absent from data. A validated record whose
+verdict relied on the `default(...)` of an absent required property lists each one
+in `defaults`, as `{ "path": "greeting", "value": "hello", "schema_location": "/properties/greeting/default" }`
+(`schema_location` is the JSON Pointer of the `default` keyword in the lowered
+schema, and a `schema_file` is added when a schema file declares the default: a
+referenced schema file, a trigger file, or the file a `Name@file` import read the
+type from); the key is absent when there are none.
+
+A default is still checked with the rest of the value. When it fails a check that
+needs the file system, such as `doc: file(required; eager; default(./note.md))` with
+no `note.md`, the problem is the default's, not the document's: its record carries
+the same `default` object, its `line` and `column` are `null`, and its message ends
+by naming the default's schema location (and schema file). The formatted output
+adds a `hint:` line under the problem saying the same: repair the default where
+the schema declares it, or write the property in the document.
+
+```json
+{ "kind": "invalid", "property": null, "path": "/doc", "line": null, "column": null,
+  "message": "no existing file matched reference `./note.md` while resolving from `/work` (the value is the schema default at schema location `/properties/doc/default`)",
+  "default": { "path": "doc", "value": "./note.md", "schema_location": "/properties/doc/default" },
+  "arm_index": null, "description": null }
+```
 
 ```json
 {
@@ -100,9 +121,9 @@ it. Both go through the same read approval:
 - **A document** under the template is checked against the resolved schema. A
   `<prop>=<value>` assignment is converted by the resolved type, so `label=123` under a
   slot that returns `alphanumeric` arrives as the text `123`; when the template does not
-  resolve, the assignment is never judged and the check is unavailable. A data
-  file committed, unchanged, in the schema's repository is read without asking (the
-  [automatic grant](../topics/schemas/schema-slots.md#the-automatic-grant)). On a
+  resolve, the assignment is never judged and the check is unavailable. A file
+  your `permissions.file-read` pre-approves is read without asking (see
+  [How a file read is decided](../topics/schemas/schema-slots.md#how-a-file-read-is-decided)). On a
   terminal, every other read whose target is written in the slot is asked about in one
   batch, just before that document's schema resolves, with the numbered prompt
   `md compose` shows (see [Prompts](../topics/schemas/schema-slots.md#prompts)); a read
@@ -120,15 +141,20 @@ it. Both go through the same read approval:
   "message": "the schema's slots could not be resolved: …",
   "problems": [],
   "diagnostics": [{ "code": "dm.schema.slot_approval_required", "...": "..." }],
-  "grants_needed": [{ "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" }, "..."]
+  "grants_needed": [
+    { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "once" },
+    { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" }
+  ]
 }
 ```
 
-Adding `allow file /repo/claudine/docs/os.yaml` to `~/.config/darkmatter/schema-read-policy`
-grants the read in every later run; see
+Adding an entry that matches `/repo/claudine/docs/os.yaml` to `permissions.file-read`
+(for example `&claudine/docs/os.yaml` in your `~/.darkmatter.yaml`) approves the read in
+every later run, as choosing "Always allow this file" at the prompt does; see
 [What a slot may read](../topics/schemas/schema-slots.md#what-a-slot-may-read).
-`md schema validate` takes no `--allow host=HOST`, so a slot's URL read needs a
-grant here (see [Schema slot reads](./policy.md#schema-slot-reads)).
+`md schema validate` takes no `--allow host=HOST`, so a slot's URL read needs
+`permissions.network: allow` or an answer for this run here (see
+[Schema slot reads](./policy.md#schema-slot-reads)).
 
 ## `md schema detect`
 
@@ -183,8 +209,10 @@ with a warning or a failure wraps it, as `{ "outcome", "diagnostics", "value" }`
 ## `md schema triggers`
 
 Explains schema-trigger discovery for a document: the roots searched, in order,
-envelopes shadowed by a nearer root, triggers skipped as invalid, and which triggers
-matched. See [Schema Triggers](../topics/schemas/schema-triggers.md).
+envelopes shadowed by a nearer root, triggers skipped as invalid, the registered
+host that identifies the document, and which triggers matched. See
+[Schema Triggers](../topics/schemas/schema-triggers.md) and
+[Host Registration](../topics/host-registration.md).
 
 ```text
 $ md schema triggers notes.md
@@ -199,8 +227,24 @@ Shadowed envelopes:
 - none
 Skipped invalid triggers:
 - none
+Registered host:
+- none
 Triggers:
 - none
+```
+
+When a [registered host](../topics/host-registration.md) identifies the document,
+the "Registered host" section names it, its version, the manifest it was loaded
+from, and its content revision, then lists each of the host's triggers in manifest
+order. Those triggers layer below the schema roots' triggers:
+
+```text
+Registered host:
+- acme 1.2.0 (manifest /Users/me/.acme/darkmatter-host.yaml, revision 5b1c…)
+- /Users/me/.acme/schemas/widget.yaml — matched
+  - condition 1 — matched
+- /Users/me/.acme/schemas/gadget.yaml — not matched
+  - condition 1 — defeated: `gadget` is required but absent
 ```
 
 A trigger whose payload holds `{{ … }}` slots is listed with
@@ -216,7 +260,9 @@ Triggers:
 
 A document outside every repository fails with status 1. A data output has `file`,
 `roots`, `shadowed`, `skipped`, `triggers`, `outcome`, and `diagnostics` on every
-run; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).
+run, and `registered` (`host`, `version`, `manifest`, `revision`, and the host's
+`triggers`), which is `null` when no single registered host identifies the
+document; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).
 
 ## `md schema about`
 

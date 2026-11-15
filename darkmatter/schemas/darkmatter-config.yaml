@@ -1,0 +1,55 @@
+# Darkmatter's configuration files: the user file `~/.darkmatter.yaml`
+# (`user-config`) and the repository file `{repo-root}/.darkmatter.yaml`
+# (`repository-config`).
+#
+# This document is the one authority for their shape and defaults: Darkmatter,
+# DMLS, and Claudine read every default from here and hard-code none. Other
+# programs import the permissions block as `permissions@darkmatter:config`
+# (with `user-permissions` or `repository-permissions` for a scope's
+# defaults) and never declare it again.
+#
+# A list a user writes replaces its scope's default; an absent property keeps
+# it. Explicit `null` is invalid for every setting.
+kind: schema
+description: Darkmatter's user and repository configuration files, and the permissions block other programs import.
+types:
+    file-read-pattern: "string(pattern(\\S)) -> One `file-read` entry: a glob reference (`./*.yaml`, `&docs/**/*.md`, `~/notes/*.md`, `{{VAR}}/*.md`). Relative patterns are relative to the reading document, `&` is the repository root. A leading `!` excludes what it matches. Absolute paths are rejected; at repository scope `~/` and patterns leaving the repository are rejected too."
+    shell-command-rule: "string(pattern(\\S)) -> One `shell-commands` rule: `exact <command>`, `prefix <command>`, or `template <shape>`. A leading `!` excludes what it matches from pre-approval."
+    shell-command-rules: "shell-command-rule[](required; default([])) -> Shell commands that run without a prompt. Default: none, so every command prompts."
+    network-setting: "enum(allow, deny; required; default(deny)) -> Whether a schema slot or a composition may fetch URLs: `allow` permits every URL, `deny` none (`--allow host=HOST` still allows one host for one run)."
+    permissions-reference: "string(pattern(\\S)) -> A file reference, resolved from this file's directory, to another YAML file whose own `permissions` mapping holds the block (`~/.claudine/config.yaml`)."
+    manifest-reference: "string(pattern(\\S)) -> A file reference to a host registration manifest."
+    register: "manifest-reference[](required; default([])) -> Host registration manifests to load."
+
+    # The shared permissions shape. `file-read` has no default here: its
+    # default depends on the scope (`user-permissions`, `repository-permissions`).
+    permissions:
+        file-read: "file-read-pattern[](non-null) -> Files a schema slot may read without asking. Its default depends on the scope."
+        shell-commands: shell-command-rules
+        network: network-setting
+        $constraints: { closed: true }
+
+    user-permissions:
+        file-read: 'file-read-pattern[](required; default(["./*.txt", "./*.text", "./*.md", "./*.csv", "./*.tsv", "./*.json", "./*.json5", "./*.yaml", "./*.yml", "./*.toml"])) -> Files a schema slot may read without asking. Default: text formats beside the reading document.'
+        shell-commands: shell-command-rules
+        network: network-setting
+        $constraints: { closed: true }
+
+    repository-permissions:
+        file-read: 'file-read-pattern[](required; default(["&**/*.txt", "&**/*.text", "&**/*.md", "&**/*.csv", "&**/*.tsv", "&**/*.json", "&**/*.json5", "&**/*.yaml", "&**/*.yml", "&**/*.toml"])) -> Files a schema slot may read without asking. Default: text formats anywhere in the repository.'
+        shell-commands: shell-command-rules
+        network: network-setting
+        $constraints: { closed: true }
+
+    # A parent default is judged whole, without its children's defaults, so
+    # each `permissions` default spells out its scope's child defaults; a
+    # test keeps the two equal.
+    user-config:
+        permissions: 'user-permissions(required; default({"file-read": ["./*.txt", "./*.text", "./*.md", "./*.csv", "./*.tsv", "./*.json", "./*.json5", "./*.yaml", "./*.yml", "./*.toml"], "shell-commands": [], "network": "deny"})) | permissions-reference -> The permissions block, or a reference to another file that holds it.'
+        register: register
+        $constraints: { closed: true }
+
+    repository-config:
+        permissions: 'repository-permissions(required; default({"file-read": ["&**/*.txt", "&**/*.text", "&**/*.md", "&**/*.csv", "&**/*.tsv", "&**/*.json", "&**/*.json5", "&**/*.yaml", "&**/*.yml", "&**/*.toml"], "shell-commands": [], "network": "deny"})) | permissions-reference -> The permissions block, or a reference to another file that holds it.'
+        register: register
+        $constraints: { closed: true }

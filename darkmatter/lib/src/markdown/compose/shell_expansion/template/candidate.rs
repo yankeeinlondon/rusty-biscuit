@@ -251,8 +251,8 @@ impl ShellCandidate {
     }
 
     /// The session-cache key of this site's template approval.
-    pub fn template_key(&self, policy_root: Option<&std::path::Path>) -> Option<ApprovalKey> {
-        self.shape().map(|shape| ApprovalKey::template(policy_root, shape))
+    pub fn template_key(&self) -> Option<ApprovalKey> {
+        self.shape().map(ApprovalKey::template)
     }
 
     /// The command text for diagnostics: the authored text, or the resolved

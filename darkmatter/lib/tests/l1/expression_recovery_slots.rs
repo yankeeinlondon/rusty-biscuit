@@ -1,12 +1,16 @@
 //! `try` inside dynamic schema slots: the slot gate's refusals propagate, a
-//! missing in-repository file recovers without a grant, and a slot's class
-//! is the join over both operands.
+//! missing in-repository file recovers without an approval, and a slot's
+//! class is the join over both operands.
 //!
 //! Every case builds a miniature Git repository in a temp dir (`repo/`, with
 //! `schema.yaml` and a document naming it; a file outside the repository
-//! sits next to `repo/`), anchors its resolution context there with a temp
-//! home (so the user's real grant store is never read), and resolves the
-//! template through `DarkmatterSchemas` with a real `SlotSession`.
+//! sits next to `repo/`), anchors its resolution context there with the
+//! temp folder holding `repo/` as the home (so the user's real configuration
+//! is never read), and resolves the
+//! template through `DarkmatterSchemas` with a real `SlotSession`. The
+//! repository has no configuration, so its default `permissions.file-read`
+//! (`&**/*.yaml`) admits every YAML file in it, present or not; a file
+//! outside it needs an entry in the home's configuration.
 
 use std::collections::HashMap;
 use std::cell::RefCell;
@@ -26,7 +30,9 @@ use darkmatter::markdown::compose::{
     ComposeOptions, ComposeRequest, ComposeSource, DataRuntime, RequestSnapshot, ShellExpansionError,
 };
 use darkmatter::markdown::schemas::DarkmatterSchemas;
-use darkmatter::markdown::schemas::slots::grants::{SlotGrantDecision, SlotGrantRequest};
+use darkmatter::markdown::schemas::slots::grants::{
+    Grant, GrantDecision, GrantScope, GrantTarget, SlotGrantDecision, SlotGrantRequest,
+};
 use darkmatter::markdown::schemas::slots::{SessionMode, SlotSession};
 use serde_json::{Value, json};
 use simplified_schema::SchemaError;
@@ -47,7 +53,9 @@ struct Repo {
     /// The folder holding `repo/`; files here are outside the repository.
     outer: PathBuf,
     root: PathBuf,
-    home: tempfile::TempDir,
+    /// The home: the folder holding the repository, so a file outside the
+    /// repository is `~/<name>` to `permissions.file-read`.
+    home: PathBuf,
     /// The data runtime of the latest command; each resolution is a new
     /// command with its own (cold) data memo.
     runtime: RefCell<DataRuntime>,
@@ -64,9 +72,9 @@ impl Repo {
         let root = outer.join("repo");
         let repo = Self {
             _temp: temp,
-            outer,
+            outer: outer.clone(),
             root,
-            home: tempfile::tempdir().expect("temp home"),
+            home: outer.clone(),
             runtime: RefCell::new(DataRuntime::new()),
         };
         let os_type = os_type.replace("OUTSIDE", &biscuit_file::to_portable_string(&repo.outer));
@@ -102,18 +110,17 @@ impl Repo {
         path
     }
 
-    /// Persists `line` as the home's whole grant store.
-    fn persist_grant(&self, line: &str) {
-        let store = self.home.path().join(".config/darkmatter/schema-read-policy");
-        std::fs::create_dir_all(store.parent().expect("store folder")).expect("store folder");
-        std::fs::write(store, line).expect("grant store");
+    /// Writes the home's `permissions.file-read` as `entries`; the home
+    /// holds the repository, so `~/name` is a file next to it.
+    fn permit(&self, entries: &[&str]) {
+        crate::slot_support::write_user_permissions(self.home.as_path(), entries);
     }
 
     fn context(&self) -> FileResolutionContext {
         FileResolutionContext::new(&self.root)
             .with_env(HashMap::new())
             .with_repository_root(&self.root)
-            .with_home_dir(self.home.path())
+            .with_home_dir(self.home.as_path())
     }
 
     fn markdown(&self) -> Markdown {
@@ -171,8 +178,9 @@ fn assert_slot_record(repo: &Repo, records: &[Diagnostic], code: &str) {
     assert_eq!(at.line, Some(SLOT_LINE), "{records:?}");
 }
 
-/// Q21: a slot read of an absent file inside the repository is a probe that
-/// needs no grant, and its typed not-found error is what `try` recovers.
+/// Q21: a slot read of an absent file inside the repository is admitted by
+/// the repository default, and its typed not-found error is what `try`
+/// recovers.
 #[test]
 fn slot_try_recovers_missing_in_repo_file() {
     let repo = Repo::new(r#"enum(a, {{ try(load_data("missing.yaml", "string[]"), []) }})"#, &[]);
@@ -195,8 +203,9 @@ fn slot_try_missing_outside_repo_needs_grant() {
     let repo = Repo::new(r#"enum(a, {{ try(load_data("OUTSIDE/missing.yaml", "string[]"), []) }})"#, &[]);
     assert_slot_record(&repo, &repo.failure(), APPROVAL_REQUIRED);
 
-    // With the folder granted, the read happens, misses, and recovers.
-    repo.persist_grant(&format!("allow dir {}\n", biscuit_file::to_portable_string(&repo.outer)));
+    // With the folder's YAML permitted, the read happens, misses, and
+    // recovers.
+    repo.permit(&["~/*.yaml"]);
     assert_eq!(repo.members(), json!(["a"]));
 }
 
@@ -212,8 +221,8 @@ fn slot_try_propagates_approval_required() {
     assert!(!repo.observed(&repo.path("sentinel.yaml")), "the fallback never ran");
     assert!(!repo.read_set_has(&outside), "the refused file was not read");
 
-    // Granted, the same slot reads the file and never runs the fallback.
-    repo.persist_grant(&format!("allow file {}\n", biscuit_file::to_portable_string(&outside)));
+    // Permitted, the same slot reads the file and never runs the fallback.
+    repo.permit(&["~/outside.yaml"]);
     assert_eq!(repo.members(), json!(["a", "b"]));
     assert!(!repo.observed(&repo.path("sentinel.yaml")));
 }
@@ -226,8 +235,18 @@ fn slot_try_propagates_denied() {
         &[("sentinel.yaml", "- fallback\n")],
     );
     let outside = repo.write_outside("outside.yaml", "- b\n");
-    repo.persist_grant(&format!("deny file {}\n", biscuit_file::to_portable_string(&outside)));
-    assert_slot_record(&repo, &repo.failure(), DENIED);
+    // Permitted by the configuration, but denied for this run: the deny wins.
+    repo.permit(&["~/outside.yaml"]);
+    let context = repo.context();
+    repo.runtime.replace(DataRuntime::new());
+    let deny = Grant { decision: GrantDecision::Deny, target: GrantTarget::File(outside.clone()), scope: GrantScope::Once };
+    let session = SlotSession::for_context(repo.runtime(), &context).with_run_grants([deny]);
+    let error = DarkmatterSchemas::new(context)
+        .with_slot_session(Arc::new(session))
+        .effective_for(&repo.markdown())
+        .err()
+        .expect("the read is denied for this run");
+    assert_slot_record(&repo, &error_diagnostics(&error as &(dyn std::error::Error + 'static)), DENIED);
     assert!(!repo.observed(&repo.path("sentinel.yaml")), "the fallback never ran");
     assert!(!repo.read_set_has(&outside), "the denied file was not read");
 }
@@ -313,10 +332,10 @@ fn slot_try_class_is_join_of_arguments() {
 
     // Reading/`[]`: input-reading, so the resolution records the read and a
     // later command re-checks it and sees the edit. The file is outside the
-    // repository under a persisted grant, so the edit needs no commit.
+    // repository under a user permission.
     let reading = Repo::new(r#"enum(a, {{ try(load_data("OUTSIDE/names.yaml", "string[]"), []) }})"#, &[]);
     let names = reading.write_outside("names.yaml", "- b\n");
-    reading.persist_grant(&format!("allow file {}\n", biscuit_file::to_portable_string(&names)));
+    reading.permit(&["~/names.yaml"]);
     assert_eq!(reading.members(), json!(["a", "b"]));
     assert!(reading.read_set_has(&names));
     std::fs::write(&names, "- b\n- c\n").expect("edit");
@@ -357,7 +376,7 @@ fn slot_try_preflight_collects_both_targets() {
     let second = repo.write_outside("second.yaml", "- c\n");
     let document = repo.path("doc.md");
     let snapshot =
-        RequestSnapshot::new(&repo.root).with_home(Some(repo.home.path().to_path_buf())).with_env(HashMap::new());
+        RequestSnapshot::new(&repo.root).with_home(Some(repo.home.clone())).with_env(HashMap::new());
     let options = ComposeOptions::new().with_source_file(&document).with_data_runtime(repo.runtime());
     let request = ComposeRequest::prepare(options, &snapshot).expect("request");
     let handler = Arc::new(Recording::default());

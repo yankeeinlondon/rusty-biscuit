@@ -24,7 +24,7 @@ use simplified_schema::numeric::{self, JsonNumberError};
 use super::error::{DataError, DataSourceLocation};
 use super::locate::SourceLocator;
 use super::runtime::{DataSourceIdentity, SourceContent};
-use crate::markdown::schemas::yaml_documents::{first_tag_start, load_yaml_document, pointer_string};
+use simplified_schema::yaml_documents::{first_tag_start, load_yaml_document, pointer_string};
 
 /// A parse failure before it is attributed to a source.
 struct Failure {

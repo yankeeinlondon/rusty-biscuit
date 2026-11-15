@@ -295,15 +295,17 @@ fn consumer_sidecars_resolve_from_supplied_sources() {
     }
 }
 
-/// The library's own envelope definitions pass the compiled definition set:
-/// each is a `yaml-schema` admitted against `yaml-schema.yaml`, the
-/// `yaml-schema` definition by itself.
+/// The library's own kind definitions (the two envelope definitions and the
+/// trigger definition) pass the compiled definition set: each is a
+/// `yaml-schema` admitted against `yaml-schema.yaml`, the `yaml-schema`
+/// definition by itself.
 #[test]
 fn the_library_envelope_definitions_pass_the_compiled_definitions() {
     use simplified_schema::envelope::{YAML_SCHEMA_DEFINITION_PATH, admit_envelope_text};
     for (path, text) in [
         ("simplified-schema/schemas/schema.yaml", include_str!("../../../schemas/schema.yaml")),
         ("simplified-schema/schemas/yaml-schema.yaml", include_str!("../../../schemas/yaml-schema.yaml")),
+        ("simplified-schema/schemas/schema-trigger.yaml", include_str!("../../../schemas/schema-trigger.yaml")),
     ] {
         let admission = admit_envelope_text(text, path)
             .unwrap_or_else(|error| panic!("{path}: {error}"))

@@ -97,13 +97,17 @@ impl SourceExcerpt {
 #[derive(Debug, thiserror::Error)]
 pub enum ShellBlockError {
     /// Parse error in a shell block directive or body.
-    #[error("Shell block parse error at line {line}: {message}")]
+    #[error("Shell block parse error at line {line}: {message}{}", crate::markdown::compose::block_pairs::note_suffix(note))]
     Parse {
         line: usize,
+        /// The reason, without a line.
         message: String,
         excerpt: SourceExcerpt,
         /// Source file where the error occurred, if known.
         source_file: Option<PathBuf>,
+        /// Another line the reason refers to, counted like `line` (such as
+        /// where a block a closer misses was opened).
+        note: Option<String>,
     },
 
     /// EOF reached with an unclosed shell block.
@@ -140,12 +144,14 @@ impl ShellBlockError {
                 line,
                 message,
                 excerpt,
+                note,
                 ..
             } => Self::Parse {
                 line,
                 message,
                 excerpt,
                 source_file: path,
+                note,
             },
             Self::Unterminated {
                 line,
@@ -192,13 +198,15 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 message,
                 excerpt,
                 source_file,
+                note,
             } => {
                 let mut body = String::new();
                 if let Some(path) = source_file {
                     body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
                 }
                 body.push_str(&format!(
-                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}{}",
+                    crate::markdown::compose::block_pairs::note_suffix(note)
                 ));
                 if !excerpt.lines.is_empty() {
                     body.push_str("\n<dim>Context:</dim>\n");
@@ -363,10 +371,10 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                             "Install the binary or update <cyan>$PATH</cyan>."
                         }
                         ShellExpansionError::Blacklisted { .. } => {
-                            "Remove the entry from your blacklist file if you trust this command."
+                            "The built-in blacklist cannot be overridden."
                         }
                         ShellExpansionError::ApprovalRequired { .. } => {
-                            "Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."
+                            "Approve it when prompted or add a <cyan>shell-commands</cyan> rule."
                         }
                         ShellExpansionError::Denied { .. } => {
                             "The user declined to approve this shell command."
@@ -719,6 +727,7 @@ mod tests {
                 message: "unknown flag".to_string(),
                 excerpt: excerpt.clone(),
                 source_file: Some(std::path::PathBuf::from("/tmp/doc.md")),
+                note: None,
             },
             &["Source:", "Line: 1", "Message:", "Context:", ">    1 |", "2 |"],
         );

@@ -586,7 +586,7 @@ from the first record). Rows are
   `numeric::admit_json_text_numbers`, JSON5 through `admit_json5_text_numbers`
   and `reject_non_finite_json5`, TOML by walking `Toml::value()` with
   `admit_integer`/`admit_f64` (biscuit-file's lenient `Toml::as_json_value` is
-  untouched), YAML through `schemas/yaml_documents/load.rs::load_yaml_document`
+  untouched), YAML through `simplified_schema::yaml_documents::load_yaml_document`
   with custom tags rejected on this path only. An inadmissible number is
   `dm.data.malformed`, located where the parser proves it. One UTF-8 BOM is
   stripped before parsing and locating.
@@ -618,7 +618,7 @@ from the first record). Rows are
   value keeps its own pointer but is positioned at its parent. Pointer-only
   is for contract mismatches alone: a YAML refusal made after parsing (second
   document, non-string key, tag) is located by
-  `schemas/yaml_documents/marks.rs`, an event-mark pass that follows aliases.
+  `simplified-schema/lib/src/yaml_documents/marks.rs`, an event-mark pass that follows aliases.
 - **Typed literal returns** (`call_check.rs::expression_type`): a literal
   `as` types the call as its bare shape (named references `unknown`, explicit
   null arms kept, `| null` added when `file` may be null, `null` for a literal

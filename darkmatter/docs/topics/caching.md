@@ -274,14 +274,14 @@ Across commands, a cached resolution is reused only when all of these hold:
 
 - the template is the same: its `$schema` value or trigger payload and where
   it was written, the exact text of every schema file it read, and its slots;
-- the request context, the repository the automatic grant was judged
-  against, and the Darkmatter build (slot resolver version and function
-  catalog) are the same;
+- the request context, the repository, and the Darkmatter build (slot
+  resolver version and function catalog) are the same;
 - every file it read, every existence answer, and every `ctx` and `env`
   value it read are unchanged;
-- the requesting command's grants allow every read the resolution made, so
-  a result that needed a grant for one run only is not served to a command
-  without it.
+- the requesting command's `permissions.file-read` and current-run
+  approvals allow every read the resolution made without asking, each judged
+  for the schema file whose slot made it, so a result that needed an
+  approval for one run only is not served to a command without it.
 
 Files are re-checked by `stat` first: a file whose size and modification
 time are unchanged counts as unchanged without being reread, and only a file
@@ -292,12 +292,16 @@ is the cost of not rehashing every input on every lookup.
 
 Some resolutions are never reused by another command, because their inputs
 cannot be re-checked cheaply: one that called a volatile function (git
-history, a network probe), fetched a URL, or listed a folder or glob.
+history, a network probe) or fetched a URL. One that used a listing
+(`find_files`, `find_first_index`, `find_last_index`) is served only within
+its own command, because a listing returns only the files that command's
+approvals let the slot read.
 
 Failures are cached with their dependencies, like results, so creating a
 missing file or repairing a malformed one is a miss and resolves again. A
-failure that depends on grants (a read needing approval, a denied read, an
-invalid grant store), a `dm.schema.slot_cycle` failure, and a canceled
+failure that depends on approvals (a read needing approval, a read denied
+for this run) or on invalid permissions, a `dm.schema.slot_cycle` failure,
+and a canceled
 resolution are never cached.
 
 ## Remote Transport Cache
@@ -346,7 +350,10 @@ A cache root never authorizes a host. `RemoteFetchRuntime::register_and_fetch`
 checks the exact-host `FetchPolicy` before any fetch task is created, and
 therefore before the transport cache is read. A denied host fails without a
 cache read or a network request, even when a fresh entry for that URL is on
-disk. The default policy is deny-all; the CLI grants hosts with `--allow host=HOST`.
+disk. The default policy is deny-all; the CLI grants hosts with `--allow host=HOST`,
+and `network: allow` in the configuration grants every host (see
+[Remote URL References](./remote-url-references.md#allowed-hosts)). Under either,
+a body is served from the cache only when its host is allowed now.
 
 ### Freshness
 

@@ -843,13 +843,13 @@ impl ComposeWarning {
     /// embedded trigger has no `path`. Either way the warning collapses
     /// across every document and pass that discovers the same trigger. The
     /// shared record names the trigger file, at the finding's
-    /// [`position`](crate::markdown::schemas::InvalidTriggerFinding::position)
+    /// [`position`](simplified_schema::triggers::InvalidTriggerFinding::position)
     /// when it has one; an embedded trigger names no file and is source-free.
     pub(crate) fn from_invalid_trigger(
-        finding: &crate::markdown::schemas::InvalidTriggerFinding,
+        finding: &simplified_schema::triggers::InvalidTriggerFinding,
         consumer: impl Into<PathBuf>,
     ) -> Self {
-        use crate::markdown::schemas::TriggerSource;
+        use simplified_schema::triggers::TriggerSource;
         let (path, subject) = match finding.identity() {
             TriggerSource::File(path) => (Some(path.clone()), WarningSubject::Path(path.clone())),
             TriggerSource::Embedded { bundle, name } => (
@@ -882,6 +882,7 @@ impl ComposeWarning {
             reference_details: None,
             data_location: None,
             grants_needed: None,
+            schema_default: None,
         };
         Self {
             stage: "schema_validation".to_string(),
@@ -944,6 +945,7 @@ impl ComposeWarning {
             reference_details: None,
             data_location: None,
             grants_needed: None,
+            schema_default: None,
         };
         Self {
             stage: "link_titles".to_string(),
@@ -962,12 +964,12 @@ impl ComposeWarning {
     }
 
     /// The trigger a [`Self::from_invalid_trigger`] warning reports: the
-    /// finding's [`identity`](crate::markdown::schemas::InvalidTriggerFinding::identity),
+    /// finding's [`identity`](simplified_schema::triggers::InvalidTriggerFinding::identity),
     /// so a host that also reads discovery findings directly can recognize
     /// the same trigger. `None` for every other warning.
     #[must_use]
-    pub fn invalid_trigger_source(&self) -> Option<crate::markdown::schemas::TriggerSource> {
-        use crate::markdown::schemas::TriggerSource;
+    pub fn invalid_trigger_source(&self) -> Option<simplified_schema::triggers::TriggerSource> {
+        use simplified_schema::triggers::TriggerSource;
         if self.code.as_deref() != Some(crate::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE) {
             return None;
         }
@@ -1096,6 +1098,12 @@ impl ComposeWarning {
         self.document = document.or(self.document);
         self.location = Some(WarningLocation { line: span.line(), column: Some(span.column()), span: Some(span.range()) });
         self
+    }
+
+    /// The file the warning is about: the document that reported it, unless
+    /// the producer named another; `None` before a report attributes it.
+    pub fn document(&self) -> Option<&std::path::Path> {
+        self.document.as_deref()
     }
 
     /// Names `document` as this warning's file unless it already names one.

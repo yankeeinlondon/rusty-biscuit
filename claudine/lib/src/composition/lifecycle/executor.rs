@@ -473,6 +473,9 @@ impl StackExecutionContext<'_> {
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
             file_resolution_context: self.file_resolution_context,
+            // The prepared context carries the invocation's configuration
+            // capture, which a request built over it consults.
+            config_snapshot: None,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             source_path: self.source_path,
@@ -598,8 +601,12 @@ impl LifecycleHost for StackExecutionContext<'_> {
             .map_err(|failure| PrepError::Failed { message: failure.message, snapshot: failure.snapshot })
     }
 
-    fn user_blacklist(&self, policy_root: Option<&Path>) -> ShellRuleSet {
-        crate::harness::shell::user_blacklist(policy_root)
+    /// The `!` rules of the configuration the prepared context captured for
+    /// this document (the invocation's), or of a passive load where nothing
+    /// was captured.
+    fn shell_exclusions(&self) -> Result<ShellRuleSet, darkmatter::config::load::ConfigError> {
+        crate::harness::CapturedPermissions::for_prepared(self.prepared_context, self.file_resolution_context)
+            .exclusions()
     }
 
     fn interrupted(&self) -> bool {

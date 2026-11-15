@@ -40,7 +40,8 @@ execution_set ⊆ approval_set      (always)
 ```
 
 At execution, membership must match the approved bytes or typed shape. A shape
-member still needs value validation, blacklist checks, and direct-target
+member still needs value validation, the built-in blacklist and exclusion
+checks, and direct-target
 validation before execution or result reuse. Re-preparing a document with
 changed state requires another audit; an exact decision cannot cover new bytes.
 A dead-branch command is **approved but never executed**.
@@ -49,8 +50,9 @@ One case has bytes the walk could not see: a command whose argument reads a
 file (`load_data`, `frontmatter`, `file_exists`, …) after an earlier command
 ran. Pre-flight read the file before anything ran, so it approved the bytes
 the old content gave. When the command's bytes change, they run only if an
-`exact` rule in the whitelist names them, the rule the walk itself would have
-applied, or if the command's `template` shape was approved. Otherwise the
+`exact` rule in `permissions.shell-commands` names them (and no exclusion
+matches them), the rule the walk itself would have applied, or if the
+command's `template` shape was approved. Otherwise the
 command fails as not pre-approved, and nothing about it runs:
 
 ```markdown
@@ -207,71 +209,74 @@ approval candidates.
 
 ## Security Policy
 
-Darkmatter uses a two-stage security design:
+Every shell command discovered during composition is judged in this order,
+and the first step that decides it wins:
 
-1. **Global blacklist** — a built-in set of commands that are never allowed, regardless of user configuration
-2. **User-controlled whitelist/blacklist files** — per-repo or per-user allow/deny lists
+1. **The built-in blacklist** refuses a set of dangerous commands. It is
+   compiled into Darkmatter, and nothing configures, extends, or overrides
+   it: no `shell-commands` rule, no approval, no cached decision, and no
+   host's "approve everything" mode.
+2. **An exclusion** (a `!` entry in `permissions.shell-commands` of the user
+   configuration, or of the repository's at `HEAD` or in the working copy)
+   that matches any segment of the command means no rule pre-approves it.
+   It is asked about like any uncovered command, and an approval of this
+   run (a prompt answer, or a host's pre-approval) still lets it run.
+3. **An allow** pre-approves the command when, for every segment of an
+   `&&`/`||` chain, a rule of the user configuration, or rules of **both**
+   the repository's committed and working-copy configuration, cover it.
+4. **Anything else** is asked about interactively, or fails with an
+   approval-required error when nothing can ask.
 
-Every shell command discovered during composition is checked against these layers in order. The first matching layer determines the outcome:
+A command whose program is missing fails when it runs. An invalid
+`permissions` block runs nothing: every command fails with the
+configuration error, and nothing is asked.
 
-- **Blacklisted** → immediate compose error
-- **Not on host** → immediate compose error (command executable not found)
-- **Whitelisted** → approved, execute normally
-- **Unknown** → interactive approval prompt (or deny in non-interactive contexts)
+```mermaid
+flowchart TD
+    A[command] --> B{built-in blacklist?}
+    B -->|yes| R[refused]
+    B -->|no| C{any segment excluded?}
+    C -->|yes| P{approved this run?}
+    C -->|no| D{every segment allowed?}
+    D -->|yes| X[runs]
+    D -->|no| P
+    P -->|yes| X
+    P -->|no| Q[approval required]
+```
+
+Where the rules live, how the user and repository layers combine, and the
+commit rule are described in [Permissions](../topics/permissions.md).
 
 ### Blacklisted Commands and Syntax
 
-The following commands will never be allowed:
+The built-in blacklist refuses:
 
-- `rm`, `rimraf`, `find*-delete`, `unlink`, `shred`, `wipe`
-- `echo* >>*`, `echo* >*`, `* >*`
-- `install`
-- `brew`, `apt`, `nala`, `pacman`, `dnf`, `yum`
-- `npm uninstall`, `pnpm uninstall`, `bun uninstall`, `yarn uninstall`
-- `npm install`, `pnpm install`, `bun install`, `yarn install`
-- `npm add`, `pnpm add`, `bun add`, `yarn add`
-- `mv`, `dd`
-- `zfs`, `zpool`, `wipefs`, `mkfs*`, `parted`, `mparted`, `sgdisk`
-- `pvcreate`, `lvremove`, `vgremove`, `mdadm`, `cryptsetup`
-- `chmod`, `chgrp`, `chown`, `setfacl`
-- `tar`, `unzip`, `rsync`, `cp`
-- `kill`, `pkill`, `killall`
-- `systemctl`
-- `shutdown`, `reboot`, `poweroff`, `halt`, `init`
-- `git reset`, `git clean`, `git checkout`, `git restore`, `git rebase`, `git branch`, `git push`, `git reflog`, `git gc`
-- `psql -c`, `mysql -e`, `redis-cli FLUSH*`, `mongosh --eval`
-- `ssh`, `scp`, `rsync`, `ansible`
-- `curl`, `wget`, `http`
-- `source`, `eval`, `sudo`, `doas`, `su`
-- `docker rm*`, `docker system prune*`, `docker volume rm*`, `docker volume prune*`
-- `kubectl delete*`, `helm uninstall*`, `terraform destroy*`
+- `rm`, `rmdir`, `shred`, `find … -delete`
+- `mkfs*`, `fdisk`, `parted`, `dd`
+- `chmod`, `chown`, `chgrp`
+- `shutdown`, `reboot`, `halt`, `init`, `systemctl`
+- `apt`, `yum`, `dnf`, `brew`, `pacman`, `pip`, `npm`, `cargo`
+- `git reset`, `git clean`, `git push --force`, `git push -f`
+- `docker system prune`, `docker rm`, `docker rmi`
+- `psql DROP…`, `mysql DROP…`, `curl -X DELETE`
+- `nc`, `ncat`, `kill`, `killall`, `pkill`
+- `vi`, `vim`, `nano`, `emacs`
+- `sh`, `bash`, `zsh`, `fish`, `cmd`, `powershell`, `pwsh` (and their `-c`
+  forms)
+- the `>` and `>>` redirection tokens
 
-### Whitelist and Blacklist Files
+### Shell rules
 
-Approved commands are stored in a namespaced whitelist file, and a companion
-blacklist file tracks user-denied commands. `md compose` keeps both beside the
-document, or in the directory `md` was launched from when the document comes
-from stdin:
+A command is pre-approved by a rule in `permissions.shell-commands`, one rule
+per entry, in `~/.darkmatter.yaml` or a repository's `.darkmatter.yaml`:
 
-```text
-docs/guide.md          → docs/.darkmatter-shell-whitelist, docs/.darkmatter-shell-blacklist
-md compose - (in ~/w)  → ~/w/.darkmatter-shell-whitelist,  ~/w/.darkmatter-shell-blacklist
-```
-
-A library caller that sets no policy root (`ComposeOptions::with_shell_policy_root`)
-gets the request context's repository root, else its home directory, else the
-request directory. Pre-flight and execution read the same files.
-
-#### File format
-
-Each file is UTF-8 text with one rule per line. Blank lines and lines starting
-with `#` are ignored.
-
-```text
-# whitelist
-exact just ci-local --plan
-prefix ls
-template just clean --out {{ string }}/build
+```yaml
+permissions:
+  shell-commands:
+    - exact just ci-local --plan
+    - prefix ls
+    - template just clean --out {{ string }}/build
+    - "!prefix git push"
 ```
 
 | Rule | Matches |
@@ -279,6 +284,7 @@ template just clean --out {{ string }}/build
 | `exact <command>` | that command, argument for argument |
 | `prefix <executable>` | the executable with any arguments |
 | `template <shape>` | a command with the same argument list, where each `{{ type }}` hole stands for one argument value of that type |
+| `!<rule>` | an exclusion: a command the rule matches is never pre-approved, in any layer |
 
 Matching compares parsed arguments: quoting and whitespace variants have the
 same shape, but changing a literal, argument count, hole position, chain
@@ -311,24 +317,26 @@ braces, or shell characters is double-quoted, with `\\`, `\"`, `\{`, `\}`,
 `\n`, `\r`, and `\t` as escapes. To store literal braces rather than a
 placeholder, escape them: `"\{\{ x \}\}"` represents the literal argument
 `{{ x }}`. Unescaped braces inside a quoted rule literal are rejected.
-A line the loader cannot read is skipped with a warning naming the file and line, and the other rules still load. These
-template lines are skipped:
 
-| Line | Why |
-|------|-----|
+A malformed entry is never skipped: it makes the whole `permissions` block
+invalid, and no command runs until it is fixed. These entries are malformed:
+
+| Entry | Why |
+|-------|-----|
+| `exact` (or `prefix`, `template`) with nothing after it | names no command |
 | `template build {{ alphanumeric(allow-slashes; min(3)) }}` | a constraint |
 | `template build {{ alphanumeric(min(3)) }}` | a constraint, written without `;` |
 | `template build {{ number }}` | not a string-like type |
 | `template build {{ slug }}` | a named type |
 | `template {{ string }} run` | a hole in the program word |
 
-In the blacklist, a `template` line blocks any command whose arguments it
-matches, whatever the hole types: `template deploy {{ string }}` blocks
+As an exclusion, a `template` rule matches any command whose arguments it
+matches, whatever the hole types: `!template deploy {{ string }}` matches
 `deploy prod`, including a command written without any placeholder. A
-single-command rule blocks that command anywhere in an `&&`/`||` chain.
+single-command rule matches that command anywhere in an `&&`/`||` chain.
 
-A whitelist `template` rule approves a command at pre-flight when no `exact`
-rule covers its bytes: an `exact` rule wins, then a `template` rule, then a
+A `template` allow approves a command at pre-flight when no `exact` rule
+covers its bytes: an `exact` rule wins, then a `template` rule, then a
 `prefix` rule. The approval records the command's shape, not its bytes, and
 the command then runs as a template.
 
@@ -381,7 +389,7 @@ third argument. The second line's key is `git commit -m`, and `git` receives
 two arguments. Neither key approves the other command, and an older
 `exact git commit -m` rule never approves the quoted form. The same spelling
 is used for every key a resolved command or a filled template is matched
-against, blacklist `exact` rules included.
+against, `exact` exclusions included.
 
 In template mode, before anything runs:
 
@@ -405,10 +413,14 @@ In template mode, before anything runs:
    `{{ a }}{{ b }}` is one argument, and an empty value is one empty argument.
    The value is never read again for spaces, quotes, operators, or
    placeholders.
-3. **The whole filled command is checked** against the built-in blacklist and
-   then the user blacklist, every segment of an `&&`/`||` chain before the
-   first starts. `template git {{ string }}` therefore cannot run
-   `git reset`.
+3. **The whole filled command is checked** against the built-in blacklist,
+   every segment of an `&&`/`||` chain before the first starts, so
+   `template git {{ string }}` cannot run `git reset`. Then against the
+   exclusions: when only an allow rule approved the shape, filled values an
+   exclusion matches (`!exact git add secrets` against
+   `git add {{ string }}`) need an approval of their own
+   (`ApprovalRequired`). A shape this run approved explicitly, or one an
+   exclusion already matched (so it was asked about), runs.
 4. **Each program is found without a shell.** It must be on `PATH` and run
    natively: on Windows an `.exe` or `.com`, never a `.cmd` or `.bat`; on Unix
    a native executable or a `#!` script, never a file the system would hand to
@@ -422,10 +434,11 @@ argument list, so the same approval with different values runs again, while
 the same filled command runs once.
 
 Authorization and results are separate caches. Authorization includes the
-execution mode, policy root, and typed shape or exact bytes. A result hit grants
-no permission: the current template is filled and validated, and the runtime
-blacklist and target checks run before a result can be reused. A saved shape
-contains no runtime values.
+execution mode and typed shape or exact bytes; one composition judges every
+command against one captured configuration. A result hit grants no
+permission: the current template is filled and validated, and the built-in
+blacklist, exclusion, and target checks run before a result can be reused. A
+saved shape contains no runtime values.
 
 Template grammar permits fixed program words, literal argument fragments,
 placeholders, `&&`/`||`, and only `> /dev/null`, `2> /dev/null`, `2>&1`, and
@@ -446,32 +459,35 @@ flowchart TD
     B -->|exact or prefix| C[run the interpolated bytes]
     B -->|template or shape| D[evaluate and check each value]
     D --> E[fill one argument per word]
-    E --> F[check the filled chain against both blacklists]
+    E --> F[check the filled chain against the built-in blacklist and the exclusions]
     F --> G[resolve each program without a shell]
     G --> H[run, or reuse the result of the same filled command]
 ```
 
 ## Interactive Approval
 
-When a command does not match the blacklist and is not in the whitelist, and
-both stdin and stderr are terminals, `md` asks about it on stderr. The prompt
-lists only the choices the command is eligible for, numbered in this order:
+When the built-in blacklist does not refuse a command and no rule
+pre-approves it (or an exclusion matches it), and both stdin and stderr are
+terminals, `md` asks about it on stderr. The prompt lists only the choices
+the command is eligible for, numbered in this order:
 
-| Choice | Listed when | Saves |
+| Choice | Listed when | Saves to the user's `permissions.shell-commands` |
 |--------|-------------|-------|
-| Allow this exact command | resolved-byte approval is eligible and every value is known now | `exact <resolved command>` to `.darkmatter-shell-whitelist` |
-| Allow this command shape | the command has a placeholder and valid template grammar | `template <shape>` to `.darkmatter-shell-whitelist`; the command runs as a template |
+| Allow this exact command | resolved-byte approval is eligible and every value is known now | `exact <resolved command>` |
+| Allow this command shape | the command has a placeholder and valid template grammar | `template <shape>`; the command runs as a template |
 | Allow this program with any arguments | every program word is fixed | `prefix <program>` for each distinct program of the chain |
 | Allow once | always | nothing; this run only (for a command with no exact choice, its shape for this run) |
-| Deny | always | nothing; the run stops |
-| Blacklist and stop | always | `exact <resolved command>` to `.darkmatter-shell-blacklist`, or `template <shape>` when no exact choice is listed; the run stops |
+| Deny for this run | always | nothing; the run stops, and the next run asks again |
+
+There is no "always deny": the only list that refuses is the built-in one. To
+make a command always ask, add a `!` entry yourself.
 
 The program-word restriction comes from the authored command, even when a host
 allows it to run as resolved bytes after template grammar fails. For example,
 `{{ tool }} probe` and `git --version && {{ tool }} probe` cannot offer or save
-program approval; their eligible byte approvals remain exact, once, deny, and
-exact blacklist. This does not enable interpolated executables in document
-shell directives, blocks, or frontmatter shell values.
+program approval; their eligible choices remain exact, once, and deny. This
+does not enable interpolated executables in document shell directives,
+blocks, or frontmatter shell values.
 
 A command with a placeholder shows each one as `{{ name: type }}`, and its
 resolved bytes beside it when they are known:
@@ -482,12 +498,11 @@ resolved bytes beside it when they are known:
   Command:  just clean --out {{ out: string }}/build
   Resolved: just clean --out dist/build
 
-  1 │ Allow this exact command               (saves "exact just clean --out dist/build" to the whitelist)
-  2 │ Allow this command shape               (saves "template just clean --out {{ string }}/build" to the whitelist; runs as a template)
-  3 │ Allow this program with any arguments  (saves "prefix just" to the whitelist)
+  1 │ Allow this exact command               (saves "exact just clean --out dist/build" to your shell-commands)
+  2 │ Allow this command shape               (saves "template just clean --out {{ string }}/build" to your shell-commands; runs as a template)
+  3 │ Allow this program with any arguments  (saves "prefix just" to your shell-commands)
   4 │ Allow once                             (this session only)
-  5 │ Deny                                   (stops the run)
-  6 │ Blacklist and stop                     (saves "exact just clean --out dist/build" to the blacklist; stops the run)
+  5 │ Deny for this run                      (stops the run; asks again next time)
 ```
 
 A placeholder whose declared type is not string-like is approved with the
@@ -496,17 +511,26 @@ value: `seq {{ count: string (validated as number) }}`. A value that is not
 known yet is never shown, and never shown as an empty string: such a command
 has no `Resolved:` line and no exact choice.
 
+A command an exclusion matches adds an `Excluded:` line naming the `!`
+entry and the file that holds it. No choice removes the exclusion.
+
 A number that names no listed choice is refused and the prompt is shown
 again. Input that ends without an answer denies. Without a terminal there is
 no prompt: the command fails with the approval-required error, which names
-the whitelist and the rules that would allow it.
+the user configuration and the rules that would allow it, or, for an
+excluded command, the exclusion (no rule can approve that one).
 
-`md compose` decides each command site once, before anything runs, and
-writes the row the chosen option names. A choice that cannot be written (for
-example, the whitelist path is not writable) fails with a policy I/O error and
-approves nothing; it never falls back to "allow once". A saved rule answers
-the next run without a prompt, and a rule already in the file is not written
-again.
+`md compose` decides each command site once, before anything runs. An
+"always allow" choice saves its rule to the user's
+`permissions.shell-commands` (in `~/.darkmatter.yaml`, or the file its
+`permissions` reference names), and the rule approves matching commands for
+the rest of the run. Saving never changes what the run already captured,
+never edits a repository's file, and never removes an exclusion. When the
+rule cannot be saved (an exclusion still matches it, there is no home, or
+the file cannot be written), the command is still approved for this run and
+the run reports a `dm.config.not_saved` warning saying why. A saved rule
+answers the next run without a prompt, and a rule already in the list is not
+written again.
 
 The approval request a handler receives says which choices it may offer
 (`ShellApprovalRequest::offered`) and, for a command with a placeholder,
@@ -518,7 +542,7 @@ choice, and its request leaves `normalized_exact` empty. A decision for a
 choice the request did not offer is treated as a denial.
 
 A handler installed on composition itself (`with_shell_approval_handler`) is
-offered the shape the same way. Choosing it (`AllowTemplatePersist`) writes the
+offered the shape the same way. Choosing it (`AllowTemplatePersist`) saves the
 `template` rule and runs the command as a template; "allow once" on a request
 that offers no exact choice approves the shape for the rest of the
 composition. `darkmatter_cli::approval::approve_with_io` runs one prompt
@@ -534,7 +558,7 @@ session over any reader and writer, which is how the prompt is tested.
 
 ## Integration with External Tools
 
-When Darkmatter is used through an external orchestrator (such as Claudine), the pre-flight flow can be bypassed in favor of the orchestrator's own approval system. In this mode, Darkmatter receives a set of pre-approved commands and skips its own whitelist and interactive approval checks; each command it runs still meets the built-in and user blacklists. See the [Claudine/Darkmatter boundary](#claudinedarkmatter-boundary) below for details.
+When Darkmatter is used through an external orchestrator (such as Claudine), the pre-flight flow can be bypassed in favor of the orchestrator's own approval system. In this mode, Darkmatter receives a set of pre-approved commands and skips its own rule and interactive approval checks; each command it runs still meets the built-in blacklist. See the [Claudine/Darkmatter boundary](#claudinedarkmatter-boundary) below for details.
 
 ### Claudine/Darkmatter Boundary
 
@@ -558,7 +582,7 @@ Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightRe
 
 **Before the body exists.** An orchestrator that must run a step before the body's includes exist (Claudine's `initialize`) reads the frontmatter first with `ComposeOptions::only_frontmatter_surface()`. That projection never walks the body graph; its approval set is `collect_frontmatter_shell_commands`, the document's frontmatter `$(...)` commands alone. The full condition-blind discovery above runs after the step, on the settled document.
 
-**Claudine's role is authorization.** It takes the approval set from Darkmatter, merges in commands from its harness, checks everything against the whitelist, and prompts the user once for anything missing. The merged, authorized set is handed back to the pipeline as the execution membership source.
+**Claudine's role is authorization.** It takes the approval set from Darkmatter, merges in commands from its harness, checks everything against the captured `permissions.shell-commands`, and prompts the user once for anything missing. The merged, authorized set is handed back to the pipeline as the execution membership source.
 
 **Each command site is reported.** Besides the deduped resolved-byte entries, the report's `candidates` holds one `ShellCandidate` per command site, never merged by bytes: its authored template, typed against the schema of the document that owns it (a transcluded child uses its own), whether it may run as resolved bytes, and the bytes discovery resolved for it.
 
@@ -646,7 +670,7 @@ flowchart TD
     H -->|"true"| J["read the live value"]
     J -->|"null"| K["MissingValue: no segment starts"]
     J -->|"fails declaration or narrowed type"| L["TemplateValueRejected: no segment starts"]
-    J -->|"passes"| M["fill one argument per hole,<br/>blacklists, then run"]
+    J -->|"passes"| M["fill one argument per hole,<br/>built-in blacklist and exclusions, then run"]
     G --> M
 ```
 
@@ -668,7 +692,7 @@ latest: "{{ last(seq.outputs) }}"
 
 Membership is judged after the warnings of the collection walk are judged against the request's blocking policy (`ComposeOptions::with_blocking_policy`). A denied warning only that walk finds, such as an invalid schema trigger in a child that composition skips (`::file child.md when=false`), stops composition with `MarkdownError::BlockedDiagnostics` before any command runs, whatever the pre-approved set holds. `Markdown::compose_preflight_approvals` applies the same check before it reads a policy file or asks the approval handler, and returns the stop as `ShellExpansionError::Preflight`.
 
-**Running templates elsewhere.** A host that runs commands itself (Claudine's sequence and lifecycle runners) uses the same checks from `shell_expansion::template`: `fill_template` to fill a template through a `HoleEvaluator`, `resolve_late_values` to check values the run produced before a step's first command, `check_filled_chain` for the blacklists, and `resolve_direct_target` for each program. A host-owned whole-value `$( … )` (Claudine's lifecycle `set`) is a `ResolvedShellValue`; `with_template` makes it run as its typed template, `with_late_values` hands it values already checked at a barrier, and `execute_shell_values_with` reads its other placeholders through the host's own `HoleEvaluator`. Its pre-approval is then its shape, not its bytes. `ResolvedShellValue::template_only` keeps such a value whose interpolated text no longer reads as a command, so it can run only as its template.
+**Running templates elsewhere.** A host that runs commands itself (Claudine's sequence and lifecycle runners) uses the same checks from `shell_expansion::template`: `fill_template` to fill a template through a `HoleEvaluator`, `resolve_late_values` to check values the run produced before a step's first command, `check_filled_chain` for the built-in blacklist, `filled_template_needs_approval` for the exclusions (`LifecycleHost::shell_exclusions` supplies them), and `resolve_direct_target` for each program. A host-owned whole-value `$( … )` (Claudine's lifecycle `set`) is a `ResolvedShellValue`; `with_template` makes it run as its typed template, `with_late_values` hands it values already checked at a barrier, and `execute_shell_values_with` reads its other placeholders through the host's own `HoleEvaluator`. Its pre-approval is then its shape, not its bytes. `ResolvedShellValue::template_only` keeps such a value whose interpolated text no longer reads as a command, so it can run only as its template.
 
 **Values that do not exist yet.** A host global declared `Availability::ExecutionDependent` (Claudine's `loop` before a loop's first iteration) has no value at discovery. A placeholder reading one is unknown, not missing, and a body `::shell` or `::shell-block` command reading one contributes neither bytes nor a site: the preparation that binds the value discovers and audits it.
 

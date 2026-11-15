@@ -346,7 +346,7 @@ impl GlobalCatalog {
     /// read from `path`; `path` names the catalog and locates its imports,
     /// and is not read again. Lifecycle discovery builds a profile from the
     /// same bytes it hashed against the artifact.
-    fn from_host_text(
+    pub(crate) fn from_host_text(
         path: &Path,
         text: &str,
         context: &biscuit_file::FileResolutionContext,
@@ -641,7 +641,16 @@ impl From<Arc<GlobalCatalog>> for CatalogHandle {
 /// A catalog that fails to load is returned as its error so a caller can
 /// report it; the others still load.
 pub fn host_catalogs(context: &biscuit_file::FileResolutionContext) -> Vec<Result<GlobalCatalog, CatalogError>> {
-    let Ok(roots) = super::roots::SchemaRoots::for_document(context) else {
+    host_catalog_files(context).into_iter().map(|(_, catalog)| catalog).collect()
+}
+
+/// [`host_catalogs`], each catalog beside the file it was loaded from, so a
+/// caller can leave out the catalogs of a known host (host selection's
+/// legacy view).
+pub fn host_catalog_files(
+    context: &biscuit_file::FileResolutionContext,
+) -> Vec<(std::path::PathBuf, Result<GlobalCatalog, CatalogError>)> {
+    let Ok(roots) = simplified_schema::roots::SchemaRoots::for_document(context) else {
         return Vec::new();
     };
     let mut seen = std::collections::BTreeSet::new();
@@ -663,7 +672,8 @@ pub fn host_catalogs(context: &biscuit_file::FileResolutionContext) -> Vec<Resul
             if !is_global_catalog(&text) || declares_fm(&text) {
                 continue;
             }
-            catalogs.push(GlobalCatalog::from_host_text(&path, &text, context));
+            let catalog = GlobalCatalog::from_host_text(&path, &text, context);
+            catalogs.push((path, catalog));
         }
     }
     catalogs
@@ -705,7 +715,14 @@ impl std::error::Error for HostFunctionCatalogError {}
 pub fn host_function_catalogs(
     context: &biscuit_file::FileResolutionContext,
 ) -> Vec<Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>> {
-    let Ok(roots) = super::roots::SchemaRoots::for_document(context) else {
+    host_function_catalog_files(context).into_iter().map(|(_, set)| set).collect()
+}
+
+/// [`host_function_catalogs`], each set beside its catalog file.
+pub fn host_function_catalog_files(
+    context: &biscuit_file::FileResolutionContext,
+) -> Vec<(std::path::PathBuf, Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>)> {
+    let Ok(roots) = simplified_schema::roots::SchemaRoots::for_document(context) else {
         return Vec::new();
     };
     let mut seen = std::collections::BTreeSet::new();
@@ -724,7 +741,8 @@ pub fn host_function_catalogs(
             if !is_host_function_catalog(&text) || !seen.insert(name) {
                 continue;
             }
-            sets.push(host_function_set(&path, &text));
+            let set = host_function_set(&path, &text);
+            sets.push((path, set));
         }
     }
     sets
@@ -771,6 +789,9 @@ type HostFunctionCacheValue = Result<crate::markdown::compose::expression::HostF
 /// The latest revision `host_function_set` processed for one catalog path.
 struct HostFunctionEntry {
     catalog_hash: String,
+    /// Where the facts artifact was read: beside the catalog, or where a
+    /// host registration manifest named it.
+    facts_path: std::path::PathBuf,
     artifact: ArtifactKey,
     result: HostFunctionCacheValue,
 }
@@ -784,15 +805,41 @@ fn host_function_cache() -> std::sync::MutexGuard<'static, HostFunctionCache> {
 
 fn host_function_set(path: &Path, text: &str) -> HostFunctionCacheValue {
     use crate::markdown::compose::expression::host::facts_artifact_path;
+
+    let facts_path = facts_artifact_path(path);
+    let artifact = ArtifactKey::read(&facts_path);
+    host_function_set_from(path, text, &facts_path, artifact)
+}
+
+/// The analysis-only set of the host function catalog at `path` (bytes
+/// `text`) with its facts read from `facts_path`, which a host registration
+/// manifest names instead of the catalog's stem; `facts` is that read's
+/// result. Shares [`host_function_catalogs`]'s per-path cache and hash checks.
+///
+/// ## Errors
+///
+/// As each entry of [`host_function_catalogs`]: a catalog that does not
+/// load or names a built-in function. A missing or bad facts artifact makes
+/// the affected functions incomplete instead.
+pub(crate) fn host_function_set_at(
+    path: &Path,
+    text: &str,
+    facts_path: &Path,
+    facts: std::io::Result<Vec<u8>>,
+) -> HostFunctionCacheValue {
+    host_function_set_from(path, text, facts_path, ArtifactKey::from_read(facts))
+}
+
+fn host_function_set_from(path: &Path, text: &str, facts_path: &Path, artifact: ArtifactKey) -> HostFunctionCacheValue {
     use crate::markdown::compose::expression::{HostFunctionCatalog, HostFunctions};
 
     let catalog_hash = biscuit_hash::blake3_hash(text);
-    let artifact = ArtifactKey::read(&facts_artifact_path(path));
     // Lookup, build, and replacement happen under one lock, so an unchanged
     // revision is never built twice and each path keeps one result.
     let mut cache = host_function_cache();
     if let Some(cached) = cache.get(path)
         && cached.catalog_hash == catalog_hash
+        && cached.facts_path == facts_path
         && cached.artifact == artifact
     {
         return cached.result.clone();
@@ -800,9 +847,12 @@ fn host_function_set(path: &Path, text: &str) -> HostFunctionCacheValue {
     discovery_probe::note_host_function_build();
     let fail = |message: String| HostFunctionCatalogError { path: path.to_path_buf(), message };
     let result = HostFunctionCatalog::load(text, path).map_err(|error| fail(error.to_string())).and_then(|catalog| {
-        HostFunctions::analysis_only(catalog, artifact.artifact()).map_err(|error| fail(error.to_string()))
+        HostFunctions::analysis_only_at(catalog, facts_path, artifact.artifact()).map_err(|error| fail(error.to_string()))
     });
-    cache.insert(path.to_path_buf(), HostFunctionEntry { catalog_hash, artifact, result: result.clone() });
+    cache.insert(
+        path.to_path_buf(),
+        HostFunctionEntry { catalog_hash, facts_path: facts_path.to_path_buf(), artifact, result: result.clone() },
+    );
     result
 }
 
@@ -839,7 +889,7 @@ pub struct HostLifecycleDiscovery {
 /// caller holds it. A refusal retains no catalog or registry. A visited path
 /// whose catalog is gone, unreadable, or no longer loads loses its entry.
 pub fn host_lifecycle_profiles(context: &biscuit_file::FileResolutionContext) -> HostLifecycleProfiles<'_> {
-    let roots = super::roots::SchemaRoots::for_document(context)
+    let roots = simplified_schema::roots::SchemaRoots::for_document(context)
         .map(|roots| roots.search_paths().to_vec())
         .unwrap_or_default();
     HostLifecycleProfiles {

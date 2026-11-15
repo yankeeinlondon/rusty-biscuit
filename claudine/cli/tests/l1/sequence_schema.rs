@@ -338,9 +338,9 @@ exit 0
 // ============================================================================
 
 #[cfg(unix)]
-fn write_shell_whitelist(home: &std::path::Path, prefixes: &[&str]) {
+fn allow_shell_prefixes(home: &std::path::Path, prefixes: &[&str]) {
     let body: String = prefixes.iter().map(|p| format!("prefix {p}\n")).collect();
-    fs::write(home.join(".darkmatter-shell-whitelist"), body).unwrap();
+    crate::common::write_shell_permissions(home, &body);
 }
 
 #[cfg(unix)]
@@ -350,7 +350,7 @@ fn sequence_shell_expanded_value_violating_schema_aborts_step() {
     // schema must surface a SchemaValidation error and not launch the
     // provider for that step.
     let fixture = CliProcessFixture::named("sequence-shell-schema-violation");
-    write_shell_whitelist(fixture.cwd(), &["echo"]);
+    allow_shell_prefixes(fixture.home(), &["echo"]);
     let count_path = fixture.cwd().join("call-count.txt");
 
     let md_file = fixture.cwd().join("seq.md");

@@ -261,7 +261,8 @@ Every type accepts:
 - `required` — the property must be present. Presence may still be deferred at
   stabilized launch so an actor inside the run can supply it; it is mandatory at
   completion. `required` has no effect on a property whose type admits `null`
-  (see [Null-Admitting Properties](#null-admitting-properties)).
+  (see [Null-Admitting Properties](#null-admitting-properties)). A required
+  property with a `default(...)` is satisfied by its default when absent.
 - `non-null` — the property may be omitted, but a present value is never
   `null`. It is not a presence rule: the property stays optional and out of the
   JSON Schema `required` list. Every type keyword except `null` and `unknown`
@@ -272,7 +273,11 @@ Every type accepts:
   ordinary schema preparation additionally retains the existing existence
   check; the passive phase validator itself checks syntax and presence without
   probing the filesystem.
-- `default(value)` — JSON Schema `default`. Darkmatter does **not** mutate documents; downstream tools and detection honor it.
+- `default(value)` — JSON Schema `default`. On a `required` property, an
+  absent value passes validation through its default, which validation
+  reports (and soft validation inserts); on an optional property it is
+  metadata only. See
+  [Required properties with a default](../validation.md#required-properties-with-a-default).
 - `category(Name)` — documentation metadata. The name is the text up to `)`,
   trimmed and case-sensitive, and may contain spaces and punctuation
   (`category(Date Arithmetic)`, `category(CI/CD)`). It emits the
@@ -1253,9 +1258,20 @@ $schema:
 | `non-null`        | Array property may be omitted but is never `null` (not items). Also read from the item parens: `string(non-null)[]` is the same. | no `null` wrapper |
 | `default(value)`  | Default for the array property.              | `default`        |
 
-The `default(...)` argument is read as a scalar, like every other constraint
-argument, so `default([a])` stores the string `"[a]"`, not a one-item list. A
-list-valued default cannot be written in the type-expression grammar today.
+A `default(...)` argument that starts with `[` or `{` is a JSON list or
+mapping, and must be the whole argument:
+
+```yaml
+$schema:
+    globs: 'string[](required; default(["./*.md", "./*.txt"]))'
+    nothing: 'string[](required; default([]))'
+    options: '{ verbose: boolean }(required; default({}))'
+```
+
+JSON strings use double quotes, so quote the whole type with single quotes in
+YAML. A bracketed argument is never text: `default([a])` is a schema error
+(`a` is not JSON), and a text default that starts with a bracket is quoted
+(`default('[a]')`). Duplicate mapping keys are an error.
 
 To make a list whose items may each take one of several shapes, group the
 options and add `[]` (`steps: "(string | number)[](min(1))"`), or name the

@@ -35,8 +35,8 @@ After the configuration refactor, these terms mean different things:
 The old per-provider config model built around `HookerConfig`, `ProviderConfig`, and a
 provider-scoped `events` map has been removed. The current persisted config is centered on:
 
-- `ClaudineConfig` for user scope (`~/.claudine/config.json`)
-- `RepoOverrideConfig` for repo scope (`<repo>/.claudine/config.json`)
+- `ClaudineConfig` for user scope (`~/.claudine/config.yaml`)
+- `RepoOverrideConfig` for repo scope (`<repo>/.claudine/config.yaml`)
 - `actions: HashMap<AgenticEvent, Vec<HookAction>>` as the canonical event-to-action map
 
 Important implications:
@@ -312,7 +312,7 @@ Notes:
 
 **File:** `claudine/lib/src/config/claudine_config.rs`
 
-Repo-scope override model loaded from `<repo>/.claudine/config.json`.
+Repo-scope override model loaded from `<repo>/.claudine/config.yaml`.
 
 **Relevant fields:**
 

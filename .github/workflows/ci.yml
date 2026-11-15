@@ -990,6 +990,162 @@ jobs:
           sniff --version
           python3 scripts/ci/test_resolved_plan.py AreaGroupingTests
 
+  # The cloned-repository risk (`darkmatter/docs/topics/configuration.md`):
+  # a change that may widen this repository's committed `permissions` needs a
+  # deliberate approval; `docs/topics/ci-cd.md` describes the gate. `permission-scope` classifies the change;
+  # `permission-widening` exists only to request the `permission-widening`
+  # deployment environment, whose required reviewer must approve the run.
+  #
+  # TRUST BOUNDARY. Everything this job runs comes from the BASE commit,
+  # checked out under `$RUNNER_TEMP/permissions-trusted` (outside the
+  # workspace, so no candidate `.cargo/config.toml` or `rust-toolchain.toml`
+  # applies). The candidate commit is fetched as objects only: never checked
+  # out, built, or run. A base that predates the checker is the bootstrap
+  # case and is potential widening, never success.
+  #
+  # Scope: pull requests compare PR base/head, pushes `before`/`after`, and a
+  # schedule or manual run has no branch delta and compares nothing. A push
+  # whose pull request run is reused (same tree, already approved) skips too.
+  # The trusted checker compiles only when `scope` says `compare`; the cheap
+  # path check runs on every pull request and push.
+  permission-scope:
+    name: Classify permission changes
+    needs: validation
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      potential_widening: ${{ steps.verdict.outputs.potential_widening }}
+    env:
+      RUSTC_WRAPPER: ""
+      EVENT: ${{ github.event_name }}
+      REUSED: ${{ needs.validation.outputs.reuse }}
+      BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Fetch the base checkout and the candidate's objects
+        id: fetch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TRUSTED="$RUNNER_TEMP/permissions-trusted"
+          echo "TRUSTED=${TRUSTED}" >>"$GITHUB_ENV"
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != push ] || [ "$REUSED" = true ]; then
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            echo "No branch delta to compare (${EVENT}, reused=${REUSED})."
+            exit 0
+          fi
+          echo "skip=false" >>"$GITHUB_OUTPUT"
+          case "$BASE" in ""|0000000000000000000000000000000000000000) exit 0 ;; esac
+          git init -q "$TRUSTED"
+          git -C "$TRUSTED" config core.hooksPath /dev/null
+          git -C "$TRUSTED" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -C "$TRUSTED" -c "http.https://github.com/.extraheader=${auth}" \
+            fetch -q --no-tags --depth=1 origin "$BASE" "$HEAD"
+          git -C "$TRUSTED" checkout -q --detach "$BASE"
+      - name: Classify the change
+        id: scope
+        if: steps.fetch.outputs.skip == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper="$TRUSTED/scripts/ci/permission_scope.py"
+          if [ ! -f "$helper" ]; then
+            echo "decision=widening" >>"$GITHUB_OUTPUT"
+            echo "The base commit has no trusted checker (bootstrap): potential widening."
+            exit 0
+          fi
+          python3 -I "$helper" scope --repository "$TRUSTED" \
+            --inputs "$TRUSTED/.github/ci/permission-inputs.json" \
+            --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_OUTPUT"
+      - name: Set up the trusted toolchain
+        if: steps.scope.outputs.decision == 'compare'
+        working-directory: ${{ runner.temp }}/permissions-trusted
+        run: rustup show
+      - name: Compare the two commits with the trusted checker
+        id: compare
+        if: steps.scope.outputs.decision == 'compare'
+        working-directory: ${{ runner.temp }}/permissions-trusted
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          cargo run -q --locked -p darkmatter --example permission_widening -- --repository "$TRUSTED" \
+            --inputs "$TRUSTED/.github/ci/permission-inputs.json" \
+            --base "$BASE" --head "$HEAD" >"$RUNNER_TEMP/permission-report.json" || status=$?
+          echo "status=${status}" >>"$GITHUB_OUTPUT"
+      - name: Read the verdict
+        id: verdict
+        if: steps.fetch.outputs.skip == 'false'
+        shell: bash
+        env:
+          DECISION: ${{ steps.scope.outputs.decision }}
+          STATUS: ${{ steps.compare.outputs.status }}
+        run: |
+          set -euo pipefail
+          case "$DECISION" in
+            skip) echo "potential_widening=false" >>"$GITHUB_OUTPUT" ;;
+            widening) echo "potential_widening=true" >>"$GITHUB_OUTPUT" ;;
+            compare)
+              python3 -I "$TRUSTED/scripts/ci/permission_scope.py" decide \
+                --report "$RUNNER_TEMP/permission-report.json" --status "${STATUS:-1}" \
+                | tee -a "$GITHUB_OUTPUT"
+              ;;
+            *) echo "no scope decision was made" >&2; exit 1 ;;
+          esac
+      # Read-only, and inline rather than a trusted helper so the bootstrap
+      # change can be verified too. Referencing an environment that does not
+      # exist makes GitHub create it UNPROTECTED, so `permission-widening`
+      # must never be requested before this passes. The filter mirrors
+      # `scripts/ci/permission_environment.py`'s `problems()`.
+      - name: Verify the approval environment's protection
+        if: steps.verdict.outputs.potential_widening == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROTECTION_FILTER: >-
+            (.can_admins_bypass == false)
+            and (.deployment_branch_policy == null)
+            and ([.protection_rules[]? | select(.type == "branch_policy")] | length == 0)
+            and ([.protection_rules[]? | select(.type == "wait_timer") | .wait_timer] | all(. == 0))
+            and ([.protection_rules[]? | select(.type == "required_reviewers")] | length == 1)
+            and ([.protection_rules[]? | select(.type == "required_reviewers") | .prevent_self_review] == [false])
+            and ([.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]? | "\(.type):\(.reviewer.id)"] | sort == ["User:980757"])
+        run: |
+          set -euo pipefail
+          verdict="$(gh api "repos/${GITHUB_REPOSITORY}/environments/permission-widening" --jq "$PROTECTION_FILTER" || echo missing)"
+          if [ "$verdict" != true ]; then
+            echo "::error::The permission-widening environment is missing or weaker than required (${verdict})." \
+              "Set it up with \`python3 scripts/ci/permission_environment.py --apply\`, then re-run this job."
+            exit 1
+          fi
+          echo "permission-widening: the environment has the required protection."
+
+  # Requests the approval. Skipped (and so never waiting) unless the change
+  # may widen. Approval happens before a runner starts, so `timeout-minutes`
+  # bounds only this job's one step, never the wait for a reviewer. A
+  # rejected approval fails the job; a new commit needs a new approval.
+  permission-widening:
+    name: Approve permission widening
+    needs: permission-scope
+    if: >-
+      !cancelled() &&
+      needs.permission-scope.result == 'success' &&
+      needs.permission-scope.outputs.potential_widening == 'true'
+    environment: permission-widening
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Record the approval
+        run: echo "A reviewer approved this run's permission widening."
+
 
   # THE single required branch-protection check: a policy-free fold.
   #
@@ -1048,6 +1204,10 @@ jobs:
       - build
       - area-ci
       - area-drift
+      # The permission-widening classifier and its approval. A failed
+      # classifier blocks even though the approval job then skips.
+      - permission-scope
+      - permission-widening
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -1062,6 +1222,8 @@ jobs:
             build:${{ needs.build.result }}
             area-ci:${{ needs.area-ci.result }}
             area-drift:${{ needs.area-drift.result }}
+            permission-scope:${{ needs.permission-scope.result }}
+            permission-widening:${{ needs.permission-widening.result }}
         run: |
           set -euo pipefail
           blocking=""

@@ -7,7 +7,8 @@
 //!
 //! Each case writes its triggers under `{root}/schemas` of a temp folder
 //! outside any repository (the tree schema root of a context anchored at
-//! `root`), so no automatic grant applies and only the stated grants do.
+//! `root`), and resolves through a session with no configuration, so only
+//! the stated approvals allow a read.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

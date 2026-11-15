@@ -87,7 +87,7 @@ fn spawn(fixture: &CliProcessFixture, document: &str, whitelist: &[&str], args: 
     write_succeeding_claude(fixture.bin_dir());
     write(&fixture.cwd().join("doc.md"), document);
     let policy: String = whitelist.iter().map(|command| format!("exact {command}\n")).collect();
-    write(&fixture.cwd().join(".darkmatter-shell-whitelist"), &policy);
+    common::write_shell_permissions(fixture.home(), &policy);
     let output = fixture
         .command_builder()
         // `git` runs the commands under test; Git for Windows is outside the

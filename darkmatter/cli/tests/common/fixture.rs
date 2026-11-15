@@ -18,7 +18,7 @@
 //! | Family | Policy |
 //! |---|---|
 //! | CWD | pinned to the fixture `cwd` |
-//! | home | `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` → fixture `home`; `HOMEDRIVE`/`HOMEPATH` removed |
+//! | home | `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` → fixture `home`; `HOMEDRIVE`/`HOMEPATH` removed. The home holds a default `.darkmatter.yaml` ([`USER_CONFIG`]) unless [`CliProcessFixture::without_user_config`] removed it |
 //! | config/cache | `XDG_CONFIG_HOME` → fixture `config`, `XDG_CACHE_HOME` → fixture `cache` (the fallback `dirs::cache_dir()` uses for compose artifacts when no `--cache-root` flag is passed) |
 //! | temp | `TMPDIR` (Unix) / `TEMP`+`TMP` (Windows) → fixture `tmp` |
 //! | darkmatter namespace | inherited `DARKMATTER_*`, `DM_*`, `MD_*`, `THEME`, `CODE_THEME`, `PREFER_ITALICS`, `TERMINAL_IMAGES`, `HASH_PROPERTY`, `HASH_IGNORE_PROPERTIES`, `BASELINE_SCHEMA`, `SCHEMAS_DIR`, `AGENT`, `MODEL`, `RUST_LOG` removed by prefix or name |
@@ -187,6 +187,10 @@ pub fn checkout_containment_error(workspace_root: &Path, checkout_root: &Path) -
 /// completion *and* cleanup: it is removed only when the fixture drops, after
 /// the test's assertions have read whatever the child wrote. Each test
 /// constructs its own fixture; parallel tests never share a root.
+/// The user configuration every fixture home starts with: every setting at
+/// its default.
+pub const USER_CONFIG: &str = "{}\n";
+
 pub struct CliProcessFixture {
     root: tempfile::TempDir,
     cwd: PathBuf,
@@ -241,6 +245,10 @@ impl CliProcessFixture {
         }
         let git_global_config = workspace.join("git-config-global");
         fs::write(&git_global_config, b"").expect("empty git global config must be writable");
+        // A home with a user configuration, so a run reports no
+        // `dm.config.missing` warning unless its test asks for one
+        // (`without_user_config`).
+        fs::write(home.join(".darkmatter.yaml"), USER_CONFIG).expect("fixture user configuration must be writable");
         Self {
             root,
             cwd,
@@ -253,8 +261,29 @@ impl CliProcessFixture {
         }
     }
 
+    /// Removes the default user configuration from the fixture home, for a
+    /// test of a run with none.
+    #[must_use]
+    pub fn without_user_config(self) -> Self {
+        fs::remove_file(self.home.join(".darkmatter.yaml")).expect("fixture user configuration must be removable");
+        self
+    }
+
     pub fn cwd(&self) -> &Path {
         &self.cwd
+    }
+
+    /// Replaces the fixture home's `.darkmatter.yaml` with one whose
+    /// `permissions.shell-commands` are `entries` (`!` entries included), the
+    /// shell policy every `md` run of this fixture reads.
+    pub fn shell_permissions(&self, entries: &[&str]) -> PathBuf {
+        let mut text = String::from("permissions:\n  shell-commands:\n");
+        for entry in entries {
+            text.push_str(&format!("    - {}\n", serde_json::to_string(entry).expect("an entry string")));
+        }
+        let path = self.home.join(".darkmatter.yaml");
+        fs::write(&path, text).expect("fixture user configuration must be writable");
+        path
     }
 
     pub fn home(&self) -> &Path {

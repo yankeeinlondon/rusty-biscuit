@@ -20,7 +20,7 @@
 //! never evaluates an expression, reads a value, or touches the filesystem,
 //! and no record holds an evaluated value.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -112,6 +112,7 @@ impl ExpressionDiagnostic {
             reference_details: None,
             data_location: None,
             grants_needed: None,
+            schema_default: None,
         }
     }
 
@@ -148,25 +149,56 @@ pub struct Diagnostic {
     /// (and not serialized) for every other record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_location: Option<DataLocation>,
-    /// The grants any one of which would allow the read a
+    /// The approvals any one of which would allow the read a
     /// `dm.schema.slot_approval_required` record is about, in the order an
     /// approval prompt offers them; `None` (and not serialized) for every
     /// other record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grants_needed: Option<Vec<GrantNeeded>>,
+    /// The schema default that supplied the value a schema problem is
+    /// about: no authored text holds that value, so `source` names the
+    /// document without a line or column. `None` (and not serialized) for
+    /// every other record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_default: Option<SchemaDefaultOrigin>,
 }
 
-/// One grant that would allow a schema slot's read, as a data output
+/// Where a schema default that composition or validation inserted is
+/// declared, as a data output writes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchemaDefaultOrigin {
+    /// The dotted property path the default stands in for.
+    pub path: String,
+    /// JSON Pointer of the `default` keyword in the lowered schema, such as
+    /// `/properties/doc/default`.
+    pub schema_location: String,
+    /// The schema file that declares the default (the imported file for a
+    /// default inside a `Name@file` type); omitted when the document's own
+    /// inline schema or a compiled-in schema declares it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_file: Option<PathBuf>,
+}
+
+impl From<&simplified_schema::AppliedDefault> for SchemaDefaultOrigin {
+    fn from(applied: &simplified_schema::AppliedDefault) -> Self {
+        Self {
+            path: applied.path.to_string(),
+            schema_location: applied.pointer.clone(),
+            schema_file: applied.origin.as_ref().and_then(simplified_schema::SchemaOrigin::file).map(Path::to_path_buf),
+        }
+    }
+}
+
+/// One approval that would allow a schema slot's read, as a data output
 /// writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GrantNeeded {
-    /// `file`, `dir`, `url`, `url-any-query`, or `site`: the grant store's
-    /// kind word.
+    /// `file` or `url`.
     pub kind: &'static str,
-    /// The path, URL, or `scheme://host[:port]` the grant covers, as the
-    /// grant store spells it.
+    /// The file's path or the exact URL the approval covers.
     pub target: String,
-    /// `once` (this run) or `persisted` (written to the grant store).
+    /// `once` (this run) or `persisted` ("always allow" a file: saved to the
+    /// user's `permissions.file-read` and applied for the run).
     pub scope: &'static str,
 }
 

@@ -436,10 +436,7 @@ fn shell_ternary_condition_and_branch_failures_stay_fatal() {
         for fail_fast in [false, true] {
             let dir = TempDir::new().unwrap();
             let path = write(dir.path(), "doc.md", &format!("---\nflag: \"{value}\"\n---\nbody\n"));
-            let options = options(dir.path(), &path, fail_fast).with_shell(ShellExpansionOptions {
-                policy_root: Some(dir.path().to_path_buf()),
-                ..Default::default()
-            });
+            let options = options(dir.path(), &path, fail_fast).with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(ShellExpansionOptions::default());
             Markdown::try_from(path.as_path())
                 .unwrap()
                 .compose_with(&crate::request_support::request(options))
@@ -529,11 +526,11 @@ fn preflight_discovery_tolerates_what_composition_rejects() {
         "---\nnote: \"x {{ 1 + }}\"\nrev: \"$(git rev-parse HEAD)\"\n---\nbody\n",
     );
     let markdown = Markdown::try_from(path.as_path()).unwrap();
-    let shell = ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() };
+    let shell = ShellExpansionOptions::default();
 
     let commands = darkmatter::markdown::compose::collect_shell_commands(
         &markdown,
-        &crate::request_support::request(options(dir.path(), &path, false).with_shell(shell.clone())),
+        &crate::request_support::request(options(dir.path(), &path, false).with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(shell.clone())),
     )
     .expect("preflight discovery tolerates the bad mixed-text span");
     assert!(
@@ -543,7 +540,7 @@ fn preflight_discovery_tolerates_what_composition_rejects() {
 
     let approved = HashSet::from(["git rev-parse HEAD".to_string()]);
     markdown
-        .compose_with(&crate::request_support::request(options(dir.path(), &path, false).with_shell(shell).with_pre_approved_commands(approved)))
+        .compose_with(&crate::request_support::request(options(dir.path(), &path, false).with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(shell).with_pre_approved_commands(approved)))
         .expect_err("the real composition rejects the bad span");
 }
 
@@ -560,11 +557,11 @@ fn preflight_discovery_does_not_fail_on_a_region_composition_removes() {
         "---\nrev: \"$(git rev-parse HEAD)\"\n---\nkept\n\n::block when=\"false\"\n{{ min(missing, 5) }}\n::end-block\n",
     );
     let markdown = Markdown::try_from(path.as_path()).unwrap();
-    let shell = ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() };
+    let shell = ShellExpansionOptions::default();
 
     let commands = darkmatter::markdown::compose::collect_shell_commands(
         &markdown,
-        &crate::request_support::request(options(dir.path(), &path, false).with_shell(shell.clone())),
+        &crate::request_support::request(options(dir.path(), &path, false).with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(shell.clone())),
     )
     .expect("discovery tolerates a failure inside a removed region");
     assert!(commands.iter().any(|entry| entry.normalized == "git rev-parse HEAD"), "{commands:?}");

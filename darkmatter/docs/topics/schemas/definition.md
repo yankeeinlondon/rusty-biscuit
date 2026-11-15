@@ -463,7 +463,7 @@ of preparing the text. It holds:
 | the global catalog, `fm` included | `GlobalCatalog::darkmatter()` and the runtime baseline |
 | the baseline lowered to JSON Schema with its [validator-cache digest](#validator-cache), and its definition-free form | `darkmatter_base_json_schema()`, `darkmatter_base_schema()`, and every `with_darkmatter_baseline_json_schema()` |
 | the named types of each partial under `schemas/partials/` | `Name@darkmatter:<stem>` references |
-| the YAML document-kind definitions (`schema-trigger.yaml` and Simplified Schema's two envelope definitions) | `KindRegistry::shipped()` and the seed of every kind registry |
+| the YAML document-kind definitions (Simplified Schema's `schema.yaml`, `yaml-schema.yaml`, and `schema-trigger.yaml`), prepared with Darkmatter's shipped sources | `shipped_kind_registry()`, and the shipped definitions `kind_host()` seeds every kind registry with |
 | the expression-function catalog (`functions.yaml`, with its file-form examples) | `expression_function_catalog()` |
 | the side-effect catalog (`mutations.yaml`) | `effect_function_catalog()` |
 
@@ -945,8 +945,9 @@ platforms: []
 
 ### Kind Checks
 
-Darkmatter's own kinds have rules that their definitions cannot express, such
-as whether a trigger's `$path` glob is valid. Once a document satisfies its
+The three shipped kinds, which Simplified Schema defines and checks, have
+rules that their definitions cannot express, such as whether a trigger's
+`$path` glob is valid. Once a document satisfies its
 definition, these checks run on the same document and add their problems to
 the same report:
 
@@ -1012,6 +1013,10 @@ explains each case.
 the YAML document at `path`. Build the `DarkmatterSchemas` with the
 **document's own** file-resolution context: its schema roots supply the kind
 definitions, and its folder resolves the document's relative file values.
+Loading, kind selection, the kind registry, and the kind checks belong to
+Simplified Schema (`simplified_schema::yaml_documents`); Darkmatter supplies
+its shipped sources and shipped definitions, prepares the selected schema,
+and reports through a `ValidationReport`.
 
 ```rust
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
@@ -1034,28 +1039,30 @@ match DarkmatterSchemas::new(context).validate_yaml_document(&text, path)? {
 ```
 
 Without a registry of its own, each call builds the kind registry for its
-context with `KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context))`.
+context with `KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context), kind_host())`.
 To validate many documents that share one context, build it once and pass it
 with `with_kind_registry`; the registry must have been built for that same
 context:
 
 ```rust
-use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, kind_host};
+use simplified_schema::yaml_documents::{KindRegistry, RegistryScope};
 use std::sync::Arc;
 
-let registry = Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context)));
+let registry = Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context), kind_host()));
 let schemas = DarkmatterSchemas::new(context).with_kind_registry(registry);
 ```
 
 | Item | Purpose |
 |---|---|
 | `YamlOutcome` | `NoSchema` (nothing was checked) or `Validated(YamlValidation)`. |
-| `YamlValidation` | `route` (`Route::Kind(kind)` or `Route::RootSchema`), `report` (a `ValidationReport`), `definition` (what validated it: a definition file's path, `built-in <path>` for a shipped definition, the `$schema` reference, or the text "the inline `$schema`"), and `byte_range(&problem)`, the byte range of a problem's token in the validated text. |
-| `KindRegistry` | The kinds one context can select. `from_filesystem(context, scope)` reads the schema roots from disk; `build(context, source, scope)` reads them through a `SchemaRootSource`, so an editor can supply unsaved buffers, also in a root whose folder does not exist yet (`absent_root_files`; run it inside `simplified_schema::resolve::buffers::with` for definitions' imports to read them too); `shipped()` holds the shipped definitions alone. `claim(kind)` and `claims()` read it; `incomplete()` and `root_failures()` list what it could not read; `dependencies()` and `searched_locations()` say which files and folders to watch before reusing it. |
-| `LoadedYamlDocument` | A document `load(text, path)` admitted, for `validate_loaded_yaml_document`; `validate_yaml_document` is the two in one. `declaration_key()` hashes its `kind` and root `$schema`, the parts a contract is prepared from. |
-| `YamlContract` | The selected schema, resolved and compiled: `prepare_yaml_contract(&document)` (`None` when no schema is selected). `validate(&document)` judges any text of the document with the same `declaration_key()`, without resolving or compiling again; it is passive unless `checks_read_files()` (a `schema` or `yaml-schema` document's checks resolve its own imports). `validate_loaded_yaml_document` is the two in one. |
-| `RegistryScope` | `WithRoots` (shipped definitions plus the schema roots) or `ShippedOnly`. `for_context` chooses `WithRoots` inside a repository and `ShippedOnly` outside one, as `md` does. |
-| `Claim`, `DefinitionSource`, `Incomplete` | In `darkmatter::markdown::schemas::yaml_documents`: a kind's claim (`Healthy`, `Duplicate`, `Reserved`), where a definition came from (`Shipped(path)` or `File(path)`), and a failure that leaves the registry unable to rule a kind out. |
+| `YamlValidation` | `route` (`Route::Kind(kind)`, `Route::RootSchema`, or `Route::Configuration`), `report` (a `ValidationReport`), `definition` (what validated it: a definition file's path, `built-in <path>` for a shipped definition, the `$schema` reference, or the text "the inline `$schema`"), and `byte_range(&problem)`, the byte range of a problem's token in the validated text. |
+| `KindRegistry` | The kinds one context can select (in `simplified_schema::yaml_documents`). `from_filesystem(context, scope, host)` reads the schema roots from disk; `build(context, source, scope, host)` reads them through a `SchemaRootSource`, so an editor can supply unsaved buffers, also in a root whose folder does not exist yet (`absent_root_files`; run it inside `simplified_schema::resolve::buffers::with` for definitions' imports to read them too); `shipped_from(definitions)` holds the given shipped definitions alone, and Darkmatter's `shipped_kind_registry()` is that registry over its own, built once per process. `claim(kind)` and `claims()` read it; `incomplete()` and `root_failures()` list what it could not read; `dependencies()` and `searched_locations()` say which files and folders to watch before reusing it. |
+| `KindHost` | What a host hands every registry it builds: its `ShippedSources` (so a definition's `Name@darkmatter:<stem>` import resolves) and its prepared shipped definitions. Darkmatter's is `kind_host()`, whose definitions come from its [shipped artifact](#the-shipped-artifact). |
+| `LoadedYamlDocument` | A document `load(text, path)` admitted (in `simplified_schema::yaml_documents`), for `validate_loaded_yaml_document`; `validate_yaml_document` is the two in one. `declaration_key()` hashes its `kind` and root `$schema`, the parts a contract is prepared from. |
+| `YamlContract` | The selected schema, resolved and compiled: `prepare_yaml_contract(&document)` (`None` when no schema is selected). `validate(&document)` judges any text of the document with the same `declaration_key()`, without resolving or compiling again; it is passive unless `checks_read_files()` (a `schema` or `yaml-schema` document's checks resolve its own imports). `validate_loaded_yaml_document` is the two in one. A caller that knows a document is a configuration file prepares its contract with `prepare_configuration_contract(resolved, definition, path)` instead (`Route::Configuration`): `resolved` is a configuration type from `config::schema::resolve_host_config_type(source, path, name)`, no `kind` or `$schema` is consulted, and an empty document is judged as an empty mapping. DMLS does this for the [configuration files](./dmls-schema-support.md#configuration-files). |
+| `RegistryScope` | In `simplified_schema::yaml_documents`. `WithRoots` (shipped definitions plus the schema roots) or `ShippedOnly`. `for_context` chooses `WithRoots` inside a repository and `ShippedOnly` outside one, as `md` does. |
+| `Claim`, `DefinitionSource`, `Incomplete` | In `simplified_schema::yaml_documents`: a kind's claim (`Healthy`, `Duplicate`, `Reserved`), where a definition came from (`Shipped(path)` or `File(path)`), and a failure that leaves the registry unable to rule a kind out. |
 
 `validate_yaml_document` returns `Err` for a load error
 (`SchemaError::SchemaDocument`), a `KindSelection` error, every resolution
@@ -1069,7 +1076,7 @@ to report `"error": "yaml_parse"` for the first and `"error": "schema"` for the
 second:
 
 ```rust
-use darkmatter::markdown::schemas::LoadedYamlDocument;
+use simplified_schema::yaml_documents::LoadedYamlDocument;
 
 let document = LoadedYamlDocument::load(&text, path)?; // the document's load error, only
 let outcome = DarkmatterSchemas::new(context).validate_loaded_yaml_document(&document)?; // selection and schema errors
@@ -1589,13 +1596,13 @@ instead; see [Validating from the Library](#validating-from-the-library).
 
 ### Key Types
 
-`DarkmatterSchemas`, `EffectiveSchema`, `ValidationReport`, `PreparationSummary`, `ValidationTimings`, `ValidationOptions`, and `PendingValue` are Darkmatter's, as are the YAML document types (`YamlOutcome`, `YamlValidation`, `Route`, `KindRegistry`, `RegistryScope`) listed in [Validating from the Library](#validating-from-the-library). The rest belong to the `simplified-schema` library, so import them from `simplified_schema`; the [library docs](../../../../simplified-schema/README.md) describe them in full, including the `SimplifiedSchema` object for callers that need the language without Darkmatter's document policy.
+`DarkmatterSchemas`, `EffectiveSchema`, `ValidationReport`, `PreparationSummary`, `ValidationTimings`, `ValidationOptions`, and `PendingValue` are Darkmatter's, as are the YAML document types (`YamlOutcome`, `YamlValidation`, `Route`, `YamlContract`) listed in [Validating from the Library](#validating-from-the-library), and the wrappers that hand Simplified Schema Darkmatter's shipped sources: `kind_host()`, `shipped_kind_registry()`, `shipped_sources()`, and `markdown::schemas::triggers::{scan, scan_with_embedded, scan_with_source, prepare_trigger_bundle}`. `KindRegistry`, `RegistryScope`, `LoadedYamlDocument`, `EmbeddedSchemaBundle`, `SchemaRoots`, and the trigger types (`simplified_schema::triggers`) are Simplified Schema's. The rest belong to the `simplified-schema` library, so import them from `simplified_schema`; the [library docs](../../../../simplified-schema/README.md) describe them in full, including the `SimplifiedSchema` object for callers that need the language without Darkmatter's document policy.
 
 | Type                  | Purpose                                                                                                             |
 |-----------------------|---------------------------------------------------------------------------------------------------------------------|
 | `DarkmatterSchemas`   | Top-level entry point. Holds the request's file-resolution context, an optional baseline, and the LRU validator cache. |
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's winning declaration: document, referenced file, trigger, or baseline; see [Embedded trigger bundles](#embedded-trigger-bundles) for reading a trigger's source). |
-| `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
+| `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`) + `defaults: Vec<AppliedDefault>`: the absent required properties the verdict accepted through their `default(...)`, in validator order (parents before children, declaration order, ascending array index); empty for an unconditional pass. Validation never inserts them into the caller's value. |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
 | `PreparationSummary`  | What the effective-schema resolution behind `DarkmatterSchemas::validate_summarized` found, returned beside its report: its `layers` and `has_schema()`, which is `false` when no baseline, trigger, or `$schema` applied. |
 | `SchemaLayers`        | Which layers an effective schema merged: `document` (the document's own `$schema`), `triggers` (the matching `TriggerSource`s that layered a payload), and `baseline`. Read from `PreparationSummary::layers` or `EffectiveSchema::layers()`. |
@@ -2196,12 +2203,14 @@ envelope reason.
 
 A program that uses Darkmatter as a library can ship trigger schemas inside
 its own binary, so they apply even where no schema file is installed. It
-hands Darkmatter an `EmbeddedSchemaBundle`: a bundle name plus
-`(file name, text)` pairs, usually from `include_str!`. Darkmatter ships no
-bundle of its own; the `md` CLI and DMLS register none.
+hands Darkmatter an `EmbeddedSchemaBundle` (from
+`simplified_schema::embedded`): a bundle name plus `(file name, text)` pairs,
+usually from `include_str!`. Darkmatter ships no bundle of its own; the `md`
+CLI and DMLS register none.
 
 ```rust
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::embedded::EmbeddedSchemaBundle;
 
 const BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new(
     "my-tool",
@@ -2273,8 +2282,8 @@ result and attaches it to the bundle; discovery then reads each document from
 it. The results are the same either way: only the work moves.
 
 ```rust
-use darkmatter::markdown::schemas::EmbeddedSchemaBundle;
-use darkmatter::markdown::schemas::triggers::{PreparedBundleDescriptor, PreparedTriggerBundle};
+use simplified_schema::embedded::EmbeddedSchemaBundle;
+use simplified_schema::triggers::{PreparedBundleDescriptor, PreparedTriggerBundle};
 
 fn accepted() -> Option<&'static PreparedTriggerBundle> {
     // The host's accepted artifact; `None` when its artifact was refused.
@@ -2285,8 +2294,11 @@ const PREPARED: PreparedBundleDescriptor = PreparedBundleDescriptor { owner: "my
 const BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new("my-tool", FILES).with_prepared(&PREPARED);
 ```
 
-The host's generator calls `prepare_trigger_bundle(bundle, PreparationMode::Uncached(&fresh))`,
-which runs every check discovery runs and fails if any document fails, so an
+The host's generator calls Darkmatter's
+`markdown::schemas::triggers::prepare_trigger_bundle(bundle, PreparationMode::Uncached(&fresh))`,
+which is Simplified Schema's `triggers::prepare_trigger_bundle` with
+Darkmatter's shipped sources added, so a payload's `Name@darkmatter:<stem>`
+import resolves. It runs every check discovery runs and fails if any document fails, so an
 invalid trigger never reaches an artifact. The result is a
 `TriggerBundleRecord`: one record per bundle file, in file-name order, each
 `NotTrigger`, `MatcherOnly`, or `Payload` with the lowered schema. The host

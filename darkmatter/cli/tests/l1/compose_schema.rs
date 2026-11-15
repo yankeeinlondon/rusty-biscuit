@@ -179,6 +179,22 @@ fn compose_with_required_property_supplied_succeeds() {
         .stdout(predicate::str::contains("Body"));
 }
 
+/// A required property the document leaves out composes with its schema
+/// default, in the frontmatter and the body, and the source file keeps its
+/// bytes.
+#[test]
+fn compose_fills_a_required_default_without_editing_the_source() {
+    let process = CliProcessFixture::new();
+    let content = "---\n$schema:\n  greeting: 'string(required; default(hello))'\n---\nSay {{ greeting }}\n";
+    let doc = process.write_file("defaulted.md", content);
+
+    let (stdout, frontmatter) = composed_document(&process, &doc, &[]);
+
+    assert_eq!(frontmatter.get("greeting"), Some(&serde_json::json!("hello")), "{stdout}");
+    assert!(stdout.contains("Say hello"), "{stdout}");
+    assert_eq!(read_to_string(&doc), content);
+}
+
 // ── Medium #4: md compose ↔ md schema validate parity ───────────────────────
 
 /// Both `md compose` and `md schema validate` consume the same input file and
@@ -697,4 +713,27 @@ fn first_frontmatter_interpolation_precedes_optional_materialization() {
         .success()
         .stdout(predicate::str::contains("before-schema=false"))
         .stdout(predicate::str::contains("after-schema=true"));
+}
+
+/// A missing eager-file target a schema default supplied has no frontmatter
+/// text to correct: the block's hint names the default, in the type file a
+/// `Name@file` import read it from, instead of the frontmatter.
+#[test]
+fn compose_hint_directs_a_default_problem_to_the_importing_types_file() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    fs::create_dir_all(tmp.join("types")).unwrap();
+    write_file(&tmp.join("types"), "types.yaml", "kind: schema\ntypes:\n  Doc: file(required; eager; default(./note.md))\n");
+    let doc = write_file(tmp, "doc.md", "---\n$schema:\n  doc: Doc@./types/types.yaml\n---\nBody\n");
+
+    let assert = process.command().args(["compose"]).arg(&doc).assert().code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+    // The block wraps at the terminal width; compare its words.
+    let words = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // A color terminal styles the backticked spans; plain output keeps them.
+    let words = words.replace('`', "");
+    assert!(words.contains("Repair the schema default at schema location /properties/doc/default in"), "{stderr}");
+    assert!(words.contains("types.yaml, or set doc in the frontmatter"), "{stderr}");
+    assert!(!words.contains("Correct the frontmatter"), "{stderr}");
 }

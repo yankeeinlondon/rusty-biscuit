@@ -33,10 +33,8 @@
 //! ```
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
 
-use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value, json};
 
 use super::{FunctionState, HostFunction, HostFunctionCatalog, HostFunctionError, HostFunctions, validate_names};
@@ -115,13 +113,30 @@ impl HostFunctions {
     /// [`HostFunctionError::BuiltinCollision`] when the catalog declares a
     /// function a built-in already names; the artifact is not consulted.
     pub fn analysis_only(catalog: HostFunctionCatalog, artifact: FactsArtifact<'_>) -> Result<Self, HostFunctionError> {
+        let path = facts_artifact_path(catalog.path());
+        Self::analysis_only_at(catalog, &path, artifact)
+    }
+
+    /// [`Self::analysis_only`] for a facts artifact that a caller located
+    /// itself (a host registration manifest names it) rather than beside the
+    /// catalog: `facts_path` is where `artifact` was read, and reasons name
+    /// it. The artifact must still record the catalog's hash.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::analysis_only`].
+    pub fn analysis_only_at(
+        catalog: HostFunctionCatalog,
+        facts_path: &Path,
+        artifact: FactsArtifact<'_>,
+    ) -> Result<Self, HostFunctionError> {
         let names = catalog.function_names();
         validate_names(names.iter().map(|name| (*name, &[][..])))?;
-        let path = facts_artifact_path(catalog.path());
+        let path = facts_path;
         let whole = |reason: String| -> Vec<HostFunction> {
             names.iter().map(|name| incomplete(name, reason.clone())).collect()
         };
-        let functions = match read_entries(&catalog, &names, artifact, &path) {
+        let functions = match read_entries(&catalog, &names, artifact, path) {
             Err(reason) => whole(reason),
             Ok(entries) => {
                 let functions: Vec<HostFunction> = names
@@ -549,83 +564,7 @@ fn position(value: &Value, field: &str) -> Result<usize, String> {
 /// (`serde_json` keeps the last) and anything after the value. `Err`
 /// completes a sentence naming the artifact ("the facts artifact `…` …").
 pub(crate) fn parse_strict(text: &str) -> Result<Value, String> {
-    let mut deserializer = serde_json::Deserializer::from_str(text);
-    let StrictValue(value) =
-        StrictValue::deserialize(&mut deserializer).map_err(|error| format!("is not valid JSON: {error}"))?;
-    deserializer.end().map_err(|error| format!("has content after its JSON value: {error}"))?;
-    Ok(value)
-}
-
-struct StrictValue(Value);
-
-impl<'de> Deserialize<'de> for StrictValue {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(StrictVisitor).map(StrictValue)
-    }
-}
-
-struct StrictVisitor;
-
-impl<'de> Visitor<'de> for StrictVisitor {
-    type Value = Value;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a JSON value")
-    }
-
-    fn visit_bool<E>(self, value: bool) -> Result<Value, E> {
-        Ok(Value::Bool(value))
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Value, E> {
-        Ok(Value::Number(value.into()))
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Value, E> {
-        Ok(Value::Number(value.into()))
-    }
-
-    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Value, E> {
-        serde_json::Number::from_f64(value)
-            .map(Value::Number)
-            .ok_or_else(|| E::custom("a number is not finite"))
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Value, E> {
-        Ok(Value::String(value.to_string()))
-    }
-
-    fn visit_string<E>(self, value: String) -> Result<Value, E> {
-        Ok(Value::String(value))
-    }
-
-    fn visit_unit<E>(self) -> Result<Value, E> {
-        Ok(Value::Null)
-    }
-
-    fn visit_none<E>(self) -> Result<Value, E> {
-        Ok(Value::Null)
-    }
-
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
-        let mut items = Vec::new();
-        while let Some(StrictValue(item)) = seq.next_element()? {
-            items.push(item);
-        }
-        Ok(Value::Array(items))
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
-        let mut object = Map::new();
-        while let Some(key) = map.next_key::<String>()? {
-            if object.contains_key(&key) {
-                return Err(de::Error::custom(format!("duplicate key `{key}`")));
-            }
-            let StrictValue(value) = map.next_value()?;
-            object.insert(key, value);
-        }
-        Ok(Value::Object(object))
-    }
+    crate::strict_json::parse(text).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

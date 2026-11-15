@@ -22,6 +22,40 @@ behavior.
   hash.
 - YAML analysis and span support are shared through `biscuit-file` rather than
   reimplemented in Darkmatter.
+- `yaml_edit` (`edit_yaml_paths`, `YamlEdit`, `YamlEditError`) edits plain
+  YAML files in place with the frontmatter path editor's engine and never
+  serializes the whole file; see [frontmatter.md](frontmatter.md#plain-yaml-files).
+- `config::write` (`ConfigTransaction`, `TargetChange`, `ConfigWriteError`)
+  is the one configuration writer: sibling `<name>.darkmatter-lock` (kept,
+  `File::try_lock`, 2 s/20 ms), locks in portable-path order, re-read,
+  `edit_yaml_paths`, caller's passive validation callback, expected-bytes
+  check, then the shared `atomic_replace::persist` (also used by
+  `effects::fs_write`). `config::migration_receipt` is the one receipt
+  reader/writer (`<name>.darkmatter-migration.json`, parsed by
+  `strict_json`); `complete_cleanup` acts only on caller-listed known
+  sources. Test seams: `config::write::test_hooks` under
+  `effects-instrumentation`. User docs: `docs/topics/config-writes.md`.
+- `config::schema` holds the shipped configuration schema
+  (`darkmatter/schemas/darkmatter-config.yaml`, in `embedded::SHIPPED`,
+  served as `Name@darkmatter:config` through `SHIPPED_ALIASES`; the alias
+  pairs are the artifact's preparation `configuration`). A host program
+  prepares its own compiled-in config schema (Claudine's
+  `claudine-config.yaml`, which imports `permissions@darkmatter:config`)
+  through `config::schema::prepare_host_config_type(source, path, name)`
+  (or `resolve_host_config_type` for the uncompiled `ResolvedSchema` an
+  editor describes, as DMLS's `config_contracts` does), never by building a context itself (the context-construction guard
+  refuses that outside Darkmatter). `config::load`'s
+  `ConfigSnapshot::load(context, Option<&CommittedTreeSnapshot>, mode)`
+  reads the user file (home from the context) and the repository file at
+  HEAD and in the working copy, with the admitted-YAML loader, judging one
+  setting at a time against the scope's selected type (`user-config` /
+  `repository-config`): whole-file failures are syntax, non-mapping, and
+  unknown keys; `permissions()` returns one merged error; `register`
+  findings omit only their entries. Typed entries reuse
+  `shell_expansion::store::parse_rule_entry` and biscuit-file's
+  `GlobReference`/`FileReference`. Permission evaluation, reference
+  following, and legacy migration are later work. User docs:
+  `docs/topics/configuration.md`.
 
 ## Composition and expressions
 
@@ -141,17 +175,27 @@ directly: `darkmatter::markdown::schemas` does not re-export them.
   `parse_standalone_schema_document` and its passive product
   `StandaloneSchemaDocument`, named-type resolution, JSON Schema lowering,
   subtyping, the conversion engine, `ValidatorCache`, `SchemaError`,
-  `ValidationProblem`, `SchemaOriginMap`, `SchemaPhase`, and the standalone
+  `ValidationProblem`, `SchemaOriginMap`, `SchemaPhase`, the standalone
   facade `simplified_schema::SimplifiedSchema` (with `Prepared`,
-  `validate_strict`/`validate_soft`, and layering). Darkmatter must not
+  `validate_strict`/`validate_soft`, and layering), and the schema-kind
+  infrastructure: `triggers` (grammar, discovery, matching, `TriggerOrigin`,
+  `SCHEMA_INVALID_TRIGGER_CODE`), `roots` (`SchemaRoots`), `embedded`
+  (`EmbeddedSchemaBundle`, `ShippedSources`), and `yaml_documents`
+  (`LoadedYamlDocument`, `KindRegistry`, selection, kind checks). Every entry
+  point there that resolves a payload or prepares a kind definition takes
+  the host's `ShippedSources`. Darkmatter must not
   redefine any of these names
   (`lib/tests/l1/schema_language_ownership_guard.rs`).
 - Darkmatter-owned (`darkmatter/lib/src/markdown/schemas/`):
   `DarkmatterSchemas` loads and merges document, trigger, and baseline schemas
   for a Markdown document; `EffectiveSchema`, `ValidationOptions`, and
-  `PendingPolicy`; the shipped baseline and global catalog; schema roots and
-  trigger discovery; the `schemas::resolve` wrappers that pass
-  `embedded::SHIPPED_SOURCES`; `TriggerOrigin`; `ProblemPositions`.
+  `PendingPolicy`; the shipped baseline and global catalog; the YAML adapter
+  (`YamlContract`, `YamlValidation`, `YamlOutcome`, `Route`); the wrappers
+  that pass `embedded::SHIPPED_SOURCES` to the library (`schemas::resolve`,
+  `schemas::triggers::{scan, scan_with_embedded, scan_with_source,
+  prepare_trigger_bundle}`, `shipped_sources()`, `kind_host()`,
+  `shipped_kind_registry()`); `ProblemPositions`. `darkmatter::markdown::schemas`
+  does not re-export the moved types; import them from `simplified_schema`.
 - `ValidationProblem` carries legacy message/kind fields plus typed code,
   instance/schema paths, offending property, source location, and optional
   file-reference detail.

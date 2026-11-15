@@ -2,7 +2,8 @@
 //!
 //! Each case builds a real Git repository in a temp dir and resolves a real
 //! template (`simplified-schema`'s resolver) through [`SlotSession`] with the
-//! real expression engine, automatic grant, and grant store. A "command" is
+//! real expression engine and a captured configuration whose
+//! `permissions.file-read` (in a temp home) admits the repository. A "command" is
 //! one session; a cache hit across commands is a second session over the
 //! same template. Evaluations are counted by the `SlotResolution` work
 //! counter, so the counting cases need the `work-counters` feature that
@@ -17,6 +18,7 @@ use serde_json::Value;
 use simplified_schema::SchemaError;
 use simplified_schema::slots::PendingSchema;
 
+use crate::config::load::{ConfigLoadMode, ConfigSnapshot};
 use crate::markdown::schemas::slots::cache::InputCheck;
 use crate::markdown::schemas::slots::session::{SessionMode, SlotSession};
 use crate::markdown::compose::DataRuntime;
@@ -78,9 +80,34 @@ impl Repo {
         std::fs::write(path, text).unwrap();
     }
 
+    /// The temp home holding the repository (and `.darkmatter.yaml`).
+    fn home(&self) -> PathBuf {
+        self.root.parent().unwrap().to_path_buf()
+    }
+
     fn context(&self, env: &[(&str, &str)]) -> biscuit_file::FileResolutionContext {
         let env: HashMap<String, String> = env.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect();
-        biscuit_file::FileResolutionContext::new(&self.root).with_env(env)
+        biscuit_file::FileResolutionContext::new(&self.root).with_env(env).with_home_dir(self.home())
+    }
+
+    /// The configuration captured after writing the user's
+    /// `permissions.file-read` as `entries`.
+    fn permissions(&self, entries: &[&str]) -> Arc<ConfigSnapshot> {
+        let list: String = entries.iter().map(|entry| format!("        - \"{entry}\"\n")).collect();
+        let text = if entries.is_empty() { "permissions:\n    file-read: []\n".to_string() } else { format!("permissions:\n    file-read:\n{list}") };
+        std::fs::write(self.home().join(".darkmatter.yaml"), text).unwrap();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(&self.root, Some(self.home()), HashMap::new());
+        Arc::new(ConfigSnapshot::load(&context, None, ConfigLoadMode::Passive).unwrap())
+    }
+
+    /// A new command's session reading through `data`, whose permissions
+    /// admit every file of the repository.
+    fn session_with(&self, data: DataRuntime) -> Arc<SlotSession> {
+        Arc::new(
+            SlotSession::new(data)
+                .with_repository_root(Some(self.root.clone()))
+                .with_config_snapshot(self.permissions(&["~/repo/**"])),
+        )
     }
 
     /// The template as a fresh resolution reads it now.
@@ -97,19 +124,16 @@ impl Repo {
         }
     }
 
-    /// A new command's session, judging automatic grants against this
-    /// repository.
+    /// A new command's session whose permissions admit the repository.
     fn session(&self) -> Arc<SlotSession> {
-        Arc::new(SlotSession::new(DataRuntime::new()).with_repository_root(Some(self.root.clone())))
+        self.session_with(DataRuntime::new())
     }
 
-    /// A new command's session holding a run-only grant for the whole
-    /// repository folder, so an edited (dirty) file may still be read.
+    /// A new command's session with no configuration: nothing is
+    /// pre-approved, so every read needs approval.
     #[cfg(feature = "work-counters")]
-    fn granted_session(&self, data: DataRuntime) -> Arc<SlotSession> {
-        use crate::markdown::schemas::slots::grants::{Grant, GrantDecision, GrantScope, GrantTarget};
-        let grant = Grant { decision: GrantDecision::Allow, target: GrantTarget::Dir(self.root.clone()), scope: GrantScope::Once };
-        Arc::new(SlotSession::new(data).with_repository_root(Some(self.root.clone())).with_run_grants([grant]))
+    fn unpermitted_session(&self) -> Arc<SlotSession> {
+        Arc::new(SlotSession::new(DataRuntime::new()).with_repository_root(Some(self.root.clone())))
     }
 }
 
@@ -173,10 +197,10 @@ mod reuse {
     fn a_hit_reports_the_read_set_a_cold_run_reports() {
         let repo = Repo::reading_data();
         let cold_data = DataRuntime::new();
-        let cold = Arc::new(SlotSession::new(cold_data.clone()).with_repository_root(Some(repo.root.clone())));
+        let cold = repo.session_with(cold_data.clone());
         resolve(&cold, &repo, &[]).unwrap();
         let warm_data = DataRuntime::new();
-        let warm = Arc::new(SlotSession::new(warm_data.clone()).with_repository_root(Some(repo.root.clone())));
+        let warm = repo.session_with(warm_data.clone());
         let (_, runs) = evaluations(|| resolve(&warm, &repo, &[]).unwrap());
         assert_eq!(runs, 0);
         let expected = vec![biscuit_file::to_portable_string(&repo.path(DATA))];
@@ -196,9 +220,9 @@ mod reuse {
     #[test]
     fn an_edited_data_file_is_a_miss() {
         let repo = Repo::reading_data();
-        resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]).unwrap();
+        resolve(&repo.session(), &repo, &[]).unwrap();
         repo.write(DATA, "- macOS\n- Linux\n");
-        let (resolved, runs) = evaluations(|| resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]).unwrap());
+        let (resolved, runs) = evaluations(|| resolve(&repo.session(), &repo, &[]).unwrap());
         assert_eq!(runs, 1);
         assert_eq!(members(&resolved), json!(["macOS", "Linux"]));
     }
@@ -206,9 +230,9 @@ mod reuse {
     #[test]
     fn an_edited_schema_file_is_a_miss() {
         let repo = Repo::reading_data();
-        resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]).unwrap();
+        resolve(&repo.session(), &repo, &[]).unwrap();
         repo.write(SCHEMA, &schema_with("load_data(\"../data/os.yaml\", \"string[]\") || []"));
-        let (resolved, runs) = evaluations(|| resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]).unwrap());
+        let (resolved, runs) = evaluations(|| resolve(&repo.session(), &repo, &[]).unwrap());
         assert_eq!(runs, 1);
         assert_eq!(members(&resolved), json!(["macOS", "Linux", "Windows"]));
     }
@@ -226,7 +250,7 @@ mod reuse {
         assert_eq!(codes(&again.unwrap_err()), vec![code]);
 
         repo.write("data/missing.yaml", "- Haiku\n");
-        let (recovered, runs) = evaluations(|| resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]));
+        let (recovered, runs) = evaluations(|| resolve(&repo.session(), &repo, &[]));
         assert_eq!(runs, 1);
         assert_eq!(members(&recovered.unwrap()), json!(["Haiku"]));
     }
@@ -235,10 +259,10 @@ mod reuse {
     fn a_repaired_data_file_recovers() {
         let repo = Repo::reading_data();
         repo.write(DATA, "- [unclosed\n");
-        let failed = resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]).unwrap_err();
+        let failed = resolve(&repo.session(), &repo, &[]).unwrap_err();
         assert!(codes(&failed)[0].starts_with("dm.data."), "{failed:?}");
         repo.write(DATA, OS_LIST);
-        let (recovered, runs) = evaluations(|| resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]));
+        let (recovered, runs) = evaluations(|| resolve(&repo.session(), &repo, &[]));
         assert_eq!(runs, 1);
         assert_eq!(members(&recovered.unwrap()), json!(["macOS", "Linux", "Windows"]));
     }
@@ -258,9 +282,9 @@ mod reuse {
     fn narrower_grants_are_not_served_a_result_broader_ones_produced() {
         let repo = Repo::reading_data();
         repo.write(DATA, "- macOS\n- Linux\n- Windows\n- FreeBSD\n");
-        resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]).unwrap();
-        let (narrowed, runs) = evaluations(|| resolve(&repo.session(), &repo, &[]));
-        assert_eq!(runs, 1, "the dirty file's read is not covered, so the template resolves again");
+        resolve(&repo.session(), &repo, &[]).unwrap();
+        let (narrowed, runs) = evaluations(|| resolve(&repo.unpermitted_session(), &repo, &[]));
+        assert_eq!(runs, 1, "the data file's read is not covered, so the template resolves again");
         assert_eq!(codes(&narrowed.unwrap_err()), vec![SLOT_APPROVAL_REQUIRED_CODE]);
     }
 
@@ -270,9 +294,9 @@ mod reuse {
     fn an_uncovered_cache_entry_is_refused_before_its_inputs_are_reread() {
         let repo = Repo::reading_data();
         repo.write(DATA, "- macOS\n- Linux\n- Windows\n- FreeBSD\n");
-        resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]).unwrap();
+        resolve(&repo.session(), &repo, &[]).unwrap();
         repo.write(DATA, "- macOS\n- Linux\n- Windows\n- BeOS\n");
-        let (narrowed, rehashes) = counted(Work::SlotInputRehash, || resolve(&repo.session(), &repo, &[]));
+        let (narrowed, rehashes) = counted(Work::SlotInputRehash, || resolve(&repo.unpermitted_session(), &repo, &[]));
         assert_eq!(rehashes, 0, "the uncovered entry's data file was read again");
         assert_eq!(codes(&narrowed.unwrap_err()), vec![SLOT_APPROVAL_REQUIRED_CODE]);
     }
@@ -293,35 +317,32 @@ mod reuse {
     fn an_approval_failure_is_never_cached() {
         let repo = Repo::reading_data();
         repo.write(DATA, "- macOS\n");
-        assert_eq!(codes(&resolve(&repo.session(), &repo, &[]).unwrap_err()), vec![SLOT_APPROVAL_REQUIRED_CODE]);
-        let (granted, runs) = evaluations(|| resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]));
+        assert_eq!(codes(&resolve(&repo.unpermitted_session(), &repo, &[]).unwrap_err()), vec![SLOT_APPROVAL_REQUIRED_CODE]);
+        let (granted, runs) = evaluations(|| resolve(&repo.session(), &repo, &[]));
         assert_eq!((runs, members(&granted.unwrap())), (1, json!(["macOS"])));
     }
 
     /// Q7/Q17: after the run's own step rewrote the data file (the memo
     /// generation moved), the pin is re-checked and the template resolves
-    /// again, keeping the automatic grant decided earlier in the run even
-    /// though the file is now dirty.
+    /// again under the permissions the run captured.
     #[test]
-    fn a_rewrite_during_the_run_re_resolves_under_the_grant_decided_earlier() {
+    fn a_rewrite_during_the_run_re_resolves_under_the_captured_permissions() {
         let repo = Repo::reading_data();
         let data = DataRuntime::new();
-        let session = Arc::new(SlotSession::new(data.clone()).with_repository_root(Some(repo.root.clone())));
+        let session = repo.session_with(data.clone());
         resolve(&session, &repo, &[]).unwrap();
         repo.write(DATA, "- macOS\n- Linux\n- Windows\n- FreeBSD\n");
         data.invalidate_memo();
         let (resolved, runs) = evaluations(|| resolve(&session, &repo, &[]).unwrap());
         assert_eq!(runs, 1);
         assert_eq!(members(&resolved), json!(["macOS", "Linux", "Windows", "FreeBSD"]));
-        // A command that did not decide the grant earlier needs approval.
-        assert_eq!(codes(&resolve(&repo.session(), &repo, &[]).unwrap_err()), vec![SLOT_APPROVAL_REQUIRED_CODE]);
     }
 
     #[test]
     fn an_unrelated_write_keeps_the_pin() {
         let repo = Repo::reading_data();
         let data = DataRuntime::new();
-        let session = Arc::new(SlotSession::new(data.clone()).with_repository_root(Some(repo.root.clone())));
+        let session = repo.session_with(data.clone());
         let first = resolve(&session, &repo, &[]).unwrap();
         repo.write("notes.txt", "unrelated\n");
         data.invalidate_memo();
@@ -333,7 +354,7 @@ mod reuse {
     fn a_failed_re_resolution_keeps_its_data_code_and_publishes_nothing() {
         let repo = Repo::reading_data();
         let data = DataRuntime::new();
-        let session = repo.granted_session(data.clone());
+        let session = repo.session_with(data.clone());
         resolve(&session, &repo, &[]).unwrap();
         repo.write(DATA, "- [unclosed\n");
         data.invalidate_memo();
@@ -474,7 +495,9 @@ mod consumed {
 
     /// A new command's session observing `observations`.
     fn observing(repo: &Repo, observations: CapturedObservations) -> Arc<SlotSession> {
-        let mut session = SlotSession::new(DataRuntime::new()).with_repository_root(Some(repo.root.clone()));
+        let mut session = SlotSession::new(DataRuntime::new())
+            .with_repository_root(Some(repo.root.clone()))
+            .with_config_snapshot(repo.permissions(&["~/repo/**"]));
         session.observations = Arc::new(crate::markdown::schemas::slots::observations::SessionObservations::supplied(observations));
         Arc::new(session)
     }
@@ -773,12 +796,12 @@ mod consumed {
 
 /// R3-F1: a nested contract's reads keep the contract file that defined
 /// them, so a cached outer result is served to another command only when
-/// that command's grants allow each read for the contract's own file. The
-/// shared contract lives outside the repository (no automatic grant, Q13);
-/// the outer schema is committed inside it (automatic grant). Each case
-/// resolves with broad one-run grants, then from a new command granting only
-/// the shared folder (warm), then the same narrowed request on a fresh
-/// fixture (cold); warm and cold must agree.
+/// that command's permissions and approvals allow each read for the
+/// contract's own file. The shared contract lives outside the repository;
+/// the user's permissions admit the shared folder and the outer schema's
+/// own data file. Each case resolves with an approval for this run of the
+/// nested read, then from a new command without it (warm), then the same
+/// narrowed request on a fresh fixture (cold); warm and cold must agree.
 #[cfg(feature = "work-counters")]
 mod nested_grants {
     use serde_json::json;
@@ -820,21 +843,29 @@ mod nested_grants {
             Self { repo: probe, shared }
         }
 
+        /// A command whose permissions admit the shared folder and the
+        /// outer schema's data file, approving `targets` for this run.
         fn session(&self, targets: Vec<GrantTarget>) -> Arc<SlotSession> {
             let grants = targets
                 .into_iter()
                 .map(|target| Grant { decision: GrantDecision::Allow, target, scope: GrantScope::Once });
-            Arc::new(SlotSession::new(DataRuntime::new()).with_repository_root(Some(self.repo.root.clone())).with_run_grants(grants))
+            let permissions = self.repo.permissions(&["~/shared/**", "~/repo/data/os.yaml"]);
+            Arc::new(
+                SlotSession::new(DataRuntime::new())
+                    .with_repository_root(Some(self.repo.root.clone()))
+                    .with_config_snapshot(permissions)
+                    .with_run_grants(grants),
+            )
         }
 
-        /// One-run grants for the shared folder and `extra`.
+        /// The permissions, and `extra` approved for this run.
         fn broad(&self, extra: GrantTarget) -> Arc<SlotSession> {
-            self.session(vec![GrantTarget::Dir(self.shared.clone()), extra])
+            self.session(vec![extra])
         }
 
-        /// A one-run grant for the shared folder only.
+        /// The permissions alone.
         fn narrow(&self) -> Arc<SlotSession> {
-            self.session(vec![GrantTarget::Dir(self.shared.clone())])
+            self.session(Vec::new())
         }
 
         fn pattern_file(&self) -> GrantTarget {
@@ -911,7 +942,7 @@ mod nested_grants {
     /// R3-F1.7 control: a template outside the repository read directly.
     #[test]
     fn a_shared_template_read_directly_needs_its_grant_warm_and_cold() {
-        let direct = "kind: schema\n$schema:\n    os: enum({{ load_data(\"{repo}/data/os.yaml\", \"string[]\") }}; required)\n";
+        let direct = "kind: schema\n$schema:\n    os: enum({{ load_data(\"{repo}/data/pattern.yaml\", \"string[]\") }}; required)\n";
         let run = |fixture: &Shared, session: &Arc<SlotSession>| {
             let path = fixture.shared.join("direct.yaml");
             let reference = serde_yaml_ng::Value::String(biscuit_file::to_portable_string(&path));
@@ -927,18 +958,26 @@ mod nested_grants {
             session.resolve(&pending, "direct-template", &fixture.repo.context(&[]), false).map(|resolved| members(&resolved.json_schema))
         };
         let fixture = Shared::new(CONTENT, &[("direct.yaml", direct)]);
-        let os = GrantTarget::File(fixture.repo.path(DATA));
-        assert_eq!(run(&fixture, &fixture.broad(os)).unwrap(), json!(["macOS", "Linux", "Windows"]));
+        assert_eq!(run(&fixture, &fixture.broad(fixture.pattern_file())).unwrap(), json!([".*"]));
         assert_refused(run(&fixture, &fixture.narrow()), "warm");
 
         let cold = Shared::new(CONTENT, &[("direct.yaml", direct)]);
         assert_refused(run(&cold, &cold.narrow()), "cold control");
     }
 
-    /// R3-F1.10 control: a nested listing needs an explicit grant.
+    /// R3-F1.10 control: a nested listing needs no approval, and returns
+    /// only the files the command may read: the approved run sees the
+    /// pattern file, a command without the approval (warm or cold) lists
+    /// nothing and its contract rejects the data.
     #[test]
-    fn a_nested_contracts_listing_needs_an_explicit_grant_warm_and_cold() {
-        let listing = "kind: schema\ntypes:\n  Os: |-\n    string(pattern({{ length(find_files(\"{repo}/data/*.yaml\")) > 0 ? '.*' : '^Windows$' }}))[]\n";
-        assert_nested_read_needs_its_grant(listing, &[], |fixture| GrantTarget::Dir(fixture.repo.path("data")));
+    fn a_nested_contracts_listing_returns_only_what_the_command_may_read_warm_and_cold() {
+        let listing = "kind: schema\ntypes:\n  Os: |-\n    string(pattern({{ length(find_files(\"{repo}/data/pattern*.yaml\")) > 0 ? '.*' : '^Windows$' }}))[]\n";
+        let fixture = Shared::new(listing, &[]);
+        let approved = fixture.resolve_as(&fixture.broad(fixture.pattern_file()), "test-template");
+        assert_eq!(approved.unwrap(), json!(["macOS", "Linux", "Windows"]), "the approved file is listed");
+        assert!(fixture.resolve_as(&fixture.narrow(), "test-template").is_err(), "warm: nothing listed");
+
+        let cold = Shared::new(listing, &[]);
+        assert!(cold.resolve_as(&cold.narrow(), "test-template").is_err(), "cold control");
     }
 }

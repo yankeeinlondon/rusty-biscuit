@@ -70,7 +70,7 @@ impl Inline {
             fixture.bin_dir().join(format!("argv-recorder{suffix}")),
         )
         .expect("the recorder is built with `test-fixtures`");
-        fs::write(fixture.cwd().join(".darkmatter-shell-whitelist"), "exact argv-recorder ran\n").unwrap();
+        common::write_shell_permissions(fixture.home(), "exact argv-recorder ran\n");
         let document = fixture.cwd().join("notes.md");
         fs::write(&document, source).unwrap();
         let marker = fixture.cwd().join("provider-runs.log");

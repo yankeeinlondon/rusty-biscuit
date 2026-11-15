@@ -41,15 +41,37 @@ impl HostPattern {
 /// Policy controlling which hosts the fetch primitive is allowed to contact.
 ///
 /// The default is deny-all: no host is allowed until explicitly added.
+/// [`FetchPolicy::allow_all`] is the one way to consent to every host; it is
+/// an explicit mode, never a wildcard pattern. Whatever the mode, the policy
+/// governs consent only: [`fetch`] and [`post`] still refuse non-HTTP(S)
+/// schemes and never follow a redirect, so a caller that follows one must
+/// consult the policy again for the redirect's host.
 #[derive(Debug, Clone, Default)]
 pub struct FetchPolicy {
     allowed: Vec<HostPattern>,
+    allow_every_host: bool,
 }
 
 impl FetchPolicy {
     /// Create a new deny-all policy.
     pub fn deny_all() -> Self {
         Self::default()
+    }
+
+    /// Create a policy that allows every host.
+    ///
+    /// Patterns added with [`Self::allow`] or [`Self::allow_host`] change
+    /// nothing under it.
+    pub fn allow_all() -> Self {
+        Self {
+            allowed: Vec::new(),
+            allow_every_host: true,
+        }
+    }
+
+    /// Whether this policy was built with [`Self::allow_all`].
+    pub fn allows_every_host(&self) -> bool {
+        self.allow_every_host
     }
 
     /// Allow a host pattern.
@@ -65,7 +87,7 @@ impl FetchPolicy {
 
     /// Check whether a host is permitted by this policy.
     pub fn is_allowed(&self, host: &str) -> bool {
-        self.allowed.iter().any(|p| p.matches(host))
+        self.allow_every_host || self.allowed.iter().any(|p| p.matches(host))
     }
 }
 
@@ -402,6 +424,33 @@ mod tests {
         // Wildcard delegates subdomains only; the bare parent stays denied.
         assert!(!policy.is_allowed("example.com"));
         assert!(!policy.is_allowed("other.com"));
+    }
+
+    #[test]
+    fn default_and_deny_all_do_not_allow_every_host() {
+        assert!(!FetchPolicy::default().allows_every_host());
+        assert!(!FetchPolicy::deny_all().allows_every_host());
+        assert!(
+            !FetchPolicy::deny_all()
+                .allow_host("example.com")
+                .allows_every_host()
+        );
+    }
+
+    #[test]
+    fn allow_all_allows_every_host() {
+        let policy = FetchPolicy::allow_all();
+        assert!(policy.allows_every_host());
+        assert!(policy.is_allowed("example.com"));
+        assert!(policy.is_allowed("127.0.0.1"));
+        assert!(policy.is_allowed("a.b.example.org"));
+    }
+
+    #[test]
+    fn allow_all_is_not_narrowed_by_added_patterns() {
+        let policy = FetchPolicy::allow_all().allow_host("a.com");
+        assert!(policy.allows_every_host());
+        assert!(policy.is_allowed("b.com"));
     }
 
     #[test]

@@ -110,7 +110,7 @@ impl ImplementPlan {
             &fixture.cwd().join("work/plan.md"),
             "---\ntotal_phases: 1\n---\n# Plan\n",
         );
-        write(&fixture.cwd().join(".darkmatter-shell-whitelist"), rules);
+        crate::common::write_shell_permissions(fixture.home(), rules);
 
         let records = fixture.workspace_path().join("argv.bin");
         let launches = fixture.workspace_path().join("launches.txt");

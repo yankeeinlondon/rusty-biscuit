@@ -11,7 +11,7 @@
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::expression::{DeclaredTypes, ExpressionError, TypeScope};
-use darkmatter::markdown::compose::shell_expansion::store::load_ruleset;
+use darkmatter::markdown::compose::shell_expansion::store::parse_rule_entry;
 use darkmatter::markdown::compose::shell_expansion::template::{
     ArgPart, CommandTemplate, HoleError, HoleTiming, RejectReason, TemplateShape, TemplateTargetError,
     fill_template, parse_authored, resolve_direct_target, resolve_late_values,
@@ -263,7 +263,7 @@ fn compose_with(dir: &Path, body: &str, handler: Arc<Scripted>) -> Result<Markdo
     std::fs::write(&path, body).unwrap();
     let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.clone())
-        .with_shell_policy_root(dir)
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[]))
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(handler);
     Markdown::try_from(path.as_path())
@@ -286,17 +286,19 @@ fn is_template_target(error: &MarkdownError) -> bool {
     )
 }
 
-fn rules(path: PathBuf) -> Vec<ShellRuleEntry> {
-    load_ruleset(&path).unwrap().entries
+/// The `shell-commands` allows of the user configuration under `home`.
+fn saved(home: &Path) -> Vec<ShellRuleEntry> {
+    let snapshot = crate::request_support::shell_config(home, &[]);
+    snapshot.policy().expect("valid permissions").user().shell_allows().entries.clone()
 }
 
 fn shape(command: &str) -> TemplateShape {
     TemplateShape::from_template(&parse_authored(command).unwrap())
 }
 
-/// A site whose bytes may run is offered both; choosing the shape persists
-/// `template <shape>` and runs the command as a template, while "once" runs
-/// its resolved bytes.
+/// A site whose bytes may run is offered both; choosing the shape saves
+/// `template <shape>` to the user's `shell-commands` and runs the command as
+/// a template, while "once" runs its resolved bytes.
 #[test]
 fn the_shape_choice_persists_the_template_and_runs_in_template_mode() {
     let dir = TempDir::new().unwrap();
@@ -314,9 +316,9 @@ fn the_shape_choice_persists_the_template_and_runs_in_template_mode() {
         Some(format!("{MISSING} {{{{ v: string }}}}").as_str())
     );
     let template_rule = ShellRuleEntry::Template(shape(&format!("{MISSING} {{{{ v }}}}")));
-    assert_eq!(rules(dir.path().join(".darkmatter-shell-whitelist")), vec![template_rule]);
+    assert_eq!(saved(dir.path()), vec![template_rule]);
 
-    // The persisted rule now answers without a prompt.
+    // The saved rule now answers without a prompt.
     let handler = Scripted::new(ShellApprovalDecision::Deny);
     let error = compose_with(dir.path(), &body, handler.clone()).unwrap_err();
     assert!(is_template_target(&error), "{error:?}");
@@ -347,26 +349,21 @@ fn a_template_only_site_offers_no_bytes_and_once_covers_its_shape() {
     assert_eq!(requests.len(), 1);
     assert!(!requests[0].offered.exact && requests[0].offered.shape);
     assert_eq!(requests[0].normalized_exact, "");
-    assert!(!dir.path().join(".darkmatter-shell-whitelist").exists());
+    assert!(!dir.path().join(".darkmatter.yaml").exists());
 }
 
-/// An unoffered exact choice denies; blacklisting persists the shape.
+/// An unoffered exact choice denies, and a denial is for this run only:
+/// neither saves anything.
 #[test]
-fn a_template_only_site_refuses_an_exact_choice_and_blacklists_its_shape() {
+fn a_template_only_site_refuses_an_exact_choice_and_a_denial_saves_nothing() {
     let body = format!("---\nv: \"a;b\"\n---\n::shell {MISSING} {{{{ v }}}}\n");
 
-    let dir = TempDir::new().unwrap();
-    let error = compose_with(dir.path(), &body, Scripted::new(ShellApprovalDecision::AllowExactPersist)).unwrap_err();
-    assert!(matches!(shell_error(&error), ShellExpansionError::Denied { .. }), "{error:?}");
-    assert!(!dir.path().join(".darkmatter-shell-whitelist").exists());
-
-    let dir = TempDir::new().unwrap();
-    let error = compose_with(dir.path(), &body, Scripted::new(ShellApprovalDecision::BlacklistPersist)).unwrap_err();
-    assert!(matches!(shell_error(&error), ShellExpansionError::Blacklisted { .. }), "{error:?}");
-    assert_eq!(
-        rules(dir.path().join(".darkmatter-shell-blacklist")),
-        vec![ShellRuleEntry::Template(shape(&format!("{MISSING} {{{{ v }}}}")))]
-    );
+    for decision in [ShellApprovalDecision::AllowExactPersist, ShellApprovalDecision::Deny] {
+        let dir = TempDir::new().unwrap();
+        let error = compose_with(dir.path(), &body, Scripted::new(decision.clone())).unwrap_err();
+        assert!(matches!(shell_error(&error), ShellExpansionError::Denied { .. }), "{decision:?}: {error:?}");
+        assert!(!dir.path().join(".darkmatter.yaml").exists(), "{decision:?}");
+    }
 }
 
 /// An exact rule answers before a template rule, which answers before the
@@ -377,16 +374,13 @@ fn an_exact_rule_wins_over_a_template_rule() {
     let template_rule = format!("template {}\n", shape(&format!("{MISSING} {{{{ v }}}}")).canonical_text());
 
     let dir = TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join(".darkmatter-shell-whitelist"),
-        format!("{template_rule}exact {MISSING} a b\n"),
-    )
-    .unwrap();
+    let exact_rule = format!("exact {MISSING} a b");
+    crate::request_support::shell_config(dir.path(), &[template_rule.trim_end(), &exact_rule]);
     let error = compose_with(dir.path(), &body, Scripted::new(ShellApprovalDecision::Deny)).unwrap_err();
     assert!(matches!(shell_error(&error), ShellExpansionError::CommandNotFound { .. }), "{error:?}");
 
     let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join(".darkmatter-shell-whitelist"), template_rule).unwrap();
+    crate::request_support::shell_config(dir.path(), &[template_rule.trim_end()]);
     let error = compose_with(dir.path(), &body, Scripted::new(ShellApprovalDecision::Deny)).unwrap_err();
     assert!(is_template_target(&error), "{error:?}");
 }
@@ -444,8 +438,23 @@ fn a_document_site_changed_after_the_barrier_cannot_read_a_new_late_value() {
 }
 
 
+/// The `permissions` text of a user whose `shell-commands` are `entries`.
+fn permissions_text(entries: &[String]) -> String {
+    if entries.is_empty() {
+        return "permissions:\n  shell-commands: []\n".to_string();
+    }
+    let mut text = String::from("permissions:\n  shell-commands:\n");
+    for entry in entries {
+        text.push_str(&format!("    - {}\n", serde_json::to_string(entry).unwrap()));
+    }
+    text
+}
+
+/// Each case's entries as an allow, and as an exclusion beside the control
+/// allow: a malformed entry is never skipped, so it makes the whole block
+/// invalid and no command runs; a valid one decides as its rule does.
 #[test]
-fn persisted_policy_matrix_decides_public_composition() {
+fn configured_policy_matrix_decides_public_composition() {
     let directory = TempDir::new().unwrap();
     let document = directory.path().join("doc.md");
     std::fs::write(&document, format!("---\nv: safe\n---\n::shell {MISSING} {{{{ v }}}}\n")).unwrap();
@@ -461,9 +470,8 @@ fn persisted_policy_matrix_decides_public_composition() {
         ("wrong keyword type", format!("123 {MISSING} {{{{ string }}}}"), false),
         ("collection payload", "template [123]".into(), false),
         ("wrong hole type", format!("template {MISSING} {{{{ 123 }}}}"), false),
-        ("empty keyword", format!(" {MISSING} {{{{ string }}}}"), false),
         ("empty payload", "template ".into(), false),
-        ("empty file", "".into(), false),
+        ("no entries", "".into(), false),
         ("duplicate", format!("{control}\n{control}"), true),
         ("invalid trailing", format!("{control} \"open"), false),
         ("valid extra argument", format!("{control} extra"), false),
@@ -475,29 +483,36 @@ fn persisted_policy_matrix_decides_public_composition() {
         ("program hole", "template {{ string }} safe".into(), false),
         ("literal mismatch", format!("template {MISSING} other"), false),
     ];
-    for (name, line, applies) in cases {
-        for blacklist in [false, true] {
-            let whitelist = directory.path().join(".darkmatter-shell-whitelist");
-            let denylist = directory.path().join(".darkmatter-shell-blacklist");
-            std::fs::write(&whitelist, if blacklist { &control } else { &line }).unwrap();
-            std::fs::write(&denylist, if blacklist { &line } else { "" }).unwrap();
+    for (name, lines, applies) in cases {
+        let lines: Vec<String> = lines.lines().map(str::to_string).collect();
+        let valid = lines.iter().all(|line| parse_rule_entry(line.trim()).is_ok());
+        for exclusion in [false, true] {
+            let entries: Vec<String> = if exclusion {
+                std::iter::once(control.clone()).chain(lines.iter().map(|line| format!("!{line}"))).collect()
+            } else {
+                lines.clone()
+            };
+            std::fs::write(directory.path().join(".darkmatter.yaml"), permissions_text(&entries)).unwrap();
             let handler = Scripted::new(ShellApprovalDecision::Deny);
             let options = ComposeOptions::new_with_context(context.clone())
                 .with_source_file(&document)
-                .with_shell_policy_root(directory.path())
+                .with_config_snapshot(crate::request_support::shell_config(directory.path(), &[]))
                 .with_shell_working_directory(directory.path())
                 .with_shell_approval_handler(handler.clone());
             let error = markdown.compose_with(&crate::request_support::request(options)).unwrap_err();
-            if blacklist && applies {
-                assert!(matches!(shell_error(&error), ShellExpansionError::Blacklisted { .. }), "{name}: {error:?}");
-            } else if blacklist || applies {
-                assert!(is_template_target(&error), "{name}: {error:?}");
+            let label = format!("{name} ({})", if exclusion { "exclusion" } else { "allow" });
+            if !valid {
+                assert!(matches!(shell_error(&error), ShellExpansionError::Config(_)), "{label}: {error:?}");
+                assert!(handler.requests().is_empty(), "{label}: an invalid policy asks nothing");
+            } else if exclusion == applies {
+                // An applying exclusion asks; so does an allow that does not apply.
+                assert!(matches!(shell_error(&error), ShellExpansionError::Denied { .. }), "{label}: {error:?}");
+                let requests = handler.requests();
+                assert_eq!(requests.len(), 1, "{label}");
+                assert_eq!(requests[0].exclusion.is_some(), exclusion, "{label}");
             } else {
-                assert!(matches!(shell_error(&error), ShellExpansionError::Denied { .. }), "{name}: {error:?}");
-                assert_eq!(handler.requests().len(), 1, "{name}");
-            }
-            if blacklist || applies {
-                assert!(handler.requests().is_empty(), "{name}: policy must answer without prompting");
+                assert!(is_template_target(&error), "{label}: {error:?}");
+                assert!(handler.requests().is_empty(), "{label}: policy must answer without prompting");
             }
         }
     }
@@ -524,7 +539,7 @@ fn once_cannot_approve_invalid_late_template_grammar() {
         let handler = Scripted::new(ShellApprovalDecision::AllowOnce);
         let options = ComposeOptions::new_with_context(context.clone())
             .with_source_file(&path)
-            .with_shell_policy_root(directory.path())
+            .with_config_snapshot(crate::request_support::shell_config(directory.path(), &[]))
             .with_shell_working_directory(directory.path())
             .with_deferred_shell_roots(DeferredShellRoots::new(["outputs"]))
             .with_data_overrides(json!({"outputs": ["safe"]}))

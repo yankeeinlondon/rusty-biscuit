@@ -130,7 +130,7 @@ fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     // Minimal config so the first-run setup wizard does not intercept.
     let claudine_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
     // Provider stub: present for resolution, never launched under --dry-run.
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
@@ -193,7 +193,7 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
 
     let claudine_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
     // Only goose is present on PATH.
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
@@ -698,7 +698,7 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
 
     let claudine_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 

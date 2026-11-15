@@ -940,7 +940,7 @@ fn invalidation_rereads_every_layer_in_every_cache_mode() {
         format!("---\nbefore: \"{{{{ length({call}) }}}}\"\nran: $(git --version)\n---\n{{{{ before }}}}-{{{{ length({call}) }}}}\n"),
     );
     let shell = ComposeOptions::new()
-        .with_shell(ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() })
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_working_directory(dir.path())
         .with_shell_approval_handler(Arc::new(AllowAll));
     for mode in [CacheAccessMode::Off, CacheAccessMode::ReadOnly, CacheAccessMode::ReadWrite, CacheAccessMode::Refresh] {

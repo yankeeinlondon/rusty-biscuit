@@ -63,6 +63,9 @@ pub fn render_required_line(status: &PropertyStatus) -> String {
         PropertyState::Deferred => format!(
             "<blue>…</blue> <inverse>{name}</inverse>: {ty} <i><dim>- not defined yet; the run must supply it by completion</dim></i>{desc}"
         ),
+        PropertyState::Defaulted => format!(
+            "<green>✓</green> <inverse>{name}</inverse>: {ty} <i><dim>- not defined; its schema default applies</dim></i>{desc}"
+        ),
     }
 }
 
@@ -72,7 +75,7 @@ pub fn render_optional_line(status: &PropertyStatus) -> String {
     let ty = escape_schema_prose(&status.type_label);
     let desc = description_suffix(status.description.as_deref());
     match status.state {
-        PropertyState::Valid => format!(
+        PropertyState::Valid | PropertyState::Defaulted => format!(
             "<green>✓</green> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
         ),
         PropertyState::Missing | PropertyState::Deferred => format!(

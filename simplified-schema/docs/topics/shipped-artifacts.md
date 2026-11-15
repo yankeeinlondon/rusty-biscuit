@@ -1,9 +1,9 @@
 # Shipped Artifacts
 
 Some schema text is compiled into a binary with `include_str!`: Simplified
-Schema's own envelope definitions (`schemas/schema.yaml` and
-`schemas/yaml-schema.yaml`), and the shipped schemas of the crates built on
-it. Every process used to parse, admit, and lower that text again on first
+Schema's own shipped definitions (`schemas/schema.yaml`,
+`schemas/yaml-schema.yaml`, and `schemas/schema-trigger.yaml`), and the
+shipped schemas of the crates built on it. Every process used to parse, admit, and lower that text again on first
 use, even though the result can only change when the text or the code that
 prepares it changes.
 
@@ -165,7 +165,7 @@ increment the revision of each owner whose payload the change alters;
 | --- | --- | --- |
 | only shipped YAML text | nothing; the source digests already differ | `just shipped-schemas` |
 | how shipped text is prepared (lowering, admission, resolution, a check) | the `PREPARATION_REVISION` of each owner whose payload changes | `just shipped-schemas` |
-| the shape of a record an owner stores | that owner's `PREPARATION_REVISION` (Claudine's records embed Darkmatter's trigger-payload record, so a change there bumps both) | `just shipped-schemas` |
+| the shape of a record an owner stores | that owner's `PREPARATION_REVISION` (Claudine's records embed this library's trigger-payload record, `triggers::TriggerBundleRecord`, so a change to that record bumps Claudine's) | `just shipped-schemas` |
 | what `merge_baseline` produces | `resolve::MERGE_ALGORITHM_REVISION` | update the pinned values in `lib/tests/l1/schema_identities.rs` |
 | what a phase projection produces | `phase::PROJECTION_REVISION` | update the pinned values in `lib/tests/l1/schema_identities.rs` |
 | the canonical JSON hashed for a validator key, or the `judges_files` rule | `validate::CANONICAL_IDENTITY_REVISION` | `just shipped-schemas` (stored digests of the old revision are refused) |
@@ -224,7 +224,11 @@ to scan it.
 | `configuration` | Any `[key, value]` setting that changes preparation. Sorted by key. |
 
 The payload is the owner's own record type. Simplified Schema's holds one
-lowered JSON Schema per envelope definition. Payloads keep authored order
+lowered JSON Schema per envelope definition (`schema.yaml` and
+`yaml-schema.yaml`); its header still fingerprints `schema-trigger.yaml`.
+The prepared kind definitions a YAML kind registry starts from, the trigger
+definition included, are prepared with a host's shipped sources, so the host
+records them: Darkmatter's artifact holds them as `kind_definitions`. Payloads keep authored order
 (properties, named types, definitions) because consumers observe it; only
 the header's lists are sorted. Artifacts hold no host path, timestamp, or
 machine-sized integer, so the same bytes are produced on every OS.

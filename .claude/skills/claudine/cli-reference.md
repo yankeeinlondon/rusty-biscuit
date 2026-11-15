@@ -45,7 +45,7 @@ Interactive setup wizard for initial configuration. Walks through 4 phases:
 1. **Agent Discovery** — detects installed agentic CLIs on the system
 2. **Provider Preferences** — rank your favorite installed CLIs for canonical ordering
 3. **Action Defaults** — global interview (logging `all/some/none`, then input-needed actions)
-4. **Write & Register** — saves `~/.claudine/config.json` and registers hooks with each provider
+4. **Write & Register** — saves `~/.claudine/config.yaml` and registers hooks with each provider
 
 Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings.
 
@@ -72,7 +72,9 @@ Creates configuration with sensible defaults:
 - `permission_request` → SoundEffect (notification)
 - `human_in_the_loop` → SoundEffect (notification)
 
-`--repo` creates `.claudine/config.json` in the repository root and can add `.claudine/` to `.gitignore`.
+`--repo` creates `.claudine/config.yaml` in the repository root and can add `.claudine/` to `.gitignore`.
+
+After writing its own file, setup completes the handshake with Darkmatter's configuration of the same scope: an absent `.darkmatter.yaml` is created with `permissions: ~/.claudine/config.yaml`, an inline block there moves into Claudine's file first, a differing block in both files is a conflict that changes neither, and any existing reference is left alone. Outside a repository, `--repo` fails before writing. See `claudine/docs/topics/configuration.md`.
 
 ---
 
@@ -193,6 +195,8 @@ claudine config
 - Inline webhook URLs never render raw (shown as `webhook: ********`); all webhook send errors run through `redact_webhook_urls`.
 - A **Test Connection** workflow (press `T` during webhook input) sends a test message without saving the route.
 - Desktop notifications are intentionally absent — they are zero-config and triggered via lifecycle `notify` frontmatter only.
+- On exit the TUI saves only the settings the session changed, per scope, as in-place edits of the freshly re-read file (comments, unmanaged keys, and another program's `permissions` edits are kept). A save that would make the file invalid, or that cannot take the file's lock, is reported as not saved and the file is left untouched. A repository file is created only when an override is set and never deleted.
+- `claudine config set favorite-agent <slug|none>` and `claudine config set prompt-for-missing <bool>` each edit only their one key in `~/.claudine/config.yaml`.
 
 See [Messaging](topics/messaging.md) for the full messaging subsystem — route types, the `redact_webhook_urls` invariants, and per-provider delivery.
 
@@ -242,7 +246,7 @@ claudine sync [OPTIONS]
 | `--fix` | Remove unsupported events from config |
 
 **Use cases:**
-- After manually editing `~/.claudine/config.json`
+- After manually editing `~/.claudine/config.yaml`
 - After updating `claudine` binary location
 - To restore hooks after agent config reset
 - With `--fix`: clean up events that don't work with certain providers
@@ -697,12 +701,12 @@ claudine uninstall [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--keep-config` | Keep `~/.claudine/config.json` (only remove hooks) |
+| `--keep-config` | Keep `~/.claudine/config.yaml` (only remove hooks) |
 
 **What it does:**
 1. Deregisters hooks from all agent configs
 2. Removes backup directory (`~/.claudine/backups/`)
-3. Optionally removes `~/.claudine/config.json`
+3. Optionally removes `~/.claudine/config.yaml`
 
 ---
 
@@ -771,8 +775,8 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 
 | File | Path |
 |------|------|
-| User config | `~/.claudine/config.json` |
-| Repo config | `<repo>/.claudine/config.json` |
+| User config | `~/.claudine/config.yaml` |
+| Repo config | `<repo>/.claudine/config.yaml` |
 | MCP catalog | `~/.claudine/mcp/catalog.json` |
 | MCP defaults | `~/.claudine/mcp/defaults.json` |
 | MCP state | `~/.claudine/mcp/provider-state.json` |

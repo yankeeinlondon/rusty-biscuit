@@ -21,7 +21,7 @@ use simplified_schema::span::SourceSpan;
 use super::admission::slot_class_report;
 use super::codes::{
     SLOT_APPROVAL_REQUIRED_CODE, SLOT_CANCELED_CODE, SLOT_CYCLE_CODE, SLOT_DENIED_CODE, SLOT_FAILED_CODE,
-    SLOT_GRANT_STORE_INVALID_CODE, SLOT_SYNTAX_CODE, slot_result_code,
+    SLOT_SYNTAX_CODE, is_permission_code, slot_result_code,
 };
 use crate::markdown::compose::expression::data::DataError;
 use super::cache::ContextCheck;
@@ -151,13 +151,13 @@ impl SlotHost for DarkmatterSlotHost {
 ///
 /// - `admit` asks the gate of the slot's defining file (or, for an inline
 ///   slot, the request's base folder) before anything is probed or read, so
-///   a deny grant refuses with `dm.schema.slot_denied`, an allow, persisted,
-///   or automatic grant allows, the approval handler is asked where the
-///   session has one, and anything else needs approval
-///   (`dm.schema.slot_approval_required`). An import named by returned data
-///   is a computed target: pre-flight never sees it. The session's gates
-///   record each allowed read with its defining file, so a cached result is
-///   served only where the same reads are granted;
+///   a deny for this run refuses with `dm.schema.slot_denied`,
+///   `permissions.file-read` or an approval for this run allows, the
+///   approval handler is asked where the session has one, and anything else
+///   needs approval (`dm.schema.slot_approval_required`). An import named by
+///   returned data is a computed target: pre-flight never sees it. The
+///   session's gates record each allowed read with its defining file, so a
+///   cached result is served only where the same reads are allowed;
 /// - `observe` records every read and probe, found or missing, succeeded or
 ///   failed, in the command's data runtime: it joins the read set and the
 ///   resolution's observations, which become the cache's input checks and
@@ -191,10 +191,7 @@ impl TemplateReads for DarkmatterTemplateReads {
             observed_hash: None,
         };
         self.gates.gate_for(defining).check(&target).map_err(|refusal| {
-            let code = match refusal {
-                GateRefusal::Denied => SLOT_DENIED_CODE,
-                GateRefusal::ApprovalRequired { .. } => SLOT_APPROVAL_REQUIRED_CODE,
-            };
+            let code = refusal_code(&refusal);
             let verb = if read.kind == SchemaReadKind::Content { "read" } else { "probe" };
             refused(code, format!("the template type's definition may not {verb} `{}`: {refusal}", target.location))
         })
@@ -224,10 +221,20 @@ pub(crate) fn failure_code(error: &ExpressionError) -> &'static str {
         };
     }
     match error.without_callbacks() {
-        ExpressionError::SlotReadRefused { refusal: GateRefusal::Denied, .. } => SLOT_DENIED_CODE,
-        ExpressionError::SlotReadRefused { .. } => SLOT_APPROVAL_REQUIRED_CODE,
+        ExpressionError::SlotReadRefused { refusal, .. } => refusal_code(refusal),
         ExpressionError::IterationLimit(limit) => limit.kind.code(),
         _ => SLOT_FAILED_CODE,
+    }
+}
+
+/// The code a refused read reports: `dm.schema.slot_denied` for a deny for
+/// this run, `dm.schema.slot_approval_required` for a read nothing allows,
+/// and the configuration's own `dm.config.*` code for invalid permissions.
+pub(crate) fn refusal_code(refusal: &GateRefusal) -> &'static str {
+    match refusal {
+        GateRefusal::Denied => SLOT_DENIED_CODE,
+        GateRefusal::ApprovalRequired { .. } => SLOT_APPROVAL_REQUIRED_CODE,
+        GateRefusal::InvalidPermissions(error) => error.code(),
     }
 }
 
@@ -249,7 +256,7 @@ pub(crate) fn contract_template_failure(error: &DataError) -> Option<&simplified
 /// failed in this slot.
 ///
 /// When several of the template's slots failed, a cycle outranks a missing
-/// or invalid grant, which outranks an exhausted work limit, which outranks
+/// approval, a deny for this run, or invalid permissions, which outrank an exhausted work limit, which outranks
 /// the first failure: this code decides whether the outer failure may be
 /// cached, deferred for a grant, or handed to a command with other limits
 /// (`cache::caches_failure`, `session::needs_grant`, `session::exhausted_work`).
@@ -270,11 +277,10 @@ fn nested_resolution_code(error: &simplified_schema::slots::SlotResolutionError)
         SlotResolutionError::Canceled => vec![SLOT_CANCELED_CODE],
         _ => Vec::new(),
     };
-    let grant_dependent = [SLOT_APPROVAL_REQUIRED_CODE, SLOT_DENIED_CODE, SLOT_GRANT_STORE_INVALID_CODE];
     codes
         .iter()
         .find(|code| **code == SLOT_CYCLE_CODE)
-        .or_else(|| codes.iter().find(|code| grant_dependent.contains(code)))
+        .or_else(|| codes.iter().find(|code| is_permission_code(code)))
         .or_else(|| codes.iter().find(|code| code.starts_with("dm.iteration.")))
         .or_else(|| codes.first())
         .copied()

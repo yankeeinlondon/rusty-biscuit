@@ -63,6 +63,8 @@
 //!
 //! - [`markdown`] - Markdown document manipulation, [`CodeBlock`], and the
 //!   parsing/composition/frontmatter/hashing surface
+//! - [`config`] - Locked, comment-preserving configuration writes and
+//!   migration receipts
 //! - [`diff`] - Reusable diff utilities
 //! - [`effects`] - Mutating side-effect engine (library surface only)
 //! - [`layout`] - Page-level layout primitive ([`DarkmatterPage`])
@@ -73,8 +75,10 @@
 //! - [`render`] - Hyperlink rendering utilities
 //! - [`terminal`] - Terminal color detection utilities
 //! - [`testing`] - Testing utilities for terminal output verification
+//! - [`yaml_edit`] - Text-preserving edits of plain YAML files
 
 pub mod catalog;
+pub mod config;
 pub mod diff;
 pub mod editor;
 pub mod effects;
@@ -86,6 +90,7 @@ pub mod prelude;
 pub mod render;
 pub mod style;
 pub mod terminal;
+pub mod yaml_edit;
 
 pub mod testing;
 #[cfg(feature = "work-counters")]
@@ -111,6 +116,9 @@ macro_rules! note_work {
 /// docs for why a `benches/*` target cannot reach those functions.
 #[cfg(test)]
 mod perf_harness;
+
+mod atomic_replace;
+mod strict_json;
 
 pub use markdown::schemas::{
     darkmatter_base_json_schema, darkmatter_base_json_schema_ref, darkmatter_base_schema,

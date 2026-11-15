@@ -63,7 +63,7 @@ fn a_proven_bad_call_in_a_dead_branch_rejects_before_any_evaluation() {
             sentinel.display()
         ),
     );
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix touch\n");
+    fixture.shell_permissions(&["prefix touch"]);
 
     // `touch` is the approved side effect that must not run.
     let output = fixture.command_builder().host_path().build().arg("compose").arg(&document).output().unwrap();

@@ -266,10 +266,12 @@ pub struct ComposeOptions {
     /// Default: 16.
     pub(crate) max_transclusion_depth: usize,
 
-    /// Whether `::url` remote transclusion is allowed.
+    /// Whether URL targets of `::file`/`::code` and of frontmatter
+    /// `prologue`/`epilogue` may be transcluded.
     ///
-    /// Disabled by default for security. When false, `::url` directives
-    /// are skipped (or error if `fail_fast` is true).
+    /// Off by default; such a target then fails as disabled. On, each fetch
+    /// is still decided by the request's network policy (`network` and the
+    /// run's allowed hosts).
     pub(crate) allow_remote_transclusion: bool,
 
     /// Whether `::file` can include local markdown documents.
@@ -331,12 +333,6 @@ pub struct ComposeOptions {
     /// What happens when a shell command exceeds its timeout.
     /// Default: `Error` (abort compose).
     pub(crate) shell_timeout_behavior: ShellTimeoutBehavior,
-
-    /// Root directory for shell expansion policy files.
-    ///
-    /// When set, only commands matching an approval policy in this
-    /// directory (or its ancestors) are allowed to execute.
-    pub(crate) shell_policy_root: Option<PathBuf>,
 
     /// Working directory for `::shell` command execution.
     ///
@@ -690,6 +686,23 @@ pub struct ComposeOptions {
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`frontmatter_resolution_context`]: Self::frontmatter_resolution_context
     pub(crate) file_ref_fallback_dir: Option<PathBuf>,
+
+    // ── Configuration ─────────────────────────────────────────────
+    /// The configuration snapshot the request was captured with. A
+    /// [`ComposeRequest`](super::request::ComposeRequest) always holds one:
+    /// supplied here, or loaded passively when the request is prepared. Every
+    /// clone and derivation shares the one `Arc`.
+    pub(crate) config_snapshot: Option<Arc<crate::config::load::ConfigSnapshot>>,
+    /// The request's registered hosts, loaded once from the configuration
+    /// snapshot by the caller. A host that identifies a document layers its
+    /// triggers into the document's schema; without them (Claudine's
+    /// embedded runtime) composition analyzes no registered host.
+    pub(crate) registered_hosts: Option<Arc<crate::config::registration::RegisteredHosts>>,
+    /// The registered host the root document belongs to, when a caller that
+    /// is not that host composes it ([`Self::with_selected_host`]). Its
+    /// analysis globals are [`Self::host_globals`]; unlike a caller's own
+    /// globals they keep the registered layer applied.
+    pub(crate) selected_host: Option<Arc<crate::config::registration::RegisteredHostProfile>>,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -716,7 +729,6 @@ impl std::fmt::Debug for ComposeOptions {
             .field("iteration_limits", &self.iteration_limits)
             .field("resolve_repo_root", &self.resolve_repo_root)
             .field("shell_timeout", &self.shell_timeout)
-            .field("shell_policy_root", &self.shell_policy_root)
             .field("shell_working_directory", &self.shell_working_directory)
             .field("shell_child_environment", &self.shell_child_environment.is_some())
             .field(
@@ -769,6 +781,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("remote_read_config", &self.remote_read_config)
             .field("exclude_keys", &self.exclude_keys)
             .field("host_globals", &self.host_globals)
+            .field("selected_host", &self.selected_host.as_ref().map(|profile| profile.host()))
             .field("name_coercion_keys", &self.name_coercion_keys)
             .field("file_ref_fallback_dir", &self.file_ref_fallback_dir)
             .finish()
@@ -1026,7 +1039,6 @@ impl ComposeOptions {
             source_opening: None,
             shell_timeout: std::time::Duration::from_secs(10),
             shell_timeout_behavior: ShellTimeoutBehavior::Error,
-            shell_policy_root: None,
             shell_working_directory: None,
             shell_child_environment: None,
             shell_approval_handler: None,
@@ -1072,6 +1084,9 @@ impl ComposeOptions {
             remote_fetch: None,
             data_runtime: None,
             slot_session: None,
+            config_snapshot: None,
+            registered_hosts: None,
+            selected_host: None,
             exclude_keys: std::collections::HashSet::new(),
             host_globals: None,
             deferred_shell_roots: Default::default(),
@@ -1562,7 +1577,6 @@ impl ComposeOptions {
     pub fn with_shell(mut self, shell: super::super::shell_expansion::ShellExpansionOptions) -> Self {
         self.shell_timeout = shell.timeout;
         self.shell_timeout_behavior = shell.timeout_behavior;
-        self.shell_policy_root = shell.policy_root;
         self.shell_working_directory = shell.working_directory;
         self.shell_approval_handler = shell.approval_handler;
         self.shell_strip_ansi = shell.strip_ansi;
@@ -1594,13 +1608,6 @@ impl ComposeOptions {
         } else {
             ShellTimeoutBehavior::Error
         };
-        self
-    }
-
-    /// Sets the shell policy root directly on flat compose options.
-    #[must_use]
-    pub fn with_shell_policy_root(mut self, path: impl Into<PathBuf>) -> Self {
-        self.shell_policy_root = Some(path.into());
         self
     }
 
@@ -1943,7 +1950,6 @@ impl ComposeOptions {
         super::super::shell_expansion::ShellExpansionOptions {
             timeout: self.shell_timeout,
             timeout_behavior: self.shell_timeout_behavior,
-            policy_root: self.shell_policy_root.clone(),
             working_directory: self.shell_working_directory.clone(),
             approval_handler: self.shell_approval_handler.clone(),
             strip_ansi: self.shell_strip_ansi,
@@ -2047,16 +2053,19 @@ impl ComposeOptions {
     ///
     /// Read-side expression URL reads (`markdown_title(url)`, `frontmatter(url)`,
     /// …) are a separate capability from `::file`/`::code` block transclusion: a
-    /// caller that configures an allowed host via [`with_remote_read_config`]
-    /// enables them without also opting into remote transclusion. Block
-    /// transclusion keeps its own explicit [`with_allow_remote_transclusion`]
-    /// gate. An empty allowlist with the transclusion flag unset means remote
+    /// caller that configures an allowed host via [`with_remote_read_config`],
+    /// or whose configuration says `network: allow`, enables them without
+    /// also opting into remote transclusion. Block transclusion keeps its own
+    /// explicit [`with_allow_remote_transclusion`] gate. An empty allowlist
+    /// and a denied `network` with the transclusion flag unset mean remote
     /// reads stay fully disabled, preserving the deny-all default.
     ///
     /// [`with_remote_read_config`]: Self::with_remote_read_config
     /// [`with_allow_remote_transclusion`]: Self::with_allow_remote_transclusion
     pub(crate) fn remote_reads_enabled(&self) -> bool {
-        self.allow_remote_transclusion || self.remote_read_config.http_hosts().next().is_some()
+        self.allow_remote_transclusion
+            || self.remote_read_config.http_hosts().next().is_some()
+            || self.network_permission().allows_every_host()
     }
 
     /// The request's ICMP authority with its grants derived from the
@@ -2236,6 +2245,11 @@ impl ComposeOptions {
     /// dependency analysis so a raw lifecycle subtree cannot leak into an
     /// early-bound value.
     ///
+    /// Schema problems on a deferred key are left to the caller, which
+    /// judges them when it runs the events. Under
+    /// [`with_selected_host`](Self::with_selected_host) no caller runs the
+    /// host's events, so the composition verdict keeps them.
+    ///
     /// Default: empty (no behavior change).
     ///
     /// ## Examples
@@ -2280,6 +2294,9 @@ impl ComposeOptions {
         globals: crate::markdown::compose::expression::HostGlobals,
     ) -> Self {
         self.host_globals = Some(globals);
+        // A caller's own globals are executable host options: they replace a
+        // selected registered host's analysis view.
+        self.selected_host = None;
         self
     }
 
@@ -2397,7 +2414,11 @@ impl ComposeOptions {
     /// approval lifecycle) should call this once so both stages fetch each
     /// remote URL exactly once instead of twice. The runtime is built with the
     /// same transport-cache resolution `compose_with` uses, honoring
-    /// `cache_root` / `cache_namespace`.
+    /// `cache_root` / `cache_namespace`, and with the `network` permission
+    /// of the configuration snapshot attached so far; attach the snapshot
+    /// ([`Self::with_config_snapshot`]) first. A request whose snapshot decides
+    /// `network` differently replaces the runtime rather than fetch under a
+    /// stale decision.
     #[must_use]
     pub fn with_shared_remote_fetch(mut self) -> Self {
         self.remote_fetch = Some(self.build_remote_fetch_runtime());
@@ -2453,6 +2474,137 @@ impl ComposeOptions {
         self.slot_session.as_ref()
     }
 
+    /// Supplies the configuration snapshot the caller captured for the
+    /// request's repository, so preparing the request loads nothing.
+    ///
+    /// Required by [`ComposeRequest::with_context`](super::request::ComposeRequest::with_context)
+    /// when its context names a repository. The snapshot must be the
+    /// projection of the repository that context names
+    /// ([`ConfigSnapshot::with_repository_projection`](crate::config::load::ConfigSnapshot::with_repository_projection)
+    /// for a source in another repository).
+    #[must_use]
+    pub fn with_config_snapshot(mut self, snapshot: Arc<crate::config::load::ConfigSnapshot>) -> Self {
+        self.config_snapshot = Some(snapshot);
+        self.align_remote_network();
+        self
+    }
+
+    /// The `network` permission of the attached configuration snapshot;
+    /// deny without one. Composition and schema-slot URL reads both take
+    /// their host consent from it.
+    pub(crate) fn network_permission(&self) -> crate::config::network::NetworkPermission {
+        crate::config::network::NetworkPermission::from_snapshot(self.config_snapshot.as_deref())
+    }
+
+    /// Replaces an attached remote-fetch runtime built under another
+    /// `network` decision than the attached snapshot's. A runtime that
+    /// already agrees is kept, so the passes sharing it still fetch each URL
+    /// once.
+    pub(crate) fn align_remote_network(&mut self) {
+        if let Some(runtime) = &self.remote_fetch
+            && *runtime.network() != self.network_permission()
+        {
+            self.remote_fetch = Some(self.build_remote_fetch_runtime());
+        }
+    }
+
+    /// Attaches the request's registered hosts, loaded once per request from
+    /// its configuration snapshot
+    /// ([`RegisteredHosts::load`](crate::config::registration::RegisteredHosts::load)).
+    /// The host that identifies a document then layers its matching triggers
+    /// into the document's schema, and [`Self::host_selection_for`] names it.
+    ///
+    /// Options carrying a caller's own host globals
+    /// ([`Self::with_host_globals`]) keep them: registration never replaces
+    /// an executable host's options, and no registered layer is added.
+    #[must_use]
+    pub fn with_registered_hosts(mut self, hosts: Arc<crate::config::registration::RegisteredHosts>) -> Self {
+        self.registered_hosts = Some(hosts);
+        self
+    }
+
+    /// The attached registered hosts.
+    pub fn registered_hosts(&self) -> Option<&Arc<crate::config::registration::RegisteredHosts>> {
+        self.registered_hosts.as_ref()
+    }
+
+    /// The registered hosts that apply to this request's documents: `None`
+    /// when none are attached or the caller supplied its own host globals.
+    pub(crate) fn applied_registered_hosts(&self) -> Option<&Arc<crate::config::registration::RegisteredHosts>> {
+        self.registered_hosts.as_ref().filter(|_| !self.has_caller_host_globals())
+    }
+
+    /// Whether the caller supplied its own host globals
+    /// ([`Self::with_host_globals`]), which opts out of registration.
+    fn has_caller_host_globals(&self) -> bool {
+        self.host_globals.is_some() && self.selected_host.is_none()
+    }
+
+    /// Composes with `profile`'s passive view: the root document is one the
+    /// registered host `profile` identifies, composed by a caller that is not
+    /// that host (`md compose`). The host's globals are declared for analysis
+    /// and typing ([`RegisteredHostProfile::analysis_globals`](crate::config::registration::RegisteredHostProfile::analysis_globals)),
+    /// so a read of one is no undeclared property, and fail as unavailable
+    /// when read; the registered layer keeps applying. Registration supplies
+    /// types, never values or handlers. Keys deferred with
+    /// [`with_exclude_keys`](Self::with_exclude_keys) are still never
+    /// rendered, but their schema problems stay in this composition's
+    /// verdict, as `md schema validate` reports them: nothing later judges a
+    /// host event `md` does not run.
+    ///
+    /// Options that already carry a caller's own host globals
+    /// ([`Self::with_host_globals`], Claudine's executable host) are returned
+    /// unchanged: registration never replaces runtime authority.
+    #[must_use]
+    pub fn with_selected_host(mut self, profile: Arc<crate::config::registration::RegisteredHostProfile>) -> Self {
+        if self.has_caller_host_globals() {
+            return self;
+        }
+        self.host_globals = profile.analysis_globals();
+        self.selected_host = Some(profile);
+        self
+    }
+
+    /// The registered host [`Self::with_selected_host`] attached.
+    pub fn selected_host(&self) -> Option<&Arc<crate::config::registration::RegisteredHostProfile>> {
+        self.selected_host.as_ref()
+    }
+
+    /// The host `source` is analyzed as, judged in `context` (the source's
+    /// own context): [`select`](crate::config::registration::select) over the
+    /// attached registered hosts, then the legacy root catalogs only when no
+    /// registered host identifies it. [`HostSelection::Md`](crate::config::registration::HostSelection::Md)
+    /// when the caller supplied its own host globals. Passive; the selection's
+    /// warnings are returned with it.
+    pub fn host_selection_for(
+        &self,
+        source: &crate::markdown::Markdown,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> crate::config::registration::Selected {
+        if self.has_caller_host_globals() {
+            return crate::config::registration::Selected {
+                selection: crate::config::registration::HostSelection::Md,
+                diagnostics: Vec::new(),
+            };
+        }
+        let document = match source.source() {
+            Some(crate::markdown::compose::ComposeSource::File(path)) => Some(path.as_path()),
+            _ => None,
+        };
+        crate::config::registration::select(
+            self.registered_hosts.as_deref(),
+            &crate::markdown::schemas::frontmatter_as_json(source),
+            document,
+            context,
+        )
+    }
+
+    /// The supplied (or, once a request holds these options, captured)
+    /// configuration snapshot.
+    pub fn config_snapshot(&self) -> Option<&Arc<crate::config::load::ConfigSnapshot>> {
+        self.config_snapshot.as_ref()
+    }
+
     /// The attached `load_data` runtime, if any.
     pub fn data_runtime_handle(&self) -> Option<&crate::markdown::compose::DataRuntime> {
         self.data_runtime.as_ref()
@@ -2491,7 +2643,7 @@ impl ComposeOptions {
                 self.cache_namespace.as_deref(),
             )))
         });
-        RemoteFetchRuntime::with_store(&self.remote_read_config, remote_store)
+        RemoteFetchRuntime::with_store_and_network(&self.remote_read_config, remote_store, self.network_permission())
     }
 
     // ── Getters ────────────────────────────────────────────────────
@@ -3078,6 +3230,66 @@ fn encode_source_opening(enc: &mut GraphIdentityEncoder, opening: &Option<Source
     }
 }
 
+/// Encodes the configured `network` decision; an invalid configuration
+/// keeps its message, since a refused read reports it.
+/// The registered hosts decide which host schemas judge a document: each
+/// loaded profile's host, manifest, and content revision, in entry order.
+fn encode_registered_hosts(enc: &mut GraphIdentityEncoder, hosts: Option<&crate::config::registration::RegisteredHosts>) {
+    match hosts {
+        Some(hosts) => {
+            enc.tag(1);
+            enc.count(hosts.loaded().profiles.len());
+            for profile in &hosts.loaded().profiles {
+                enc.str(profile.host());
+                enc.path(&profile.manifest().path);
+                enc.str(profile.revision());
+            }
+        }
+        None => enc.tag(0),
+    }
+}
+
+fn encode_network_permission(enc: &mut GraphIdentityEncoder, network: &crate::config::network::NetworkPermission) {
+    use crate::config::network::NetworkPermission;
+    match network {
+        NetworkPermission::Deny => enc.tag(0),
+        NetworkPermission::Allow => enc.tag(1),
+        NetworkPermission::Invalid(error) => {
+            enc.tag(2);
+            enc.str(&error.to_string());
+        }
+    }
+}
+
+/// The `shell-commands` rules of every layer `snapshot` captured that has
+/// any, in layer order with allows before exclusions; an invalid block keeps
+/// its message, since every command then fails with it. No snapshot, and a
+/// snapshot with no rules, are the same empty policy.
+fn shell_permissions_identity(snapshot: Option<&crate::config::load::ConfigSnapshot>) -> String {
+    use std::fmt::Write as _;
+    let Some(snapshot) = snapshot else {
+        return String::new();
+    };
+    let policy = match snapshot.policy() {
+        Ok(policy) => policy,
+        Err(error) => return format!("invalid\u{0}{error}"),
+    };
+    let mut identity = String::new();
+    for layer in policy.layers() {
+        if layer.shell_allows().entries.is_empty() && layer.shell_exclusions().entries.is_empty() {
+            continue;
+        }
+        let _ = write!(identity, "{:?}\u{0}", layer.revision());
+        for (tag, rules) in [("+", layer.shell_allows()), ("!", layer.shell_exclusions())] {
+            for rule in &rules.entries {
+                let text = crate::config::permissions::shell_rule_text(rule);
+                let _ = write!(identity, "{tag}{}:{text}\u{0}", text.len());
+            }
+        }
+    }
+    identity
+}
+
 impl ComposeOptions {
     /// Exhaustively classifies every field into the two identity products.
     ///
@@ -3122,7 +3334,6 @@ impl ComposeOptions {
             source_opening,
             shell_timeout,
             shell_timeout_behavior,
-            shell_policy_root,
             shell_working_directory,
             shell_child_environment,
             shell_approval_handler,
@@ -3182,10 +3393,23 @@ impl ComposeOptions {
             // Grants and pinned snapshots: they decide whether a template
             // resolves, and the resolved schema is judged by its content.
             slot_session: _,
+            // Its `network` decision and its `shell-commands` rules shape a
+            // composed result (encoded as `network_permission` and
+            // `shell_permissions` below): one decides which URLs a run
+            // reads, the other whether a command runs or needs approval.
+            // Permission enforcement must add each further policy it reads.
+            config_snapshot,
+            registered_hosts,
+            selected_host,
             file_ref_fallback_dir,
         } = self;
 
         use serde_json::Value;
+
+        // The configured `network` decision decides which URLs a run reads.
+        let network_permission =
+            crate::config::network::NetworkPermission::from_snapshot(config_snapshot.as_deref());
+        let shell_permissions = shell_permissions_identity(config_snapshot.as_deref());
 
         // Both identity domains below encode the baseline schema, and the
         // conversion-plus-canonicalization dominates this whole function
@@ -3346,14 +3570,8 @@ impl ComposeOptions {
             ShellTimeoutBehavior::Error => 0,
             ShellTimeoutBehavior::EmptyString => 1,
         });
-        enc.field("shell_policy_root");
-        match shell_policy_root {
-            Some(p) => {
-                enc.tag(1);
-                enc.path(p);
-            }
-            None => enc.tag(0),
-        }
+        enc.field("shell_permissions");
+        enc.str(&shell_permissions);
         enc.field("shell_working_directory");
         match shell_working_directory {
             Some(p) => {
@@ -3542,6 +3760,17 @@ impl ComposeOptions {
             RemoteFreshnessMode::Strict => 1,
             RemoteFreshnessMode::Fallback => 2,
         });
+        enc.field("network_permission");
+        encode_network_permission(&mut enc, &network_permission);
+        enc.field("registered_hosts");
+        encode_registered_hosts(&mut enc, registered_hosts.as_deref());
+        // Encoded only when present, so an option set without one keeps its
+        // historical fingerprint.
+        if let Some(profile) = selected_host {
+            enc.field("selected_host");
+            enc.str(profile.host());
+            enc.str(profile.revision());
+        }
 
         enc.field("defer_shell_pending_schema_problems");
         enc.bool(*defer_shell_pending_schema_problems);
@@ -3670,6 +3899,17 @@ impl ComposeOptions {
         cenc.u64(*max_transclusion_depth as u64);
         cenc.field("allow_remote_transclusion");
         cenc.bool(*allow_remote_transclusion);
+        cenc.field("network_permission");
+        encode_network_permission(&mut cenc, &network_permission);
+        cenc.field("registered_hosts");
+        encode_registered_hosts(&mut cenc, registered_hosts.as_deref());
+        if let Some(profile) = selected_host {
+            cenc.field("selected_host");
+            cenc.str(profile.host());
+            cenc.str(profile.revision());
+        }
+        cenc.field("shell_permissions");
+        cenc.str(&shell_permissions);
         cenc.field("allow_local_markdown");
         cenc.bool(*allow_local_markdown);
         cenc.field("allow_local_code");
@@ -3947,6 +4187,7 @@ fn schema_phase_tag(phase: Option<simplified_schema::SchemaPhase>) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::network::NetworkPermission;
     use crate::markdown::compose::{test_request, test_request_in, ComposeRequest};
     use std::path::PathBuf;
 
@@ -4687,10 +4928,6 @@ mod tests {
                 }) as Box<dyn Fn(PathBuf) -> ComposeRequest>,
             ),
             (
-                "shell_policy_root",
-                Box::new(|p| req(fixed_opts().with_shell_policy_root(p))),
-            ),
-            (
                 "shell_working_directory",
                 Box::new(|p| req(fixed_opts().with_shell_working_directory(p))),
             ),
@@ -4726,11 +4963,9 @@ mod tests {
     /// separator must not collide with its halves landing in two adjacent
     /// path-valued fields.
     #[test]
-    fn options_identity_separator_does_not_cross_shell_root_field_boundary() {
-        let merged = fixed_opts().with_shell_policy_root("a/b");
-        let split = fixed_opts()
-            .with_shell_policy_root("a")
-            .with_shell_working_directory("b");
+    fn options_identity_separator_does_not_cross_path_field_boundary() {
+        let merged = fixed_opts().with_shell_working_directory("a/b");
+        let split = fixed_opts().with_shell_working_directory("a").with_file_ref_fallback_dir("b");
         assert_ne!(id(&merged), id(&split));
     }
 
@@ -4741,7 +4976,6 @@ mod tests {
     fn options_identity_path_encoding_is_clone_stable() {
         let opts = with_magic_roots(&["/one"]).derive(|options| {
             options
-                .with_shell_policy_root("/policy")
                 .with_shell_working_directory("/work")
                 .with_cache_root("/cache")
                 .with_file_ref_fallback_dir("/fallback")
@@ -4865,6 +5099,86 @@ mod tests {
         let fresh: Arc<dyn ShellApprovalHandlerTrait> = Arc::new(DummyApproval);
         let fresh_opts = fixed_opts().with_shell_approval_handler(fresh);
         assert_ne!(captured, id(&fresh_opts));
+    }
+
+    /// A configuration snapshot of a temp home whose user file says
+    /// `network: <network>`, outside any repository.
+    fn network_snapshot(home: &std::path::Path, network: &str) -> Arc<crate::config::load::ConfigSnapshot> {
+        std::fs::write(home.join(".darkmatter.yaml"), format!("permissions:\n  network: {network}\n")).unwrap();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(
+            home,
+            Some(home.to_path_buf()),
+            std::collections::HashMap::new(),
+        );
+        Arc::new(
+            crate::config::load::ConfigSnapshot::load(&context, None, crate::config::load::ConfigLoadMode::Passive)
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn identities_include_the_configured_network_decision() {
+        let allow_home = tempfile::tempdir().unwrap();
+        let deny_home = tempfile::tempdir().unwrap();
+        let allow = fixed_opts().with_config_snapshot(network_snapshot(allow_home.path(), "allow"));
+        let deny = fixed_opts().with_config_snapshot(network_snapshot(deny_home.path(), "deny"));
+
+        assert_ne!(fp(&allow), fp(&deny), "a cached result composed under `allow` never serves `deny`");
+        assert_eq!(fp(&deny), fp(&fixed_opts()), "no snapshot decides as `deny` does");
+        let classify = |options: &ComposeOptions| options.classify_options(&neutral_context()).graph_value_fingerprint;
+        assert_ne!(classify(&allow), classify(&deny));
+    }
+
+    fn shell_snapshot(home: &std::path::Path, rules: &str) -> Arc<crate::config::load::ConfigSnapshot> {
+        std::fs::write(home.join(".darkmatter.yaml"), format!("permissions:\n  shell-commands: [{rules}]\n")).unwrap();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(
+            home,
+            Some(home.to_path_buf()),
+            std::collections::HashMap::new(),
+        );
+        Arc::new(
+            crate::config::load::ConfigSnapshot::load(&context, None, crate::config::load::ConfigLoadMode::Passive)
+                .unwrap(),
+        )
+    }
+
+    /// A shell result composed where a rule allowed its command never serves
+    /// a request whose policy asks about it (or refuses every command).
+    #[test]
+    fn identities_include_the_configured_shell_commands() {
+        let homes: Vec<_> = (0..4).map(|_| tempfile::tempdir().unwrap()).collect();
+        let allow = fixed_opts().with_config_snapshot(shell_snapshot(homes[0].path(), "\"prefix ls\""));
+        let exclude = fixed_opts().with_config_snapshot(shell_snapshot(homes[1].path(), "\"prefix ls\", \"!prefix ls\""));
+        let invalid = fixed_opts().with_config_snapshot(shell_snapshot(homes[2].path(), "\"prefix\""));
+        let none = fixed_opts().with_config_snapshot(shell_snapshot(homes[3].path(), ""));
+
+        let fingerprints = [fp(&allow), fp(&exclude), fp(&invalid), fp(&none)];
+        for (index, first) in fingerprints.iter().enumerate() {
+            for second in &fingerprints[index + 1..] {
+                assert_ne!(first, second);
+            }
+        }
+        assert_eq!(fp(&none), fp(&fixed_opts()), "no rules decide as no snapshot does");
+        let classify = |options: &ComposeOptions| options.classify_options(&neutral_context()).graph_value_fingerprint;
+        assert_ne!(classify(&allow), classify(&exclude));
+    }
+
+    #[test]
+    fn attaching_a_snapshot_aligns_a_shared_runtime_with_its_network_decision() {
+        let home = tempfile::tempdir().unwrap();
+        let shared_first = fixed_opts().with_shared_remote_fetch();
+        assert_eq!(*shared_first.remote_fetch.as_ref().unwrap().network(), NetworkPermission::Deny);
+
+        let aligned = shared_first.with_config_snapshot(network_snapshot(home.path(), "allow"));
+        assert_eq!(*aligned.remote_fetch.as_ref().unwrap().network(), NetworkPermission::Allow);
+        assert!(aligned.remote_reads_enabled());
+
+        let kept = aligned.remote_fetch.clone().unwrap();
+        let realigned = aligned.with_config_snapshot(network_snapshot(home.path(), "allow"));
+        assert!(
+            kept.weak_id().same_instance(&realigned.remote_fetch.unwrap().weak_id()),
+            "an agreeing runtime is kept, so passes still share it"
+        );
     }
 
     #[test]

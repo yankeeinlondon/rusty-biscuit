@@ -51,14 +51,10 @@ impl Document {
         Self { fixture, records }
     }
 
-    /// The document's shell policy: its directory is the policy root.
+    /// The user's `permissions.shell-commands`, one rule per line (`!` for an
+    /// exclusion).
     fn whitelist(&self, rules: &str) -> &Self {
-        std::fs::write(self.fixture.cwd().join(".darkmatter-shell-whitelist"), rules).unwrap();
-        self
-    }
-
-    fn blacklist(&self, rules: &str) -> &Self {
-        std::fs::write(self.fixture.cwd().join(".darkmatter-shell-blacklist"), rules).unwrap();
+        crate::common::write_shell_permissions(self.fixture.home(), rules);
         self
     }
 
@@ -270,10 +266,11 @@ fn a_lifecycle_exact_approval_refuses_iteration_two() {
     assert_eq!(exact.runs(), vec![argv(&["start-1"])]);
 }
 
-/// The filled command meets both blacklists after its approval is found:
-/// pre-flight approved the bytes the document started with, then a `set`
-/// changed the value, and the `template` rule cannot authorize the new fill
-/// the built-in blacklist refuses, nor one a user `exact` rule names.
+/// The filled command meets the built-in blacklist and the user's exclusions
+/// after its approval is found: pre-flight approved the bytes the document
+/// started with, then a `set` changed the value, and the `template` rule
+/// cannot authorize the new fill the built-in blacklist refuses, nor one a
+/// `!exact` entry names.
 #[test]
 fn the_builtin_blacklist_judges_the_filled_command_after_approval() {
     let builtin = Document::new(
@@ -286,16 +283,15 @@ fn the_builtin_blacklist_judges_the_filled_command_after_approval() {
 }
 
 #[test]
-fn the_user_blacklist_judges_the_filled_command_after_approval() {
+fn an_exclusion_judges_the_filled_command_after_approval() {
     let user = Document::new(
         "---\nword: allowed\nstart:\n    - set: { word: forbidden }\n    - shell: { command: \"argv-recorder {{ word }}\", no_error: true }\n---\nBody.\n",
     );
-    user.whitelist("template argv-recorder {{ string }}\n");
-    user.blacklist("exact argv-recorder forbidden\n");
+    user.whitelist("template argv-recorder {{ string }}\n!exact argv-recorder forbidden\n");
     let outcome = user.run(&[]);
     assert!(!outcome.success, "{}", outcome.stderr);
-    assert!(outcome.stderr.contains("user blacklist"), "{}", outcome.stderr);
-    assert!(user.runs().is_empty(), "a blacklisted fill never starts");
+    assert!(outcome.names("argv-recorder {{ word }}") && outcome.stderr.contains("refused before it ran"), "{}", outcome.stderr);
+    assert!(user.runs().is_empty(), "an excluded fill never starts");
 }
 
 /// A program an interpreter would re-parse the arguments for is refused
@@ -404,10 +400,12 @@ fn a_persisted_broad_shape_keeps_the_current_owner_constraints() {
     assert!(!second.success, "{}", second.stderr);
     assert!(second.stderr.contains("refused before it ran"), "{}", second.stderr);
     assert!(document.runs().is_empty(), "the changed constraint blocks the spawn");
-    assert_eq!(
-        std::fs::read_to_string(document.fixture.cwd().join(".darkmatter-shell-whitelist")).unwrap(),
-        BROAD_SHAPE_WHITELIST
-    );
+    // Claudine's first-run setup moved the inline block into its own file
+    // and pointed `~/.darkmatter.yaml` at it.
+    let reference = std::fs::read_to_string(document.fixture.home().join(".darkmatter.yaml")).unwrap();
+    assert!(reference.contains("permissions: ~/.claudine/config.yaml"), "{reference}");
+    let saved = std::fs::read_to_string(document.fixture.home().join(".claudine/config.yaml")).unwrap();
+    assert!(saved.contains(BROAD_SHAPE_WHITELIST.trim()), "the rule is unchanged: {saved}");
 }
 
 #[test]

@@ -34,6 +34,11 @@ impl ReadGate for RecordingGate {
         self.asked.lock().unwrap().push(target.clone());
         if self.allow { Ok(()) } else { Err(GateRefusal::approval_required()) }
     }
+
+    fn admits_listed(&self, target: &ReadTarget) -> bool {
+        self.asked.lock().unwrap().push(target.clone());
+        self.allow
+    }
 }
 
 fn fixture() -> tempfile::TempDir {

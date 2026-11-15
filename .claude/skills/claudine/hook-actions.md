@@ -9,7 +9,7 @@
 Use heading search to jump to the listed subsystem.
 
 
-Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.json` specifies an ordered list of actions. Actions are executed sequentially in declaration order. Most actions do not block the event pipeline. Audio is handed to Playa's queue, and a `message` send runs in the background but is drained before the CLI exits. Only `Call` can return a `HookResponse` to influence agent behavior on blocking events.
+Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.yaml` specifies an ordered list of actions. Actions are executed sequentially in declaration order. Most actions do not block the event pipeline. Audio is handed to Playa's queue, and a `message` send runs in the background but is drained before the CLI exits. Only `Call` can return a `HookResponse` to influence agent behavior on blocking events.
 
 ## Supported Actions
 
@@ -33,8 +33,11 @@ is no blocking fallback or second scheduler. Unknown effect names also warn.
 **Return payload:** None.
 
 **Example:**
-```json
-{ "type": "sound_effect", "effect": "success", "volume": 0.8, "speed": 1.2 }
+```yaml
+type: sound_effect
+effect: success
+volume: 0.8
+speed: 1.2
 ```
 
 ---
@@ -65,8 +68,9 @@ is redacted from journal and `playa spool` output.
 **Return payload:** None.
 
 **Example:**
-```json
-{ "type": "speak", "message": "Tool {{tool_name}} completed on {{git.branch}}" }
+```yaml
+type: speak
+message: "Tool {{tool_name}} completed on {{git.branch}}"
 ```
 
 ---
@@ -87,8 +91,10 @@ Execute a shell command asynchronously without waiting for a result. Command and
 **Return payload:** None.
 
 **Example:**
-```json
-{ "type": "bash", "command": "notify-send", "params": "Claudine {{event}} fired" }
+```yaml
+type: bash
+command: notify-send
+params: "Claudine {{event}} fired"
 ```
 
 ---
@@ -111,8 +117,9 @@ Send a message to the configured messaging destination (Discord, Slack, Signal, 
 **Return payload:** None.
 
 **Example:**
-```json
-{ "type": "message", "message": "Agent finished turn on **{{git.repo_name}}**" }
+```yaml
+type: message
+message: "Agent finished turn on **{{git.repo_name}}**"
 ```
 
 ---
@@ -147,14 +154,11 @@ When `handler` is omitted, defaults to: `[EVENT] tool_name (provider)`.
 **Return payload:** None.
 
 **Example:**
-```json
-{
-  "type": "report",
-  "handler": {
-    "format": "compact",
-    "template": "[TOOL] {{tool_name}}: executing on {{os.type}}"
-  }
-}
+```yaml
+type: report
+handler:
+  format: compact
+  template: "[TOOL] {{tool_name}}: executing on {{os.type}}"
 ```
 
 ---
@@ -196,14 +200,14 @@ Execute an external command synchronously and map its output to a `HookResponse`
 **Note:** `HookResponse` values are only communicated back to the agent when the event supports blocking (e.g., `before_tool`, `before_prompt`, `permission_request`). On non-blocking events, call responses are discarded with a debug log.
 
 **Example:**
-```json
-{
-  "type": "call",
-  "command": "security-check",
-  "args": ["--tool", "{{tool_name}}"],
-  "timeout_ms": 4000,
-  "mapper": { "type": "json_field", "field": "decision" }
-}
+```yaml
+type: call
+command: security-check
+args: ["--tool", "{{tool_name}}"]
+timeout_ms: 4000
+mapper:
+  type: json_field
+  field: decision
 ```
 
 ## Context Variables
@@ -262,11 +266,9 @@ Shell environment variables are supported via `{{env.VAR_NAME}}` with optional d
 
 ### Example
 
-```json
-{
-  "type": "speak",
-  "message": "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
-}
+```yaml
+type: speak
+message: "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
 ```
 
 ## Conditional Execution (`when`)
@@ -296,19 +298,16 @@ before/after table is in
 
 ### Example
 
-```json
-{
-  "type": "speak",
-  "when": "git.branch == 'main'",
-  "message": "Running on main branch"
-}
+```yaml
+type: speak
+when: "git.branch == 'main'"
+message: Running on main branch
 ```
 
-```json
-{
-  "type": "call",
-  "when": "!is_empty(ctx.today)",
-  "command": "daily-check",
-  "mapper": { "type": "exit_code" }
-}
+```yaml
+type: call
+when: "!is_empty(ctx.today)"
+command: daily-check
+mapper:
+  type: exit_code
 ```

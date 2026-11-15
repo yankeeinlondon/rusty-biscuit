@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn protect_boolean_true_deserializes() {
-    let config: ClaudineConfig = serde_json::from_value(
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(
         serde_json::json!({ "preferred_agent": "claude", "protect": true }),
     )
     .unwrap();
@@ -15,7 +15,7 @@ fn protect_boolean_true_deserializes() {
 
 #[test]
 fn protect_boolean_false_deserializes() {
-    let config: ClaudineConfig = serde_json::from_value(
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(
         serde_json::json!({ "preferred_agent": "claude", "protect": false }),
     )
     .unwrap();
@@ -24,7 +24,7 @@ fn protect_boolean_false_deserializes() {
 
 #[test]
 fn protect_expanded_form_deserializes() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "protect": {
             "enabled": true,
@@ -52,7 +52,7 @@ fn actions_map_snake_case_keys() {
             ]
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert!(config.actions.contains_key(&AgenticEvent::SessionStart));
     assert!(config.actions.contains_key(&AgenticEvent::TurnComplete));
     assert_eq!(config.actions[&AgenticEvent::SessionStart].len(), 1);
@@ -75,7 +75,7 @@ fn actions_map_round_trip() {
         ..Default::default()
     };
     let json = serde_json::to_value(&config).unwrap();
-    let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert!(back.actions.contains_key(&AgenticEvent::BeforeTool));
 }
 
@@ -92,7 +92,7 @@ fn default_sounds_deserializes() {
             "error": "space-alarm"
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert_eq!(config.default_sounds.success.as_deref(), Some("doorbell"));
     assert_eq!(config.default_sounds.error.as_deref(), Some("space-alarm"));
     assert!(config.default_sounds.attention.is_none());
@@ -108,7 +108,7 @@ fn default_sounds_all_fields() {
             "error": "space-alarm"
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert_eq!(config.default_sounds.success.as_deref(), Some("doorbell"));
     assert_eq!(config.default_sounds.attention.as_deref(), Some("bong"));
     assert_eq!(config.default_sounds.error.as_deref(), Some("space-alarm"));
@@ -121,21 +121,21 @@ fn default_sounds_all_fields() {
 #[test]
 fn preferred_agent_deserializes() {
     let json = serde_json::json!({ "preferred_agent": "claude" });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert_eq!(config.preferred_agent, Some(Provider::Claude));
 }
 
 #[test]
 fn favorite_agent_alias_deserializes() {
     let json = serde_json::json!({ "favorite_agent": "codex" });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert_eq!(config.preferred_agent, Some(Provider::Codex));
 }
 
 #[test]
 fn preferred_agent_absent_deserializes_to_none() {
     let json = serde_json::json!({});
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert!(config.preferred_agent.is_none());
 }
 
@@ -146,7 +146,7 @@ fn preferred_agent_round_trip_when_set() {
         ..ClaudineConfig::default()
     };
     let json = serde_json::to_value(&config).unwrap();
-    let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert_eq!(back.preferred_agent, Some(Provider::Gemini));
 }
 
@@ -158,7 +158,7 @@ fn preferred_agent_round_trip_when_none_skips_field() {
         json.get("preferred_agent").is_none(),
         "preferred_agent should be omitted when None"
     );
-    let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert!(back.preferred_agent.is_none());
 }
 
@@ -166,7 +166,7 @@ fn preferred_agent_round_trip_when_none_skips_field() {
 fn canonical_provider_deserializes() {
     let json =
         serde_json::json!({ "preferred_agent": "claude", "canonical_provider": "goose" });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert_eq!(config.canonical_provider, Some(Provider::Goose));
 }
 
@@ -177,7 +177,7 @@ fn canonical_provider_deserializes() {
 #[test]
 fn minimal_config_deserializes_with_defaults() {
     let config: ClaudineConfig =
-        serde_json::from_value(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
+        ClaudineConfig::from_user_document(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
     assert!(matches!(config.tts, TtsValue::Boolean(false)));
     assert!(config.logging);
     assert!(config.protect.enabled);
@@ -191,7 +191,7 @@ fn minimal_config_deserializes_with_defaults() {
 #[test]
 fn default_impl_matches_empty_deserialization() {
     let from_default = ClaudineConfig::default();
-    let from_json: ClaudineConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+    let from_json: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({})).unwrap();
     assert!(matches!(from_default.tts, TtsValue::Boolean(false)));
     assert!(matches!(from_json.tts, TtsValue::Boolean(false)));
     assert_eq!(from_default.logging, from_json.logging);
@@ -208,7 +208,7 @@ fn default_impl_matches_empty_deserialization() {
 
 #[test]
 fn rejects_unknown_top_level_field() {
-    let result = serde_json::from_value::<ClaudineConfig>(serde_json::json!({
+    let result = ClaudineConfig::from_user_document(serde_json::json!({
         "unknown_field": true
     }));
     assert!(result.is_err());
@@ -218,7 +218,7 @@ fn rejects_unknown_top_level_field() {
 
 #[test]
 fn rejects_unknown_messenger_field() {
-    let result = serde_json::from_value::<ClaudineConfig>(serde_json::json!({
+    let result = ClaudineConfig::from_user_document(serde_json::json!({
         "messenger": {
             "active_config": "x",
             "typo_field": true
@@ -229,7 +229,7 @@ fn rejects_unknown_messenger_field() {
 
 #[test]
 fn rejects_unknown_default_sounds_field() {
-    let result = serde_json::from_value::<ClaudineConfig>(serde_json::json!({
+    let result = ClaudineConfig::from_user_document(serde_json::json!({
         "default_sounds": {
             "success": "doorbell",
             "warning": "bong"
@@ -250,7 +250,7 @@ fn validate_accepts_minimal_config() {
 
 #[test]
 fn validate_rejects_missing_active_messenger_config() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "messenger": {
             "active_config": "nonexistent",
@@ -266,7 +266,7 @@ fn validate_rejects_missing_active_messenger_config() {
 
 #[test]
 fn validate_accepts_valid_messenger_active_config() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "messenger": {
             "active_config": "main",
@@ -284,7 +284,7 @@ fn validate_accepts_valid_messenger_active_config() {
 
 #[test]
 fn validate_accepts_messenger_with_no_active_config() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "messenger": {
             "configurations": {
@@ -301,7 +301,7 @@ fn validate_accepts_messenger_with_no_active_config() {
 
 #[test]
 fn validate_rejects_invalid_protect_config() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "protect": {
             "rules": {
@@ -318,7 +318,7 @@ fn validate_rejects_invalid_protect_config() {
 
 #[test]
 fn validate_rejects_unknown_success_sound() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "default_sounds": {
             "success": "this-sound-does-not-exist-xyz-abc"
@@ -336,7 +336,7 @@ fn validate_rejects_unknown_success_sound() {
 
 #[test]
 fn validate_accepts_known_sound_names() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "default_sounds": {
             "success": "doorbell",
@@ -429,7 +429,7 @@ fn validate_rejects_blank_messenger_active_config() {
 
 #[test]
 fn validate_rejects_unknown_attention_sound() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "default_sounds": {
             "attention": "nonexistent-sound-xyz"
@@ -446,7 +446,7 @@ fn validate_rejects_unknown_attention_sound() {
 
 #[test]
 fn validate_rejects_unknown_error_sound() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({
         "preferred_agent": "claude",
         "default_sounds": {
             "error": "bogus-sound-name"
@@ -616,6 +616,7 @@ fn validate_round_trip_fully_populated_config() {
         exit_expressions: None,
         guard_settings: GuardSettings::default(),
         steering: Default::default(),
+        permissions: None,
     };
 
     // First validation pass
@@ -623,7 +624,7 @@ fn validate_round_trip_fully_populated_config() {
 
     // Serialize and deserialize
     let json = serde_json::to_value(&config).unwrap();
-    let roundtripped: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let roundtripped: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
 
     // Second validation pass
     roundtripped
@@ -694,11 +695,11 @@ fn full_config_round_trip() {
         }
     });
 
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert!(config.validate().is_ok());
 
     let serialized = serde_json::to_value(&config).unwrap();
-    let back: ClaudineConfig = serde_json::from_value(serialized).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(serialized).unwrap();
     assert!(back.validate().is_ok());
     assert!(back.logging);
     assert!(back.protect.enabled);
@@ -717,7 +718,7 @@ fn models_additive_shorthand_deserializes() {
             "codex": ["gpt-5.4", "gpt-5.4-mini"]
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let entry = config
         .models
         .get(&Provider::Codex)
@@ -736,7 +737,7 @@ fn models_replace_object_deserializes() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let entry = config
         .models
         .get(&Provider::OpenCode)
@@ -752,7 +753,7 @@ fn models_object_defaults_to_add_mode() {
             "claude": { "values": ["claude-x"] }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let entry = config
         .models
         .get(&Provider::Claude)
@@ -780,7 +781,7 @@ fn models_round_trip_preserves_modes() {
         ..ClaudineConfig::default()
     };
     let json = serde_json::to_value(&config).unwrap();
-    let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert_eq!(
         back.models.get(&Provider::Codex).unwrap().mode(),
         ModelOverrideMode::Add
@@ -812,7 +813,7 @@ fn models_detailed_form_rejects_unknown_field() {
             }
         }
     });
-    let result = serde_json::from_value::<ClaudineConfig>(json);
+    let result = ClaudineConfig::from_user_document(json);
     assert!(
         result.is_err(),
         "unknown field inside detailed override should be rejected"
@@ -832,7 +833,7 @@ fn models_detailed_values_accept_mixed_string_and_object_entries() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     let entry = config
         .models
         .get(&Provider::Claude)
@@ -858,7 +859,7 @@ fn models_value_object_rejects_unknown_field() {
             }
         }
     });
-    let result = serde_json::from_value::<ClaudineConfig>(json);
+    let result = ClaudineConfig::from_user_document(json);
     assert!(
         result.is_err(),
         "unknown field inside a value object should be rejected"
@@ -874,7 +875,7 @@ fn models_plain_values_round_trip_as_bare_strings() {
             "codex": { "mode": "replace", "values": ["a", "b"] }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json.clone()).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json.clone()).unwrap();
     let back = serde_json::to_value(&config).unwrap();
     assert_eq!(back["models"], json["models"]);
 }
@@ -892,7 +893,7 @@ fn models_object_values_round_trip() {
             }
         }
     });
-    let config: ClaudineConfig = serde_json::from_value(json.clone()).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(json.clone()).unwrap();
     let back = serde_json::to_value(&config).unwrap();
     assert_eq!(back["models"], json["models"]);
 }
@@ -933,14 +934,14 @@ fn repo_override_rejects_models_field() {
 
 #[test]
 fn prompt_for_missing_defaults_to_true_when_absent() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({})).unwrap();
     assert!(config.prompt_for_missing);
 }
 
 #[test]
 fn prompt_for_missing_deserializes_false() {
     let config: ClaudineConfig =
-        serde_json::from_value(serde_json::json!({ "prompt_for_missing": false })).unwrap();
+        ClaudineConfig::from_user_document(serde_json::json!({ "prompt_for_missing": false })).unwrap();
     assert!(!config.prompt_for_missing);
 }
 
@@ -974,7 +975,7 @@ fn prompt_for_missing_round_trips() {
         ..ClaudineConfig::default()
     };
     let json = serde_json::to_value(&config).unwrap();
-    let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert!(!back.prompt_for_missing);
 }
 
@@ -984,7 +985,7 @@ fn prompt_for_missing_round_trips() {
 
 #[test]
 fn harvest_unmatched_defaults_to_false_and_is_omitted() {
-    let config: ClaudineConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(serde_json::json!({})).unwrap();
     assert!(!config.harvest_unmatched);
     let json = serde_json::to_value(ClaudineConfig::default()).unwrap();
     assert!(
@@ -996,10 +997,10 @@ fn harvest_unmatched_defaults_to_false_and_is_omitted() {
 #[test]
 fn harvest_unmatched_round_trips_when_true() {
     let config: ClaudineConfig =
-        serde_json::from_value(serde_json::json!({ "harvest_unmatched": true })).unwrap();
+        ClaudineConfig::from_user_document(serde_json::json!({ "harvest_unmatched": true })).unwrap();
     assert!(config.harvest_unmatched);
     let json = serde_json::to_value(&config).unwrap();
-    let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+    let back: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
     assert!(back.harvest_unmatched);
 }
 

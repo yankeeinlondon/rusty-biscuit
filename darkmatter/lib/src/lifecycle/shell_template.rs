@@ -46,12 +46,9 @@ pub enum LifecycleShellMode {
     /// The bytes pre-flight resolved, through the system shell.
     ResolvedBytes,
     /// The authored template, filled from the state current when the action
-    /// executes. `policy_root` holds the user blacklist the filled command is
-    /// checked against before it starts.
-    Template {
-        /// The shell policy root the site was approved under.
-        policy_root: Option<PathBuf>,
-    },
+    /// executes. The filled command meets the built-in blacklist, and the
+    /// request's exclusions, before it starts.
+    Template,
 }
 
 /// A lifecycle shell site's typed template and the mode its approval chose.
@@ -90,9 +87,9 @@ impl LifecycleShellTemplate {
     /// For a host that approves lifecycle stacks outside
     /// [`settle`](Self::settle), such as a sequence task's `setup:` and
     /// `teardown:`.
-    pub fn approved(template: CommandTemplate, policy_root: Option<PathBuf>) -> Self {
+    pub fn approved(template: CommandTemplate) -> Self {
         let site = Self::new(template, None);
-        site.record(Some(LifecycleShellMode::Template { policy_root }));
+        site.record(Some(LifecycleShellMode::Template));
         site
     }
 
@@ -156,7 +153,7 @@ impl LifecycleShellTemplate {
     /// Record the mode `approvals` grant: the resolved bytes when every key
     /// is an exact member, otherwise the template when its shape is a
     /// template member, otherwise none, and the site refuses to run.
-    pub fn settle(&self, approvals: &ShellPreApprovals, policy_root: Option<&Path>) {
+    pub fn settle(&self, approvals: &ShellPreApprovals) {
         let bytes = self
             .resolved
             .as_ref()
@@ -164,9 +161,7 @@ impl LifecycleShellTemplate {
         let mode = if bytes {
             Some(LifecycleShellMode::ResolvedBytes)
         } else if approvals.contains_template(&self.shape()) {
-            Some(LifecycleShellMode::Template {
-                policy_root: policy_root.map(Path::to_path_buf),
-            })
+            Some(LifecycleShellMode::Template)
         } else {
             None
         };
@@ -289,14 +284,14 @@ mod tests {
         let shaped = site(Some("tool a"));
         let mut approvals = ShellPreApprovals::new();
         approvals.insert_template(shaped.shape());
-        shaped.settle(&approvals, None);
-        assert_eq!(shaped.mode(), Some(LifecycleShellMode::Template { policy_root: None }));
+        shaped.settle(&approvals);
+        assert_eq!(shaped.mode(), Some(LifecycleShellMode::Template));
 
         approvals.insert_exact("tool a");
-        shaped.settle(&approvals, None);
+        shaped.settle(&approvals);
         assert_eq!(shaped.mode(), Some(LifecycleShellMode::ResolvedBytes));
 
-        shaped.settle(&ShellPreApprovals::new(), None);
+        shaped.settle(&ShellPreApprovals::new());
         assert_eq!(shaped.mode(), None);
     }
 
@@ -306,17 +301,12 @@ mod tests {
         let copy = template_only.clone();
         let mut approvals = ShellPreApprovals::new();
         approvals.insert_exact("tool a");
-        template_only.settle(&approvals, None);
+        template_only.settle(&approvals);
         assert_eq!(copy.mode(), None);
 
         approvals.insert_template(template_only.shape());
-        template_only.settle(&approvals, Some(Path::new("/policy")));
-        assert_eq!(
-            copy.mode(),
-            Some(LifecycleShellMode::Template {
-                policy_root: Some(PathBuf::from("/policy"))
-            })
-        );
+        template_only.settle(&approvals);
+        assert_eq!(copy.mode(), Some(LifecycleShellMode::Template));
         assert_eq!(
             template_only.candidate(Path::new("doc.md"), "start[0].shell.command").requirement,
             ModeRequirement::TemplateRequired

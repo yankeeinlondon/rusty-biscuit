@@ -208,7 +208,7 @@ pub fn run_compose(
     let launch_dir = request.launch_dir().to_path_buf();
 
     // Resolve the input path once through FileReference (handles @-prefixed paths)
-    // and reuse for both loading and source_file/policy_root.
+    // and reuse for both loading and source_file.
     let resolve_start = perf.then(Instant::now);
     let opened_input = if let Some(path) = input
         && path.to_str() != Some("-")
@@ -243,6 +243,9 @@ pub fn run_compose(
         Some(opened) => opened.document_context(request)?,
         None => request.launch_context()?.clone(),
     };
+    // The invocation's configuration for the document's repository, loaded
+    // before anything runs; every request below shares it.
+    let config_snapshot = request.config_snapshot(&file_resolution_context)?;
 
     // The request boundary (D3): one demand-driven context capture for the
     // document plus the request's repository observation, both anchored on the
@@ -252,7 +255,38 @@ pub fn run_compose(
     // Its stacks are parsed now, before anything can run, and stay deferred
     // through every interpolation pass.
     let lifecycle_source = resolved_input.clone().unwrap_or_else(|| launch_dir.join("<stdin>"));
-    let lifecycle = lifecycle::root_lifecycle(&md, &lifecycle_source)?;
+    // The invocation's registered hosts, loaded once from the configuration
+    // snapshot; the root document's selection warnings are reported once. A
+    // root a registered host identifies is a foreign document: `md` analyzes
+    // it with that host's passive profile and runs only the events it shares
+    // with the host.
+    let registered_hosts =
+        if policy.disables("schema-triggers") { None } else { request.registered_hosts(&file_resolution_context) };
+    let foreign = registered_hosts.as_ref().and_then(|hosts| {
+        let document = md.source().as_ref().and_then(|source| match source {
+            darkmatter::markdown::compose::ComposeSource::File(path) => Some(path),
+            _ => None,
+        });
+        let identified = hosts.identify(
+            &darkmatter::markdown::schemas::frontmatter_as_json(&md),
+            document.map(std::path::PathBuf::as_path),
+            &file_resolution_context,
+        );
+        request.report_host_diagnostics(&identified.diagnostics);
+        identified.selection.registered().cloned()
+    });
+    if let Some(profile) = &foreign {
+        let shared = darkmatter::lifecycle::md_host::shared_event_keys(profile.lifecycle().registry());
+        request.report_host_diagnostics(&[profile.foreign_document_notice(&lifecycle_source, &shared)]);
+    }
+    // The host's functions are declared for this thread's analysis and
+    // typing only: an analysis-only set has no handler, so a call fails when
+    // evaluated, as any failing function does.
+    let _host_functions: Vec<_> = foreign
+        .iter()
+        .flat_map(|profile| profile.functions().iter().map(|set| set.functions.enter()))
+        .collect();
+    let lifecycle = lifecycle::root_lifecycle(&md, &lifecycle_source, foreign.as_deref())?;
 
     let ctx_start = perf.then(Instant::now);
     let mut options = ComposeOptions::for_document(&launch_dir, &md);
@@ -261,8 +295,8 @@ pub fn run_compose(
     if let Some(width) = output_width.0 {
         options = options.with_output_width(width);
     }
-    if lifecycle.is_some() {
-        options = options.with_exclude_keys(lifecycle::event_keys());
+    if let Some(keys) = lifecycle::deferred_keys(lifecycle.is_some(), foreign.as_deref()) {
+        options = options.with_exclude_keys(keys);
     }
     // Keep a cheap Arc clone for perf report context timings
     let options_ctx_ref = options.context().clone();
@@ -274,6 +308,12 @@ pub fn run_compose(
     let opts_start = perf.then(Instant::now);
     options = apply_compose_baseline_schema(options, baseline_schema, policy.disables("baseline-schema"), request)?;
     options = options.with_trigger_schemas(!policy.disables("schema-triggers"));
+    if let Some(hosts) = registered_hosts {
+        options = options.with_registered_hosts(hosts);
+    }
+    if let Some(profile) = &foreign {
+        options = options.with_selected_host(std::sync::Arc::clone(profile));
+    }
     let blocking = policy.blocking_policy();
     options = options.with_blocking_policy(blocking.clone());
     // Collection controls must be in force before reference validation,
@@ -339,7 +379,10 @@ pub fn run_compose(
     }
     options = options.with_data_runtime(data_runtime);
     let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
-        ComposeRequest::with_context(options, file_resolution_context.clone())
+        ComposeRequest::with_context(
+            options.with_config_snapshot(std::sync::Arc::clone(&config_snapshot)),
+            file_resolution_context.clone(),
+        )
             .wrap_err("Failed to prepare the compose request")
     };
 
@@ -419,16 +462,6 @@ pub fn run_compose(
         timeout: timeout_secs
             .map(std::time::Duration::from_secs)
             .unwrap_or(std::time::Duration::from_secs(10)),
-        // Shell policy lives beside the document, or in the launch directory
-        // for stdin, so pre-flight and execution read the same files and a
-        // stdin run never falls through to the user's home.
-        policy_root: Some(
-            resolved_input
-                .as_ref()
-                .and_then(|p| p.parent())
-                .filter(|parent| !parent.as_os_str().is_empty())
-                .map_or_else(|| launch_dir.clone(), Path::to_path_buf),
-        ),
         approval_handler: None,
         ..Default::default()
     };
@@ -462,8 +495,10 @@ pub fn run_compose(
     // Share one single-flight remote-fetch runtime between the pre-flight
     // approval walk and the compose pass so each remote URL is fetched once,
     // not once per stage. Must follow the remote-read-config and cache-root
-    // wiring above so the shared runtime inherits both.
-    options = options.with_shared_remote_fetch();
+    // wiring above so the shared runtime inherits both, and follow the
+    // configuration snapshot so it fetches under the configured `network`
+    // permission.
+    options = options.with_config_snapshot(std::sync::Arc::clone(&config_snapshot)).with_shared_remote_fetch();
     let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
     perf_stage("build options", build_options_dur);
@@ -529,7 +564,8 @@ pub fn run_compose(
     let compose_start = perf.then(Instant::now);
 
     // Pre-flight approval lifecycle (v2 design step 4): condition-blind
-    // collect every command, validate against blacklist/whitelist policy,
+    // collect every command, validate against the built-in blacklist and the
+    // captured `permissions.shell-commands`,
     // and route the remainder through a single batched prompt. The
     // resulting set becomes the execution membership source so the
     // pipeline never prompts per directive and never executes a command
@@ -768,7 +804,7 @@ pub(crate) enum ReferenceCheck {
 /// The check is passive: body `::shell` directives stay unexpanded, because
 /// running one here would be an effect ahead of the shell-approval walk and
 /// its policy stop (a lifecycle request already carries the document's
-/// whitelist), and would run it again when the document composes.
+/// approvals), and would run it again when the document composes.
 ///
 /// ## Errors
 ///
@@ -950,20 +986,22 @@ fn shell_compose_error(e: darkmatter::markdown::MarkdownError) -> color_eyre::ey
             }
             ShellExpansionError::ApprovalRequired {
                 command,
-                whitelist_path,
+                save_target,
+                exclusion,
                 suggested_rules,
                 ..
-            } => approval_required_report(&command, &whitelist_path, &suggested_rules),
+            } => approval_required_report(&command, save_target.as_deref().map(std::path::PathBuf::as_path), exclusion.as_deref(), &suggested_rules),
             other => eyre!("{other}"),
         },
         other => other.into(),
     }
 }
 
-/// The skipped-trigger warnings (`dm.schema.invalid_trigger`) a failed
-/// composition found before it failed, on stderr ahead of the error, so the
-/// failure does not hide them. Those the error itself shows as blocking are
-/// left to it. Other warning families keep their success-only delivery.
+/// The skipped-trigger warnings (`dm.schema.invalid_trigger`) and unsaved
+/// approvals (`dm.config.not_saved`) a failed composition found before it
+/// failed, on stderr ahead of the error, so the failure does not hide them.
+/// Those the error itself shows as blocking are left to it. Other warning
+/// families keep their success-only delivery.
 pub(crate) fn report_failure_trigger_warnings(
     warnings: &[darkmatter::markdown::compose::ComposeWarning],
     blocking: Option<&[darkmatter::markdown::compose::ComposeWarning]>,
@@ -973,7 +1011,11 @@ pub(crate) fn report_failure_trigger_warnings(
 
     let blocking = blocking.unwrap_or_default();
     for warning in warnings {
-        if warning.code.as_deref() == Some(SCHEMA_INVALID_TRIGGER_CODE)
+        let held = matches!(
+            warning.code.as_deref(),
+            Some(SCHEMA_INVALID_TRIGGER_CODE | darkmatter::config::load::CONFIG_NOT_SAVED_CODE)
+        );
+        if held
             && !blocking.iter().any(|shown| shown.code == warning.code && shown.message == warning.message)
         {
             let term = term_cell.get_or_init(stderr_terminal);
@@ -985,18 +1027,31 @@ pub(crate) fn report_failure_trigger_warnings(
 /// The skipped-trigger warnings (`dm.schema.invalid_trigger`) a pass found
 /// ahead of the report that delivers the invocation's warnings: reference
 /// validation, the lifecycle call check, the lifecycle bootstrap, the
-/// `--shell` walk, and the shell-approval walk. A run that
-/// stops before that report delivers them itself; a report that does arrive
-/// carries each trigger once, whichever passes found it.
+/// `--shell` walk, and the shell-approval walk; and the shell-approval walk's
+/// `dm.config.not_saved` warnings (an "always allow" rule it could not save).
+/// A run that stops before that report delivers them itself; a report that
+/// does arrive carries each trigger, and each unsaved rule, once, whichever
+/// passes found it.
 #[derive(Default)]
 pub(crate) struct PendingTriggerWarnings(Vec<darkmatter::markdown::compose::ComposeWarning>);
 
+/// What makes two held warnings the same: a trigger's source, or the
+/// message of an approval that was not saved.
+fn held_identity(warning: &darkmatter::markdown::compose::ComposeWarning) -> Option<String> {
+    if let Some(trigger) = warning.invalid_trigger_source() {
+        return Some(format!("trigger\u{0}{trigger:?}"));
+    }
+    (warning.code.as_deref() == Some(darkmatter::config::load::CONFIG_NOT_SAVED_CODE))
+        .then(|| format!("not-saved\u{0}{}", warning.message))
+}
+
 impl PendingTriggerWarnings {
-    /// Holds the trigger warnings in `warnings` not already held.
+    /// Holds the trigger and not-saved warnings in `warnings` not already
+    /// held.
     pub(crate) fn hold(&mut self, warnings: &[darkmatter::markdown::compose::ComposeWarning]) {
         for warning in warnings {
-            if let Some(trigger) = warning.invalid_trigger_source()
-                && !self.0.iter().any(|held| held.invalid_trigger_source().as_ref() == Some(&trigger))
+            if let Some(identity) = held_identity(warning)
+                && !self.0.iter().any(|held| held_identity(held).as_ref() == Some(&identity))
             {
                 self.0.push(warning.clone());
             }
@@ -1032,8 +1087,8 @@ impl PendingTriggerWarnings {
         candidates
             .into_iter()
             .filter(|candidate| {
-                let trigger = candidate.invalid_trigger_source();
-                !present.iter().any(|warning| warning.invalid_trigger_source() == trigger)
+                let identity = held_identity(candidate);
+                !present.iter().any(|warning| held_identity(warning) == identity)
             })
             .collect()
     }
@@ -1273,28 +1328,40 @@ fn escape_table_cell(value: &str) -> String {
         .replace('\n', " ")
 }
 
-/// The non-interactive "add one of these" report for a command that needs
-/// approval. The rules are the ones its approval prompt would offer (exact
-/// bytes, template shape, program prefixes), so each copies into the
-/// whitelist as a rule that approves the command.
+/// The non-interactive report for a command that needs approval.
+///
+/// For a command no rule covers, the rules are the ones its approval prompt
+/// would offer (exact bytes, template shape, program prefixes), each a
+/// `permissions.shell-commands` entry that approves it. For a command an
+/// exclusion matches, no rule helps: the report names the exclusion, and the
+/// command runs only when approved interactively.
 fn approval_required_report(
     command: &str,
-    whitelist_path: &std::path::Path,
+    save_target: Option<&std::path::Path>,
+    exclusion: Option<&darkmatter::config::permissions::PolicyExclusion>,
     rules: &darkmatter::markdown::compose::shell_expansion::template::SuggestedRules,
 ) -> color_eyre::eyre::Report {
     // Backslash-escape backslashes and underscores so Prose (used by `main`
     // to render error chains) neither consumes a key's `\\` escapes nor reads
     // `_..._` in paths or command names as italic markdown: a printed rule
-    // must copy into the whitelist byte for byte.
+    // must copy into the configuration byte for byte.
     let escape_prose = |s: &str| s.replace('\\', "\\\\").replace('_', "\\_");
-    let path = whitelist_path.display().to_string();
+    if let Some(exclusion) = exclusion {
+        return eyre!(
+            "Approval required for '{}': it is excluded by '{}' in {}.\nAn excluded command runs only when approved interactively.",
+            escape_prose(command),
+            escape_prose(&exclusion.entry),
+            escape_prose(&exclusion.file.display().to_string()),
+        );
+    }
     if rules.is_empty() {
         return eyre!("Approval required for '{}'.", escape_prose(command));
     }
+    let file = save_target.map_or_else(|| "your `~/.darkmatter.yaml`".to_string(), |path| path.display().to_string());
     eyre!(
-        "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n{}",
+        "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to `permissions.shell-commands` in {}:\n{}",
         escape_prose(command),
-        escape_prose(&path),
+        escape_prose(&file),
         escape_prose(&rules.render()),
     )
 }
@@ -1336,10 +1403,11 @@ fn preflight_approval_message(err: darkmatter::markdown::compose::ShellExpansion
         }
         ShellExpansionError::ApprovalRequired {
             command,
-            whitelist_path,
+            save_target,
+            exclusion,
             suggested_rules,
             ..
-        } => approval_required_report(&command, &whitelist_path, &suggested_rules),
+        } => approval_required_report(&command, save_target.as_deref().map(std::path::PathBuf::as_path), exclusion.as_deref(), &suggested_rules),
         other => eyre!("{other}"),
     }
 }

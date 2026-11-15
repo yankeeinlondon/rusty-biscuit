@@ -2098,7 +2098,7 @@ fn seed_dispatch_recorder_config(staged: &Staged) {
         recorder = recorder.display(),
     );
     fs::write(
-        staged.workspace.path().join(".claudine/config.json"),
+        staged.workspace.path().join(".claudine/config.yaml"),
         config,
     )
     .unwrap();
@@ -4995,7 +4995,7 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     // then used — so this keeps the derivation under test instead of masking it
     // with a caller override.
     fs::write(
-        root.join(".claudine/config.json"),
+        root.join(".claudine/config.yaml"),
         "{\"prompt_for_missing\": false}",
     )
     .unwrap();
@@ -5056,7 +5056,7 @@ fn stage_shipped_optional_commit_message() -> Staged {
     fs::create_dir_all(root.join("src")).unwrap();
     seed_minimal_config(&root);
     fs::write(
-        root.join(".claudine/config.json"),
+        root.join(".claudine/config.yaml"),
         "{\"prompt_for_missing\": false}",
     )
     .unwrap();
@@ -6804,15 +6804,11 @@ fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
          target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
 
-    // The recorder is whitelisted so the non-interactive run approves it without
+    // The recorder is pre-approved so the non-interactive run approves it without
     // a TTY handler (mirrors the overlay-layering L1 fixture's `prefix echo`).
     let executed_log = staged.workspace.path().join("executed.log");
     write_bytes_recorder(&staged.bin_dir, &executed_log);
-    fs::write(
-        staged.workspace.path().join(".darkmatter-shell-whitelist"),
-        "prefix logbytes\n",
-    )
-    .unwrap();
+    crate::common::write_shell_permissions(staged.workspace.path(), "prefix logbytes\n");
 
     let pane = run_in_tmux_for(&staged, "ac17-done");
 
@@ -6892,7 +6888,7 @@ fn level2_lifecycle_overlay_initialization_shell_cannot_be_whitelisted() {
     let staged = stage_proxy_pair(source_doc, "---\ntitle: target\n---\nTarget\n", true);
     let executed_log = staged.workspace.path().join("executed.log");
     write_bytes_recorder(&staged.bin_dir, &executed_log);
-    fs::write(staged.workspace.path().join(".darkmatter-shell-whitelist"), "prefix logbytes\n").unwrap();
+    crate::common::write_shell_permissions(staged.workspace.path(), "prefix logbytes\n");
     let pane = run_in_tmux_until_exit(&staged);
     let prose = flattened(&pane);
     assert!(prose.contains("Initialization is shell-free"), "{pane}");

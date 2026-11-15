@@ -14,7 +14,7 @@ fn level2_ctrl_c_cancels_group_descendants_and_finalizes_innermost_first() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let fixture = CliProcessFixture::named("container-ctrl-c");
     fs::create_dir_all(fixture.home().join(".claudine")).unwrap();
-    fs::write(fixture.home().join(".claudine/config.json"), "{}").unwrap();
+    fs::write(fixture.home().join(".claudine/config.yaml"), "{}").unwrap();
     write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
     let opted = ShellBarrier::new(fixture.cwd(), "opted");
     let plain = ShellBarrier::new(fixture.cwd(), "plain");

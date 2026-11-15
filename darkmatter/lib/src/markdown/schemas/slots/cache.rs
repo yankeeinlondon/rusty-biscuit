@@ -5,8 +5,7 @@
 //! - the template: its identity (the `$schema` value or trigger payload and
 //!   where it was written), the exact text of every schema file it read, and
 //!   its slots with their authored ranges;
-//! - the request context it resolved in, and the repository the automatic
-//!   grant was judged against;
+//! - the request context it resolved in, and the request's repository;
 //! - [`SLOT_RESOLVER_VERSION`] and the embedded function catalog, so a build
 //!   that evaluates differently never reuses an older result.
 //!
@@ -17,7 +16,7 @@
 //! `has_command`, `ipv4`, `package`, ...; called again against the
 //! requesting command's captured observations, see
 //! [`dependencies`](super::dependencies)), and that the requesting session's
-//! grants cover every read the resolution made. What a resolution depended
+//! permissions and approvals cover every read the resolution made. What a resolution depended
 //! on is recorded while its slots evaluate, so it includes every slot that
 //! ran: later root-union rounds and the slots of nested `load_data`
 //! contracts. A file changed within the modification time's resolution
@@ -29,8 +28,8 @@
 //! or a listing, is served only to the session that produced it, because
 //! none of those can be re-checked cheaply. Failures are cached like successes, with
 //! their dependencies, so creating a missing file or repairing a bad one is
-//! a miss; a failure that depends on grants (a read needing approval or
-//! denied, an invalid grant store), on the resolution in progress (a
+//! a miss; a failure that depends on permissions (a read needing approval
+//! or denied for the run, invalid `permissions`), on the resolution in progress (a
 //! `dm.schema.slot_cycle`), or a cancellation is never cached. Nothing is
 //! written to disk.
 
@@ -58,7 +57,7 @@ pub(crate) const SLOT_RESOLVER_VERSION: u32 = 1;
 pub(crate) struct ResolutionKey([u8; 32]);
 
 /// The key of resolving `pending`, identified by `template`, in `context`,
-/// with automatic grants judged against `repository`.
+/// for the request's `repository`.
 pub(crate) fn resolution_key(
     pending: &PendingSchema,
     template: &str,
@@ -256,7 +255,7 @@ pub(crate) fn clear() {
 }
 
 /// Whether a failed resolution may be cached: not when it depends on the
-/// grants in force (including an invalid grant store), on the resolutions in
+/// permissions and approvals in force (including invalid permissions), on the resolutions in
 /// progress on this thread (a cycle), or was canceled.
 pub(crate) fn caches_failure(error: &SlotResolutionError) -> bool {
     match error {
@@ -270,15 +269,7 @@ pub(crate) fn caches_failure(error: &SlotResolutionError) -> bool {
 }
 
 /// Whether a failure with `code` may be kept: not one that depends on the
-/// session's grants, its grant store, or what else it is resolving.
+/// session's permissions and approvals, or what else it is resolving.
 fn caches_code(code: Option<&str>) -> bool {
-    !matches!(
-        code,
-        Some(
-            super::codes::SLOT_APPROVAL_REQUIRED_CODE
-                | super::codes::SLOT_DENIED_CODE
-                | super::codes::SLOT_GRANT_STORE_INVALID_CODE
-                | super::codes::SLOT_CYCLE_CODE
-        )
-    )
+    !code.is_some_and(|code| code == super::codes::SLOT_CYCLE_CODE || super::codes::is_permission_code(code))
 }

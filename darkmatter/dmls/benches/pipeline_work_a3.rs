@@ -231,6 +231,7 @@ impl Server {
             profile: &self.profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         let (diagnostics, diagnostics_cost) = measure(|| self.registry.diagnostics(&ctx));
         assert!(overlay.is_some(), "the document has a frontmatter overlay");

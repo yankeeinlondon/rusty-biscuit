@@ -111,12 +111,14 @@ required-features = ["terminal-tests"]
 [package.metadata.ci.tests]
 # The entry-point parity runner and the clean parity suite include
 # darkmatter's shared matrices, the union-reference suites its union fixtures,
-# and the diagnostic-position suite its position fixtures, by `#[path]`; each
-# test spells the file it reads.
+# the diagnostic-position suite its position fixtures, and the host
+# registration suite its host fixtures, by `#[path]`; each test spells the
+# file it reads.
 source-inputs = [
     "darkmatter/lib/tests/common/clean_parity/mod.rs",
     "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
     "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
+    "darkmatter/lib/tests/host_fixtures/mod.rs",
     "darkmatter/lib/tests/position_fixtures/mod.rs",
     "darkmatter/lib/tests/union_fixtures/mod.rs",
 ]

@@ -8,8 +8,10 @@
 //! whose subject is the request directory builds its own [`RequestSnapshot`].
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
+use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot};
 use darkmatter::markdown::compose::{
     ComposeOptions, ComposeRequest, ComposeSource, RequestSnapshot, build_resolution_context,
 };
@@ -73,4 +75,57 @@ fn request_dir(options: &ComposeOptions) -> PathBuf {
 /// assertions do not depend on where they resolve.
 pub fn cwd_context() -> FileResolutionContext {
     FileResolutionContext::new(std::env::current_dir().expect("process directory"))
+}
+
+/// `options` with the configuration a test supplies for `context`: when the
+/// context names a repository, the user-only configuration of its home
+/// (`ComposeRequest::with_context` requires a snapshot there and a test's
+/// repository may be a synthetic catalog with no committed tree); otherwise
+/// `options` unchanged, so the request loads it passively.
+pub fn configured(options: ComposeOptions, context: &FileResolutionContext) -> ComposeOptions {
+    if options.config_snapshot().is_some() || context.repository_root().is_none() {
+        return options;
+    }
+    options.with_config_snapshot(user_config(context.request_cwd(), context.home_dir(), context.env().clone()))
+}
+
+/// The configuration of `home` and no repository, for a test whose
+/// repository is a synthetic catalog or caller evidence with no committed
+/// tree, which has no committed policy to read.
+pub fn user_config(
+    dir: &Path,
+    home: Option<&Path>,
+    env: std::collections::HashMap<String, String>,
+) -> Arc<ConfigSnapshot> {
+    let snapshot = RequestSnapshot::new(dir).with_home(home.map(Path::to_path_buf)).with_env(env);
+    Arc::new(ConfigSnapshot::load_user(&snapshot, ConfigLoadMode::Passive).expect("test configuration"))
+}
+
+/// `ComposeRequest::with_context` over [`configured`] options.
+pub fn request_in(options: ComposeOptions, context: FileResolutionContext) -> ComposeRequest {
+    ComposeRequest::with_context(configured(options, &context), context).expect("test request context")
+}
+
+/// The configuration of a user whose home is `home`, with `rules` as the
+/// `permissions.shell-commands` of `~/.darkmatter.yaml` (no file is written
+/// when there are none), and no repository: what a shell test composes
+/// under, so it never reads or writes the process's home.
+pub fn shell_config(home: impl AsRef<Path>, rules: &[&str]) -> Arc<ConfigSnapshot> {
+    let home = home.as_ref();
+    if !rules.is_empty() {
+        let mut text = String::from("permissions:\n  shell-commands:\n");
+        for rule in rules {
+            text.push_str(&format!("    - {}\n", serde_json::to_string(rule).expect("a rule string")));
+        }
+        std::fs::write(home.join(darkmatter::config::schema::CONFIG_FILE_NAME), text).expect("user configuration");
+    }
+    user_config(home, Some(home), std::collections::HashMap::new())
+}
+
+/// The `permissions.shell-commands` entries, as written (`!` included), of
+/// the user configuration under `home`; empty when there is none.
+pub fn saved_shell_rules(home: impl AsRef<Path>) -> Vec<String> {
+    let snapshot = shell_config(home, &[]);
+    let policy = snapshot.policy().expect("valid permissions");
+    policy.user().permissions().shell_commands.value.iter().map(|entry| entry.authored.clone()).collect()
 }

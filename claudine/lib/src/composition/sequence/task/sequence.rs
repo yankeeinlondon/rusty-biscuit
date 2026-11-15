@@ -442,7 +442,7 @@ impl TaskExecution<'_> {
             }
         }
         if let Some(authorization) = self.graph.shell_authorization() {
-            fresh.settle_container_events(&authorization.0, authorization.1.as_deref());
+            fresh.settle_container_events(&authorization.0);
         }
         Ok(())
     }

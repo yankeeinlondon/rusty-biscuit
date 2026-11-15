@@ -16,7 +16,7 @@ use claudine::composition::{
 };
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::TriggerSource;
+use simplified_schema::triggers::TriggerSource;
 
 const MEMORY_TRIGGER: &str = "kind: schema-trigger\nname: Memory Trigger\ndescription: TODO\nmatch:\n";
 

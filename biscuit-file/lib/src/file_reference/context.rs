@@ -1135,6 +1135,14 @@ impl FileResolutionContext {
         &self.env
     }
 
+    /// The portable variable names this context declares through
+    /// [`PORTABLE_ENV_VARIABLES`](crate::PORTABLE_ENV_VARIABLES) in its
+    /// captured environment, in name order. Invalid entries are left out.
+    #[cfg(feature = "file-reference")]
+    pub fn portable_variables(&self) -> std::collections::BTreeSet<String> {
+        super::portable::declared_portable_names(&self.env)
+    }
+
     /// The original request directory whose repository containment is retained
     /// across derived document contexts.
     pub fn request_cwd(&self) -> &Path {
@@ -1587,6 +1595,15 @@ fn utf8_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "file-reference")]
+    #[test]
+    fn portable_variables_are_the_valid_names_the_captured_environment_declares() {
+        let env = HashMap::from([(crate::PORTABLE_ENV_VARIABLES.to_string(), " VAULT, , bad-name,CONFIG_DIR".to_string())]);
+        let ctx = FileResolutionContext::new("/tmp").with_env(env);
+        assert_eq!(ctx.portable_variables().into_iter().collect::<Vec<_>>(), ["CONFIG_DIR", "VAULT"]);
+        assert!(FileResolutionContext::new("/tmp").with_env(HashMap::new()).portable_variables().is_empty());
+    }
 
     mod user_cache_dir {
         use super::*;

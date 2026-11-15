@@ -281,8 +281,10 @@ Inside an interpolation, the DSL provider offers these candidate families:
    eight list-formatting functions (`as_csv`, `as_tsv`, `as_space_separated`,
    `as_line_separated`, `as_unordered_list`, `as_ordered_list`, `as_json`,
    `as_json5`).
-5. **Host globals** — every global a host catalog in the document's schema
-   roots declares, such as Claudine's `seq`, `loop`, and `group`.
+5. **Host globals** — every global the document's host declares: a
+   registered host that identifies the document, or else a host catalog in
+   its schema roots, such as Claudine's `seq`, `loop`, and `group`. An `md`
+   document (including one two registered hosts identify) gets none.
 6. **Event globals** — inside a lifecycle stack only, the globals that
    event may read under the document's host: md's events, or a host's from
    its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md),

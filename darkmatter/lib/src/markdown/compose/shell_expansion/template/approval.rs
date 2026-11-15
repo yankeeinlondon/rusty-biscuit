@@ -8,9 +8,7 @@
 //! bytes some fill of it produced.
 
 use super::{CommandTemplate, TemplateShape};
-use crate::markdown::compose::shell_expansion::types::ShellPolicyPaths;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 
 /// The approvals a caller computed at preflight, handed back to composition
 /// through `ComposeOptions::with_pre_approved_commands`.
@@ -94,34 +92,23 @@ impl FromIterator<String> for ShellPreApprovals {
 }
 
 /// A session-cache key for one approval decision, tagged with its execution
-/// mode and scoped to the policy root whose files the decision was judged
-/// against.
+/// mode. A session judges every command against one captured configuration,
+/// so the key holds nothing else.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ApprovalKey {
     /// Resolved bytes: one normalized command.
-    Exact { policy_root: Option<PathBuf>, normalized: String },
+    Exact { normalized: String },
     /// A template shape with its approval types.
-    Template { policy_root: Option<PathBuf>, shape: TemplateShape },
+    Template { shape: TemplateShape },
 }
 
 impl ApprovalKey {
-    pub fn exact(policy_root: Option<&Path>, normalized: impl Into<String>) -> Self {
-        Self::Exact {
-            policy_root: policy_root.map(Path::to_path_buf),
-            normalized: normalized.into(),
-        }
+    pub fn exact(normalized: impl Into<String>) -> Self {
+        Self::Exact { normalized: normalized.into() }
     }
 
-    pub fn template(policy_root: Option<&Path>, shape: TemplateShape) -> Self {
-        Self::Template {
-            policy_root: policy_root.map(Path::to_path_buf),
-            shape,
-        }
-    }
-
-    /// The policy root of `paths`: the directory holding the whitelist.
-    pub fn policy_root_of(paths: &ShellPolicyPaths) -> Option<&Path> {
-        paths.whitelist.parent()
+    pub fn template(shape: TemplateShape) -> Self {
+        Self::Template { shape }
     }
 
     /// The key's command text: the normalized bytes, or the shape's canonical
@@ -136,8 +123,8 @@ impl ApprovalKey {
 
 /// Which approval choices a prompt may offer for one candidate.
 ///
-/// Once, deny, and blacklist are offered whenever the candidate validated, so
-/// they are not listed.
+/// Once and deny are offered whenever the candidate validated, so they are
+/// not listed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OfferedChoices {
     /// "This exact command": the candidate's bytes are known and resolved-byte

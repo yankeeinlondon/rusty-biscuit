@@ -115,7 +115,7 @@ impl Fixture {
         // every run is a first run (the report always renders by default).
         let claudine_dir = workspace.path().join(".claudine");
         fs::create_dir_all(&claudine_dir).unwrap();
-        fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+        fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
         let md_path = workspace.path().join("prompt.md");
         fs::write(&md_path, user_prompt).unwrap();

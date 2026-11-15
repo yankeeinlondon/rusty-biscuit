@@ -112,6 +112,12 @@ If a command fails with no matching error handler:
   `::file`: the error names that file, and the file is never replaced by a
   "could not transclude" notice
 
+Every shell-block error names the file of the document it belongs to: a
+command failure, an invalid opener option (`::shell-block timeout=bad`), and
+an unclosed block alike. A document with no file of its own (composed from
+text) names none, so a host can tell a block error of its own document from
+one of a file it transcludes.
+
 Inside a repeated `::map` or `::filter` body, a command failure's structured
 `source` and `span` identify the authored command, and `iteration_path` retains
 the original item. A failure charging the block's combined output identifies
@@ -125,7 +131,7 @@ renderer, use a matching CSS treatment for that demoted partial output.
 
 Shell blocks share the same security infrastructure as `::shell` directives:
 
-- [Pre-Flight Shell Approval](../topics/pre-flight-checks.md) — blacklist, whitelist, and approval flow
+- [Pre-Flight Shell Approval](../topics/pre-flight-checks.md) — the built-in blacklist, `shell-commands` rules, and approval flow
 - [Shell Expansion](./shell-expansion.md) — `::shell` directive details
 
 Commands inside a shell block are discovered during pre-flight and presented for

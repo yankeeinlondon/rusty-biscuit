@@ -261,6 +261,22 @@ impl ResolutionContext {
         gate.check(&target).map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })
     }
 
+    /// Whether a file `function`'s listing returned may reach the slot:
+    /// always without a slot gate; with one, only when the gate admits a
+    /// content read of `path` without asking anyone
+    /// ([`ReadGate::admits_listed`](super::read_gate::ReadGate::admits_listed)).
+    pub(crate) fn admits_listed_file(&self, function: &str, path: &Path) -> bool {
+        let Some(gate) = &self.slot_gate else {
+            return true;
+        };
+        gate.admits_listed(&super::read_gate::ReadTarget {
+            function: function.to_string(),
+            kind: super::functions::ReadKind::Content,
+            location: super::read_gate::ReadLocation::Local(path.to_path_buf()),
+            observed_hash: None,
+        })
+    }
+
     /// Runs `resolve`, a schema resolution `function` makes (a contract's
     /// imports, the schema of a page it validates), with the slot gate asked
     /// before each schema file is opened; without a gate this is `resolve()`.
@@ -314,6 +330,11 @@ impl ResolutionContext {
         let Some(gate) = &self.slot_gate else {
             return Ok(());
         };
+        // A listing function's existence answers and folder listings are part
+        // of the listing, which needs no approval of its own: they reveal no
+        // more than listing the folder does. Its content reads are still
+        // judged as reads.
+        let listing = super::functions::read_fact(function).is_some_and(|fact| fact.kind == super::functions::ReadKind::Listing);
         for observation in observed {
             // A listing by pattern is judged by the folders it lists below,
             // as `find_files` judged it before listing; a relative pattern
@@ -336,7 +357,10 @@ impl ResolutionContext {
             }
             // An input the gate cannot name is refused, never skipped.
             let (target, verdict) = match super::read_gate::ReadTarget::from_observation(function, observation) {
-                Some(target) => {
+                Some(mut target) => {
+                    if listing && target.kind == super::functions::ReadKind::Probe {
+                        target.kind = super::functions::ReadKind::Listing;
+                    }
                     let verdict = gate.check(&target);
                     (target, verdict)
                 }
@@ -454,6 +478,8 @@ impl ResolutionContext {
                 RemoteReadKind::Infrastructure,
                 format!("remote URL {raw:?} could not be fetched"),
             ))),
+            // An invalid configuration keeps its own located message.
+            Err(e) if rf.network().config_error().is_some() => Err(RemoteTextError::Failed(e)),
             // A host the policy refuses is never requested; checking the
             // policy first keeps such a failure from ever being typed
             // `Transport`.

@@ -1,6 +1,13 @@
 //! Policy enforcement for shell commands.
 //!
-//! Implements built-in blacklists, whitelist checking, and command normalization.
+//! Implements the built-in blacklist, rule matching against a rule set (a
+//! layer's allows or exclusions from `permissions.shell-commands`), and
+//! command normalization.
+//!
+//! The built-in blacklist is the only list that refuses; nothing configures,
+//! extends, or overrides it. A `!` entry (an exclusion) never refuses on its
+//! own: it removes pre-approval, so the command needs an explicit approval of
+//! the run.
 
 use super::template::{FilledChain, FilledSegment, ShapeArg, ShapePart, TemplateShape};
 use super::types::{BlacklistRule, ShellRuleSet};
@@ -255,52 +262,64 @@ fn check_builtin_blacklist_known(executable: &str, args: &[KnownArg<'_>]) -> Opt
 }
 
 /// Checks a template's fixed program words and known literal arguments
-/// against the built-in blacklist, then the user blacklist, before any
-/// whitelist or cache approval.
+/// against the built-in blacklist, before any rule, cache, or session
+/// approval.
 ///
 /// A hole's position is kept, never deleted: `git {{ string }} reset` is not
 /// read as `git reset`. Holes are judged at run time by
-/// [`check_filled_chain`]. User `exact` rules apply to segments with no holes,
-/// `prefix` rules to every program, and `template` rules by shape alone.
+/// [`check_filled_chain`].
 ///
 /// ## Returns
 ///
 /// `Some(reason)` when the template is blacklisted.
-pub fn check_template_blacklist(shape: &TemplateShape, user_blacklist: &ShellRuleSet) -> Option<String> {
-    for segment in &shape.segments {
+pub fn check_template_blacklist(shape: &TemplateShape) -> Option<String> {
+    shape.segments.iter().find_map(|segment| {
         let args: Vec<KnownArg<'_>> = segment.args.iter().map(KnownArg::of).collect();
-        if let Some(reason) = check_builtin_blacklist_known(&segment.program, &args) {
-            return Some(reason);
-        }
-    }
-    let blocked = shape.segments.iter().any(|segment| {
+        check_builtin_blacklist_known(&segment.program, &args)
+    })
+}
+
+/// Whether an exclusion of `exclusions` matches a template by shape: an
+/// `exact` rule for a segment with no holes, a `prefix` rule for any program,
+/// or a `template` rule by shape alone (holes match any hole).
+pub fn check_template_exclusion(shape: &TemplateShape, exclusions: &ShellRuleSet) -> bool {
+    shape.segments.iter().any(|segment| {
         let literal_args: Option<Vec<String>> =
             segment.args.iter().map(|arg| arg.as_literal().map(str::to_string)).collect();
-        user_blacklist.matches_prefix(&segment.program)
-            || literal_args.is_some_and(|args| user_blacklist.matches_exact(&normalize_command(&segment.program, &args)))
-    }) || user_blacklist.template_blocks_shape(shape);
-    blocked.then(|| "user blacklist".to_string())
+        exclusions.matches_prefix(&segment.program)
+            || literal_args.is_some_and(|args| exclusions.matches_exact(&normalize_command(&segment.program, &args)))
+    }) || exclusions.template_blocks_shape(shape)
 }
 
 /// Checks every segment of a filled command chain against the built-in
-/// blacklist, then the user blacklist (`exact`, `prefix`, and `template`
-/// rules). Call it after every hole of every segment is filled and before the
-/// first segment starts, even when `&&`/`||` would skip a segment.
+/// blacklist. Call it after every hole of every segment is filled and before
+/// the first segment starts, even when `&&`/`||` would skip a segment.
 ///
 /// ## Returns
 ///
 /// `Some(reason)` when any segment is blacklisted.
-pub fn check_filled_chain(chain: &FilledChain, user_blacklist: &ShellRuleSet) -> Option<String> {
+pub fn check_filled_chain(chain: &FilledChain) -> Option<String> {
     chain
         .segments
         .iter()
         .find_map(|FilledSegment { program, args, .. }| check_builtin_blacklist(program, args))
-        .or_else(|| user_blacklist.blocks_filled(chain).then(|| "user blacklist".to_string()))
 }
 
-/// Checks if a command matches the user blacklist: an `exact` rule for
-/// `normalized`, a `prefix` rule for `executable`, or a single-segment
-/// `template` rule matching the command's arguments.
+/// Whether a filled template, approved by its `shape`, still needs an
+/// approval of its own because an exclusion matches the filled values.
+///
+/// A shape an exclusion already matched was approved explicitly (no rule
+/// pre-approves an excluded shape), so that approval stands. Otherwise the
+/// shape may have been pre-approved by an allow rule, which never overrides
+/// an exclusion: an exclusion that matches only the filled values (`!exact
+/// git add secrets` against `git add {{ string }}`) requires approval.
+pub fn filled_template_needs_approval(chain: &FilledChain, shape: &TemplateShape, exclusions: &ShellRuleSet) -> bool {
+    exclusions.blocks_filled(chain) && !check_template_exclusion(shape, exclusions)
+}
+
+/// Checks if a command matches a rule set used as exclusions: an `exact`
+/// rule for `normalized`, a `prefix` rule for `executable`, or a
+/// single-segment `template` rule matching the command's arguments.
 ///
 /// ## Examples
 ///
@@ -332,7 +351,8 @@ pub fn check_user_blacklist(
     ruleset.matches_exact(normalized) || ruleset.matches_prefix(executable) || ruleset.blocks_filled(&command)
 }
 
-/// Checks if a command matches the whitelist.
+/// Checks if a command matches a rule set used as allows: an `exact` rule
+/// for `normalized` or a `prefix` rule for `executable`.
 ///
 /// ## Examples
 ///

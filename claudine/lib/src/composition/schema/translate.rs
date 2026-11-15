@@ -128,6 +128,7 @@ pub(super) fn translate_schema_failure(
         &options.file_resolution_context,
         &options.schema_caller_records(),
         &options.trigger_findings(),
+        None,
     )?;
     let phase = match mode {
         PrepareMode::Inline(_) => Some(SchemaPhase::Launch),
@@ -238,6 +239,7 @@ pub(super) fn handle_retry_error(
         file_resolution_context,
         caller_input_records,
         trigger_findings,
+        None,
     )?;
     let categorized = categorize_problems(&problems, effective.as_ref(), phase);
 

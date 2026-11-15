@@ -28,7 +28,7 @@ fn level1_pty_lifecycle_shell_using_the_terminal_completes() {
     let fixture = CliProcessFixture::named("lifecycle-shell-terminal-pty");
     let claudine_dir = fixture.home().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
     write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
     let marker = fixture.cwd().join("terminal-ok.txt");

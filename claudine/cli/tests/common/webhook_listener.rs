@@ -292,7 +292,7 @@ fn respond(mut stream: TcpStream, status: u16) {
 }
 
 /// Write an active, environment-backed Discord webhook route named
-/// [`ROUTE_NAME`] into the fixture home's `~/.claudine/config.json`.
+/// [`ROUTE_NAME`] into the fixture home's `~/.claudine/config.yaml`.
 ///
 /// The route stores only [`WEBHOOK_URL_ENV`], never a URL, so the loopback
 /// address never has to pass the inline Discord-host validator.
@@ -301,7 +301,7 @@ pub fn write_webhook_route(home: &Path) {
 }
 
 /// Write `config` plus the [`write_webhook_route`] route as the fixture home's
-/// `~/.claudine/config.json`, for a test that also needs other keys such as
+/// `~/.claudine/config.yaml`, for a test that also needs other keys such as
 /// hook `actions`.
 ///
 /// ## Panics
@@ -314,7 +314,7 @@ pub fn write_config_with_webhook_route(home: &Path, mut config: serde_json::Valu
         "the webhook route owns the `messenger` key"
     );
     object.insert("messenger".to_string(), webhook_route_messenger());
-    super::write_json(&home.join(".claudine").join("config.json"), &config);
+    super::write_json(&home.join(".claudine").join("config.yaml"), &config);
 }
 
 fn webhook_route_messenger() -> serde_json::Value {

@@ -1,23 +1,23 @@
 //! Typed shell-template policy primitives: placeholder types and the covers
-//! relation, the `template` rule store and its robustness matrix, and
-//! whitelist/blacklist matching (acceptance criteria 3, 4, 5, 13, and 17 of
-//! `2026-10-23-shell-template-approval`, at the public library boundary).
+//! relation, `template` rules in `permissions.shell-commands` and their
+//! robustness matrix, and allow/exclusion matching (acceptance criteria 3,
+//! 4, 5, 13, and 17 of `2026-10-23-shell-template-approval`, at the public
+//! library boundary).
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::shell_expansion::store::{
-    append_blacklist_template, append_whitelist_exact, append_whitelist_prefix, append_whitelist_template,
-    load_ruleset, load_ruleset_with_warnings,
-};
+use darkmatter::config::load::ConfigError;
+use darkmatter::config::permissions::persist::{PersistentApproval, save_user_approval};
 use darkmatter::markdown::compose::shell_expansion::template::{
     ApprovalType, FilledChain, FilledSegment, HoleType, HoleValidator, TemplateShape, TypeProvenance,
     parse_authored,
 };
 use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
 use darkmatter::markdown::compose::shell_expansion::types::{
-    ChainOperator, ShellExpansionError, ShellPolicyPaths, ShellRuleEntry, ShellRuleSet,
+    ChainOperator, ShellRuleEntry, ShellRuleSet,
 };
 use darkmatter::markdown::compose::shell_expansion::{
-    check_filled_chain, check_template_blacklist, check_user_blacklist, normalize_command,
+    check_filled_chain, check_template_blacklist, check_template_exclusion, check_user_blacklist,
+    filled_template_needs_approval, normalize_command,
 };
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 use simplified_schema::SchemaRoot;
@@ -198,200 +198,184 @@ fn values_are_validated_as_declared_without_conversion() {
     }
 }
 
-// ── AC3: store round trip ────────────────────────────────────────────────
+// ── AC3: rule round trip through the user configuration ─────────────────
 
-fn policy_paths(dir: &Path) -> ShellPolicyPaths {
-    ShellPolicyPaths {
-        whitelist: dir.join(".darkmatter-shell-whitelist"),
-        blacklist: dir.join(".darkmatter-shell-blacklist"),
-    }
+/// The user layer's `shell-commands` allows of the configuration whose home
+/// is `home`.
+fn user_allows(home: &Path) -> Vec<ShellRuleEntry> {
+    let snapshot = crate::request_support::shell_config(home, &[]);
+    snapshot.policy().expect("valid permissions").user().shell_allows().entries.clone()
+}
+
+/// The rules of `entries` (`shell-commands` text, `!` included) as the
+/// configuration loader reads them, or the loader's refusal.
+fn load_entries(home: &Path, entries: &[String]) -> Result<ShellRuleSet, ConfigError> {
+    let entries: Vec<&str> = entries.iter().map(String::as_str).collect();
+    let snapshot = crate::request_support::shell_config(home, &entries);
+    snapshot.policy().map(|policy| {
+        let user = policy.user();
+        let mut rules = user.shell_allows().clone();
+        rules.entries.extend(user.shell_exclusions().entries.iter().cloned());
+        rules
+    })
 }
 
 #[test]
-fn exact_prefix_and_template_rules_survive_write_read_write_read() {
+fn exact_prefix_and_template_rules_survive_save_read_save_read() {
     let dir = TempDir::new().expect("tempdir");
-    let paths = policy_paths(dir.path());
     let shape = typed_shape("just clean --out {{ out }}/build", None);
-    let write = || {
-        append_whitelist_exact(&paths, "echo hello").expect("exact");
-        append_whitelist_prefix(&paths, "ls").expect("prefix");
-        append_whitelist_template(&paths, &shape).expect("template");
-    };
-    write();
-    let first = load_ruleset(&paths.whitelist).expect("first read");
-    write();
-    let second = load_ruleset(&paths.whitelist).expect("second read");
-    let expected = vec![
+    let rules = [
         ShellRuleEntry::Exact("echo hello".into()),
         ShellRuleEntry::Prefix("ls".into()),
         ShellRuleEntry::Template(shape.clone()),
     ];
-    assert_eq!(first.entries, expected);
-    assert_eq!(second.entries, expected);
-    let text = std::fs::read_to_string(&paths.whitelist).expect("whitelist");
+    let save = || {
+        for rule in &rules {
+            let snapshot = crate::request_support::shell_config(dir.path(), &[]);
+            let policy = snapshot.policy().expect("valid permissions");
+            save_user_approval(policy, &PersistentApproval::ShellRule { rule: rule.clone(), command: None })
+                .expect("saved");
+        }
+    };
+    save();
+    let first = user_allows(dir.path());
+    save();
+    let second = user_allows(dir.path());
+    assert_eq!(first, rules);
+    assert_eq!(second, rules);
+    let text = std::fs::read_to_string(dir.path().join(".darkmatter.yaml")).expect("configuration");
     assert_eq!(
-        text.lines().filter(|line| line.starts_with("template ")).collect::<Vec<_>>(),
-        ["template just clean --out {{ string }}/build"],
+        text.lines().filter(|line| line.contains("template ")).map(str::trim).collect::<Vec<_>>(),
+        ["- template just clean --out {{ string }}/build"],
         "the template is written once and holds its type, never a value"
     );
 }
 
 #[test]
-fn a_constraint_or_program_word_hole_line_is_skipped_with_its_file_and_line() {
+fn a_constraint_or_program_word_hole_entry_invalidates_the_permissions() {
     let dir = TempDir::new().expect("tempdir");
-    let path = dir.path().join(".darkmatter-shell-whitelist");
-    std::fs::write(
-        &path,
-        "exact echo hello\n\
-         template build {{ alphanumeric(allow-slashes; min(3)) }}\n\
-         template build {{ alphanumeric(min(3)) }}\n\
-         template {{ string }} run\n\
-         template build {{ alphanumeric(allow-everything) }}\n\
-         template build {{ slug }}\n\
-         prefix ls\n",
-    )
-    .expect("write");
-    let (rules, warnings) = load_ruleset_with_warnings(&path).expect("loads");
-    assert_eq!(
-        rules.entries,
-        [ShellRuleEntry::Exact("echo hello".into()), ShellRuleEntry::Prefix("ls".into())]
-    );
-    assert_eq!(warnings.iter().map(|warning| warning.line).collect::<Vec<_>>(), [2, 3, 4, 5, 6]);
-    for warning in &warnings {
-        assert_eq!(warning.path, path);
-        let rendered = warning.to_string();
-        assert!(rendered.contains(&format!("{}:{}", path.display(), warning.line)), "{rendered}");
+    for invalid in [
+        "template build {{ alphanumeric(allow-slashes; min(3)) }}",
+        "template build {{ alphanumeric(min(3)) }}",
+        "template {{ string }} run",
+        "template build {{ alphanumeric(allow-everything) }}",
+        "template build {{ slug }}",
+    ] {
+        let entries = ["exact echo hello".to_string(), invalid.to_string(), "prefix ls".to_string()];
+        let error = load_entries(dir.path(), &entries).expect_err(invalid);
+        assert!(error.to_string().contains("shell-commands"), "{invalid}: {error}");
     }
+    let valid = load_entries(dir.path(), &["exact echo hello".to_string(), "prefix ls".to_string()]).expect("valid");
+    assert_eq!(valid.entries, [ShellRuleEntry::Exact("echo hello".into()), ShellRuleEntry::Prefix("ls".into())]);
 }
 
-#[test]
-fn unreadable_and_non_utf8_policy_files_are_policy_io_failures() {
-    let dir = TempDir::new().expect("tempdir");
-    let binary = dir.path().join("binary");
-    std::fs::write(&binary, [b't', 0xff, 0xfe, b'\n']).expect("write");
-    assert!(matches!(load_ruleset(&binary), Err(ShellExpansionError::PolicyIo { .. })));
-    assert!(matches!(load_ruleset(dir.path()), Err(ShellExpansionError::PolicyIo { .. })));
-    assert!(load_ruleset(&dir.path().join("missing")).expect("missing").entries.is_empty());
-}
-
-// ── Input robustness matrix: the line-based policy format ────────────────
+// ── Input robustness matrix: one `shell-commands` entry ─────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Decision {
-    /// The control whitelist approves (or blacklist denies) the target.
+    /// The control allow approves (or exclusion matches) the target.
     Applies,
-    /// The edited line contributes no decision.
+    /// The edited entry contributes no decision.
     None,
 }
 
 struct Cell {
     name: &'static str,
-    /// Rewrites the persisted control line.
+    /// Rewrites the saved control entry; a newline splits it into entries.
     edit: fn(&str) -> String,
     decision: Decision,
-    /// Whether the loader skips the edited line with a warning.
-    warns: bool,
+    /// Whether the loader refuses the block: a malformed configured rule is
+    /// never skipped, so nothing in the block applies.
+    rejected: bool,
 }
 
-const SENTINELS: &str = "exact echo sentinel\nprefix sentinel-tool\n";
+const SENTINELS: [&str; 2] = ["exact echo sentinel", "prefix sentinel-tool"];
 
 fn payload(line: &str) -> &str {
-    line.strip_prefix("template ").expect("control is a template line")
+    line.strip_prefix("template ").expect("control is a template entry")
 }
 
 fn cells() -> Vec<Cell> {
     use Decision::{Applies, None as Nothing};
     vec![
-        Cell { name: "control", edit: |line| line.to_string(), decision: Applies, warns: false },
-        Cell { name: "keyword absent", edit: |line| payload(line).to_string(), decision: Nothing, warns: true },
-        Cell { name: "payload absent", edit: |_| "template".into(), decision: Nothing, warns: true },
-        Cell { name: "keyword null", edit: |line| format!("null {}", payload(line)), decision: Nothing, warns: true },
-        Cell { name: "payload null", edit: |_| "template null".into(), decision: Nothing, warns: false },
-        Cell { name: "keyword collection", edit: |line| format!("[template] {}", payload(line)), decision: Nothing, warns: true },
-        Cell { name: "payload collection", edit: |_| r#"template {"program": "just"}"#.into(), decision: Nothing, warns: true },
-        Cell { name: "keyword wrong type", edit: |line| format!("123 {}", payload(line)), decision: Nothing, warns: true },
+        Cell { name: "control", edit: |line| line.to_string(), decision: Applies, rejected: false },
+        Cell { name: "keyword absent", edit: |line| payload(line).to_string(), decision: Nothing, rejected: true },
+        Cell { name: "payload absent", edit: |_| "template".into(), decision: Nothing, rejected: true },
+        Cell { name: "keyword null", edit: |line| format!("null {}", payload(line)), decision: Nothing, rejected: true },
+        Cell { name: "payload null", edit: |_| "template null".into(), decision: Nothing, rejected: false },
+        Cell { name: "keyword collection", edit: |line| format!("[template] {}", payload(line)), decision: Nothing, rejected: true },
+        Cell { name: "payload collection", edit: |_| r#"template {"program": "just"}"#.into(), decision: Nothing, rejected: true },
+        Cell { name: "keyword wrong type", edit: |line| format!("123 {}", payload(line)), decision: Nothing, rejected: true },
         Cell {
             name: "one hole type wrong",
             edit: |line| line.replacen("{{ string }}", "{{ 123 }}", 1),
             decision: Nothing,
-            warns: true,
+            rejected: true,
         },
         Cell {
             name: "every hole type wrong",
             edit: |line| line.replace("{{ string }}", "{{ 123 }}").replace("{{ alphanumeric(allow-dashes) }}", "{{ 123 }}"),
             decision: Nothing,
-            warns: true,
+            rejected: true,
         },
-        Cell { name: "keyword empty", edit: |line| format!(" {}", payload(line)), decision: Nothing, warns: true },
-        Cell { name: "payload empty", edit: |_| "template ".into(), decision: Nothing, warns: true },
-        Cell { name: "duplicate line", edit: |line| format!("{line}\n{line}"), decision: Applies, warns: false },
-        Cell { name: "keyword trailing", edit: |line| format!("templatex {}", payload(line)), decision: Nothing, warns: true },
-        Cell { name: "payload valid extra argument", edit: |line| format!("{line} extra"), decision: Nothing, warns: false },
-        Cell { name: "payload invalid trailing", edit: |line| format!("{line} \"open"), decision: Nothing, warns: true },
+        Cell { name: "payload empty", edit: |_| "template ".into(), decision: Nothing, rejected: true },
+        Cell { name: "duplicate entry", edit: |line| format!("{line}\n{line}"), decision: Applies, rejected: false },
+        Cell { name: "keyword trailing", edit: |line| format!("templatex {}", payload(line)), decision: Nothing, rejected: true },
+        Cell { name: "payload valid extra argument", edit: |line| format!("{line} extra"), decision: Nothing, rejected: false },
+        Cell { name: "payload invalid trailing", edit: |line| format!("{line} \"open"), decision: Nothing, rejected: true },
         Cell {
-            name: "malformed trailing line",
+            name: "malformed trailing entry",
             edit: |line| format!("{line}\ntemplate {{{{ string }}}} run"),
-            decision: Applies,
-            warns: true,
+            decision: Nothing,
+            rejected: true,
         },
     ]
 }
 
-/// Walks every cell for one policy file. `persist` writes the control rule
-/// through the real persistence API; `decides` observes the public decision.
-fn walk_matrix(
-    persist: fn(&ShellPolicyPaths, &TemplateShape) -> Result<(), ShellExpansionError>,
-    path_of: fn(&ShellPolicyPaths) -> &Path,
-    decides: impl Fn(&ShellRuleSet) -> bool,
-) {
+/// Walks every cell through the configuration loader. `prefix` is `""` for
+/// an allow and `"!"` for an exclusion; `decides` observes the decision.
+fn walk_matrix(prefix: &str, decides: impl Fn(&ShellRuleSet) -> bool) {
     let dir = TempDir::new().expect("tempdir");
-    let paths = policy_paths(dir.path());
     let profile = schema("  profile: \"alphanumeric(allow-dashes)\"\n");
     let control = typed_shape("just clean --out {{ out }}/build {{ profile }}", profile.as_ref());
-    persist(&paths, &control).expect("persist the control rule");
-    let path = path_of(&paths);
-    let persisted = std::fs::read_to_string(path).expect("persisted file");
-    let control_line = persisted.lines().next().expect("one line").to_string();
+    let control_line = format!("template {}", control.canonical_text());
     assert_eq!(control_line, "template just clean --out {{ string }}/build {{ alphanumeric(allow-dashes) }}");
 
     for cell in cells() {
-        std::fs::write(path, format!("{SENTINELS}{}\n", (cell.edit)(&control_line))).expect("write cell");
-        let (rules, warnings) = load_ruleset_with_warnings(path).expect(cell.name);
-        let decision = if decides(&rules) { Decision::Applies } else { Decision::None };
-        assert_eq!(decision, cell.decision, "{}", cell.name);
-        assert_eq!(!warnings.is_empty(), cell.warns, "{}: {warnings:?}", cell.name);
-        for warning in &warnings {
-            assert_eq!(warning.path, path, "{}", cell.name);
-            assert!(warning.line > 2, "{}: a sentinel line was reported", cell.name);
+        let mut entries: Vec<String> = SENTINELS.iter().map(|sentinel| format!("{prefix}{sentinel}")).collect();
+        entries.extend((cell.edit)(&control_line).lines().map(|line| format!("{prefix}{line}")));
+        match load_entries(dir.path(), &entries) {
+            Err(error) => {
+                assert!(cell.rejected, "{}: {error}", cell.name);
+                assert!(error.to_string().contains("shell-commands"), "{}: {error}", cell.name);
+            }
+            Ok(rules) => {
+                assert!(!cell.rejected, "{}: a malformed entry was accepted", cell.name);
+                let decision = if decides(&rules) { Decision::Applies } else { Decision::None };
+                assert_eq!(decision, cell.decision, "{}", cell.name);
+                assert!(rules.matches_exact("echo sentinel"), "{}: exact sentinel lost", cell.name);
+                assert!(rules.matches_prefix("sentinel-tool"), "{}: prefix sentinel lost", cell.name);
+            }
         }
-        assert!(rules.matches_exact("echo sentinel"), "{}: exact sentinel lost", cell.name);
-        assert!(rules.matches_prefix("sentinel-tool"), "{}: prefix sentinel lost", cell.name);
-        let templates = rules.entries.iter().filter(|entry| matches!(entry, ShellRuleEntry::Template(_))).count();
-        assert!(templates <= 1, "{}: duplicate rules load once", cell.name);
     }
-
-    std::fs::write(path, "").expect("blank document");
-    let (rules, warnings) = load_ruleset_with_warnings(path).expect("blank");
-    assert!(rules.entries.is_empty() && warnings.is_empty());
-    assert!(!decides(&rules));
 }
 
 #[test]
-fn the_whitelist_robustness_matrix() {
+fn the_allow_robustness_matrix() {
     let profile = schema("  profile: \"alphanumeric(allow-dashes)\"\n");
     let target = typed_shape("just clean --out {{ out }}/build {{ profile }}", profile.as_ref());
-    walk_matrix(append_whitelist_template, |paths| &paths.whitelist, |rules| rules.template_covers(&target));
+    walk_matrix("", |rules| rules.template_covers(&target));
 }
 
 #[test]
-fn the_blacklist_robustness_matrix() {
+fn the_exclusion_robustness_matrix() {
     let profile = schema("  profile: \"alphanumeric(allow-dashes)\"\n");
     let target = typed_shape("just clean --out {{ out }}/build {{ profile }}", profile.as_ref());
     let filled = filled(&[(ChainOperator::None, "just", &["clean", "--out", "dist/build", "release"])]);
-    walk_matrix(append_blacklist_template, |paths| &paths.blacklist, |rules| {
-        let preflight = check_template_blacklist(&target, rules).is_some();
-        let runtime = check_filled_chain(&filled, rules).is_some();
-        assert_eq!(preflight, runtime, "preflight and runtime blacklists disagree");
+    walk_matrix("!", |rules| {
+        let preflight = check_template_exclusion(&target, rules);
+        let runtime = rules.blocks_filled(&filled);
+        assert_eq!(preflight, runtime, "preflight and runtime exclusions disagree");
         preflight
     });
 }
@@ -420,16 +404,16 @@ fn whitelist_templates_match_on_the_argument_list() {
 }
 
 #[test]
-fn a_blacklist_template_matches_on_shape_whatever_the_hole_type() {
+fn an_exclusion_template_matches_on_shape_whatever_the_hole_type() {
     let projection = schema("  dir: \"alphanumeric\"\n");
     let candidate = typed_shape("deploy {{ dir }} --now", projection.as_ref());
-    let blacklist = ruleset(&["deploy {{ string }} --now"]);
-    assert!(check_template_blacklist(&candidate, &blacklist).is_some());
+    let exclusions = ruleset(&["deploy {{ string }} --now"]);
+    assert!(check_template_exclusion(&candidate, &exclusions));
     assert!(ruleset(&["deploy {{ email }} --now"]).template_blocks_shape(&candidate));
     // A single-segment rule matches any segment of a chain.
     let chained = typed_shape("echo start && deploy {{ dir }} --now", projection.as_ref());
-    assert!(check_template_blacklist(&chained, &blacklist).is_some());
-    assert!(check_template_blacklist(&typed_shape("deploy {{ dir }}", projection.as_ref()), &blacklist).is_none());
+    assert!(check_template_exclusion(&chained, &exclusions));
+    assert!(!check_template_exclusion(&typed_shape("deploy {{ dir }}", projection.as_ref()), &exclusions));
 }
 
 // ── AC13 primitives: runtime policy on filled commands ───────────────────
@@ -438,49 +422,61 @@ fn a_blacklist_template_matches_on_shape_whatever_the_hole_type() {
 fn a_string_template_cannot_authorize_a_dangerous_filled_value() {
     let candidate = typed_shape("git {{ action }}", None);
     assert!(ruleset(&["git {{ string }}"]).template_covers(&candidate));
-    assert!(check_template_blacklist(&candidate, &ShellRuleSet::default()).is_none());
+    assert!(check_template_blacklist(&candidate).is_none());
     let reset = filled(&[(ChainOperator::None, "git", &["reset"])]);
-    let reason = check_filled_chain(&reset, &ShellRuleSet::default()).expect("git reset is refused");
+    let reason = check_filled_chain(&reset).expect("git reset is refused");
     assert!(reason.contains("git reset"), "{reason}");
-    assert!(check_filled_chain(&filled(&[(ChainOperator::None, "git", &["status"])]), &ShellRuleSet::default()).is_none());
+    assert!(check_filled_chain(&filled(&[(ChainOperator::None, "git", &["status"])])).is_none());
 }
 
 #[test]
 fn preflight_keeps_hole_positions_when_checking_known_words() {
-    let none = ShellRuleSet::default();
     // `reset` is the second argument, not the subcommand.
-    assert!(check_template_blacklist(&typed_shape("git {{ x }} reset", None), &none).is_none());
-    assert!(check_template_blacklist(&typed_shape("git reset {{ x }}", None), &none).is_some());
-    assert!(check_template_blacklist(&typed_shape("psql -c DROP{{ x }}", None), &none).is_some());
-    assert!(check_template_blacklist(&typed_shape("rm {{ x }}", None), &none).is_some());
+    assert!(check_template_blacklist(&typed_shape("git {{ x }} reset", None)).is_none());
+    assert!(check_template_blacklist(&typed_shape("git reset {{ x }}", None)).is_some());
+    assert!(check_template_blacklist(&typed_shape("psql -c DROP{{ x }}", None)).is_some());
+    assert!(check_template_blacklist(&typed_shape("rm {{ x }}", None)).is_some());
 }
 
 #[test]
-fn user_blacklists_block_filled_commands_with_and_without_authored_holes() {
+fn exclusions_match_filled_commands_with_and_without_authored_holes() {
     let exact = ShellRuleSet { entries: vec![ShellRuleEntry::Exact("git status".into())] };
     let status = filled(&[(ChainOperator::None, "git", &["status"])]);
-    assert!(check_filled_chain(&status, &exact).is_some(), "an exact blacklist blocks a filled template");
+    assert!(exact.blocks_filled(&status), "an exact exclusion matches a filled template");
 
     let template = ruleset(&["deploy {{ string }}"]);
     let prod = filled(&[(ChainOperator::None, "deploy", &["prod"])]);
-    assert!(check_filled_chain(&prod, &template).is_some());
+    assert!(template.blocks_filled(&prod));
     // The resolved-byte path: a command with no authored holes.
     let args = vec!["prod".to_string()];
     assert!(check_user_blacklist(&template, "deploy", &args, &normalize_command("deploy", &args)));
     assert!(!check_user_blacklist(&template, "deploy", &[], "deploy"));
 
     let partial = ruleset(&["tool pre-{{ string }}-post"]);
-    for (value, blocked) in [("pre--post", true), ("pre-x-post", true), ("pre-x", false), ("x-post", false)] {
+    for (value, matched) in [("pre--post", true), ("pre-x-post", true), ("pre-x", false), ("x-post", false)] {
         let chain = filled(&[(ChainOperator::None, "tool", &[value])]);
-        assert_eq!(check_filled_chain(&chain, &partial).is_some(), blocked, "{value}");
+        assert_eq!(partial.blocks_filled(&chain), matched, "{value}");
     }
 }
 
 #[test]
-fn a_blocked_later_segment_blocks_the_whole_chain() {
+fn a_filled_value_an_exclusion_matches_needs_approval_unless_the_shape_was_excluded() {
+    let shape = typed_shape("git add {{ path }}", None);
+    let secrets = filled(&[(ChainOperator::None, "git", &["add", "secrets"])]);
+    let readme = filled(&[(ChainOperator::None, "git", &["add", "README.md"])]);
+    let values = ShellRuleSet { entries: vec![ShellRuleEntry::Exact("git add secrets".into())] };
+    assert!(filled_template_needs_approval(&secrets, &shape, &values));
+    assert!(!filled_template_needs_approval(&readme, &shape, &values));
+    // A shape the exclusion already matched was approved explicitly.
+    let program = ShellRuleSet { entries: vec![ShellRuleEntry::Prefix("git".into())] };
+    assert!(!filled_template_needs_approval(&secrets, &shape, &program));
+}
+
+#[test]
+fn a_refused_later_segment_refuses_the_whole_chain() {
     let chain = filled(&[(ChainOperator::None, "echo", &["start"]), (ChainOperator::Or, "git", &["reset", "--hard"])]);
-    assert!(check_filled_chain(&chain, &ShellRuleSet::default()).is_some());
+    assert!(check_filled_chain(&chain).is_some());
     let user = ruleset(&["deploy {{ string }}"]);
     let chain = filled(&[(ChainOperator::None, "echo", &["start"]), (ChainOperator::And, "deploy", &["prod"])]);
-    assert!(check_filled_chain(&chain, &user).is_some());
+    assert!(user.blocks_filled(&chain));
 }

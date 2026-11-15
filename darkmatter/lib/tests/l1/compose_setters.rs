@@ -61,6 +61,8 @@ fn only_property_path_splits_a_path_in_the_library() {
     for (file, source) in [
         ("compose/setters.rs", include_str!("../../src/markdown/compose/setters.rs")),
         ("hash/path_edit.rs", include_str!("../../src/markdown/hash/path_edit.rs")),
+        ("hash/node_edit.rs", include_str!("../../src/markdown/hash/node_edit.rs")),
+        ("yaml_edit.rs", include_str!("../../src/yaml_edit.rs")),
         ("schemas/completion.rs", include_str!("../../src/markdown/schemas/completion.rs")),
     ] {
         for needle in ["split('.')", "split(\".\")", "split_once('.')", "rsplit('.')", "rsplit_once('.')"] {

@@ -337,12 +337,22 @@ impl CliProcessFixture {
         for path in [&cwd, &home, &bin_dir] {
             fs::create_dir_all(path).unwrap();
         }
+        // Darkmatter's user configuration, so a run reports no missing-file
+        // warning unless its test asks for one (`without_darkmatter_config`).
+        fs::write(home.join(".darkmatter.yaml"), "{}\n").unwrap();
         Self {
             workspace,
             cwd,
             home,
             bin_dir,
         }
+    }
+
+    /// Removes the fixture home's Darkmatter user configuration.
+    #[must_use]
+    pub fn without_darkmatter_config(self) -> Self {
+        fs::remove_file(self.home.join(".darkmatter.yaml")).unwrap();
+        self
     }
 
     pub fn cwd(&self) -> &Path {
@@ -933,6 +943,23 @@ pub fn write(path: &Path, content: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(path, content).unwrap();
+}
+
+/// Writes `rules` (one `exact`/`prefix`/`template` rule per line, `!` for an
+/// exclusion) as the `permissions.shell-commands` of the user configuration
+/// `home/.darkmatter.yaml`, replacing the file. A child spawned with the
+/// fixture's home decides its shell commands with them.
+pub fn write_shell_permissions(home: &Path, rules: &str) {
+    let entries: Vec<String> = rules
+        .lines()
+        .map(str::trim)
+        .filter(|rule| !rule.is_empty())
+        .map(|rule| serde_json::to_string(rule).unwrap())
+        .collect();
+    write(
+        &home.join(".darkmatter.yaml"),
+        &format!("permissions:\n  shell-commands: [{}]\n", entries.join(", ")),
+    );
 }
 
 pub fn write_json<T: serde::Serialize>(path: &Path, value: &T) {

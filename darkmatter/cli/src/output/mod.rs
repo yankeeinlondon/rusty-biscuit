@@ -164,6 +164,7 @@ pub fn output_diagnostic(code: &str, severity: Severity, message: &str) -> Diagn
         reference_details: None,
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     }
 }
 
@@ -174,14 +175,46 @@ pub fn stderr_text(text: String) -> String {
     if std::io::stderr().is_terminal() { text } else { biscuit_terminal::utils::escape_codes::strip_escape_codes(text) }
 }
 
+/// Run-level notices raised before the command's output began (the missing
+/// user configuration), waiting for the first data output to carry them.
+static RUN_NOTICES: std::sync::Mutex<Vec<Diagnostic>> = std::sync::Mutex::new(Vec::new());
+
+/// Reports run-level `notices` once for the invocation: on stderr as status
+/// rows for a formatted output (an `info` notice as an info row, every other
+/// one as a warning row), or held for the data output's `diagnostics`
+/// (the first [`command::CommandRun`] or [`report::ReportSink`] to begin takes
+/// them), keeping stderr empty.
+pub fn report_run_notices(notices: Vec<Diagnostic>, data_output: bool) {
+    if data_output {
+        RUN_NOTICES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend(notices);
+    } else {
+        for notice in &notices {
+            match notice.severity {
+                Severity::Info => stderr_status(&notice.message, biscuit_terminal::prelude::StatusState::Info),
+                _ => stderr_warning(&notice.message),
+            }
+        }
+    }
+}
+
+/// The held run-level notices; empty for every later caller.
+pub(crate) fn take_run_notices() -> Vec<Diagnostic> {
+    std::mem::take(&mut *RUN_NOTICES.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+}
+
 /// Writes a warning row to stderr.
 pub fn stderr_warning(text: &str) {
+    stderr_status(text, biscuit_terminal::prelude::StatusState::Warning);
+}
+
+/// Writes a status row in `state` to stderr.
+fn stderr_status(text: &str, state: biscuit_terminal::prelude::StatusState) {
     use biscuit_terminal::components::prose::{LineBreaks, Prose};
     use biscuit_terminal::components::renderable::TerminalRenderable as _;
-    use biscuit_terminal::prelude::{Status, StatusState};
+    use biscuit_terminal::prelude::Status;
     let row = Status::from_prose(Prose::escape_text_outside_code_spans(text))
         .with_line_breaks(LineBreaks::Hard)
-        .state(StatusState::Warning)
+        .state(state)
         .render(&stderr_terminal());
     eprintln!("{row}");
 }

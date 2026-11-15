@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::triggers::{
-    self, PayloadMemoCounts, PayloadMemoTally, TriggerRegistry,
-};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, TriggerSource};
+use simplified_schema::triggers::{PayloadMemoCounts, PayloadMemoTally, TriggerRegistry};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, triggers};
+use simplified_schema::embedded::EmbeddedSchemaBundle;
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerSource};
 use simplified_schema::SchemaError;
 
 /// A valid trigger selecting documents with a `title`, layering `level: number`.

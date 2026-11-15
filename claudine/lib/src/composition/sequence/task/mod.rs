@@ -57,7 +57,7 @@ pub use shell::{
 /// The settings a sequence task's `setup:`/`teardown:` stacks play speech
 /// with, for a top-level task and every group member alike.
 ///
-/// Task stacks do not read the user's `config.json`: their `say` uses the
+/// Task stacks do not read the user's `config.yaml`: their `say` uses the
 /// auto-detected provider and no requested voice. Task playback and TTS
 /// pre-warm of task stacks both take their settings from here, so a prepared
 /// phrase matches the configuration it later plays with.

@@ -827,13 +827,13 @@ ignored body
 // Post-shell-expansion schema validation (review-6 high finding)
 // ============================================================================
 
-/// Helper: write a `.darkmatter-shell-whitelist` file allowing the given
-/// command prefixes so frontmatter `$(...)` expressions can execute under
-/// claudine's preflight shell approval pipeline.
+/// Helper: allow the given command prefixes in the user's permissions so
+/// frontmatter `$(...)` expressions can execute under claudine's preflight
+/// shell approval pipeline.
 #[cfg(unix)]
-fn write_shell_whitelist(home: &std::path::Path, prefixes: &[&str]) {
+fn allow_shell_prefixes(home: &std::path::Path, prefixes: &[&str]) {
     let body: String = prefixes.iter().map(|p| format!("prefix {p}\n")).collect();
-    fs::write(home.join(".darkmatter-shell-whitelist"), body).unwrap();
+    crate::common::write_shell_permissions(home, &body);
 }
 
 #[cfg(unix)]
@@ -845,7 +845,7 @@ fn compose_shell_expanded_value_satisfying_schema_succeeds() {
     // values, and claudine's post-shell re-validation accepts the
     // resolved value.
     let fixture = CliProcessFixture::named("compose-schema-cli");
-    write_shell_whitelist(fixture.cwd(), &["echo"]);
+    allow_shell_prefixes(fixture.home(), &["echo"]);
 
     let md_file = fixture.cwd().join("plan.md");
     fs::write(
@@ -878,7 +878,7 @@ fn compose_shell_expanded_value_violating_schema_aborts_without_launching_provid
     // outside the enum must be rejected by the post-shell validator, and
     // the provider stub must not be launched.
     let fixture = CliProcessFixture::named("compose-schema-cli");
-    write_shell_whitelist(fixture.cwd(), &["echo"]);
+    allow_shell_prefixes(fixture.home(), &["echo"]);
     let count_path = fixture.cwd().join("call-count.txt");
 
     let md_file = fixture.cwd().join("plan.md");
@@ -926,7 +926,7 @@ fn inline_compose_shell_expanded_value_violating_schema_aborts_without_launching
     // resolves to a value outside the enum must be rejected by the
     // post-shell validator. Provider stub must not be launched.
     let fixture = CliProcessFixture::named("compose-schema-cli");
-    write_shell_whitelist(fixture.cwd(), &["echo"]);
+    allow_shell_prefixes(fixture.home(), &["echo"]);
     let count_path = fixture.cwd().join("call-count.txt");
 
     let md_file = fixture.cwd().join("inline.md");

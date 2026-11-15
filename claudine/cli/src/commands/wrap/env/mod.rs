@@ -49,12 +49,13 @@ pub(crate) fn detect_wrap_startup(
     cwd: &Path,
     capture_git_status: bool,
 ) -> Result<WrapStartupDetection> {
-    let invocation =
+    let invocation = crate::request::with_darkmatter_config(
         claudine::invocation_context::InvocationContext::capture_for_wrapper(
             crate::request::snapshot(),
             cwd,
             capture_git_status,
-        )?;
+        )?,
+    );
     let mut launch_context = invocation.launch_context();
     let mut launch_workspace = invocation.launch_workspace_context(None);
     let launch_repository = invocation.launch_repository();

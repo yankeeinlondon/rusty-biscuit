@@ -73,7 +73,9 @@ authorizes a shell command: shell approval and host consent are separate.
 ### Access (`--allow host=HOST`, `md compose`)
 
 `--allow host=example.com` lets composition read remote content from exactly
-that host (a hostname, an IP address, or a CIDR range for ICMP probes).
+that host (a hostname, an IP address, or a CIDR range for ICMP probes), on top
+of the configured `network` permission; under `network: allow` every HTTP(S)
+host is readable already.
 `host=HOST` is an allowance only: `--deny host=…` and `--disable host=…` are
 usage errors, and `--deny all` does not take a named host away. A named host
 also allows schema slot reads of URLs on it; see
@@ -259,7 +261,7 @@ flowchart TD
   document is written.
 
 ```sh
-# .darkmatter-shell-whitelist holds: prefix touch
+# ~/.darkmatter.yaml allows it: permissions: { shell-commands: [prefix touch] }
 printf '{{ missing }}\n\n::shell touch marker\n' > doc.md
 md compose doc.md --deny all   # fails on dm.expression.undeclared_property; no marker
 md compose doc.md              # succeeds with the warning; creates marker
@@ -306,42 +308,43 @@ document. See [Exit status](./output-and-width.md#exit-status).
 A schema can load values from data with a `{{ … }}`
 [slot](../topics/schemas/schema-slots.md), such as
 `enum({{ load_data("../os.yaml", "string[]") }})`. Whether a slot may read a
-file or URL is decided by **grants**, not by the verbs on this page, and not
-by the shell command whitelist or blacklist either:
+file or URL is decided by your `permissions.file-read` configuration and
+this run's approvals, not by the verbs on this page, and not by the shell
+command rules either:
 
 - **`--allow host=HOST` is the only flag that affects a slot read.** On
   `md compose` it also allows a slot's `http` and `https` reads on that host
-  for the run, unless a deny grant covers them. No other `--allow`,
+  for the run, unless the read was denied for this run. (The configured
+  `network: allow` allows every such read the same way.) No other `--allow`,
   `--deny`, or `--disable` identifier governs a slot, and no
   `dm.schema.slot_*` code is a recovery or one of the codes `--deny` takes, so
   `--deny dm.schema.slot_denied` is a usage error and `--allow all` recovers
   no slot failure.
-- **Persisted grants** live in the user's grant store,
-  `<home>/.config/darkmatter/schema-read-policy` on every OS, never in a
-  repository. Each line allows or denies one target, and a deny always wins:
-
-  ```text
-  allow file /home/me/data/os.yaml
-  deny dir /home/me/schemas/private
-  allow site https://schemas.example.com
-  ```
-
-  See [Grants](../topics/schemas/schema-slots.md#grants) for every target
-  kind and what makes the file invalid.
-- **On a terminal**, a read no grant decides is asked about with a numbered
-  prompt (see [Prompts](../topics/schemas/schema-slots.md#prompts)).
+- **`permissions.file-read` pre-approves file reads.** A file it matches is
+  read without asking; by default that is a file with a common data or text
+  extension beside the schema, or anywhere in its repository. See
+  [Permissions](../topics/permissions.md#file-read) for the list and
+  [How a file read is decided](../topics/schemas/schema-slots.md#how-a-file-read-is-decided)
+  for the order of the checks.
+- **On a terminal**, any other read is asked about with a numbered prompt:
+  allow this file (or URL) for this run, always allow this file (saved to
+  your `permissions.file-read`), or deny for this run (see
+  [Prompts](../topics/schemas/schema-slots.md#prompts)).
 - **A data output never asks.** An unapproved read fails with
-  `dm.schema.slot_approval_required`, whose `grants_needed` lists the grants
-  any one of which would allow it, so a script can add one to the store and
-  run again:
+  `dm.schema.slot_approval_required`, whose `grants_needed` lists the
+  approvals any one of which would allow it:
 
   ```json
   { "code": "dm.schema.slot_approval_required",
-    "grants_needed": [{ "kind": "file", "target": "/repo/data/os.yaml", "scope": "persisted" }, "..."] }
+    "grants_needed": [
+      { "kind": "file", "target": "/repo/data/os.yaml", "scope": "once" },
+      { "kind": "file", "target": "/repo/data/os.yaml", "scope": "persisted" }
+    ] }
   ```
 
-  A `persisted` entry is the store line `allow <kind> <target>`; a `once`
-  entry can only be given at a prompt.
+  A `persisted` entry is "always allow": a script gives it by adding the file
+  to `permissions.file-read` and running again. A `once` entry can only be
+  given at a prompt.
 
 ## Removed flags
 

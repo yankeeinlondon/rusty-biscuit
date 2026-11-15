@@ -97,9 +97,32 @@ $schema:
 
 Properties are optional unless their definition includes `required`. An
 unbound optional property therefore remains nullable at a use site, including
-when its definition contains `default(...)`: schema defaults are metadata and
-are not applied as runtime values. Only `required` or a concrete non-null
-frontmatter/caller binding establishes that a property is non-null.
+when its definition contains `default(...)`: the default of an optional
+property is metadata and is never applied as a runtime value. Only `required`
+or a concrete non-null frontmatter/caller binding establishes that a property
+is non-null.
+
+A `required` property that also declares a `default(...)` may be left out.
+Validation accepts the document and reports the default it relied on, and
+`md compose` writes the default into the composed frontmatter before anything
+reads it, so the body and later frontmatter values see it:
+
+```yaml
+---
+$schema:
+    greeting: string(required; default(hello))
+---
+Say {{ greeting }}
+```
+
+composes to `Say hello`. The default is applied only to the composed result;
+the source file is never edited. It counts only when the property is absent:
+an explicit `greeting: null` is judged by the declared type, and a default
+inside an object applies only when that object is present. Expressions treat
+the property as present, so no null guard is needed. A default that does not
+satisfy its own definition is reported as a problem at the schema's
+`default(...)`, with no line or column in the document. See
+[Required Properties with a Default](../../inline/schema-validation.md#required-properties-with-a-default).
 
 This distinction matters when an expression supplies a directive target. DMLS
 warns about an unguarded whole-value target such as `::file {{log}}` when
@@ -411,13 +434,14 @@ The rules for a definition:
   and a Markdown schema share in a `kind: schema` file and import them from
   both (see [A `yaml-schema` Is Selected by `kind`, Never Referenced](../../../../simplified-schema/docs/topics/language/schema-documents.md#a-yaml-schema-is-selected-by-kind-never-referenced)).
 
-Darkmatter's own definitions are worked examples of each form:
+The shipped definitions, which Simplified Schema owns and Darkmatter
+compiles in, are worked examples of each form:
 
 - [`yaml-schema.yaml`](../../../../simplified-schema/schemas/yaml-schema.yaml)
   defines `yaml-schema` itself, and validates itself. Its
   `property(kind, ...)` declaration option is what requires your `$schema` to
   declare a literal or enum `kind`.
-- [`schema-trigger.yaml`](../../../schemas/schema-trigger.yaml) uses `types`
+- [`schema-trigger.yaml`](../../../../simplified-schema/schemas/schema-trigger.yaml) uses `types`
   for a recursive `match-expression` and a closed root.
 - [`schema.yaml`](../../../../simplified-schema/schemas/schema.yaml) uses a
   root union whose two arms claim the same `schema` kind: one requires
@@ -443,8 +467,8 @@ broken definition does to the documents around it.
 #### Changing a shipped definition
 
 In this repository the shipped definitions are ordinary files in schema roots:
-[`darkmatter/schemas/schema-trigger.yaml`](../../../schemas/schema-trigger.yaml)
-sits in the `darkmatter` package area's root. Edit it in place and the edit
+[`simplified-schema/schemas/schema-trigger.yaml`](../../../../simplified-schema/schemas/schema-trigger.yaml)
+sits in the `simplified-schema` package area's root. Edit it in place and the edit
 applies at once to documents whose roots include that folder, with no
 rebuild, because a file at a shipped definition's repository-relative path
 that claims the same kind replaces the compiled-in copy. Documents elsewhere
@@ -568,9 +592,10 @@ values.
 A schema with a slot is a **template**. Reading it evaluates nothing: parsing,
 querying, exporting, trigger matching, completion, and hover all see the slot
 as text. The slot runs only when a command resolves the schema, and every
-read it makes must be approved first. A clean, committed file in the schema's
-own repository is approved automatically; anything else needs a grant or an
-answer at a prompt. See
+read it makes must be approved first. A file your `permissions.file-read`
+configuration matches is approved ahead of time (by default, a file with a
+common data or text extension beside the schema or anywhere in its
+repository); anything else needs an answer at a prompt. See
 [When a slot is evaluated](./schema-slots.md#when-a-slot-is-evaluated) and
 [What a slot may read](./schema-slots.md#what-a-slot-may-read).
 
@@ -596,14 +621,14 @@ A **template type** is a slot that supplies a property's whole type
 definition (`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`);
 see [Template Types](../../../../simplified-schema/docs/topics/language/slots.md#template-types).
 
-Every file a returned definition imports or names is read only with a grant,
+Every file a returned definition imports or names is read only once approved,
 exactly like the slot's own reads; see
 [The reads a returned definition causes](./schema-slots.md#the-reads-a-returned-definition-causes).
 
 The full grammar and every result rule are in
 [Slots: Values Supplied by an Expression](../../../../simplified-schema/docs/topics/language/slots.md).
 Darkmatter's side (which expressions a slot may contain, where slots may
-appear, approvals and grants, caching, the editor, and failure codes) is in
+appear, read approvals, caching, the editor, and failure codes) is in
 [Schema Slots in Darkmatter](./schema-slots.md).
 
 ### Union Types
@@ -692,11 +717,13 @@ Your job is to review the specification file "{{spec}}".
 
 - we also specify that `spec` should be evaluated _eagerly_ (the default is _lazy_ evaluation)
 - even though a filepath is a derivative of a string type it holds additional semantic meaning to define it as a **file** type
-- 
 
 This meaning becomes even more pronounced when we add the `eager` constraint:
 
-- by default all properties are `lazy` which means that the page can be _composed_ without
+- by default a `file` is _lazy_: the value only has to parse as a file reference, so the page can be composed with a path to a file the run has not created yet
+- `file(eager)` also requires the file to exist when the document is validated, so `spec` must point at a real file
+- after a successful composition, `md compose` rewrites an eager file value to its resolved path; a document that fails validation is never rewritten
+- see [`eager`](../../../../simplified-schema/docs/topics/global-type-constraints.md#eager) for when a host checks an eager value
 
 ### External Grammar Files
 

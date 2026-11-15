@@ -44,11 +44,16 @@ impl ReadGate for DenyAllReads {
     fn check(&self, _target: &ReadTarget) -> Result<(), GateRefusal> {
         Err(GateRefusal::approval_required())
     }
+
+    fn admits_listed(&self, _target: &ReadTarget) -> bool {
+        false
+    }
 }
 
-/// Gives each slot the gate its reads are asked of. A slot's automatic
-/// grants depend on where the slot was written, so the gate is chosen per
-/// slot, by the file (or, for an inline schema, the folder) that defines it.
+/// Gives each slot the gate its reads are asked of. Relative
+/// `permissions.file-read` entries are judged from the document doing the
+/// read, so the gate is chosen per slot, by the file (or, for an inline
+/// schema, the folder) that defines it.
 pub(crate) trait SlotGates: Send + Sync + std::fmt::Debug {
     /// The gate for a slot defined at `defining`.
     fn gate_for(&self, defining: &Path) -> Arc<dyn ReadGate>;

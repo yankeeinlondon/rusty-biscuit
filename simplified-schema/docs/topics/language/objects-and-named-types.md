@@ -417,10 +417,9 @@ control characters escaped (`\n`, `\t`, `\u{1b}`), shortened to at most 160
 Unicode scalar values including a final `…`. The same excerpt appears in
 `Display`, the terminal block, and DMLS, always inside a code span, so schema
 text cannot become terminal markup. Paths and sources are not part of the
-limit, and the structured `constraint` keeps the full value. A compound
-default that only Rust code can build, such as an object, is rendered as
-compact JSON (`default({"a":1})`); that is a diagnostic spelling, not schema
-grammar.
+limit, and the structured `constraint` keeps the full value. A list or
+mapping default is rendered as compact JSON (`default({"a":1})`), the same
+spelling the grammar reads.
 
 When the conflict arises inside a schema the document references,
 `SchemaError::ReferencedSchema` wraps it.

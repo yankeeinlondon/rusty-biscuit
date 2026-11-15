@@ -176,11 +176,7 @@ fn a_body_shell_expansion_reads_the_filesystem_at_its_turn() {
     )
     .unwrap();
     // Pre-approve the command so the run is non-interactive.
-    fs::write(
-        fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "prefix wc\n",
-    )
-    .unwrap();
+    common::write_shell_permissions(fixture.home(), "prefix wc\n");
 
     let (_, stderr, code) = run(
         &fixture,
@@ -409,11 +405,7 @@ exit 0"#,
         "---\nsequence:\n  - name: work\n    shell: \"echo from-shell\"\n  - name: report\n---\nBody {{seq}} prior=[{{ last(seq.outputs) }}].\n",
     )
     .unwrap();
-    fs::write(
-        fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
+    common::write_shell_permissions(fixture.home(), "prefix echo\n");
 
     let (_, stderr, code) = run(
         &fixture,
@@ -447,11 +439,7 @@ fn a_failing_shell_task_fails_its_step() {
         "---\nsequence:\n  - name: work\n    shell: \"false\"\n---\nBody {{seq}}.\n",
     )
     .unwrap();
-    fs::write(
-        fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "prefix false\n",
-    )
-    .unwrap();
+    common::write_shell_permissions(fixture.home(), "prefix false\n");
 
     let (_, stderr, code) = run(
         &fixture,

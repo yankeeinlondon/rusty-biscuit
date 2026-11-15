@@ -104,11 +104,10 @@ fn reference_options(repo_root: &std::path::Path) -> darkmatter::markdown::compo
     // repository and read no `ctx.*`, so the scan is pure cost. The context is
     // caller-supplied and frozen: a `ctx.*` read of another group would fail
     // with `ContextNotCaptured`.
-    darkmatter::markdown::compose::ComposeRequest::with_context(
+    crate::request_support::request_in(
         ComposeOptions::new_with_context(ComposeContext::capture_for_content(repo_root, "")),
         context,
     )
-    .unwrap()
 }
 
 struct CurrentDirGuard(std::path::PathBuf);

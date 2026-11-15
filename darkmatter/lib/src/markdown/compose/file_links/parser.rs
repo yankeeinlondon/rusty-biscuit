@@ -174,6 +174,7 @@ fn parse_directive_line(
         return Err(FileLinksError::ParseDirective {
             line,
             message: "Directive requires a glob pattern or '--dir <path>'".to_string(),
+            document: None,
         });
     }
 
@@ -189,6 +190,7 @@ fn parse_directive_line(
         return Err(FileLinksError::ParseDirective {
             line,
             message: "Glob pattern cannot be empty".to_string(),
+            document: None,
         });
     }
     reject_trailing_tokens(&mut cursor, line)?;
@@ -228,6 +230,7 @@ fn parse_dir_form(
                     return Err(FileLinksError::ParseDirective {
                         line,
                         message: "'--dir' specified more than once".to_string(),
+                        document: None,
                     });
                 }
                 seen_dir = true;
@@ -238,6 +241,7 @@ fn parse_dir_form(
                     return Err(FileLinksError::ParseDirective {
                         line,
                         message: "'--dir' requires a path".to_string(),
+                        document: None,
                     });
                 }
                 path = Some(value.to_string());
@@ -247,6 +251,7 @@ fn parse_dir_form(
                     return Err(FileLinksError::ParseDirective {
                         line,
                         message: "'--depth' specified more than once".to_string(),
+                        document: None,
                     });
                 }
                 cursor.skip_ws();
@@ -256,6 +261,7 @@ fn parse_dir_form(
                     FileLinksError::ParseDirective {
                         line,
                         message: format!("'--depth' expects a non-negative integer, got '{value}'"),
+                        document: None,
                     }
                 })?;
                 depth = Some(parsed);
@@ -264,6 +270,7 @@ fn parse_dir_form(
                 return Err(FileLinksError::ParseDirective {
                     line,
                     message: format!("Unknown option '{other}'"),
+                    document: None,
                 });
             }
         }
@@ -273,6 +280,7 @@ fn parse_dir_form(
         return Err(FileLinksError::ParseDirective {
             line,
             message: "'--depth' can only be used with '--dir'".to_string(),
+            document: None,
         });
     };
 
@@ -296,6 +304,7 @@ fn read_flag(cursor: &mut Cursor<'_>, line: usize) -> Result<String, FileLinksEr
         return Err(FileLinksError::ParseDirective {
             line,
             message: "Expected '--dir' or '--depth', found something else".to_string(),
+            document: None,
         });
     }
     while let Some(ch) = cursor.current() {
@@ -318,11 +327,13 @@ fn reject_trailing_tokens(cursor: &mut Cursor<'_>, line: usize) -> Result<(), Fi
             return Err(FileLinksError::ParseDirective {
                 line,
                 message: "Glob form cannot be combined with '--dir' or '--depth'".to_string(),
+                document: None,
             });
         }
         return Err(FileLinksError::ParseDirective {
             line,
             message: format!("Unexpected trailing token '{remainder}'"),
+            document: None,
         });
     }
     Ok(())

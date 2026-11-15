@@ -129,6 +129,9 @@ pub mod code {
     /// artifact, so its lifecycle stacks are analyzed under the `md` host.
     /// Reported once per catalog, at the top of the document.
     pub const LIFECYCLE_INCOMPLETE_ANALYSIS: &str = "dm.lifecycle.incomplete_analysis";
+    /// A root key is a host-only lifecycle event of a registered host that
+    /// does not identify the document, so it is data here. Ranged at the key.
+    pub const LIFECYCLE_UNKNOWN_HOST: &str = "dm.lifecycle.unknown_host";
     /// A recognized standalone SimplifiedSchema envelope is malformed (missing
     /// or non-mapping `types`, unsupported tagged-envelope keys, or an invalid
     /// payload).

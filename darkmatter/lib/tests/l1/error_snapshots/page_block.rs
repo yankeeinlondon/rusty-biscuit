@@ -15,6 +15,7 @@ fn parse_directive_shows_line_and_hint() {
         ctx: Box::new(test_ctx_lines(15, "test.md")),
         line: 12,
         message: "unexpected token".into(),
+        note: None,
     };
     let out = render(&err);
     assert_contains_all(

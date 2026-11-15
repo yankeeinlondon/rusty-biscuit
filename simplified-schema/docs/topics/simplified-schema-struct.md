@@ -145,8 +145,10 @@ failed), `MissingSchema`, `Frontmatter`, and `Schema`.
 
 `validate_strict` and `validate_soft` behave exactly as on a prepared schema
 (see [Strict and Soft Validation](./validation.md)): strict judges the value
-as written, soft converts first, and an accepted value is borrowed from the
-input unless soft validation converted it.
+as written, soft converts first, and an absent `required` property with a
+`default(...)` passes through its default, listed in the success's
+`defaults`. An accepted value is borrowed from the input unless soft
+validation converted it or inserted a default.
 
 The object prepares itself on first validation and keeps that preparation
 until a layering call changes the definition. A schema that cannot be

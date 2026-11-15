@@ -27,15 +27,18 @@ extension.
   trigger matching, completion, hover, and validation must not perform I/O,
   execute expressions, fetch remotes, or mutate documents.
 - Keep network access deny-all by default. Route every allowed remote read or
-  write through `biscuit_file::FetchPolicy` and exact-host consent.
+  write through `biscuit_file::FetchPolicy`: exact-host consent, or the
+  configured `network: allow` projected by `config::network::NetworkPermission`
+  (`FetchPolicy::allow_all()`, never a wildcard host). An invalid
+  `permissions` block (`NetworkPermission::Invalid`) refuses every URL with
+  its configuration error before any per-run host or approval is consulted.
 - Keep schema `{{ … }}` slots passive by default. Only an explicit resolution
   through a `SlotSession` (`DarkmatterSchemas::resolve_template`) evaluates
   them, after every slot is admitted; nothing ever validates against a
   template or a placeholder. Every slot read passes the grant gate before the
   file is opened or the shared memo consulted, and grants come only from the
-  user-level store under the home (`<home>/.config/darkmatter/schema-read-policy`),
-  a prompt, or the clean-committed automatic grant; repository or workspace
-  content never grants. See [schema.md](schema.md), "Schema templates".
+  captured `permissions.file-read` and this run's approvals; repository or
+  workspace content never grants. See [schema.md](schema.md), "Schema templates".
 - Render terminal output with `TerminalRenderable` components. The browser tier
   is headless and must use browser-protocol input, never host focus or OS input.
 - Preserve source spans and typed diagnostic provenance through parsing,
@@ -63,7 +66,11 @@ definitions away from their references or replace them with placeholders.
 | DMLS architecture, protocol behavior, and rollout history | [dmls.md](dmls.md) |
 | Render tree, style lowering, disclosure blocks, code blocks | [rendering.md](rendering.md) |
 | Terminal rendering options | [terminal.md](terminal.md) |
-| Frontmatter model, shared views, literal tokens, in-place leaf edits | [frontmatter.md](frontmatter.md) |
+| Frontmatter model, shared views, literal tokens, in-place leaf edits, plain-YAML edits (`yaml_edit`) | [frontmatter.md](frontmatter.md) |
+| `.darkmatter.yaml` schema, `ConfigSnapshot` loading, locked config writes | [library-surfaces.md](library-surfaces.md), `docs/topics/configuration.md` |
+| Permission policy: `config::permissions::PermissionPolicy` (built once per `ConfigSnapshot` from the user layer plus the repository's `HEAD` and working-copy layers; an exclusion in any layer wins, otherwise user allows or both repository layers allow; `network: allow` only when every layer says so), saving an "always allow" entry (`config::permissions::persist::save_user_approval`, user scope only, through `ConfigTransaction`) | `docs/topics/permissions.md` |
+| Host registration: `darkmatter-host` manifests, `config::registration` profiles, host selection (`RegisteredHosts`, `select`, `HostSelection`), the registered trigger layer, `md compose` of a foreign document (`ComposeOptions::with_selected_host`, `RegisteredHostProfile::analysis_globals`, `md_host::{shared_event_keys, execution_projection, foreign_deferred_keys}`), `dm.host.*` codes, a host's setup adding its own `register` entry (`config::init::register_manifest`, deduplicated by `config::registration::manifest_identity`; Claudine publishes its revision with `claudine::composition::registration` first), DMLS's per-document host view (`dmls/src/overlay/hosts.rs`, see [dmls.md](dmls.md)) | `docs/topics/host-registration.md` |
+| Permission-widening comparison for CI (`config::widening`: `compare_revisions`, `WideningInputs` from `.github/ci/permission-inputs.json`, the `permission_widening` example the trusted CI job builds from the base commit; commits read through `sniff`'s `committed_tree_at`, never checked out; resolution reuses `load::committed_layer`/`typed_block`, so a loader change is a checker-input change) | `docs/topics/configuration.md` ("The Cloned-Repository Risk"), repo `docs/topics/ci-cd.md` ("Permission-widening approval") |
 | Error/status block conventions | [errors.md](errors.md) |
 | `md clean`/DMLS formatting rules and frontmatter repair | [cleanup.md](cleanup.md) |
 | Document comparison | [comparison.md](comparison.md) |
@@ -141,11 +148,24 @@ trigger file is reported as `TriggerSchemaReferenced`/`TriggerPayloadCycle`
 A whole `.yaml`/`.yml` document is validated by
 `DarkmatterSchemas::validate_yaml_document` (claimed `kind` > root `$schema` >
 none, no baseline or triggers) over a per-context `KindRegistry`; read
-[schema.md](schema.md#whole-yaml-documents-schemasyaml_documents) first.
-Ownership: the `simplified-schema` crate owns the `schema` and `yaml-schema`
-definitions (`simplified-schema/schemas/`) and envelope admission;
-Darkmatter owns `schema-trigger.yaml`, the `KindRegistry`, selection, and the
-kind checks. A registry is built per call (or once per folder/worker and
+[schema.md](schema.md#whole-yaml-documents) first.
+DMLS routes the four configuration paths (`.darkmatter.yaml`,
+`.claudine/config.yaml` under the captured home or repo root, by
+`PathIdentity`) before that selection: `dmls/src/config_contracts.rs`
+resolves the scope type (`config::schema::resolve_host_config_type`; Claudine's
+schema is `include_str!`'d, never the claudine crate) and
+`DarkmatterSchemas::prepare_configuration_contract` makes a
+`Route::Configuration` contract whose `kind`/`$schema` are data.
+Ownership: the `simplified-schema` crate owns all three shipped definitions
+(`simplified-schema/schemas/{schema,yaml-schema,schema-trigger}.yaml`),
+envelope admission, triggers (`simplified_schema::triggers`), schema roots
+(`roots`), `EmbeddedSchemaBundle` (`embedded`), and the YAML loader,
+`KindRegistry`, selection, and kind checks (`yaml_documents`); edit those
+there (load the `simplified-schema` skill). Darkmatter supplies its
+`ShippedSources` and prepared shipped definitions (`schemas::kind_host()`,
+`shipped_sources()`), adapts the selected schema into an `EffectiveSchema`
+and `ValidationReport` (`YamlContract`, `YamlValidation`, `Route`), and
+re-exports nothing it moved. A registry is built per call (or once per folder/worker and
 passed with `with_kind_registry`); it never fails as a whole, and a
 duplicate, reserved, or broken claim is a `KindSelection` error only for a
 document whose `kind` it could affect. A YAML file is never Markdown: a
@@ -183,14 +203,18 @@ Important contracts:
   only `markdown::{span, literal_token}` and the expression items its
   composition API names (`compose::expression::{Expr, Lexer, parse, …}`).
   Edit the language in `simplified-schema/lib/src/`. What stays in Darkmatter:
-  `DarkmatterSchemas`/`EffectiveSchema`, the baseline, schema roots
-  (`SchemaSearchRoot`), triggers (`TriggerOrigin` maps a `SchemaOrigin` to its
-  `TriggerSource`), the shipped catalog (`embedded::SHIPPED_SOURCES`, which
-  `schemas::resolve` wrappers pass to the library resolver so
+  `DarkmatterSchemas`/`EffectiveSchema`, the baseline, trigger layering into
+  the effective schema, the YAML adapter (`schemas::yaml_documents`:
+  `YamlContract`, `YamlValidation`, `kind_host`, `shipped_kind_registry`), the
+  shipped catalog (`embedded::SHIPPED_SOURCES`, which `schemas::resolve` and
+  the `schemas::triggers::{scan, scan_with_embedded, scan_with_source,
+  prepare_trigger_bundle}` wrappers pass to the library so
   `Name@darkmatter:<stem>` resolves), pending classification
   (`coerce::nested_templates`), `ProblemPositions`, and completion over an
-  `EffectiveSchema`. Work counters for moved code are recorded by the library
-  and folded into `darkmatter::work_counters::snapshot()`.
+  `EffectiveSchema`. Work counters for moved code (including
+  `TriggerDiscovery`, `PayloadMergeCheck`, `PayloadCompileCheck`,
+  `YamlKindCheck`) are recorded by the library and folded into
+  `darkmatter::work_counters::snapshot()`/`threads()`.
 - The library's standalone object is `simplified_schema::SimplifiedSchema`
   (content and file factories, strict/soft validation, atomic layering, type
   queries, export; `simplified-schema/docs/topics/schema-object.md`).
@@ -207,7 +231,7 @@ Important contracts:
 - Trigger matching is schema-based and passive. A schema-trigger document is a
   kinded document and must retain its root `kind` declaration.
 - Triggers and bare-name `$schema` lookup use the five schema roots of the
-  **document's** context (`schemas::roots::SchemaRoots::for_document`):
+  **document's** context (`simplified_schema::roots::SchemaRoots::for_document`):
   `SCHEMAS_DIR` (the folder itself, from `ctx.env()`), package, package area,
   `base_dir()`, `~/schemas`. Never walk ancestors or read the process
   environment for them. Every bare-name consumer (`$schema`, `Name@file`,
@@ -224,7 +248,7 @@ Important contracts:
   the catalog and baseline; a refused artifact or section falls back per item
   to text; `Registry::check_all` forces every section). A host's trigger
   bundle can carry prepared payloads (`EmbeddedSchemaBundle::with_prepared`,
-  `triggers::prepared`): served after filename selection, only when the
+  `simplified_schema::triggers::prepared`): served after filename selection, only when the
   bundle's name and every file's text match, skipping the payload
   merge/compile checks (`Work::PayloadMergeCheck`/`PayloadCompileCheck`). After editing `darkmatter/schemas/`
   or the code that prepares it, run `just shipped-schemas` from the root
@@ -264,7 +288,7 @@ just gets its entries as optional properties; see
 HTTP(S) composition covers `::file`, `::code`, and read-side expression
 arguments where a remote runtime is present; rendered links are never fetched,
 and frontmatter interpolation and `$()` fail loudly on a URL. Reads are
-deny-all until `--allow host=HOST`; only transport artifacts (raw HTTP bodies) may
+deny-all until `--allow host=HOST` or a configured `network: allow`; only transport artifacts (raw HTTP bodies) may
 persist under a cache root; `Cache-Control` outranks every freshness flag;
 host policy is checked before the cache is read. Read
 [remote-cache.md](remote-cache.md) before changing any of this.
@@ -288,7 +312,8 @@ themes, disclosure blocks, browser safety, or the render-tree fold.
 
 The binary is `md`: `render`, `compose`, `clean`, `toc`, `delta`, `schema
 validate|detect|about|triggers`, `hash`, `get|set|rm` (frontmatter), `edit`,
-`code-block`, `graph`, and `validate refs`. Users' contract:
+`code-block`, `graph`, `validate refs`, and `init` (configuration setup; see
+[cli.md](cli.md#md-init)). Users' contract:
 `docs/cli/output-and-width.md` and `docs/cli/data-contracts.md`.
 
 Checks are relaxed or tightened only through three verbs: `--allow <id|all>`

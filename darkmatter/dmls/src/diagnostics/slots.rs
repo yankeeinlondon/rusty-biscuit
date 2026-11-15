@@ -40,19 +40,19 @@ pub const GRANT_SLOT_READ_COMMAND: &str = "dmls.grantSlotRead";
 /// The command that re-resolves every open document's schema slots.
 pub const REFRESH_SCHEMA_SLOTS_COMMAND: &str = "dmls.refreshSchemaSlots";
 
-/// One grant a quick fix offers, carried in an approval-required
+/// One approval a quick fix offers, carried in an approval-required
 /// diagnostic's `data.choices` and passed back as the
-/// [`GRANT_SLOT_READ_COMMAND`] argument. The words are the grant store's
-/// (`allow file /abs/path`).
+/// [`GRANT_SLOT_READ_COMMAND`] argument.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlotGrantChoice {
     /// `allow` or `deny`.
     pub decision: String,
-    /// `file`, `dir`, `url`, `url-any-query`, or `site`.
+    /// `file` or `url`.
     pub kind: String,
-    /// The path, URL, or site.
+    /// The file's path or the exact URL.
     pub target: String,
-    /// `once` (this server process) or `persisted` (the user's grant store).
+    /// `once` (this server process) or `persisted` ("always allow" a file:
+    /// saved to the user's `permissions.file-read`).
     pub scope: String,
 }
 
@@ -69,7 +69,6 @@ impl SlotGrantChoice {
         match (self.decision.as_str(), self.scope.as_str()) {
             ("allow", "persisted") => format!("Always allow schema slots to read {what} {}{any_query}", self.target),
             ("allow", _) => format!("Allow schema slots to read {what} {}{any_query} for this session", self.target),
-            (_, "persisted") => format!("Always deny schema slots reading {what} {}{any_query}", self.target),
             _ => format!("Deny schema slots reading {what} {}{any_query} for this session", self.target),
         }
     }
@@ -198,9 +197,9 @@ fn slot_is_local(ctx: &DocumentContext, origin: Option<&Path>) -> bool {
 }
 
 /// The quick fixes for an unapproved read: every allow the library offers
-/// (each file, folder, URL, or site, for this session and, with a grant
-/// store, persisted), then a deny of the first target, persisted (with a
-/// store) and for this session.
+/// (the file or URL for this session and, for a file with valid
+/// permissions, "always allow"), then a deny of it for this session. There
+/// is no persistent deny.
 fn grant_choices(needed: &[darkmatter::markdown::compose::expression::diagnostics::GrantNeeded]) -> Vec<SlotGrantChoice> {
     let mut choices: Vec<SlotGrantChoice> = needed
         .iter()
@@ -212,15 +211,12 @@ fn grant_choices(needed: &[darkmatter::markdown::compose::expression::diagnostic
         })
         .collect();
     if let Some(first) = needed.first() {
-        let persist = needed.iter().any(|grant| grant.scope == "persisted");
-        for scope in [persist.then_some("persisted"), Some("once")].into_iter().flatten() {
-            choices.push(SlotGrantChoice {
-                decision: "deny".to_string(),
-                kind: first.kind.to_string(),
-                target: first.target.clone(),
-                scope: scope.to_string(),
-            });
-        }
+        choices.push(SlotGrantChoice {
+            decision: "deny".to_string(),
+            kind: first.kind.to_string(),
+            target: first.target.clone(),
+            scope: "once".to_string(),
+        });
     }
     choices
 }

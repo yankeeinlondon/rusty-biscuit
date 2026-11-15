@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::compose::RequestSnapshot;
-use darkmatter::markdown::schemas::SchemaRoots;
+use simplified_schema::roots::SchemaRoots;
 use darkmatter::markdown::schemas::resolve::resolve_schema_with_roots;
 use dmls::capabilities::ClientProfile;
 use dmls::config::DmlsConfig;
@@ -303,6 +303,7 @@ impl NavigationFixture {
             profile: &self.profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         let start = case
             .text

@@ -347,21 +347,31 @@ fn classify_root_partial_detects_empty_and_word_and_flag() {
 }
 
 #[test]
-fn user_config_exists_detects_json_file() {
+fn user_config_exists_detects_yaml_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dot_claudine = tmp.path().join(".claudine");
+    std::fs::create_dir_all(&dot_claudine).unwrap();
+    std::fs::write(dot_claudine.join("config.yaml"), "{}\n").unwrap();
+    assert!(user_config_exists(Some(tmp.path())));
+}
+
+#[test]
+fn user_config_exists_detects_a_legacy_json_file_without_converting_it() {
     let tmp = tempfile::TempDir::new().unwrap();
     let dot_claudine = tmp.path().join(".claudine");
     std::fs::create_dir_all(&dot_claudine).unwrap();
     std::fs::write(dot_claudine.join("config.json"), "{}").unwrap();
     assert!(user_config_exists(Some(tmp.path())));
+    assert!(!dot_claudine.join("config.yaml").exists(), "completion never converts");
 }
 
 #[test]
-fn user_config_exists_detects_json5_file() {
+fn user_config_exists_ignores_a_json5_file_no_reader_opens() {
     let tmp = tempfile::TempDir::new().unwrap();
     let dot_claudine = tmp.path().join(".claudine");
     std::fs::create_dir_all(&dot_claudine).unwrap();
     std::fs::write(dot_claudine.join("config.json5"), "{}").unwrap();
-    assert!(user_config_exists(Some(tmp.path())));
+    assert!(!user_config_exists(Some(tmp.path())));
 }
 
 #[test]
@@ -380,7 +390,7 @@ fn detect_repo_config_finds_repo_and_config() {
     let tmp = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
     std::fs::create_dir_all(tmp.path().join(".claudine")).unwrap();
-    std::fs::write(tmp.path().join(".claudine").join("config.json"), "{}").unwrap();
+    std::fs::write(tmp.path().join(".claudine").join("config.yaml"), "{}\n").unwrap();
     let (has_cfg, in_repo) = detect_repo_config(tmp.path());
     assert!(in_repo);
     assert!(has_cfg);

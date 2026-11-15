@@ -191,10 +191,7 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
             "SOURCE-BODY AREA={{ ctx.area }} CWD={{ ctx.cwd }} FILE={{ file_exists(spec) }}\n",
         ),
     );
-    write(
-        &root.join(".darkmatter-shell-whitelist"),
-        "prefix recordctx\n",
-    );
+    common::write_shell_permissions(fixture.home(), "prefix recordctx\n");
 
     let bin = fixture.bin_dir();
     let provider_log = fixture.cwd().join("provider.log");

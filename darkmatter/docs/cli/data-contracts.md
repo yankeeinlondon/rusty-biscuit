@@ -213,7 +213,8 @@ record this output prints.
 | `span` | `{ "start", "end" }`, the byte range of the failing construct in `source.file`; otherwise `null` |
 | `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key); otherwise `[]` |
 | `data_location` | for `dm.data.malformed` and `dm.data.contract_mismatch`, where in the loaded data file the problem is; see [Data location](#data-location). Absent, not `null`, on every other diagnostic |
-| `grants_needed` | for `dm.schema.slot_approval_required`, the grants any one of which would allow the schema slot's read, in prompt order, as `{ "kind", "target", "scope" }` (`kind` is `file`, `dir`, `url`, `url-any-query`, or `site`; `scope` is `once` or `persisted`); see [Schema Slots](../topics/schemas/schema-slots.md#failures). Absent, not `null`, on every other diagnostic |
+| `grants_needed` | for `dm.schema.slot_approval_required`, the approvals any one of which would allow the schema slot's read, in prompt order, as `{ "kind", "target", "scope" }` (`kind` is `file` or `url`; `target` is the file's path or the exact URL; `scope` is `once`, allow for this run, or `persisted`, "always allow" a file by saving it to `permissions.file-read`); see [Schema Slots](../topics/schemas/schema-slots.md#failures). Absent, not `null`, on every other diagnostic |
+| `schema_default` | for a `dm.schema.*` problem with a value a schema default supplied (a required property the document left out, filled from its `default(...)`), where that default is declared, as `{ "path", "schema_location", "schema_file" }`: `path` is the dotted property path, `schema_location` the JSON Pointer of the `default` keyword (for example `/properties/doc/default`), and `schema_file` the schema file that declares the default (for a default inside a type imported with `Name@file`, that import's file, not the importing schema), omitted for the document's inline schema or a compiled-in one. No authored text holds such a value, so `source` names the document with a `null` line and column. Absent, not `null`, on every other diagnostic |
 
 Severity describes the problem, and `outcome` describes the run. A problem an
 `--allow` recovered keeps its severity while the run succeeds, so `severity: "error"`
@@ -355,6 +356,8 @@ classified by what failed:
 | `dm.schema.baseline` | `md schema validate --schema` could not load the baseline schema |
 | `dm.output.serialization_failed` | the value cannot be written in the requested format; see [TOML](#toml) |
 | `dm.output.open_failed` | `--show` could not open the file |
+| `dm.config.invalid`, `dm.config.reference` | `~/.darkmatter.yaml` or the repository's `.darkmatter.yaml` does not load, for a command that reads the configuration (`md compose`, `md graph`, `md validate refs`); one record per problem, with the file, line, and column. See [Configuration Files](../topics/configuration.md#how-md-and-claudine-report-configuration) |
+| `dm.config.not_saved` | `md init` has nowhere to write: no home directory can be found. See [`md init`](./init.md#exit-status) |
 | `dm.style.*`, and `dm.schema.*` for a style | `md render` could not use a style setter, a `--style` file, or the merged style; see [Style input errors](#style-input-errors) |
 | `dm.compose.failure` | anything else, on any command |
 
@@ -364,10 +367,19 @@ warnings belong to the run's output rather than to composition:
 | Code | Warning |
 |---|---|
 | `dm.output.fractional_width` | `--width` was fractional and was rounded down |
+| `dm.config.missing` | `~/.darkmatter.yaml` does not exist, so every setting takes its default; names the file and `md init`. Reported once per run by every command (a repository without `.darkmatter.yaml` is not reported) |
+| `dm.config.migration` | a legacy policy file (`.darkmatter-shell-whitelist`, `.darkmatter-shell-blacklist`, `.config/darkmatter/schema-read-policy`) was converted into the configuration, a line of it was dropped, a blacklist rule became a `!` exclusion, or a source was kept; one record per notice. See [Migrating Legacy Policy Files](../topics/configuration.md#migrating-legacy-policy-files-temporary) |
+| `dm.config.not_saved` | an "always allow" answer could not be saved to the user's `permissions`; the operation is still approved for this run. See [Saving an "Always Allow" Approval](../topics/configuration.md#saving-an-always-allow-approval) |
+| `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` | a `register` entry's host could not be used, or a document's host could not be chosen; each distinct warning once per run. See [Host Registration](../topics/host-registration.md#diagnostics) |
 | `dm.link.malformed_structured_title` | a link title starts with `{` but is not a JSON5 object, so it is read as plain text |
 | `dm.link.legacy_structured_title` | a link title uses the removed `key=value` syntax; [`md clean`](./clean.md#migrating-link-titles) migrates it |
 | `dm.style.unknown_key` | `md render` found an unknown `style:` key |
 | `dm.style.deprecated` | `md render` found a deprecated `style:` key or inline rule style |
+
+`md compose` of a document a registered host identifies also reports one
+`dm.host.foreign_document` record with `"severity": "info"`, naming the
+host's own command (see
+[`md compose` of a host's document](../topics/host-registration.md#md-compose-of-a-hosts-document)).
 
 ### Style input errors
 
@@ -985,6 +997,7 @@ outcome, depending on whether its shape was published before `outcome` existed:
 | Command | Schema | Value |
 |---|---|---|
 | [`md clean`](./clean.md#version-1-json-envelope) | [`clean.yaml`](../../cli/schemas/output/clean.yaml) | the version-1 object: `version`, `source`, `frontmatter`, `diagnostics`, `applied`, `changed`, `warnings`; see below for its run-level records |
+| [`md init`](./init.md) | [`init.yaml`](../../cli/schemas/output/init.yaml) | `{ "files", "notices", "outcome", "diagnostics" }`: one `{ path, scope, action }` row per configuration file (`action` is `created`, `updated`, or `unchanged`); a failure before any write has empty lists |
 | [`md list-themes`](./list-themes.md) | [`list-themes.yaml`](../../cli/schemas/output/list-themes.yaml) | a bare array of `{ name, description }`, one per theme in canonical order; a run with a diagnostic is `{ "outcome", "diagnostics", "value" }`, as for `md get` |
 | [`md toc`](./toc.md) | [`toc.yaml`](../../cli/schemas/output/toc.yaml) | `title`, the hashes, `preamble`, `structure` (the heading tree), `code_blocks`, `internal_links`, `slug_index` |
 | [`md delta`](./delta.md) | [`delta.yaml`](../../cli/schemas/output/delta.yaml) | `classification`, `statistics`, the frontmatter and preamble flags, `added`, `removed`, `modified`, `moved`, `code_block_changes`, `broken_links` |
@@ -998,7 +1011,7 @@ outcome, depending on whether its shape was published before `outcome` existed:
 | [`md validate refs`](./validate.md) | [`validate-refs.yaml`](../../cli/schemas/output/validate-refs.yaml) | `valid`, `references_scanned`, `references_valid`, `issues`, `warnings`, and with `--show-all`, `references`; with `--graph`, `{ "graph": { "format", "source" } }` alone |
 | [`md schema validate`](./schema.md#md-schema-validate) | [`schema-validate.yaml`](../../cli/schemas/output/schema-validate.yaml) | `{ "files": [...] }`, one record per file argument |
 | [`md schema detect`](./schema.md#md-schema-detect) | [`schema-detect.yaml`](../../cli/schemas/output/schema-detect.yaml) | the inferred schema; for several files without `--merge`, `{ "files": [{ "file", "schema" }] }` |
-| [`md schema triggers`](./schema.md#md-schema-triggers) | [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml) | `file`, `roots`, `shadowed`, `skipped`, `triggers`, plus outcome |
+| [`md schema triggers`](./schema.md#md-schema-triggers) | [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml) | `file`, `roots`, `shadowed`, `skipped`, `triggers`, `registered`, plus outcome |
 | [`md schema about`](./schema.md#md-schema-about) | [`schema-about.yaml`](../../cli/schemas/output/schema-about.yaml) | `sections`, the whole catalog at any verbosity, plus outcome |
 
 A malformed [property path](./index.md#property-paths) given to `md get`, `md set`, or `md rm` is a usage error: exit status 2, nothing read, and no value printed. A path that is well formed but cannot be edited, or a value the schema refuses, is a failure with exit status 1 and a diagnostic.

@@ -66,7 +66,7 @@ Failures are
 setter's value keeps `dm.schema.*`, names the setter, and has no position.
 
 1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing an authored whole-value `$(...)` are deferred to pass 2; each string is scanned once (see [Inserted Text Is Data](#inserted-text-is-data))
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Converts** values to their declared types at every declared depth through the shared coercion engine (default-on, e.g. the string `"true"` → real boolean; each top-level property commits on its own) and writes the converted values back into frontmatter, skipping pending values. The passive call check (`call_precheck.rs`) runs before this stage and before frontmatter interpolation. Each pass gets a `schema_validation::PendingDeferral` saying what a later stage will resolve: `BeforeShell` defers an authored whole-value `$(...)` key (even after pass 1 interpolated its arguments), a problem whose own path (or nearest existing ancestor) holds an authored `{{ }}` template the schema did not already accept as `deferred` (`schemas::awaits_rendering`, shared with `validate_with_options(Defer)` and Claudine's launch pre-validation; a literal sibling's problem, and an unknown or missing key on a collection, are always reported; `PendingDeferral::defers_problem`), and the `provisional_keys` a non-deferring pass 1 (shell discovery) resolved from a command's unexpanded text; `$(...)` text anywhere else is never expanded and is judged now. Other data (a data override, an expression result, a decoded literal token) is never pending. Deferral applies only when frontmatter shell expansion is enabled (or `defer_shell_pending_schema_problems`); when it is disabled every problem fails fast. After shell expansion and interpolation pass 2, `run_with_registry` runs again against the same effective schema (document, baseline, matched triggers) and judges the resolved values with `PendingDeferral::Final` (nothing deferred). The only opt-out is `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (set by Claudine's `canonical_compose_options`, whose `prepare_*_with_schema` re-validates and drops invalid optionals): then, unless `trigger_schemas` is on, compose runs only `verify_projection_stability` and `validate_typed_shell_values`. **Trap:** never gate this pass on `trigger_schemas` alone — `--disable schema-triggers` removes trigger schemas, not the document/baseline verdict on resolved values
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Converts** values to their declared types at every declared depth through the shared coercion engine (default-on, e.g. the string `"true"` → real boolean; each top-level property commits on its own) and writes the converted values back into frontmatter, skipping pending values. Before converting it inserts the default of each absent required property (never into the source file; inserted paths become data; see schema.md "Required defaults"). The passive call check (`call_precheck.rs`) runs before this stage and before frontmatter interpolation. Each pass gets a `schema_validation::PendingDeferral` saying what a later stage will resolve: `BeforeShell` defers an authored whole-value `$(...)` key (even after pass 1 interpolated its arguments), a problem whose own path (or nearest existing ancestor) holds an authored `{{ }}` template the schema did not already accept as `deferred` (`schemas::awaits_rendering`, shared with `validate_with_options(Defer)` and Claudine's launch pre-validation; a literal sibling's problem, and an unknown or missing key on a collection, are always reported; `PendingDeferral::defers_problem`), and the `provisional_keys` a non-deferring pass 1 (shell discovery) resolved from a command's unexpanded text; `$(...)` text anywhere else is never expanded and is judged now. Other data (a data override, an expression result, a decoded literal token) is never pending. Deferral applies only when frontmatter shell expansion is enabled (or `defer_shell_pending_schema_problems`); when it is disabled every problem fails fast. After shell expansion and interpolation pass 2, `run_with_registry` runs again against the same effective schema (document, baseline, matched triggers) and judges the resolved values with `PendingDeferral::Final` (nothing deferred). The only opt-out is `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (set by Claudine's `canonical_compose_options`, whose `prepare_*_with_schema` re-validates and drops invalid optionals): then, unless `trigger_schemas` is on, compose runs only `verify_projection_stability` and `validate_typed_shell_values`. **Trap:** never gate this pass on `trigger_schemas` alone — `--disable schema-triggers` removes trigger schemas, not the document/baseline verdict on resolved values
 3. **Frontmatter Shell Expansion** - top-level frontmatter values whose *authored source* is a whole-value `$(cmd)` execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
 4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
 5. **Text Replacement** - `replace:` frontmatter replaces literal strings
@@ -537,8 +537,8 @@ blocks, so a read after a block waits for the block stage; the last enabled
 shell stage settles the rest. Structural decisions (page-block and `when=`
 conditions, collection gates, sources, callbacks) are not deferred. A command
 whose own line held pending reads is prepared with `prepare_refreshed_site`:
-under pre-approvals its new bytes run when an exact whitelist rule covers every
-segment (or its shape is a member), else `NotPreApproved`. Tests:
+under pre-approvals its new bytes run when an exact `shell-commands` rule covers
+every segment (or its shape is a member), else `NotPreApproved`. Tests:
 `lib/tests/l1/load_data_runtime.rs`.
 
 ### Variable Resolution
@@ -1033,6 +1033,13 @@ every policy and located by line and column:
 Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw text: pass 1
 neither decodes their tokens nor converts their `{{{ … }}}` literals, so the
 caller's event-time evaluation sees each escape as authored.
+Excluding a key defers its rendering, not its verdict: the composition
+verdict drops an excluded key's schema problems only for a caller that
+judges them when it runs the events (Claudine's `post_shell_validate`).
+Under `with_selected_host` (`md compose` of a foreign document) nothing runs
+the host's events, so `run_with_registry` keeps those problems, setting aside
+only what `schemas::pending_rendering_sets_aside` sets aside for `md schema
+validate`. A new `with_exclude_keys` caller must say which side it is on.
 
 **Schema pending.** Pending is decided by what a later stage resolves, never
 by text shape alone (`PendingDeferral` in `compose/schema_validation.rs`).
@@ -1092,7 +1099,7 @@ Shell approval and shell execution are separate concerns:
   `ComposeOptions::with_pre_approved_commands(set)`. The invariant
   `execution_set ⊆ approval_set` makes the gate a pure membership check,
   except for a refreshed site (its arguments read a file after an earlier
-  command ran), which an exact whitelist rule may also admit
+  command ran), which an exact `shell-commands` rule may also admit
   (`site::prepare_refreshed_site`).
 - A body/`::shell-block` command embedding a frontmatter value still pending
   frontmatter-shell expansion is rejected up front as
@@ -1136,25 +1143,40 @@ Shell approval and shell execution are separate concerns:
   template (`schema_validation::defers_template`). Details:
   [schema.md](schema.md), "Schema templates".
 
-### Interactive approval: the stage policy snapshot
+### Shell permissions: the captured policy plus the run's approvals
 
-When no pre-approved set is supplied and an `approval_handler` drives approval
-interactively, policy is snapshotted **once per stage**, not per directive. Each
-of the three shell stages (frontmatter `$()`, body `::shell`, `::shell-block`)
-takes one `ShellRuntimeSnapshot` of the whitelist/blacklist/allow-once state at
-stage open, and every directive that stage admits is judged against it. This
-keeps the policy mutex out of parsing, approval, and execution.
+There is no shell policy file and no policy root. Every decision reads the
+request's captured `permissions.shell-commands`
+(`request.config_snapshot().policy()?.shell()`, a `ShellPermissions`: user ∨
+(HEAD ∧ worktree) per segment, `exclusions()` from every layer) plus the
+runtime's own state, through `ShellExpansionRuntime::snapshot(request)` (a
+`ShellRuntimeSnapshot` of `allow_once`, the run's `saved` rules, and the
+`Arc<PermissionPolicy>`; `allows(..)`, `exclusion(..)`, `save_target()`). An
+invalid block is `ShellExpansionError::Config` before anything is asked.
+Order everywhere (body, blocks, frontmatter, templates, preflight, lifecycle):
+built-in blacklist (`check_filled_chain`, `check_template_blacklist`, no
+rule set) refuses first, before pre-approvals or the handler; an exclusion
+match (`blocks_filled` on the whole chain; `check_template_exclusion` for a
+shape) disables every allow, so only `allow_once`/the handler/pre-approvals
+admit it; otherwise each segment needs `allows(check_whitelist ..)` or an
+`allow_once` key. A filled template whose shape only a rule approved needs
+its own approval when an exclusion matches the filled values
+(`filled_template_needs_approval`; the lifecycle executor reads exclusions
+through `LifecycleHost::shell_exclusions`). Pre-approved membership is not
+re-judged against exclusions: preflight already did.
 
-Two consequences:
-
-- A rule **persisted** by an `AllowExactPersist` / `AllowCommandPersist`
-  decision is written to the runtime immediately but becomes *policy input*
-  only for a **subsequent** stage (or run). A later directive in the same stage
-  matching that fresh rule therefore prompts again. This is conservative by
-  construction — it can over-prompt, never under-authorize.
-- **Allow-once is exempt.** It is arbitrated live against shared runtime state,
-  so one approval covers repeats of that exact command for the rest of the
-  stage and across concurrently composed sibling transclusions.
+"Always allow" (`AllowExactPersist`/`AllowCommandPersist`/`AllowTemplatePersist`)
+calls `ShellExpansionRuntime::save_rule` (or `SitePolicy::save` in
+preflight): `config::permissions::persist::save_user_approval`, the rule added
+to the run's `saved` set, and the approved keys recorded in `allow_once` so an
+excluded command keeps its run approval. A `NotSaved` becomes a
+`dm.config.not_saved` `ComposeWarning` (`take_recent_warnings`, drained by the
+three stages beside `take_recent_approval_count`; preflight returns them in
+`ComposePreflightApprovals::warnings`, which the CLI holds in
+`PendingTriggerWarnings`). The captured snapshot never changes mid-run.
+Each directive takes its own snapshot, so a rule saved earlier in the stage
+answers a later directive without a prompt. `ApprovalKey` is mode + bytes or
+shape only. The compose fingerprint encodes the rules (`shell_permissions`).
 
 Orchestrators (Claudine) call `compose_preflight`, merge in their own harness
 commands, authorize the union once, and pass the merged set back via
@@ -1176,21 +1198,22 @@ declaration is approved as `{{ string }}` but still validated as a number.
 `TemplateShape` is what a `template` rule stores and matches, and
 `canonical_text`/`parse_rule` round-trip it. Covers is `rule_covers`, which
 gates `schemas::is_subtype` behind `is_string_like`, because `is_subtype`
-accepts any identical pair. Blacklist matching errs toward refusing: holes
+accepts any identical pair. Exclusion matching errs toward matching: holes
 ignore type, redirects are ignored, a one-segment rule matches any chain
 segment, and `blocks_filled` treats holes as `*` against filled argv.
 
 The runtime template rejection chain never stores a rejected value; this does
 not cover the earlier document-schema verdict, which can display it. Template
 authorization and command-result caching remain separate: fill, validate,
-check blacklists, and resolve direct targets before result reuse. The native
+check the built-in blacklist and exclusions, and resolve direct targets before result reuse. The native
 redirection regressions preserve original stream destinations, so `2>&1 >
 /dev/null` retains stderr on original stdout whereas `> /dev/null 2>&1`
 discards both. Do not replace a surviving `ToStdout`/`ToStderr` with that
 stream's own capture channel.
-`check_user_blacklist` already applies template blacklist rules to
-resolved-byte commands. `store::load_ruleset_with_warnings` returns the
-skipped lines with file and line; `load_ruleset` logs them.
+`check_user_blacklist` (the exclusion matcher, despite its name) already
+applies `template` rules to resolved-byte commands. `store::parse_rule_entry`
+is the one strict single-rule parser (the configuration loader's); an empty
+payload or unknown form is an error, never skipped.
 
 Discovery (`preflight/collect.rs`) also reads each command site as authored
 (`parser::authored_directive_commands` + `authored_template`, which drops
@@ -1235,12 +1258,14 @@ transclusion notices and nested `||`. `ComposeOptions.pre_approved_commands`
 is `ShellPreApprovals` (exact bytes + shapes; a `HashSet<String>` converts to
 exact only); `validate_pre_approved` admits a site by bytes or shape.
 The runtime allow-once set and Claudine's session cache key on `ApprovalKey`
-(mode + policy root). `compose_preflight_approvals` decides per site (exact
-rule, template rule, prefix rule, then the handler with
-`ShellApprovalRequest::offered`/`template`) and persists every chosen row.
+(mode only). `compose_preflight_approvals` decides per site (built-in
+refusal, then an exclusion check over the authored shape and resolved chain,
+then exact rule, template rule, prefix rule, then the handler with
+`ShellApprovalRequest::offered`/`template`/`exclusion`/`save_target`) and
+saves every "always" choice to the user configuration.
 The `md` prompt (`cli/src/approval.rs`, also Claudine's installed handler)
-numbers only the offered choices (exact, shape, prefix, once, deny,
-blacklist), shows `template.display` as `Command:` with the resolved bytes as
+numbers only the offered choices (exact, shape, prefix, once, deny for this
+run; there is no permanent deny), names an exclusion as `Excluded:`, shows `template.display` as `Command:` with the resolved bytes as
 `Resolved:` only when exact is offered, re-asks on an unlisted number, and
 denies at end of input; `approve_with_io` is its scripted-I/O test seam
 (`cli/tests/l1/approval_prompt.rs`).
@@ -1259,16 +1284,17 @@ the pristine body, advanced with every edit), `::shell-block` through
 (threaded into the inline stages) and evaluates holes with `LookupEvaluator`
 over the stage's state (`ResolvingLookup` for the body, `FrontmatterSeedState`
 for frontmatter). `prepare_site` picks the mode: pre-approved → exact bytes
-member, else shape member, else `NotPreApproved`; policy → blacklists, exact
-rule/cached exact key, template rule/cached shape key, prefix (bytes) or
+member, else shape member, else `NotPreApproved`; policy → built-in blacklist,
+exclusions, exact rule/cached exact key, template rule/cached shape key, prefix (bytes) or
 prefix-per-program (template-only), then the handler. `prepare_resolved` (the
 old `prepare_directive` body) offers the shape beside the bytes and handles
 `AllowTemplatePersist`. `TemplateSite::prepare_template` fills, runs
-`check_filled_chain`, resolves each program with `resolve_direct_target`, and
+`check_filled_chain` and `filled_template_needs_approval`, resolves each program with `resolve_direct_target`, and
 returns `ExecutionMode::Template` with authored `raw_command`; its cache key is
 `template_command_key` (length-prefixed argv), never the rendered line.
-Resolved-byte preparation now also runs `check_filled_chain` (pre-approved
-path included) so chain `template` blacklists reach bytes.
+Resolved-byte preparation runs `check_filled_chain` (pre-approved path
+included) and judges exclusions with `blocks_filled` on the whole chain, so
+chain `template` exclusions reach bytes.
 
 **Shared API for hosts (`template/fill.rs`, `template/target.rs`).**
 `HoleEvaluator` (closures and `LookupEvaluator<L: EvaluationLookup>`),
@@ -1579,7 +1605,18 @@ darkmatter/lib/src/
   normal `CollectionBlocks` operation (double execution).
 - **Diagnostics.** `dm.collection.*`, `dm.expression.invalid_callback`,
   `dm.iteration.{visit,expansion}_limit`; located diagnostics carry `span` and
-  `iteration_path`. Recovery: `with_allow_untyped_{map,filter}_variables`.
+  `iteration_path`. Engine and precheck sites name the body under a `document`
+  placeholder until `inline/collection_blocks.rs::anchor` / `call_precheck.rs::collection_rejection`
+  re-anchor them to the loaded file; a file-less document keeps the body site,
+  named by its context identity (`Markdown::identified_unfiled`) when it has
+  one, so a host can tell its generated body from a remote child's. The same
+  holds for `TocLinkingError`/`FileLinksError`: each names its `document`
+  (`Markdown::error_document`: the file, else the identity), stamped by the
+  compose stage, the transclusion engine, and the pre-flight walk, and
+  `reason()` is its line-free message, which a tolerated failure's warning
+  uses for a document with an identity (`Markdown::generated_identity`).
+  Block-pair reasons are line-free too; the secondary line (`BlockPairError::note`)
+  rides in the consumers' `note` field and their `Display`. Recovery: `with_allow_untyped_{map,filter}_variables`.
   Budget counters stay context-free (`CollectionError::budget`); the stage
   that charged them locates the failure. A later body stage's failure at a
   site inside a copy goes through `site_scope::scope_failure` (or

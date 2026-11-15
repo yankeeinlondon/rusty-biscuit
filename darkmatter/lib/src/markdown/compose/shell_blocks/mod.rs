@@ -14,10 +14,7 @@ pub use types::ShellBlockError;
 use super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, prepare_refreshed_site, prepare_site};
 use super::shell_expansion::template::HoleEvaluator;
 use super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionError, ShellExpansionRuntime};
-use super::shell_expansion::{
-    execute_prepared_directive,
-    resolve_policy_paths,
-};
+use super::shell_expansion::execute_prepared_directive;
 use super::ComposeReport;
 use super::body_origin::{AuthoredBody, DataRanges, EditOrigin, TextEdit};
 use std::path::PathBuf;
@@ -121,8 +118,27 @@ pub(crate) fn run_shell_blocks_stage(
 /// With `templates`, a command whose authored text holds a placeholder may
 /// also run as a template (see [`prepare_site`]), including when the values
 /// interpolated into the block keep its text from parsing as commands.
+///
+/// Every error names the composed document's file (none for a document
+/// without one), so a caller can tell the document's own block failures from
+/// a transcluded child's.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_shell_blocks_stage_in(
+    content: &str,
+    data: Option<&DataRanges>,
+    templates: Option<&BlockTemplates<'_>>,
+    options: &crate::markdown::compose::ComposeRequest,
+    runtime: &mut ShellExpansionRuntime,
+    ctx: &biscuit_terminal::errors::SourceContext,
+    line_offset: usize,
+    first: Option<bool>,
+) -> Result<(String, ComposeReport, Vec<TextEdit>), ShellBlockError> {
+    run_shell_blocks(content, data, templates, options, runtime, ctx, line_offset, first)
+        .map_err(|error| error.with_source_file(source_file_from_options(options)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_shell_blocks(
     content: &str,
     data: Option<&DataRanges>,
     templates: Option<&BlockTemplates<'_>>,
@@ -136,13 +152,13 @@ pub(crate) fn run_shell_blocks_stage_in(
 
     // Scan for block pairs (both page and shell)
     let pairs = super::block_pairs::scan_block_pairs_in(content, data).map_err(|e| {
-        // Extract line number from BlockPairError
         let line = e.line();
         ShellBlockError::Parse {
             line,
             message: e.to_string(),
             excerpt: SourceExcerpt::default(),
             source_file: source_file.clone(),
+            note: e.note(),
         }
     })?;
 
@@ -159,24 +175,6 @@ pub(crate) fn run_shell_blocks_stage_in(
         return Ok((content.to_string(), ComposeReport::new(), Vec::new()));
     }
 
-    // Resolve policy paths once
-    let shell_opts = options.shell_options();
-    let policy_paths =
-        resolve_policy_paths(&shell_opts, &options.source, options.resolution_context()).map_err(|e| ShellBlockError::Parse {
-            line: 0,
-            message: format!("Policy path resolution failed: {e}"),
-            excerpt: SourceExcerpt::default(),
-            source_file: source_file.clone(),
-        })?;
-
-    runtime
-        .ensure_loaded(&policy_paths)
-        .map_err(|e| ShellBlockError::Parse {
-            line: 0,
-            message: format!("Policy loading failed: {e}"),
-            excerpt: SourceExcerpt::default(),
-            source_file: source_file.clone(),
-        })?;
 
     let mut replacements = Vec::new();
     let mut report = ComposeReport::new();
@@ -312,7 +310,7 @@ pub(crate) fn run_shell_blocks_stage_in(
         for (directive, site, start_line, offset) in commands {
             enter(offset);
             let prepare = if first == Some(true) { prepare_refreshed_site } else { prepare_site };
-            match prepare(directive, site.as_ref(), options, &policy_paths, runtime) {
+            match prepare(directive, site.as_ref(), options, runtime) {
                 Ok(p) => prepared.push((p, start_line, offset)),
                 Err(e) => {
                     return Err(ShellBlockError::Command {
@@ -388,6 +386,7 @@ pub(crate) fn run_shell_blocks_stage_in(
         EditOrigin::Data,
     );
     report.shell_approvals_used += runtime.take_recent_approval_count();
+    report.warnings.extend(runtime.take_recent_warnings());
 
     Ok((new_content, report, edits))
 }
@@ -451,6 +450,7 @@ pub(crate) fn reject_data_shaped_commands(
         ),
         excerpt: SourceExcerpt::from_text(body_text, line, body_start_line, 2),
         source_file: source_file.clone(),
+        note: None,
     };
     let (masked_groups, _) = body::group_logical_commands(masked_body, body_start_line);
     let spans_match = masked_groups.len() == commands.len()
@@ -546,7 +546,7 @@ mod tests {
         let options = test_request(
             ComposeOptions::new()
                 .with_shell_approval_handler(handler)
-                .with_shell_policy_root(temp_dir.path())
+                .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[]))
                 .with_shell_working_directory(std::env::current_dir().unwrap()),
         );
         (options, temp_dir)
@@ -746,10 +746,9 @@ mod tests {
         // timeout, so its length costs no wall clock.
         let content = "::shell-block\nsleep 10 && echo after\n::end-block\n";
         let temp_dir = TempDir::new().unwrap();
-        let options = test_request(ComposeOptions::new().with_shell(ShellExpansionOptions {
+        let options = test_request(ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
             timeout: std::time::Duration::from_secs(1),
             timeout_behavior: ShellTimeoutBehavior::EmptyString,
-            policy_root: Some(temp_dir.path().to_path_buf()),
             approval_handler: Some(Arc::new(AllowAllHandler)),
             ..Default::default()
         }));
@@ -854,6 +853,23 @@ mod tests {
                 assert_eq!(source_file, Some(std::path::PathBuf::from("/tmp/test.md")));
             }
             other => panic!("Expected Command error, got: {other:?}"),
+        }
+    }
+
+    /// Every block error names the composed file, an option or pairing
+    /// failure as well as a command's, so a caller can tell the document's
+    /// own errors from a transcluded child's.
+    #[test]
+    fn every_block_error_names_the_source_file() {
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let options = options.with_source_file("/tmp/test.md");
+        for content in ["::shell-block timeout=bad\ntrue\n::end-block\n", "::shell-block\ntrue\n"] {
+            let mut runtime = ShellExpansionRuntime::new();
+            let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap_err();
+            let (ShellBlockError::Parse { source_file, .. }
+            | ShellBlockError::Unterminated { source_file, .. }
+            | ShellBlockError::Command { source_file, .. }) = &err;
+            assert_eq!(source_file.as_deref(), Some(std::path::Path::new("/tmp/test.md")), "{content:?}: {err:?}");
         }
     }
 

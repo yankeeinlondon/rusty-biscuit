@@ -3,8 +3,9 @@
 //! later matched trigger) redeclares is never read or asked about.
 //!
 //! Each case is a Git repository in a temp dir whose `schemas/` folder holds
-//! the trigger files and whose `data/os.yaml` is untracked (so no automatic
-//! grant applies), with an empty home (no persisted grant) and an explicit
+//! the trigger files and whose `data/os.yaml` is untracked, whose committed
+//! `permissions.file-read` and home configuration pre-approve nothing (so
+//! only an entry a case commits allows a read), with an explicit
 //! data runtime whose observation log is read afterwards. `a.trigger.yaml`
 //! selects `topic: sandbox` and declares `os` as an enum read from that
 //! file; every document's value is `Windows`, which the file does not list.
@@ -48,13 +49,16 @@ impl Case {
         let temp = tempfile::tempdir().expect("temp dir");
         let root = biscuit_file::canonicalize_simplified(temp.path()).expect("canonical temp dir").join("repo");
         let case = Self { _temp: temp, root, home: tempfile::tempdir().expect("temp home"), runtime: DataRuntime::new() };
+        crate::slot_support::write_user_permissions(case.home.path(), &[]);
         for (name, text) in files {
             case.write(name, text);
         }
+        case.write(".darkmatter.yaml", crate::slot_support::NO_READS);
         git(&case.root, &["init", "-q", "-b", "main"]);
         git(&case.root, &["add", "-A"]);
         git(&case.root, &["commit", "-q", "-m", "fixture"]);
-        // Untracked, so only an explicit grant could allow the reads.
+        // Untracked and admitted by nothing, so only a permission a case
+        // commits could allow the reads.
         case.write(OS_DATA, "- macOS\n- Linux\n");
         case.write(ARCH_DATA, "- arm64\n");
         case
@@ -70,15 +74,14 @@ impl Case {
         std::fs::write(path, text).expect("write");
     }
 
-    /// Persists `allow file <name>` for each of `names` in the home's store.
+    /// Commits a repository `permissions.file-read` admitting each of
+    /// `names` (repository-relative).
     fn grant_files(&self, names: &[&str]) {
-        let lines: String = names
-            .iter()
-            .map(|name| format!("allow file {}\n", biscuit_file::to_portable_string(&self.path(name))))
-            .collect();
-        let store = self.home.path().join(".config/darkmatter/schema-read-policy");
-        std::fs::create_dir_all(store.parent().expect("store folder")).expect("store folder");
-        std::fs::write(&store, lines).expect("grant store");
+        let entries: Vec<String> = names.iter().map(|name| format!("&{name}")).collect();
+        let entries: Vec<&str> = entries.iter().map(String::as_str).collect();
+        self.write(".darkmatter.yaml", &crate::slot_support::file_read_config(&entries));
+        git(&self.root, &["add", "--", ".darkmatter.yaml"]);
+        git(&self.root, &["commit", "-q", "-m", "permit"]);
     }
 
     fn request(&self, document: &Path) -> ComposeRequest {

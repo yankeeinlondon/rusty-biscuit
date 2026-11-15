@@ -41,6 +41,7 @@ last_updated: 2026-11-06
 - One set of [policy verbs](./docs/cli/policy.md) on every command: `--allow <id|all>` to recover from a known problem, `--deny <id|all>` to make diagnostics blocking (for example `md compose doc.md --deny all` in CI), and `--disable <id>` to turn a feature off
 - One [`--output` and `--width`](./docs/cli/output-and-width.md) on every command: print for a person (`terminal`, `plain`, `markdown`, `markdown-plus`, `html`) or as [data](./docs/cli/data-contracts.md) (`json`, `json5`, `yaml`, `toml`). For example, `md compose --output json` prints one value with the outcome, every diagnostic (with the same codes and positions the editor shows), and the composed document
 
+- Keep file-read, shell, and network [permissions](./docs/topics/permissions.md) in one [configuration file](./docs/topics/configuration.md); `md init` writes `~/.darkmatter.yaml` with every default ([`md init`](./docs/cli/init.md))
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [DMLS language server](./dmls/README.md) in an editor.
 
@@ -96,6 +97,11 @@ host OS input and take focus.
     - [Transclusion](./docs/topics/transclusion.md)
     - [Loading Data](./docs/topics/loading-data.md) — `load_data(file, as, options)`: formats, read options (format, delimiter, headerless CSV), CSV rows, optional files, and failures that point into the data file
     - [Frontmatter](./docs/topics/frontmatter.md) and [Frontmatter and Recursion](./docs/topics/frontmatter-recursion.md) — parsing, key order, merges, and what a transcluded child inherits
+    - [Editing Plain YAML Files](./docs/topics/yaml-editing.md) — the library's in-place, comment-preserving edits of a whole `.yaml` file
+    - [Configuration Files](./docs/topics/configuration.md) — `~/.darkmatter.yaml` and the repository's `.darkmatter.yaml`: settings, schema defaults, and loading a `ConfigSnapshot`
+    - [Permissions](./docs/topics/permissions.md) — the `file-read`, `shell-commands`, and `network` policies, how the user and repository scopes combine, and current-run approvals
+    - [Host Registration](./docs/topics/host-registration.md) — `darkmatter-host` manifests a `register` entry names, and loading them into host profiles
+    - [Writing Configuration Files Safely](./docs/topics/config-writes.md) — locked, validated, atomic configuration saves shared by every writer, and the receipts that let a migration finish its cleanup
     - [Lifecycle Events](./docs/topics/lifecycle/index.md) and [Lifecycle Error Handling](./docs/topics/lifecycle/error-handling.md) — the frontmatter stacks `md compose` runs before and after composition, and how failures, cleanup, and Ctrl-C route
     - [Rendering Output Formats](./docs/topics/output-formats.md)
     - [Delta Processing](./docs/topics/delta.md)

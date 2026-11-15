@@ -306,7 +306,7 @@ mod vocabulary {
         let schema = schema_with(KIND_CLAIM);
         let value = json!({ "x": { "kind": "literal(a; required)", "count": "number(min(1))" } });
         let accepted = schema.validate_soft(&value).expect("accepted");
-        assert!(!accepted.is_converted(), "{:?}", accepted.value);
+        assert!(!accepted.is_modified(), "{:?}", accepted.value);
     }
 
     /// A raw JSON Schema author writes the payload directly; a malformed one

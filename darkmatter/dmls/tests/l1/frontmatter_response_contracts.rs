@@ -113,6 +113,7 @@ impl Session {
             profile: &self.profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         f(&ctx, &self.registry)
     }

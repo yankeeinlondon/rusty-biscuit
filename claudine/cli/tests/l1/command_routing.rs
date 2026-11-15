@@ -22,7 +22,7 @@ fn seed_user_config(home: &std::path::Path) {
     });
 
     write(
-        &home.join(".claudine/config.json"),
+        &home.join(".claudine/config.yaml"),
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 }
@@ -81,7 +81,7 @@ fn hooks_support_command_routes_without_detected_agents() {
 #[test]
 fn explicit_config_path_loads_configured_actions() {
     let fixture = CliProcessFixture::named("command-routing-explicit-config");
-    let config_path = fixture.cwd().join("config.json");
+    let config_path = fixture.cwd().join("config.yaml");
     write(
         &config_path,
         r#"{

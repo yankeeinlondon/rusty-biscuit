@@ -11,12 +11,11 @@ use std::path::Path;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
-use darkmatter::markdown::compose::shell_expansion::store::resolve_policy_paths;
 use darkmatter::markdown::compose::shell_expansion::types::{
-    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionOptions,
+    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
 };
 use darkmatter::markdown::compose::{
-    ComposeContext, ComposeOptions, ComposeRequest, ComposeSource, RequestSnapshot, ShellExpansionError,
+    ComposeContext, ComposeOptions, ComposeRequest, RequestSnapshot, ShellExpansionError,
     build_resolution_context,
 };
 use darkmatter::markdown::schemas::{DarkmatterSchemas, detect_from_document};
@@ -137,23 +136,6 @@ fn structural_validators_resolve_only_context_free_file_values() {
 
     let resolved = cache.validator_for(&schema, Some(dir.path()), &context_at(dir.path())).unwrap();
     assert!(!resolved.is_valid(&relative_missing), "a context-bound validator checks existence");
-}
-
-/// A source with no directory keeps its shell policy files in the request
-/// directory when the context names no repository or home.
-#[test]
-fn a_pathless_source_keeps_shell_policy_in_the_request_directory() {
-    let dir = TempDir::new().unwrap();
-    let context = build_resolution_context(&RequestSnapshot::new(dir.path())).unwrap();
-    assert_eq!(context.repository_root(), None);
-    assert_eq!(context.home_dir(), None);
-
-    for source in [ComposeSource::Unknown, ComposeSource::File("doc.md".into())] {
-        let paths =
-            resolve_policy_paths(&ShellExpansionOptions::default(), &source, &context).unwrap();
-        assert_eq!(paths.whitelist, dir.path().join(".darkmatter-shell-whitelist"), "{source:?}");
-        assert_eq!(paths.blacklist, dir.path().join(".darkmatter-shell-blacklist"), "{source:?}");
-    }
 }
 
 /// `ComposeOptions::new` captures no process directory; a prepared request

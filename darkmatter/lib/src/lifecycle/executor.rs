@@ -91,7 +91,7 @@ pub(crate) use shell::execute_set_shell_values_sharing;
 pub use host::{LifecycleHost, LifecycleRunFailure, PrepError, PrepRequest};
 pub use outcome::{ActionLocation, LifecycleEventOutcome, StackControl};
 pub use shell::{
-    DisabledShellRunner, ShellRunError, ShellRunner, ShellValueRequest, compose_request,
+    DisabledShellRunner, ShellRunError, ShellRunner, ShellValueRequest, compose_request, local_expression_context,
     execute_set_shell_values,
 };
 
@@ -134,6 +134,10 @@ pub struct StackInputs<'a> {
     /// The request's file-resolution context, used by document-authored file
     /// expressions.
     pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    /// The request's configuration snapshot, handed to every request a
+    /// lifecycle action builds over [`Self::file_resolution_context`]. `None`
+    /// is valid only when that context names no repository.
+    pub config_snapshot: Option<&'a std::sync::Arc<crate::config::load::ConfigSnapshot>>,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Approved-shell runner.
@@ -741,8 +745,8 @@ impl<'a> StackExecutor<'a> {
         if let Some(site) = &shell.template {
             match site.mode() {
                 Some(LifecycleShellMode::ResolvedBytes) => {}
-                Some(LifecycleShellMode::Template { policy_root }) => {
-                    return self.run_shell_template(shell, site, policy_root.as_deref(), property, fm);
+                Some(LifecycleShellMode::Template) => {
+                    return self.run_shell_template(shell, site, property, fm);
                 }
                 None => {
                     self.ensure_shell_permitted("shell")?;
@@ -779,16 +783,16 @@ impl<'a> StackExecutor<'a> {
     ///
     /// Every placeholder is read from the state current now, checked against
     /// its declared type, and filled into exactly one argument; the whole
-    /// filled command then meets the built-in and user blacklists, and only
-    /// then does any segment start. A value that is missing or rejected, a
-    /// blacklisted fill, and a program that needs an interpreter are
+    /// filled command then meets the built-in blacklist and the run's
+    /// exclusions, and only then does any segment start. A value that is
+    /// missing or rejected, a blacklisted or excluded fill, and a program
+    /// that needs an interpreter are
     /// evaluation errors: `no_error` cannot suppress them, and their message
     /// never shows a value. A non-zero exit is a dispatch error, as for bytes.
     fn run_shell_template(
         &self,
         shell: &ShellAction,
         site: &LifecycleShellTemplate,
-        policy_root: Option<&Path>,
         property: &str,
         fm: &SharedFrontmatter,
     ) -> Result<(), ActionFailure> {
@@ -802,13 +806,27 @@ impl<'a> StackExecutor<'a> {
                 let ctx = self.template_context(authored);
                 self.template_refusal(property, authored, error.into_shell_error(&ctx, authored, &template_origin(property)))
             })?;
-        let blacklist = self.inputs.host.user_blacklist(policy_root);
-        if let Some(reason) = crate::markdown::compose::shell_expansion::check_filled_chain(&chain, &blacklist) {
+        if let Some(reason) = crate::markdown::compose::shell_expansion::check_filled_chain(&chain) {
             let error = ShellExpansionError::Blacklisted {
                 ctx: Box::new(self.template_context(authored)),
                 command: authored.to_string(),
                 reason,
                 origin: template_origin(property),
+            };
+            return Err(self.template_refusal(property, authored, error));
+        }
+        let exclusions = self.inputs.host.shell_exclusions().map_err(|error| {
+            self.template_refusal(property, authored, ShellExpansionError::Config(Box::new(error)))
+        })?;
+        let shape = crate::markdown::compose::shell_expansion::template::TemplateShape::from_template(template);
+        if crate::markdown::compose::shell_expansion::filled_template_needs_approval(&chain, &shape, &exclusions) {
+            let error = ShellExpansionError::ApprovalRequired {
+                ctx: Box::new(self.template_context(authored)),
+                command: authored.to_string(),
+                save_target: None,
+                exclusion: None,
+                origin: template_origin(property),
+                suggested_rules: Box::default(),
             };
             return Err(self.template_refusal(property, authored, error));
         }
@@ -1109,7 +1127,6 @@ impl<'a> StackExecutor<'a> {
     ) -> Result<Vec<(String, Value)>, ActionFailure> {
         let mut values: Vec<std::borrow::Cow<'_, ResolvedShellValue>> = Vec::new();
         let mut authored = String::new();
-        let mut policy_root = None;
         for (key, shell) in set.shell_values() {
             let Some(resolved) = shell.resolved.as_ref() else {
                 return Err(ActionFailure::Evaluation(
@@ -1130,9 +1147,8 @@ impl<'a> StackExecutor<'a> {
                 None | Some((_, Some(LifecycleShellMode::ResolvedBytes))) => {
                     values.push(std::borrow::Cow::Borrowed(resolved));
                 }
-                Some((site, Some(LifecycleShellMode::Template { policy_root: root }))) => {
+                Some((site, Some(LifecycleShellMode::Template))) => {
                     self.ensure_shell_permitted("set")?;
-                    policy_root = root.or(policy_root);
                     let value = resolved.clone().with_template(site.template().clone());
                     values.push(std::borrow::Cow::Owned(match site.late_values() {
                         Some(late) => value.with_late_values(late.clone()),
@@ -1153,8 +1169,8 @@ impl<'a> StackExecutor<'a> {
                 source_path: self.inputs.source_path,
                 context: self.early_binding_context(&authored),
                 file_resolution_context: self.inputs.file_resolution_context,
+                config_snapshot: self.inputs.config_snapshot,
                 holes,
-                policy_root: policy_root.as_deref(),
             };
             self.inputs.shell_runner.run_values(&request)
         };
@@ -1204,18 +1220,22 @@ impl<'a> StackExecutor<'a> {
         let request_context = self.inputs.file_resolution_context;
         let reference = FileReference::new(raw).map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
         let document_context = request_context.for_source(self.inputs.source_path);
-        let mutation_context = request_context.for_cwd(self.inputs.effect_engine.mutation_root());
         let resolved = reference
             .resolve_in_context(&document_context)
             .map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
         let path = match resolved {
             Some(path) => path,
+            // A new implicit-relative target is created under the mutation root.
+            // Joined directly rather than through `request_context.for_cwd(..)`:
+            // that context keeps the document's repository boundary, and the
+            // mutation root (the launch workspace) lies outside it whenever the
+            // document comes from a different repository, e.g. a shared prompt
+            // library.
+            None if reference.class().kind == FileReferenceKind::ImplicitRelative => {
+                self.inputs.effect_engine.mutation_root().join(raw)
+            }
             None => reference
-                .candidate_plan(if reference.class().kind == FileReferenceKind::ImplicitRelative {
-                    &mutation_context
-                } else {
-                    &document_context
-                })
+                .candidate_plan(&document_context)
                 .map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?
                 .into_iter()
                 .next()

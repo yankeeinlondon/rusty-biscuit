@@ -448,8 +448,9 @@ A URL parses into a typed remote reference. It never becomes a local
 candidate: sending it through local-path resolution fails with
 `RemoteNotLocal`. With the `url` feature, `resolve_target_in_context(&ctx)`
 distinguishes `Resolved::Local` from `Resolved::Remote` so callers can route
-remote references to the separate fetching API (whose failures are
-`FetchError`, a different type from `FileReferenceError`). A `{{VAR}}` in the
+remote references to the separate fetching API ([Fetching Remote
+Content](./fetch.md); its failures are `FetchError`, a different type from
+`FileReferenceError`). A `{{VAR}}` in the
 URL is filled from the context's environment, so
 `https://{{DOCS_HOST}}/guide.md` names the host the request was given, not
 whatever the process has. `resolve_target()` is the ambient twin.
@@ -1802,6 +1803,21 @@ anchor it; the deepest anchor wins, then name order.
 CONFIG_DIR=/opt/config, target /opt/config/x.json  →  {{CONFIG_DIR}}/x.json
 CONFIG_DIR=../shared                                →  not eligible (NotAbsolute)
 CONFIG_DIR=/opt/conf                                →  not eligible (NotAPrefix)
+```
+
+To check a reference against the declared names yourself, compare
+`FileReference::env_variables()` (the `{{NAME}}` names a reference
+interpolates, in authored order) with
+`FileResolutionContext::portable_variables()` (the valid names the context's
+`PORTABLE_ENV_VARIABLES` declares). Darkmatter's configuration loader does
+this for `file-read` patterns.
+
+```rust
+use biscuit_file::FileReference;
+
+let reference = FileReference::new("{{NOTES}}/*.md")?;
+assert_eq!(reference.env_variables(), ["NOTES"]);
+# Ok::<(), biscuit_file::FileReferenceError>(())
 ```
 
 ### Builders and captured state

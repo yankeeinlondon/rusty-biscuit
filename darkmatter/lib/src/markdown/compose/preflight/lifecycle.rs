@@ -1,20 +1,23 @@
 //! Pre-flight approval lifecycle.
 //!
-//! Combines a condition-blind pre-flight collection with the blacklist /
-//! whitelist policy check and the single interactive prompt the v2 design
-//! requires. Returns the set the caller hands back to the execution
+//! Combines a condition-blind pre-flight collection with the shell policy
+//! check (the built-in blacklist and the captured `permissions.shell-commands`)
+//! and the single interactive prompt the v2 design requires. Returns the set the caller hands back to the execution
 //! pipeline as `ComposeOptions::with_pre_approved_commands(...)`.
 //!
 //! The lifecycle is:
 //!
 //! 1. Collect every command the document *could* run (condition-blind), and
 //!    stop when a warning the walk found blocks under the request's policy.
-//! 2. Validate the set against the built-in blacklist, the user
-//!    blacklist, and the whitelist. Each command site is decided once: a
-//!    site whose value is late by its shape; any other by an `exact` rule,
-//!    then a `template` rule, then a `prefix` rule.
+//! 2. Refuse any command the built-in blacklist matches. Then decide each
+//!    command site once: a site an exclusion (`!` entry of any layer)
+//!    matches is never pre-approved; any other is pre-approved when a rule
+//!    covers it, a site whose value is late by its shape, any other by an
+//!    `exact` rule, then a `template` rule, then a `prefix` rule.
 //! 3. For the remainder, prompt the supplied approval handler, offering only
-//!    the choices the site is eligible for, and persist the chosen row.
+//!    the choices the site is eligible for, and save an "always allow" rule
+//!    to the user configuration (a rule that cannot be saved still approves
+//!    the run and is reported as `dm.config.not_saved`).
 //! 4. Return the approved set: resolved bytes and template shapes.
 //!
 //! Darkmatter never prompts directly; the caller (CLI, Claudine, …) owns
@@ -26,20 +29,21 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::markdown::Markdown;
-use crate::markdown::schemas::slots::grants::gate::SlotGrants;
-use crate::markdown::schemas::slots::grants::{Grant, GrantBook, GrantScope, GrantStore};
+use crate::markdown::schemas::slots::grants::Grant;
+use crate::config::permissions::{PermissionPolicy, PolicyExclusion};
+use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::shell_expansion::policy::{
-    check_builtin_blacklist, check_template_blacklist, check_user_blacklist, check_whitelist,
-};
-use crate::markdown::compose::shell_expansion::store::{
-    self, load_ruleset, resolve_policy_paths,
+    check_builtin_blacklist, check_template_blacklist, check_template_exclusion, check_user_blacklist,
+    check_whitelist,
 };
 use crate::markdown::compose::shell_expansion::template::{
-    ModeRequirement, OfferedChoices, ShellCandidate, ShellPreApprovals, SuggestedRules,
+    FilledChain, FilledSegment, ModeRequirement, OfferedChoices, ShellCandidate, ShellPreApprovals, SuggestedRules,
+    TemplateShape,
 };
 use crate::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellCommandEntry,
-    ShellCommandOrigin, ShellExpansionError, ShellPolicyPaths, ShellRuleSet,
+    ShellCommandOrigin, ShellExpansionError, ShellRuleEntry, ShellRuleSet, approval_required, request_policy,
+    save_user_rule,
 };
 
 /// Counts from a single pre-flight approval run.
@@ -47,12 +51,14 @@ use crate::markdown::compose::shell_expansion::types::{
 pub struct PreflightApprovalStats {
     /// Commands the collector discovered in the document graph.
     pub total_discovered: usize,
-    /// Commands covered by the whitelist (no prompt needed).
+    /// Commands a `permissions.shell-commands` rule pre-approved (no prompt
+    /// needed).
     pub already_whitelisted: usize,
     /// Commands the approval handler admitted.
     pub user_approved: usize,
-    /// Schema-slot reads known before evaluation that no grant (or the
-    /// automatic grant) already decided, and so were asked about.
+    /// Schema-slot reads known before evaluation that neither the
+    /// `permissions` nor this run's approvals already decided, and so were
+    /// asked about.
     pub slot_reads_asked: usize,
 }
 
@@ -79,19 +85,22 @@ pub struct ComposePreflightApprovals {
     pub stats: PreflightApprovalStats,
     pub preflight_graph: super::PreflightGraphNode,
     pub warnings: Vec<crate::markdown::compose::ComposeWarning>,
-    /// The schema-slot read grants the handler gave for this run only
-    /// (persisted ones are already in the grant store), for the run that
-    /// resolves the slots.
+    /// The schema-slot read approvals the handler gave, for the session
+    /// that resolves the slots
+    /// ([`SlotSession::with_run_grants`](crate::markdown::schemas::slots::SlotSession::with_run_grants)),
+    /// which applies them for the run and saves an "always allow".
     pub slot_grants: Vec<Grant>,
 }
 
 impl Markdown {
     /// Runs the pre-flight approval lifecycle.
     ///
-    /// Walks the document condition-blind, validates each discovered
-    /// command against the built-in blacklist, the user blacklist, and
-    /// the whitelist, and prompts `approval_handler` (if supplied) for
-    /// the remainder. Returns the final approval set.
+    /// Walks the document condition-blind, refuses any discovered command
+    /// the built-in blacklist matches, judges the rest against the request's
+    /// captured `permissions.shell-commands`, and prompts `approval_handler`
+    /// (if supplied) for the remainder. Returns the final approval set; the
+    /// `dm.config.not_saved` warnings of "always allow" choices that could
+    /// not be saved are in [`ComposePreflightApprovals::warnings`].
     ///
     /// The v2 design places this stage between schema validation and
     /// any shell execution (design step 4): the caller (CLI, Claudine,
@@ -102,14 +111,14 @@ impl Markdown {
     ///
     /// ## Errors
     ///
-    /// - Built-in or user blacklist match → `ShellExpansionError::Blacklisted`
-    ///   for the offending command.
+    /// - Built-in blacklist match → `ShellExpansionError::Blacklisted` for
+    ///   the offending command.
+    /// - An invalid `permissions` block → `ShellExpansionError::Config`.
     /// - Handler denied a command → `ShellExpansionError::Denied`.
-    /// - Handler blacklisted a command → `ShellExpansionError::Blacklisted`.
-    /// - No handler and a command is not whitelisted →
-    ///   `ShellExpansionError::ApprovalRequired` for the first such
-    ///   command.
-    /// - Collection, policy-file, or pre-flight failures.
+    /// - No handler and a command no rule pre-approves (or an exclusion
+    ///   matches) → `ShellExpansionError::ApprovalRequired` for the first
+    ///   such command.
+    /// - Collection or pre-flight failures.
     /// - A walk warning the request's
     ///   [`BlockingPolicy`](crate::markdown::compose::policy::BlockingPolicy)
     ///   blocks (a denied skipped trigger) → `ShellExpansionError::Preflight`
@@ -158,7 +167,11 @@ impl Markdown {
             .map_err(|stop| ShellExpansionError::Preflight(Box::new(stop)))
             .and_then(|()| self.approve_collected(request, approval_handler, extra, report));
         match judged {
-            Ok(approvals) => Ok(ComposePreflightApprovals { warnings, ..approvals }),
+            Ok(approvals) => {
+                let mut warnings = warnings;
+                warnings.extend(approvals.warnings);
+                Ok(ComposePreflightApprovals { warnings, ..approvals })
+            }
             Err(error) => {
                 request.options().preflight_failure_warnings.record(warnings);
                 Err(error)
@@ -179,30 +192,37 @@ impl Markdown {
         report.entries.extend(extra.entries);
         report.candidates.extend(extra.candidates);
 
-        let shell_opts = options.shell_options();
-        let policy_paths = resolve_policy_paths(&shell_opts, &options.source, request.resolution_context())?;
-        let whitelist = load_ruleset(&policy_paths.whitelist)?;
-        let user_blacklist = load_ruleset(&policy_paths.blacklist)?;
-
         let ctx = self.source_context_for_errors();
+        let entries_by_key: HashMap<&str, &ShellCommandEntry> =
+            report.entries.iter().map(|entry| (entry.normalized.as_str(), entry)).collect();
+
+        // The built-in blacklist first, for every resolved-byte command and
+        // every shape, before the permissions are read or anything is asked.
+        for entry in &report.entries {
+            if let Some(reason) = check_builtin_blacklist(&entry.executable, &entry.args) {
+                return Err(blacklisted(&ctx, &entry.normalized, reason, &entry.origin));
+            }
+        }
+        for candidate in &report.candidates {
+            if let Some(shape) = candidate.shape()
+                && let Some(reason) = check_template_blacklist(&shape)
+            {
+                return Err(blacklisted(&ctx, &candidate.display_command(), reason, &candidate.site.origin));
+            }
+        }
+
+        let has_shells = !report.entries.is_empty() || !report.candidates.is_empty();
         let mut policy = SitePolicy {
             source: &options.source,
             ctx: &ctx,
-            paths: &policy_paths,
-            whitelist,
-            user_blacklist,
+            policy: if has_shells { Some(request_policy(request)?) } else { None },
+            saved: ShellRuleSet::default(),
+            not_saved: Vec::new(),
             handler: approval_handler.as_deref(),
             approved: ShellPreApprovals::new(),
             already_whitelisted: 0,
             user_approved: 0,
         };
-        let entries_by_key: HashMap<&str, &ShellCommandEntry> =
-            report.entries.iter().map(|entry| (entry.normalized.as_str(), entry)).collect();
-
-        // Blacklists first, for every resolved-byte command.
-        for entry in &report.entries {
-            policy.check_blacklists(entry)?;
-        }
 
         // Schema-slot reads are judged and asked before any command prompt,
         // in the same batch.
@@ -241,7 +261,7 @@ impl Markdown {
                 slot_reads_asked,
             },
             preflight_graph: report.preflight_graph,
-            warnings: Vec::new(),
+            warnings: policy.not_saved,
             slot_grants,
         })
     }
@@ -249,17 +269,16 @@ impl Markdown {
     /// The schema-slot half of [`Self::compose_preflight_approvals`], for a
     /// run with no shell operation to approve: collects the reads the slots
     /// of this document's schema templates name, and asks `approval_handler`
-    /// once about every one no grant decides yet. Returns the grants given
-    /// for this run only, for
-    /// [`SlotSession::with_run_grants`](crate::markdown::schemas::slots::SlotSession::with_run_grants);
-    /// persisted ones are already in the grant store.
+    /// once about every one neither `permissions.file-read` nor the network
+    /// permission decides. Returns the approvals given, for
+    /// [`SlotSession::with_run_grants`](crate::markdown::schemas::slots::SlotSession::with_run_grants),
+    /// which applies them for the run and saves an "always allow".
     ///
     /// Passive: nothing is resolved, and nothing a slot names is read.
     ///
     /// ## Errors
     ///
-    /// [`ShellExpansionError::SlotGrantStore`] when the user's grant store is
-    /// invalid; the handler's own failure.
+    /// The handler's own failure.
     pub fn compose_slot_approvals(
         &self,
         request: &crate::markdown::compose::ComposeRequest,
@@ -269,9 +288,8 @@ impl Markdown {
     }
 
     /// Collects the reads the slots of this document's schema templates will
-    /// make, and asks `handler` once about every one no grant decides yet.
-    /// Returns the grants given for this run and how many reads were asked
-    /// about.
+    /// make, and asks `handler` once about every one nothing decides yet.
+    /// Returns the approvals given and how many reads were asked about.
     ///
     /// Only reads named before evaluation are asked here; a computed target
     /// is judged when its slot evaluates. Without a handler nothing is asked
@@ -280,14 +298,12 @@ impl Markdown {
     ///
     /// ## Errors
     ///
-    /// [`ShellExpansionError::SlotGrantStore`] when the user's grant store is
-    /// invalid; the handler's own failure.
+    /// The handler's own failure.
     fn approve_slot_reads(
         &self,
         request: &crate::markdown::compose::ComposeRequest,
         handler: Option<&dyn ShellApprovalHandler>,
     ) -> Result<(Vec<Grant>, usize), ShellExpansionError> {
-        let options = request.options();
         let mut registry = None;
         let pending = crate::markdown::compose::schema_validation::prepare_schemas(self, request, &mut registry)
             .map(|prepared| prepared.pending_templates_for(self))
@@ -295,21 +311,7 @@ impl Markdown {
         if pending.is_empty() {
             return Ok((Vec::new(), 0));
         }
-        let context = request.resolution_context();
-        let store_path = GrantStore::path_for_home(context.home_dir());
-        let store = GrantStore::load(store_path.as_deref())
-            .map_err(|error| ShellExpansionError::SlotGrantStore(Box::new(error)))?;
-        let hosts = options.remote_read_config.http_hosts().cloned().collect();
-        let grants = SlotGrants::new(GrantBook::new(store, hosts), options.slot_repository_root().as_deref(), None);
-
-        let requests = grants.undecided_requests(&pending, context);
-        let Some(handler) = handler.filter(|_| !requests.is_empty()) else {
-            return Ok((Vec::new(), requests.len()));
-        };
-        let decisions = handler.approve_slot_reads(&requests)?;
-        grants.apply_all(&requests, &decisions);
-        let once = grants.book().once().iter().filter(|grant| grant.scope == GrantScope::Once).cloned().collect();
-        Ok((once, requests.len()))
+        crate::markdown::schemas::slots::grants::gate::preflight_slot_grants(request, &pending, handler)
     }
 }
 
@@ -327,22 +329,67 @@ pub struct ExtraShellSources {
 struct SitePolicy<'a> {
     source: &'a crate::markdown::compose::ComposeSource,
     ctx: &'a biscuit_terminal::errors::SourceContext,
-    paths: &'a ShellPolicyPaths,
-    whitelist: ShellRuleSet,
-    user_blacklist: ShellRuleSet,
+    /// The request's captured permissions; `None` only when the run has no
+    /// command to judge.
+    policy: Option<Arc<PermissionPolicy>>,
+    /// The rules "always allow" choices added in this run. Like a user rule,
+    /// a saved rule never overrides an exclusion.
+    saved: ShellRuleSet,
+    /// `dm.config.not_saved` warnings of choices that could not be saved.
+    not_saved: Vec<ComposeWarning>,
     handler: Option<&'a dyn ShellApprovalHandler>,
     approved: ShellPreApprovals,
     already_whitelisted: usize,
     user_approved: usize,
 }
 
+/// The built-in blacklist's refusal of `command`.
+fn blacklisted(
+    ctx: &biscuit_terminal::errors::SourceContext,
+    command: &str,
+    reason: String,
+    origin: &ShellCommandOrigin,
+) -> ShellExpansionError {
+    ShellExpansionError::Blacklisted {
+        ctx: Box::new(ctx.clone()),
+        command: command.to_string(),
+        reason,
+        origin: origin.clone(),
+    }
+}
+
 impl SitePolicy<'_> {
-    fn blacklisted(&self, command: &str, reason: String, origin: &ShellCommandOrigin) -> ShellExpansionError {
-        ShellExpansionError::Blacklisted {
-            ctx: Box::new(self.ctx.clone()),
-            command: command.to_string(),
-            reason,
-            origin: origin.clone(),
+    fn policy(&self) -> &PermissionPolicy {
+        self.policy.as_deref().expect("a run with a command to judge read its permissions")
+    }
+
+    /// Whether `positive` holds for the saved rules, the user rules, or both
+    /// repository layers.
+    fn allows(&self, positive: impl Fn(&ShellRuleSet) -> bool) -> bool {
+        positive(&self.saved) || self.policy().shell().preapproves(&positive)
+    }
+
+    /// The `!` entry `excluded` matches, judged layer by layer.
+    fn exclusion(&self, excluded: impl Fn(&ShellRuleSet) -> bool) -> Option<PolicyExclusion> {
+        match self.policy().shell().verdict(|_| true, excluded) {
+            crate::config::permissions::PermissionVerdict::ApprovalRequired { exclusion } => exclusion,
+            crate::config::permissions::PermissionVerdict::Preapproved => None,
+        }
+    }
+
+    fn save_target(&self) -> Option<std::path::PathBuf> {
+        let policy = self.policy();
+        policy.home().map(|_| policy.user().block_file().to_path_buf())
+    }
+
+    /// Saves `rule` to the user configuration and to this run's rules; a
+    /// rule that cannot be saved still approves the run.
+    fn save(&mut self, rule: ShellRuleEntry, command: Option<crate::markdown::compose::shell_expansion::template::FilledChain>) {
+        if let Some(warning) = save_user_rule(self.policy(), &rule, command) {
+            self.not_saved.push(warning);
+        }
+        if !self.saved.entries.contains(&rule) {
+            self.saved.entries.push(rule);
         }
     }
 
@@ -350,16 +397,10 @@ impl SitePolicy<'_> {
         &self,
         command: &str,
         origin: &ShellCommandOrigin,
+        exclusion: Option<PolicyExclusion>,
         suggested_rules: SuggestedRules,
     ) -> ShellExpansionError {
-        ShellExpansionError::ApprovalRequired {
-            ctx: Box::new(self.ctx.clone()),
-            command: command.to_string(),
-            whitelist_path: Box::new(self.paths.whitelist.clone()),
-            blacklist_path: Box::new(self.paths.blacklist.clone()),
-            origin: origin.clone(),
-            suggested_rules: Box::new(suggested_rules),
-        }
+        approval_required(self.ctx, command.to_string(), origin, self.save_target(), exclusion, suggested_rules)
     }
 
     fn denied(&self, command: &str, origin: &ShellCommandOrigin) -> ShellExpansionError {
@@ -370,14 +411,47 @@ impl SitePolicy<'_> {
         }
     }
 
-    fn check_blacklists(&self, entry: &ShellCommandEntry) -> Result<(), ShellExpansionError> {
-        if let Some(reason) = check_builtin_blacklist(&entry.executable, &entry.args) {
-            return Err(self.blacklisted(&entry.normalized, reason, &entry.origin));
-        }
-        if check_user_blacklist(&self.user_blacklist, &entry.executable, &entry.args, &entry.normalized) {
-            return Err(self.blacklisted(&entry.normalized, "user blacklist".to_string(), &entry.origin));
-        }
-        Ok(())
+    /// The exclusion matching `entry`'s command, if any.
+    fn entry_exclusion(&self, entry: &ShellCommandEntry) -> Option<PolicyExclusion> {
+        self.exclusion(|rules| check_user_blacklist(rules, &entry.executable, &entry.args, &entry.normalized))
+    }
+
+    /// The exclusion matching a site: its authored command (holes matching
+    /// anything), or any of its resolved segments.
+    fn site_exclusion(
+        &self,
+        shape: Option<&TemplateShape>,
+        resolved: Option<&Vec<String>>,
+        entries: &HashMap<&str, &ShellCommandEntry>,
+    ) -> Option<PolicyExclusion> {
+        let segments: Vec<&ShellCommandEntry> = resolved
+            .map(|keys| keys.iter().filter_map(|key| entries.get(key.as_str()).copied()).collect())
+            .unwrap_or_default();
+        // The resolved segments joined by the authored operators, so a chain
+        // `template` exclusion meets the bytes the chain resolved to.
+        let chain = shape.filter(|shape| shape.segments.len() == segments.len() && !segments.is_empty()).map(|shape| {
+            FilledChain {
+                segments: shape
+                    .segments
+                    .iter()
+                    .zip(&segments)
+                    .map(|(authored, entry)| FilledSegment {
+                        operator: authored.operator,
+                        program: entry.executable.clone(),
+                        args: entry.args.clone(),
+                        redirection: Default::default(),
+                    })
+                    .collect(),
+            }
+        });
+        self.exclusion(|rules| {
+            shape.is_some_and(|shape| check_template_exclusion(shape, rules))
+                || segments
+                    .iter()
+                    .any(|entry| check_user_blacklist(rules, &entry.executable, &entry.args, &entry.normalized))
+                || resolved.is_some_and(|keys| keys.iter().any(|key| rules.matches_exact(key)))
+                || chain.as_ref().is_some_and(|chain| rules.blocks_filled(chain))
+        })
     }
 
     /// Decides one command site.
@@ -389,11 +463,6 @@ impl SitePolicy<'_> {
         let shape = candidate.shape();
         let command = candidate.display_command();
         let origin = &candidate.site.origin;
-        if let Some(shape) = &shape
-            && let Some(reason) = check_template_blacklist(shape, &self.user_blacklist)
-        {
-            return Err(self.blacklisted(&command, reason, origin));
-        }
 
         let resolved = match (&candidate.resolved, candidate.requirement) {
             (Some(keys), ModeRequirement::AnyMode) => Some(keys),
@@ -402,11 +471,17 @@ impl SitePolicy<'_> {
             // entries of their own.
             (None, ModeRequirement::AnyMode) => return Ok(()),
         };
+        // An excluded site is approved only by a decision of this run. The
+        // authored command is judged as a whole, holes or not, so a chain
+        // `template` exclusion meets the chain it names.
+        let authored = candidate.template.as_ref().ok().map(TemplateShape::from_template);
+        let exclusion = self.site_exclusion(authored.as_ref(), resolved, entries);
+        let by_rules = exclusion.is_none();
         if let Some(keys) = resolved {
             if keys.iter().all(|key| self.approved.contains_exact(key)) {
                 return Ok(());
             }
-            if keys.iter().all(|key| self.whitelist.matches_exact(key)) {
+            if by_rules && keys.iter().all(|key| self.allows(|rules| rules.matches_exact(key))) {
                 self.approved.extend_exact(keys.iter().cloned());
                 self.already_whitelisted += 1;
                 return Ok(());
@@ -416,26 +491,28 @@ impl SitePolicy<'_> {
             if self.approved.contains_template(shape) {
                 return Ok(());
             }
-            if self.whitelist.template_covers(shape) {
+            if by_rules && self.allows(|rules| rules.template_covers(shape)) {
                 self.approved.insert_template(shape.clone());
                 self.already_whitelisted += 1;
                 return Ok(());
             }
         }
         let executables = site_executables(candidate, entries);
-        if let Some(keys) = resolved
+        if by_rules
+            && let Some(keys) = resolved
             && keys
                 .iter()
                 .zip(&executables)
-                .all(|(key, executable)| check_whitelist(&self.whitelist, executable, key))
+                .all(|(key, executable)| self.allows(|rules| check_whitelist(rules, executable, key)))
         {
             self.approved.extend_exact(keys.iter().cloned());
             self.already_whitelisted += 1;
             return Ok(());
         }
-        if resolved.is_none()
+        if by_rules
+            && resolved.is_none()
             && !executables.is_empty()
-            && executables.iter().all(|executable| self.whitelist.matches_prefix(executable))
+            && executables.iter().all(|executable| self.allows(|rules| rules.matches_prefix(executable)))
         {
             // A prefix rule covers a template-required site's fixed programs.
             if let Some(shape) = shape {
@@ -452,7 +529,7 @@ impl SitePolicy<'_> {
                 shape.as_ref(),
                 &executables,
             );
-            return Err(self.approval_required(&command, origin, rules));
+            return Err(self.approval_required(&command, origin, exclusion, rules));
         };
         let first = resolved
             .and_then(|keys| keys.first())
@@ -471,8 +548,8 @@ impl SitePolicy<'_> {
             executable: executables.first().cloned().unwrap_or_default(),
             args: first.map(|entry| entry.args.clone()).unwrap_or_default(),
             normalized_exact: resolved.map(|keys| keys.join(" && ")).unwrap_or_default(),
-            whitelist_path: self.paths.whitelist.clone(),
-            blacklist_path: self.paths.blacklist.clone(),
+            save_target: self.save_target(),
+            exclusion,
             alias_name: None,
             chain_executables: if chain_executables.len() > 1 { chain_executables } else { Vec::new() },
             offered,
@@ -483,19 +560,19 @@ impl SitePolicy<'_> {
         match (decision, resolved, shape) {
             (ShellApprovalDecision::AllowExactPersist, Some(keys), _) if offered.exact => {
                 for key in keys {
-                    store::append_whitelist_exact(self.paths, key)?;
+                    self.save(ShellRuleEntry::Exact(key.clone()), None);
                 }
                 self.approved.extend_exact(keys.iter().cloned());
             }
             (ShellApprovalDecision::AllowTemplatePersist, _, Some(shape)) if offered.shape => {
-                store::append_whitelist_template(self.paths, &shape)?;
+                self.save(ShellRuleEntry::Template(shape.clone()), None);
                 self.approved.insert_template(shape);
             }
             (ShellApprovalDecision::AllowCommandPersist, resolved, shape) if offered.prefix => {
                 let mut persisted = HashSet::new();
                 for executable in &executables {
                     if persisted.insert(executable.as_str()) {
-                        store::append_whitelist_prefix(self.paths, executable)?;
+                        self.save(ShellRuleEntry::Prefix(executable.clone()), None);
                     }
                 }
                 match (resolved, shape) {
@@ -510,18 +587,6 @@ impl SitePolicy<'_> {
             (ShellApprovalDecision::AllowOnce, None, Some(shape)) => {
                 self.approved.insert_template(shape);
             }
-            (ShellApprovalDecision::BlacklistPersist, resolved, shape) => {
-                match (resolved, shape) {
-                    (Some(keys), _) => {
-                        for key in keys {
-                            store::append_blacklist_exact(self.paths, key)?;
-                        }
-                    }
-                    (None, Some(shape)) => store::append_blacklist_template(self.paths, &shape)?,
-                    (None, None) => {}
-                }
-                return Err(self.blacklisted(&command, "user blacklisted".to_string(), origin));
-            }
             // Deny, or a choice the request did not offer.
             _ => return Err(self.denied(&command, origin)),
         }
@@ -534,7 +599,8 @@ impl SitePolicy<'_> {
         if self.approved.contains_exact(&entry.normalized) {
             return Ok(());
         }
-        if check_whitelist(&self.whitelist, &entry.executable, &entry.normalized) {
+        let exclusion = self.entry_exclusion(entry);
+        if exclusion.is_none() && self.allows(|rules| check_whitelist(rules, &entry.executable, &entry.normalized)) {
             self.approved.insert_exact(entry.normalized.clone());
             self.already_whitelisted += 1;
             return Ok(());
@@ -546,7 +612,7 @@ impl SitePolicy<'_> {
                 None,
                 std::slice::from_ref(&entry.executable),
             );
-            return Err(self.approval_required(&entry.normalized, &entry.origin, rules));
+            return Err(self.approval_required(&entry.normalized, &entry.origin, exclusion, rules));
         };
         let request = ShellApprovalRequest {
             source: self.source.clone(),
@@ -555,8 +621,8 @@ impl SitePolicy<'_> {
             executable: entry.executable.clone(),
             args: entry.args.clone(),
             normalized_exact: entry.normalized.clone(),
-            whitelist_path: self.paths.whitelist.clone(),
-            blacklist_path: self.paths.blacklist.clone(),
+            save_target: self.save_target(),
+            exclusion,
             alias_name: None,
             chain_executables: Vec::new(),
             offered: OfferedChoices::resolved_bytes(),
@@ -564,16 +630,12 @@ impl SitePolicy<'_> {
         };
         match handler.approve(request)? {
             ShellApprovalDecision::AllowExactPersist => {
-                store::append_whitelist_exact(self.paths, &entry.normalized)?;
+                self.save(ShellRuleEntry::Exact(entry.normalized.clone()), None);
             }
             ShellApprovalDecision::AllowCommandPersist => {
-                store::append_whitelist_prefix(self.paths, &entry.executable)?;
+                self.save(ShellRuleEntry::Prefix(entry.executable.clone()), None);
             }
             ShellApprovalDecision::AllowOnce => {}
-            ShellApprovalDecision::BlacklistPersist => {
-                store::append_blacklist_exact(self.paths, &entry.normalized)?;
-                return Err(self.blacklisted(&entry.normalized, "user blacklisted".to_string(), &entry.origin));
-            }
             ShellApprovalDecision::Deny | ShellApprovalDecision::AllowTemplatePersist => {
                 return Err(self.denied(&entry.normalized, &entry.origin));
             }
@@ -685,14 +747,14 @@ mod lifecycle_tests {
         }
     }
 
-    fn build_options(policy_root: &std::path::Path) -> ComposeOptions {
+    fn build_options(home: &std::path::Path) -> ComposeOptions {
         ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::ShellExpansion,
             ])
-            .with_shell_policy_root(policy_root)
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(home, &[]))
     }
 
     /// The CLI's user-facing lifecycle: a frontmatter `touch` plus a
@@ -783,19 +845,18 @@ mod lifecycle_tests {
         assert_eq!(report.shell_approvals_used, 0);
     }
 
-    /// A pre-existing whitelist is honored: the handler is not consulted
-    /// for already-allowed commands, and the stats report the count.
+    /// A `permissions.shell-commands` allow is honored: the handler is not
+    /// consulted for already-allowed commands, and the stats report the count.
     #[test]
     fn preflight_lifecycle_honors_whitelist_without_prompting() {
         let temp = TempDir::new().unwrap();
-        let whitelist = temp.path().join(".darkmatter-shell-whitelist");
-        std::fs::write(&whitelist, "prefix echo\n").unwrap();
 
         let content = "::shell echo whitelisted\n";
         let md: Markdown = content.into();
         let handler = Arc::new(RecordingHandler::new(ShellApprovalDecision::AllowOnce));
 
-        let options = build_options(temp.path());
+        let options = build_options(temp.path())
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp.path(), &["prefix echo"]));
         let approvals = md
             .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .unwrap();
@@ -806,9 +867,9 @@ mod lifecycle_tests {
         assert!(approvals.pre_approved_commands.contains_exact("echo whitelisted"));
     }
 
-    /// No approval handler and no whitelist coverage: the first
-    /// unapproved command surfaces as `ShellExpansionError::ApprovalRequired`
-    /// with the policy paths populated so the user can act on the error.
+    /// No approval handler and no rule coverage: the first unapproved
+    /// command surfaces as `ShellExpansionError::ApprovalRequired`, naming
+    /// the user configuration a rule would go in.
     #[test]
     fn preflight_lifecycle_without_handler_reports_approval_required() {
         let temp = TempDir::new().unwrap();
@@ -820,7 +881,11 @@ mod lifecycle_tests {
             .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), None)
             .expect_err("no handler and no whitelist must surface ApprovalRequired");
         assert!(
-            matches!(err, ShellExpansionError::ApprovalRequired { .. }),
+            matches!(
+                &err,
+                ShellExpansionError::ApprovalRequired { save_target: Some(target), exclusion: None, .. }
+                    if **target == temp.path().join(".darkmatter.yaml")
+            ),
             "expected ApprovalRequired, got: {err:?}"
         );
     }
@@ -849,46 +914,50 @@ mod lifecycle_tests {
         );
     }
 
-    /// A user-blacklist entry short-circuits the lifecycle with a
-    /// targeted `Blacklisted` error naming the policy file.
+    /// An exclusion asks instead of refusing: with no handler the command
+    /// needs approval (naming the exclusion), even under an allow rule; a
+    /// handler's once approves it.
     #[test]
-    fn preflight_lifecycle_enforces_user_blacklist() {
+    fn preflight_lifecycle_asks_about_an_excluded_command() {
         let temp = TempDir::new().unwrap();
-        let blacklist = temp.path().join(".darkmatter-shell-blacklist");
-        std::fs::write(&blacklist, "exact echo sneaky\n").unwrap();
-
-        let content = "::shell echo sneaky\n";
-        let md: Markdown = content.into();
-        let handler = Arc::new(RecordingHandler::new(ShellApprovalDecision::AllowOnce));
-
-        let options = build_options(temp.path());
-        let err = md
-            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
-            .expect_err("user-blacklisted command must be rejected");
-        assert!(
-            matches!(err, ShellExpansionError::Blacklisted { ref reason, .. } if reason == "user blacklist"),
-            "expected Blacklisted with user-blacklist reason, got: {err:?}"
+        let config = crate::markdown::compose::shell_expansion::test_shell_config(
+            temp.path(),
+            &["prefix echo", "!exact echo sneaky"],
         );
+        let md: Markdown = "::shell echo sneaky\n".into();
+
+        let options = build_options(temp.path()).with_config_snapshot(config);
+        let err = md
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), None)
+            .expect_err("an excluded command is never pre-approved");
+        assert!(
+            matches!(&err, ShellExpansionError::ApprovalRequired { exclusion: Some(exclusion), .. } if exclusion.entry == "!exact echo sneaky"),
+            "expected ApprovalRequired naming the exclusion, got: {err:?}"
+        );
+
+        let handler = Arc::new(RecordingHandler::new(ShellApprovalDecision::AllowOnce));
+        let approvals = md
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options), Some(handler.clone()))
+            .unwrap();
+        assert!(approvals.pre_approved_commands.contains_exact("echo sneaky"));
+        let calls = handler.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].exclusion.as_ref().map(|exclusion| exclusion.entry.as_str()), Some("!exact echo sneaky"));
     }
 
-    /// A handler that replies `BlacklistPersist` is treated as a hard
-    /// abort: the lifecycle returns `Blacklisted` rather than adding the
-    /// command to the pre-approved set.
+    /// No choice saves a denial: `Deny` refuses this run and writes nothing.
     #[test]
-    fn preflight_lifecycle_treats_blacklist_persist_as_abort() {
+    fn preflight_lifecycle_deny_writes_nothing() {
         let temp = TempDir::new().unwrap();
-        let content = "::shell echo blacklist-me\n";
-        let md: Markdown = content.into();
-        let handler = Arc::new(RecordingHandler::new(ShellApprovalDecision::BlacklistPersist));
+        let md: Markdown = "::shell echo deny-me\n".into();
+        let handler = Arc::new(RecordingHandler::new(ShellApprovalDecision::Deny));
 
         let options = build_options(temp.path());
         let err = md
-            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
-            .expect_err("BlacklistPersist must abort the lifecycle");
-        assert!(
-            matches!(err, ShellExpansionError::Blacklisted { ref reason, .. } if reason == "user blacklisted"),
-            "expected Blacklisted(user blacklisted), got: {err:?}"
-        );
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options), Some(handler))
+            .expect_err("Deny must abort the lifecycle");
+        assert!(matches!(err, ShellExpansionError::Denied { .. }), "got: {err:?}");
+        assert!(!temp.path().join(".darkmatter.yaml").exists());
     }
 
     /// A handler that replies `AllowCommandPersist` is accepted: the
@@ -968,7 +1037,7 @@ mod lifecycle_tests {
                 ComposeOperation::ShellExpansion,
                 ComposeOperation::BlockTransclusion,
             ])
-            .with_shell_policy_root(temp.path())
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp.path(), &[]))
             .with_source_file(&root_path);
 
         let handler = Arc::new(RecordingHandler::new(ShellApprovalDecision::AllowOnce));

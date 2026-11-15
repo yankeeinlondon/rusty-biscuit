@@ -19,6 +19,22 @@ fn prepare_system_prompt(
     super::prepare_system_prompt(source, raw_text, &invocation)
 }
 
+/// [`prepare_system_prompt`] for a user whose home is `home`, so the
+/// `permissions` a test writes there decide its shell commands.
+fn prepare_system_prompt_at_home(
+    source: SystemPromptSource,
+    raw_text: &str,
+    home: &std::path::Path,
+) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
+    let snapshot = crate::test_support::snapshot().with_home(Some(home.to_path_buf()));
+    let launch = source_path(&source)
+        .and_then(std::path::Path::parent)
+        .map_or_else(|| snapshot.request_dir().to_path_buf(), std::path::Path::to_path_buf);
+    let invocation =
+        crate::invocation_context::InvocationContext::capture_at(&snapshot, &launch).unwrap();
+    super::prepare_system_prompt(source, raw_text, &invocation)
+}
+
 use crate::system_prompt::context::LaunchContext;
 
 /// Helper: create a temp file and return its path.
@@ -302,10 +318,9 @@ fn transclusion_resolves_relative() {
 fn shell_directive_executes() {
     let tmp = TempDir::new().unwrap();
 
-    // Shell policy resolution walks up to find .git root, so create
-    // a fake git root and place the whitelist there.
-    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
-    write_temp_file(tmp.path(), ".darkmatter-shell-whitelist", "prefix echo\n");
+    // The user's permissions pre-approve `echo`.
+    let home = tmp.path().join("home");
+    crate::harness::shell::test_support::user_config(&home, &["prefix echo"]);
 
     let path = write_temp_file(
         tmp.path(),
@@ -318,7 +333,7 @@ fn shell_directive_executes() {
         scope: StandardPromptScope::Repo,
     };
 
-    let result = prepare_system_prompt(source, "Pre.\n\n::shell echo hello\n\nPost.").unwrap();
+    let result = prepare_system_prompt_at_home(source, "Pre.\n\n::shell echo hello\n\nPost.", &home).unwrap();
 
     match result {
         ResolvedSystemPrompt::Ready(prepared) => {
@@ -841,7 +856,7 @@ fn session_reuses_resolved_external_source_context() {
 fn non_repository_session_runs_shell_in_launch_cwd() {
     // A compiled probe rather than `pwd`: the built-in shell blacklist rejects
     // every Windows shell that could report a working directory, and no
-    // whitelist can override it.
+    // permission can override it.
     let Some(probe) = crate::test_support::cwd_probe() else {
         eprintln!("skipping cwd probe test because rustc is unavailable");
         return;
@@ -859,18 +874,16 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
         .status()
         .unwrap();
     assert!(status.success());
-    write_temp_file(
-        &source_repo,
-        ".darkmatter-shell-whitelist",
-        &format!("prefix {probe}\n"),
-    );
+    let home = tmp.path().join("home");
+    crate::harness::shell::test_support::user_config(&home, &[&format!("prefix {probe}")]);
     let prompt = write_temp_file(
         &source_repo,
         "prompt.md",
         &format!("Before.\n\n::shell \"{probe}\"\n\nAfter."),
     );
 
-    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), &launch).unwrap();
+    let snapshot = crate::test_support::snapshot().with_home(Some(home));
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&snapshot, &launch).unwrap();
     let context = invocation.launch_context();
     assert!(context.repo_root.is_none());
     let args = SystemPromptArgs {

@@ -53,7 +53,6 @@ use crate::markdown::compose::expression::{
 use crate::markdown::compose::SharedFrontmatter;
 use crate::markdown::compose::preflight::ExtraShellSources;
 use crate::markdown::compose::shell_expansion::executor::{ShellStatus, execute_directive_outcome};
-use crate::markdown::compose::shell_expansion::store::{load_ruleset, resolve_policy_paths};
 use crate::markdown::compose::shell_expansion::template::{FilledChain, ShellPreApprovals};
 use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use crate::markdown::compose::shell_expansion::types::{
@@ -121,6 +120,46 @@ pub fn authors_lifecycle(frontmatter: &Value) -> bool {
     frontmatter
         .as_object()
         .is_some_and(|map| registry().authored_event_keys().iter().any(|key| map.contains_key(*key)))
+}
+
+// ── A document another host identifies ───────────────────────────────────
+
+/// The `md` events `host` fires under the same name: Darkmatter's events
+/// `host` does not rename (for Claudine, `initialize`, `cancelled`, and
+/// `finalize`), in Darkmatter's order. These are the only stacks `md` runs on
+/// a document `host` identifies.
+pub fn shared_event_keys(host: &EventRegistry) -> Vec<&'static str> {
+    super::registry::CoreEvent::ALL
+        .into_iter()
+        .filter(|event| host.id(event.darkmatter_name()).is_some_and(|id| host.core_event(id) == Some(*event)))
+        .map(super::registry::CoreEvent::darkmatter_name)
+        .collect()
+}
+
+/// The execution-only frontmatter of a document `host` identifies: its
+/// [shared events](shared_event_keys) alone. Every other key is left out,
+/// so `md` never parses the host's own events, its renamed spellings of
+/// `composed` and `failed` (the host's schema owns and rejects those), or
+/// any task as a stack of its own.
+pub fn execution_projection(frontmatter: &Value, host: &EventRegistry) -> Value {
+    let shared = shared_event_keys(host);
+    Value::Object(
+        frontmatter
+            .as_object()
+            .map(|map| {
+                map.iter().filter(|(key, _)| shared.contains(&key.as_str())).map(|(key, value)| (key.clone(), value.clone())).collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// The top-level keys composition defers on a document `host` identifies:
+/// every event key `host` registers, shared or host-only. Their values are
+/// event-time actions, never compose-time data, so no interpolation pass
+/// evaluates them. `md`'s own `composed` and `failed` are not deferred: they
+/// are ordinary frontmatter the host's schema judges.
+pub fn foreign_deferred_keys(host: &EventRegistry) -> Vec<String> {
+    host.authored_event_keys().into_iter().map(str::to_string).collect()
 }
 
 /// Parses and statically validates a root document's lifecycle under the
@@ -297,11 +336,9 @@ pub fn lifecycle_shell_sources(config: &LifecycleConfig, source_path: &Path) -> 
     ExtraShellSources { entries, candidates: audit.candidates }
 }
 
-/// Records on each lifecycle shell site the mode `approved` grants it, under
-/// `request`'s shell policy root.
-pub fn settle_lifecycle_shells(config: &LifecycleConfig, approved: &ShellPreApprovals, request: &ComposeRequest) {
-    let policy_root = request.options().shell_options().policy_root;
-    super::preflight::settle_lifecycle_shell_modes(config, &LifecycleSignal::ALL, approved, policy_root.as_deref());
+/// Records on each lifecycle shell site the mode `approved` grants it.
+pub fn settle_lifecycle_shells(config: &LifecycleConfig, approved: &ShellPreApprovals) {
+    super::preflight::settle_lifecycle_shell_modes(config, &LifecycleSignal::ALL, approved);
 }
 
 fn command_pipeline(command: &str, source_path: &Path) -> Result<ShellPipeline, ShellExpansionError> {
@@ -356,6 +393,33 @@ impl MdRuntimeState {
     }
 }
 
+impl MdStackHost<'_> {
+    /// `view` plus every global the request declares unavailable (a
+    /// registered host's roots on a document that host identifies,
+    /// [`ComposeOptions::with_selected_host`](crate::markdown::compose::ComposeOptions::with_selected_host)),
+    /// so a stack reading one fails as composition would, instead of reading
+    /// an absent document property. `md` supplies no host value, so a host
+    /// global with any other availability is not added.
+    fn with_unavailable_host_globals(&self, view: Arc<BindingView>) -> Arc<BindingView> {
+        let Some(globals) = self.request.options().host_globals.as_ref() else {
+            return view;
+        };
+        let added: Vec<_> = globals
+            .view()
+            .globals()
+            .filter(|global| matches!(global.availability(), Availability::Unavailable(_)))
+            .filter(|global| view.global(global.root()).is_none())
+            .collect();
+        if added.is_empty() {
+            return view;
+        }
+        let builder = view.globals().chain(added).fold(BindingView::builder(view.scope().clone()), |builder, global| {
+            builder.declare(global.root(), global.description(), global.availability().clone())
+        });
+        builder.build().map_or(view, Arc::new)
+    }
+}
+
 /// The executor's [`LifecycleHost`] for one `md` event.
 pub struct MdStackHost<'a> {
     /// The event being evaluated.
@@ -368,8 +432,6 @@ pub struct MdStackHost<'a> {
     pub request: &'a ComposeRequest,
     /// Where `set` commits.
     pub state: &'a MdRuntimeState,
-    /// The user blacklist a template-mode command also meets.
-    pub user_blacklist: &'a ShellRuleSet,
     /// The cancellation probe.
     pub interrupted: &'a (dyn Fn() -> bool + Sync),
 }
@@ -384,6 +446,7 @@ impl LifecycleHost for MdStackHost<'_> {
             .id_of(self.signal)
             .map(|id| registry().globals(id).clone())
             .unwrap_or_else(|| Arc::new(BindingView::baseline()));
+        let view = self.with_unavailable_host_globals(view);
         let entries = view
             .globals()
             .map(|global| {
@@ -452,8 +515,8 @@ impl LifecycleHost for MdStackHost<'_> {
         Err(PrepError::Unavailable)
     }
 
-    fn user_blacklist(&self, _policy_root: Option<&Path>) -> ShellRuleSet {
-        self.user_blacklist.clone()
+    fn shell_exclusions(&self) -> Result<ShellRuleSet, crate::config::load::ConfigError> {
+        self.request.config_snapshot().policy().map(|policy| policy.shell().exclusions().clone())
     }
 
     fn interrupted(&self) -> bool {
@@ -531,8 +594,9 @@ pub trait CommandOutput: Sync {
 ///
 /// Every chain segment must be an exact member of the approval set (a
 /// template-mode site arrives filled and checked through
-/// [`ShellRunner::run_structured`]), and the whole chain meets both
-/// blacklists before its first segment starts. The command runs under the
+/// [`ShellRunner::run_structured`]), and the whole chain meets the built-in
+/// blacklist before its first segment starts. Pre-flight already judged the
+/// exclusions, so an exact member runs. The command runs under the
 /// document's shell options (timeout, working directory) with its output
 /// captured and handed to [`CommandOutput`].
 pub struct MdShellRunner<'a> {
@@ -540,8 +604,6 @@ pub struct MdShellRunner<'a> {
     pub permission: Result<ApprovalEpoch, ShellRefusal>,
     /// The approval set preflight produced.
     pub approved: &'a ShellPreApprovals,
-    /// The user blacklist.
-    pub user_blacklist: &'a ShellRuleSet,
     /// The run's one request: shell options, source, and file context.
     pub request: &'a ComposeRequest,
     /// The root document.
@@ -653,7 +715,7 @@ impl ShellRunner for MdShellRunner<'_> {
                 });
             }
         }
-        if let Some(reason) = check_filled_chain(&FilledChain::from_pipeline(&pipeline), self.user_blacklist) {
+        if let Some(reason) = check_filled_chain(&FilledChain::from_pipeline(&pipeline)) {
             return Err(ShellRunError::Value {
                 source: ShellExpansionError::Blacklisted {
                     ctx: Box::new(ctx),
@@ -718,8 +780,6 @@ pub struct MdStackContext<'a> {
     pub state: &'a MdRuntimeState,
     /// The approval set preflight produced; empty before it.
     pub approved: &'a ShellPreApprovals,
-    /// The user blacklist.
-    pub user_blacklist: &'a ShellRuleSet,
     /// The side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Terminal communication.
@@ -744,13 +804,11 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         timing: context.timing,
         request: context.request,
         state: context.state,
-        user_blacklist: context.user_blacklist,
         interrupted: context.interrupted,
     };
     let shell_runner = MdShellRunner {
         permission: event.shells,
         approved: context.approved,
-        user_blacklist: context.user_blacklist,
         request: context.request,
         source_path: context.source_path,
         output: context.output,
@@ -766,21 +824,13 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         ctx_base_dir: None,
         prepared_context: Some(options.context()),
         file_resolution_context: context.request.resolution_context(),
+        config_snapshot: Some(context.request.config_snapshot()),
         effect_engine: context.effect_engine,
         shell_runner: &shell_runner,
         source_path: context.source_path,
         host: &host,
     };
     StackExecutor::with_services(inputs, context.effects, &MdDiagnostics).execute_event(config)
-}
-
-/// The user blacklist of `request`'s shell policy; an unreadable policy file
-/// reads as empty here because preflight already refused it.
-pub fn user_blacklist(request: &ComposeRequest) -> ShellRuleSet {
-    let options = request.options();
-    resolve_policy_paths(&options.shell_options(), options.source(), request.resolution_context())
-        .and_then(|paths| load_ruleset(&paths.blacklist))
-        .unwrap_or_default()
 }
 
 // ── The driver ───────────────────────────────────────────────────────────

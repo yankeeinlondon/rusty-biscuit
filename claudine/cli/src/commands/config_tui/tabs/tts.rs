@@ -610,11 +610,17 @@ mod tests {
     #[test]
     fn edited_prewarm_survives_save_and_reload() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.json");
-        let mut app = app_with_tts(prewarm_off(None));
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, "tts: # mine\n  gender: female\n  prewarm: false\n").unwrap();
+        let opened = claudine::dispatch::loader::load_claudine_config(Some(&path), None).unwrap();
+        let mut app = App::new(opened, None, None, false, None, None);
         handle_key(&mut app, key(KeyCode::Char('M')));
 
-        claudine::dispatch::loader::save_claudine_config(&app.config, &path).unwrap();
+        crate::commands::config_tui::persistence::save_user(&app, &path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "tts: # mine\n  gender: male\n  prewarm: false\n"
+        );
         let reloaded = claudine::dispatch::loader::load_claudine_config(Some(&path), None).unwrap();
 
         assert!(!reloaded.tts.prewarm_enabled());

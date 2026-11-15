@@ -60,12 +60,14 @@ pub mod bundle;
 pub mod classify;
 pub mod findings;
 pub mod globals;
+mod launch_defaults;
 pub mod shipped;
 mod status_render;
 pub mod supplied;
 pub mod translate;
 
 pub use classify::*;
+use launch_defaults::complete_launch_defaults;
 pub use findings::{TriggerFindings, TriggerWarning};
 pub use status_render::{
     description_suffix, escape_schema_prose, render_optional_line, render_required_line,
@@ -323,6 +325,7 @@ fn post_shell_validate(
             })?,
             None => effective.validate(instance),
         };
+        complete_launch_defaults(&effective, phase, instance, &mut report);
         if trigger_declared_only {
             report.problems.retain(|problem| {
                 top_level_pointer_segment(&problem.path).is_some_and(|name| {
@@ -556,6 +559,10 @@ pub fn authored_schema_parameters(
 /// matching trigger. Either way, and when the authored `$schema` then fails,
 /// the triggers discovery skipped as invalid are recorded in
 /// `trigger_findings`; they are warnings, never a [`CompositionError`].
+///
+/// A template schema's `{{ … }}` slots resolve through `slot_session`, the
+/// one the composition ran with, so its approvals and snapshots hold; with
+/// none the template stays unresolved, which is an error.
 pub(super) fn load_effective_schema(
     source: &ResolvedCompositionSource,
     snapshot: Option<&serde_json::Value>,
@@ -563,14 +570,20 @@ pub(super) fn load_effective_schema(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     callers: &darkmatter::markdown::compose::CallerInputRecords,
     trigger_findings: &TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<Option<EffectiveSchema>, CompositionError> {
-    let schemas = discover_schema_owner(
+    let mut schemas = discover_schema_owner(
         source,
         file_ref_fallback_dir,
         file_resolution_context,
         trigger_findings,
     )?
     .with_caller_input_records(callers);
+    // Without the composition's session a template schema stays passive
+    // and fails as unresolved.
+    if let Some(session) = slot_session {
+        schemas = schemas.with_slot_session(std::sync::Arc::clone(session));
+    }
     prepare_effective_schema(source, snapshot, &schemas)
 }
 
@@ -905,7 +918,7 @@ fn pre_validate_verdict(
     // without ever deferring it as a template.
     let mut instance = raw_instance.clone();
     normalize_file_array_values(&mut instance, Some(&effective));
-    let report = effective
+    let mut report = effective
         .validate_stored(&instance, &PositionMap::new(), phase)
         .map_err(|error| {
             schema_error_to_composition_error(
@@ -914,6 +927,7 @@ fn pre_validate_verdict(
                 Some(&error),
             )
         })?;
+    complete_launch_defaults(&effective, phase, &instance, &mut report);
     if report.valid {
         return Ok(PreValidatedSchema {
             source,
@@ -1404,3 +1418,5 @@ fn top_level_pointer_segment(pointer: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod defaults_tests;

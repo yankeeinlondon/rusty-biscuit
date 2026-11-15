@@ -620,11 +620,14 @@ WSL2. Defining that scope, aggregating its evidence, enforcing the release
 gate, and handling capability gaps are deferred release-process work; this
 policy is not yet implemented by the cadence correction.
 
-`ci.yml` defines exactly 10 top-level jobs: `validation`
+`ci.yml` defines exactly 12 top-level jobs: `validation`
 (does successful PR validation cover this tree?), `scope` (source the plan), `preflight`
 (bootstrap prerequisites per selected OS — no test suite), `build` (the native build owners),
 `area-ci` (one caller identity per selected area), `area-drift` (the planner's areas match
-`sniff`), `ci-gate` (the required check, a policy-free fold of the other six blocking jobs),
+`sniff`), `permission-scope` (may this change widen the repository's permissions?),
+`permission-widening` (the approval such a change needs; see
+[Permission-widening approval](#permission-widening-approval)), `ci-gate` (the required
+check, a policy-free fold of the other eight blocking jobs),
 `certify-nightly` (publish a successful nightly's coverage certification), `publish-observations`
 (publish finished nightly cells' observations), and advisory `ci-reporting`. Certification and
 observation publication are outside the merge gate; either can fail the scheduled run without
@@ -1256,6 +1259,108 @@ document carries `accepted_evidence`, one entry per reused cell — the same set
 *scheduling*, so the scheduler and the report cannot disagree. A document from an earlier
 generation is refused by its version, before any cell is interpreted, with the migration that
 applies named; the fix is to re-run the rollup that produced it.
+
+### Permission-widening approval
+
+**What it protects.** Darkmatter and Claudine read a repository's committed
+`permissions` (in `.darkmatter.yaml`, or `.claudine/config.yaml`) and let it
+pre-approve file reads, shell commands, and network access. A committed change
+that grants more is therefore a change in what tools on every clone may do
+without asking. `darkmatter/docs/topics/configuration.md` ("The
+cloned-repository risk") explains the risk; this section is how this
+repository's CI makes such a change deliberate.
+
+**What a developer sees.** Most pull requests touch no permission input:
+`permission-scope` finishes in seconds and `permission-widening` is skipped.
+A pull request that narrows permissions, or leaves them equal, also passes
+without waiting. A pull request that **may widen** them shows
+`permission-widening` (shown as "Approve permission widening") as *waiting*: GitHub's
+[deployment review](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments)
+asks the environment's reviewer to approve the run, and `ci-gate` stays
+pending until they do. A rejection fails the job and so the gate.
+
+```mermaid
+flowchart TD
+    A[pull request or push] --> B{permission input changed?<br/>trusted path check}
+    B -- no --> S[skip: no approval]
+    B -- yes --> C[build the BASE commit's checker<br/>compare base and head as Git objects]
+    C -- error --> F[permission-scope fails: ci-gate blocks]
+    C -- unchanged or narrower --> S
+    C -- may widen --> V{environment protected?}
+    B -- base has no checker --> V
+    V -- no --> F
+    V -- yes --> W[permission-widening waits for the reviewer]
+    W -- approved --> G[ci-gate continues]
+    W -- rejected --> F
+```
+
+**What counts as widening.** The checker (`darkmatter::config::widening`,
+run as `darkmatter/lib/examples/permission_widening.rs`) resolves each policy
+file in both commits, follows a `permissions` reference to its target in that
+same commit, and fills in the shipped defaults. It reports potential widening
+for:
+
+| change | example |
+|---|---|
+| a new `file-read` or `shell-commands` entry | `prefix git` → `prefix gh` (a rewrite is a new entry) |
+| a removed `!` exclusion | dropping `"!&secrets/**"` |
+| `network: deny` → `allow` | |
+| a deleted file or property whose default is wider | `file-read: []` removed |
+| a changed default in a shipped schema | `darkmatter/schemas/darkmatter-config.yaml` |
+| a default schema the trusted code cannot read | a renamed type, invalid YAML |
+| any change to the check's own inputs | its code, `ci.yml`, `.github/ci/permission-inputs.json` |
+
+Moving an unchanged block from inline to a reference (or back), reordering or
+deduplicating entries, removing entries, and adding exclusions are not
+widening. No containment between two globs or two command templates is
+attempted, and entry counts are never compared. A file, Git, YAML, or
+reference error fails `permission-scope`; it never reads as "no change".
+`.github/ci/permission-inputs.json` lists every input the check reads.
+
+**The trust boundary.** Everything `permission-scope` runs comes from the
+**base** commit, checked out under `$RUNNER_TEMP/permissions-trusted`, outside
+the workspace. The candidate commit is fetched as Git objects only and is
+never checked out, built, or run. When the base predates the checker (the
+change that introduced it), the change is treated as potential widening.
+`ci.yml` itself belongs to the candidate in a pull request, so a change that
+edits or removes these jobs is visible only as a changed checker input; the
+gate makes a widening deliberate, not impossible.
+
+**The environment.** The approval is a GitHub deployment environment,
+`permission-widening`, whose required reviewers are the people allowed to
+merge (today `yankeeinlondon`, user id `980757`). Self-review is allowed,
+because the one reviewer authors every change and the gate needs a deliberate
+approval rather than a second person; administrators cannot bypass it, and it
+has no wait timer. An approval covers one workflow run, so a new commit that
+still may widen needs a new approval. Before `permission-widening` is
+requested, `permission-scope` reads the environment and fails if it is
+missing or weaker, because GitHub would otherwise create an unprotected
+environment on first use. Anyone holding the reviewer's GitHub credentials
+(including an agent using `gh` with that token) can approve a run.
+
+Set the environment up once with `scripts/ci/permission_environment.py`. It
+is a dry run unless given `--apply`, and `verify` is read-only:
+
+```bash
+python3 scripts/ci/permission_environment.py            # show what would change
+python3 scripts/ci/permission_environment.py --apply    # configure, then read back
+python3 scripts/ci/permission_environment.py verify     # exit 1 unless protected
+```
+
+`--apply` sends exactly this request through the existing `gh` login:
+
+```bash
+gh api --method PUT repos/yankeeinlondon/rusty-biscuit/environments/permission-widening \
+  -H 'Accept: application/vnd.github+json' --input - <<'JSON'
+{
+  "wait_timer": 0,
+  "prevent_self_review": false,
+  "reviewers": [{ "type": "User", "id": 980757 }],
+  "can_admins_bypass": false,
+  "deployment_branch_policy": null
+}
+JSON
+```
 
 ### The run report
 

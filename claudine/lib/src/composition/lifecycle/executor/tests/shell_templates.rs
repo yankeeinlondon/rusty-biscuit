@@ -25,7 +25,7 @@ fn prepared(frontmatter: &Value, approvals: Option<&ShellPreApprovals>) -> Lifec
     )
     .unwrap();
     if let Some(approvals) = approvals {
-        settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, approvals, None);
+        settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, approvals);
     }
     config
 }
@@ -188,7 +188,7 @@ fn a_host_approved_site_fills_its_late_values_without_reading_them_again() {
         .site("setup[0]")
         .cloned()
         .unwrap();
-    let site = crate::composition::lifecycle::shell_template::LifecycleShellTemplate::approved(template, None)
+    let site = crate::composition::lifecycle::shell_template::LifecycleShellTemplate::approved(template)
         .with_late_values(late);
     crate::composition::lifecycle_actions::for_each_action_mut(
         config.stack_mut(LifecycleSignal::Start),
@@ -207,42 +207,18 @@ fn a_host_approved_site_fills_its_late_values_without_reading_them_again() {
     assert_eq!(args_of(&shell), vec![vec!["tool", "from the barrier", "now"]]);
 }
 
-mod user_blacklist {
-    //! A template site's filled command meets the user blacklist, read fresh
-    //! from its policy root on every dispatch and without the whitelist.
+mod exclusions {
+    //! A template site's filled command meets the `!` entries of the
+    //! configuration captured for its document, and the built-in blacklist;
+    //! an invalid configuration refuses it.
 
     use super::*;
-    use crate::harness::shell::policy_reads;
-    use std::fs;
-    use std::path::PathBuf;
 
-    struct PolicyRoot {
-        dir: tempfile::TempDir,
-    }
-
-    impl PolicyRoot {
-        fn new() -> Self {
-            Self { dir: tempfile::tempdir().unwrap() }
-        }
-
-        fn whitelist(&self) -> PathBuf {
-            self.dir.path().join(".darkmatter-shell-whitelist")
-        }
-
-        fn blacklist(&self) -> PathBuf {
-            self.dir.path().join(".darkmatter-shell-blacklist")
-        }
-    }
-
-    /// A start stack whose one `shell` runs `command` approved by its shape
-    /// under `policy_root`.
-    fn approved_under(command: &str, policy_root: Option<&Path>) -> LifecycleConfig {
+    /// A start stack whose one `shell` runs `command` approved by its shape.
+    fn approved(command: &str) -> LifecycleConfig {
         let frontmatter = json!({ "start": [{ "shell": "placeholder" }] });
         let mut config = parse_lifecycle_config(&frontmatter, Path::new(SOURCE)).unwrap();
-        let site = crate::composition::lifecycle::shell_template::LifecycleShellTemplate::approved(
-            unguarded(command),
-            policy_root.map(Path::to_path_buf),
-        );
+        let site = crate::composition::lifecycle::shell_template::LifecycleShellTemplate::approved(unguarded(command));
         crate::composition::lifecycle_actions::for_each_action_mut(config.stack_mut(LifecycleSignal::Start), &mut |action| {
             if let LifecycleActionKind::Shell(shell) = &mut action.kind {
                 shell.template = Some(site.clone());
@@ -251,11 +227,24 @@ mod user_blacklist {
         config
     }
 
-    /// Dispatches `command` with `x` bound; `Ok` with the filled argv when it
-    /// ran, `Err` with the refusal message when it did not.
-    fn dispatch(command: &str, policy_root: Option<&Path>) -> Result<Vec<Vec<String>>, String> {
+    /// Dispatches `command` with `x` bound, for a document whose user
+    /// configuration (under `home`) holds `configuration`; `Ok` with the
+    /// filled argv when it ran, `Err` with the refusal message when it did not.
+    fn dispatch(command: &str, home: &Path, configuration: Option<&str>) -> Result<Vec<Vec<String>>, String> {
+        if let Some(text) = configuration {
+            std::fs::write(home.join(".darkmatter.yaml"), text).unwrap();
+        }
+        let context = biscuit_file::FileResolutionContext::from_snapshot(home, Some(home.to_path_buf()), Default::default());
         let shell = MockShell::new(0);
-        let outcome = start(&approved_under(command, policy_root), &map(json!({ "x": "value" })), &shell);
+        let (_dir, engine) = temp_engine();
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let state = map(json!({ "x": "value" }));
+        let outcome = StackExecutionContext {
+            file_resolution_context: &context,
+            ..ctx(LifecycleSignal::Start, &state, None, &engine, &shell, &recorder, &harness, Path::new(SOURCE))
+        }
+        .execute_event(&approved(command));
         match outcome.evaluation_error {
             Some(error) => {
                 assert_eq!(error.variant, "LifecycleShellTemplateRefused", "{error:?}");
@@ -269,117 +258,36 @@ mod user_blacklist {
         }
     }
 
-    /// The skipped-policy-line warnings `f` emits on this thread.
-    fn policy_line_warnings_during<R>(f: impl FnOnce() -> R) -> (R, Vec<String>) {
-        use tracing::field::{Field, Visit};
-        use tracing::span::{Attributes, Id, Record};
-        use tracing::{Event, Level, Metadata};
+    #[test]
+    fn an_exclusion_matching_the_filled_values_refuses_the_command() {
+        let home = tempfile::tempdir().unwrap();
+        let rules = "permissions:\n  shell-commands:\n    - template tool {{ string }}\n    - '!exact tool value'\n";
 
-        #[derive(Default)]
-        struct Warnings(Mutex<Vec<String>>);
-        struct Message(String);
-        impl Visit for Message {
-            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-                if field.name() == "message" {
-                    self.0 = format!("{value:?}");
-                }
-            }
-        }
-        impl tracing::Subscriber for Warnings {
-            fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-                *metadata.level() <= Level::WARN
-            }
-            fn new_span(&self, _: &Attributes<'_>) -> Id {
-                Id::from_u64(1)
-            }
-            fn record(&self, _: &Id, _: &Record<'_>) {}
-            fn record_follows_from(&self, _: &Id, _: &Id) {}
-            fn event(&self, event: &Event<'_>) {
-                if *event.metadata().level() == Level::WARN {
-                    let mut message = Message(String::new());
-                    event.record(&mut message);
-                    self.0.lock().unwrap().push(message.0);
-                }
-            }
-            fn enter(&self, _: &Id) {}
-            fn exit(&self, _: &Id) {}
-        }
+        let refused = dispatch("tool {{ x }}", home.path(), Some(rules));
+        let other = dispatch("tool {{ x }} --other", home.path(), None);
 
-        let warnings = std::sync::Arc::new(Warnings::default());
-        let result = tracing::subscriber::with_default(warnings.clone(), f);
-        let collected = warnings.0.lock().unwrap().iter()
-            .filter(|warning| warning.starts_with("Ignoring malformed policy line"))
-            .cloned()
-            .collect();
-        (result, collected)
+        assert!(refused.as_ref().is_err_and(|message| message.contains("Approval required")), "an excluded fill needs an approval: {refused:?}");
+        assert_eq!(other, Ok(vec![vec!["tool".to_string(), "value".to_string(), "--other".to_string()]]));
     }
 
     #[test]
-    fn a_dispatch_reads_the_blacklist_and_never_opens_a_malformed_whitelist() {
-        let root = PolicyRoot::new();
-        fs::write(root.whitelist(), "not a rule\ntemplate {{ broken\nexact tool value\n").unwrap();
-        fs::write(root.blacklist(), "prefix tool\n").unwrap();
-        let reads = policy_reads::observe_this_thread(&[]);
+    fn invalid_permissions_refuse_and_built_ins_still_refuse_first() {
+        let home = tempfile::tempdir().unwrap();
+        let invalid = "permissions:\n  shell-commands:\n    - frobnicate tool\n";
 
-        let (refused, warnings) = policy_line_warnings_during(|| dispatch("tool {{ x }}", Some(root.dir.path())));
+        let refused = dispatch("tool {{ x }}", home.path(), Some(invalid));
+        let built_in = dispatch("chmod {{ x }}", home.path(), None);
 
-        let message = refused.expect_err("the user blacklist refuses the filled command");
-        assert!(message.contains("user blacklist"), "{message}");
-        assert_eq!(reads.reads(), [root.blacklist()]);
-        assert!(warnings.is_empty(), "no whitelist line is parsed: {warnings:?}");
+        assert!(refused.is_err(), "an invalid configuration never runs a command");
+        assert!(built_in.as_ref().is_err_and(|message| message.contains("chmod")), "{built_in:?}");
     }
 
     #[test]
-    fn a_blacklist_edit_applies_at_the_next_dispatch() {
-        let root = PolicyRoot::new();
-        fs::write(root.blacklist(), "prefix other\n").unwrap();
-        let reads = policy_reads::observe_this_thread(&[]);
+    fn without_exclusions_a_shape_approved_command_runs() {
+        let home = tempfile::tempdir().unwrap();
 
-        let first = dispatch("tool {{ x }}", Some(root.dir.path()));
-        fs::write(root.blacklist(), "prefix other\nprefix tool\n").unwrap();
-        let second = dispatch("tool {{ x }}", Some(root.dir.path()));
+        let ran = dispatch("tool {{ x }}", home.path(), None);
 
-        assert_eq!(first, Ok(vec![vec!["tool".to_string(), "value".to_string()]]));
-        assert!(second.is_err_and(|message| message.contains("user blacklist")));
-        assert_eq!(reads.reads(), [root.blacklist(), root.blacklist()]);
-    }
-
-    #[test]
-    fn unloadable_user_rules_are_empty_and_built_ins_still_refuse() {
-        let missing = PolicyRoot::new();
-        let unreadable = PolicyRoot::new();
-        fs::write(unreadable.blacklist(), "prefix tool\n").unwrap();
-        let relative = PathBuf::from("relative-policy-root");
-        let cases: [(&str, Option<&Path>, Vec<PathBuf>); 4] = [
-            ("no root", None, vec![]),
-            ("underivable root", Some(&relative), vec![]),
-            ("missing blacklist", Some(missing.dir.path()), vec![missing.blacklist()]),
-            ("unreadable blacklist", Some(unreadable.dir.path()), vec![unreadable.blacklist()]),
-        ];
-        for (case, policy_root, expected_reads) in cases {
-            let reads = policy_reads::observe_this_thread(&[unreadable.blacklist()]);
-
-            let user_rule_free = dispatch("tool {{ x }}", policy_root);
-            let built_in = dispatch("chmod {{ x }}", policy_root);
-
-            assert_eq!(user_rule_free, Ok(vec![vec!["tool".to_string(), "value".to_string()]]), "{case}");
-            assert!(built_in.as_ref().is_err_and(|message| message.contains("chmod")), "{case}: {built_in:?}");
-            let twice: Vec<PathBuf> = expected_reads.iter().chain(&expected_reads).cloned().collect();
-            assert_eq!(reads.reads(), twice, "{case}");
-        }
-    }
-
-    #[test]
-    fn valid_blacklist_rules_apply_among_malformed_lines_which_still_warn() {
-        let root = PolicyRoot::new();
-        fs::write(root.blacklist(), "not a rule\nprefix tool\ntemplate {{ broken\n").unwrap();
-
-        let (refused, warnings) = policy_line_warnings_during(|| dispatch("tool {{ x }}", Some(root.dir.path())));
-
-        assert!(refused.is_err_and(|message| message.contains("user blacklist")));
-        let blacklist = root.blacklist().display().to_string();
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
-        assert!(warnings[0].contains(&format!("{blacklist}:1")) && warnings[0].contains("not a rule"), "{warnings:?}");
-        assert!(warnings[1].contains(&format!("{blacklist}:3")), "{warnings:?}");
+        assert_eq!(ran, Ok(vec![vec!["tool".to_string(), "value".to_string()]]));
     }
 }

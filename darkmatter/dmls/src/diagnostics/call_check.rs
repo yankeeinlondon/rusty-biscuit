@@ -156,6 +156,7 @@ mod tests {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         let mut out = crate::diagnostics::frontmatter::diagnostics(&ctx);
         out.extend(crate::providers::dsl::diagnostics(&ctx));

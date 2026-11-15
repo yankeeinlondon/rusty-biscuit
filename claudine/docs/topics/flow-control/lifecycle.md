@@ -116,7 +116,7 @@ existing contents are preserved. Every adopted proxy target follows the same
 ordering, and an abandoned source body is never discovered. **Initialization
 is shell-free:** shell actions are rejected even in a branch that can never
 run, and bootstrap frontmatter `$(...)` expansion is forbidden. `-y`,
-whitelists, cached approvals, and interactive approval cannot grant an
+permissions, cached approvals, and interactive approval cannot grant an
 exception. Move shell work to `start` or a later event. After initialization,
 the fresh body and remaining lifecycle commands receive a full, condition-blind
 audit before launch.
@@ -473,7 +473,8 @@ success:
 ```
 
 With no `commit_message`, pre-flight passes once the shape
-`git commit -m {{ string }}` is approved (a `template` whitelist rule or the
+`git commit -m {{ string }}` is approved (a `template` rule in
+`permissions.shell-commands` or the
 approval prompt). When `success` runs:
 
 - a false guard selects `else:`; `commit_message` is never read and
@@ -857,8 +858,8 @@ captured `NAME` when the prompt is prepared. Lexical runtime roots,
 #### Configuration and when it is off
 
 Document lifecycle phrases use the `tts` setting in
-`~/.claudine/config.json`, including prompt documents reached by a sequence.
-Under `{ "tts": { "provider": "kokoro", "voice": "af_heart" } }`, a
+`~/.claudine/config.yaml`, including prompt documents reached by a sequence.
+Under `tts: { provider: kokoro, voice: af_heart }`, a
 prompt's `say: done` is prepared with Kokoro and `af_heart`.
 
 The on/off switch always comes from the user's `tts` setting, whichever phrase
@@ -989,7 +990,7 @@ success:
 
 `no_error` is accepted by every long form except `set`'s (see
 [`no_error`](#no_error)). `say`/`speak` take no `voice` or `provider`: TTS
-configuration lives in `~/.claudine/config.json`.
+configuration lives in `~/.claudine/config.yaml`.
 
 #### Typed argument values
 
@@ -1095,9 +1096,10 @@ space and `;` passed as data. A template-mode command:
 - **checks each value against its declared type** (constraints included)
   before anything starts. `null` is missing; an array or object, a string
   holding a NUL character, or a value the declaration refuses is rejected.
-- **meets the blacklists again** once every argument is filled: a `template
-  git {{ string }}` approval cannot run `git reset`, and a user `exact`
-  blacklist rule blocks the fill it names.
+- **meets the built-in blacklist and the `!` entries again** once every
+  argument is filled: a `template git {{ string }}` approval cannot run `git
+  reset`, and a `!exact` entry in `permissions.shell-commands` stops the fill
+  it names (it needs an approval of its own).
 - **starts its program directly**, never through a shell, from the same working
   directory and environment as a byte-approved command, with its output on the
   terminal. A program an interpreter would re-parse the arguments for (a
@@ -1106,7 +1108,7 @@ space and `;` passed as data. A template-mode command:
   `&&`/`||` chains are available; a refused segment anywhere in the chain keeps
   every segment from starting.
 
-A missing or rejected value, a blacklisted fill, and a refused program are
+A missing or rejected value, a blacklisted or excluded fill, and a refused program are
 input errors, not command failures: the event halts with
 `LifecycleShellTemplateRefused`, whatever `no_error` says, and the message names
 the placeholder, its declared type, and the authored command, never the value.
@@ -1788,7 +1790,7 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 
 ## Integration Notes
 
-- **TTS**: Uses the global TTS configuration from `~/.claudine/config.json` (voice, rate, provider). If no TTS settings are configured, uses system defaults.
+- **TTS**: Uses the global TTS configuration from `~/.claudine/config.yaml` (voice, rate, provider). If no TTS settings are configured, uses system defaults.
 - **Messaging**: Requires a configured messaging route. See [Configuring Actions](../configuring-actions.md).
 - **Desktop notifications**: Zero-config. Emitted via `notify` independently of messaging routes. Failures are non-fatal.
 - **stderr/info/warn**: Rendered as styled status badges using the terminal's capability detection (circular theme with color-coded state).

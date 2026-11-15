@@ -921,7 +921,7 @@ fn a_frontmatter_command_that_rewrites_the_data_is_read_again() {
     let path = write(dir.path(), "doc.md", content);
     let runtime = DataRuntime::new();
     let options = ComposeOptions::new()
-        .with_shell(ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() })
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_working_directory(dir.path())
         .with_shell_approval_handler(Arc::new(AllowAll))
         .with_data_runtime(runtime.clone());

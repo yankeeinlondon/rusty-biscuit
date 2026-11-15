@@ -13,7 +13,7 @@
 //!   [`DarkmatterSchemas::effective_for`] layers are asserted;
 //! - is not a trigger, so discovery succeeds without it; or
 //! - is an invalid trigger: discovery succeeds without it and reports one
-//!   [`InvalidTriggerFinding`](darkmatter::markdown::schemas::InvalidTriggerFinding)
+//!   [`InvalidTriggerFinding`](simplified_schema::triggers::InvalidTriggerFinding)
 //!   for the trigger file whose cause names the field (or, for YAML
 //!   failures, the line).
 //!
@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::triggers::evaluate_registry;
+use simplified_schema::triggers::evaluate_registry;
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 use simplified_schema::SchemaError;
 use serde_json::Value;

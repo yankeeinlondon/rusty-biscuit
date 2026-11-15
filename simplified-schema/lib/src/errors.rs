@@ -933,6 +933,42 @@ pub enum SchemaError {
         reference: String,
         suggestion: String,
     },
+
+    /// The `default(...)` of a required property, needed because the
+    /// property is absent, does not satisfy the property's own definition.
+    /// `pointer` is the JSON Pointer of the `default` keyword in the lowered
+    /// JSON Schema; the lowered schema keeps no source position.
+    #[error("the default of required property `{path}` does not satisfy its definition (schema location `{pointer}`): {message}")]
+    InvalidDefault {
+        path: crate::PropertyPath,
+        pointer: String,
+        message: String,
+    },
+
+    /// Absent required properties could be filled from more than one union
+    /// arm, and the arms complete the value differently. `pointer` is the
+    /// union's JSON Pointer in the lowered JSON Schema; `path` is `None` for
+    /// a root union.
+    #[error(
+        "required defaults are ambiguous at {}: union arms {arms:?} at schema location `{pointer}` each complete the value differently",
+        path.as_ref().map_or_else(|| "the document root".to_string(), |path| format!("`{path}`"))
+    )]
+    AmbiguousDefaults {
+        path: Option<crate::PropertyPath>,
+        pointer: String,
+        arms: Vec<usize>,
+    },
+
+    /// Filling defaults followed `reference` back to itself without
+    /// descending into the value, so the expansion would never end.
+    #[error(
+        "default expansion repeats `{reference}` at {} without descending into the value",
+        path.as_ref().map_or_else(|| "the document root".to_string(), |path| format!("`{path}`"))
+    )]
+    RecursiveDefault {
+        path: Option<crate::PropertyPath>,
+        reference: String,
+    },
 }
 
 /// The ` at line L, column C` suffix of a YAML failure, empty without a
@@ -1802,6 +1838,16 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     "Use the payload file (without the <cyan>.trigger</cyan> infix) as the \
                      document <cyan>$schema</cyan>. Trigger envelopes live in <cyan>schemas/</cyan> \
                      and activate automatically when their match conditions hold.",
+                ),
+
+            SchemaError::InvalidDefault { .. }
+            | SchemaError::AmbiguousDefaults { .. }
+            | SchemaError::RecursiveDefault { .. } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "required default cannot be applied"))
+                .body(vec![Prose::new(Prose::escape_text_outside_code_spans(&self.to_string()))])
+                .hint(
+                    "Fix the <cyan>default(...)</cyan> at the reported schema location so it satisfies \
+                     its property's definition and only one union arm can supply it, or write the value.",
                 ),
         }
     }

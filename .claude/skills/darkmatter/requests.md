@@ -39,7 +39,36 @@ directory, not spelling (`/var` vs `/private/var`); re-deriving it with
 `for_cwd` would drop a `~` tree root.
 Unit tests use `crate::markdown::compose::test_request(options)` /
 `test_request_in(options, context)`; `lib/tests/l1` uses
-`crate::request_support::{request, request_at, context_at, cwd_context}`.
+`crate::request_support::{request, request_at, request_in, configured,
+user_config, context_at, cwd_context}`.
+
+**Configuration snapshot.** A request always holds one
+`Arc<config::load::ConfigSnapshot>` (`ComposeRequest::config_snapshot()`;
+`options.config_snapshot()` mirrors it). Precedence when building:
+`ComposeOptions::with_config_snapshot`, then the host capture on the options'
+`ctx` (`ComposeContext::with_config_source`, trait
+`config::load::ConfigSnapshotSource`; Claudine's invocation attaches one in
+`capture_launch_context_in`, holding a `Weak` to the invocation), then
+`prepare` loads passively from the observation's committed tree, and
+`with_context` loads the user file only when the context names no repository,
+else returns `ContextBuildError::ConfigSnapshotRequired`. A config load failure
+is `ContextBuildError::Config`. `derive`/`map_options` keep the request's
+`Arc` (even when `change` replaces the options); the configuration is outside
+the compose-cache fingerprint until permission enforcement reads it.
+`RepositoryObservation::committed` holds the tree `ContextCapture::new` pinned
+from its `git_handle` (only with the `Repo` group, non-bare root), carried by
+`CapturedObservations::with_repository` and `ContextCaptureEvidence::
+with_committed_tree`; `capture_resolution_context` returns it beside the
+context for hosts (`MdRequest` caches it per repository root and projects the
+startup `load_user` snapshot with `with_repository_projection`). The lifecycle
+passes it through `StackInputs::config_snapshot` / `ShellValueRequest::
+config_snapshot`. A local-only expression context needs none:
+`ComposeRequest::local_expression_context` /
+`lifecycle::executor::local_expression_context`. Test helpers whose context
+names a synthetic (Git-less) repository supply a user-only snapshot
+(`ConfigSnapshot::load_user`). CLI fixtures (`md` and Claudine) write
+`~/.darkmatter.yaml` (`{}`) by default; `without_user_config()` /
+`without_darkmatter_config()` remove it for missing-file tests.
 
 **The context is required, never `Option`.** `ComposeOptions` is only the
 settings builder and holds no context. The pipeline runs on `ComposeRequest`,

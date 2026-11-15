@@ -700,6 +700,31 @@ impl FileReference {
         &self.parsed.authored[self.parsed.payload_offset..]
     }
 
+    /// The names of the `{{NAME}}` environment variables the reference
+    /// interpolates, in authored order, each as often as it is written.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_file::FileReference;
+    ///
+    /// assert_eq!(FileReference::new("{{VAULT}}/notes/{{DAY}}.md")?.env_variables(), ["VAULT", "DAY"]);
+    /// assert!(FileReference::new("./notes.md")?.env_variables().is_empty());
+    /// # Ok::<(), biscuit_file::FileReferenceError>(())
+    /// ```
+    pub fn env_variables(&self) -> Vec<&str> {
+        self.parsed
+            .kind
+            .template()
+            .segments
+            .iter()
+            .filter_map(|segment| match segment {
+                TemplateSegment::EnvVar(name) => Some(name.as_str()),
+                TemplateSegment::Literal(_) => None,
+            })
+            .collect()
+    }
+
     /// Add a custom search path for magic (`@`) references, with its tier
     /// inferred from containment in the local root.
     ///

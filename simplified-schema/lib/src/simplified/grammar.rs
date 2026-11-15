@@ -2862,6 +2862,18 @@ impl<'a> Parser<'a> {
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
+                self.lex.skip_ws();
+                let start = self.lex.pos;
+                if matches!(self.lex.peek_byte(), Some(b'[' | b'{')) && !self.opens_slot() {
+                    let value = self.compound_default()?;
+                    if owner == ListOwner::Type(SimplifiedType::Null) && !is_array_level {
+                        return self.err(
+                            format!("`default({value})` is not valid on `null`; a `null` default must be null"),
+                            start..self.lex.pos,
+                        );
+                    }
+                    return Ok(Constraint::Default(value));
+                }
                 let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
                 if let Some(slot) = self.whole_argument_slot(&args)? {
@@ -3408,6 +3420,62 @@ fn inadmissible(keyword: &str, arg: &Arg, reason: NumericAdmissionError) -> Stri
 }
 
 impl Parser<'_> {
+    /// Reads a compound `default(...)` argument: a JSON array or object
+    /// (`default(["a", "b"])`, `default({})`), up to and including the
+    /// closing `)`. The cursor is at the opening `[` or `{`.
+    ///
+    /// A bracketed argument is always JSON, never text: write a string that
+    /// starts with a bracket quoted (`default('[a]')`). Duplicate object keys
+    /// are refused, as the admitted-YAML loader refuses them in a document.
+    fn compound_default(&mut self) -> Result<serde_json::Value, SchemaError> {
+        let start = self.lex.pos;
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        while let Some(byte) = self.lex.peek_byte() {
+            self.lex.pos += 1;
+            if in_string {
+                match byte {
+                    _ if escaped => escaped = false,
+                    b'\\' => escaped = true,
+                    b'"' => in_string = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match byte {
+                b'"' => in_string = true,
+                b'[' | b'{' => depth += 1,
+                b']' | b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let span = start..self.lex.pos;
+        if depth != 0 || in_string {
+            return self.err("`default(...)` has an unclosed JSON list or mapping", span);
+        }
+        let value = strict_json_value(&self.src[span.clone()]).or_else(|reason| {
+            self.err(
+                format!(
+                    "`default(...)` holds an invalid JSON list or mapping ({reason}); quote a text default that starts with a bracket"
+                ),
+                span.clone(),
+            )
+        })?;
+        self.lex.skip_ws();
+        if self.lex.peek_byte() != Some(b')') {
+            let at = self.lex.pos..(self.lex.pos + 1).min(self.src.len());
+            return self.err("`default` takes exactly 1 argument; a JSON list or mapping must be the whole argument", at);
+        }
+        self.lex.pos += 1;
+        Ok(super::convert::normalize_json_number(value))
+    }
+
     /// The numeric argument of `keyword`, admitted exactly.
     fn numeric_arg(&self, keyword: &str, arg: &Arg) -> Result<f64, SchemaError> {
         match arg_to_number(arg) {
@@ -3836,6 +3904,85 @@ fn number_to_usize(
     }
     Ok(n as usize)
 }
+/// Parses `text` as one JSON value, refusing duplicate object keys at any
+/// depth and trailing content.
+fn strict_json_value(text: &str) -> Result<serde_json::Value, String> {
+    use serde::de::{DeserializeSeed, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
+
+    struct Strict;
+
+    impl<'de> DeserializeSeed<'de> for Strict {
+        type Value = serde_json::Value;
+
+        fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+            deserializer.deserialize_any(self)
+        }
+    }
+
+    impl<'de> Visitor<'de> for Strict {
+        type Value = serde_json::Value;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a JSON value")
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Bool(value))
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+            Ok(value.into())
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+            Ok(value.into())
+        }
+
+        fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Self::Value, E> {
+            serde_json::Number::from_f64(value)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| E::custom("a number must be finite"))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::String(value.to_string()))
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::String(value))
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut items = Vec::new();
+            while let Some(item) = seq.next_element_seed(Strict)? {
+                items.push(item);
+            }
+            Ok(serde_json::Value::Array(items))
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut object = serde_json::Map::new();
+            while let Some(key) = map.next_key::<String>()? {
+                if object.contains_key(&key) {
+                    return Err(A::Error::custom(format!("duplicate key `{key}`")));
+                }
+                let value = map.next_value_seed(Strict)?;
+                object.insert(key, value);
+            }
+            Ok(serde_json::Value::Object(object))
+        }
+    }
+
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    let value = Strict.deserialize(&mut deserializer).map_err(|error| error.to_string())?;
+    deserializer.end().map_err(|error| error.to_string())?;
+    Ok(value)
+}
+
 
 /// A `default(...)` argument as JSON: an admitted number, `true`, `false`,
 /// `null`, or text. A bare number spelling Darkmatter cannot hold is an error
@@ -4417,6 +4564,30 @@ mod tests {
                 "hello".into()
             ))]
         );
+    }
+
+    #[test]
+    fn a_bracketed_default_is_a_json_list_or_mapping() {
+        assert_eq!(
+            parse(r#"string[](default(["./*.md", "&**/*.txt"]))"#).array_constraints,
+            vec![Constraint::Default(serde_json::json!(["./*.md", "&**/*.txt"]))]
+        );
+        assert_eq!(parse("string[](default( [ ] ))").array_constraints, vec![Constraint::Default(serde_json::json!([]))]);
+        assert_eq!(
+            parse(r#"string(required; default({"a": [1, "x]"]}))"#).constraints,
+            vec![Constraint::Required, Constraint::Default(serde_json::json!({"a": [1, "x]"]}))]
+        );
+        assert_eq!(parse("string(default('[a]'))").constraints, vec![Constraint::Default(serde_json::json!("[a]"))]);
+        for (text, expected) in [
+            ("string[](default([a]))", "invalid JSON"),
+            (r#"string(default({"a": 1, "a": 2}))"#, "duplicate key `a`"),
+            ("string[](default([1, 2))", "unclosed"),
+            ("string[](default([], 1))", "exactly 1 argument"),
+            ("null(default([]))", "must be null"),
+        ] {
+            let error = parse_type_expr("test", text).expect_err(text).to_string();
+            assert!(error.contains(expected), "{text}: {error}");
+        }
     }
 
     #[test]

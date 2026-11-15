@@ -1984,6 +1984,9 @@ pub(crate) fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) ->
         lines.push("Required".to_string());
     }
     lines.extend(eager_hover_line(def));
+    if let Some(default) = atoms_of(def).iter().find_map(default_value) {
+        lines.push(format!("Default: _{default}_"));
+    }
     let mut described = Vec::new();
     for atom in atoms_of(def) {
         if let TypeExpr::Primitive(ty) = &atom.ty
@@ -3495,6 +3498,7 @@ mod tests {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
         f(&ctx)
     }

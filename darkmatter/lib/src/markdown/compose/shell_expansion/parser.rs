@@ -285,9 +285,16 @@ pub(crate) fn authored_directive_at(content: &str, offset: usize, line_offset: u
 
 /// Parses an authored `::shell` command as a template and removes the
 /// directive's own options (`--when-error`, `--no-cache`, `::timeout:<N>`, …),
-/// which are not command arguments, exactly as [`parse_directives_in`]
-/// removes them from the token stream.
-pub(crate) fn authored_template(
+/// which are not command arguments, exactly as [`parse_directives`]
+/// removes them from the token stream. Public so a passive analyzer (DMLS)
+/// reads a `::shell` site exactly as pre-flight does.
+///
+/// ## Errors
+///
+/// The [`TemplateGrammarError`](super::template::TemplateGrammarError)s of
+/// [`parse_authored`](super::template::parse_authored), and `Empty` when only
+/// options remain.
+pub fn authored_template(
     command_text: &str,
 ) -> Result<super::template::CommandTemplate, super::template::TemplateGrammarError> {
     authored_template_with_options(command_text).map(|(template, _)| template)

@@ -671,7 +671,8 @@ Claudine walks the **entire task graph**:
   stand. A task command approved by shape runs directly with structured
   arguments: late holes use the checked step-entry values; other holes read
   current state when their command runs. Whole chains
-  meet the runtime blacklist before any segment starts. Prompt documents and
+  meet the built-in blacklist and the `!` entries of the captured
+  `permissions.shell-commands` before any segment starts. Prompt documents and
   their transclusions pass the same late-value check before task execution; each
   execution retains its own checked values. Sequence-wide document validation
   discovers shells without executing them. See

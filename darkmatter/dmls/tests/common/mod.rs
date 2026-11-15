@@ -734,6 +734,32 @@ impl<'workspace> LspFixture<'workspace> {
         }
     }
 
+    /// Removes every buffered `publishDiagnostics` whose URI ends with
+    /// `suffix` and returns the last one's `diagnostics`; `None` when none
+    /// is buffered. For a file the server publishes under a path spelled
+    /// differently from the workspace's (a canonical temporary folder).
+    pub fn take_latest_diagnostics_ending(&mut self, suffix: &str) -> Option<Vec<Value>> {
+        let mut latest = None;
+        self.notifications.retain(|notification| {
+            let matches = notification.method == "textDocument/publishDiagnostics"
+                && notification.params["uri"].as_str().is_some_and(|uri| uri.ends_with(suffix));
+            if matches {
+                latest = Some(notification.params["diagnostics"].as_array().cloned().unwrap_or_default());
+            }
+            !matches
+        });
+        latest
+    }
+
+    /// Removes and returns every buffered `window/showMessage`'s params.
+    pub fn take_show_messages(&mut self) -> Vec<Value> {
+        let (messages, rest) = std::mem::take(&mut self.notifications)
+            .into_iter()
+            .partition::<Vec<_>, _>(|notification| notification.method == "window/showMessage");
+        self.notifications = rest;
+        messages.into_iter().map(|notification| notification.params).collect()
+    }
+
     pub fn take_buffered_diagnostics(&mut self, uri: &str) -> Option<Value> {
         let position = self.notifications.iter().rposition(|notification| {
             notification.method == "textDocument/publishDiagnostics"

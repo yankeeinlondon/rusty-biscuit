@@ -22,6 +22,27 @@ const ALLOWLIST: &[Allowance] = &[
         1,
         "the builder, `build_resolution_context_with_catalog`",
     ),
+    allow(
+        Gate::Construction,
+        "config/load.rs",
+        "FileResolutionContext::from_snapshot",
+        1,
+        "`ConfigSnapshot::load_user`: a repository-free context over the request snapshot's own directory, home, and environment, which resolves only the user configuration file and its `permissions` reference",
+    ),
+    allow(
+        Gate::Construction,
+        "config/schema.rs",
+        "FileResolutionContext::from_snapshot",
+        1,
+        "`shipped_only_context`, behind `prepare_host_config_type` and `resolve_host_config_type`: an empty context for expanding a compiled-in schema whose imports resolve only among Darkmatter's shipped documents; it names no file",
+    ),
+    allow(
+        Gate::Construction,
+        "config/widening.rs",
+        "FileResolutionContext::from_snapshot",
+        1,
+        "`compare_trees`, the trusted CI permission-widening check: it judges two pinned commits as object data, with no request, home, or environment, so its context names only the repository root the committed policy files and their references resolve in",
+    ),
     // `RequestSnapshot::from_process`, the only process reader (R2).
     allow(Gate::AmbientState, "markdown/compose/context/request.rs", "std::env::current_dir", 1, "RequestSnapshot::from_process"),
     allow(Gate::AmbientState, "markdown/compose/context/request.rs", "biscuit_file::home_dir", 1, "RequestSnapshot::from_process"),

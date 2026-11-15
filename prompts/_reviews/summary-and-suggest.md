@@ -3,7 +3,7 @@ name: summary-and-suggest
 description: Provides a summary of recent activitity in a given area of the monorepo along with suggestions for improvements
 timeframe: "2 weeks"
 today: "{{ctx.today}}"
-review_dir: "@{{ctx.area}}/reviews/{{today}-summary-and-suggest"
+review_dir: "@{{ctx.area}}/reviews/{{today}}-summary-and-suggest"
 ---
 
 ## Context
@@ -51,7 +51,7 @@ The review document you will produce will consist of the following sections:
 
 The commits in the "{{ctx.area}}" package area over the past _{{timeframe}}_ are:
 
-::shell sniff repo recent-commits --package-area "{{ctx.area}}" --plain || "no commits during this timeframe"
+::shell sniff repo recent-commits "{{timeframe}}" --package-area "{{ctx.area}}" --plain || echo "no commits during this timeframe"
 
 ## Tools
 

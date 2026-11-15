@@ -32,14 +32,18 @@ pub fn run(args: UninstallArgs) -> Result<()> {
 
     if !args.keep_config {
         // Remove config files
+        // `config.json` is the legacy file a load converts; remove it too.
         if let Some(home) = biscuit_file::home_dir() {
-            let config_path = home.join(".claudine").join("config.json");
-            if config_path.exists() {
-                std::fs::remove_file(&config_path)?;
-                log::message(&format!(
-                    "  Removed {}",
-                    biscuit_file::to_portable_string(&config_path)
-                ));
+            let config_path = claudine::dispatch::loader::user_config_path();
+            let legacy_path = home.join(".claudine").join("config.json");
+            for path in [config_path, legacy_path] {
+                if path.exists() {
+                    std::fs::remove_file(&path)?;
+                    log::message(&format!(
+                        "  Removed {}",
+                        biscuit_file::to_portable_string(&path)
+                    ));
+                }
             }
         }
     }

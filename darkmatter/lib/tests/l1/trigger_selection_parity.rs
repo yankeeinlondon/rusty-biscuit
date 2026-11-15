@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
-use darkmatter::markdown::schemas::triggers::evaluate_registry;
+use simplified_schema::triggers::evaluate_registry;
 use serde_json::Value;
 
 /// The fixture schema files, verbatim.

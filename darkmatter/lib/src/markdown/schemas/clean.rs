@@ -77,6 +77,7 @@ pub struct CleanSchemaConfig {
     trigger_schemas: bool,
     file_resolution_context: biscuit_file::FileResolutionContext,
     slot_session: Option<std::sync::Arc<super::slots::SlotSession>>,
+    registered_hosts: Option<std::sync::Arc<crate::config::registration::RegisteredHosts>>,
 }
 
 impl CleanSchemaConfig {
@@ -94,7 +95,17 @@ impl CleanSchemaConfig {
             trigger_schemas: true,
             file_resolution_context: context,
             slot_session: None,
+            registered_hosts: None,
         }
+    }
+
+    /// Layers the triggers of the registered host that identifies the
+    /// document ([`DarkmatterSchemas::with_registered_hosts`]); off with
+    /// [`Self::with_trigger_schemas`]`(false)`.
+    #[must_use]
+    pub fn with_registered_hosts(mut self, hosts: std::sync::Arc<crate::config::registration::RegisteredHosts>) -> Self {
+        self.registered_hosts = Some(hosts);
+        self
     }
 
     /// Resolves a schema template (a `$schema` or matched trigger payload
@@ -182,6 +193,11 @@ impl CleanSchemaConfig {
         {
             builder = builder.with_trigger_discovery()?;
         }
+        if self.trigger_schemas
+            && let Some(hosts) = &self.registered_hosts
+        {
+            builder = builder.with_registered_hosts(std::sync::Arc::clone(hosts));
+        }
         Ok(CleanSchemaContext {
             schemas: builder,
             schema_override: self.schema_override.clone(),
@@ -213,7 +229,7 @@ impl CleanSchemaContext {
     /// The schema triggers discovery skipped as invalid, in discovery order;
     /// empty when discovery did not run.
     #[must_use]
-    pub fn discovery_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+    pub fn discovery_findings(&self) -> &[simplified_schema::triggers::InvalidTriggerFinding] {
         self.schemas.discovery_findings()
     }
 
@@ -273,7 +289,7 @@ impl CleanSchemaContext {
 pub struct SchemaCleanAnalysis {
     effective: Option<EffectiveSchema>,
     diagnostics: Vec<YamlDiagnostic>,
-    trigger_findings: Vec<crate::markdown::schemas::InvalidTriggerFinding>,
+    trigger_findings: Vec<simplified_schema::triggers::InvalidTriggerFinding>,
 }
 
 impl SchemaCleanAnalysis {
@@ -296,7 +312,7 @@ impl SchemaCleanAnalysis {
     /// The schema triggers discovery skipped as invalid, whether or not an
     /// effective schema constrains the document. Not diagnostics: they
     /// describe trigger files, not this frontmatter block.
-    pub fn trigger_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+    pub fn trigger_findings(&self) -> &[simplified_schema::triggers::InvalidTriggerFinding] {
         &self.trigger_findings
     }
 

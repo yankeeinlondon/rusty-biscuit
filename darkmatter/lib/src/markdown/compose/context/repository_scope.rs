@@ -12,15 +12,20 @@ use sniff::filesystem::repo::RepoInfo;
 pub use simplified_schema::repository_scope_catalog;
 
 /// One request's repository as a capture observed it: the root the discovery
-/// found and the topology walked under it (decision D3).
+/// found, the topology walked under it (decision D3), and the tree committed
+/// at `HEAD` when the discovery was made.
 ///
 /// Retained beside the projected `ctx.*` values so the file-resolution scope
-/// catalog and the lazy `current.*` repository facts can be projected from the
-/// same observation instead of discovering the repository again.
+/// catalog, the lazy `current.*` repository facts, and the configuration
+/// snapshot's committed policy are all read from the same observation instead
+/// of discovering the repository again.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RepositoryObservation {
     pub(crate) root: Option<PathBuf>,
     pub(crate) info: Option<RepoInfo>,
+    /// `None` outside a (non-bare) repository, or when the observation came
+    /// from caller evidence that supplied no tree.
+    pub(crate) committed: Option<crate::config::load::CommittedTreeCapture>,
 }
 
 impl RepositoryObservation {

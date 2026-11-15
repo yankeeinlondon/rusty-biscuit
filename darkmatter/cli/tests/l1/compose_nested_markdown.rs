@@ -79,7 +79,7 @@ fn compose_approves_and_runs_a_nested_shell_command() {
         "cwd/root.md",
         "::shell record-run body\n\n{{ as_markdown(\"::shell record-run nested\") }}\n",
     );
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix record-run\n");
+    fixture.shell_permissions(&["prefix record-run"]);
 
     fixture
         .command()
@@ -109,7 +109,7 @@ fn compose_rejects_dynamic_nested_content_before_execution() {
             sentinel.display()
         ),
     );
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix printf\nprefix touch\n");
+    fixture.shell_permissions(&["prefix printf", "prefix touch"]);
 
     fixture
         .command_builder()

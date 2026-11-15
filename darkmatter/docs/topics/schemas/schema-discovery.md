@@ -18,9 +18,9 @@ and inferring a schema from existing documents is
 
 ## Where Definitions Come From
 
-Every document can select three **shipped** kinds. Their definitions are
-compiled into Darkmatter, so they apply in any folder, with or without a
-repository. Their prepared form is read from Darkmatter's
+Every document can select three **shipped** kinds. Their definitions belong
+to Simplified Schema and are compiled into Darkmatter, so they apply in any
+folder, with or without a repository. Their prepared form is read from Darkmatter's
 [shipped artifact](./definition.md#the-shipped-artifact) instead of being
 prepared on every run:
 
@@ -28,7 +28,7 @@ prepared on every run:
 |---|---|---|
 | `schema` | [`simplified-schema/schemas/schema.yaml`](../../../../simplified-schema/schemas/schema.yaml) | standalone schema documents, such as [`darkmatter.yaml`](../../../schemas/darkmatter.yaml) |
 | `yaml-schema` | [`simplified-schema/schemas/yaml-schema.yaml`](../../../../simplified-schema/schemas/yaml-schema.yaml) | kind definitions, itself included |
-| `schema-trigger` | [`darkmatter/schemas/schema-trigger.yaml`](../../../schemas/schema-trigger.yaml) | [trigger files](./schema-triggers.md) |
+| `schema-trigger` | [`simplified-schema/schemas/schema-trigger.yaml`](../../../../simplified-schema/schemas/schema-trigger.yaml) | [trigger files](./schema-triggers.md) |
 
 For a document inside a repository, Darkmatter also reads the definitions in
 the document's five [schema roots](./definition.md#schema-roots):
@@ -91,7 +91,7 @@ A repository file that claims a shipped kind is a duplicate too: a
 `schemas/my-trigger.yaml` declaring `kind: literal(schema-trigger; required)`
 makes every trigger file in that repository fail selection, and the message
 names the compiled-in definition by its repository-relative path,
-`darkmatter/schemas/schema-trigger.yaml`. A copy of a shipped file under
+`simplified-schema/schemas/schema-trigger.yaml`. A copy of a shipped file under
 another path, such as `~/schemas/schema.yaml`, is a duplicate in the same way.
 
 Kinds compare exactly, including case: a definition claiming `roster` does
@@ -101,14 +101,15 @@ not claim `Roster`.
 
 A shipped definition is also an ordinary file in the repository it is built
 from. When a definition in a schema root sits at a shipped definition's
-repository-relative path (for example `darkmatter/schemas/schema-trigger.yaml`,
+repository-relative path (for example `simplified-schema/schemas/schema-trigger.yaml`,
 relative to the document's repository root) and claims that same kind, it
 **replaces** the compiled-in copy instead of duplicating it. An edit to that
 file therefore applies at once, with no rebuild, to every document whose
-schema roots include its folder. In the Darkmatter repository,
-`darkmatter/schemas/` is the `darkmatter` package area's root, so documents
-in that area see the edited trigger definition; a document in another area
-still uses the compiled-in copy.
+schema roots include its folder. In the repository these definitions are
+built from, `simplified-schema/schemas/` is the `simplified-schema` package
+area's root, so documents in that area see the edited trigger definition; a
+document in another area, Darkmatter's included, still uses the compiled-in
+copy.
 
 A file at a shipped path that claims a different kind is an ordinary
 definition, and the shipped one stays in place.
@@ -174,9 +175,11 @@ or from the library with
 ## Reusing the Definitions
 
 A library host that validates many documents in one context can read the
-definitions once with `KindRegistry::from_filesystem` (or `KindRegistry::build`
-with its own `SchemaRootSource`, for unsaved editor buffers) and pass the
-result to `DarkmatterSchemas::with_kind_registry`. Building reads local files
+definitions once with Simplified Schema's `KindRegistry::from_filesystem` (or
+`KindRegistry::build` with its own `SchemaRootSource`, for unsaved editor
+buffers), passing Darkmatter's `kind_host()` so the shipped definitions and
+the `darkmatter:` namespace are the ones Darkmatter uses, and pass the result
+to `DarkmatterSchemas::with_kind_registry`. Building reads local files
 only: it evaluates nothing, runs no commands, and fetches nothing.
 `dependencies()` lists every file the registry read, and
 `searched_locations()` every folder whose new files could change it; rebuild

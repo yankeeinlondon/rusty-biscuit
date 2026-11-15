@@ -1,7 +1,8 @@
 ---
 name: simplified-schema
-description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `non-null`, closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
-last_updated: 2026-11-09T00:00:00Z
+description: >-
+  Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, `AppliedDefault`, `prepare_defaults`, or `SchemaError`; required properties with a `default(...)`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `non-null`, closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; schema triggers (`kind: schema-trigger`, `simplified_schema::triggers`, `TriggerRegistry`, `scan`, `scan_with_source`, `EmbeddedSchemaBundle`, `prepare_trigger_bundle`), schema roots (`SchemaRoots`, `SCHEMAS_DIR`), or whole YAML documents selected by `kind` (`yaml_documents`, `KindRegistry`, `KindHost`, `LoadedYamlDocument`, kind checks); deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
+last_updated: 2026-11-13T00:00:00Z
 ---
 
 # simplified-schema
@@ -18,16 +19,19 @@ feature) depend on it directly.
 |---|---|
 | AST and grammar (`simplified/`: `SchemaRoot`, `SchemaShape`, `PropertyDef`, `PropertyAtom`, `TypeExpr`, `DefinitionTable`) | `DarkmatterSchemas`, `EffectiveSchema`, `ValidationOptions`, `PendingPolicy` (`mod.rs`) |
 | Named-type resolution, cycles, use-site merges, `merge_baseline` (`resolve.rs`, `resolve/`) | The shipped baseline and global catalog (`catalog.rs`, `embedded.rs::SHIPPED_SOURCES`) |
-| JSON Schema lowering, subtyping, queries, serialization | Schema roots (`roots.rs`) and trigger discovery/matching (`triggers/`) |
+| JSON Schema lowering, subtyping, queries, serialization | Darkmatter's shipped artifact (`shipped.rs`), including the prepared kind definitions it records (`kind_definitions`) |
 | Conversion engine (`coercion/`, `coerce.rs`), numeric model (`numeric.rs`) | Pending classification (`coerce.rs::nested_templates`) and eager-file rewrite (`rewrite.rs`) |
 | Validators, formats, `x-darkmatter-*` keywords (`validate.rs`, `format.rs`, `file_match.rs`) | `ProblemPositions` (`positions.rs`), completion over an `EffectiveSchema` |
 | `SchemaError`, `ValidationProblem`, `SchemaPhase`, `SchemaOrigin`, `ValidationTimings` | `md schema` CLI, compose integration, DMLS projection |
 | Dotted paths and their pure edits (`property_path.rs`), the command-line value reader (`setter_value.rs`) | Which document and schema a path or value applies to; the nested text editor (`markdown/hash/path_edit.rs`); setter plans (`compose/setters.rs`) |
 | Passive expression syntax (`expression/`), literal-token codec (`pending.rs`) | Expression evaluation and the function registry |
 | The `SimplifiedSchema` facade object (`schema/`) | `schemas::resolve` wrappers that pass `SHIPPED_SOURCES` so `Name@darkmatter:<stem>` resolves |
+| Schema roots (`roots.rs`), triggers (`triggers/`: grammar, envelope, lint, matcher, discovery, assembly, prepared bundles, findings, and the identifying-trigger proof `identify.rs::{admit_identifying_trigger, identifies}` host registration uses), `EmbeddedSchemaBundle` (`embedded.rs`), the trigger definition (`schemas/schema-trigger.yaml`) | Layering matched trigger payloads into an `EffectiveSchema`; the `triggers.rs` wrappers (`scan`, `scan_with_embedded`, `scan_with_source`, `prepare_trigger_bundle`) that add `SHIPPED_SOURCES` |
+| Whole YAML documents (`yaml_documents/`): the loader, `KindRegistry`, selection, kind checks | The adapter (`yaml_documents/mod.rs`): `kind_host()`, `shipped_kind_registry()`, `YamlContract`, `YamlValidation`, `Route` |
 
 Rule of thumb: if it answers "what does this schema text mean, and does this
-value satisfy it?", it belongs in the library. If it answers "which schemas
+value satisfy it?", or "which schema-kind documents exist for this context,
+and which one does this document select?", it belongs in the library. If it answers "which schemas
 apply to this Markdown document, and what do we do about it?", it is
 Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
 [schema.md](../darkmatter/schema.md).
@@ -51,6 +55,31 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   A failed soft validation reports on a diagnostic copy
   (`coerce.rs::partial_copy`): converted siblings, failing values as written,
   and unexpected keys/tuple elements masked from the retry then put back.
+- **One default engine.** An absent `required` property with a lowered
+  `default` passes through it: `defaults::prepare_defaults(json_schema,
+  value, templates, validators, cache)` builds the completed candidate, and
+  `Prepared` and Darkmatter's `EffectiveSchema` both judge that candidate.
+  Strict success stays `Cow::Borrowed` and lists `defaults`; soft inserts
+  them (defaults, then conversion, then any default the conversion made
+  reachable). A union compares every arm's complete candidate, the value as
+  written included, so a value one arm accepts as written and another
+  accepts completed is ambiguous; only a schema with no union arm that can
+  add a default (`defaults::alternatives_supply_defaults`, memoized by `Arc`)
+  keeps the as-written fast path. Invalid or ambiguous defaults are `SchemaError::InvalidDefault`
+  / `AmbiguousDefaults` (JSON Pointer into the lowered schema, no source
+  span) inside `ValidationFailure::Unprepared`. A problem the completed
+  value still has at or below an inserted path (an eager file default with
+  no target) is the default's: `defaults::attribute_problems` sets
+  `ValidationProblem::default` (the `AppliedDefault`, whose `pointer` names
+  the `default` keyword and whose `origin` a host fills), names it in the
+  message, and clears line/column; a host judging its own completed
+  candidate calls it too. Expansion inlines `Name@file` types without their
+  file, so resolution records each imported default's declaring file in
+  `ResolvedSchema::default_files` (walked over the authored schema after
+  expansion, `ImportEngine::default_files`); Darkmatter's `EffectiveSchema`
+  prefers it over the layer origin. Exported JSON Schema keeps
+  `required`. Never write a second defaulting walk in a host. Tests:
+  `tests/l1/required_defaults.rs`.
 - **One failure flattening.** `ConversionError::located_failures()` /
   `coercion::locate_failures` (null arms dropped, an arm unreachable only on
   `NoConversion` at the union's path) serves annotation, `partial_copy`, and
@@ -75,6 +104,14 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   library-owned item (see [build-and-guards.md](build-and-guards.md)).
 - **The library sits below its hosts.** It never depends on Darkmatter, DMLS,
   Claudine, Content Policy, or any CLI, in any manifest table or source.
+- **Host inputs are explicit.** Every entry point that resolves a trigger
+  payload or prepares a kind definition takes the host's `ShippedSources`
+  (`triggers::scan(context, sources)`, `scan_with_source(…, sources)`,
+  `prepare_trigger_bundle(bundle, mode, sources)`, `TriggerRegistry::new`,
+  `assemble::resolve_trigger_payload`); a kind registry takes a `KindHost { sources,
+  shipped }` (`KindRegistry::build(context, source, scope, host)`,
+  `from_filesystem(context, scope, host)`, `shipped_from(definitions)`).
+  Never read a host's namespace from a global.
 
 ## Quick Reference
 
@@ -87,7 +124,7 @@ let schema = SimplifiedSchema::try_from("$schema:\n  name: string(required)\n  c
 let input = json!({ "name": "Ada", "count": "4" });
 assert!(schema.validate_strict(&input).is_err());          // "4" is not a number as written
 let accepted = schema.validate_soft(&input).unwrap();       // converted copy
-assert!(accepted.is_converted());
+assert!(accepted.is_modified());                          // converted or defaulted copy
 assert_eq!(accepted.value["count"], json!(4));
 
 let name = schema.query("name").unwrap().unwrap();          // TypeDefinition view
@@ -134,7 +171,10 @@ ownership line with Darkmatter's `KindRegistry` are in
 (`shipped::registry`; a refused artifact silently falls back to the text).
 `simplified_schema::shipped` is the mechanism Darkmatter and Claudine share
 (`accept`, `generate`, `check_fresh`, `PreparationMode::Uncached`, the
-`*_with_mode` entry points, `ShippedSources::with_prepared`). After editing
+`*_with_mode` entry points, `ShippedSources::with_prepared`). `ShippedSources::with_aliases(&[(stem, path)])`
+lets a stem name a shipped document outside the partials folder
+(Darkmatter's `config` → `darkmatter-config.yaml`); aliases are part of
+equality, memo keys, and the owner's artifact `configuration`. After editing
 shipped YAML or its preparation code, run the root `just shipped-schemas`
 (it regenerates all three artifacts, all or nothing). A code-only change
 bumps `PREPARATION_REVISION` of every owner whose payload it changes (a
@@ -219,8 +259,8 @@ Darkmatter integration: [definition.md](../../../darkmatter/docs/topics/schemas/
 
 ## Related Skills
 
-- **darkmatter** — the host: baseline, triggers, schema roots, `md schema`,
-  DMLS. Its [schema.md](../darkmatter/schema.md) holds implementation notes for
+- **darkmatter** — the host: baseline, trigger layering, the YAML adapter,
+  `md schema`, DMLS. Its [schema.md](../darkmatter/schema.md) holds implementation notes for
   both sides.
 - **biscuit-file** — `FileReference`, `FileResolutionContext`,
   `GlobReference`, the `file-reference-syntax` / `file-reference` split, and

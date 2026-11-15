@@ -28,7 +28,7 @@ fn handle_flushes_blocking_payload_before_nonzero_exit() {
         }
     });
     write(
-        &fixture.home().join(".claudine/config.json"),
+        &fixture.home().join(".claudine/config.yaml"),
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 

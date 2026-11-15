@@ -24,8 +24,9 @@
 //!   diagnostic; applies the rewrite carried in its typed `data` payload.
 //! - **grant a schema slot's read** — from an approval-required slot
 //!   diagnostic; one action per grant its `data.choices` lists, each running
-//!   the `dmls.grantSlotRead` command (no edit: a grant is written to the
-//!   user's grant store or kept in memory, never into the workspace).
+//!   the `dmls.grantSlotRead` command (no edit: an "always allow" is saved
+//!   to the user's `permissions.file-read` and every approval is kept in
+//!   memory, never written into the workspace).
 
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Diagnostic, NumberOrString, Position, Range,
@@ -721,6 +722,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
 
         let diagnostics = crate::providers::dsl::diagnostics(&ctx);

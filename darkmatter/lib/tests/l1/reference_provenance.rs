@@ -875,7 +875,7 @@ fn shell_output_is_located_at_its_directive() {
     let path = dir.path().join("doc.md");
     std::fs::write(&path, text).unwrap();
     let options = ComposeOptions::new()
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(dir.path())
         .with_shell_approval_handler(Arc::new(AllowAll));
     let options = ReferenceGraphOptions::with_compose(&crate::request_support::request_at(dir.path(), options));

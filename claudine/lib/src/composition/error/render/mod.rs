@@ -449,6 +449,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::SequenceMissingProperties { .. } => "composition.missing_properties",
             CompositionError::FrontmatterParse(_) => "composition.frontmatter_parse",
             CompositionError::ShellExpansionFailed { .. } => "composition.shell_expansion",
+            CompositionError::InlinePromptDirectiveFailed { .. } => "composition.failed",
             // The approval family: a user declining and the catalog refusing
             // are the same authoring problem with the same fix, so they share a
             // code and `err.detail.reason` tells them apart. `PreFlightFailed`
@@ -669,6 +670,9 @@ impl Diagnostic for CompositionError {
                     base["command"] = json!(command);
                 }
             }
+            CompositionError::InlinePromptDirectiveFailed { source_path, .. } => {
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+            }
             // `io.write_failed` declares `path`.
             CompositionError::AtomicWriteFailed { path, .. }
             | CompositionError::InlineRollbackFailed { path, .. } => {
@@ -724,27 +728,31 @@ impl Diagnostic for CompositionError {
                 );
             }
             // `composition.shell_approval` declares `command`, `source_path`,
-            // `line`, `reason`. A `line` of 0 means the source carried none, so
+            // `line`, `property`, `reason`. A `line` of 0 means the source carried none, so
             // it projects `null` rather than a line number that does not exist.
             CompositionError::ShellCommandDenied {
                 command,
                 source_file,
                 line,
+                property,
             } => {
                 base["command"] = json!(command);
                 base["source_path"] = json!(biscuit_file::to_portable_string(source_file));
                 base["line"] = optional_line(*line);
+                base["property"] = json!(property);
                 base["reason"] = json!("denied");
             }
             CompositionError::ShellApprovalUnavailable {
                 command,
                 source_file,
                 line,
+                property,
                 failure,
             } => {
                 base["command"] = json!(command);
                 base["source_path"] = json!(biscuit_file::to_portable_string(source_file));
                 base["line"] = optional_line(*line);
+                base["property"] = json!(property);
                 base["reason"] = json!(failure.as_str());
             }
             // `composition.lifecycle_invalid` declares `property`, `message`.

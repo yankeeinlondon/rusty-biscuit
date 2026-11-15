@@ -2,6 +2,7 @@ pub mod api;
 #[cfg(test)]
 mod changed_paths_tests;
 pub mod commit_links;
+pub mod committed_tree;
 pub mod discovery;
 mod merge_conflicts;
 pub mod open;
@@ -43,6 +44,7 @@ pub use recent_commits::{
     RecentCommitFileKind, RecentCommitFileTypes, RecentCommitPackages, RecentCommits,
     RecentCommitsOptions, RecentCommitsProjection, RecentCommitsVerbosity, Selection,
 };
+pub use committed_tree::{CommittedEntry, CommittedTreeSnapshot};
 pub use status::detect_merge_conflicts;
 pub use types::{
     BehindStatus, BranchInfo, ChangedBase, CommitInfo, ConventionalCommit, FileAction, FileChange,

@@ -54,7 +54,7 @@ from that pattern: `md compose` accepts only Markdown and the data family, and
 | [`md clean`](./clean.md), [`md set`](./set.md) | `markdown` | both families |
 | [`md get`](./get.md) | `json` | both families |
 | [`md schema detect`](./schema.md#md-schema-detect) | `terminal` | both families and `json-schema` |
-| [`md render`](./render.md) (and `md FILE`), [`md list-themes`](./list-themes.md), [`md toc`](./toc.md), [`md delta`](./delta.md), [`md rm`](./rm.md), [`md edit`](./edit.md), [`md hash`](./hash.md), [`md graph`](./graph.md), [`md code-block`](./code-block.md), [`md validate refs`](./validate.md), [`md schema validate`](./schema.md#md-schema-validate), [`md schema triggers`](./schema.md#md-schema-triggers), [`md schema about`](./schema.md#md-schema-about) | `terminal` | both families |
+| [`md render`](./render.md) (and `md FILE`), [`md init`](./init.md), [`md list-themes`](./list-themes.md), [`md toc`](./toc.md), [`md delta`](./delta.md), [`md rm`](./rm.md), [`md edit`](./edit.md), [`md hash`](./hash.md), [`md graph`](./graph.md), [`md code-block`](./code-block.md), [`md validate refs`](./validate.md), [`md schema validate`](./schema.md#md-schema-validate), [`md schema triggers`](./schema.md#md-schema-triggers), [`md schema about`](./schema.md#md-schema-about) | `terminal` | both families |
 
 `md --completions` takes no `--output`: combining them is a usage error. `md --help` and `md --version` print their text and ignore it.
 
@@ -382,6 +382,8 @@ flowchart TD
 | `md compose broken.md --output json` | the value, with `outcome: "failure"` | nothing |
 | `md render doc.md --output html` | the HTML | style warnings |
 | `md validate refs doc.md --output markdown` | the report, as Markdown | nothing |
+| `md hash doc.md` with no `~/.darkmatter.yaml` | the hash | one `dm.config.missing` warning |
+| `md hash doc.md --output json` with no `~/.darkmatter.yaml` | the value, with the `dm.config.missing` diagnostic | nothing |
 
 ## Exit status
 

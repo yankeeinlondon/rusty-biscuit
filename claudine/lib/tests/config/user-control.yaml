@@ -1,0 +1,120 @@
+# A user configuration that writes every setting, for the input robustness
+# matrix (`tests/l1/config_schema_matrix.rs`). Each negative cell edits one
+# value of this file; `user-control.json5` is the same values in the legacy
+# format.
+tts:
+  provider: say
+  voice:
+    male: Daniel
+    female: Samantha
+  gender: male
+  prewarm: false
+messenger:
+  active_config: alerts
+  configurations:
+    alerts:
+      provider: discord
+      channel_id: "123"
+    team:
+      provider: slack
+      channel_id: C01
+      bot_token_env: TEAM_TOKEN
+    phone:
+      provider: signal
+      recipient: "+15550100"
+    biz:
+      provider: whatsapp
+      recipient: "+15550101"
+    hook:
+      provider: discord-webhook
+      webhook_url_env: MY_DISCORD_URL
+    slackhook:
+      provider: slack_webhook
+      webhook_url: https://hooks.slack.com/services/T000/B000/XXXX
+logging: false
+protect:
+  enabled: true
+  rules:
+    git_destructive: false
+    filesystem_destruction:
+      enabled: true
+      allow_paths:
+        - /tmp/scratch
+  custom_patterns:
+    - name: no-curl-pipe
+      pattern: curl .*\| *sh
+    - name: no-secrets
+      pattern: SECRET_[A-Z]+
+      surface: mcp_response
+actions:
+  session_start:
+    - type: sound_effect
+      effect: doorbell
+    - type: speak
+      message: Starting {{ tool_name }}
+      voice: Samantha
+      gender: female
+  before_tool:
+    - type: bash
+      command: echo
+      when: tool_name == 'Bash'
+    - type: call
+      command: ./check.sh
+      args:
+        - --strict
+      timeout_ms: 5000
+      mapper:
+        type: json_field
+        field: decision
+  turn_complete:
+    - type: report
+      handler:
+        format: json
+    - type: message
+      message: Done
+matchers:
+  before_tool: Bash|Edit
+preferred_agent: codex
+canonical_provider: claude
+models:
+  codex:
+    - gpt-x
+  claude:
+    mode: replace
+    values:
+      - claude-opus
+      - id: claude-sonnet
+        catalog_id: anthropic/claude-sonnet@5
+default_sounds:
+  success: doorbell
+  attention: doorbell
+prompt_for_missing: false
+harvest_unmatched: true
+exit_expressions:
+  mode: merge
+  rules:
+    - pattern: STOP
+    - patterns:
+        - HALT
+        - ABORT
+      kind: regex
+      ignore_case: true
+      scope: opencode
+guard_settings:
+  repetition:
+    enabled: true
+    max_repeats: 10
+    max_cycle_length: 8
+  volume:
+    enabled: false
+    max_lines: 1000
+    max_bytes: 1048576
+steering:
+  automatic:
+    enabled: false
+permissions:
+  file-read:
+    - ./*.md
+  shell-commands:
+    - prefix ls
+  network: deny

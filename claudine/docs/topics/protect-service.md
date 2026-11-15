@@ -106,39 +106,36 @@ Current built-in sensitive prefixes are:
 
 ## Configuration
 
-`settings.protect` accepts either shorthand boolean form or an object.
+`protect` in `~/.claudine/config.yaml` ([Configuration files](configuration.md))
+accepts either shorthand boolean form or a mapping.
 
 Shorthand:
 
-```json
-{ "protect": true }
+```yaml
+protect: true
 ```
 
 Expanded form:
 
-```json
-{
-  "protect": {
-    "enabled": true,
-    "rules": {
-      "git_destructive": false,
-      "filesystem_destruction": {
-        "enabled": true,
-        "allow_paths": ["node_modules", "target"]
-      }
-    },
-    "custom_patterns": [
-      { "name": "no_prod_deploy", "pattern": "deploy.*production" }
-    ]
-  }
-}
+```yaml
+protect:
+  enabled: true
+  rules:
+    git_destructive: false
+    filesystem_destruction:
+      enabled: true
+      allow_paths: [node_modules, target]
+  custom_patterns:
+    - name: no_prod_deploy
+      pattern: deploy.*production
 ```
 
 Important config semantics:
 
 - Unknown top-level keys under `protect` are rejected.
 - Removed fields such as `posture` are rejected rather than ignored.
-- Any built-in group can be toggled with `false` or `{ "enabled": false }`.
+- Any built-in group can be toggled with `false` or `{ enabled: false }`.
+- A custom pattern must write both `name` and `pattern`; `surface` defaults to `bash_command`.
 - `allow_paths` is only supported for `filesystem_destruction` and `sensitive_paths`.
 - `custom_patterns` must be valid regexes at config load time.
 
@@ -166,21 +163,15 @@ Protect blocks regardless of the allow list.
 
 Example:
 
-```json
-{
-  "protect": {
-    "rules": {
-      "filesystem_destruction": {
-        "enabled": true,
-        "allow_paths": ["node_modules", "target", "dist", "build", ".cache"]
-      },
-      "sensitive_paths": {
-        "enabled": true,
-        "allow_paths": ["/etc/my-safe-generated-dir"]
-      }
-    }
-  }
-}
+```yaml
+protect:
+  rules:
+    filesystem_destruction:
+      enabled: true
+      allow_paths: [node_modules, target, dist, build, .cache]
+    sensitive_paths:
+      enabled: true
+      allow_paths: [/etc/my-safe-generated-dir]
 ```
 
 ## Config Merge Semantics

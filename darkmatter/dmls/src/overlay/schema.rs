@@ -22,10 +22,8 @@ use darkmatter::markdown::schemas::completion::DefinitionLookup;
 use darkmatter::markdown::schemas::resolve::resolve_schema;
 use simplified_schema::resolve::merge_baseline;
 use simplified_schema::simplified::query::resolved_alternatives;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, DocumentTemplate, EffectiveSchema, SiteSchema, darkmatter_base_json_schema_ref,
-    effective_property_shape, triggers::TriggerRegistry,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, DocumentTemplate, EffectiveSchema, SiteSchema, darkmatter_base_json_schema_ref, effective_property_shape};
+use simplified_schema::triggers::TriggerRegistry;
 use simplified_schema::{
     DefKey, Definition, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaAdvisory,
     SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SchemaRoot, SimplifiedType,
@@ -1028,12 +1026,14 @@ impl From<SchemaError> for AssemblyError {
 /// `dm.schema.prepare` / `dm.schema.invalid_schema_shape` diagnostic. A
 /// template left unresolved is [`SchemaError::UnresolvedSlots`] with its
 /// [`AssemblyError::template`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn assemble(
     doc_path: &Path,
     document_text: &str,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
     trigger_registry: Option<TriggerRegistry>,
+    registered_hosts: Option<&Arc<darkmatter::config::registration::RegisteredHosts>>,
     file_context: &FileResolutionContext,
     slots: SlotUse<'_>,
 ) -> Result<Option<SchemaBundle>, AssemblyError> {
@@ -1062,6 +1062,11 @@ pub(crate) fn assemble(
     })?;
     if let Some(registry) = trigger_registry {
         schemas = schemas.with_trigger_registry(registry);
+    }
+    // The registered host that identifies the document layers its triggers
+    // over the baseline and under the schema roots' triggers.
+    if let Some(hosts) = registered_hosts {
+        schemas = schemas.with_registered_hosts(Arc::clone(hosts));
     }
     schemas = match slots {
         SlotUse::None => schemas,
@@ -1266,6 +1271,7 @@ mod tests {
             &DmlsConfig::default(),
             &[PathBuf::from("/w")],
             None,
+            None,
             &crate::context::test_support::workspace_context(),
             SlotUse::None,
         )
@@ -1285,6 +1291,7 @@ mod tests {
             &DmlsConfig::default(),
             &[PathBuf::from("/w")],
             None,
+            None,
             &crate::context::test_support::workspace_context(),
             SlotUse::None,
         )
@@ -1302,6 +1309,7 @@ mod tests {
             "---\ntitle: A\n---\n\nbody\n",
             &config,
             &[PathBuf::from("/w")],
+            None,
             None,
             &crate::context::test_support::workspace_context(),
             SlotUse::None,

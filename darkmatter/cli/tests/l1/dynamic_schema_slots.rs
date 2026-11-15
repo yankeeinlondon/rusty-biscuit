@@ -4,11 +4,13 @@
 //!
 //! Each test copies both files (read with `include_str!` inside the test, so
 //! a change to either runs it) into a fresh Git repository at the fixture
-//! `cwd`, beside a document that names the schema, and commits them: the
-//! clean control gets the automatic grant. A cell then changes one thing (a
-//! dirty data file, a grant store line) and runs one command. Nothing here
-//! has a terminal, so nothing ever prompts; the fixture home holds the grant
-//! store, so the developer's own grants never apply.
+//! `cwd`, beside a document that names the schema, and commits them with a
+//! repository `.darkmatter.yaml` whose `permissions.file-read` admits the
+//! data file: the control reads it without asking. A cell then changes one
+//! thing (the working copy's policy withdraws that entry, the user's
+//! `permissions` admit the file, or are invalid) and runs one command.
+//! Nothing here has a terminal, so nothing ever prompts; the fixture home
+//! holds the user configuration, so the developer's own never applies.
 
 use crate::common;
 
@@ -22,6 +24,10 @@ const SCHEMA_FILE: &str = "claudine/docs/research/sandboxing/providers/sandboxin
 const DATA_FILE: &str = "claudine/docs/os.yaml";
 const DOCUMENT_FILE: &str = "claudine/docs/research/sandboxing/providers/provider.md";
 const APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
+/// A `permissions` block pre-approving no read.
+const NO_READS: &str = "permissions:\n    file-read: []\n";
+/// A `permissions` block admitting exactly the data file.
+const DATA_READ: &str = "permissions:\n    file-read:\n        - \"&claudine/docs/os.yaml\"\n";
 
 /// A provider document under the sandboxing schema listing `os_support`.
 fn document(os_support: &[&str]) -> String {
@@ -39,17 +45,21 @@ fn sandbox(name: &str, schema: &str, data: &str) -> Option<CliProcessFixture> {
     fixture.write_file(Path::new("cwd").join(SCHEMA_FILE), schema);
     fixture.write_file(Path::new("cwd").join(DATA_FILE), data);
     fixture.write_file(Path::new("cwd").join(DOCUMENT_FILE), &document(&["macOS", "Linux"]));
+    fixture.write_file("cwd/.darkmatter.yaml", DATA_READ);
+    fixture.write_file("home/.darkmatter.yaml", NO_READS);
     assert!(fixture.commit_all(fixture.cwd()), "the fixture commits");
     Some(fixture)
 }
 
-/// Appends an entry to the committed data file: tracked, but no longer
-/// identical to `HEAD`, so it gets no automatic grant.
+/// Appends an entry to the committed data file and withdraws the
+/// repository's permission in the working copy: a narrowing applies at
+/// once, so nothing admits the (now dirty) file.
 fn dirty_data(fixture: &CliProcessFixture) {
     let path = in_repo(fixture, DATA_FILE);
     let mut text = std::fs::read_to_string(&path).expect("the data file");
     text.push_str("- FreeBSD\n");
     std::fs::write(&path, text).expect("the data file is writable");
+    fixture.write_file("cwd/.darkmatter.yaml", NO_READS);
 }
 
 fn in_repo(fixture: &CliProcessFixture, relative: &str) -> PathBuf {
@@ -103,12 +113,11 @@ fn grants(record: &Value) -> Vec<(String, String, String)> {
         .collect()
 }
 
-/// The grants a dirty `os.yaml` needs, in prompt order: this file, then its
-/// folder, each once and persisted (the fixture home holds a grant store).
+/// The approvals an unpermitted `os.yaml` needs, in prompt order: this
+/// file for this run, then always (saved to the user's permissions).
 fn data_file_grants(fixture: &CliProcessFixture) -> Vec<(String, String, String)> {
     let file = canonical(fixture, DATA_FILE);
-    let folder = canonical(fixture, "claudine/docs");
-    [("file", &file, "once"), ("file", &file, "persisted"), ("dir", &folder, "once"), ("dir", &folder, "persisted")]
+    [("file", &file, "once"), ("file", &file, "persisted")]
         .into_iter()
         .map(|(kind, target, scope)| (kind.to_string(), target.clone(), scope.to_string()))
         .collect()
@@ -179,6 +188,7 @@ fn compose_data_output_on_a_dirty_data_file_fails_naming_the_grants_needed() {
 #[test]
 fn compose_reads_nothing_for_an_unapproved_inline_slot() {
     let fixture = CliProcessFixture::named("slots-compose-inline");
+    fixture.write_file("home/.darkmatter.yaml", NO_READS);
     fixture.write_file(Path::new("cwd").join("names.yaml"), "- Linux\n");
     fixture.write_file(
         Path::new("cwd").join("doc.md"),
@@ -207,8 +217,10 @@ fn compose_without_a_terminal_never_prompts_and_reports_the_approval_needed() {
     assert!(!stderr.contains("Allow"), "no prompt was shown: {stderr}");
 }
 
+/// The user's `permissions.file-read` admits the data file the repository's
+/// working copy no longer admits: the union of the scopes reads it, dirty.
 #[test]
-fn compose_with_a_persisted_grant_reads_the_dirty_data_file() {
+fn compose_with_user_permissions_reads_the_dirty_data_file() {
     let Some(fixture) = sandbox(
         "slots-compose-persisted",
         include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
@@ -217,38 +229,33 @@ fn compose_with_a_persisted_grant_reads_the_dirty_data_file() {
         return;
     };
     dirty_data(&fixture);
-    let store = fixture.home().join(".config").join("darkmatter").join("schema-read-policy");
-    common::fixture::write(&store, &format!("# granted by hand\nallow file {}\n", canonical(&fixture, DATA_FILE)));
+    fixture.write_file("home/.darkmatter.yaml", &format!("# approved by hand\n{DATA_READ}"));
     let output = run(&fixture, &["compose", DOCUMENT_FILE, "--output", "json"]);
     let report = data_output(&output, 0, include_str!("../../schemas/output/compose.yaml"));
     assert_eq!(report["read_set"], json!([read_entry(&fixture, DATA_FILE)]), "{report:#}");
 }
 
-/// Matrix 2's wiring cell: an invalid grant-store line grants nothing and
-/// fails the run at that line, even for a data file the automatic grant
-/// would allow, since skipping the line could drop a deny.
+/// Matrix 2's wiring cell: invalid user `permissions` decide nothing, so
+/// the data file the repository admits is refused with the configuration's
+/// error, never read.
 #[test]
-fn compose_with_an_invalid_grant_store_fails_at_its_line() {
+fn compose_with_invalid_permissions_refuses_every_read() {
     let Some(fixture) = sandbox(
-        "slots-compose-store-invalid",
+        "slots-compose-permissions-invalid",
         include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
         include_str!("../../../../claudine/docs/os.yaml"),
     ) else {
         return;
     };
-    let store = fixture.home().join(".config").join("darkmatter").join("schema-read-policy");
-    common::fixture::write(&store, "# a comment line is valid\nallow file\n");
+    fixture.write_file("home/.darkmatter.yaml", "permissions:\n    file-read:\n        - /absolute/os.yaml\n");
     let output = run(&fixture, &["compose", DOCUMENT_FILE, "--output", "json"]);
     let report = data_output(&output, 1, include_str!("../../schemas/output/compose.yaml"));
-    assert_eq!(diagnostic_codes(&report["diagnostics"]), ["dm.schema.slot_grant_store_invalid"], "{report:#}");
-    let at = &report["diagnostics"][0]["source"];
-    assert_eq!(at["line"], 2, "{report:#}");
-    assert!(at["file"].as_str().is_some_and(|file| file.ends_with("schema-read-policy")), "{report:#}");
+    assert_eq!(diagnostic_codes(&report["diagnostics"]), ["dm.config.invalid"], "{report:#}");
     assert_eq!(report["read_set"], json!([]), "{report:#}");
 }
 
 /// A schema file argument resolves its slot as a document naming it would:
-/// the committed data file gets the automatic grant, so the file is valid,
+/// the repository's permissions admit the data file, so the file is valid,
 /// and the record carries no slot count.
 #[test]
 fn schema_validate_of_the_shipped_schema_file_resolves_its_slot() {
@@ -288,8 +295,8 @@ fn schema_validate_of_the_shipped_schema_file_without_its_data_is_unavailable() 
     assert_eq!(record["diagnostics"][0]["span"], first_slot_span(schema), "{report:#}");
 }
 
-/// A dirty data file has no automatic grant and a data output never
-/// prompts: approval required, naming the grants that would allow it.
+/// A data file nothing admits needs approval, and a data output never
+/// prompts: approval required, naming the approvals that would allow it.
 #[test]
 fn schema_validate_of_the_shipped_schema_file_with_a_dirty_data_file_needs_approval() {
     let Some(fixture) = sandbox(
@@ -329,7 +336,7 @@ fn schema_validate_of_a_schema_file_with_a_dirty_data_file_prints_the_slot_failu
 }
 
 #[test]
-fn schema_validate_of_a_document_resolves_with_the_automatic_grant() {
+fn schema_validate_of_a_document_resolves_with_the_repository_permissions() {
     let Some(fixture) = sandbox(
         "slots-validate-document-clean",
         include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
@@ -472,9 +479,9 @@ fn schema_validate_names_the_code_of_a_slot_in_the_baseline() {
 }
 
 /// A repository whose `a.trigger.yaml` selects `topic: sandbox` and declares
-/// `os` as an enum read from `data/os.yaml`, which is left untracked (no
-/// automatic grant), beside `docs/doc.md` with `frontmatter` and any `extra`
-/// files; `None` when `git` is unavailable.
+/// `os` as an enum read from `data/os.yaml`, beside `docs/doc.md` with
+/// `frontmatter` and any `extra` files, under permissions (repository and
+/// user) admitting no read; `None` when `git` is unavailable.
 fn overridden_trigger(name: &str, frontmatter: &str, extra: &[(&str, &str)]) -> Option<CliProcessFixture> {
     let fixture = CliProcessFixture::named(name);
     if !fixture.initialize_repository() {
@@ -488,6 +495,8 @@ fn overridden_trigger(name: &str, frontmatter: &str, extra: &[(&str, &str)]) -> 
         fixture.write_file(Path::new("cwd").join(relative), text);
     }
     fixture.write_file("cwd/docs/doc.md", &format!("---\n{frontmatter}---\n\nBody.\n"));
+    fixture.write_file("cwd/.darkmatter.yaml", NO_READS);
+    fixture.write_file("home/.darkmatter.yaml", NO_READS);
     assert!(fixture.commit_all(fixture.cwd()), "the fixture commits");
     fixture.write_file("cwd/data/os.yaml", "- macOS\n- Linux\n");
     Some(fixture)
