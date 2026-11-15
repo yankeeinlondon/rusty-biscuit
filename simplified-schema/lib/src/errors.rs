@@ -182,7 +182,7 @@ fn is_json_path(path: &Path) -> bool {
 impl fmt::Display for NotSchemaReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            NotSchemaReason::TypesOnly => "it declares only `types`, with no `$schema` property",
+            NotSchemaReason::TypesOnly => "it declares only `types`, with no `$schema` value",
             NotSchemaReason::NoSchemaProperty => "it has no `$schema` property",
             NotSchemaReason::NotAMapping => "its root is not a mapping",
             NotSchemaReason::JsonMissingDialect => "it does not declare its JSON Schema dialect in `$schema`",

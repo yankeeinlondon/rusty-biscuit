@@ -1,12 +1,13 @@
-//! The grammar of the declaration-narrowing language additions: `non-null`,
-//! `$constraints: { closed: true }`, and the `schema` / `type-definition`
-//! options `mapping`, `property(name, type-definition(...))`, `forms(...)`,
-//! and `declared-required`.
+//! The grammar of the declaration-narrowing language additions: `not-empty`
+//! on containers and declarations, `$constraints: { closed: true }`, and the
+//! `schema` / `type-definition` options `mapping`,
+//! `property(name, type-definition(...))`, `forms(...)`, and
+//! `declared-required`; and the refusal of the removed `non-null` marker.
 //!
 //! Each accepted spelling parses to its `Constraint` and survives a canonical
 //! serialize-and-reparse round trip; each rejected spelling is a located
 //! `SchemaError::Grammar`. What the constraints *do* is tested beside their
-//! lowering (`closed_roots.rs`, `non_null_properties.rs`,
+//! lowering (`closed_roots.rs`, `not_empty_values.rs`,
 //! `declaration_narrowing.rs`).
 
 use serde_yaml_ng::Value as YamlValue;
@@ -57,19 +58,18 @@ mod accepted {
     #[test]
     fn every_new_spelling_round_trips_through_canonical_serialization() {
         for expression in [
-            "string(non-null)",
-            "string[](non-null)",
-            "string(non-null)[]",
-            "number(non-null; min(1))",
-            "{ a: string }(non-null)",
+            "string(not-empty)",
+            "string[](not-empty)",
+            "string(not-empty)[]",
+            "{ a: string }(not-empty)",
             "schema(mapping)",
-            "schema(mapping; non-null)",
+            "schema(mapping; not-empty)",
             "schema(required; property(kind, type-definition(forms(literal, enum); declared-required)))",
             "schema(property(kind, type-definition(declared-required)); property(name, type-definition(forms(string))))",
             "type-definition(forms(literal))",
             "type-definition(declared-required)",
-            "type-definition(forms(literal, enum, literal); declared-required; non-null)",
-            "schema(required; non-null)",
+            "type-definition(forms(literal, enum, literal); declared-required; not-empty)",
+            "schema(required; not-empty)",
         ] {
             let parsed = definition(expression);
             let canonical = serialize_property_def(&parsed);
@@ -80,15 +80,13 @@ mod accepted {
     }
 
     #[test]
-    fn non_null_is_a_marker_in_either_constraint_list() {
-        assert_eq!(atom_constraints(&definition("string(non-null)")), [Constraint::NonNull]);
-        assert_eq!(atom_constraints(&definition("string[](non-null)")), [Constraint::NonNull]);
-        assert_eq!(atom_constraints(&definition("string(non-null)[]")), [Constraint::NonNull]);
-        assert!(definition("string[](non-null)").marks_non_null());
-        // Redundant beside `required`, and accepted.
+    fn not_empty_is_read_from_either_constraint_list() {
+        assert_eq!(atom_constraints(&definition("string(not-empty)")), [Constraint::NotEmpty]);
+        assert_eq!(atom_constraints(&definition("string[](not-empty)")), [Constraint::NotEmpty]);
+        assert_eq!(atom_constraints(&definition("string(not-empty)[]")), [Constraint::NotEmpty]);
         assert_eq!(
-            atom_constraints(&definition("string(required; non-null)")),
-            [Constraint::Required, Constraint::NonNull]
+            atom_constraints(&definition("schema(mapping; not-empty)")),
+            [Constraint::Mapping, Constraint::NotEmpty]
         );
     }
 
@@ -156,8 +154,8 @@ mod accepted {
     }
 
     #[test]
-    fn closed_and_non_null_survive_the_block_form_export_round_trip() {
-        let text = "$schema:\n  a: string(non-null)\n  box:\n    b: string\n    $constraints:\n      non-null: true\n      closed: true\n  $constraints:\n    closed: true\n";
+    fn closed_and_not_empty_survive_the_block_form_export_round_trip() {
+        let text = "$schema:\n  a: string(not-empty)\n  box:\n    b: string\n    $constraints:\n      not-empty: true\n      closed: true\n  $constraints:\n    closed: true\n";
         let schema = SimplifiedSchema::try_from(text).expect("schema parses");
         let exported = schema.to_simplified_yaml().expect("exports");
         assert!(exported.contains("closed: true"), "{exported}");
@@ -165,7 +163,12 @@ mod accepted {
         assert_eq!(reparsed.to_simplified_yaml().unwrap(), exported);
         assert_eq!(reparsed.property("a").unwrap().def(), schema.property("a").unwrap().def());
         assert_eq!(reparsed.property("box").unwrap().def(), schema.property("box").unwrap().def());
-        assert!(schema.property("box").unwrap().def().marks_non_null());
+        let view = schema.property("box").unwrap();
+        let PropertyDef::Single(atom) = view.def() else { panic!("one atom") };
+        let TypeExpr::InlineObject(shape) = &atom.ty else { panic!("an inline object") };
+        assert!(shape.constraints.contains(&Constraint::NotEmpty), "{shape:?}");
+        assert!(schema.validate_strict(&serde_json::json!({ "box": {} })).is_err(), "an empty box");
+        assert!(schema.validate_strict(&serde_json::json!({ "box": { "b": "x" } })).is_ok());
     }
 
     /// The library's definition of `kind: yaml-schema` documents parses as a
@@ -182,11 +185,11 @@ mod accepted {
         };
         assert_eq!(shape.constraints, [Constraint::Closed]);
         let types = &shape.properties["types"];
-        assert_eq!(atom_constraints(types), [Constraint::Mapping, Constraint::NonNull]);
+        assert_eq!(atom_constraints(types), [Constraint::Mapping, Constraint::NotEmpty]);
         let export = atom_constraints(&shape.properties["$schema"]);
         assert!(matches!(&export[1], Constraint::Property { name, .. } if name == "kind"), "{export:?}");
         for key in ["description", "categories"] {
-            assert!(shape.properties[key].marks_non_null(), "{key}");
+            assert!(atom_constraints(&shape.properties[key]).contains(&Constraint::NotEmpty), "{key}");
         }
     }
 }
@@ -221,7 +224,6 @@ mod rejected {
             ("type-definition(forms('literal'))", "is not one"),
             ("schema(mapping(1))", "`mapping` does not take arguments"),
             ("type-definition(declared-required(x))", "`declared-required` does not take arguments"),
-            ("string(non-null(1))", "`non-null` does not take arguments"),
             ("schema(property)", "`property` requires arguments"),
             ("schema(property(kind))", "takes a name and a `type-definition(...)`"),
             ("schema(property(, type-definition))", "requires a property name"),
@@ -235,32 +237,25 @@ mod rejected {
     }
 
     #[test]
-    fn non_null_over_a_null_admitting_type_is_a_declaration_error() {
+    fn the_removed_non_null_marker_is_a_located_error_in_every_spelling() {
         for expression in [
+            "string(non-null)",
+            "string[](non-null)",
+            "string(non-null)[]",
+            "string(non-null(1))",
+            "boolean(non-null; default(true))",
+            "schema(mapping; non-null)",
             "null | string(non-null)",
-            "string(non-null) | null",
-            "unknown(non-null)",
-            "any(non-null)",
-            "null(non-null)",
-            "string(non-null) | unknown",
         ] {
             let (message, span) = expression_error(expression);
-            assert!(message.contains("`non-null` cannot mark a type that admits null"), "`{expression}`: {message}");
-            assert!(!span.is_empty(), "`{expression}`");
+            assert!(message.contains("`non-null` is no longer supported"), "`{expression}`: {message}");
+            assert!(message.contains("`not-empty`") && message.contains("`required`"), "{message}");
+            assert_eq!(&expression[span], "non-null", "`{expression}`");
         }
-        // The span is the marked option.
-        let (_, span) = expression_error("null | string(non-null)");
-        assert_eq!(&"null | string(non-null)"[span], "string(non-null)");
-
-        // The YAML list spelling of the same union.
         let message = grammar_error(&yaml("[string(non-null), null]"));
-        assert!(message.contains("`non-null` cannot mark"), "{message}");
-        let message = grammar_error(&yaml("[string(non-null), ~]"));
-        assert!(message.contains("`non-null` cannot mark"), "{message}");
-
-        // A list of a nullable type is itself never null: accepted.
-        definition("(null | string)[](non-null)");
-        definition("null[](non-null)");
+        assert!(message.contains("`non-null` is no longer supported"), "{message}");
+        let message = grammar_error(&yaml("box:\n  a: string\n  $constraints:\n    non-null: true\n"));
+        assert!(message.contains("`non-null` is no longer supported"), "{message}");
     }
 
     #[test]

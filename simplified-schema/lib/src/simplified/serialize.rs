@@ -440,7 +440,6 @@ fn render_constraints(constraints: &[Constraint], ty: Option<SimplifiedType>) ->
 fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>) {
     match c {
         Constraint::Required => out.push_str("required"),
-        Constraint::NonNull => out.push_str("non-null"),
         Constraint::Closed => out.push_str("closed"),
         Constraint::Mapping => out.push_str("mapping"),
         Constraint::DeclaredRequired => out.push_str("declared-required"),

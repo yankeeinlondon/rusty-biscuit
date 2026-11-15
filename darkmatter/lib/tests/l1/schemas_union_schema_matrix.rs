@@ -151,7 +151,7 @@ fn imported_types_cells() {
         ("wrong type", format!("{head}types: 1\n"), Expect::PrepareFails),
         ("one wrong element", format!("{head}types: [{{policy: string}}, 1]\n"), Expect::PrepareFails),
         ("every element wrong", format!("{head}types: [1, 2]\n"), Expect::PrepareFails),
-        ("empty", format!("{head}types: {{}}\n"), Expect::UnknownName),
+        ("empty", format!("{head}types: {{}}\n"), Expect::PrepareFails),
         ("duplicate key", format!("{schema}types:\n  other: string\n"), Expect::PrepareFails),
         ("trailing document", format!("{schema}---\nextra: 1\n"), Expect::PrepareFails),
         ("invalid YAML", format!("{schema}  : [\n"), Expect::PrepareFails),

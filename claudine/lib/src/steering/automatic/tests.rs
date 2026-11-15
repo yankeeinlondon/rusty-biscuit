@@ -94,7 +94,7 @@ fn cells() -> Vec<(&'static str, &'static str, Expected)> {
     vec![
         ("control", CONTROL, Ok(Some(false))),
         ("control true", r#"{ "steering": { "automatic": { "enabled": true } } }"#, Ok(Some(true))),
-        ("absent key", r#"{ "steering": { "automatic": {} } }"#, Ok(None)),
+        ("empty automatic", r#"{ "steering": { "automatic": {} } }"#, Ok(None)),
         ("absent automatic", r#"{ "steering": {} }"#, Ok(None)),
         ("absent steering", r#"{}"#, Ok(None)),
         ("null value", r#"{ "steering": { "automatic": { "enabled": null } } }"#, Err(())),
@@ -121,6 +121,9 @@ fn write(dir: &Path, text: &str) -> std::path::PathBuf {
 #[test]
 fn repo_file_matrix() {
     for (cell, text, expected) in cells() {
+        // The repository's `steering` and `automatic` overrides are
+        // `not-empty`: an empty override mapping is refused.
+        let expected = if matches!(cell, "empty automatic" | "absent automatic") { Err(()) } else { expected };
         let tmp = tempfile::tempdir().unwrap();
         let loaded = loader::load_repo_override_config(&write(tmp.path(), text));
         let actual = loaded.map(|config| config.expect("file exists").steering.automatic.enabled).map_err(|_| ());

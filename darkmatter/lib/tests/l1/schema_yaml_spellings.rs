@@ -119,11 +119,8 @@ const TAGGED_CELLS: &[Cell] = &[
     cell("types indentless list", Set("types", "\n- string\n- number"), Rejects),
     cell("types one wrong element", Set("types", "\n  - string\n  - 5"), Rejects),
     cell("types every element wrong", Set("types", "\n  - 5"), Rejects),
-    cell(
-        "types empty mapping",
-        Set("types", " {}"),
-        Accepts(&[("title: ab", true), ("status: word", true)]),
-    ),
+    // `types: schema(mapping; not-empty)`: an empty table is refused.
+    cell("types empty mapping", Set("types", " {}"), Rejects),
     cell("types empty list", Set("types", " []"), Rejects),
     cell("types duplicate", Duplicate("types"), Declines),
     cell("types second document", Append("---\ntypes: {}\n"), Declines),
@@ -226,8 +223,9 @@ const NESTED_CELLS: &[Cell] = &[
     // Removing the sole key leaves an empty document.
     cell("$schema absent", Remove("$schema"), Declines),
     cell("$schema absent beside another key", Replace("$schema:", "schema:"), Declines),
-    cell("$schema null", Set("$schema", " null"), Rejects),
-    cell("$schema empty value", Set("$schema", ""), Rejects),
+    // A null `$schema` is no export, so the informal envelope declines it.
+    cell("$schema null", Set("$schema", " null"), Declines),
+    cell("$schema empty value", Set("$schema", ""), Declines),
     cell("$schema number", Set("$schema", " 5"), Rejects),
     cell("$schema bool", Set("$schema", " true"), Rejects),
     cell("$schema one wrong element", Set("$schema", " [./a.yaml, 5]"), Rejects),

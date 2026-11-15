@@ -29,11 +29,11 @@ pub enum ClaimCause {
     NotObject,
     /// The arm does not declare the property.
     Missing,
-    /// The property is not listed in the arm's `required`; an optional
-    /// declaration, including one made optional by a null alternative
-    /// (`null | literal(a)`), lands here.
+    /// The property is not listed in the arm's `required`: an optional
+    /// declaration (`literal(a)`) lands here.
     NotRequired,
-    /// The required property's schema admits `null`.
+    /// The required property's schema admits `null`, so a written `null`
+    /// meets presence without naming a member (`null | literal(a; required)`).
     NullAdmitted,
     /// The property's schema is not a `const`, an `enum`, or a union of them,
     /// so its values are not a finite set (`string`, `unknown`).

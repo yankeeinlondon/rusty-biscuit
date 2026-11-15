@@ -3075,8 +3075,8 @@ fn declares_constraint(def: &PropertyDef, predicate: fn(&Constraint) -> bool) ->
 }
 
 /// Whether a property is required, by the library's shared presence
-/// calculation: a null-admitting whole value is never required, and a
-/// pending template type is not known to be until it resolves.
+/// calculation: a `required` marker, whether or not the type admits null;
+/// a pending template type is not known to be until it resolves.
 fn is_required(def: &PropertyDef) -> bool {
     def.requiredness() == Requiredness::Required
 }
@@ -4907,7 +4907,7 @@ mod tests {
     fn constraints_block_keys_come_from_the_catalog_by_placement() {
         // A declaration root offers the object constraints not yet written.
         let root = "---\n$schema:\n  title: string\n  $constraints:\n    min-keys: 1\n    \n---\n\nbody\n";
-        assert_eq!(top_level_labels_after(root, "min-keys: 1\n    "), ["max-keys", "uncounted-keys", "closed"]);
+        assert_eq!(top_level_labels_after(root, "min-keys: 1\n    "), ["max-keys", "uncounted-keys", "closed", "not-empty"]);
         with_ctx(root, |ctx| {
             let offset = root.find("min-keys: 1\n    ").unwrap() + "min-keys: 1\n    ".len();
             let items = completion(ctx, offset);
@@ -4936,8 +4936,8 @@ mod tests {
     #[test]
     fn meta_type_constraint_lists_offer_their_declaration_options() {
         for (declaration, offered, withheld) in [
-            ("type-definition(", &["forms", "declared-required", "container", "non-null"][..], &["mapping", "property"][..]),
-            ("schema(", &["mapping", "property", "non-null"][..], &["forms", "declared-required", "container"][..]),
+            ("type-definition(", &["forms", "declared-required", "container", "not-empty"][..], &["mapping", "property", "non-null"][..]),
+            ("schema(", &["mapping", "property", "not-empty"][..], &["forms", "declared-required", "container", "non-null"][..]),
         ] {
             let text = format!("---\n$schema:\n  p: {declaration}\n---\n\nbody\n");
             let labels = top_level_labels_after(&text, declaration);
@@ -4948,8 +4948,9 @@ mod tests {
                 assert!(labels.iter().all(|label| label != keyword), "{declaration} withholds {keyword}: {labels:?}");
             }
         }
+        // `unknown` has no "empty" value, and `non-null` is no longer offered.
         let labels = top_level_labels_after("---\n$schema:\n  p: unknown(\n---\n\nbody\n", "unknown(");
-        assert!(labels.iter().all(|label| label != "non-null"), "{labels:?}");
+        assert!(labels.iter().all(|label| label != "non-null" && label != "not-empty"), "{labels:?}");
     }
 
     #[test]

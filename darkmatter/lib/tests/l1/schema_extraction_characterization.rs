@@ -419,11 +419,12 @@ mod yaml_loader_matrix {
         // A tagged document needs `types` or `$schema`; `$schema` alone is enough.
         types_absent: Whole("kind: schema\n") => Rejects("schema.yaml`: `/$schema`: \"$schema\" is a required property");
         types_absent_beside_schema: Whole("kind: schema\n$schema:\n  name: string(required)\n") => Tagged;
-        types_null_bare: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Rejects("schema.yaml`: `/types`");
-        types_null_explicit: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: null\n") => Rejects("schema.yaml`: `/types`");
+        // A null `types` is absent, so the document has no usable carrier.
+        types_null_bare: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Rejects("schema.yaml`: `/$schema`: \"$schema\" is a required property");
+        types_null_explicit: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: null\n") => Rejects("schema.yaml`: `/$schema`: \"$schema\" is a required property");
         types_wrong_type: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: [Person]\n") => Rejects("schema.yaml`: `/types`");
         types_empty_string: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: \"\"\n") => Rejects("schema.yaml`: `/types`");
-        types_empty_mapping: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: {}\n") => Tagged;
+        types_empty_mapping: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: {}\n") => Rejects("schema.yaml`: `/types`");
         types_entry_non_string: Replace("  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "  Person: 5\n") => Rejects("invalid SimplifiedSchema payload");
     });
 
@@ -457,14 +458,16 @@ mod yaml_loader_matrix {
     cells!(PURE_PERSON {
         pure_control: Control => Pure;
         schema_absent: Replace("$schema:\n  person: Person\n", "") => NotSchema;
-        schema_null_bare: Replace("$schema:\n  person: Person\n", "$schema:\n") => Rejects("schema.yaml`: `/$schema`");
-        schema_null_explicit: Replace("$schema:\n  person: Person\n", "$schema: null\n") => Rejects("schema.yaml`: `/$schema`");
+        // A null `$schema` is absent: the informal envelope no longer claims it.
+        schema_null_bare: Replace("$schema:\n  person: Person\n", "$schema:\n") => NotSchema;
+        schema_null_explicit: Replace("$schema:\n  person: Person\n", "$schema: null\n") => NotSchema;
         schema_wrong_type: Replace("$schema:\n  person: Person\n", "$schema: 5\n") => Rejects("schema.yaml`: `/$schema`");
         schema_empty_string: Replace("$schema:\n  person: Person\n", "$schema: \"\"\n") => Rejects("schema.yaml`: `/$schema`");
         schema_empty_mapping: Replace("$schema:\n  person: Person\n", "$schema: {}\n") => Pure;
         schema_remote_reference: Replace("$schema:\n  person: Person\n", "$schema: https://example.com/person.yaml\n") => Rejects("schema.yaml`: `/$schema`");
         pure_types_wrong_type: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: [Person]\n") => Rejects("schema.yaml`: `/types`");
-        pure_types_null: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Rejects("schema.yaml`: `/types`");
+        // A null optional `types` is absent.
+        pure_types_null: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Pure;
     });
 
     /// A `$schema` file reference is classified by the loader, not opened:

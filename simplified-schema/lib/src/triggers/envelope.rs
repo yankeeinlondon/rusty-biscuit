@@ -114,14 +114,9 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
 
     let conditions = match_semantics(match_value)?;
 
+    // A null `$schema` is an absent one: the trigger is matcher-only.
     let payload = match map.get(YamlValue::String("$schema".into())) {
-        None => None,
-        Some(YamlValue::Null) => {
-            return Err(field_error(
-                "$schema",
-                "an explicit null is not a payload; omit `$schema` for a matcher-only trigger".into(),
-            ));
-        }
+        None | Some(YamlValue::Null) => None,
         Some(payload @ (YamlValue::String(_) | YamlValue::Mapping(_) | YamlValue::Sequence(_))) => {
             Some(payload.clone())
         }

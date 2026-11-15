@@ -248,7 +248,6 @@ fn is_annotation(constraint: &Constraint) -> bool {
     matches!(
         constraint,
         Constraint::Required
-            | Constraint::NonNull
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Deferred
@@ -416,9 +415,9 @@ impl<'r> Translator<'r> {
                 if let Some(max) = bounds.max_properties {
                     fragment.insert("maxProperties".into(), json!(max));
                 }
-                value_constraints
-                    .iter()
-                    .all(|constraint| matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_)))
+                value_constraints.iter().all(|constraint| {
+                    matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::NotEmpty)
+                })
             }
             _ => false,
         };
@@ -473,8 +472,6 @@ impl<'r> Translator<'r> {
                     (shape, def.is_required() && !matches!(def, PropertyDef::Single(atom) if is_generated(atom)))
                 } else if def.is_required() {
                     (shape, !matches!(def, PropertyDef::Single(atom) if is_generated(atom)))
-                } else if def.marks_non_null() {
-                    (shape, false)
                 } else {
                     (Shape::Union(vec![Shape::Null, shape]), false)
                 });
@@ -552,10 +549,8 @@ impl<'r> Translator<'r> {
         let admits_null = container.map_or_else(|| arms.iter().any(PropertyAtom::admits_null), PropertyAtom::admits_null);
         let required = container.map_or_else(|| arms.iter().any(marks_required), marks_required);
         let generated = container.map_or_else(|| arms.iter().any(is_generated), is_generated);
-        let non_null =
-            container.map_or_else(|| arms.iter().any(PropertyAtom::marks_non_null), PropertyAtom::marks_non_null);
         let mut options = Vec::with_capacity(arms.len() + 1);
-        if !(required || admits_null || non_null) {
+        if !(required || admits_null) {
             options.push(Shape::Null);
         }
         let mut hoisted: Option<Value> = None;
@@ -576,10 +571,6 @@ impl<'r> Translator<'r> {
         }
         if required {
             return Ok((shape, !is_generated(atom)));
-        }
-        // Optional, but a present `null` is a wrong type.
-        if atom.marks_non_null() {
-            return Ok((shape, false));
         }
         let wrapped = match shape {
             // The optional scalar `file` already carries its `""` option.
@@ -608,7 +599,7 @@ impl<'r> Translator<'r> {
             .filter(|constraint| {
                 !matches!(
                     constraint,
-                    Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred | Constraint::NonNull
+                    Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred
                 )
             })
             .cloned()
@@ -733,6 +724,7 @@ impl<'r> Translator<'r> {
                     | Constraint::Generated
                     | Constraint::Example(_)
                     | Constraint::Eager
+                    | Constraint::NotEmpty
                     | Constraint::MinKeys(_)
                     | Constraint::MaxKeys(_)
             ) {
@@ -948,6 +940,7 @@ fn array(path: &str, items: Shape, constraints: &[Constraint]) -> Result<Shape, 
         match constraint {
             constraint if is_annotation(constraint) => {}
             Constraint::MinItems(n) => count.lower(*n, format!("min({n})")),
+            Constraint::NotEmpty => count.lower(1, "not-empty".to_string()),
             Constraint::MaxItems(n) => count.upper(*n, format!("max({n})")),
             Constraint::Unique => unique_items = true,
             other => {
@@ -973,7 +966,10 @@ fn reject_block_constraints(path: &str, shape: &SchemaShape, place: &str) -> Res
         .iter()
         .find(|constraint| {
             // `closed` is a no-op on an inline object, which is closed already.
-            !matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::Closed)
+            !matches!(
+                constraint,
+                Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::NotEmpty | Constraint::Closed
+            )
         })
     {
         Some(constraint) => Err(invalid(
@@ -1001,6 +997,7 @@ fn object_arity<'c>(
     for constraint in constraints {
         match constraint {
             Constraint::MinKeys(n) => keys.lower(*n, format!("min-keys({n})")),
+            Constraint::NotEmpty => keys.lower(1, "not-empty".to_string()),
             Constraint::MaxKeys(n) => keys.upper(*n, format!("max-keys({n})")),
             _ => {}
         }
@@ -1046,8 +1043,13 @@ fn primitive(path: &str, ty: SimplifiedType, constraints: &[Constraint]) -> Resu
             })
         }
         SimplifiedType::Object => {
-            reject_unsupported(path, keyword, constraints)?;
-            Ok(Shape::Object(ObjectShape::opaque()))
+            let (not_empty, rest) = split_not_empty(constraints);
+            reject_unsupported(path, keyword, &rest)?;
+            let mut object = ObjectShape::opaque();
+            if not_empty {
+                object.min_properties = Some(1);
+            }
+            Ok(Shape::Object(object))
         }
         SimplifiedType::File => {
             if let Some(constraint) = constraints
@@ -1077,12 +1079,17 @@ fn primitive(path: &str, ty: SimplifiedType, constraints: &[Constraint]) -> Resu
         }
         SimplifiedType::Url => url(path, constraints),
         SimplifiedType::Yaml | SimplifiedType::Json => {
-            reject_unsupported(path, keyword, constraints)?;
-            Ok(Shape::Content(if ty == SimplifiedType::Json {
+            let (not_empty, rest) = split_not_empty(constraints);
+            reject_unsupported(path, keyword, &rest)?;
+            let content = Shape::Content(if ty == SimplifiedType::Json {
                 ContentFormat::Json
             } else {
                 ContentFormat::Yaml
-            }))
+            });
+            if not_empty {
+                return Ok(content.assert(format_assertion("not-empty", json!({ "pattern": r"\S" }))?));
+            }
+            Ok(content)
         }
         SimplifiedType::Literal => literal(path, constraints),
         SimplifiedType::Expression => {
@@ -1114,6 +1121,7 @@ fn primitive(path: &str, ty: SimplifiedType, constraints: &[Constraint]) -> Resu
                 })
                 .cloned()
                 .collect();
+            let (not_empty, rest) = split_not_empty(&rest);
             reject_unsupported(path, keyword, &rest)?;
             let payload = declaration_options_payload(path, constraints).map_err(|error| match error {
                 SchemaError::Convert { message, .. } => invalid(path, message),
@@ -1124,11 +1132,22 @@ fn primitive(path: &str, ty: SimplifiedType, constraints: &[Constraint]) -> Resu
             } else {
                 DARKMATTER_TYPE_DEFINITION_KEYWORD
             };
-            let structure = Shape::Union(vec![
-                Shape::text(),
-                Shape::Object(ObjectShape::opaque()),
-                Shape::array(Shape::Any),
-            ]);
+            // `not-empty`, as the lowering's `pattern` / `minProperties` /
+            // `minItems` beside the declaration keyword.
+            let (text, object, list) = if not_empty {
+                let mut object = ObjectShape::opaque();
+                object.min_properties = Some(1);
+                let mut list = ArrayShape::of(Shape::Any);
+                list.min_items = Some(1);
+                (
+                    Shape::text().assert(format_assertion("not-empty", json!({ "pattern": r"\S" }))?),
+                    Shape::Object(object),
+                    Shape::Array(list),
+                )
+            } else {
+                (Shape::text(), Shape::Object(ObjectShape::opaque()), Shape::array(Shape::Any))
+            };
+            let structure = Shape::Union(vec![text, object, list]);
             Ok(structure.assert(format_assertion(keyword, json!({ flag: payload }))?))
         }
         SimplifiedType::Unknown => {
@@ -1225,6 +1244,13 @@ fn refined(path: &str, ty: &str, constraints: &[Constraint], fragment: Value) ->
 }
 
 /// Text whose final value must also pass a format validator.
+/// Whether `constraints` holds `not-empty`, and the rest of them.
+fn split_not_empty(constraints: &[Constraint]) -> (bool, Vec<Constraint>) {
+    let not_empty = constraints.contains(&Constraint::NotEmpty);
+    let rest = constraints.iter().filter(|constraint| **constraint != Constraint::NotEmpty).cloned().collect();
+    (not_empty, rest)
+}
+
 fn format_text(description: &str, fragment: Value) -> Result<Shape, TranslateError> {
     Ok(Shape::text().assert(format_assertion(description, fragment)?))
 }

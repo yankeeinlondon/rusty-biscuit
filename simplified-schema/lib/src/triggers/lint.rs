@@ -204,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn null_admitting_required_condition_is_a_guard_but_a_required_list_is_a_gate() {
+    fn required_conditions_are_gates_whether_or_not_they_admit_null() {
         for ty in [SimplifiedType::Unknown, SimplifiedType::Null] {
             let arms = MatchConditions(vec![MatchExpr::Property {
                 name: "steps".into(),
@@ -216,7 +216,12 @@ mod tests {
                     description: None,
                 },
             }]);
-            assert!(matches!(lint(&arms), Err(SchemaError::TriggerVacuousMatch)), "{ty:?}");
+            assert!(lint(&arms).is_ok(), "`{ty:?}(required)` needs the key written");
+            let optional = MatchConditions(vec![MatchExpr::Property {
+                name: "steps".into(),
+                atom: PropertyAtom::bare(ty),
+            }]);
+            assert!(matches!(lint(&optional), Err(SchemaError::TriggerVacuousMatch)), "bare {ty:?}");
         }
         let list = MatchConditions(vec![MatchExpr::Property {
             name: "steps".into(),

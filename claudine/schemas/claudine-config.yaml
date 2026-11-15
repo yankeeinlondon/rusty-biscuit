@@ -26,11 +26,11 @@ types:
         male: "string(required) -> The voice used when `gender` is `male`."
         female: "string(required) -> The voice used when `gender` is `female`."
     tts-settings:
-        provider: "string(non-null) -> The TTS engine (`say`, `espeak`, `elevenlabs`, ...). Absent auto-detects one, as `tts: true` does."
+        provider: "string(not-empty) -> The TTS engine (`say`, `espeak`, `elevenlabs`, ...). Absent auto-detects one, as `tts: true` does."
         voice: "voice-selection -> The voice, or a voice per gender. A `speak` action's own `voice` wins."
         gender: "gender(required; default(female)) -> Which voice of a gendered pair to use. A `speak` action's own `gender` wins."
         # Absent means on; it is never inserted, so saving a file does not add it.
-        prewarm: "boolean(non-null; default(true)) -> Whether lifecycle speech is synthesized ahead of time into the audio cache."
+        prewarm: "boolean(default(true)) -> Whether lifecycle speech is synthesized ahead of time into the audio cache."
 
     # ---------------------------------------------------------- messenger
     discord-route:
@@ -163,39 +163,39 @@ types:
         - "message-action -> Send a message."
     # One optional entry per event; an event not listed has no actions.
     event-actions:
-        session_start: "action[](non-null) -> The actions run, in order, on `session_start`."
-        session_end: "action[](non-null) -> The actions run, in order, on `session_end`."
-        before_prompt: "action[](non-null) -> The actions run, in order, on `before_prompt`."
-        before_tool: "action[](non-null) -> The actions run, in order, on `before_tool`."
-        after_tool: "action[](non-null) -> The actions run, in order, on `after_tool`."
-        tool_error: "action[](non-null) -> The actions run, in order, on `tool_error`."
-        permission_request: "action[](non-null) -> The actions run, in order, on `permission_request`."
-        turn_complete: "action[](non-null) -> The actions run, in order, on `turn_complete`."
-        turn_error: "action[](non-null) -> The actions run, in order, on `turn_error`."
-        subagent_start: "action[](non-null) -> The actions run, in order, on `subagent_start`."
-        subagent_stop: "action[](non-null) -> The actions run, in order, on `subagent_stop`."
-        before_model: "action[](non-null) -> The actions run, in order, on `before_model`."
-        after_model: "action[](non-null) -> The actions run, in order, on `after_model`."
-        before_compact: "action[](non-null) -> The actions run, in order, on `before_compact`."
-        notification: "action[](non-null) -> The actions run, in order, on `notification`."
-        human_in_the_loop: "action[](non-null) -> The actions run, in order, on `human_in_the_loop`."
+        session_start: "action[](not-empty) -> The actions run, in order, on `session_start`."
+        session_end: "action[](not-empty) -> The actions run, in order, on `session_end`."
+        before_prompt: "action[](not-empty) -> The actions run, in order, on `before_prompt`."
+        before_tool: "action[](not-empty) -> The actions run, in order, on `before_tool`."
+        after_tool: "action[](not-empty) -> The actions run, in order, on `after_tool`."
+        tool_error: "action[](not-empty) -> The actions run, in order, on `tool_error`."
+        permission_request: "action[](not-empty) -> The actions run, in order, on `permission_request`."
+        turn_complete: "action[](not-empty) -> The actions run, in order, on `turn_complete`."
+        turn_error: "action[](not-empty) -> The actions run, in order, on `turn_error`."
+        subagent_start: "action[](not-empty) -> The actions run, in order, on `subagent_start`."
+        subagent_stop: "action[](not-empty) -> The actions run, in order, on `subagent_stop`."
+        before_model: "action[](not-empty) -> The actions run, in order, on `before_model`."
+        after_model: "action[](not-empty) -> The actions run, in order, on `after_model`."
+        before_compact: "action[](not-empty) -> The actions run, in order, on `before_compact`."
+        notification: "action[](not-empty) -> The actions run, in order, on `notification`."
+        human_in_the_loop: "action[](not-empty) -> The actions run, in order, on `human_in_the_loop`."
     event-matchers:
-        session_start: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `session_start` must match."
-        session_end: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `session_end` must match."
-        before_prompt: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_prompt` must match."
-        before_tool: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_tool` must match."
-        after_tool: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `after_tool` must match."
-        tool_error: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `tool_error` must match."
-        permission_request: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `permission_request` must match."
-        turn_complete: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `turn_complete` must match."
-        turn_error: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `turn_error` must match."
-        subagent_start: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `subagent_start` must match."
-        subagent_stop: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `subagent_stop` must match."
-        before_model: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_model` must match."
-        after_model: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `after_model` must match."
-        before_compact: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_compact` must match."
-        notification: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `notification` must match."
-        human_in_the_loop: "string(non-null) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `human_in_the_loop` must match."
+        session_start: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `session_start` must match."
+        session_end: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `session_end` must match."
+        before_prompt: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_prompt` must match."
+        before_tool: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_tool` must match."
+        after_tool: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `after_tool` must match."
+        tool_error: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `tool_error` must match."
+        permission_request: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `permission_request` must match."
+        turn_complete: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `turn_complete` must match."
+        turn_error: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `turn_error` must match."
+        subagent_start: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `subagent_start` must match."
+        subagent_stop: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `subagent_stop` must match."
+        before_model: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_model` must match."
+        after_model: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `after_model` must match."
+        before_compact: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_compact` must match."
+        notification: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `notification` must match."
+        human_in_the_loop: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `human_in_the_loop` must match."
 
     # ------------------------------------------------------------- models
     model-entry:
@@ -211,16 +211,16 @@ types:
         - "string[] -> Models added to the fetched catalog."
         - "model-override-settings -> Models that add to or replace the fetched catalog."
     model-overrides:
-        claude: "model-override(non-null) -> The `claude` catalog override."
-        codex: "model-override(non-null) -> The `codex` catalog override."
-        gemini: "model-override(non-null) -> The `gemini` catalog override."
-        goose: "model-override(non-null) -> The `goose` catalog override."
-        kimi_code: "model-override(non-null) -> The `kimi_code` catalog override."
-        open_code: "model-override(non-null) -> The `open_code` catalog override."
-        qwen_code: "model-override(non-null) -> The `qwen_code` catalog override."
-        kilo: "model-override(non-null) -> The `kilo` catalog override."
-        pi: "model-override(non-null) -> The `pi` catalog override."
-        antigravity: "model-override(non-null) -> The `antigravity` catalog override."
+        claude: "model-override -> The `claude` catalog override."
+        codex: "model-override -> The `codex` catalog override."
+        gemini: "model-override -> The `gemini` catalog override."
+        goose: "model-override -> The `goose` catalog override."
+        kimi_code: "model-override -> The `kimi_code` catalog override."
+        open_code: "model-override -> The `open_code` catalog override."
+        qwen_code: "model-override -> The `qwen_code` catalog override."
+        kilo: "model-override -> The `kilo` catalog override."
+        pi: "model-override -> The `pi` catalog override."
+        antigravity: "model-override -> The `antigravity` catalog override."
 
     # ------------------------------------------------------------- sounds
     default-sounds:
@@ -257,13 +257,13 @@ types:
     # `enabled` is never inserted: an unset value lets a repository's value,
     # then the built-in `true`, decide.
     user-automatic-steering:
-        enabled: "boolean(non-null; default(true)) -> Whether automatic repetition help is on."
+        enabled: "boolean(default(true)) -> Whether automatic repetition help is on."
     user-steering:
         automatic: "user-automatic-steering(required; default({})) -> Automatic repetition help."
     repository-automatic-steering:
-        enabled: "boolean(non-null) -> Whether automatic repetition help is on; absent inherits the user's setting."
+        enabled: "boolean -> Whether automatic repetition help is on; absent inherits the user's setting."
     repository-steering:
-        automatic: "repository-automatic-steering(non-null) -> Automatic repetition help."
+        automatic: "repository-automatic-steering(not-empty) -> Automatic repetition help."
 
     # ------------------------------------------------------------- files
     user-config:
@@ -292,11 +292,11 @@ types:
 
     repository-config:
         canonical_provider: "provider -> The canonical provider for this repository; absent inherits the user's."
-        actions: "event-actions(non-null) -> Actions for this repository; each event listed replaces the user's actions for it."
-        matchers: "event-matchers(non-null) -> Matchers for this repository; each event listed replaces the user's matcher for it."
+        actions: "event-actions(not-empty) -> Actions for this repository; each event listed replaces the user's actions for it."
+        matchers: "event-matchers(not-empty) -> Matchers for this repository; each event listed replaces the user's matcher for it."
         active_messenger: "string -> The messenger route for this repository; `null` turns messaging off here and absent inherits."
         exit_expressions: "exit-expressions -> Output that stops a run in this repository; the list form replaces the user's rules."
         guard_settings: "guard-settings -> Guard thresholds for this repository, replacing the user's whole setting."
-        steering: "repository-steering(non-null) -> Steering settings for this repository; absent inherits."
+        steering: "repository-steering(not-empty) -> Steering settings for this repository; absent inherits."
         permissions: 'repository-permissions(required; default({"file-read": ["&**/*.txt", "&**/*.text", "&**/*.md", "&**/*.csv", "&**/*.tsv", "&**/*.json", "&**/*.json5", "&**/*.yaml", "&**/*.yml", "&**/*.toml"], "shell-commands": [], "network": "deny"}))@darkmatter:config | permissions-reference@darkmatter:config -> The permissions block, or a reference to another file that holds it.'
         $constraints: { closed: true }

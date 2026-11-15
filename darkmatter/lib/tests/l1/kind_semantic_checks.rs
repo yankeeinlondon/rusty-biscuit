@@ -228,11 +228,11 @@ fn an_opened_trigger_definition_admits_an_added_property_and_keeps_its_checks() 
 }
 
 /// The unmodified shipped `schema` definition is closed and its metadata
-/// non-null: the selected definition, not a kind check, rejects both.
+/// `not-empty`: the selected definition, not a kind check, rejects both.
 #[test]
-fn the_shipped_schema_definition_rejects_a_null_description_and_an_unknown_key() {
+fn the_shipped_schema_definition_rejects_a_blank_description_and_an_unknown_key() {
     for (text, code) in [
-        ("kind: schema\ndescription: null\n$schema:\n    title: string\n", ValidationProblemCode::TypeMismatch),
+        ("kind: schema\ndescription: '  '\n$schema:\n    title: string\n", ValidationProblemCode::ConstraintViolation),
         ("kind: schema\n$schema:\n    title: string\nnote: hi\n", ValidationProblemCode::UnknownKey),
     ] {
         let validation = validation(text);

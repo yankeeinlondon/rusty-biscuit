@@ -1,8 +1,7 @@
-//! `md schema validate` end to end for the core schema types of
-//! `2026-10-16-core-schema-types`: the Phase A presence table (acceptance
-//! criterion 1) with the nullable-union and container cases of criteria 3 and
-//! 12, and a lifecycle-shaped schema whose `initialize` actions exclude
-//! `shell` (criterion 7).
+//! `md schema validate` end to end for the core schema types: the presence
+//! table (`required` asks whether the key was written; a null-admitting type
+//! accepts a written `null`) with the nullable-union and container cases,
+//! and a lifecycle-shaped schema whose `initialize` actions exclude `shell`.
 //!
 //! Each test validates every document in one `md` process and matches the
 //! JSON file records back to their documents by file name.
@@ -33,8 +32,11 @@ fn cases() -> Vec<(&'static str, String, bool)> {
         ("null_quoted", "'null'"),
         ("null_required", "'null(required)'"),
     ] {
+        // `required` asks only that the key be written; a written `null`
+        // meets it.
+        let required = declaration.contains("required");
         cases.push((leak(format!("{stem}_null.md")), single(declaration, "p: null\n"), true));
-        cases.push((leak(format!("{stem}_omitted.md")), single(declaration, ""), true));
+        cases.push((leak(format!("{stem}_omitted.md")), single(declaration, ""), !required));
         cases.push((leak(format!("{stem}_text.md")), single(declaration, "p: text\n"), false));
         cases.push((leak(format!("{stem}_empty.md")), single(declaration, "p: ''\n"), false));
         cases.push((leak(format!("{stem}_list.md")), single(declaration, "p: []\n"), false));
@@ -52,7 +54,8 @@ fn cases() -> Vec<(&'static str, String, bool)> {
             ("number", "p: 3\n"),
             ("nested", "p:\n    a: [1, null, x]\n"),
         ] {
-            cases.push((leak(format!("{stem}_{value_stem}.md")), single(declaration, value), true));
+            let omitted_but_required = value_stem == "omitted" && declaration.contains("required");
+            cases.push((leak(format!("{stem}_{value_stem}.md")), single(declaration, value), !omitted_but_required));
         }
     }
     let both = "schema: spec.md\nreview: review.md\n";
@@ -68,18 +71,19 @@ fn cases() -> Vec<(&'static str, String, bool)> {
         ("xor_neither.md", XOR.to_string(), false),
         ("xor_both_null.md", format!("{XOR}schema: null\nreview: null\n"), false),
     ]);
-    // A required named type made optional by a `null` arm; its constraints
-    // still apply to non-null values.
+    // A required named type beside a `null` arm: the key must be written,
+    // `null` meets that, and the named type's constraints still apply to
+    // non-null values.
     let draft = "$schema:\n  code: 'string(required; min(3))'\n  draft: [code, null]\n  code_value: 'string'\ncode: abc\n";
     cases.extend([
-        ("draft_omitted.md", draft.to_string(), true),
+        ("draft_omitted.md", draft.to_string(), false),
         ("draft_null.md", format!("{draft}draft: null\n"), true),
         ("draft_valid.md", format!("{draft}draft: abcd\n"), true),
         ("draft_short.md", format!("{draft}draft: ab\n"), false),
     ]);
     let unknown_arm = "$schema:\n  p: ['string(required)', unknown]\n";
     cases.extend([
-        ("unknown_arm_omitted.md", unknown_arm.to_string(), true),
+        ("unknown_arm_omitted.md", unknown_arm.to_string(), false),
         ("unknown_arm_null.md", format!("{unknown_arm}p: null\n"), true),
     ]);
     // Item and child nullability leave the container required.

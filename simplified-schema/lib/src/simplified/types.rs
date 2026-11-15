@@ -186,27 +186,6 @@ impl PropertyDef {
         }
     }
 
-    /// Whether some atom carries the `non-null` marker.
-    pub fn marks_non_null(&self) -> bool {
-        match self {
-            Self::Single(atom) => atom.marks_non_null(),
-            Self::Union(atoms) => atoms.iter().any(PropertyAtom::marks_non_null),
-        }
-    }
-
-    /// The message of a `non-null` declared over a value that admits null
-    /// (`null | string(non-null)`, `unknown(non-null)`), if this definition
-    /// has one. Expects a definition whose references are resolved; an
-    /// unresolved reference never admits null, so the resolver repeats the
-    /// check after expansion.
-    pub fn non_null_problem(&self) -> Option<String> {
-        (self.marks_non_null() && self.admits_null()).then(|| {
-            "`non-null` cannot mark a type that admits null (`null`, `unknown`, or a union with \
-             such an alternative); drop `non-null` or the null-admitting alternative"
-                .to_string()
-        })
-    }
-
     /// Whether any atom supplies a property default.
     ///
     /// Valid union defaults are identical and collapse to one value during
@@ -221,9 +200,9 @@ impl PropertyDef {
 
     /// Checks the invariants of this definition's options that the parser
     /// checks for an authored definition: at most one `suggest`, distinct
-    /// `function` overloads, valid `narrows` clauses, and no `non-null` over
-    /// a value that admits null. Template-type resolution repeats them on a
-    /// definition a returned type was substituted into.
+    /// `function` overloads, and valid `narrows` clauses. Template-type
+    /// resolution repeats them on a definition a returned type was
+    /// substituted into.
     ///
     /// ## Errors
     ///
@@ -234,7 +213,7 @@ impl PropertyDef {
             Self::Single(atom) => std::slice::from_ref(atom),
             Self::Union(atoms) => atoms.as_slice(),
         };
-        match super::grammar::union_invariant_problem(arms, true) {
+        match super::grammar::union_invariant_problem(arms) {
             Some(problem) => Err(problem.into_error(property)),
             None => Ok(()),
         }
@@ -855,16 +834,6 @@ impl PropertyAtom {
                 .is_some_and(|arms| arms.iter().any(PropertyAtom::marks_required))
     }
 
-    /// Whether this atom carries a `non-null` marker in either constraint
-    /// list, or on a union type's arms.
-    pub fn marks_non_null(&self) -> bool {
-        self.property_constraints()
-            .any(|constraint| matches!(constraint, Constraint::NonNull))
-            || self
-                .union_arms()
-                .is_some_and(|arms| arms.iter().any(PropertyAtom::marks_non_null))
-    }
-
     /// Whether this atom's whole value admits null: a non-array `null` or
     /// `unknown`, or a non-array union type with such an arm.
     pub fn admits_null(&self) -> bool {
@@ -1106,13 +1075,6 @@ pub enum Constraint {
     /// The property must be present.
     Required,
 
-    /// `non-null`: the property may be omitted, but a present value is never
-    /// `null`. A presence marker like [`Constraint::Required`], read from
-    /// either constraint list. Declaring it on a type whose whole value
-    /// admits null (`null`, `unknown`, or a union with such an alternative)
-    /// is a schema error.
-    NonNull,
-
     /// Default value (emitted as JSON Schema `default`).
     Default(serde_json::Value),
 
@@ -1149,7 +1111,12 @@ pub enum Constraint {
     /// Maximum length in Unicode code points.
     MaxLen(usize),
 
-    /// Disallow empty/whitespace-only strings.
+    /// `not-empty`: a written value must have content. Rejects `""` and
+    /// whitespace-only text (strings, `yaml`, `json`, and declaration text),
+    /// `[]` (lists, the same bound as `min(1)`), and `{}` (objects and
+    /// mappings). It never rejects `null`: an optional property's `null` is
+    /// unset. A schema error on `number`, `boolean`, `null`, and `unknown`,
+    /// which have no "empty".
     NotEmpty,
 
     /// ECMA-262 regex the value must match.
@@ -1425,7 +1392,6 @@ impl Constraint {
     pub fn keyword(&self) -> &'static str {
         match self {
             Constraint::Required => "required",
-            Constraint::NonNull => "non-null",
             Constraint::Default(_) => "default",
             Constraint::Generated => "generated",
             Constraint::Deferred => "deferred",

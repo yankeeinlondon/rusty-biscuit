@@ -30,9 +30,11 @@
 //! which skips admission and reads metadata from the host's accepted copy:
 //! the selected definition is then the only judge of the file's shape.
 //!
-//! Only a document with a `$schema` property exports document properties
+//! Only a document with a non-null `$schema` exports document properties
 //! ([`StandaloneSchemaDocument::exports_schema`]); a tagged `types`-only
-//! document is a valid envelope that serves named-type imports alone.
+//! document, or one whose `$schema` is `null`, is a valid envelope that
+//! serves named-type imports alone. A null optional carrier or metadata
+//! field is read as absent.
 //!
 //! A separate `types` mapping supplies local names and named imports without
 //! adding document properties. Otherwise mapping payload entries serve both
@@ -135,12 +137,12 @@ pub struct StandaloneSchemaDocument {
     pub path: PathBuf,
     /// Content envelope that claimed the document.
     pub envelope: StandaloneSchemaEnvelope,
-    /// Whether the document has a `$schema` property, and so can be the
-    /// target of a document's `$schema`. A `types`-only document serves
-    /// named-type imports only.
+    /// Whether the document has a usable `$schema` export (present and not
+    /// `null`), and so can be the target of a document's `$schema`. A
+    /// `types`-only document, including one whose `$schema` is `null`,
+    /// serves named-type imports only.
     pub exports_schema: bool,
-    /// The top-level `description` string, `None` when absent. An empty
-    /// string is kept as `Some("")`.
+    /// The top-level `description` string, `None` when absent or `null`.
     pub description: Option<String>,
     /// The shared declaration product for the envelope payload: an inline
     /// schema (mapping or root-union sequence) or a syntax-checked whole-file
@@ -343,15 +345,15 @@ fn parse_standalone(
     };
     let envelope = recognized.envelope;
     let payload_key = recognized.payload_key();
-    let map = recognized.mapping();
     let Some(payload) = recognized.payload() else {
-        return Err(schema_document_error(path, "the envelope has neither `$schema` nor `types`"));
+        return Err(schema_document_error(path, "the envelope has neither a `$schema` nor a `types` value"));
     };
     let description = metadata.get("description").and_then(serde_json::Value::as_str).map(str::to_string);
     let mut parsed = parse_standalone_schema_payload_with_source(payload, source, payload_key)
         .map_err(|failure| failure.into_document_error(path, "invalid SimplifiedSchema payload"))?;
     let local = if payload_key == "$schema" {
-        map.get("types")
+        recognized
+            .local_types()
             .map(|value| parse_standalone_schema_payload_with_source(value, source, "types"))
             .transpose()
             .map_err(|failure| failure.into_document_error(path, "invalid named types"))?
@@ -418,23 +420,32 @@ pub(crate) struct RecognizedStandalone {
 }
 
 impl RecognizedStandalone {
-    /// The envelope key holding the payload.
+    /// The envelope key holding the payload: `$schema` when it carries a
+    /// value, `types` otherwise. A null carrier is an absent one, so a
+    /// tagged `$schema: null` beside a `types` table reads as `types`-only.
     pub(super) fn payload_key(&self) -> &'static str {
-        if self.mapping().contains_key("$schema") { "$schema" } else { "types" }
+        if self.carrier("$schema").is_some() { "$schema" } else { "types" }
     }
 
     pub(crate) fn mapping(&self) -> &serde_yaml_ng::Mapping {
         self.document.as_mapping().expect("recognition requires a mapping document")
     }
 
-    /// The payload value; `None` for an envelope with neither `$schema` nor
-    /// `types`, which admission rejects.
+    /// The payload value; `None` for an envelope with no usable `$schema`
+    /// or `types` carrier, which admission rejects.
     pub(super) fn payload(&self) -> Option<&YamlValue> {
-        self.mapping().get(self.payload_key())
+        self.carrier(self.payload_key())
     }
 
+    /// The named types beside an exported `$schema`; a null `types` is
+    /// absent.
     pub(super) fn local_types(&self) -> Option<&YamlValue> {
-        (self.payload_key() == "$schema").then(|| self.mapping().get("types")).flatten()
+        (self.payload_key() == "$schema").then(|| self.carrier("types")).flatten()
+    }
+
+    /// The value of carrier `key`, unless it is missing or null.
+    fn carrier(&self, key: &str) -> Option<&YamlValue> {
+        self.mapping().get(key).filter(|value| !value.is_null())
     }
 }
 
@@ -469,7 +480,9 @@ pub(crate) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
     let envelope = match map.get("kind").and_then(YamlValue::as_str) {
         Some("schema") => StandaloneSchemaEnvelope::Tagged,
         Some("yaml-schema") => StandaloneSchemaEnvelope::YamlSchema,
-        _ if map.contains_key("$schema")
+        // An informal document is claimed only by a usable `$schema`; with a
+        // null one it is ordinary YAML, as with none.
+        _ if map.get("$schema").is_some_and(|value| !value.is_null())
             && map
                 .keys()
                 .all(|key| key.as_str().is_some_and(|key| StandaloneSchemaEnvelope::Pure.admits_top_level_key(key))) =>
@@ -511,7 +524,7 @@ pub(crate) fn claims_yaml_schema(source: &str) -> bool {
 /// 2. Otherwise a payload definition the parser rejects: it fails the
 ///    definition's `schema` check too, and the parser's error locates the
 ///    rejected token inside the type string.
-/// 3. Otherwise the payload carrier's own problem (`types: null`,
+/// 3. Otherwise the payload carrier's own problem (`types: {}`,
 ///    `types: [a, b]`).
 fn rejected_envelope(
     recognized: &RecognizedStandalone,
@@ -524,7 +537,7 @@ fn rejected_envelope(
     }
     let map = recognized.mapping();
     for key in ["$schema", "types"] {
-        if let Some(value) = map.get(key)
+        if let Some(value) = map.get(key).filter(|value| !value.is_null())
             // A `types` that is not a mapping is wrong as a whole; its
             // entries are not definitions to blame.
             && (key != "types" || value.is_mapping())

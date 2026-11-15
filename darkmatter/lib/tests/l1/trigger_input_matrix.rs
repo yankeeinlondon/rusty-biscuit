@@ -355,7 +355,7 @@ matrix! {
     // ── $schema payload ──────────────────────────────────────────────────
     payload_control: Payload / Control => Edit::None, Expect::Loads(CONTROL_SELECTED, Payload::Applied);
     payload_absent: Payload / Absent => Edit::Replace("$schema: claudine.yaml\n", ""), Expect::Loads(CONTROL_SELECTED, Payload::Nothing);
-    payload_null: Payload / Null => Edit::Replace("$schema: claudine.yaml\n", "$schema: null\n"), Expect::Fails(&["`$schema`", "explicit null"]);
+    payload_null: Payload / Null => Edit::Replace("$schema: claudine.yaml\n", "$schema: null\n"), Expect::Loads(CONTROL_SELECTED, Payload::Nothing);
     payload_wrong_type: Payload / WrongType => Edit::Replace("$schema: claudine.yaml\n", "$schema: 42\n"), Expect::Fails(&["`$schema`", "got number"]);
     payload_one_wrong: Payload / OneWrong => Edit::Replace("$schema: claudine.yaml\n", "$schema:\n  provider: string(required)\n  region: 42\n"), Expect::Fails(&["region"]);
     payload_every_wrong: Payload / EveryWrong => Edit::Replace("$schema: claudine.yaml\n", "$schema:\n  provider: 42\n  region: true\n"), Expect::Fails(&["provider"]);
@@ -465,7 +465,7 @@ matrix! {
 const TABLE: &[(Shape, [&str; 11])] = &[
     (Shape::Control, ["schema-trigger discovered", "selects expected docs", "applies expected payload", "OR selection", "AND selection", "exclusion selection", "threshold selection", "threshold changes selection", "candidates change selection", "path selects docs", "type/presence selects docs"]),
     (Shape::Absent, ["non-trigger classification", "E", "matcher-only trigger, no payload", "no group node", "no all node", "no none node", "no threshold node", "E", "E", "no path predicate", "no property predicate"]),
-    (Shape::Null, ["E", "E", "E", "E", "E", "E", "E", "E", "E", "E", "E"]),
+    (Shape::Null, ["E", "E", "matcher-only trigger, no payload (null is absent)", "E", "E", "E", "E", "E", "E", "E", "E"]),
     (Shape::WrongType, ["E", "E", "E", "E", "E", "E", "E", "E", "E", "E", "E"]),
     (Shape::OneWrong, ["N/A", "E", "E", "E", "E", "E", "E", "N/A", "E", "E", "E"]),
     (Shape::EveryWrong, ["N/A", "E", "E", "E", "E", "E", "E", "N/A", "E", "E", "E"]),

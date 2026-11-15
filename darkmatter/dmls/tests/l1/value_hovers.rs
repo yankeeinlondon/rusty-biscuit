@@ -250,7 +250,7 @@ fn a_nonblank_description_leads_and_comments_never_do() {
     let cases = [
         ("tagged", "kind: schema\ndescription: Tagged *reviews*.\n$schema:\n  a: string\n", Some("Tagged *reviews*.")),
         ("informal", "description: |\n  Informal reviews.\n$schema:\n  a: string\n", Some("Informal reviews.")),
-        ("blank", "description: \"  \"\n$schema:\n  a: string\n", None),
+        ("null", "description: null\n$schema:\n  a: string\n", None),
         ("absent", "$schema:\n  a: string\n", None),
         ("comment", "# Only a comment.\n$schema:\n  a: string\n", None),
     ];

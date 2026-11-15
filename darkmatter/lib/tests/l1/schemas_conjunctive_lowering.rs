@@ -295,7 +295,9 @@ fn block_generated_defers_presence_in_authored_validation_like_the_postfix() {
 
 #[test]
 fn block_keys_with_no_object_meaning_are_errors() {
-    for key in ["not-empty: true", "unique: true", "integer: true", "min-items: 1", "max-items: 1"] {
+    // `not-empty` has object meaning (`minProperties: 1`), on a nested
+    // object and on the root alike.
+    for key in ["unique: true", "integer: true", "min-items: 1", "max-items: 1"] {
         let name = key.split(':').next().unwrap();
         let message = convert_error(&format!("meta:\n  a: string\n  $constraints:\n    {key}\n"));
         assert!(
@@ -303,7 +305,7 @@ fn block_keys_with_no_object_meaning_are_errors() {
             "{key}: {message}"
         );
     }
-    for key in ["required", "generated", "not-empty"] {
+    for key in ["required", "generated"] {
         let message = convert_error(&format!("a: string\n$constraints:\n  {key}: true\n"));
         assert!(
             message.contains(&format!("`$constraints` key `{key}` is not valid on the root object")),

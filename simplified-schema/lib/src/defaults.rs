@@ -12,8 +12,8 @@
 //! - Only a key listed in its object's `required` whose property schema has a
 //!   `default` (directly, or on the local `$ref` target it names) is filled,
 //!   and only when the key is absent. An explicit `null` is present and is
-//!   judged by the declared type. A null-admitting or optional property is
-//!   never listed in `required`, so its default stays an annotation.
+//!   judged by the declared type. An optional property is never listed in
+//!   `required`, so its default stays an annotation.
 //! - A child is filled only inside a parent that exists. A parent filled from
 //!   its own default is not descended into: its default was validated
 //!   against the complete contract, nested required children included.

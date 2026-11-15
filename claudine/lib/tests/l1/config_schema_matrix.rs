@@ -231,10 +231,9 @@ fn shared_validators_take_the_full_shape_walk() {
     }
     // Mapping: an empty one is explicit.
     assert!(loads("mapping empty", &edited(&user_control(), "/default_sounds", Some(json!({})))).default_sounds.success.is_none());
-    // Sequence (`action[]`): empty is explicit, never absent.
+    // Sequence (`action[](not-empty)`): an empty event list is refused.
     let at = "/actions/session_start";
-    let empty = loads("sequence empty", &edited(&user_control(), at, Some(json!([]))));
-    assert_eq!(empty.actions[&claudine::events::AgenticEvent::SessionStart].len(), 0);
+    rejected("sequence empty", at, Some(json!([])));
     rejected("sequence null", at, Some(Value::Null));
     rejected("sequence wrong type", at, Some(json!({})));
     rejected("sequence one wrong element", "/actions/session_start/1", Some(json!(5)));

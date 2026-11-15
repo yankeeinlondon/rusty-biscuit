@@ -353,7 +353,7 @@ fn a_modified_copy_at_the_shipped_path_replaces_the_built_in_definition() {
 
     // The copy edited to require `$schema`: the same trigger now fails, at
     // its root mapping, with no Rust change.
-    let edited = include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml").replace("schema(non-null)", "schema(required; non-null)");
+    let edited = include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml").replace("schema(not-empty)", "schema(required; not-empty)");
     assert_ne!(edited, include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml"), "the edit applies");
     write(&copy, &edited);
     let validation = validated(validate(trigger));
@@ -400,7 +400,7 @@ fn an_unsaved_copy_at_the_shipped_path_replaces_the_built_in_definition() {
     std::fs::create_dir_all(&folder).unwrap();
     let copy = folder.join("schema-trigger.yaml");
     assert!(!copy.exists(), "the copy exists only in the editor");
-    let edited = include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml").replace("schema(non-null)", "schema(required; non-null)");
+    let edited = include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml").replace("schema(not-empty)", "schema(required; not-empty)");
     let mut buffers = SourceBuffers::default();
     buffers.insert(&copy, Arc::from(edited.as_str()));
 

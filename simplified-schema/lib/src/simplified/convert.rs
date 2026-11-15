@@ -871,16 +871,11 @@ fn union_property_to_schema(
     // The optional-`file` empty-string arm is allowed only when the union
     // itself is optional.
     let (mut any_of, hoisted_default) = union_arm_fragments(name, arms, !required, defs)?;
-    // A union with a `null` or `unknown` arm already accepts null, and a
-    // `non-null` union must reject it while staying optional, so neither gets
-    // an extra `null` arm. Otherwise the null arm leads the one flat
+    // A union with a `null` or `unknown` arm already accepts null, so it
+    // gets no extra `null` arm. Otherwise the null arm leads the one flat
     // `anyOf: [null, arm1, arm2, ...]` rather than nesting the whole union
     // under a second anyOf wrapper.
-    let non_null = container.map_or_else(
-        || arms.iter().any(PropertyAtom::marks_non_null),
-        PropertyAtom::marks_non_null,
-    );
-    if !(required || admits_null || non_null) {
+    if !(required || admits_null) {
         any_of.insert(0, json!({ "type": "null" }));
     }
 
@@ -998,15 +993,6 @@ fn atom_to_schema(
         // so a present, wrongly-typed host-supplied value still fails type
         // validation (point 3).
         return Ok((fragment, !generated));
-    }
-
-    // `non-null` leaves the property optional but omits the `null` arm, so an
-    // explicit `null` fails as a wrong type while an absent key passes. Every
-    // fragment that reaches here carries a type that excludes null: the
-    // null-admitting types (`null`, `unknown`, a union with such an arm) are
-    // declaration errors under `non-null`, and so is a reference to one.
-    if atom.marks_non_null() {
-        return Ok((fragment, false));
     }
 
     // Pull annotations off the fragment so they land on the outer wrapper,
@@ -1139,15 +1125,15 @@ fn atom_fragment_without_null_wrap(
         }
     }
 
-    // `category(...)`, `operands(...)`, and `deferred` are annotations, and
-    // `non-null` is a presence marker, not constraints any type builder checks.
+    // `category(...)`, `operands(...)`, and `deferred` are annotations, not
+    // constraints any type builder checks.
     let value_constraints: Vec<Constraint> = atom
         .constraints
         .iter()
         .filter(|constraint| {
             !matches!(
                 constraint,
-                Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred | Constraint::NonNull
+                Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred
             )
         })
         .cloned()
@@ -1402,6 +1388,7 @@ fn inline_object_fragment(
             | Constraint::Generated
             | Constraint::Example(_)
             | Constraint::Eager
+            | Constraint::NotEmpty
             | Constraint::MinKeys(_)
             | Constraint::MaxKeys(_)
             | Constraint::UncountedKeys(_) => {}
@@ -1435,7 +1422,7 @@ enum ObjectScope {
 
 /// Rejects `$constraints` keys that have no meaning on the block's object.
 /// The block parser accepts every key the grammar knows; only `min-keys`,
-/// `max-keys`, `uncounted-keys`, and `closed` lower here. `closed` is a no-op
+/// `max-keys`, `uncounted-keys`, `not-empty`, and `closed` lower here. `closed` is a no-op
 /// on an inline object, which is closed already.
 fn reject_block_constraints(
     name: &str,
@@ -1445,7 +1432,11 @@ fn reject_block_constraints(
     for c in &shape.constraints {
         if !matches!(
             c,
-            Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_) | Constraint::Closed
+            Constraint::MinKeys(_)
+                | Constraint::MaxKeys(_)
+                | Constraint::UncountedKeys(_)
+                | Constraint::NotEmpty
+                | Constraint::Closed
         ) {
             let place = match scope {
                 ObjectScope::Inline => "an inline object",
@@ -1702,6 +1693,8 @@ fn apply_object_arity<'c>(
     for c in constraints {
         match c {
             Constraint::MinKeys(n) => keys.lower(*n, c),
+            // `not-empty` on an object or mapping is `min-keys(1)`.
+            Constraint::NotEmpty => keys.lower(1, c),
             Constraint::MaxKeys(n) => keys.upper(*n, c),
             Constraint::UncountedKeys(names) => {
                 for key in names {
@@ -1870,7 +1863,6 @@ fn apply_array_constraints(
     for c in constraints {
         match c {
             Constraint::Required
-            | Constraint::NonNull
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Example(_)
@@ -1882,6 +1874,8 @@ fn apply_array_constraints(
                 // `deferred`) marked on the list by the atom's lowering.
             }
             Constraint::MinItems(n) => items.lower(*n, c),
+            // `not-empty` on a list is `min(1)`: one merged lower bound.
+            Constraint::NotEmpty => items.lower(1, c),
             Constraint::MaxItems(n) => items.upper(*n, c),
             Constraint::Unique => {
                 arr.insert("uniqueItems".into(), Value::Bool(true));
@@ -1938,7 +1932,7 @@ fn type_fragment(
         SimplifiedType::NumberLike => numberlike_fragment(name, constraints),
         SimplifiedType::Boolean => simple_typed_fragment(name, "boolean", constraints),
         SimplifiedType::Boolish => boolish_fragment(name, constraints),
-        SimplifiedType::Object => simple_typed_fragment(name, "object", constraints),
+        SimplifiedType::Object => object_fragment(name, constraints),
         SimplifiedType::File => file_fragment(name, constraints, matching),
         SimplifiedType::Enum => enum_fragment(name, constraints),
         SimplifiedType::Url => url_fragment(name, constraints),
@@ -2015,7 +2009,7 @@ fn string_fragment_with_base(
                 // only Feature C pattern-key literal precedence opts a schema
                 // into `fancy-regex` — so the previous `^(?!\s*$).+` form (which
                 // the linear engine rejects) is not portable and `\S` is used.
-                push_unique(&mut patterns, r"\S");
+                push_unique(&mut patterns, NOT_EMPTY_TEXT_PATTERN);
             }
             Constraint::Pattern(p) => push_unique(&mut patterns, p),
             other => return Err(invalid_constraint(name, type_label, other)),
@@ -2258,8 +2252,36 @@ fn content_format_fragment(
     format: &str,
     constraints: &[Constraint],
 ) -> Result<Value, SchemaError> {
-    reject_unsupported(name, type_label, constraints, &[])?;
-    Ok(json!({ "type": "string", "format": format }))
+    let (not_empty, rest) = split_not_empty(constraints);
+    reject_unsupported(name, type_label, &rest, &[])?;
+    let mut fragment = json!({ "type": "string", "format": format });
+    if not_empty {
+        fragment["pattern"] = json!(NOT_EMPTY_TEXT_PATTERN);
+    }
+    Ok(fragment)
+}
+
+/// An `object` fragment; `not-empty` lowers to `minProperties: 1`.
+fn object_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    let (not_empty, rest) = split_not_empty(constraints);
+    reject_unsupported(name, "object", &rest, &[])?;
+    let mut fragment = json!({ "type": "object" });
+    if not_empty {
+        fragment["minProperties"] = json!(1);
+    }
+    Ok(fragment)
+}
+
+/// The pattern `not-empty` lowers to on text: at least one non-whitespace
+/// character. Lookaround-free, so the schema stays on jsonschema's linear
+/// (ReDoS-safe) `regex` engine.
+const NOT_EMPTY_TEXT_PATTERN: &str = r"\S";
+
+/// Whether `constraints` holds `not-empty`, and the rest of them.
+fn split_not_empty(constraints: &[Constraint]) -> (bool, Vec<Constraint>) {
+    let not_empty = constraints.contains(&Constraint::NotEmpty);
+    let rest = constraints.iter().filter(|constraint| **constraint != Constraint::NotEmpty).cloned().collect();
+    (not_empty, rest)
 }
 
 /// Lowers a `literal(value)` atom to a JSON Schema `const` fragment.
@@ -2334,9 +2356,23 @@ fn semantic_type_fragment(
     let (options, rest): (Vec<&Constraint>, Vec<&Constraint>) =
         constraints.iter().partition(|constraint| is_declaration_option(constraint));
     let rest: Vec<Constraint> = rest.into_iter().cloned().collect();
+    let (not_empty, rest) = split_not_empty(&rest);
     reject_unsupported(name, type_label, &rest, &[])?;
     let mut fragment = Map::new();
     fragment.insert("type".into(), json!(["string", "object", "array"]));
+    // `not-empty` on a declaration: reference text must have content, an
+    // inline mapping at least one key, and a union list at least one arm.
+    // Each keyword applies only to its own JSON type. Under `mapping` the
+    // declaration keyword already refuses text and lists, so only the key
+    // count is added and a list is reported once.
+    if not_empty {
+        let mapping_only = options.iter().any(|option| matches!(option, Constraint::Mapping));
+        if !mapping_only {
+            fragment.insert("pattern".into(), json!(NOT_EMPTY_TEXT_PATTERN));
+            fragment.insert("minItems".into(), json!(1));
+        }
+        fragment.insert("minProperties".into(), json!(1));
+    }
     fragment.insert(keyword.into(), options_payload(name, &options)?);
     Ok(Value::Object(fragment))
 }
@@ -2615,10 +2651,14 @@ fn reject_unsupported(
 }
 
 fn invalid_constraint(property: &str, ty: &str, c: &Constraint) -> SchemaError {
-    SchemaError::Convert {
-        property: property.to_string(),
-        message: format!("constraint `{}` is not valid on `{ty}`", c.keyword()),
-    }
+    let message = match c {
+        Constraint::NotEmpty => format!(
+            "constraint `not-empty` is not valid on `{ty}`: \"empty\" has no meaning for this type \
+             (`not-empty` applies to text, lists, and mappings)"
+        ),
+        other => format!("constraint `{}` is not valid on `{ty}`", other.keyword()),
+    };
+    SchemaError::Convert { property: property.to_string(), message }
 }
 
 /// Emits a JSON number in its exact form: an integral value as a JSON
@@ -3569,43 +3609,55 @@ config: "{ host: string }(required)"
     }
 
     #[test]
-    fn unknown_accepts_null_and_omission_whatever_its_presence_marker() {
-        // `required` has no effect on `unknown`/`any`: absence, null, and
-        // every native value validate, and the key never enters `required`.
-        for declaration in ["opt: any", "opt: unknown", "opt: 'any(required)'", "opt: 'unknown(required)'"] {
+    fn unknown_accepts_null_and_every_value_and_required_demands_the_key() {
+        // `unknown`/`any` accept null and every native value; `required`
+        // only demands that the key be written.
+        for (declaration, required) in [
+            ("opt: any", false),
+            ("opt: unknown", false),
+            ("opt: 'any(required)'", true),
+            ("opt: 'unknown(required)'", true),
+        ] {
             let schema = convert(declaration);
             assert_eq!(schema["properties"]["opt"], json!({}), "{declaration}");
-            assert!(schema.get("required").is_none(), "{declaration}");
+            assert_eq!(schema.get("required").is_some(), required, "{declaration}");
             let v = crate::validate::build_structural_validator(&schema).unwrap();
-            assert!(v.is_valid(&json!({})), "{declaration}: absent");
+            assert_eq!(v.is_valid(&json!({})), !required, "{declaration}: absent");
             assert!(v.is_valid(&json!({ "opt": null })), "{declaration}: null");
             assert!(v.is_valid(&json!({ "opt": { "nested": [1, null, "x"] } })), "{declaration}");
         }
     }
 
     #[test]
-    fn null_admitting_properties_lower_bare_and_never_enter_required() {
-        for (declaration, expected) in [
-            ("p: 'null'", json!({ "type": "null" })),
-            ("p: 'null(required)'", json!({ "type": "null" })),
-            ("p: 'null(eager; required)'", json!({ "type": "null" })),
-            ("p: 'unknown(generated; required)'", json!({ "x-darkmatter-generated": true })),
+    fn null_admitting_properties_lower_bare_and_enter_required_when_marked() {
+        for (declaration, expected, listed) in [
+            ("p: 'null'", json!({ "type": "null" }), false),
+            ("p: 'null(required)'", json!({ "type": "null" }), true),
+            ("p: 'null(eager; required)'", json!({ "type": "null" }), true),
+            ("p: 'unknown(generated; required)'", json!({ "x-darkmatter-generated": true }), false),
         ] {
             let schema = convert(declaration);
             assert_eq!(schema["properties"]["p"], expected, "{declaration}");
-            assert!(schema.get("required").is_none(), "{declaration}");
+            assert_eq!(schema.get("required") == Some(&json!(["p"])), listed, "{declaration}");
         }
 
-        // A union with a null arm is optional and gains no second null arm;
-        // constraints on its other arms still apply to non-null values.
+        // A union with a null arm keeps a hoisted `required` and gains no
+        // second null arm; constraints on its other arms still apply to
+        // non-null values, and a written `null` meets presence.
         let schema = convert("p:\n  - 'string(required; min(3))'\n  - 'null'");
-        assert!(schema.get("required").is_none());
+        assert_eq!(schema["required"], json!(["p"]));
         assert_eq!(schema["properties"]["p"]["anyOf"].as_array().unwrap().len(), 2);
         let v = crate::validate::build_structural_validator(&schema).unwrap();
-        assert!(v.is_valid(&json!({})));
+        assert!(!v.is_valid(&json!({})), "absent");
         assert!(v.is_valid(&json!({ "p": null })));
         assert!(v.is_valid(&json!({ "p": "abc" })));
         assert!(!v.is_valid(&json!({ "p": "ab" })));
+
+        // Without a marker the same union stays optional.
+        let schema = convert("p:\n  - 'string(min(3))'\n  - 'null'");
+        assert!(schema.get("required").is_none());
+        let v = crate::validate::build_structural_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({})));
 
         // Item and child nullability leave the container required.
         for declaration in ["p: 'null[](required)'", "p: 'unknown[](required)'", "p: '{ c: null }(required)'"] {
@@ -4481,7 +4533,8 @@ mod repeated_constraints {
 
     #[test]
     fn block_keys_without_object_meaning_are_rejected() {
-        for key in ["not-empty", "unique", "integer"] {
+        // `not-empty` has object meaning (`minProperties: 1`); these do not.
+        for key in ["unique", "integer"] {
             let err = schema(&format!("p:\n  a: string\n  $constraints:\n    {key}: true\n")).unwrap_err();
             assert!(
                 err.to_string().contains(&format!("`$constraints` key `{key}` is not valid on an inline object")),

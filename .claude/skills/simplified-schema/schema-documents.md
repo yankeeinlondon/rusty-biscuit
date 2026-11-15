@@ -25,11 +25,13 @@ before their payload is read: `envelope.rs` soft-validates each against the
 compiled `simplified-schema/schemas/schema.yaml` / `yaml-schema.yaml`
 (`envelope::ENVELOPE_DEFINITIONS`, `admit_envelope_text`). Those files are the
 only authority for envelope structure (closed keys, `$schema` or `types`,
-`types` a mapping, non-null metadata); never add a structural check to
+`types` a mapping, `not-empty` metadata); never add a structural check to
 `standalone.rs` (`shipped_corpus.rs` guards it). Rust keeps only category
 grammar, duplicate/undeclared categories, and duplicate overloads. Metadata
 is read from the converted copy (`description: 123` → `"123"`); `$schema` /
-`types` carriers are never converted. Report order: envelope problem, then a
+`types` carriers are never converted, and a null carrier is absent
+(`RecognizedStandalone::{payload_key, payload, local_types}`: a tagged
+`$schema: null` beside `types` is a `types`-only document). Report order: envelope problem, then a
 parser-located definition failure inside a carrier, then the carrier shape
 (`standalone.rs::rejected_envelope`; `locate_standalone_definition_failure`
 returns `None` when the envelope itself is malformed). The definitions

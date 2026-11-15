@@ -58,6 +58,10 @@ fn semantic_types_accept_only_definition_level_constraints() {
             parse(&format!("{semantic_type}{suffix}"));
         }
         parse(&format!("{semantic_type}[](min(1); max(2); unique)"));
+        // A declaration has an "empty" (blank text, `{}`, `[]`), and so does
+        // a list of them.
+        parse(&format!("{semantic_type}(not-empty)"));
+        parse(&format!("{semantic_type}[](not-empty)"));
 
         for invalid in [
             "min(1)",
@@ -68,7 +72,6 @@ fn semantic_types_accept_only_definition_level_constraints() {
             "match(src/**)",
             "scheme(https)",
             "integer",
-            "not-empty",
             "unique",
             "min-keys(1)",
             "max-keys(2)",
@@ -114,7 +117,7 @@ fn semantic_type_descriptors_are_authoritative() {
             .find(|descriptor| descriptor.keyword == keyword)
             .unwrap_or_else(|| panic!("missing descriptor for {keyword}"));
         let expected: Vec<&str> =
-            options.iter().copied().chain(["default", "required", "non-null", "generated", "deferred"]).collect();
+            options.iter().copied().chain(["not-empty", "default", "required", "generated", "deferred"]).collect();
         assert_eq!(descriptor.accepted_constraints, expected);
         let description = descriptor.description.to_ascii_lowercase();
         for required in ["string", "mapping", "sequence", "parse-only", "dmls"] {

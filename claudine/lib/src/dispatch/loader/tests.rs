@@ -924,12 +924,10 @@ fn tts_config_input_robustness_matrix() {
         "provider wrong type",
         r#"tts: { provider: 1, voice: "af_heart" }"#,
     );
-    // An empty name loads as before; playback treats it as an unknown
-    // provider and falls back to automatic selection.
-    assert_tts_cell(
+    // `provider: string(not-empty)`: an empty name is refused.
+    assert_tts_cell_rejected(
         "provider empty",
         r#"tts: { provider: "", voice: "af_heart" }"#,
-        bridged(Some(""), Some("af_heart"), true),
     );
     assert_tts_cell_rejected(
         "provider duplicate key",

@@ -1,9 +1,9 @@
-//! One presence calculation across every surface (acceptance criteria 3 and
-//! 12 of `2026-10-16-core-schema-types`): ordinary validation,
-//! launch/completion phase validation, trigger matching, and composition's
-//! optional-property materialization agree that a null-admitting whole value
-//! is never required, while arrays of nullable items, objects with nullable
-//! children, and ordinary concrete types keep their authored presence.
+//! One presence calculation across every surface: ordinary validation,
+//! launch/completion phase validation, trigger matching, and composition
+//! agree that `required` asks only whether the key was written. A
+//! null-admitting type accepts a written `null` but never cancels
+//! `required`, and a phase projection that relaxes presence keeps the
+//! declared value type.
 
 use std::path::Path;
 
@@ -37,19 +37,22 @@ fn surfaces(schema: &EffectiveSchema, instance: &Value) -> [bool; 3] {
 const OPTIONAL_EVERYWHERE: [bool; 3] = [true, true, true];
 
 #[test]
-fn null_admitting_whole_values_are_optional_at_every_phase_whatever_their_markers() {
-    for declaration in [
-        "'null(required)'",
-        "'null(eager; required)'",
-        "'null(generated; required)'",
-        "'unknown(required)'",
-        "'any(eager; required)'",
-        "'unknown(generated; required)'",
-        "['string(required; min(3))', 'null']",
-        "['string(eager; required)', unknown]",
+fn null_admitting_required_values_need_their_key_at_the_phases_that_demand_it() {
+    // `[ordinary, launch, completion]` for an omitted key: launch demands only
+    // an eager required property, completion every required one, and
+    // ordinary validation leaves a `generated` one to its host.
+    for (declaration, omitted) in [
+        ("'null(required)'", [false, true, false]),
+        ("'null(eager; required)'", [false, false, false]),
+        ("'null(generated; required)'", [true, true, false]),
+        ("'unknown(required)'", [false, true, false]),
+        ("'any(eager; required)'", [false, false, false]),
+        ("'unknown(generated; required)'", [true, true, false]),
+        ("['string(required; min(3))', 'null']", [false, true, false]),
+        ("['string(eager; required)', unknown]", [false, false, false]),
     ] {
         let schema = effective(&format!("  p: {declaration}\n"));
-        assert_eq!(surfaces(&schema, &json!({})), OPTIONAL_EVERYWHERE, "{declaration}: omitted");
+        assert_eq!(surfaces(&schema, &json!({})), omitted, "{declaration}: omitted");
         assert_eq!(surfaces(&schema, &json!({ "p": null })), OPTIONAL_EVERYWHERE, "{declaration}: null");
     }
 
@@ -60,25 +63,42 @@ fn null_admitting_whole_values_are_optional_at_every_phase_whatever_their_marker
 }
 
 #[test]
-fn inherited_and_postfixed_required_is_dropped_by_a_null_arm() {
+fn a_phase_that_relaxes_presence_keeps_the_declared_value_type() {
+    // Launch leaves a deferred required number unlisted, but a supplied
+    // `null` is still not a number, at the top level and inside an object.
+    let schema = effective("  n: 'number(required)'\n  o: \"{ m: number(required) }\"\n");
+    assert_eq!(surfaces(&schema, &json!({ "n": 1 })), OPTIONAL_EVERYWHERE);
+    assert_eq!(surfaces(&schema, &json!({})), [false, true, false], "omitted");
+    assert_eq!(surfaces(&schema, &json!({ "n": null })), [false; 3], "a null number");
+    assert_eq!(surfaces(&schema, &json!({ "n": 1, "o": {} })), [false, true, false], "an omitted child");
+    assert_eq!(surfaces(&schema, &json!({ "n": 1, "o": { "m": null } })), [false; 3], "a null child");
+    // A generated required string keeps its type whatever the phase.
+    let generated = effective("  g: 'string(generated; required)'\n");
+    assert_eq!(surfaces(&generated, &json!({ "g": null })), [false; 3]);
+}
+
+#[test]
+fn inherited_and_postfixed_required_survives_a_null_arm() {
     let schema = effective(
         "  person: \"{ name: string(required) }(required)\"\n  code: 'string(required; min(3))'\n  \
          choice: ['string(required)', 'null']\n  maybe_person: [person, null]\n  \
          maybe_code: [code, null]\n  postfixed: choice(eager)\n",
     );
-    let base = json!({ "person": { "name": "Ada" }, "code": "abc" });
+    let base = json!({
+        "person": { "name": "Ada" }, "code": "abc", "choice": null, "maybe_person": null, "maybe_code": null,
+        "postfixed": null,
+    });
     assert_eq!(surfaces(&schema, &base), OPTIONAL_EVERYWHERE);
-    for property in ["maybe_person", "maybe_code", "postfixed"] {
-        let mut with_null = base.clone();
-        with_null[property] = Value::Null;
-        assert_eq!(surfaces(&schema, &with_null), OPTIONAL_EVERYWHERE, "{property}: null");
+    for (property, omitted) in
+        [("maybe_person", [false, true, false]), ("maybe_code", [false, true, false]), ("postfixed", [false; 3])]
+    {
+        let mut without = base.clone();
+        without.as_object_mut().expect("an object").remove(property);
+        assert_eq!(surfaces(&schema, &without), omitted, "{property}: omitted");
     }
     let mut short = base.clone();
     short["maybe_code"] = json!("ab");
     assert!(!schema.validate(&short).valid, "the named arm keeps `min(3)`");
-
-    // The named types themselves stay required.
-    assert_eq!(surfaces(&schema, &json!({ "code": "abc" })), [false, true, false]);
 }
 
 #[test]
@@ -144,14 +164,17 @@ fn trigger_conditions_use_the_same_presence() {
     let selects = |condition: &str, frontmatter: Value| arms(condition).matches(&frontmatter, &PathSubject::detached());
 
     for condition in ["'unknown(required)'", "'null(required)'"] {
-        assert!(selects(condition, json!({ "kind": "t" })), "{condition}: omitted");
+        assert!(!selects(condition, json!({ "kind": "t" })), "{condition}: omitted");
         assert!(selects(condition, json!({ "kind": "t", "p": null })), "{condition}: null");
-        // Alone, the condition is a guard, so the arm would be vacuous.
-        let vacuous = parse_trigger_envelope_from_str(&format!(
+        // Alone, the condition is a gate (the key must be written).
+        let alone = parse_trigger_envelope_from_str(&format!(
             "kind: schema-trigger\nmatch:\n  - p: {condition}\n"
         ));
-        assert!(vacuous.is_err(), "{condition} alone is vacuous");
+        assert!(alone.is_ok(), "{condition} alone is a gate");
     }
+    // Without the marker the condition is a guard, vacuous alone.
+    let vacuous = parse_trigger_envelope_from_str("kind: schema-trigger\nmatch:\n  - p: unknown\n");
+    assert!(vacuous.is_err(), "an unmarked `unknown` alone is vacuous");
     assert!(!selects("'null(required)'", json!({ "kind": "t", "p": 1 })));
 
     let list = "'unknown[](required)'";
@@ -180,20 +203,23 @@ fn compose(dir: &Path, content: &str) -> Result<Markdown, String> {
 }
 
 #[test]
-fn composition_materializes_null_admitting_properties_and_requires_containers() {
+fn composition_requires_written_keys_for_null_admitting_required_properties() {
     let dir = TempDir::new().expect("tempdir");
+    let schema = "---\n$schema:\n  n: 'null(required)'\n  u: 'unknown(eager; required)'\n  \
+                  d: ['string(required)', 'null']\n";
     let composed = compose(
         dir.path(),
-        "---\n$schema:\n  n: 'null(required)'\n  u: 'unknown(eager; required)'\n  \
-         d: ['string(required)', 'null']\n  set: 'string(required)'\nset: x\n---\n\
-         {{ is_null(n) }} {{ is_null(u) }} {{ is_null(d) }}\n",
+        &format!("{schema}n: null\nu: null\nd: null\n---\n{{{{ is_null(n) }}}} {{{{ is_null(u) }}}} {{{{ is_null(d) }}}}\n"),
     )
-    .expect("composes");
+    .expect("written nulls compose");
     let frontmatter = composed.frontmatter().as_map();
     for name in ["n", "u", "d"] {
-        assert_eq!(frontmatter.get(name), Some(&Value::Null), "`{name}` is materialized as null");
+        assert_eq!(frontmatter.get(name), Some(&Value::Null), "`{name}` stays a written null");
     }
     assert_eq!(composed.content().trim_end(), "true true true");
+    let error = compose(dir.path(), &format!("{schema}n: null\nd: null\n---\nbody\n"))
+        .expect_err("an omitted required key fails");
+    assert!(error.contains("did not satisfy the schema"), "{error}");
 
     let list = "---\n$schema:\n  items: 'null[](required)'\n";
     compose(dir.path(), &format!("{list}items: [null]\n---\nbody\n")).expect("a list of nulls composes");

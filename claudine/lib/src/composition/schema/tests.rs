@@ -655,9 +655,11 @@ fn required_string_resolved_to_null_is_a_missing_property_for_direct_compose() {
 }
 
 #[test]
-fn required_expression_resolved_to_null_is_tolerated_at_inline_launch() {
-    // The same document under `inline-compose`: the agent supplies `design`,
-    // so launch proceeds and the launch report defers the property.
+fn required_expression_resolved_to_null_is_a_wrong_type_at_inline_launch() {
+    // The same document under `inline-compose`: launch does not demand the
+    // non-eager `design`, but the value it was given is still judged by its
+    // declared type, and `null` is not a string. (An omitted `design` is
+    // deferred; see `inline_launch_succeeds_with_required_non_eager_properties_absent`.)
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -672,14 +674,8 @@ fn required_expression_resolved_to_null_is_tolerated_at_inline_launch() {
         ),
     );
 
-    let prepared = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let launch = prepared.launch_schema.as_ref().expect("schema retained");
-    assert_eq!(launch.phase, Some(simplified_schema::SchemaPhase::Launch));
-    let report = launch.report.as_ref().expect("launch report retained");
-    let design = report.required.iter().find(|p| p.name == "design").unwrap();
-    assert_eq!(design.state, PropertyState::Deferred);
-    let prompt = report.required.iter().find(|p| p.name == "prompt").unwrap();
-    assert_eq!(prompt.state, PropertyState::Valid);
+    let error = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
+    assert!(error.to_string().contains("/design"), "{error}");
 }
 
 /// The voip.md shape as authored on 2026-09-05: `prompt` eager, the three
@@ -2605,7 +2601,7 @@ fn presence_and_timing_read_through_a_resolved_union_reference() {
 }
 
 #[test]
-fn null_admitting_whole_values_are_not_required() {
+fn null_admitting_required_values_are_required() {
     let dir = TempDir::new().unwrap();
     let schema = serde_json::json!({
         "nothing": "null(required)",
@@ -2613,6 +2609,7 @@ fn null_admitting_whole_values_are_not_required() {
         "maybe": ["string(required)", "null"],
         "nulls": "null[](required)",
         "concrete": "string(required)",
+        "optional": ["string", "null"],
     });
     let resolved = darkmatter::markdown::schemas::resolve::resolve_schema(
         &schema,
@@ -2624,10 +2621,8 @@ fn null_admitting_whole_values_are_not_required() {
     else {
         panic!("a single shape");
     };
-    for optional in ["nothing", "anything", "maybe"] {
-        assert!(!classify::is_required(Some(shape), optional), "{optional}");
-    }
-    for required in ["nulls", "concrete"] {
+    assert!(!classify::is_required(Some(shape), "optional"));
+    for required in ["nothing", "anything", "maybe", "nulls", "concrete"] {
         assert!(classify::is_required(Some(shape), required), "{required}");
     }
 }

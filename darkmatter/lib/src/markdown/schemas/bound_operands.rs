@@ -140,6 +140,17 @@ impl BoundOperands {
             if !site.forms.contains(&form) {
                 continue;
             }
+            // `edit: null` supplies no target. The schema's optional
+            // wrapper admits a null value, so the parser's refusal is
+            // reported here, where the two share one rule.
+            if site.verb == "edit" && value.is_null() {
+                bound.refused_targets.push(RefusedTarget {
+                    at: site.path.clone(),
+                    message: EDIT_WITHOUT_TARGET.to_string(),
+                    mistyped: true,
+                });
+                continue;
+            }
             if site.verb == "edit"
                 && let Some(location) = edit_target(form, value)
             {
@@ -333,6 +344,9 @@ fn collect_stored_data(arg: &Value, stored: &Value, data: &mut HashSet<*const Va
         _ => {}
     }
 }
+
+/// The problem for an `edit` action whose value is `null`.
+const EDIT_WITHOUT_TARGET: &str = "`edit` needs a target file; `null` names none";
 
 /// Where the target of an `edit` action value sits, when the value has the
 /// shape the parser reads one target from: a scalar, a one-item list, or a

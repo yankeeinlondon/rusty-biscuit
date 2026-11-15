@@ -435,13 +435,14 @@ fn types_catalog_declaration_column() {
     catalog(&mut matrix, Control, "control witness", shipped.to_string(), "agent: {name: x}\n", Expect::Invalid("agent"));
     catalog(&mut matrix, Absent, "absent", head.to_string(), "agent: claude\n", load(FILE));
     catalog(&mut matrix, ExplicitNull, "null", format!("{head}types: null\n"), "", load(FILE));
-    catalog(&mut matrix, ExplicitNull, "empty value", format!("{head}types:\n"), "", load("schema.yaml`: `/types`"));
+    // A null `types` is absent, leaving the envelope no carrier.
+    catalog(&mut matrix, ExplicitNull, "empty value", format!("{head}types:\n"), "", load("schema.yaml`: `/$schema`"));
     catalog(&mut matrix, WrongWhole, "number", format!("{head}types: 5\n"), "", load("schema.yaml`: `/types`"));
     catalog(&mut matrix, WrongOneElement, "sequence", format!("{head}types:\n  - AGENT: string\n"), "", load("schema.yaml`: `/types`"));
     catalog(&mut matrix, WrongEveryElement, "invalid sequence", format!("{head}types: [5, true]\n"), "", load("schema.yaml`: `/types`"));
     // A declared empty catalog loads; the retained reference names a type it
     // does not hold.
-    catalog(&mut matrix, Empty, "empty mapping", format!("{head}types: {{}}\n"), "", load("unknown named type `AGENT`"));
+    catalog(&mut matrix, Empty, "empty mapping", format!("{head}types: {{}}\n"), "", load("schema.yaml`: `/types`"));
     catalog(&mut matrix, DuplicateKey, "duplicate types", format!("{shipped}types:\n  OTHER: string\n"), "", load(FILE));
     catalog(&mut matrix, DuplicateKey, "duplicate name", format!("{head}types:\n{types}    AGENT: number\n"), "", load(FILE));
     catalog(&mut matrix, TrailingContent, "extra document", format!("{shipped}---\nx: 1\n"), "", load(FILE));
@@ -781,14 +782,15 @@ fn union_definition_column() {
             vec![("ref", String::new(), load(FILE))],
         );
 
-        // A postfixed named union: `required` on a null-admitting union has
-        // no effect, through an import from the shipped catalog.
+        // A postfixed named union: `required` on a null-admitting union still
+        // demands the key, which a written `null` meets, through an import
+        // from the shipped catalog.
         let file = format!("named_union_{}.yaml", slug(core.name));
         matrix.file(&file, format!("{catalog}\n    maybe: [{}, null]\n", core.definition));
         let named = format!("$schema:\n  p: maybe(required)@./{file}\n");
         let named_col = format!("postfixed named union {}", core.name);
         matrix.cell(&named_col, Control, "control", format!("{named}p: {}\n", core.accepted), Expect::Valid);
-        matrix.cell(&named_col, Absent, "absent", named.clone(), Expect::Valid);
+        matrix.cell(&named_col, Absent, "absent", named.clone(), Expect::Invalid("p"));
         matrix.cell(&named_col, ExplicitNull, "null", format!("{named}p: null\n"), Expect::Valid);
         let rejected = core.rejected.map_or(Expect::Valid, |_| Expect::Invalid("p"));
         matrix.cell(&named_col, WrongWhole, "wrong", format!("{named}p: {}\n", core.rejected.unwrap_or("5")), rejected);
@@ -880,7 +882,7 @@ fn instance_side_matrix() {
     // p: N
     let mut rows = vec![
         (Control, "control", v("null"), Valid),
-        (Absent, "absent", String::new(), Valid),
+        (Absent, "absent", String::new(), p.clone()),
         (ExplicitNull, "tilde", v("~"), Valid),
         (WrongWhole, "text", v("x"), p.clone()),
         (WrongWhole, "number", v("0"), p.clone()),
@@ -900,7 +902,7 @@ fn instance_side_matrix() {
     for (name, declaration) in [("X unknown", "'unknown(required)'"), ("X any", "'any(required)'")] {
         let mut rows = vec![
             (Control, "control", v("{a: {b: [1, null, x]}}"), Valid),
-            (Absent, "absent", String::new(), Valid),
+            (Absent, "absent", String::new(), p.clone()),
             (ExplicitNull, "null", v("null"), Valid),
             (WrongWhole, "number", v("5"), Valid),
             (WrongWhole, "boolean", v("true"), Valid),
@@ -919,7 +921,7 @@ fn instance_side_matrix() {
     // p: U
     let mut rows = vec![
         (Control, "control", v("abc"), Valid),
-        (Absent, "absent", String::new(), Valid),
+        (Absent, "absent", String::new(), p.clone()),
         (ExplicitNull, "null", v("null"), Valid),
         (WrongWhole, "number coerces", v("1234"), Valid),
         (WrongWhole, "boolean coerces", v("true"), Valid),

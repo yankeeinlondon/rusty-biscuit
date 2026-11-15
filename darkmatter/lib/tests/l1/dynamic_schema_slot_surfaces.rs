@@ -556,15 +556,17 @@ mod template_types {
         }
 
         #[test]
-        fn a_required_suffix_over_a_null_or_unknown_definition_stays_optional() {
+        fn a_required_suffix_over_a_null_or_unknown_definition_needs_the_key_written() {
             for definition in ["null", "unknown"] {
                 let folder = Folder::new();
-                let document = folder.document(&format!("$schema:\n    note: \"{{{{ '{definition}' }}}}(required)\"\n"));
+                let schema = format!("$schema:\n    note: \"{{{{ '{definition}' }}}}(required)\"\n");
                 let home = empty_home();
 
-                let composed = compose_in(&document, home.path());
+                let omitted = compose_in(&folder.document(&schema), home.path());
+                assert!(omitted.is_err(), "{definition}: an omitted required key fails");
 
-                assert!(composed.is_ok(), "{definition}: {}", composed.err().map(|f| f.error.to_string()).unwrap_or_default());
+                let written = compose_in(&folder.document(&format!("{schema}note: null\n")), home.path());
+                assert!(written.is_ok(), "{definition}: {}", written.err().map(|f| f.error.to_string()).unwrap_or_default());
             }
         }
 

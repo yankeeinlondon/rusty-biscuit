@@ -254,10 +254,12 @@ fn a_malformed_file_in_the_first_root_is_reported_not_skipped() {
 fn description_field_shapes() {
     let fixture = Fixture::new();
     let without = INFORMAL.replace("description: Feature reviews\n", "");
-    let empty = INFORMAL.replace("Feature reviews", "''");
+    let null = INFORMAL.replace("Feature reviews", "null");
+    let implicit_null = INFORMAL.replace(" Feature reviews", "");
     for (label, text, expected) in [
         ("absent", without.as_str(), None),
-        ("empty", empty.as_str(), Some("")),
+        ("null", null.as_str(), None),
+        ("implicit-null", implicit_null.as_str(), None),
         ("control", INFORMAL, Some("Feature reviews")),
     ] {
         let document = parse_standalone_schema_document(text, "s.yaml").unwrap().expect(label);
@@ -265,9 +267,9 @@ fn description_field_shapes() {
         let (_, result) = fixture.target(&format!("description-{label}.yaml"), text);
         assert!(result.is_ok(), "{label}: {result:?}");
     }
-    // `string(non-null)`: an explicit null is not "absent", and a collection
-    // is not text.
-    for (label, value) in [("null", "null"), ("implicit-null", ""), ("sequence", "[a]"), ("mapping", "{a: b}")] {
+    // `string(not-empty)`: a null is unset, but blank text has no content,
+    // and a collection is not text.
+    for (label, value) in [("empty", "''"), ("blank", "'  '"), ("sequence", "[a]"), ("mapping", "{a: b}")] {
         let text = INFORMAL.replace("description: Feature reviews", &format!("description: {value}"));
         let (path, result) = fixture.target(&format!("description-{label}.yaml"), &text);
         assert_document_error(result, &path, &[DEFINITION, "`/description`"]);
@@ -291,18 +293,28 @@ fn schema_field_shapes_in_yaml() {
         let text = format!("description: Reviews\n$schema: {value}\n");
         let (path, result) = fixture.target(&format!("schema-{label}.yaml"), &text);
         assert_document_error(result, &path, &[]);
+        if label == "null" {
+            continue;
+        }
         let tagged = format!("kind: schema\n$schema: {value}\ntypes:\n  Id: string\n");
         let (path, result) = fixture.target(&format!("tagged-schema-{label}.yaml"), &tagged);
         assert_document_error(result, &path, &[]);
     }
+    // A tagged `$schema: null` beside a types table is a types-only document:
+    // a valid import source but no document schema.
+    let (_, result) = fixture.target("tagged-schema-null.yaml", "kind: schema\n$schema: null\ntypes:\n  Id: string\n");
+    assert!(
+        matches!(result, Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. })),
+        "{result:?}"
+    );
 }
 
 #[test]
 fn types_field_shapes() {
     let fixture = Fixture::new();
-    let (_, result) = fixture.target("types-empty.yaml", "$schema:\n  title: string\ntypes: {}\n");
-    assert!(result.is_ok(), "{result:?}");
-    for (label, value) in [("null", "null"), ("scalar", "word"), ("sequence", "[a]")] {
+    let (_, result) = fixture.target("types-null.yaml", "$schema:\n  title: string\ntypes: null\n");
+    assert!(result.is_ok(), "a null optional types table is absent: {result:?}");
+    for (label, value) in [("empty", "{}"), ("scalar", "word"), ("sequence", "[a]")] {
         let (path, result) = fixture.target(&format!("types-{label}.yaml"), &format!("$schema:\n  title: string\ntypes: {value}\n"));
         assert_document_error(result, &path, &[DEFINITION, "`/types`"]);
         let tagged = format!("kind: schema\n$schema:\n  title: string\ntypes: {value}\n");
@@ -315,12 +327,12 @@ fn types_field_shapes() {
 fn categories_field_shapes() {
     let fixture = Fixture::new();
     let without = TAGGED.replace("categories: [Core]\n", "").replace("(category(Core))", "");
-    let empty = TAGGED.replace("[Core]", "[]").replace("(category(Core))", "");
-    for (label, text) in [("absent", without.as_str()), ("empty", empty.as_str())] {
+    let null = TAGGED.replace("[Core]", "null").replace("(category(Core))", "");
+    for (label, text) in [("absent", without.as_str()), ("null", null.as_str())] {
         let (_, result) = fixture.target(&format!("categories-{label}.yaml"), text);
         assert!(result.is_ok(), "{label}: {result:?}");
     }
-    for (label, value) in [("null", "null"), ("scalar", "Core")] {
+    for (label, value) in [("empty", "[]"), ("scalar", "Core")] {
         let text = TAGGED.replace("[Core]", value);
         let (path, result) = fixture.target(&format!("categories-{label}.yaml"), &text);
         assert_document_error(result, &path, &[DEFINITION, "`/categories`"]);
@@ -409,14 +421,15 @@ fn an_informal_document_with_categories_is_a_delegation_and_root_union_arm() {
     }
 }
 
-/// Every `categories` shape through the resolver: absent and `[]` declare no
-/// restriction; a non-list, or an entry that does not convert to text, is a
-/// located error from `schema.yaml`'s `categories: string[](non-null)`; a
-/// number entry converts softly to its text.
+/// Every `categories` shape through the resolver: absent and `null` declare
+/// no restriction; `[]`, a non-list, or an entry that does not convert to
+/// text, is a located error from `schema.yaml`'s
+/// `categories: string[](not-empty)`; a number entry converts softly to its
+/// text.
 #[test]
 fn informal_categories_field_shapes() {
     let fixture = Fixture::new();
-    for (label, value) in [("absent", None), ("empty", Some("[]")), ("control", Some("[Core]"))] {
+    for (label, value) in [("absent", None), ("null", Some("null")), ("control", Some("[Core]"))] {
         let text = match value {
             Some(value) => INFORMAL_CATEGORIES.replace("[Core]", value),
             None => INFORMAL_CATEGORIES.replace("categories: [Core]\n", ""),
@@ -425,7 +438,7 @@ fn informal_categories_field_shapes() {
         assert!(result.is_ok(), "{label}: {result:?}");
     }
     for (label, value, fragment) in [
-        ("null", "null", "`/categories`"),
+        ("empty", "[]", "`/categories`"),
         ("scalar", "Core", "`/categories`"),
         ("mapping", "{}", "`/categories`"),
         ("mixed", "[Core, {a: b}]", "`/categories/1`"),

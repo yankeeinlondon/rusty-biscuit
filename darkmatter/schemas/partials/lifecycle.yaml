@@ -94,9 +94,9 @@ types:
     prep-short: "string(not-empty; operands(prep-short)) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
     prep-long: "{ target: string(not-empty; required), with: object, no_error: boolean }(operands(prep-long))"
     edit-short:
-        - "string(not-empty; deferred; non-null; operands(edit-short)) -> open this file in the editor and wait for it to close; a missing file is created"
-        - "tuple([string(not-empty; deferred)]; non-null; operands(edit-short))"
-    edit-long: "{ file: string(not-empty; deferred; required), create_new: boolean(non-null), gui: boolean(non-null), no_error: boolean }(non-null; operands(edit-long)) -> open file in the editor and wait for it to close; create_new refuses an existing file, gui chooses a graphical (true) or terminal (false) editor"
+        - "string(not-empty; deferred; operands(edit-short)) -> open this file in the editor and wait for it to close; a missing file is created"
+        - "tuple([string(not-empty; deferred)]; operands(edit-short))"
+    edit-long: "{ file: string(not-empty; deferred; required), create_new: boolean, gui: boolean, no_error: boolean }(operands(edit-long)) -> open file in the editor and wait for it to close; create_new refuses an existing file, gui chooses a graphical (true) or terminal (false) editor"
     shell-short: "shell(operands(shell-short)) -> run a shell command (never in initialize)"
     shell-long: "{ command: shell(required), on_error: string, no_error: boolean }(operands(shell-long))"
     set-short: "object(operands(set-short)) -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"

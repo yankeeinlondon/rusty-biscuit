@@ -95,9 +95,15 @@ mod problems {
     }
 
     #[test]
-    fn an_optional_declaration_including_one_made_optional_by_null() {
+    fn an_optional_declaration() {
         single_root_problem("kind: literal(a)\n", ClaimCause::NotRequired);
-        single_root_problem("kind: null | literal(a; required)\n", ClaimCause::NotRequired);
+    }
+
+    /// A null arm leaves the declaration required (a written `null` meets
+    /// presence), but a `null` value names no member.
+    #[test]
+    fn a_required_declaration_that_admits_null() {
+        single_root_problem("kind: null | literal(a; required)\n", ClaimCause::NullAdmitted);
     }
 
     #[test]
@@ -117,8 +123,8 @@ mod problems {
         single_root_problem("kind: literal(\"\"; required)\n", ClaimCause::EmptyChoice);
     }
 
-    /// Null admission and non-object arms cannot be authored in
-    /// SimplifiedSchema with `required`; a raw JSON Schema arm can.
+    /// Non-object arms cannot be authored in SimplifiedSchema; a raw JSON
+    /// Schema arm can, and can admit null as well.
     #[cfg(feature = "file")]
     #[test]
     fn raw_json_arms_that_admit_null_have_no_enum_members_or_are_not_objects() {

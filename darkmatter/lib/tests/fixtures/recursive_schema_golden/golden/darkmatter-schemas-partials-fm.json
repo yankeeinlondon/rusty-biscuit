@@ -6238,6 +6238,9 @@
         "edit": {
           "anyOf": [
             {
+              "type": "null"
+            },
+            {
               "type": "string",
               "pattern": "\\S",
               "x-darkmatter-deferred": true,
@@ -6267,10 +6270,24 @@
                   "x-darkmatter-deferred": true
                 },
                 "create_new": {
-                  "type": "boolean"
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
                 },
                 "gui": {
-                  "type": "boolean"
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
                 },
                 "no_error": {
                   "anyOf": [
@@ -6380,6 +6397,30 @@
             "minProperties": 3,
             "maxProperties": 3
           }
+        }
+      ]
+    },
+    "edit-short": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "\\S",
+          "x-darkmatter-deferred": true,
+          "description": "open this file in the editor and wait for it to close; a missing file is created",
+          "x-darkmatter-operands": "edit-short"
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "pattern": "\\S",
+              "x-darkmatter-deferred": true
+            }
+          ],
+          "minItems": 1,
+          "items": false,
+          "x-darkmatter-operands": "edit-short"
         }
       ]
     },
@@ -6505,24 +6546,10 @@
         "edit": {
           "anyOf": [
             {
-              "type": "string",
-              "pattern": "\\S",
-              "x-darkmatter-deferred": true,
-              "description": "open this file in the editor and wait for it to close; a missing file is created",
-              "x-darkmatter-operands": "edit-short"
+              "type": "null"
             },
             {
-              "type": "array",
-              "prefixItems": [
-                {
-                  "type": "string",
-                  "pattern": "\\S",
-                  "x-darkmatter-deferred": true
-                }
-              ],
-              "minItems": 1,
-              "items": false,
-              "x-darkmatter-operands": "edit-short"
+              "$ref": "#/$defs/edit-short"
             }
           ]
         },
@@ -6868,24 +6895,10 @@
         "edit": {
           "anyOf": [
             {
-              "type": "string",
-              "pattern": "\\S",
-              "x-darkmatter-deferred": true,
-              "description": "open this file in the editor and wait for it to close; a missing file is created",
-              "x-darkmatter-operands": "edit-short"
+              "type": "null"
             },
             {
-              "type": "array",
-              "prefixItems": [
-                {
-                  "type": "string",
-                  "pattern": "\\S",
-                  "x-darkmatter-deferred": true
-                }
-              ],
-              "minItems": 1,
-              "items": false,
-              "x-darkmatter-operands": "edit-short"
+              "$ref": "#/$defs/edit-short"
             }
           ]
         },

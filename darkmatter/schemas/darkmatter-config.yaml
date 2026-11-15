@@ -24,7 +24,7 @@ types:
     # The shared permissions shape. `file-read` has no default here: its
     # default depends on the scope (`user-permissions`, `repository-permissions`).
     permissions:
-        file-read: "file-read-pattern[](non-null) -> Files a schema slot may read without asking. Its default depends on the scope."
+        file-read: "file-read-pattern[](not-empty) -> Files a schema slot may read without asking. Its default depends on the scope."
         shell-commands: shell-command-rules
         network: network-setting
         $constraints: { closed: true }

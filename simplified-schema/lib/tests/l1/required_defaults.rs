@@ -153,13 +153,28 @@ mod strict_and_soft {
     }
 
     #[test]
-    fn a_null_admitting_property_stays_optional_and_is_not_filled() {
+    fn a_required_null_admitting_property_is_filled_when_missing() {
         let nullable = schema("$schema:\n  note: [string(required; default(\"x\")), null]\n");
         let input = json!({});
 
-        let success = borrowed(nullable.validate_soft(&input), &input);
+        let strict = borrowed(nullable.validate_strict(&input), &input);
+        assert_eq!(strict.defaults, [applied("note", json!("x"))]);
+        let (value, defaults) = owned(nullable.validate_soft(&input));
+        assert_eq!(value, json!({ "note": "x" }));
+        assert_eq!(defaults, [applied("note", json!("x"))]);
+    }
 
-        assert!(success.defaults.is_empty());
+    #[test]
+    fn a_required_null_admitting_property_without_a_default_needs_its_key() {
+        for declaration in ["note: null(required)", "note: unknown(required)", "note: [number(required), null]"] {
+            let nullable = schema(&format!("$schema:\n  {declaration}\n"));
+
+            let codes = invalid_codes(nullable.validate_strict(&json!({})));
+            assert_eq!(codes, [("/note".to_string(), ValidationProblemCode::MissingRequired)], "{declaration}");
+            let written = json!({ "note": null });
+            borrowed(nullable.validate_strict(&written), &written);
+            borrowed(nullable.validate_soft(&written), &written);
+        }
     }
 
     #[test]

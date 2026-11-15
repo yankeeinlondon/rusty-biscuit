@@ -519,16 +519,25 @@ fn omission_and_null_stay_distinct() {
 }
 
 #[test]
-fn a_non_null_property_of_an_object_parameter_may_be_omitted_but_never_null() {
-    let f = Function::new("f", "function(parameters(opts: { label: string(non-null), note: string }); returns(string))");
-    assert_eq!(f.received(&[json!({})]), [json!({})]);
-    assert_eq!(f.received(&[json!({ "label": "a" })]), [json!({ "label": "a" })]);
-    assert_eq!(f.received(&[json!({ "note": null })]), [json!({ "note": null })], "the control admits null");
-    let error = f.rejected(&[json!({ "label": null })]);
-    assert_eq!(error.argument_errors().count(), 1, "{error}");
-    let optional = Function::new("g", "function(parameters(x?: string(non-null)); returns(string))");
+fn an_object_parameter_s_properties_follow_the_presence_rule() {
+    // Inside an object argument, a missing key and `null` are the same
+    // value: optional properties accept both, and `required` asks only
+    // whether the key was written.
+    let f = Function::new("f", "function(parameters(opts: { label: string(not-empty), id: unknown(required) }); returns(string))");
+    assert_eq!(f.received(&[json!({ "id": null })]), [json!({ "id": null })]);
+    assert_eq!(f.received(&[json!({ "id": 1, "label": null })]), [json!({ "id": 1, "label": null })]);
+    assert_eq!(f.received(&[json!({ "id": 1, "label": "a" })]), [json!({ "id": 1, "label": "a" })]);
+    assert_eq!(f.rejected(&[json!({})]).argument_errors().count(), 1, "`id` was not written");
+    assert_eq!(f.rejected(&[json!({ "id": 1, "label": "" })]).argument_errors().count(), 1, "blank `label`");
+}
+
+#[test]
+fn an_optional_argument_may_be_omitted_but_a_written_null_needs_a_null_admitting_type() {
+    let optional = Function::new("g", "function(parameters(x?: string); returns(string))");
     assert!(optional.call(&[]).expect("omission binds").args().is_omitted(0));
     optional.rejected(&[Value::Null]);
+    let nullable = Function::new("h", "function(parameters(x?: string | null); returns(string))");
+    assert_eq!(nullable.received(&[Value::Null]), [Value::Null]);
 }
 
 #[test]

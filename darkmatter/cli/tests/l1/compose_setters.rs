@@ -334,7 +334,7 @@ mod values {
     fn null_is_accepted_only_where_the_type_permits() {
         let fixture = with_document("setters-null", "---\n$schema:\n  a: string\n---\n[{{ a }}]\n");
         assert_eq!(composed(&fixture, &["doc.md", "a=null"]), "[]");
-        let fixture = with_document("setters-non-null", "---\n$schema:\n  b: string(non-null)\nb: text\n---\n{{ b }}\n");
+        let fixture = with_document("setters-required", "---\n$schema:\n  b: string(required)\nb: text\n---\n{{ b }}\n");
         let report = failure(&fixture, &["doc.md", "b=null"]);
         assert!(report["diagnostics"][0]["code"].as_str().unwrap().starts_with("dm.schema."), "{report:#}");
     }
