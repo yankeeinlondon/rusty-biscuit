@@ -7,10 +7,10 @@ repository's CI, pre-push hook, or release automation. The live authorities are
 
 ## The jobs of `ci.yml`
 
-`ci.yml` defines exactly 12 top-level jobs and a contract test pins the set:
+`ci.yml` defines exactly 11 top-level jobs and a contract test pins the set:
 `validation`, `scope`, `preflight`, `build`, `area-ci`, `area-drift`,
-`permission-scope`, `permission-widening`, `ci-gate`, `certify-nightly`,
-`publish-observations`, and `ci-reporting`. The first nine block merges; certification and observation publication are outside the gate
+`permission-scope`, `ci-gate`, `certify-nightly`,
+`publish-observations`, and `ci-reporting`. The first eight block merges; certification and observation publication are outside the gate
 but can fail the scheduled run. `ci-reporting` is advisory and carries
 `continue-on-error: true`.
 
@@ -1177,17 +1177,25 @@ artifact — `ci_gate_is_the_single_required_check` in
 `WorkflowGateStepTests` in `scripts/ci/test_ci_local.py` runs the extracted
 fold against every result shape.
 
-`permission-scope` and `permission-widening` are ordinary blocking needs of the
-fold. `permission-scope` builds the **base** commit's checker
+`permission-scope` is an ordinary blocking need of the fold, and fails only
+when the checker errors. It builds the **base** commit's checker
 (`darkmatter::config::widening`, run as
 `darkmatter/lib/examples/permission_widening.rs`) outside the workspace and
 reads the candidate only as Git objects; it never checks out, builds, or runs
-candidate code. `permission-widening` runs only when that check reports
-possible widening, under `environment: permission-widening`, whose required
-reviewer approval holds the gate pending. The environment is configured once
-with `python3 scripts/ci/permission_environment.py --apply` (bare = dry run,
-`verify` = read-only check); `permission-scope` fails if it is missing or
-weaker. User docs: `docs/topics/ci-cd.md` ("Permission-widening approval").
+candidate code. The trusted `scripts/ci/permission_scope.py decide` prints
+`permission_change=widens|narrows|unknown|none` from the resolved
+before/after policies only (a `checker-input-changed` reason is code review,
+never reported) and writes the template's data to `$PERMISSION_REPORT_DATA`
+(an older base copy ignores the variable, so it posts nothing). For anything
+but `none`, the example's `--render` mode composes the base commit's
+`.github/ci/permission-report.md` with that data through Darkmatter (values
+arrive as literal tokens; any composition warning fails the job), and the job
+keeps the result as one marked pull-request comment
+(`<!-- permission-report -->`, rewritten on every push; `pull-requests: write`
+is its only write). Nothing waits for an approval: the merge is the decision.
+`config_widening::the_permission_report_template_states_each_change_verbatim`
+pins the template. User docs: `docs/topics/ci-cd.md` ("Permission-change
+report").
 
 Ruleset `protect-your-bacon` (19747338) has required `ci-gate` since
 2026-09-13. It named `ci-verdict` until then, and because that job no longer

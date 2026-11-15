@@ -509,3 +509,69 @@ fn the_inputs_file_rejects_every_malformed_shape() {
         assert!(WideningInputs::from_json(&document).is_err(), "{document}");
     }
 }
+
+/// The CI permission report: `.github/ci/permission-report.md`, composed with
+/// data shaped as `scripts/ci/permission_scope.py decide` writes it (the
+/// `permission_widening --render` example's path), states each change in
+/// words and shows every repository value verbatim, never as template syntax.
+#[test]
+fn the_permission_report_template_states_each_change_verbatim() {
+    use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
+    use darkmatter::markdown::literal_token::encode;
+    use darkmatter::markdown::{Markdown, MergeStrategy};
+    use serde_json::json;
+
+    let template = include_str!("../../../../.github/ci/permission-report.md");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = dir.path().join("permission-report.md");
+    std::fs::write(&path, template).expect("the template copy is written");
+    let code = |text: &str| encode(&format!("`{text}`"));
+    let rule = |form: &str, command: &str| json!({ "form": form, "code": code(command) });
+    let data = json!({
+        "verdict": "widens",
+        "sources": [code(".darkmatter.yaml")],
+        "policies": [{
+            "title": code(".darkmatter.yaml"),
+            "scope_note": "",
+            "shell": {
+                "changed": true, "before_count": 12, "before_default": false,
+                "added": [rule("prefix", "git status"), rule("exact", "make tidy"), rule("template", "git add {{ string }}")],
+                "removed": [rule("prefix", "ls")], "excluded": [], "unexcluded": [],
+            },
+            "file_read": {
+                "changed": true, "before_count": 3, "before_default": true,
+                "added": [code("&docs/specs/**")], "removed": [], "excluded": [], "unexcluded": [],
+            },
+            "network": { "changed": true, "before": "deny", "after": "allow" },
+        }],
+        "unreadable": [],
+    });
+
+    let mut document: Markdown = template.to_string().into();
+    document
+        .fm_merge_with(json!({ "report": data }), MergeStrategy::PreferExternal)
+        .expect("the data merges into the template's frontmatter");
+    let snapshot = RequestSnapshot::new(dir.path()).with_home(None);
+    let request = ComposeRequest::prepare(ComposeOptions::new().with_source_file(&path), &snapshot)
+        .expect("a request for the template");
+    let (composed, report) = document.compose_with(&request).expect("the template composes");
+    assert!(report.warnings.is_empty(), "a warning fails the CI render: {:?}", report.warnings);
+    let text = composed.content();
+    for expected in [
+        "_This pull request **widens** what Darkmatter and Claudine may do without asking",
+        "### `.darkmatter.yaml`",
+        "Before this change there were **12** shell rules.",
+        "- Commands **starting with** `git status` will run without asking",
+        "- The `make tidy` command (exact command, no variation) will run without asking",
+        "- Commands **shaped like** `git add {{ string }}` will run without asking",
+        "Removed, so these will now ask first:\n\n- Commands **starting with** `ls`",
+        "Before this change these were the defaults",
+        "- Files matching `&docs/specs/**`",
+        "- Changed from **no URLs** to **every URL** fetched without asking",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
+    }
+    for absent in ["narrows**", "Could not be compared", "::block", "::map", "::end-"] {
+        assert!(!text.contains(absent), "unexpected {absent:?} in:\n{text}");
+    }
+}

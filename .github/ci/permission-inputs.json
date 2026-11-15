@@ -11,7 +11,7 @@
     ".github/ci/permission-inputs.json",
     ".github/workflows/ci.yml",
     "scripts/ci/permission_scope.py",
-    "scripts/ci/permission_environment.py",
+    ".github/ci/permission-report.md",
     "darkmatter/lib/Cargo.toml",
     "darkmatter/lib/examples/permission_widening.rs",
     "darkmatter/lib/src/config/",

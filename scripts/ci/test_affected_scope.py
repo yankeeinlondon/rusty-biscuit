@@ -4450,7 +4450,6 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         "test_evidence_reuse.py": "repo-deps",
         "test_hosted_observations.py": "repo-deps",
         "test_local_evidence.py": "repo-deps",
-        "test_permission_environment.py": "repo-deps",
         "test_permission_scope.py": "repo-deps",
         "test_publish_gaps.py": "repo-deps",
         "test_resolved_plan.py": "repo-deps",
