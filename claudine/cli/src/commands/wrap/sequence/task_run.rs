@@ -105,10 +105,12 @@ pub(super) fn run_step_task(
     let prewarm = TaskStackPrewarm::new(run, &frontmatter);
     prewarm.submit(&run.prep_context.invocation, task, &task_context);
 
-    // A task stack mutates relative to the document that authored the task,
-    // including when that document lives outside the sequence repository.
-    let mutation_root = task.origin_dir.clone();
-    let engine = EffectEngine::builder().mutation_root(&mutation_root).build();
+    // Relative targets resolve against the document that authored the task,
+    // but writes stay inside the caller's launch scope, even when that
+    // document lives outside it.
+    let engine = EffectEngine::builder()
+        .mutation_root(task_source_context.file_resolution_context().launch_magic_scope().local_root())
+        .build();
     let emitter = DefaultLifecycleEmitter;
     let settings = claudine::composition::sequence::task::task_playback_settings();
     let messaging = claudine::messaging::RuntimeMessagingSettings {
@@ -254,7 +256,9 @@ pub(super) fn root_step_guard(
         .invocation
         .derive_source(&task.origin_path)
         .expect("resolved task document always has a parent directory");
-    let engine = EffectEngine::builder().mutation_root(&task.origin_dir).build();
+    let engine = EffectEngine::builder()
+        .mutation_root(source_context.file_resolution_context().launch_magic_scope().local_root())
+        .build();
     let emitter = DefaultLifecycleEmitter;
     let settings = claudine::composition::sequence::task::task_playback_settings();
     let messaging = claudine::messaging::RuntimeMessagingSettings { user: None, repo: None };

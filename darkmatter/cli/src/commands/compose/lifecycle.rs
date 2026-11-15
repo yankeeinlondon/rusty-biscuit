@@ -12,6 +12,9 @@
 //!   they are collected, in run order, into the payload's `lifecycle_output`.
 //! - Every step reuses the invocation's one [`ComposeRequest`]: nothing here
 //!   captures a context of its own.
+//! - File-writing actions may write only inside the launch scope's local root
+//!   (the Git working tree containing the launch directory, else that
+//!   directory); relative targets still resolve against the document.
 //! - The first Ctrl-C cancels the run (cleanup still runs, exit 130); a
 //!   second one exits at once.
 
@@ -374,11 +377,14 @@ impl<'a> ComposeHost<'a> {
         effects: &'a TerminalEffects<'a>,
         interrupted: Arc<AtomicBool>,
     ) -> Self {
+        // The boundary is the caller's launch scope, not the document's
+        // directory, so a document writes the same files under every host.
         let mutation_root = compose
-            .source_path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .map_or_else(|| compose.request.resolution_context().cwd().to_path_buf(), Path::to_path_buf);
+            .request
+            .resolution_context()
+            .launch_magic_scope()
+            .local_root()
+            .to_path_buf();
         let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(bootstrap);
         Self {
             md: compose.md,

@@ -1356,10 +1356,16 @@ fn construct_lifecycle_runtime(
         };
 
         // Build an effect engine for lifecycle side effects / expression functions.
-        // Writes are confined to the launch workspace (the launch repo root when
-        // known, otherwise the launch cwd) — never the prompt's own repository,
-        // which differs whenever the prompt lives in a shared library.
-        let lifecycle_mutation_root = env_plan.child_cwd.as_path();
+        // Writes are confined to the caller's launch scope (the working tree
+        // containing the launch directory, otherwise that directory) — never
+        // the prompt's own repository, which differs whenever the prompt lives
+        // in a shared library.
+        let lifecycle_mutation_root = request
+            .prepared
+            .input_layers
+            .file_resolution_context
+            .launch_magic_scope()
+            .local_root();
         let lifecycle_effect_engine = EffectEngine::builder()
             .mutation_root(lifecycle_mutation_root)
             .auto_rehash(false)

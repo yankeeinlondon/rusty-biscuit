@@ -7,6 +7,10 @@
 //! only inside the project being worked on: an absolute target there is
 //! allowed, while a relative target resolves beside the prompt, in the
 //! library, and is refused before anything is created.
+//!
+//! The same boundary holds on the sequence routes: a sequence's own
+//! `initialize` and its side-effect tasks write inside the caller's tree, not
+//! inside the directory that holds the sequence document.
 
 use std::fs;
 use std::path::PathBuf;
@@ -56,6 +60,26 @@ impl CrossRepo {
             .output()
             .expect("spawn claudine");
         (output.status, strip_ansi(&String::from_utf8_lossy(&output.stderr)))
+    }
+
+    /// Run `claudine sequence --claude` on a sequence document at `path`;
+    /// returns its status and plain output (the sequence route reports on
+    /// both streams).
+    fn sequence(&self, path: &std::path::Path, body: &str) -> (std::process::ExitStatus, String) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+        let output = self
+            .fixture
+            .command()
+            .args(["sequence", "--claude", path.to_str().unwrap()])
+            .output()
+            .expect("spawn claudine");
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (output.status, strip_ansi(&combined))
     }
 
     /// [`Self::run`], asserting success and that no lifecycle write was
@@ -120,4 +144,72 @@ fn initialize_ensure_file_into_launch_repo_is_allowed_from_foreign_prompt_repo()
     ));
 
     assert!(target.exists(), "ensure_file must create {}", target.display());
+}
+
+/// A sequence container's `initialize` and a side-effect task both writing
+/// `target`, relative to the sequence document.
+fn sequence_writing(target: &str) -> String {
+    format!(
+        "---\n\
+         initialize:\n  \
+           - append_line: [\"{target}\", \"initialize\"]\n\
+         sequence:\n  \
+           - name: first\n    \
+             side_effect:\n      \
+               append_line:\n        \
+                 - {target}\n        \
+                 - task\n\
+         ---\n"
+    )
+}
+
+/// A sequence in a subdirectory of the launch repository reaches the
+/// repository top through `../`: the boundary is the caller's tree, not the
+/// sequence's directory, for its container event and for its task alike.
+#[test]
+fn a_sequence_in_a_subdirectory_writes_to_the_launch_root_from_initialize_and_a_task() {
+    let staged = CrossRepo::stage();
+    let sequence = staged.fixture.cwd().join("sequences").join("seq.md");
+    let (status, output) = staged.sequence(&sequence, &sequence_writing("../events.log"));
+
+    assert!(status.success(), "the run succeeds; output was:\n{output}");
+    assert!(!output.contains("outside the mutation root"), "output was:\n{output}");
+    let log = fs::read_to_string(staged.fixture.cwd().join("events.log")).expect("the launch root holds the log");
+    assert_eq!(log.lines().collect::<Vec<_>>(), ["initialize", "task"]);
+    assert!(!staged.fixture.cwd().join("sequences/events.log").exists());
+}
+
+/// A sequence from a foreign library writing beside itself is refused before
+/// anything is created, from its container `initialize` and from a task.
+#[test]
+fn a_foreign_sequence_cannot_write_beside_itself_from_initialize_or_a_task() {
+    let staged = CrossRepo::stage();
+    let sequence = staged.library.join("prompts").join("seq.md");
+
+    // A failed container event is otherwise silent; `failure` reports why.
+    let container = sequence_writing("events.log").replacen(
+        "---\n",
+        "---\nfailure:\n  - info: \"failure: {{ err.msg }}\"\n",
+        1,
+    );
+    let (status, output) = staged.sequence(&sequence, &container);
+    assert!(!status.success(), "the refused container write fails the run; output was:\n{output}");
+    let prose = output.replace('┃', " ").split_whitespace().collect::<String>();
+    assert!(prose.contains("outsidethemutationroot"), "output was:\n{output}");
+    assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the sequence");
+
+    let task_only = "---\n\
+         sequence:\n  \
+           - name: first\n    \
+             side_effect:\n      \
+               append_line:\n        \
+                 - events.log\n        \
+                 - task\n\
+         ---\n";
+    let (status, output) = staged.sequence(&sequence, task_only);
+    assert!(!status.success(), "the refused task write fails the run; output was:\n{output}");
+    let prose = output.replace('┃', " ").split_whitespace().collect::<String>();
+    assert!(prose.contains("outsidethemutationroot"), "output was:\n{output}");
+    assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the sequence");
+    assert!(!staged.fixture.cwd().join("events.log").exists(), "never root-joined in the caller");
 }

@@ -599,3 +599,84 @@ fn converted_and_null_flags_run_and_an_unwritten_declared_key_stays_absent() {
     assert!(ran.stderr.contains("title-null=true"), "{}", ran.stderr);
     assert!(!ran.stdout.lines().any(|line| line.starts_with("title:")), "{}", ran.stdout);
 }
+
+// The mutation root is the caller's launch scope (the Git working tree
+// containing the launch directory, else that directory), never the composed
+// document's directory; relative targets still resolve against the document.
+
+#[test]
+fn a_prompt_in_a_subdirectory_writes_to_the_launch_root_through_a_parent_reference() {
+    let fixture = CliProcessFixture::named("lifecycle-root-launch-scope");
+    let doc = fixture.write_file(
+        "cwd/prompts/doc.md",
+        "---\ninitialize:\n  - ensure_file: [\"../root-note.md\", \"from-prompt\"]\n---\nbody\n",
+    );
+    let ran = compose(&fixture, &doc, &[]);
+    assert_eq!(ran.status, Some(0), "{}", ran.stderr);
+    let written = fixture.cwd().join("root-note.md");
+    assert_eq!(
+        std::fs::read_to_string(&written).expect("the launch root holds the target"),
+        "from-prompt"
+    );
+    assert!(!fixture.cwd().join("prompts/root-note.md").exists());
+}
+
+#[test]
+fn a_prompt_outside_the_launch_scope_cannot_write_beside_itself() {
+    let fixture = CliProcessFixture::named("lifecycle-root-foreign-prompt");
+    let doc = fixture.write_file(
+        "shared/doc.md",
+        "---\ninitialize:\n  - ensure_file: [\"beside.md\", \"from-prompt\"]\n---\nbody\n",
+    );
+    let ran = compose(&fixture, &doc, &["--output", "json"]);
+    assert_eq!(ran.status, Some(1), "{}", ran.stdout);
+    let envelope: serde_json::Value = serde_json::from_str(&ran.stdout).expect("one JSON envelope");
+    let message = envelope["diagnostics"][0]["message"].as_str().expect("a failure diagnostic");
+    let target = fixture.workspace_path().join("shared").join("beside.md");
+    let (named_target, named_root) = message
+        .strip_prefix("refusing to write outside the mutation root: ")
+        .and_then(|rest| rest.split_once(" (root: "))
+        .unwrap_or_else(|| panic!("a containment refusal: {message}"));
+    assert_eq!(named_target, target.display().to_string());
+    // The lifecycle failure message is length-clamped, which can cut a long
+    // temp-dir root; what is shown must still be the launch root.
+    let root = biscuit_file::canonicalize_simplified(fixture.cwd()).expect("the launch directory exists");
+    let shown_root = named_root.trim_end_matches(')').trim_end_matches('…');
+    assert!(
+        !shown_root.is_empty() && root.display().to_string().starts_with(shown_root),
+        "{message}"
+    );
+    assert!(envelope["document"].is_null(), "no document was written: {envelope}");
+    assert!(!fixture.workspace_path().join("shared/beside.md").exists());
+    assert!(!fixture.cwd().join("beside.md").exists());
+}
+
+#[test]
+fn a_launch_from_a_repository_subdirectory_bounds_writes_by_the_working_tree_top() {
+    let fixture = CliProcessFixture::named("lifecycle-root-working-tree");
+    if !fixture.initialize_repository() {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let launch = fixture.cwd().join("sub");
+    std::fs::create_dir_all(&launch).expect("launch directory");
+    let doc = fixture.write_file(
+        "cwd/prompts/doc.md",
+        "---\ninitialize:\n  - ensure_file: [\"../top-note.md\", \"from-prompt\"]\n---\nbody\n",
+    );
+    let output = fixture
+        .command_builder()
+        .host_path()
+        .ambient_context(&launch)
+        .build()
+        .arg("compose")
+        .arg(&doc)
+        .output()
+        .expect("md runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(
+        std::fs::read_to_string(fixture.cwd().join("top-note.md")).expect("the working tree top holds the target"),
+        "from-prompt"
+    );
+}

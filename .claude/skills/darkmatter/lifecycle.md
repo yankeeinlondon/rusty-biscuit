@@ -74,9 +74,12 @@ pages with the behavior.
   first candidate (beside the document for a bare relative name; an
   unmatched `%` is refused), then `ensure_within` against the engine's
   mutation root before anything is opened or created. The root is only the
-  boundary, never a base. `md`'s mutation root is the prompt's own
-  directory (Claudine's is the launch workspace), so an `md` prompt in a
-  sibling library cannot edit a `{{ ctx.cwd }}` path. A failure message is
+  boundary, never a base. Every host (`md compose` and every Claudine
+  route: compose, wrapper, staged boot, loop harness, sequence container,
+  task, step guard) builds its `EffectEngine` with the request context's
+  `launch_magic_scope().local_root()` (the working tree containing the
+  launch directory, else that directory), so a prompt in a sibling library
+  can edit a `{{ ctx.cwd }}` path but not a file beside itself. A failure message is
   clamped to one 240-character line (`concise_message`), so `md` puts the
   reason before the target. Terminal-editor success is provable only in L2
   (`cli/tests/level2/level2_edit_action.rs`); L1 process tests use the fake

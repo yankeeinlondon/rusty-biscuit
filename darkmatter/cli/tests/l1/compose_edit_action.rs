@@ -168,9 +168,9 @@ fn the_motivating_workflow_creates_and_opens_the_spec_then_skips() {
 
 /// The prompt lives in the workspace above the launch directory; the absolute
 /// `{{ ctx.cwd }}` target names the launch directory's file for both the
-/// probe and the edit. `md`'s mutation root is the prompt's own directory,
-/// so a prompt in a sibling library cannot edit the launch directory: the
-/// edit is refused before anything is created.
+/// probe and the edit. `md`'s mutation root is the caller's launch scope, not
+/// the prompt's directory, so a prompt in a sibling library edits the same
+/// launch-directory file.
 #[test]
 fn a_prompt_outside_the_launch_directory_edits_the_absolute_target_inside_its_root() {
     let run = EditRun::new("edit-outside-prompt", "code").writing("written");
@@ -185,11 +185,16 @@ fn a_prompt_outside_the_launch_directory_edits_the_absolute_target_inside_its_ro
 
     std::fs::remove_dir_all(run.cwd().join("features")).unwrap();
     let sibling = run.fixture.write_file("library/prompt.md", MOTIVATING);
-    let refused = run.compose(&sibling, &[]);
-    assert_eq!(refused.status.code(), Some(1), "{}", stderr(&refused));
-    assert!(stderr(&refused).contains("initialize[0].else[0].edit"), "{}", stderr(&refused));
-    assert_eq!(run.launches().len(), 1, "the refused edit never launched");
-    assert!(!run.cwd().join("features").exists(), "nothing was created");
+    let from_sibling = run.compose(&sibling, &[]);
+    assert_eq!(from_sibling.status.code(), Some(0), "{}", stderr(&from_sibling));
+    let launches = run.launches();
+    assert_eq!(launches.len(), 2, "the sibling prompt's edit launched: {launches:?}");
+    assert_eq!(PathBuf::from(launches[1].last().expect("the target argument")), canonical(&target));
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "written");
+    assert!(
+        !run.fixture.workspace_path().join("library/features").exists(),
+        "nothing beside the sibling prompt"
+    );
 }
 
 /// A side effect between the existence check and the edit plays the

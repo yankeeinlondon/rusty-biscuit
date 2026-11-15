@@ -280,7 +280,9 @@ pub(crate) fn execute_sequence(
     let emitter = DefaultLifecycleEmitter;
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
     let context = invocation.capture_launch_context(&requirements);
-    let engine = darkmatter::effects::EffectEngine::builder().mutation_root(source_context.base_dir()).build();
+    // Writes stay inside the caller's launch scope; relative targets still
+    // resolve against the sequence source (`base_dir` below).
+    let engine = darkmatter::effects::EffectEngine::builder().mutation_root(file_resolution_context.launch_magic_scope().local_root()).build();
     let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
     let live = Mutex::new(frontmatter_view.clone());
     let lifecycle_context = LifecycleRuntimeContext { settings: &settings, messaging: &messaging, term: &term,
