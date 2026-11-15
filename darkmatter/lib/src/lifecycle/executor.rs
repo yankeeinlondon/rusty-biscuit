@@ -50,13 +50,14 @@ use std::error::Error as StdError;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use biscuit_file::{FileReference, FileReferenceKind};
+use biscuit_file::{FileReference, FileReferenceKind, PathIdentity};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tracing::warn;
 
 use crate::editor::{EditError, EditRequest};
-use crate::effects::{EffectEngine, effect_registration};
+use crate::effects::fs_write::{canonicalize_with_missing_tail, ensure_within};
+use crate::effects::{EffectEngine, EffectError, effect_registration};
 use crate::markdown::compose::context::merge::json_type_name;
 use crate::markdown::compose::expression::{
     BindingView, Expr, ExpressionError, ExpressionFinder, ResolutionContext, RuntimeBinding, evaluate, functions,
@@ -173,11 +174,28 @@ enum ActionStep {
     EvaluationErrored(LifecycleErrorInfo),
 }
 
+/// The side-effect verbs whose first operand is a Markdown file whose
+/// frontmatter they rewrite.
+const FRONTMATTER_VERBS: [&str; 7] = [
+    "set_frontmatter",
+    "merge_frontmatter",
+    "delete_frontmatter",
+    "increment_frontmatter",
+    "decrement_frontmatter",
+    "append_frontmatter",
+    "prepend_frontmatter",
+];
+
 /// Why a mutation target did not resolve to a local path.
 enum MutationTargetError {
     Reference(biscuit_file::FileReferenceError),
     /// The reference has no document-scoped candidate to create.
     NoLocalTarget,
+    /// A recursive reference matched nothing; its search directory is never
+    /// a new filename.
+    UnmatchedRecursive,
+    /// The selected target lies outside the engine's mutation root.
+    Outside(EffectError),
 }
 
 /// Which layer an action error originated in.
@@ -1016,14 +1034,18 @@ impl<'a> StackExecutor<'a> {
         // the host stores it so the next preparation reads it back instead of
         // scanning it. `working` keeps it raw.
         let stored = |idx: usize| v(idx).map(|value| self.inputs.host.persisted_data(&value));
+        // A frontmatter verb's file operand is resolved once; the engine writes
+        // that target and the live-state mirror compares that same target.
+        let frontmatter_target = if FRONTMATTER_VERBS.contains(&verb) { Some(path(0)?) } else { None };
+        let target = || frontmatter_target.as_deref().unwrap_or_default();
         let result = match verb {
-            "set_frontmatter" => engine.set_frontmatter(&s(0)?, &s(1)?, stored(2)?),
-            "merge_frontmatter" => engine.merge_frontmatter(&s(0)?, stored(1)?),
-            "delete_frontmatter" => engine.delete_frontmatter(&s(0)?, &s(1)?),
-            "increment_frontmatter" => engine.increment_frontmatter(&s(0)?, &s(1)?),
-            "decrement_frontmatter" => engine.decrement_frontmatter(&s(0)?, &s(1)?),
-            "append_frontmatter" => engine.append_frontmatter(&s(0)?, &s(1)?, stored(2)?),
-            "prepend_frontmatter" => engine.prepend_frontmatter(&s(0)?, &s(1)?, stored(2)?),
+            "set_frontmatter" => engine.set_frontmatter(target(), &s(1)?, stored(2)?),
+            "merge_frontmatter" => engine.merge_frontmatter(target(), stored(1)?),
+            "delete_frontmatter" => engine.delete_frontmatter(target(), &s(1)?),
+            "increment_frontmatter" => engine.increment_frontmatter(target(), &s(1)?),
+            "decrement_frontmatter" => engine.decrement_frontmatter(target(), &s(1)?),
+            "append_frontmatter" => engine.append_frontmatter(target(), &s(1)?, stored(2)?),
+            "prepend_frontmatter" => engine.prepend_frontmatter(target(), &s(1)?, stored(2)?),
             "ensure_file" => {
                 if takes_content {
                     engine.ensure_file_with_content(&path(0)?, &s(1)?).map(Value::String)
@@ -1043,7 +1065,9 @@ impl<'a> StackExecutor<'a> {
         // over typed so the projection reads it, rather than pre-flattening it
         // here and handing the snapshot prose.
         let out = result.map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
-        self.mirror_frontmatter_mutation(verb, &values, working);
+        if let Some(target) = &frontmatter_target {
+            self.mirror_frontmatter_mutation(verb, Path::new(target), &values, working);
+        }
         Ok(out)
     }
 
@@ -1224,12 +1248,17 @@ impl<'a> StackExecutor<'a> {
     /// [`Self::mutation_target`]. Every failure is a dispatch failure of `verb`.
     fn resolve_effect_path(&self, verb: &str, raw: &str) -> Result<String, ActionFailure> {
         let reference = FileReference::new(raw).map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
-        match self.mutation_target(&reference, raw) {
+        match self.mutation_target(&reference) {
             Ok(path) => Ok(path.to_string_lossy().into_owned()),
             Err(MutationTargetError::Reference(error)) => Err(ActionFailure::Dispatch(self.error_or_action(verb, &error))),
             Err(MutationTargetError::NoLocalTarget) => Err(ActionFailure::Dispatch(
                 self.action_failure(verb, format!("file reference `{raw}` has no local mutation target")),
             )),
+            Err(MutationTargetError::UnmatchedRecursive) => Err(ActionFailure::Dispatch(self.action_failure(
+                verb,
+                format!("recursive file reference `{raw}` matched no file, and a search directory is never a new filename"),
+            ))),
+            Err(MutationTargetError::Outside(error)) => Err(ActionFailure::Dispatch(self.error_or_action(verb, &error))),
         }
     }
 
@@ -1244,45 +1273,44 @@ impl<'a> StackExecutor<'a> {
         if reference.class().kind == FileReferenceKind::Url {
             return Err(EditError::UrlRefused { reference: raw.to_string() });
         }
-        match self.mutation_target(&reference, raw) {
+        match self.mutation_target(&reference) {
             Ok(path) => Ok(path),
             Err(MutationTargetError::Reference(error)) => Err(error.into()),
-            Err(MutationTargetError::NoLocalTarget) => Err(EditError::NoLocalTarget { reference: raw.to_string() }),
+            Err(MutationTargetError::NoLocalTarget | MutationTargetError::UnmatchedRecursive) => {
+                Err(EditError::NoLocalTarget { reference: raw.to_string() })
+            }
+            Err(MutationTargetError::Outside(error)) => Err(EditError::Containment(error)),
         }
     }
 
-    /// Resolve a document-authored mutation target through the same captured
-    /// file-reference context used by composition.
+    /// Select a document-authored mutation target by the file-reference
+    /// contract, then check it against the engine's mutation root.
     ///
-    /// Existing targets follow ordinary document resolution precedence. For a
-    /// missing implicit-relative target, creation stays anchored to the
-    /// mutation root, preserving the effect engine's relative mutation policy;
-    /// other reference kinds use their first document-scoped candidate. A later
-    /// transclusion therefore resolves the same identity.
-    fn mutation_target(&self, reference: &FileReference, raw: &str) -> Result<PathBuf, MutationTargetError> {
+    /// An existing file is the contract's lookup result; a missing target is
+    /// the contract's first candidate (beside the document for an implicit
+    /// relative path), so a later read of the same reference finds the file
+    /// just created. The mutation root is only the boundary: it never
+    /// supplies a base. The returned path is lexically clean and has passed
+    /// [`ensure_within`](crate::effects::fs_write::ensure_within) before
+    /// anything is opened, created, or written.
+    fn mutation_target(&self, reference: &FileReference) -> Result<PathBuf, MutationTargetError> {
         let document_context = self.inputs.file_resolution_context.for_source(self.inputs.source_path);
         let resolved = reference
             .resolve_in_context(&document_context)
             .map_err(MutationTargetError::Reference)?;
-        match resolved {
-            Some(path) => Ok(path),
-            // A new implicit-relative target is created under the mutation root.
-            // Joined directly rather than through `request_context.for_cwd(..)`:
-            // that context keeps the document's repository boundary, and the
-            // mutation root (the launch workspace) lies outside it whenever the
-            // document comes from a different repository, e.g. a shared prompt
-            // library.
-            None if reference.class().kind == FileReferenceKind::ImplicitRelative => {
-                Ok(self.inputs.effect_engine.mutation_root().join(raw))
-            }
+        let target = match resolved {
+            Some(path) => path,
+            // A recursive reference's candidates are search roots (directories).
+            None if reference.class().recursive => return Err(MutationTargetError::UnmatchedRecursive),
             None => reference
                 .candidate_plan(&document_context)
                 .map_err(MutationTargetError::Reference)?
                 .into_iter()
                 .next()
                 .map(|candidate| candidate.path().to_path_buf())
-                .ok_or(MutationTargetError::NoLocalTarget),
-        }
+                .ok_or(MutationTargetError::NoLocalTarget)?,
+        };
+        ensure_within(self.inputs.effect_engine.mutation_root(), &target).map_err(MutationTargetError::Outside)
     }
 
     /// Open an `edit` action's file in the host's editor and wait for it.
@@ -1370,10 +1398,7 @@ impl<'a> StackExecutor<'a> {
     /// view consistent so a later action in the same stack resolves `{{ … }}`
     /// against the mutated value (just-in-time resolution). Mutations targeting
     /// any other file are not mirrored — they do not change this document.
-    fn mirror_frontmatter_mutation(&self, verb: &str, values: &[Value], working: &mut SharedFrontmatter) {
-        let Some(Value::String(target)) = values.first() else {
-            return;
-        };
+    fn mirror_frontmatter_mutation(&self, verb: &str, target: &Path, values: &[Value], working: &mut SharedFrontmatter) {
         if !self.targets_document(target) {
             return;
         }
@@ -1419,22 +1444,14 @@ impl<'a> StackExecutor<'a> {
         }
     }
 
-    /// Whether a side-effect target path refers to the document being processed.
-    ///
-    /// Resolves both the target and the document source against the effect
-    /// engine's mutation root (relative paths join it; absolute paths win) and
-    /// compares them lexically.
-    fn targets_document(&self, target: &str) -> bool {
-        let root = self.inputs.effect_engine.mutation_root();
-        let resolve = |raw: &Path| -> PathBuf {
-            if raw.is_absolute() {
-                lexical_normalize(raw)
-            } else {
-                lexical_normalize(&root.join(raw))
-            }
+    /// Whether a resolved side-effect target is the document being processed,
+    /// by filesystem identity: symlinked or `..` spellings of one file match.
+    fn targets_document(&self, target: &Path) -> bool {
+        let identity = |path: &Path| {
+            let canonical = canonicalize_with_missing_tail(path).unwrap_or_else(|| path.to_path_buf());
+            PathIdentity::new(&canonical)
         };
-        let target_clean = target.trim().trim_matches('"').trim_matches('\'');
-        resolve(Path::new(target_clean)) == resolve(self.inputs.source_path)
+        identity(target) == identity(self.inputs.source_path)
     }
 
     /// Invoke a read-only expression function for its result, logging it in
@@ -2003,23 +2020,6 @@ fn first_template_span(value: &Value, suffix: &mut String) -> Option<(String, St
         }),
         _ => None,
     }
-}
-
-/// Lexically normalize a path (resolve `.`/`..` components) without touching the
-/// filesystem, so two paths that name the same document compare equal.
-fn lexical_normalize(path: &Path) -> PathBuf {
-    use std::path::Component;
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

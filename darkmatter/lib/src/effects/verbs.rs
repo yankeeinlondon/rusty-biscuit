@@ -23,9 +23,11 @@ impl EffectEngine {
         Ok(abs)
     }
 
-    /// Loads a Markdown file for mutation.
+    /// Loads a Markdown file for mutation, refusing a target outside the
+    /// mutation root before it is read.
     fn load(&self, raw: &str) -> Result<(PathBuf, Markdown), EffectError> {
         let path = self.resolve(raw)?;
+        ensure_within(self.mutation_root(), &path)?;
         let content = std::fs::read_to_string(&path).map_err(|source| EffectError::Io {
             path: path.clone(),
             source,
@@ -460,6 +462,32 @@ mod tests {
         assert_eq!(merged["owner"], json!("ken"));
         let removed = eng.delete_frontmatter("d.md", "owner").unwrap();
         assert_eq!(removed, json!("ken"));
+    }
+
+    #[test]
+    fn frontmatter_verbs_refuse_an_outside_target_before_reading_it() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let outside = dir.path().join("outside.md");
+        std::fs::write(&outside, "---\nphase: 1\n---\nBody\n").unwrap();
+        // A missing outside file would fail the read with `NotFound` if the
+        // read ran first; the guard must answer before any read.
+        let missing = dir.path().join("missing.md");
+        let eng = EffectEngine::builder().mutation_root(&root).build();
+
+        for target in [&outside, &missing] {
+            let target = target.to_string_lossy();
+            let err = eng.increment_frontmatter(&target, "phase").unwrap_err();
+            assert!(
+                matches!(err, crate::effects::EffectError::OutsideMutationRoot { .. }),
+                "{target}: {err}"
+            );
+            let err = eng.delete_frontmatter(&target, "phase").unwrap_err();
+            assert!(matches!(err, crate::effects::EffectError::OutsideMutationRoot { .. }), "{target}: {err}");
+        }
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "---\nphase: 1\n---\nBody\n");
+        assert!(!missing.exists());
     }
 
     #[test]

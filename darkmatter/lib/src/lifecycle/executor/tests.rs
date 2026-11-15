@@ -89,6 +89,8 @@ impl ShellRunner for RecordingShell {
 struct FakeHost {
     committed: RefCell<Map<String, Value>>,
     failures: RefCell<Vec<String>>,
+    /// The display of each classified `edit` failure's error.
+    edit_errors: RefCell<Vec<String>>,
     /// `None` is a host that cannot run `edit`, the trait's default.
     editor: Option<FakeEditor>,
     side_effects_attempted: std::cell::Cell<usize>,
@@ -163,6 +165,9 @@ impl LifecycleHost for FakeHost {
         true
     }
     fn failure(&self, failure: LifecycleRunFailure) -> LifecycleErrorInfo {
+        if let LifecycleRunFailure::EditFailed { error, .. } = &failure {
+            self.edit_errors.borrow_mut().push(error.to_string());
+        }
         let label = format!("{failure:?}");
         let variant = label.split([' ', '{', '(']).next().unwrap_or_default().to_string();
         self.failures.borrow_mut().push(variant.clone());
@@ -862,4 +867,396 @@ fn a_completed_edit_cancelled_while_open_never_continues_even_with_an_authored_f
     let error = outcome.evaluation_error.expect("cancellation is an evaluation failure");
     assert_eq!(error.msg, "the run was cancelled while an `edit` was open");
     assert!(fixture.effects.lines().is_empty());
+}
+
+// ── mutation targets ─────────────────────────────────────────────────────
+//
+// A mutation target is selected by the file-reference contract (an existing
+// file by lookup, a missing one at its first candidate) and then checked
+// against the engine's mutation root, which is only the boundary.
+
+/// A workspace laid out as `<tmp>/ws/prompts/doc.md`, with `<tmp>/ws` as the
+/// repository root, the launch directory, and the mutation root, and
+/// `<tmp>/outside` beyond the boundary.
+struct Workspace {
+    fixture: Fixture,
+    ws: PathBuf,
+    outside: PathBuf,
+    doc: PathBuf,
+}
+
+const DOC_TEXT: &str = "---\ncount: 1\n---\nBody\n";
+
+impl Workspace {
+    fn new() -> Self {
+        Self::with_editor(None)
+    }
+
+    fn with_editor(editor: Option<FakeEditor>) -> Self {
+        let mut fixture = Fixture::new();
+        let ws = fixture.root().join("ws");
+        let outside = fixture.root().join("outside");
+        let doc = ws.join("prompts/doc.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(&doc, DOC_TEXT).unwrap();
+        fixture.engine = EffectEngine::builder().mutation_root(&ws).auto_rehash(false).build();
+        fixture.files = biscuit_file::FileResolutionContext::new(&ws).with_repository_root(&ws);
+        fixture.host.editor = editor;
+        Self { fixture, ws, outside, doc }
+    }
+
+    /// Run `document`'s `success` stack as authored by `prompts/doc.md`, with
+    /// the document's frontmatter as live state.
+    fn run(&self, document: Value) -> LifecycleEventOutcome {
+        let config = parse(document);
+        let fm: SharedFrontmatter = json!({ "count": 1, "patch": { "count": 2 } }).as_object().cloned().unwrap().into();
+        let inputs = StackInputs { source_path: &self.doc, ..self.fixture.inputs(LifecycleSignal::Success, &fm) };
+        StackExecutor::with_services(inputs, &self.fixture.effects, &NoCodes).execute_event(&config)
+    }
+
+    fn info(&self) -> Vec<String> {
+        self.fixture.effects.lines()
+    }
+
+    /// Every path under the fixture's temp directory, relative to it.
+    fn tree(&self) -> Vec<String> {
+        fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                out.push(path.strip_prefix(base).unwrap().to_string_lossy().replace('\\', "/"));
+                if path.is_dir() {
+                    walk(&path, base, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self.fixture.root(), self.fixture.root(), &mut out);
+        out.sort();
+        out
+    }
+}
+
+impl Workspace {
+    /// The failure message of `outcome`: an `edit` failure's error display
+    /// (the fake host's classification clamps it), else the action error.
+    fn failure_message(&self, outcome: &LifecycleEventOutcome) -> String {
+        match self.fixture.host.edit_errors.borrow().last() {
+            Some(error) if outcome.action_error.as_ref().is_some_and(|info| info.msg.starts_with("EditFailed")) => {
+                error.clone()
+            }
+            _ => action_message(outcome),
+        }
+    }
+}
+
+fn action_message(outcome: &LifecycleEventOutcome) -> String {
+    outcome.action_error.as_ref().map(|error| error.msg.clone()).unwrap_or_default()
+}
+
+#[test]
+fn a_missing_bare_relative_target_is_created_beside_the_document() {
+    let fixture = Fixture::with_editor(FakeEditor::default());
+
+    let outcome = fixture.run_edit(LifecycleSignal::Success, json!({}), json!({ "success": [{ "edit": "notes/today.md" }] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    let seen = fixture.seen();
+    assert_eq!(seen[0].target, fixture.root().join("notes/today.md"));
+    assert_eq!((seen[0].create_new, seen[0].gui), (false, None));
+    assert_eq!(fixture.host.side_effects_attempted.get(), 0, "a refusal before preparation reuses reads");
+}
+
+#[test]
+fn a_missing_bare_relative_target_in_a_subdirectory_document_lands_beside_it_not_at_the_root() {
+    let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+
+    let outcome = workspace.run(json!({ "success": [
+        { "edit": "notes.md" },
+        { "append_line": ["log.txt", "one"] },
+    ] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    let seen = workspace.fixture.seen();
+    assert_eq!(seen[0].target, workspace.ws.join("prompts/notes.md"));
+    assert_eq!(seen[0].mutation_root, workspace.ws, "the boundary is the root, never the base");
+    assert_eq!(std::fs::read_to_string(workspace.ws.join("prompts/log.txt")).unwrap(), "one\n");
+    assert!(!workspace.ws.join("log.txt").exists(), "never root-joined");
+}
+
+#[test]
+fn an_existing_root_level_file_is_the_contracts_second_candidate_while_dot_slash_pins_the_document_dir() {
+    let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+    std::fs::write(workspace.ws.join("notes.md"), "root\n").unwrap();
+
+    let outcome = workspace.run(json!({ "success": [
+        { "edit": "notes.md" },
+        { "append_line": ["notes.md", "appended"] },
+        { "ensure_file": ["./notes.md", "pinned\n"] },
+    ] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(workspace.fixture.seen()[0].target, workspace.ws.join("notes.md"));
+    assert_eq!(std::fs::read_to_string(workspace.ws.join("notes.md")).unwrap(), "root\nappended\n");
+    assert_eq!(std::fs::read_to_string(workspace.ws.join("prompts/notes.md")).unwrap(), "pinned\n");
+}
+
+#[test]
+fn a_file_created_beside_the_document_is_found_there_by_the_next_reference() {
+    let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+    std::fs::write(workspace.ws.join("notes.md"), "root\n").unwrap();
+
+    // `./notes.md` created beside the document now outranks the root file
+    // for the bare spelling too.
+    let outcome = workspace.run(json!({ "success": [
+        { "ensure_file": "./notes.md" },
+        { "append_line": ["notes.md", "beside"] },
+        { "edit": "notes.md" },
+    ] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(std::fs::read_to_string(workspace.ws.join("prompts/notes.md")).unwrap(), "beside\n");
+    assert_eq!(std::fs::read_to_string(workspace.ws.join("notes.md")).unwrap(), "root\n");
+    assert_eq!(workspace.fixture.seen()[0].target, workspace.ws.join("prompts/notes.md"));
+}
+
+#[test]
+fn a_nested_missing_target_creates_its_parents_beside_the_document() {
+    let workspace = Workspace::new();
+
+    let outcome = workspace.run(json!({ "success": [
+        { "ensure_file": ["specs/new/a.md", "seed"] },
+        { "ensure_dir": "./logs/today" },
+    ] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(std::fs::read_to_string(workspace.ws.join("prompts/specs/new/a.md")).unwrap(), "seed");
+    assert!(workspace.ws.join("prompts/logs/today").is_dir());
+    assert!(!workspace.ws.join("specs").exists() && !workspace.ws.join("logs").exists());
+}
+
+#[test]
+fn an_unmatched_recursive_reference_is_refused_and_creates_nothing() {
+    let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+    let before = workspace.tree();
+
+    let ensure = workspace.run(json!({ "success": [{ "ensure_file": "%missing.md" }] }));
+    let edit = workspace.run(json!({ "success": [{ "edit": "%missing.md" }] }));
+
+    let message = action_message(&ensure);
+    assert!(message.contains("recursive") && message.contains("%missing.md"), "{message}");
+    assert!(action_message(&edit).contains("NoLocalTarget"), "{}", action_message(&edit));
+    assert!(workspace.fixture.seen().is_empty(), "no editor for an unresolved target");
+    assert_eq!(workspace.tree(), before);
+}
+
+#[test]
+fn a_url_target_is_refused_as_not_local_without_writing() {
+    let workspace = Workspace::new();
+    let before = workspace.tree();
+
+    let outcome = workspace.run(json!({ "success": [{ "append_line": ["https://example.invalid/log.txt", "x"] }] }));
+
+    // `RemoteNotLocal` is decided before any probe or fetch; the test has
+    // no network, so reaching a fetch would surface as a different error.
+    let message = action_message(&outcome);
+    assert!(message.contains("example.invalid"), "{message}");
+    assert!(!message.contains("outside the mutation root"), "{message}");
+    assert_eq!(workspace.tree(), before);
+}
+
+#[test]
+fn a_target_outside_the_root_is_refused_naming_target_and_root_before_any_parent_exists() {
+    let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+    let before = workspace.tree();
+    let target = workspace.outside.join("deep/new/file.md");
+
+    let ensure = workspace.run(json!({ "success": [{ "ensure_file": target.to_string_lossy() }] }));
+    let edit = workspace.run(json!({ "success": [{ "edit": target.to_string_lossy() }] }));
+    // A relative escape is already refused by the reference's own tree rule.
+    let escape = workspace.run(json!({ "success": [{ "ensure_file": "../../outside/escape.md" }] }));
+
+    assert!(action_message(&escape).contains("leaves file tree"), "{}", action_message(&escape));
+    for outcome in [&ensure, &edit] {
+        let message = workspace.failure_message(outcome);
+        assert!(message.contains("outside the mutation root"), "{message}");
+        assert!(message.contains(&*workspace.ws.to_string_lossy()), "names the root: {message}");
+    }
+    assert!(action_message(&ensure).contains(&*target.to_string_lossy()), "names the target");
+    assert!(workspace.fixture.seen().is_empty(), "the editor is never invoked");
+    assert_eq!(workspace.tree(), before, "no file or parent was created");
+}
+
+#[test]
+fn an_in_root_parent_reference_and_a_sibling_text_prefix_are_judged_by_components() {
+    let workspace = Workspace::new();
+    let sibling = workspace.fixture.root().join("ws-x");
+
+    let inside = workspace.run(json!({ "success": [{ "ensure_file": "../shared/state.md" }] }));
+    let prefix = workspace.run(json!({ "success": [{ "ensure_file": sibling.join("f.md").to_string_lossy() }] }));
+
+    assert_eq!(inside, LifecycleEventOutcome::default());
+    assert!(workspace.ws.join("shared/state.md").is_file());
+    assert!(action_message(&prefix).contains("outside the mutation root"), "{}", action_message(&prefix));
+    assert!(!sibling.exists());
+}
+
+#[test]
+fn a_frontmatter_write_to_the_active_document_is_visible_to_the_next_action() {
+    let workspace = Workspace::new();
+
+    let outcome = workspace.run(json!({ "success": [
+        { "set_frontmatter": ["doc.md", "count", 7] },
+        { "info": "count={{ count }}" },
+    ] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(workspace.info(), ["info count=7"]);
+    assert!(std::fs::read_to_string(&workspace.doc).unwrap().contains("count: 7"));
+}
+
+#[test]
+fn a_frontmatter_write_to_another_file_leaves_the_active_documents_state_alone() {
+    let workspace = Workspace::new();
+    let other = workspace.ws.join("prompts/other.md");
+    std::fs::write(&other, DOC_TEXT).unwrap();
+
+    let outcome = workspace.run(json!({ "success": [
+        { "set_frontmatter": ["other.md", "count", 9] },
+        { "info": "count={{ count }}" },
+    ] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(workspace.info(), ["info count=1"]);
+    assert!(std::fs::read_to_string(&other).unwrap().contains("count: 9"));
+    assert_eq!(std::fs::read_to_string(&workspace.doc).unwrap(), DOC_TEXT);
+}
+
+#[test]
+fn the_active_document_is_recognized_through_an_equivalent_spelling() {
+    let workspace = Workspace::new();
+    let spelled = workspace.ws.join("prompts/../prompts/./doc.md");
+
+    let outcome = workspace.run(json!({ "success": [
+        { "increment_frontmatter": ["../prompts/doc.md", "count"] },
+        { "increment_frontmatter": [spelled.to_string_lossy(), "count"] },
+        { "info": "count={{ count }}" },
+    ] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(workspace.info(), ["info count=3"]);
+    assert!(std::fs::read_to_string(&workspace.doc).unwrap().contains("count: 3"));
+}
+
+/// One action per file-writing verb, by the operand it writes.
+fn writer_action(verb: &str, file: &str) -> Value {
+    match verb {
+        "set_frontmatter" => json!({ verb: [file, "count", 2] }),
+        "merge_frontmatter" => json!({ verb: [file, "{{ patch }}"] }),
+        "delete_frontmatter" | "increment_frontmatter" | "decrement_frontmatter" => json!({ verb: [file, "count"] }),
+        "append_frontmatter" | "prepend_frontmatter" => json!({ verb: [file, "tags", "t"] }),
+        "ensure_file" | "ensure_dir" | "edit" => json!({ verb: file }),
+        "ensure_file_with_content" => json!({ "ensure_file": [file, "seed"] }),
+        "append_line" => json!({ verb: [file, "line"] }),
+        "append_jsonl" => json!({ verb: [file, "{{ patch }}"] }),
+        other => unreachable!("{other}"),
+    }
+}
+
+const WRITERS: [&str; 13] = [
+    "set_frontmatter",
+    "merge_frontmatter",
+    "delete_frontmatter",
+    "increment_frontmatter",
+    "decrement_frontmatter",
+    "append_frontmatter",
+    "prepend_frontmatter",
+    "ensure_file",
+    "ensure_file_with_content",
+    "ensure_dir",
+    "append_line",
+    "append_jsonl",
+    "edit",
+];
+
+#[test]
+fn the_writer_table_covers_every_frontmatter_verb() {
+    for verb in FRONTMATTER_VERBS {
+        assert!(WRITERS.contains(&verb), "{verb} has no row");
+    }
+}
+
+#[test]
+fn every_writer_acts_on_the_target_beside_the_document() {
+    for verb in WRITERS {
+        let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+        let file = if FRONTMATTER_VERBS.contains(&verb) { "target.md" } else { "new/target.md" };
+        let target = workspace.ws.join("prompts").join(file);
+        if FRONTMATTER_VERBS.contains(&verb) {
+            std::fs::write(&target, "---\ncount: 1\ntags: []\n---\n").unwrap();
+        }
+
+        let outcome = workspace.run(json!({ "success": [writer_action(verb, file)] }));
+
+        assert_eq!(outcome, LifecycleEventOutcome::default(), "{verb}");
+        if verb == "edit" {
+            assert_eq!(workspace.fixture.seen()[0].target, target, "{verb}");
+        } else {
+            assert!(target.exists(), "{verb} acted on {}", target.display());
+        }
+        assert!(!workspace.ws.join(file).exists(), "{verb} never root-joins");
+    }
+}
+
+#[test]
+fn every_writer_refuses_an_outside_target_and_touches_nothing() {
+    for verb in WRITERS {
+        let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+        let target = workspace.outside.join("sub/target.md");
+        if FRONTMATTER_VERBS.contains(&verb) {
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(&target, "---\ncount: 1\ntags: []\n---\n").unwrap();
+        }
+        let before = workspace.tree();
+        let target_before = std::fs::read_to_string(&target).ok();
+
+        let outcome = workspace.run(json!({ "success": [writer_action(verb, &target.to_string_lossy())] }));
+
+        let message = workspace.failure_message(&outcome);
+        assert!(message.contains("outside the mutation root"), "{verb}: {message}");
+        assert_eq!(workspace.tree(), before, "{verb} created nothing");
+        assert_eq!(std::fs::read_to_string(&target).ok(), target_before, "{verb} wrote nothing");
+        assert!(workspace.fixture.seen().is_empty(), "{verb} invoked no editor");
+        assert_eq!(workspace.info(), Vec::<String>::new());
+    }
+}
+
+#[test]
+fn a_refused_target_honors_no_error_and_the_stack_continues() {
+    let workspace = Workspace::new();
+    let target = workspace.outside.join("x.md");
+
+    let outcome = workspace.run(json!({ "success": [
+        { "ensure_file": target.to_string_lossy(), "no_error": true },
+        { "info": "continued" },
+    ] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(workspace.info(), ["info continued"]);
+    assert!(!target.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_inside_the_root_cannot_redirect_a_write_outside_it() {
+    let workspace = Workspace::new();
+    std::os::unix::fs::symlink(&workspace.outside, workspace.ws.join("prompts/link")).unwrap();
+
+    // Spelled absolute, so the boundary check (not the reference's relative
+    // tree rule) is what refuses it.
+    let through_link = workspace.ws.join("prompts/link/escape.md");
+    let outcome = workspace.run(json!({ "success": [{ "ensure_file": through_link.to_string_lossy() }] }));
+
+    assert!(action_message(&outcome).contains("outside the mutation root"), "{}", action_message(&outcome));
+    assert!(!workspace.outside.join("escape.md").exists());
 }

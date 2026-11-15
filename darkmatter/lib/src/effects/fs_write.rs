@@ -148,7 +148,7 @@ fn normalize_within(root: &Path, target: &Path) -> Result<std::path::PathBuf, Ef
 /// prefix still makes symlink aliases (`/var` versus `/private/var` on macOS)
 /// comparable and prevents an existing symlink inside the root from redirecting
 /// a new child outside it.
-fn canonicalize_with_missing_tail(path: &Path) -> Option<PathBuf> {
+pub(crate) fn canonicalize_with_missing_tail(path: &Path) -> Option<PathBuf> {
     let mut ancestor = path;
     let mut tail = Vec::<OsString>::new();
     loop {
