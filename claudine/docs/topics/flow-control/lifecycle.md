@@ -285,9 +285,10 @@ Two more rules keep `finalize` from repeating:
 
 An event's value is either a **list** of items or a single **dictionary** of
 verbs. For events other than `cancelled`, omitting the event, writing `null`,
-`[]`, or `{}` all mean "do nothing". For `cancelled`, omission does not opt into
-sibling cancellation, an empty list or dictionary opts in without actions,
-and null is invalid.
+`[]`, or `{}` all mean "do nothing"; so does a dictionary holding only
+`no_error: null`, because a `null` flag is no flag. For `cancelled`,
+omission does not opt into sibling cancellation, an empty list or dictionary
+opts in without actions, and null is invalid.
 
 **A list** runs its items in the order written. Each item is one verb, a
 dictionary of several verbs (a *bundle*), or a guarded `when` item:
@@ -1238,15 +1239,17 @@ start:
 
 | Parameter | Value | Meaning |
 |---|---|---|
-| `file` | a non-blank string (required) | the file to open; a missing file is created empty, with any missing parent directories |
+| `file` | a non-blank file name (required) | the file to open; a missing file is created empty, with any missing parent directories |
 | `create_new` | `true` or `false` (default `false`) | with `true`, the action must create the file: if anything already has that name (a file, directory, or symlink), the action fails before an editor opens and leaves that entry untouched |
 | `gui` | `true` or `false` (omitted: either) | `true` requires a graphical editor that opens its own window, `false` a terminal editor; omitted, the usual editor is used |
 | `no_error` | `true` or `false` (default `false`) | the ordinary [`no_error`](#no_error) |
 
-`create_new` and `gui` must be literal YAML booleans: `gui: "yes"`,
-`gui: null`, and `gui: "{{ fm.gui }}"` are errors, never conversions. The
-target must be a string, so `edit: 5` is an error rather than a file named
-`5`. A bare `edit`, `edit: null`, and `edit: []` name no file and are errors.
+`create_new` and `gui` are literal flags, read like
+[`no_error`](#no_error): a YAML boolean or Boolean-like text (`gui: "yes"`)
+is accepted, `null` is the same as leaving the flag out, and a number or
+`gui: "{{ fm.gui }}"` is an error, never evaluated. A number or boolean
+target names a file by its text, so `edit: 5` opens a file named `5`. A
+bare `edit`, `edit: null`, and `edit: []` name no file and are errors.
 The value is literal text like every action value: `edit: fqn` opens a file
 named `fqn`; write `edit: "{{ fqn }}"` to open the path the `fqn` property
 holds.
@@ -1424,7 +1427,14 @@ by a directory while it was open. `no_error` never suppresses a malformed
 When `no_error` is `true`, a side-effect **dispatch** failure (a channel, TTS,
 or shell action whose values evaluated fine but whose effect failed) is logged
 and does not stop the event or change the composition outcome. It defaults to
-`false` and must be a YAML boolean.
+`false`. It takes a YAML boolean or Boolean-like text (`"yes"`, `"no"`,
+`"true"`); a number or a `{{ … }}` template is an error, because the flag is
+never evaluated. `no_error: null` is the same as leaving the flag out.
+
+Only a flag you wrote counts. The schema stage fills the default
+`no_error: false` into every action it completes, but the parser ignores a
+flag it filled, so a filled flag is never a second placement and never gives
+`set` one.
 
 It has exactly two homes:
 
@@ -1440,10 +1450,11 @@ start:
 
 It is rejected:
 
-- beside `then`/`else` on a `when` item (put it on the actions in the body);
-- beside a lone `set`, and as a long-form parameter of `set`: a `set` failure
-  always stops the event. In a bundle that also holds `set`, the sibling flag
-  applies to the other verbs, never to the `set`;
+- beside `then`/`else` on a `when` item, `false` included (put it on the
+  actions in the body); `null` there is no flag and is accepted;
+- beside a lone `set`, even as `null`, and as a long-form parameter of `set`:
+  a `set` failure always stops the event. In a bundle that also holds `set`,
+  the sibling flag applies to the other verbs, never to the `set`;
 - when one action carries it both inside its long form and as a bundle
   sibling, even if the two values agree.
 

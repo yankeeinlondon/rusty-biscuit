@@ -82,6 +82,28 @@ actions:
   session_start: null   # no actions for this event
 ```
 
+Every default is filled in, including the defaults of optional settings
+inside a value you wrote. What a command reads is the completed value, not
+the text of the file:
+
+| You write | Claudine reads |
+|---|---|
+| `tts: { provider: say }` | `tts: { provider: say, gender: female, prewarm: true }` |
+| `steering: {}` | `steering: { automatic: { enabled: true } }` |
+| (no `steering` key) | `steering: { automatic: { enabled: true } }` |
+
+Earlier releases filled only the required defaults, so the same files read
+as `{ provider: say, gender: female }` and `steering: { automatic: {} }`, and
+an unwritten `prewarm` or `enabled` was treated as on by the code that read
+it. The switches behave the same; the difference is visible to anything
+that inspects the loaded configuration, such as an editor's completion or a
+library caller.
+
+An event's action list and matcher, when written, must say something in
+either file: `session_start: []` and `session_start: ""` are errors. Leave
+the event out, or write `null`, for an event with no actions; a file that
+still lists one as `[]` fails to load until that line is deleted.
+
 A repository setting is an override, so a repository file declares no
 defaults of its own: an absent or `null` override inherits the user's value.
 The repository accepts `canonical_provider`, `actions`, `matchers`,
@@ -99,6 +121,13 @@ The repository accepts `canonical_provider`, `actions`, `matchers`,
 An override that is written must say something: an empty `actions: {}`,
 `matchers: {}`, `steering: {}`, or `steering: { automatic: {} }` is an error
 (leave the key out instead).
+
+A repository cannot turn messaging off. Earlier releases read
+`active_messenger: null` as "no messaging in this repository"; it now
+inherits the user's route like an absent key, and `claudine config` no
+longer offers a "(disabled)" choice for the repository. For the same reason
+a repository cannot clear an event's actions (`[]` is an error and `null`
+inherits); it can only replace them with other actions.
 
 ## Actions and messenger routes
 
@@ -126,7 +155,25 @@ An entry with no key, two keys, an unknown kind, or `null` in place of the
 fields is an error. Earlier releases wrote the kind as a field
 (`- type: bash` beside `command:`, `provider: slack` beside `channel_id:`);
 such a `config.yaml` fails to load, and the message spells each entry in the
-keyed form. The action fields are listed in
+keyed form, at that entry's location:
+
+```yaml
+actions:
+  session_start:
+    - type: bash          # the earlier flat form
+      command: ./notify.sh
+```
+
+```text
+… at /actions/session_start/0: an action is now written as a mapping keyed by its kind, not with `type:`; write `{ bash: { command: "./notify.sh" } }`
+```
+
+Replace each flagged entry with the spelling the message gives. Kinds are
+written in snake_case (`discord_webhook`, `slack_webhook`), and the message
+already converts a hyphenated `provider: slack-webhook`. Only the file
+format changed: the Rust types `HookAction` and `MessengerProviderConfig`
+and their own serialized form (`type:` / `provider:` tags) are unchanged for
+library callers. The action fields are listed in
 [Configuring Actions](configuring-actions.md#action-types) and the route
 fields in [Messaging Configuration](configuring-actions.md#provider-configs).
 
@@ -250,14 +297,17 @@ legacy file first:
 
 | Files in the `.claudine` directory | Result |
 |---|---|
-| `config.json` only | written to `config.yaml` with the same values, actions and messenger routes rewritten in the [keyed form](#actions-and-messenger-routes), then `config.json` is renamed `config.json.bak`; one notice names both files and says JSON5 comments were not carried over |
+| `config.json` only | written to `config.yaml` with the same values, actions and messenger routes rewritten in the [keyed form](#actions-and-messenger-routes) (a hyphenated kind such as `slack-webhook` becomes `slack_webhook`), then `config.json` is renamed `config.json.bak`; one notice names both files and says JSON5 comments were not carried over |
 | `config.yaml` only | used |
 | both | `config.yaml` is used; a warning says `config.json` is ignored |
 | a pre-2026 per-provider `config.json` | renamed `config.json.bak` and ignored |
 
 A conversion that fails (unreadable file, invalid JSON5, a duplicated key, a
 number that cannot be kept exactly, or a value the schema refuses) leaves
-`config.json` untouched, writes nothing, and stops with an error naming it. An
+`config.json` untouched, writes nothing, and stops with an error naming it.
+The schema judges the converted, keyed value, so an empty event list
+(`"session_start": []`) in the old file is refused like one in `config.yaml`;
+delete it from `config.json` and load again. An
 existing `config.json.bak` is never overwritten: if it holds the same bytes the
 unchanged `config.json` is simply removed; if it differs, the conversion stops
 and keeps both files.

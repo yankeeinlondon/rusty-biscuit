@@ -366,7 +366,7 @@ All dispatch surfaces that evaluate expressions against an `EventMeta` share the
 
 ### Config Merge Strategy
 
-User config (`ClaudineConfig`) is the full source of truth; repo config (`RepoOverrideConfig`) is an optional overlay where every field is `Option`-like. Per-event `actions` replace user-level actions per canonical event (a repo entry for `BeforeTool` fully replaces the user's `BeforeTool` actions; events not present in the repo config fall through to user). `canonical_provider` overrides when set. `messenger_override` uses three-state semantics: absent = inherit, `null` = disable, object = override. Global toggles (`logging`, `protect`, `preferred_agent`, etc.) live only in the user config.
+User config (`ClaudineConfig`) is the full source of truth; repo config (`RepoOverrideConfig`) is an optional overlay where every field is `Option`-like. Per-event `actions` replace user-level actions per canonical event (a repo entry for `BeforeTool` fully replaces the user's `BeforeTool` actions; events not present in the repo config fall through to user). `canonical_provider` overrides when set. `active_messenger` is `Option<String>`: absent or `null` inherits the user's `messenger.active_config`, a name selects one of the user's routes, and there is no disable state (`config/merge.rs`). Every repository override reads absent and `null` alike as unset (`config/wire.rs::{null_as_default, null_entries_unset}`), and the schema refuses an empty one (`(not-empty)`). Global toggles (`logging`, `protect`, `preferred_agent`, etc.) live only in the user config.
 
 ## Configuration Schema
 
@@ -388,7 +388,7 @@ pub struct ClaudineConfig {
 pub struct RepoOverrideConfig {
     pub canonical_provider: Option<Provider>,
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
-    pub messenger_override: /* three-state: absent / null / object */,
+    pub active_messenger: Option<String>, // absent or null inherits
     // ...other optional overrides
 }
 ```

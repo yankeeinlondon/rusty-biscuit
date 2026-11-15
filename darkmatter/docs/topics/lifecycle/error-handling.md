@@ -19,6 +19,7 @@ The short version for `md compose`:
 | An error in `initialize` | `failed`, `finalize` | no | 1 |
 | Preflight: a refused shell command | `failed`, `finalize` | no | 1 |
 | Preflight: unresolved references (a missing include, a broken link) | `failed`, `finalize` | no | 1 |
+| Schema validation refuses the frontmatter | `failed`, `finalize` (after `initialize` has run) | no | 1 |
 | An error in `composed` | `finalize` | no | 1 |
 | Writing the document (for example a closed stdout pipe) | `finalize` | partly, never repeated | 1 |
 | An error in `failed` or `finalize` | see [Errors inside cleanup](#errors-inside-cleanup) | — | 1 |
@@ -55,7 +56,26 @@ An error raised in `initialize` (an explicit `error`, or an expression that
 fails to evaluate) ends `initialize`, skips composition, and runs `failed`
 then `finalize`. So does any failure while preparing the document: a shell
 command the audit refuses, a reference that does not resolve, a lifecycle
-command whose template value is missing at preflight.
+command whose template value is missing at preflight, or frontmatter that its
+[schema](../../inline/schema-validation.md) refuses.
+
+Schema validation is part of composition, so it runs **after** `initialize`.
+A document whose frontmatter fails its schema still runs `initialize` first,
+and whatever `initialize` did (a file an `edit` created, for example) stays
+done. Put a side effect that must not happen for an invalid document in
+`composed`, which never fires after a refusal:
+
+```yaml
+$schema:
+    count: number(required)
+count: many                  # refused: not a number
+initialize:
+    - info: "runs"           # prints, before validation
+composed:
+    - info: "never runs"
+failed:
+    - warn: "{{ err.msg }}"  # prints: Schema validation failed for "…": frontmatter did not satisfy the schema
+```
 
 ```yaml
 initialize:
@@ -135,8 +155,8 @@ stack continues with the next action:
 
 Three kinds of problem are **never suppressed**, even with `no_error`:
 
-- **A malformed action** (`edit: []`, `gui: "yes"`, an unknown field) is a
-  parse error reported before anything runs.
+- **A malformed action** (`edit: []`, `edit: null`, `gui: 1`, an unknown
+  field) is a parse error reported before anything runs.
 - **A path that is not a non-blank string at run time**, such as
   `edit: "{{ count }}"` where `count` is a number, is an evaluation error.
 - **Cancellation.** An `edit` that was open when the run was cancelled, or

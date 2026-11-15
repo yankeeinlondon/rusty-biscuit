@@ -19,7 +19,9 @@ For the Darkmatter grammar in depth, load `use-darkmatter` and read its
 ## The pipeline, in order
 
 1. Resolve the file reference, and read frontmatter without running shell.
-2. `initialize` (shell-free; it can `skip` the run).
+2. `initialize` (shell-free; it can `skip` the run). It runs before schema
+   validation, so what it does stands even when the schema then refuses the
+   document.
 3. **Pre-flight.** Walk every transcluded document and every branch, and
    approve every shell command once.
 4. **Compose.**
@@ -115,6 +117,21 @@ Claudine's trigger schemas type these keys automatically, even with no
 - A schema problem with an optional key that your own `$schema` declares
   is dropped with a warning.
 - Redeclaring a Claudine key in your `$schema` takes it over.
+
+In your own `$schema`, a missing key and `null` are the same value:
+
+```yaml
+$schema:
+  depth: number(default(2))             # missing or null → 2 (optional defaults are filled too)
+  retries: number(required; default(3)) # missing or null → 3; never prompted
+  count: number(required)               # missing → prompted or MissingProperties; `count: null` → fails the type
+```
+
+- **`required` only asks whether the key was written.** A written `null`
+  meets it and is then judged by the type.
+- **`inline-compose` at launch** leaves a missing required, non-`eager`
+  value to the agent, but a value that resolves to `null` is type-checked
+  then: `foo: string(required)` holding `null` refuses the launch.
 
 ## Overrides from the command line
 

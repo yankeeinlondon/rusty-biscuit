@@ -33,6 +33,18 @@ environment variable that holds it.
   is a valid configuration (the URL is resolved from the env var at send time).
 - **Test Connection** — pressing `T` during webhook input runs
   `test_webhook_connection`, sending a test message **without saving** the route.
+- **Repository override** — inside a repository, `R` picks the route that
+  repository sends to: "(inherit user)" or one of the user's named routes.
+  There is no "(disabled)" choice, because a repository's
+  `active_messenger: null` inherits the user's route rather than turning
+  messaging off (see
+  [Configuration files → Defaults and inheritance](configuration.md#defaults-and-inheritance)).
+
+The config file stores each route as a one-key mapping named by its kind
+(`team: { slack: { channel_id: C012345ABC } }`); the six kinds are `discord`,
+`slack`, `signal`, `whatsapp`, `discord_webhook`, and `slack_webhook`. The
+fields of each are in
+[Configuring Actions → Provider Configs](configuring-actions.md#provider-configs).
 
 ## Webhook redaction invariants
 

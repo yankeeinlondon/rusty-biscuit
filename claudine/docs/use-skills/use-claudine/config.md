@@ -6,7 +6,9 @@
   (repo). Both are YAML, validated against the shipped schema
   `claudine/schemas/claudine-config.yaml`. A legacy JSON5 `config.json` beside
   either is converted on the next load and renamed `config.json.bak` (its
-  comments are not carried over).
+  comments are not carried over). The conversion writes actions and routes
+  in the keyed form below; if the schema refuses the converted value, nothing
+  is written and `config.json` is left as it was.
 - **Creating it.** The first run creates the user file. Edit it with
   `claudine config`, a TUI.
 - **Shape.** The format is flat:
@@ -17,7 +19,7 @@
   logging: true
   protect: true                   # or { enabled, rules: { <group>: false | {enabled, allow_paths} }, custom_patterns: [...] }
   actions:
-    "<event>": []                 # hook actions
+    "<event>": [ … ]              # hook actions; a written list needs at least one
   matchers:
     "<event>": "expr or regex"
   preferred_agent: claude         # `favorite_agent` is accepted too
@@ -31,6 +33,35 @@
 - **Old format.** A legacy `config.json` with `version` and `providers` keys is
   treated as the old format: it's renamed to `config.json.bak` and setup runs
   again.
+- **`null` is the same as leaving a key out**, in both files. In the user
+  file, a missing or `null` setting takes its default, and every default is
+  filled in, optional ones too: `tts: { provider: say }` reads as
+  `{ provider: say, gender: female, prewarm: true }`, and a missing
+  `steering` reads as `{ automatic: { enabled: true } }`.
+- **Empty values are errors**: an event list `[]`, a blank matcher `""`, or
+  a blank TTS `provider`. Leave the key out instead.
+
+### Repository overrides
+
+The repository file holds overrides only. A missing or `null` override
+inherits the user's value; a written one replaces it.
+
+```yaml
+# <repo>/.claudine/config.yaml
+canonical_provider: codex
+active_messenger: team          # one of the user's routes; null inherits
+actions:
+  session_start:
+    - bash: { command: ./repo-notify.sh }   # replaces the user's session_start actions
+steering:
+  automatic: { enabled: false }
+```
+
+- **An empty override is an error**: `actions: {}`, `matchers: {}`,
+  `steering: {}`, `steering: { automatic: {} }`, and `session_start: []`.
+- **A repository can't turn messaging off.** `active_messenger: null`
+  inherits the user's route, and `claudine config` has no "(disabled)"
+  choice. It also can't clear an event's actions, only replace them.
 
 ## Hook events and actions
 
@@ -61,6 +92,10 @@ actions:
 
 Messenger routes are keyed the same way:
 `messenger.configurations.<name>: { slack: { channel_id: C012345ABC } }`.
+The route kinds are `discord`, `slack`, `signal`, `whatsapp`,
+`discord_webhook`, and `slack_webhook` (snake_case only). An action or route
+with no fields to set is written `{}` (`report: {}`, `slack_webhook: {}`);
+`null` in place of the fields is an error.
 
 - `call` mappers: `exit_code`, `json_field`, `json_object`, and `regex`.
 - `hook.*` holds the event payload.

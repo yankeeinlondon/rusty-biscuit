@@ -109,6 +109,7 @@ flowchart TD
 - A problem counts only when it sits at or under the path you set, or when the edit introduced it. So `md set a.md author.mistake 1` fails under an `author` object that does not declare `mistake`, but a problem that was already there at a parent of the path does not block the edit.
 - A missing or malformed schema fails with an explanation and no write. It never silently changes how the value is read.
 - Validation is passive. It reads local schema files only, evaluates nothing, and leaves `file(eager)` values as they are. A pending value such as `'{{ fm.n }}'` is written unevaluated, and composition judges it later.
+- Defaults are never written. Validation counts a schema's `default(...)` as if it were written, but what `md set` writes is only your value, converted: under `server: "{ name: string(default(web)), port: number }"`, `md set a.md server '{port: 80}'` writes `server: { port: 80 }`, with no `name: web`. Composition adds the default to its composed copy, never to the file (see [Properties with a default](../inline/schema-validation.md#properties-with-a-default)).
 - Setting `$schema` itself checks only that the value can be a schema reference, not the rest of the document against it, and does not open the file. Text is always a reference; `null`, numbers, and booleans are refused, so use `md rm doc.md '$schema'` to remove it.
 
 ## Formatting Is Preserved

@@ -78,7 +78,9 @@ accepts the matching text: `"2"` against `literal(2)` becomes `2`.
 
 Text given to `json` or `yaml` is already content: it is validated (JSON
 rejects duplicate keys and numbers such as `1e400`) and kept as written,
-never quoted again.
+never quoted again. [`not-empty`](./language/types.md#empty-values-not-empty) on these types
+judges that text, so `"{}"` has content, and a native `{}` converts to the
+text `"{}"` and passes too; only blank text such as `""` fails.
 
 These are **never** converted:
 
@@ -90,16 +92,26 @@ These are **never** converted:
 - a number or boolean into `alphanumeric`, which must already be text;
 - anything into `unknown`, which keeps every value as written.
 
-Because `null` never converts, an explicit `null` at a
-[`non-null`](./language/types.md#non-null-properties) property is rejected at
-that property, with the same problem strict validation reports. It is not
-turned into the text `"null"`, nor dropped as if the key were missing, and a
-sibling that does convert (`count: "4"`) does not let it through.
+Because `null` never converts, a written `null` at a required property whose
+type does not admit it (`n: number(required)`) is rejected at that property,
+with the same problem strict validation reports. It is not turned into the
+text `"null"`, nor dropped as if the key were missing, and a sibling that does
+convert (`count: "4"`) does not let it through. An optional property accepts
+`null` as it is.
+
+Defaults are not conversions. When a property that declares a
+`default(...)` is missing or `null`, the default is
+[applied](./validation.md#applying-defaults) before conversion runs, and
+again for any default a converted value makes reachable; conversion then
+judges the completed value. So `retries: number(default(3))` turns
+`retries: null` into `3`, while `retries: "4"` converts to `4` and keeps it.
 
 Whole numbers must be held exactly: `"9007199254740993"` and the native YAML
 `9007199254740993` are errors with the reason "cannot be represented
 exactly", `"1e400"` is "not finite", and `"1e-400"` would become `0`, which is
-also an error. `number(integer)` means a whole number below 2^64 in
+also an error. YAML has no number for an overflowing spelling, so a native
+`1e400` in frontmatter is read as the text `"1e400"` and fails a `number` the
+same way. `number(integer)` means a whole number below 2^64 in
 magnitude (the compiled schema carries `x-darkmatter-integer: true`); a raw
 JSON Schema `integer` has no such ceiling. See [Numbers](../../../darkmatter/docs/topics/numbers.md).
 
@@ -204,7 +216,8 @@ complete statement of what a function accepts. Parameters follow the
 property rules with two differences: a parameter is required unless it is
 written `name?: T`, and it accepts `null` only when its type says so
 (`number | null`). Omitting an optional argument is not the same as passing
-`null`.
+`null`, unlike a property, where a missing key and `null` are the same value
+(see [Function Signatures](language/unions.md#function-signatures)).
 
 A function with several signatures (overloads) binds to one of them. A
 signature that accepts every argument without conversion wins over one that

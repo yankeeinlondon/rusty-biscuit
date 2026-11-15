@@ -59,7 +59,11 @@ Numbers are admitted at load: the YAML loader reads every number through
 `simplified_schema::numeric` (`load_admitted_yaml`), so an inexact whole
 number, an underflow, a non-finite `.inf`/`.nan`, or an integer beyond `u64`
 is a located load error whatever the property's type, and no fallback
-strategy can hide it.
+strategy can hide it. An overflowing exponent (`1e400`) is not a YAML number:
+it loads as the text `"1e400"` and only a declared `number` refuses it
+(`setter_values::spellings_yaml_reads_as_strings_are_never_rounded`). A
+duplicate key's location is the start of its enclosing mapping, and the
+loaded body rejoins lines with LF; neither is byte- or key-exact.
 
 ## Merge Strategies
 

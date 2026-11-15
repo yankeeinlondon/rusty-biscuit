@@ -75,7 +75,8 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
 | --- | --- | --- |
 | a typed value | `name: string`, `age: number` | [Types](./types.md#types) |
 | a constraint | `age: number(min(0); required)` | [Universal constraints](./types.md#universal-constraints) |
-| an optional value that may not be `null` | `note: string(non-null)` | [Non-null properties](./types.md#non-null-properties) |
+| an optional value that must have content when written | `note: string(not-empty)` | [Empty values](./types.md#empty-values-not-empty) |
+| a key that must be written, even as `null` | `note: unknown(required)` | [Null-admitting properties](./types.md#null-admitting-properties) |
 | a document with no undeclared keys | `$constraints: { closed: true }` in `$schema` | [Closed roots](./objects-and-named-types.md#closed-roots-closed) |
 | a list | `tags: string[]` | [Array constraints](./types.md#array-constraints) |
 | one of several values | `status: enum(draft, published)` | [Enumerations](./types.md#enumerations) |

@@ -146,7 +146,7 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
 - [Foundations](./docs/topics/foundations.md): the numeric model, spans, the expression scan, and the literal-token codec.
 - [Shipped artifacts](./docs/topics/shipped-artifacts.md): the checked-in prepared form of compiled-in schema text, how to regenerate it, and the fallback when it is stale.
 - [Expression syntax](./docs/topics/expression-syntax.md): parsing expressions without evaluating them.
-- [Strict and soft validation](./docs/topics/validation.md): judging values with a prepared schema, with or without conversion.
+- [Strict and soft validation](./docs/topics/validation.md): applying defaults to missing or `null` values, then judging values with a prepared schema, with or without conversion; and what plain JSON Schema validators do differently.
 - [Property paths](./docs/topics/property-paths.md): naming a value inside a document's data, walking it, and editing it without surprises.
 - [Setter values](./docs/topics/setter-values.md): reading a value typed on a command line through the type its place declares.
 - [Cargo features](./docs/topics/features.md)

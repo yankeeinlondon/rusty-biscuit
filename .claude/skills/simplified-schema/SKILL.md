@@ -1,7 +1,7 @@
 ---
 name: simplified-schema
 description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, `AppliedDefault`, `DefaultPlan`, `prepare_defaults`, `ConflictingDefaults`, or `SchemaError`; required properties with a `default(...)`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `required` presence versus null admission, `not-empty` (and the removed `non-null`), closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; schema triggers (`kind: schema-trigger`, `simplified_schema::triggers`, `TriggerRegistry`, `scan`, `scan_with_source`, `EmbeddedSchemaBundle`, `prepare_trigger_bundle`), schema roots (`SchemaRoots`, `SCHEMAS_DIR`), or whole YAML documents selected by `kind` (`yaml_documents`, `KindRegistry`, `KindHost`, `LoadedYamlDocument`, kind checks); deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
-last_updated: 2026-11-13T00:00:00Z
+last_updated: 2026-11-15T00:00:00Z
 ---
 
 # simplified-schema
@@ -54,26 +54,16 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   A failed soft validation reports on a diagnostic copy
   (`coerce.rs::partial_copy`): converted siblings, failing values as written,
   and unexpected keys/tuple elements masked from the retry then put back.
-- **One default engine, compiled once.** `defaults::DefaultPlan::compile(
-  json_schema, cache)` reads a lowered or raw schema into object locations
-  (merging `$ref`, `allOf`, and every `anyOf`/`oneOf` arm, never choosing
-  an arm); `DefaultPlan::for_identity` memoizes it per `SchemaIdentity`.
-  `prepare_defaults(&plan, value, templates)` fills every missing or `null`
-  property that declares a default, required or not (a `null` default only
-  inserts a missing *required* key), checks each used default against its
-  declaring definitions, then completes the default's own children.
-  `Prepared` and Darkmatter's `EffectiveSchema` hold a plan and run it on
-  every value, valid or not: there is no "already valid" shortcut before
-  preparation. Strict success stays `Cow::Borrowed` and lists `defaults`;
-  soft applies them (defaults, then conversion, then any default the
-  conversion made reachable). Different defaults for one property at one
-  location are `SchemaError::ConflictingDefaults`, raised by lowering
-  (`lower_document` → `check_declarations`) and by `Prepared::new` for raw
-  schemas; a used invalid default is `InvalidDefault`; endless expansion is
-  `RecursiveDefault` (all inside `ValidationFailure::Unprepared`, JSON
-  Pointers into the lowered schema). Exported JSON Schema keeps `required`.
-  Never write a second defaulting walk in a host. Tests:
-  `tests/l1/required_defaults.rs`.
+- **A missing key and `null` are one value; `required` is presence only.**
+  Defaults (required or not) fill missing or `null` values in a step of
+  their own (`defaults::{DefaultPlan, prepare_defaults}`) before any
+  validator judges the candidate; there is no "already valid" shortcut.
+  Strict success stays `Cow::Borrowed` and lists `defaults`; soft applies
+  them. Conflicting defaults fail at lowering/`Prepared::new`, never by arm
+  at run time. Exported JSON Schema keeps `required`; `default` is only an
+  annotation there. Never write a second defaulting walk in a host. Read
+  [defaults.md](defaults.md) before touching presence, defaults, or
+  `not-empty`.
 - **One failure flattening.** `ConversionError::located_failures()` /
   `coercion::locate_failures` (null arms dropped, an arm unreachable only on
   `NoConversion` at the union's path) serves annotation, `partial_copy`, and
@@ -154,52 +144,21 @@ cannot run, such as a file check without a file context), and
 A definition rejected inside a schema document (standalone payload, `types`
 table, Markdown frontmatter `$schema`, or an imported named-type file) is
 `SchemaError::SchemaDocument { path, message, source, span }`: `source` is the
-Referenced `$schema` file classification (`classify_yaml_schema_text`,
+grammar's typed error unchanged, `span` a byte range in the exact supplied
+text. Referenced `$schema` file classification (`classify_yaml_schema_text`,
 `classify_json_schema_text`), envelope admission (`envelope.rs`), and the
 ownership line with Darkmatter's `KindRegistry` are in
 [schema-documents.md](schema-documents.md).
 
-## Shipped artifacts
+## Shipped artifacts and identities
 
-`schemas/*.yaml` are served from the checked-in `lib/generated/shipped.json`
-(`shipped::registry`; a refused artifact silently falls back to the text).
-`simplified_schema::shipped` is the mechanism Darkmatter and Claudine share
-(`accept`, `generate`, `check_fresh`, `PreparationMode::Uncached`, the
-`*_with_mode` entry points, `ShippedSources::with_prepared`). `ShippedSources::with_aliases(&[(stem, path)])`
-lets a stem name a shipped document outside the partials folder
-(Darkmatter's `config` → `darkmatter-config.yaml`); aliases are part of
-equality, memo keys, and the owner's artifact `configuration`. After editing
-shipped YAML or its preparation code, run the root `just shipped-schemas`
-(it regenerates all three artifacts, all or nothing). A code-only change
-bumps `PREPARATION_REVISION` of every owner whose payload it changes (a
-lowering change can alter Darkmatter's and Claudine's payloads without
-touching this crate's); see
-[shipped-artifacts.md](../../../simplified-schema/docs/topics/shipped-artifacts.md).
-The encoder writes the header pretty and each payload member compact on its
-own line; a large payload loads with `accept_deferred` (`Sections::take` →
-`Section::get`), which checks only layout, header, and member list at load
-and decodes each member on first read, refusing that member alone. Tests that
-hand-edit an artifact must re-encode it in that layout (or edit the text).
-
-## Validator identities
-
-`ValidatorCache` keys a validator by `(SchemaIdentity, anchor hash)`.
-`SchemaIdentity::Canonical` is the canonical-JSON hash
-(`SchemaDigest::canonical`, the only path that serializes; counted as
-`Work::CanonicalSchemaSerialization`); `SchemaIdentity::Layered` comes from a
-`LayeredIdentity` a host builds over ordered `(LayerRole, SchemaDigest)`
-layers and phase projections, with fixed little-endian encoding (pinned in
-`tests/l1/schema_identities.rs`). The variants never share a slot. Callers
-with a known digest use `validator_for_shared_with_digest`,
-`CompiledValidators::build_with_digest`, `structural_validator_identified`,
-and `ConversionPlan::for_identity`; the canonical APIs are unchanged and
-`shared_schema_hash` stays canonical. A shipped record stores a canonical
-digest as `shipped::CanonicalDigestRecord` (refused under another
-`CANONICAL_IDENTITY_REVISION`). `judges_files` is the one classification
-rule; a layered digest ORs it. Changing what `merge_baseline` or a phase
-projection produces bumps `resolve::MERGE_ALGORITHM_REVISION` or
-`phase::PROJECTION_REVISION`, which changes the pinned identities in
-`schema_identities.rs`.
+`schemas/*.yaml` are served from the checked-in `lib/generated/shipped.json`.
+After editing shipped YAML or its preparation code, run the root
+`just shipped-schemas`; a code-only change bumps `PREPARATION_REVISION` of
+every owner whose payload it changes. Validator and phase-projection
+identities (`SchemaIdentity`, `MERGE_ALGORITHM_REVISION`,
+`PROJECTION_REVISION`) are pinned in `tests/l1/schema_identities.rs`. Details:
+[shipped-and-identities.md](shipped-and-identities.md).
 
 ## Paths, features, and guards
 
@@ -210,46 +169,22 @@ direction, path lookup, language ownership, glob implementation) are in
 
 ## Testing
 
-Run from `simplified-schema/`:
-
-- `just test` — L1 (`--features work-counters,terminal`), then `test-minimal`
-  (`--no-default-features`).
-- `just lint` — clippy for the default build, `work-counters,terminal`, and
-  `--no-default-features`.
-- Doctests are **not** part of `just test`: run `just doctest` or
-  `cargo test -p simplified-schema --doc`.
-- All tests live in the single `l1` binary (`tests/l1/main.rs`,
-  `autotests = false`); a new test file must be added as a module there.
-  `tests/l1/shipped_corpus.rs` parses every shipped schema artifact.
-- After a change visible to Darkmatter, also run the Darkmatter guard and
-  parity tests (`cargo nextest run -p darkmatter --test l1 -E 'test(schema_language_ownership_guard) | test(effective_schema_layering)'`)
-  or `just test` in `darkmatter/`. Load the `rust-testing` skill for tiers and
-  CI test-input rules.
+Run from `simplified-schema/`: `just test` (L1 with `work-counters,terminal`,
+then `--no-default-features`), `just lint` (all three builds), and
+`just doctest` (doctests are not part of `just test`). Every test lives in
+the single `l1` binary (`tests/l1/main.rs`, `autotests = false`): add a new
+file as a module there. After a change visible to Darkmatter, also run
+`cargo nextest run -p darkmatter --test l1 -E 'test(schema_language_ownership_guard) | test(effective_schema_layering)'`
+or `just test` in `darkmatter/`. Load the `rust-testing` skill for tiers and
+CI test-input rules.
 
 ## Documentation
 
-- [README](../../../simplified-schema/README.md) — overview and install
-- [The `SimplifiedSchema` object](../../../simplified-schema/docs/topics/simplified-schema-struct.md) — build, validate, layer, inspect, export
-- [Strict and soft validation](../../../simplified-schema/docs/topics/validation.md) — `Prepared`, success and failure shapes
-- [Conversion](../../../simplified-schema/docs/topics/conversion.md) — coercion rules, unions, function binding, type errors
-- [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md) — located failures and the error model
-- [Property paths](../../../simplified-schema/docs/topics/property-paths.md) · [Setter values](../../../simplified-schema/docs/topics/setter-values.md) — the dotted grammar, its edits, and the command-line value reader
-- [Language core](../../../simplified-schema/docs/topics/language-core.md) — modules, supplied sources, what a host keeps
-- [Features](../../../simplified-schema/docs/topics/features.md) · [Foundations](../../../simplified-schema/docs/topics/foundations.md) · [Expression syntax](../../../simplified-schema/docs/topics/expression-syntax.md)
+Topic pages (`simplified-schema/docs/topics/`): [README](../../../simplified-schema/README.md) · [`SimplifiedSchema` object](../../../simplified-schema/docs/topics/simplified-schema-struct.md) · [Strict and soft validation](../../../simplified-schema/docs/topics/validation.md) (defaults, the required/`null` table, export limits) · [Conversion](../../../simplified-schema/docs/topics/conversion.md) · [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md) · [Property paths](../../../simplified-schema/docs/topics/property-paths.md) · [Setter values](../../../simplified-schema/docs/topics/setter-values.md) · [Language core](../../../simplified-schema/docs/topics/language-core.md) · [Features](../../../simplified-schema/docs/topics/features.md) · [Foundations](../../../simplified-schema/docs/topics/foundations.md) · [Expression syntax](../../../simplified-schema/docs/topics/expression-syntax.md) · [Selecting a schema file](../../../simplified-schema/docs/topics/selecting-schema-files.md) · [Custom vocabulary](../../../simplified-schema/docs/topics/custom-vocabulary.md) · [Host capabilities](../../../simplified-schema/docs/topics/host-capabilities.md).
 
-Language reference (`simplified-schema/docs/topics/language/`):
+Language reference (`docs/topics/language/`): [Index](../../../simplified-schema/docs/topics/language/index.md) (start here) · [Types and constraints](../../../simplified-schema/docs/topics/language/types.md) (null admission, `not-empty`, phases) · [Objects and named types](../../../simplified-schema/docs/topics/language/objects-and-named-types.md) · [Unions and function signatures](../../../simplified-schema/docs/topics/language/unions.md) (defaults in unions) · [Schema documents](../../../simplified-schema/docs/topics/language/schema-documents.md) · [Slots](../../../simplified-schema/docs/topics/language/slots.md) · [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md).
 
-- [Index](../../../simplified-schema/docs/topics/language/index.md) — start here
-- [Types and constraints](../../../simplified-schema/docs/topics/language/types.md) — grammar, built-in types, files, tuples, `null`/`unknown`
-- [Objects and named types](../../../simplified-schema/docs/topics/language/objects-and-named-types.md) — imports, recursive and shared types, dictionaries
-- [Unions and function signatures](../../../simplified-schema/docs/topics/language/unions.md) — `|`, named union references, root unions, narrowing
-- [Schema documents](../../../simplified-schema/docs/topics/language/schema-documents.md) — resolution, standalone envelopes, raw JSON Schema
-- [Selecting a schema file](../../../simplified-schema/docs/topics/selecting-schema-files.md) — `select_schema_file` outcomes, probes, creation paths; `inspect_schema_target`
-- [Slots](../../../simplified-schema/docs/topics/language/slots.md) — `{{ … }}` slots, templates, what each operation reports before resolution
-- [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md) · [Custom vocabulary](../../../simplified-schema/docs/topics/custom-vocabulary.md) · [Host capabilities](../../../simplified-schema/docs/topics/host-capabilities.md)
-- [declaration-narrowing.md](declaration-narrowing.md) — code map for presence, `not-empty`, root `closed`, `schema`/`type-definition` options, `claimed_values`
-
-Darkmatter integration: [definition.md](../../../darkmatter/docs/topics/schemas/definition.md).
+Code maps in this skill: [defaults.md](defaults.md) (presence, `null`, default application) · [declaration-narrowing.md](declaration-narrowing.md) (`not-empty`, `closed`, meta-type options, `claimed_values`) · [schema-documents.md](schema-documents.md) · [templates.md](templates.md) · [build-and-guards.md](build-and-guards.md) · [shipped-and-identities.md](shipped-and-identities.md). Darkmatter integration: [definition.md](../../../darkmatter/docs/topics/schemas/definition.md).
 
 ## Related Skills
 

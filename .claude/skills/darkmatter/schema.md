@@ -55,8 +55,11 @@ Path shorthand in this file:
 - Mirrors of the lowering (Darkmatter's `call_binding/translate.rs`, the
   library's trigger `matcher.rs`) must reuse the library's `simplified::declaration_options_payload`
   and `format::{judge_schema, judge_type_definition}` for the `schema` /
-  `type-definition` declaration options, and treat `non-null` as a marker
-  (no null arm, never a presence requirement). `about.rs` catalogs constraints
+  `type-definition` declaration options (`not-empty` there lowers to
+  `pattern: "\S"`, `minProperties: 1`, and `minItems: 1`; only
+  `minProperties` under `mapping`). `non-null` is removed: the grammar and
+  `$constraints` refuse it with `grammar::NON_NULL_REMOVED`, and DMLS never
+  offers it. `about.rs` catalogs constraints
   per type (`SCHEMA_CONSTRAINT_DESCRIPTORS`, parity-tested against the grammar)
   and `$constraints` keys per placement (`BLOCK_CONSTRAINT_DESCRIPTORS`, which
   feeds DMLS key completion); a new constraint or `$constraints` key updates both.
@@ -309,10 +312,13 @@ axes, derived recursively:
 | `required` | absence may be deferred; a present value is type-checked | must be present and valid |
 | `required; eager` | must be present and valid | must be present and valid |
 
-Explicit null counts as absence, so an eager-only null is allowed at both
-phases. Exception: a null-admitting whole value (see
-[Core types](#core-types-unknown-null-alphanumeric-shell)) is optional at both
-phases whatever its markers. Completion observes the final working instance without coercion, while
+A phase relaxes only parent `required` membership (`phase::lower` over the
+original AST); value fragments keep the declared type, so a written `null` on
+`number(required)` fails at launch too, while an omitted one is deferred.
+An eager-only (optional) `null` is allowed at both phases. A null-admitting
+type accepts a written `null` but keeps its presence: `unknown(required)` may
+be omitted at launch and must be written by completion
+(`lib/tests/l1/schemas_effective_presence.rs`). Completion observes the final working instance without coercion, while
 the existing unphased `validate*` authoring behavior remains unchanged. Raw JSON
 Schema retains its authored `required` behavior at both phases, and trigger
 match conditions reject `eager` because matching has no runtime phase.
@@ -707,12 +713,21 @@ the directives but `stop`/`skip`, `set`) carry the same marker; for them
 `lifecycle::template_operands` names exactly the strings the parser reads as
 templates (every `with:` and `set` value nested, not a `$( … )` `set` value,
 `no_error`, or `break.code`) and the walk only scans those, never binds.
-`edit` (lifecycle-only, typed by hand with `non-null` arms) additionally
-gets the parser's own rules from the stored value
-(`BoundOperands::report_refused_targets`, `lifecycle::edit_file_problem` and
-`edit_flag_problem`, shared with the parser): conversion would read
-`edit: 5` as text and `gui: "yes"` as `true`, which the parser refuses;
-`lib/tests/l1/lifecycle_edit_schema_parity.rs` is its parity matrix. So
+`edit` (lifecycle-only, typed by hand: `create_new: boolean(default(false))`,
+`gui: boolean`, `no_error: boolean(default(false))`) additionally gets the
+parser's own rules (`BoundOperands::report_refused_targets` →
+`lifecycle::{edit_target_problem, edit_flag_problem}`, shared with the
+parser, both over `action_shape.rs::{edit_file_value, literal_flag}` and
+`simplified_schema::coercion`): `edit: 5` names file `"5"`, boolean-like flag
+text converts, `null` is no value, a native number or `{{ }}` template flag is
+refused, and `edit: null` is refused (no target; the optional wrapper would
+otherwise admit it). `lib/tests/l1/lifecycle_edit_schema_parity.rs` is its
+parity matrix. Two authored `no_error` placements pass the schema (each is
+judged alone) and fail the parser; that and an authored `no_error: false`
+beside `then` (the conditional's `literal(false)` slot exists for the filled
+default) are pinned gaps in `lifecycle_schema_parity.rs`, as are md's
+`unknown`-typed side-effect/function verbs whose bad flags only the parser
+refuses. So
 `number: [pear, 7]` passes and `length: [true]` fails; never widen a generated
 type to fix a schema/binder disagreement. Bind from the authored value, not
 the converted working copy. `lib/tests/l1/lifecycle_generated_operands.rs`
@@ -755,8 +770,9 @@ Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typi
 - Every constraint survives a reference, including `required` and `generated`
   (nothing is stripped; no use-site opt-out). Presence declared inside an
   object type does not make the holding property required. An optional variant
-  is declared directly or as `[T, null]`; aliasing the required type
-  re-inherits presence.
+  is declared directly; aliasing the required type re-inherits presence, and
+  `[T, null]` hoists `T`'s `required` too (it admits a written `null` but still
+  needs the key).
 - `alphanumeric` options are identity, not mergeable constraints:
   `check_use_site_options` (`resolve.rs`, before merging) drops an equal
   canonical set and raises `ConstraintConflict` with
@@ -1178,13 +1194,15 @@ needs `@this`.
   type).
 - **Effective presence** is one calculation: `PropertyDef::is_required` /
   `PropertyAtom::is_required` = a `required` marker (written, inherited,
-  hoisted, or after `[]`) and not `admits_null()`. `admits_null()` is true for
-  a non-array `null`/`unknown` or a non-array union (property-level or
-  `TypeExpr::Union`) with such an arm, on resolved input. Lowering, trigger
-  matching and the vacuous-arm lint, phase projection, completion,
-  composition materialization, DMLS, and Claudine all read it; never re-derive
-  presence from the raw marker (`marks_required` is crate-private). `eager`
-  and `generated` never restore presence. `unknown[](required)` /
+  hoisted, or after `[]`). It asks only whether the key is written (or a
+  default supplies it); `admits_null()` (a non-array `null`/`unknown` or a
+  non-array union with such an arm, on resolved input) is independent and
+  decides only whether a written `null` satisfies the type, so
+  `null(required)` and `[number(required), null]` are required. Lowering,
+  trigger matching and the vacuous-arm lint, phase projection, completion,
+  DMLS, and Claudine all read it; never re-derive presence from the raw
+  marker (`marks_required` is crate-private), and never let null admission
+  cancel it. `unknown[](required)` /
   `null[](required)` still require the list; a nullable child leaves its
   parent's presence alone. Raw JSON Schema keeps its authored `required`.
 - Root unions are inclusive (`anyOf`, one or more arms); XOR is written with

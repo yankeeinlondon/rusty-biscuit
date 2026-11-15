@@ -166,7 +166,8 @@ md rm  doc.md items.0 --save
 `get` returns `""` for a missing path, with exit status 0. `set` and `rm`
 refuse a path they cannot follow (exit 1) and write nothing. Examples: an
 index past the end of an array, a number under a missing parent, or a path
-that goes through a scalar value.
+that goes through a scalar value. `set` writes only the value you gave
+(converted to its declared type), never a schema `default(...)`.
 
 ### Command-line values (`set`, compose setters, style setters)
 

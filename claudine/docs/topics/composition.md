@@ -396,7 +396,11 @@ Steps:
    `compose`; an eager-only property remains optional, while a
    required-but-not-eager property may stay absent (the agent supplies it, the
    completion verdict enforces it) and renders as *deferred* in the launch
-   report. A present value is always type-checked; only the spot that still
+   report. A present value is always type-checked against its declared type,
+   and a value that resolves to `null` is present: with
+   `foo: string(required)` and `foo: "{{ spec ? spec : null }}"`, a run
+   without `spec` is refused before the agent starts, because `null` is not
+   a string. Only the spot that still
    holds `{{ … }}` or `$( … )` text waits for composition, so in
    `counts: [three, "{{ fm.x }}"]` against `number[]` the launch fails at
    `/counts/0` while the template's own element is judged once rendered. The intrinsic `prompt`
@@ -1282,7 +1286,7 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 | Outcome                | Required                                                            | Optional                                                                                |
 | ---------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Present and valid      | continue                                                            | continue                                                                                |
-| Present as `null`      | hard `SchemaValidation` abort                                       | treated as absent (valid)                                                               |
+| Present as `null`      | takes the default if one is declared; otherwise judged by its type, so `string(required)` is a hard `SchemaValidation` abort and a null-admitting type is valid | takes the default if one is declared; otherwise treated as absent (valid) |
 | Missing                | prompt in Interactive Mode when allowed; otherwise `MissingProperties` | continue                                                                                |
 | Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context, a `tracing::warn!` fires, composition retries once |
 
@@ -1305,7 +1309,7 @@ constraint. `eager` means "validate at launch when present"; `required` means
 |---|---|---|---|
 | `eager`, not required | validate when present; absence continues | validate when present; absence continues | valid if present |
 | `required; eager` | prompt when allowed, otherwise `MissingProperties` | prompt when allowed, otherwise `MissingProperties` | must be present and valid |
-| `required`, not eager | judged after the document's own expression has run: prompt when allowed, otherwise `MissingProperties` | never prompted, never a launch error | must be present and valid |
+| `required`, not eager | judged after the document's own expression has run: prompt when allowed, otherwise `MissingProperties` | absent: never prompted, never a launch error (deferred); present, `null` included: type-checked | must be present and valid |
 | `generated; required` | exempt from launch collection | exempt from launch collection | must be present and valid |
 | neither | continue | continue | valid if present |
 
@@ -1313,24 +1317,30 @@ constraint. `eager` means "validate at launch when present"; `required` means
 `file(eager)` expresses an optional file that is resolved and validated at
 launch when supplied.
 
-#### A required property with a default is never collected
+#### A property with a default is never collected
 
-A `required` property that declares `default(...)` is answered by its default
-when it is absent, so claudine never prompts for it and never reports it as
-missing, in either mode. Composition writes the default into the composed
-frontmatter (never into your file), and the status report marks the property
-as using its default:
+A property that declares `default(...)`, required or optional, is answered by
+its default when it is absent or `null`, so claudine never prompts for it and
+never reports it as missing, in either mode. Composition writes the default
+into the composed frontmatter (never into your file), and the status report
+marks the property as using its default:
 
 ```yaml
 $schema:
-  retries: number(required; default(3))   # absent: runs with retries = 3
+  retries: number(required; default(3))   # absent or null: runs with retries = 3
+  depth: number(default(2))               # absent or null: runs with depth = 2
   topic: string(required)                 # absent: prompted, as before
+  count: number(required)                 # `count: null`: judged by type; null is not a number
 ```
 
-- An **optional** property's default is documentation only: the property is
-  not collected and no value is inserted.
-- An explicit `retries: null` is present, so it is judged by its type
-  (`SchemaValidation`), not replaced by the default.
+- A missing key and an explicit `null` are the same value. `required` asks
+  only whether the key was written: `count: null` meets it and then fails
+  the `number` type, while a missing `count` is a missing property. The
+  full rule is SimplifiedSchema's
+  [Validation](../../../simplified-schema/docs/topics/validation.md) page.
+- Earlier releases treated an optional property's default as documentation
+  only, and judged `retries: null` by its type instead of replacing it.
+  Both now take the default.
 - A default the schema refuses (`number(required; min(5); default(3))`) blocks
   the launch with a `SchemaValidation` error that names the default's schema
   location, `/properties/retries/default`, instead of prompting. This holds
@@ -1488,7 +1498,7 @@ For every flavor (`compose`, `inline-compose`, `sequence`):
 6. If required values are missing and Interactive Mode is allowed: collect, apply as overrides, re-compose, re-validate.
 7. Proceed to provider/model resolution only after validation succeeds.
 
-`inline-compose` validates at `SchemaPhase::Launch` (see [Inline Composition](#inline-composition)); `compose` keeps the unphased authoring verdict. A required property whose own expression resolved to `null` after composition is a `MissingProperties` gap for `compose` — collected interactively once, or a launch error when Interactive Mode is denied — and is never a wrong-type failure. `inline-compose` never prompts for a required, non-eager property and never refuses to launch over one; the completion verdict is where its absence is reported. A non-string `prompt` still surfaces as `PromptPropertyWrongType` before schema scrubbing; a *missing* `prompt` is judged only after eager collection and caller overlays, so it surfaces as `PromptPropertyMissing` only when no layer supplies one. The original `$schema` declaration is preserved byte-for-byte during the inline rewrite — interactive values collected for one run are never written back to the source file.
+`inline-compose` validates at `SchemaPhase::Launch` (see [Inline Composition](#inline-composition)); `compose` keeps the unphased authoring verdict. A required property whose own expression resolved to `null` after composition is a `MissingProperties` gap for `compose` — collected interactively once, or a launch error when Interactive Mode is denied — and is never a wrong-type failure. `inline-compose` never prompts for a required, non-eager property and never refuses to launch over its absence; the completion verdict is where that is reported. A value it does have is judged by its declared type at launch, so one that resolves to `null` for a type that does not admit `null` refuses the launch. A non-string `prompt` still surfaces as `PromptPropertyWrongType` before schema scrubbing; a *missing* `prompt` is judged only after eager collection and caller overlays, so it surfaces as `PromptPropertyMissing` only when no layer supplies one. The original `$schema` declaration is preserved byte-for-byte during the inline rewrite — interactive values collected for one run are never written back to the source file.
 
 Source loading (shared by all three commands) parses frontmatter strictly. A document whose `---` block contains malformed YAML — e.g. inconsistent block-scalar indentation — surfaces as a `FrontmatterParse` error that renders Darkmatter's rich frontmatter-parse block (file link, YAML location, offending-line excerpt), not as a misleading `PromptPropertyMissing`.
 

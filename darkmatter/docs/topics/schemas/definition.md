@@ -331,7 +331,7 @@ Two different things can carry constraints:
 - **The definition you write** carries the constraints of the type it describes,
   as in `"string(min(1))[]"` or `"tuple([string, number]; required)"`.
 - **The `type-definition` declaration** in a `$schema` takes only the universal
-  `required`, `non-null`, `eager`, `default(...)`, and `generated`, plus three
+  `required`, `not-empty`, `eager`, `default(...)`, and `generated`, plus three
   options that narrow which definitions it accepts: `forms(...)`,
   `declared-required`, and `container`. Combine them with `;`:
   `type-definition(container; declared-required)`.
@@ -1602,7 +1602,7 @@ instead; see [Validating from the Library](#validating-from-the-library).
 |-----------------------|---------------------------------------------------------------------------------------------------------------------|
 | `DarkmatterSchemas`   | Top-level entry point. Holds the request's file-resolution context, an optional baseline, and the LRU validator cache. |
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's winning declaration: document, referenced file, trigger, or baseline; see [Embedded trigger bundles](#embedded-trigger-bundles) for reading a trigger's source). |
-| `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`) + `defaults: Vec<AppliedDefault>`: the absent required properties the verdict accepted through their `default(...)`, in validator order (parents before children, declaration order, ascending array index); empty for an unconditional pass. Validation never inserts them into the caller's value. |
+| `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`) + `defaults: Vec<AppliedDefault>`: every `default(...)` the verdict applied to a missing or `null` value, required or optional, in validator order (parents before children, declaration order, ascending array index); empty when no default applied. Validation never inserts them into the caller's value. |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
 | `PreparationSummary`  | What the effective-schema resolution behind `DarkmatterSchemas::validate_summarized` found, returned beside its report: its `layers` and `has_schema()`, which is `false` when no baseline, trigger, or `$schema` applied. |
 | `SchemaLayers`        | Which layers an effective schema merged: `document` (the document's own `$schema`), `triggers` (the matching `TriggerSource`s that layered a payload), and `baseline`. Read from `PreparationSummary::layers` or `EffectiveSchema::layers()`. |
@@ -2053,10 +2053,11 @@ $schema: docs.yaml
 
 Property conditions reuse SimplifiedSchema type expressions. A condition
 without `required` is a guard: absence is allowed, but a present value of the
-wrong type defeats the match. `required` makes it a presence gate, except on
-a [null-admitting](../../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties) type: `steps: unknown(required)`
-is only a guard and cannot satisfy the vacuity rule below, while
-`steps: unknown[](required)` is a gate that requires a list. Match-safe
+wrong type defeats the match. `required` makes it a presence gate on every
+type: the key must be written, and its value must match. `steps:
+unknown(required)` is satisfied by any written value, `null` included, and
+counts toward the vacuity rule below; `steps: unknown[](required)` also
+requires the value to be a list. Match-safe
 constraints are limited to structural types plus pure constraints such as
 `required`, `enum`, `pattern`, length/range, item-count, and key-count.
 Stateful or phase-specific constraints (`eager`, imports, `example`,
@@ -2090,10 +2091,11 @@ child of a combinator: `none: [{}]` would otherwise make the trigger
 unmatchable, and `all: [{}, …]` would hide a dropped condition. A load error
 names the field it is about, from `match` down: `` `match[1].group[0]` ``.
 
-Use a concrete type for a presence gate, such as `prompt: string(required)`
-or `steps: unknown[](required)`. `unknown(required)` and its alias
-`any(required)` admit omission and null, so neither establishes presence.
-A concrete type also limits which non-null values select the trigger:
+Any `required` condition is a presence gate: `prompt: string(required)`,
+`steps: unknown[](required)`, and `steps: unknown(required)` (alias
+`any(required)`) all need the key written. `unknown(required)` accepts any
+written value, `null` included. A concrete type also limits which values
+select the trigger:
 `steps: unknown[](required)` does not match `steps: false`. Write the type for
 the values that the target document actually accepts.
 

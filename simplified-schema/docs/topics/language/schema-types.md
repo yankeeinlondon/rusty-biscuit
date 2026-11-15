@@ -56,28 +56,31 @@ type named `shell` rather than the built-in command type.
 
 ## Missing values and null
 
-A concrete property is optional unless it carries `required`. Optional
-properties also accept null as an absent value. A type that explicitly admits
-null as a whole value is always optional, even if it carries or inherits
-`required`:
+A missing key and an explicit `null` are the same value, so an optional
+property accepts both. `required` asks whether the key was written: a
+written `null` meets it and is then judged by the type, so only a type that
+admits `null` as a whole value accepts it. A `default(...)` fills a missing
+or `null` value, required or not.
 
-| Declaration | Missing or null | Other accepted values |
-| --- | --- | --- |
-| `name: string(required)` | Rejected | Text, with ordinary scalar coercion |
-| `payload: unknown(required)` | Accepted | Every value, with its native type preserved |
-| `retired: null(required)` | Accepted | None |
-| `name: [string(required; min(3)), null]` | Accepted | Text of at least three characters |
-| `items: unknown[](required)` | Rejected | A list whose items may have any type, including null |
-| `items: null[](required)` | Rejected | A list containing only null items |
+| Declaration | Missing | `null` | Other accepted values |
+| --- | --- | --- | --- |
+| `name: string` | Accepted | Accepted | Text, with ordinary scalar coercion |
+| `name: string(required)` | Rejected | Rejected | Text, with ordinary scalar coercion |
+| `name: string(default(anon))` | `anon` | `anon` | Text |
+| `payload: unknown(required)` | Rejected | Accepted | Every value, with its native type preserved |
+| `retired: null(required)` | Rejected | Accepted | None |
+| `name: [string(required; min(3)), null]` | Rejected | Accepted | Text of at least three characters |
+| `items: unknown[](required)` | Rejected | Rejected | A list whose items may have any type, including null |
+| `items: null[](required)` | Rejected | Rejected | A list containing only null items |
 
-`non-null` separates the two cases: `name: string(non-null)` accepts a missing
-key but rejects an explicit null, and stays optional. It cannot mark a type
-that admits null, so `unknown(non-null)` is a schema error. See
-[Non-Null Properties](types.md#non-null-properties).
+To refuse an empty written value instead, use `not-empty`:
+`name: string(not-empty)` accepts a missing key and `null` but rejects `""`.
+See [Null-Admitting Properties](types.md#null-admitting-properties) and
+[Empty Values](types.md#empty-values-not-empty).
 
 `any` and `unknown` mean the same thing. Serialization and editor hover use
-`unknown` as the canonical name. Neither spelling can enforce a property's
-presence; choose a concrete type for that requirement. A native YAML null
+`unknown` as the canonical name. `unknown(required)` demands the key but
+accepts any value, `null` included; choose a concrete type to refuse `null`. A native YAML null
 (`retired: null`, `retired: ~`, or `retired:`) declares the null type at a
 property-definition position. A null root schema is invalid.
 
@@ -129,7 +132,7 @@ contract it holds names its `kind` as a fixed set of strings:
 ```yaml
 $schema:
     contract: schema(required; property(kind, type-definition(forms(literal, enum); declared-required)))
-    catalog: schema(mapping; non-null)
+    catalog: schema(mapping; not-empty)
 ```
 
 | `contract` value | Verdict |
@@ -143,7 +146,8 @@ $schema:
 | `{ kind: literal(a) }` | rejected: `` `kind` must be declared `required`, with no alternative that admits null `` |
 
 `catalog` must be written as a mapping (`[{ a: string }]` and `./types.yaml`
-are rejected), may be omitted, and may not be `null`.
+are rejected) with at least one entry (`{}` is rejected), and may be omitted
+or `null`.
 
 **An option judges the declaration, never a value.** It reads only what the
 author wrote: the YAML carrier and the declaration it parses to. It never
@@ -174,9 +178,10 @@ parse-only.
   alternative (`Kind(required)`, `Kind(required)@./kinds.yaml`) passes
   provisionally, because what it denotes is known only once resolved. A union
   may be written with `|` or as a YAML list.
-- **`declared-required` follows the null-admission rule.** `literal(a)` fails
-  because it is optional; `null | literal(a; required)` fails because a
-  null-admitting union is never required (see
+- **`declared-required` also refuses `null`.** It accepts a definition that
+  is `required` and has no alternative that admits `null`. `literal(a)` fails
+  because it is optional; `null | literal(a; required)` fails because of its
+  `null` alternative, although that union is required for presence (see
   [Null-Admitting Properties](types.md#null-admitting-properties)).
 - **`container` drops `null` alternatives but needs a container.**
 

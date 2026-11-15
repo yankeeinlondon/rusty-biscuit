@@ -28,6 +28,20 @@ module, which decides from its **written spelling** whether it can be held:
 - a non-zero value that would become `0` is rejected (underflow), and one
   that overflows is rejected as not finite.
 
+These rules apply to every number that reaches this module. Which spellings
+reach it as numbers depends on the loader:
+
+- **YAML** has no number for an overflowing spelling, so `1e400` in a YAML
+  document (frontmatter, a schema file, or raw JSON Schema text given to
+  `SimplifiedSchema::try_from`, which reads it as YAML) loads as the text
+  `"1e400"`. It is never rounded: a `number` property rejects it, and a
+  `"default": 1e400` loads and then fails as `InvalidDefault` when a value
+  needs that default. YAML's own non-finite spellings, such as `.inf`, are
+  numbers and are rejected at load as not finite.
+- **The `.json` file loaders** (`SimplifiedSchema::try_from_json_schema` and a
+  `$schema` that names a `.json` file) read `1e400` as a number and refuse
+  the file at load ("out of range").
+
 ```rust
 use simplified_schema::numeric::{admit_integer, NumericAdmissionError};
 

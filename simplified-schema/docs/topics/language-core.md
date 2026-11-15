@@ -99,8 +99,8 @@ that fails is returned as a `ClaimProblem { property, arm_index, cause, path }`:
 | --- | --- | --- |
 | `NotObject` | is not an object schema | a file arm whose schema is `{"type": "string"}` |
 | `Missing` | does not declare the property | `name: string` (no `kind`) |
-| `NotRequired` | declares it optional, including through a `null` alternative | `literal(a)`, `null \| literal(a; required)` |
-| `NullAdmitted` | requires it, but its JSON Schema admits `null` | a raw JSON Schema `anyOf` with a `{"type": "null"}` arm |
+| `NotRequired` | declares it optional | `literal(a)` |
+| `NullAdmitted` | requires it, but its type admits `null`, so a written `null` meets presence without naming a choice | `null \| literal(a; required)`, or a raw JSON Schema `anyOf` with a `{"type": "null"}` arm |
 | `NotEnumerable` | declares a type that is not a finite set | `string(required)` |
 | `NonStringChoice` | has a choice that is not a string | `literal(1; required)` |
 | `EmptyChoice` | has an empty string choice, or an empty `enum` | `literal(""; required)` |

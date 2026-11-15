@@ -45,7 +45,7 @@ holds, exit codes, Ctrl-C), read [Lifecycle Error Handling](./error-handling.md)
 
 | Event | Fires when | `err` |
 |---|---|---|
-| `initialize` | First. After the shell-free frontmatter bootstrap, before the body is read, the shell audit, and composition | unavailable |
+| `initialize` | First. After the shell-free frontmatter bootstrap, before the body is read, schema validation, the shell audit, and composition; its effects stay done if validation then refuses the document | unavailable |
 | `composed` | Composition and preflight both succeeded | unavailable |
 | `failed` | Composition or preflight failed, or an `initialize` error was raised; under some hosts also a refusal before the host's own work started | available |
 | `cancelled` | The run was interrupted (Ctrl-C) | depends on the run: the cancellation cause |
@@ -143,9 +143,38 @@ of a supported verb are errors. A dictionary at an event root cannot carry
 evaluated, such as a command returning a nonzero status. It does not suppress
 an expression error or grant permission to execute a command. It belongs
 inside a named action, as above, or beside the verbs of a compact dictionary,
-where it applies to each eligible action. Do not write both forms on one
-action, or place it beside a conditional's `then`/`else`. It never applies to
-`set`: a failed mutation stops the stack.
+where it applies to each eligible action. Do not place it beside a
+conditional's `then`/`else`. It never applies to `set`, which refuses the key
+(even `no_error: null`): a failed mutation stops the stack.
+
+The flag is a literal, read when the stack is parsed and never evaluated:
+
+| Written | Read as |
+|---|---|
+| omitted, or `null` | `false` |
+| `true`, `false` | itself |
+| boolean-like text: `"yes"`, `"no"`, `"on"`, `"off"`, `"1"`, `"0"`, any letter case | `true` or `false`, by the shared [conversion rules](../../../../simplified-schema/docs/topics/conversion.md#type-coercion) |
+| a native number (`1`), a list, a mapping, or a `{{ … }}` template | error: `` `no_error` must be a boolean `` |
+
+**Write the flag in one place.** Writing it both inside an action's long form
+and beside it is an error, even when the two agree:
+
+```yaml
+composed:
+    - edit: { file: notes.md, no_error: true }
+      no_error: true     # error: `no_error` is set both beside `edit` and inside it
+```
+
+`md compose` refuses that document before any event fires. `md schema
+validate` and DMLS judge each placement on its own, so they accept it.
+
+A **filled default** is a different thing. Schema validation completes every
+place an action can carry the flag with `no_error: false`, so
+`{ edit: { file: notes.md } }` gains `false` both beside and inside the long
+form. A filled value is never a placement: it never conflicts with a flag you
+wrote, never sits beside `then`, never gives `set` a flag, and never adds an
+action or changes how many verbs an item holds. Only a value you wrote, other
+than `null`, counts as yours.
 
 Omitting an ordinary event, writing `null`, or giving it `[]` or `{}` means
 no actions. An explicitly written `then` or `else` body must contain an action;
@@ -464,21 +493,37 @@ initialize:
 |---|---|---|
 | `file` | required | The file to open. Any local [file reference](../file-referencing.md) form is accepted. |
 | `create_new` | `false` | `true` requires the action to create the file: if anything (a file, a directory, a symlink) already holds the name, the action fails before an editor opens and the entry is left untouched. With `false`, an existing file is opened and a missing one is created. |
-| `gui` | omitted | `true` accepts only a GUI editor, `false` only a terminal editor; omitted accepts either. See [Which editor opens](#which-editor-opens). |
+| `gui` | omitted | `true` accepts only a GUI editor, `false` only a terminal editor; omitted or `null` accepts either. See [Which editor opens](#which-editor-opens). |
 | `no_error` | `false` | Continue the stack when the edit fails; see [When an `edit` fails](./error-handling.md#when-an-edit-fails). |
 
-The path must be a non-blank string. Whitespace inside a non-blank path is
-kept. A number or boolean is never turned into a file name, `create_new` and
-`gui` must be literal `true` or `false` (not `"yes"`, not `null`, not a
-`{{ … }}` template), and unknown fields are errors. A bare `edit`,
-`edit: null`, `edit: []`, and a list with two items are errors too. `md compose`,
-`md schema validate`, and the DMLS language server report the same problems,
-located at the same property.
+The target is mandatory and must name a file:
+
+- The path must be non-blank. Whitespace inside a non-blank path is kept.
+- A native number or boolean names the file spelled by its text, as any
+  `string` value converts: `edit: 5` opens `5`, `edit: true` opens `true`,
+  `edit: 2.5` opens `2.5`. A `{{ … }}` template whose whole result is a
+  number or boolean is still an error.
+- A bare `edit`, `edit: null`, `edit: []`, a list with two items, a long form
+  without `file` (or with `file: null`), and unknown fields are errors.
+  `null` supplies no target, so it is never "no edit".
+
+The flags follow the same literal rules as `no_error`: `true`/`false` or
+boolean-like text (`"yes"`, `"off"`) converts; omitting a flag or writing
+`null` takes its default (`create_new` and `no_error` are `false`, and `gui`
+has no preference); a native number, a list, a mapping, or a `{{ … }}`
+template is an error. The flags are never evaluated, while the file name is
+an interpolated operand.
+
+`md compose`, `md schema validate`, and the DMLS language server report the
+same problems, located at the same property.
 
 ```yaml
 initialize:
-    - edit: 5                                # error: the path must be a string
-    - edit: { file: notes.md, gui: "yes" }   # error at `gui`: not a literal boolean
+    - edit: { file: notes.md, gui: "yes" }   # valid: a GUI editor
+    - edit: { file: notes.md, gui: null }    # valid: either kind of editor
+    - edit: { file: notes.md, gui: 1 }       # error at `gui`: must be a boolean, got number
+    - edit: "   "                            # error: the path must not be blank
+    - edit: null                             # error: no target
 ```
 
 `edit` is a lifecycle action only. There is no `edit()` function for `{{ }}`

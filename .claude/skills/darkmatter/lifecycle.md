@@ -97,11 +97,25 @@ pages with the behavior.
 - `edit` is a lifecycle-only verb, never a catalog entry: schema projection
   (`hand_owner`) fails generation when a catalog function or effect is named
   `edit`. Its schema types (`edit-short`/`edit-long` in
-  `darkmatter/schemas/partials/lifecycle.yaml`, `non-null` flags) are backed
-  by the parser's own rules: `markdown/schemas/bound_operands.rs::report_refused_targets`
-  applies `action_shape.rs::{edit_file_problem, edit_flag_problem}` (which
-  the parser also calls), so `md schema validate` and DMLS refuse `edit: 5`
-  or `gui: "yes"` exactly as `md compose` does. Passive surfaces (DMLS,
+  `darkmatter/schemas/partials/lifecycle.yaml`, flags
+  `boolean(default(false))` / `gui: boolean`) are backed by the parser's own
+  rules: `markdown/schemas/bound_operands.rs::report_refused_targets` applies
+  `action_shape.rs::{edit_target_problem, edit_flag_problem}` (which the
+  parser also calls, over `edit_file_value` and `literal_flag`), so
+  `md schema validate`, DMLS, and `md compose` agree: `edit: 5` opens `"5"`,
+  `gui: "yes"` is `true`, a null flag is unset, and `edit: null`, `gui: 1`, or
+  a template flag is refused.
+- Authored flag origin: hosts that parse a schema-completed value pass the
+  pre-completion value as `LifecycleParseOptions::authored_values` (`md`
+  parses the authored document, so `None`). Only a non-null authored
+  `no_error` is a placement; two placements fail even when equal; a filled
+  `false` never conflicts, meets `then`, creates a verb, or gives `set` a flag;
+  `set` refuses any authored `no_error`, `null` included
+  (`lifecycle/tests/authored_flags.rs`).
+- `initialize` runs before schema validation; a schema refusal is a
+  composition failure (`failed`, `finalize`) and `initialize`'s effects stay.
+  CLI cells that must prove "no effect on refusal" put the marker in
+  `composed` (`cli/tests/l1/compose_loader_wiring.rs`). Passive surfaces (DMLS,
   `md schema validate`, hover, completion) never run a stack, so they never
   create a target or launch an editor (`dmls/tests/l1/no_side_effects.rs`,
   `edit_action_editor.rs`).

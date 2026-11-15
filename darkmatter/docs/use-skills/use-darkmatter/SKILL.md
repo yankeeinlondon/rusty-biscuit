@@ -132,7 +132,12 @@ The CLI describes itself. Prefer these over memory:
   (`people: "{ name: string }[]"`). Without one, composition fails with
   `dm.collection.untyped_*_source`.
 - **Effects are not rolled back.** A failed compose prints no document, but
-  shell commands and lifecycle actions that already ran stay done.
+  shell commands and lifecycle actions that already ran stay done. That
+  includes `initialize`, which runs before schema validation.
+- **Missing and `null` are the same value; `required` asks only whether the
+  key was written.** A `default(...)` fills a missing or `null` value, required
+  or not, in the composed copy only: the source file and `md set` never gain
+  it. See [authoring.md](authoring.md#required-null-and-defaults).
 
 ## Canonical documentation
 

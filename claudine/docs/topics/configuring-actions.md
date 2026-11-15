@@ -26,7 +26,9 @@ matchers:
 | `actions.<event>` | `HookAction[]` | absent | Ordered list of actions to execute when `<event>` fires |
 | `matchers.<event>` | `string` | absent | Optional filter for that event's actions (a regex over `tool_name` for tool events and `notification_type` for notifications, or a Darkmatter condition) |
 
-An event with no `actions` entry runs no actions. A legacy `config.json` that still uses the old `version` + `providers.<provider>.events` shape is treated as the old format: Claudine renames it to `config.json.bak` and treats the configuration as missing, so setup runs again.
+An event with no `actions` entry, or `null`, runs no actions. A written list
+must hold at least one action and a written matcher must not be blank:
+`before_tool: []` and `before_tool: ""` are configuration errors. A legacy `config.json` that still uses the old `version` + `providers.<provider>.events` shape is treated as the old format: Claudine renames it to `config.json.bak` and treats the configuration as missing, so setup runs again.
 
 Every dispatched event is also appended to a daily JSONL log under `~/.claudine/logs/` while the top-level `logging` setting is `true` (the default); this is independent of the actions bound to the event.
 
@@ -411,7 +413,8 @@ The value is validated strictly against the shipped schema
   rejected;
 - an explicit `null` is the same as leaving the key out: `tts: null` is
   `false`, `provider: null` auto-detects, and `prewarm: null` is `true`;
-- a wrong type (`tts: "say"`, `provider: 1`, `prewarm: "no"`) is rejected;
+- a wrong type (`tts: "say"`, `provider: 1`, `prewarm: "no"`) or a blank
+  `provider: ""` is rejected;
 - `{}` loads as an object with every key at its default;
 - a key written twice is rejected, as it is anywhere in `config.yaml`.
 

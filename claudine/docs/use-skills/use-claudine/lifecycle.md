@@ -13,7 +13,7 @@ initialize → pre-flight → start → agent runs → result check → success 
 
 | Event | Fires | Shell? |
 |---|---|---|
-| `initialize` | once per document, before pre-flight; not repeated on retry or resume | **never** (rejected even in a branch that can't run) |
+| `initialize` | once per document, before pre-flight and schema validation (its effects stand even if the schema then refuses the document); not repeated on retry or resume | **never** (rejected even in a branch that can't run) |
 | `start` | pre-flight passed, just before launch | yes |
 | `success` | the agent finished and the result check passed (inline-compose: the body changed; the schema validates) | yes |
 | `failure` | the agent failed or the result check failed | yes |
@@ -65,7 +65,10 @@ failure:
   is the exception: it returns). An unconditional directive must be the
   last item in its list.
 - **Errors.** `no_error: true` on an action ignores that action's failure.
-  It doesn't cover expression errors.
+  It doesn't cover expression errors. Flags (`no_error`, and `edit`'s
+  `create_new` and `gui`) take a boolean or Boolean-like text such as
+  `"yes"`, never a number or a template; `null` is the same as leaving the
+  flag out. `no_error` is refused beside `then`/`else` and on `set`.
 
 ## Actions
 
@@ -89,7 +92,7 @@ failure:
 | `set: {key: value}` | change runtime state (in memory only). `set: {sha: "$(git rev-parse HEAD)"}` captures a command's output |
 | `set_frontmatter`, `merge_frontmatter`, `delete_frontmatter`, `increment_frontmatter`, `decrement_frontmatter`, `append_frontmatter`, `prepend_frontmatter` | edit a file's frontmatter: `set_frontmatter: ["s.md", "status", "done"]` |
 | `ensure_file`, `ensure_dir`, `append_line`, `append_jsonl`, `http_post` | file and HTTP effects (a short-form array of arguments) |
-| `edit: path` or `{file, create_new, gui}` | open the file in your editor and wait for it to close, then continue; a missing file is created (`create_new: true` refuses an existing one), `gui` picks a graphical or terminal editor |
+| `edit: path` or `{file, create_new, gui}` | open the file in your editor and wait for it to close, then continue; a missing file is created (`create_new: true` refuses an existing one), `gui` picks a graphical or terminal editor; a number target such as `edit: 5` names the file `5` |
 
 `claudine context --side-effects` lists every verb and its arguments
 (`edit` is a lifecycle action, not a catalog verb, so it is not listed).

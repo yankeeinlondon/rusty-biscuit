@@ -4,7 +4,8 @@ Loaded from the `simplified-schema` skill. How a referenced `$schema` file
 is classified, how envelopes are admitted, and where the line between this
 crate and Darkmatter runs.
 
-grammar's typed error unchanged, `span` a byte range in the exact supplied
+A rejected definition's `SchemaError::SchemaDocument` keeps the parser's
+typed error as `source`, and its `span` is a byte range in the exact supplied
 text (whole Markdown file, CRLF counted). Never stringify a `SchemaError` into
 `message` alone; see [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md#a-rejected-definition-in-a-schema-document).
 
@@ -49,7 +50,9 @@ judges its shape twice. Tests: `envelope_admission.rs`,
 
 Null carriers are absent: a null `description`/`categories`/`types` is
 omitted, a tagged `$schema: null` beside a usable `types` table is a
-types-only document, and a trigger's `$schema: null` is matcher-only. An
+types-only document, an untagged document whose `$schema` is null is
+ordinary YAML (`standalone.rs::recognize_standalone`), and a trigger's
+`$schema: null` is matcher-only. An
 *empty* carrier is not absent: `types: {}` and a trigger's `$schema: {}`/`[]`/
 blank text are refused (`triggers/envelope.rs::parse_trigger_envelope`
 mirrors `schema-trigger.yaml`'s `schema(not-empty)`, so discovery and

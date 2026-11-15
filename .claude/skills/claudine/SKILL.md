@@ -223,6 +223,37 @@ attempt's preflight read only looks at it and `materialize_harness_prompt`
 consumes it, so it applies to exactly one transition; resume and proxy
 adoption clear it.
 
+**Authored lifecycle flags.** The schema stage fills `no_error: false` (and
+`edit.create_new: false`) everywhere an action can sit, so the completed
+frontmatter is parsed with its authored counterpart
+(`LifecycleParseOptions::authored_values`): a flag counts only where the
+author wrote it non-null, so a filled one is never a second placement, never
+gives `set` a flag, and never makes an empty stack/item/body non-empty.
+Claudine's authored source is `prepare.rs::authored_lifecycle_values` (source
+frontmatter plus proxy overlay and layered overrides); sequence task
+`side_effect:`/`setup:`/`teardown:` stacks parse as authored (`None`). A
+`null` flag is omitted everywhere (`start: { no_error: null }` is an empty
+stack), except on `set`, which refuses any authored flag. Flags read through
+Darkmatter's `literal_flag` (boolean or Boolean-like text; never a number or
+template). Conditionals declare `no_error: literal(false)` in
+`schemas/{action,lifecycle}.yaml` so the closed arms accept the filled flag;
+gap: an authored `false` beside `then` passes the schema and fails the parser.
+`loop` is a deferred lifecycle key (`PreparedComposition::deferred_lifecycle_keys
+== ["loop"]`): the schema stage judges it but inserts nothing, and an unwritten
+gate `no_error` reads `false` from the parser. Tests:
+`composition/lifecycle/tests/grammar.rs::no_error_must_be_a_boolean_in_both_homes`,
+`prepare/service/tests.rs::a_loop_document_prepares_as_authored_and_an_invalid_loop_flag_is_refused`.
+
+**Launch keeps the declared type.** `SchemaPhase::Launch` relaxes presence for
+non-eager `required` properties but not their type: an omitted one is
+`Deferred`, while one written or resolved as `null` is judged by its type (a
+`string(required)` holding `null` refuses the inline launch;
+`defaults_tests.rs::launch::a_supplied_null_or_wrong_type_is_judged_by_type_at_launch`).
+Direct `compose` still promotes a required top-level `null` to
+`MissingProperties` (`classify.rs::promote_null_required_to_missing`).
+Defaults fill missing or `null` values whether or not the property is required
+(`PropertyState::Defaulted`).
+
 **One loop for every primitive.** `looping/frame.rs::LoopFrame` is the
 nearest-loop frame, allocated before `initialize` (which reads pass 1's
 values): cap precedence override > authored > 100, `is_last` is `count ==

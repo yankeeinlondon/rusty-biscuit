@@ -61,6 +61,45 @@ version: "$(git describe --tags)"   # top-level $(…) shell expansion (needs ap
   `yaml`/`json`/`expression`/`shell`, modifiers like `required`, `min(0)`, and
   `suggest(…)`, and descriptions written as `-> text`.
 
+### Required, `null`, and defaults
+
+A missing key and `n: null` are the same value, `null`. `required` means
+only "the key must be written"; the value then has to satisfy the type. A
+`default(...)` fills a missing **or** `null` value, on optional and required
+properties alike, before the value is judged.
+
+| Declaration | Key missing | `n: null` |
+|---|---|---|
+| `n: number` | valid, `null` | valid, `null` |
+| `n: number(default(3))` | valid, `3` | valid, `3` |
+| `n: number(required)` | error: missing | error: not a number |
+| `n: number(required; default(3))` | valid, `3` | valid, `3` |
+| `n: unknown(required)` | error: missing | valid |
+
+```mermaid
+flowchart LR
+    A["authored values"] --> B["apply defaults<br/>(missing or null)"]
+    B --> C["convert to the<br/>declared types"]
+    C --> D["validate the<br/>completed value"]
+    D -->|valid| E["composed output<br/>(holds the defaults)"]
+    A -.->|"kept as written"| K["source file, md set,<br/>lifecycle stacks"]
+```
+
+- `md compose` writes defaults into the **composed** frontmatter only. The
+  source file never changes, and `md set` never writes a default into it.
+- `md schema validate` judges the document as if the defaults were written
+  and lists them in each record's `defaults` array.
+- A declared but unwritten property with no default stays unbound: no `null`
+  key appears in `--frontmatter` output, `{{{ note }}}` renders empty without
+  an "undeclared" warning, and a transcluded child's `required` sees it as
+  missing.
+- A property with a non-null literal default, such as
+  `retries: number(default(3))`, is typed `number` in expressions, so it needs
+  no null guard. A default written as a `{{{ … }}}` template does not count.
+- `not-empty` refuses empty or blank text, an empty list, or an empty
+  mapping. The old `non-null` marker is a schema error now; for an optional
+  value that must not be blank, write `string(not-empty)`.
+
 ## Expressions: `{{{ … }}}`
 
 ```md
@@ -246,6 +285,20 @@ finalize:
   must sit inside the prompt's own directory. A terminal editor needs stdin,
   stdout, and stderr on a terminal, so it fails with `--output json`, a
   redirected stdout, or a document read from stdin.
+- The target is mandatory: `edit: null`, `edit: []`, a blank path, or a long
+  form without `file` is an error. A native number or boolean names a file by
+  its text (`edit: 5` opens `5`).
+- Flags (`no_error`, `create_new`, `gui`) are literals, never evaluated.
+  `true`/`false` and boolean-like text (`"yes"`, `"off"`) work; omitted or
+  `null` takes the default (`false`; for `gui`, either editor); a native
+  number or a `{{{ … }}}` template is an error.
+- Write `no_error` once per action. Setting it both inside the long form and
+  beside it fails `md compose` before any event fires, even when the values
+  agree (`md schema validate` does not catch this). The `no_error: false`
+  that schema validation fills in never counts as a second placement.
+- `initialize` runs before schema validation, so its effects stay done when
+  the frontmatter is then refused (the run goes on to `failed`, `finalize`).
+  Put effects that must not happen for an invalid document in `composed`.
 
 ## Style (rendering)
 

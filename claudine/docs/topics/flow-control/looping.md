@@ -110,6 +110,8 @@ invalid loop definition (prompts/count.md): unknown `loop.untill` key (did you m
 Every loop configuration error names the file and the key, as above. These are errors, never silently ignored:
 
 - `null` for `loop` or any of its keys, and `loop: {}` (it has no condition);
+  the one exception is `no_error` beside the loop's loose lifecycle verbs,
+  where `null` is the same as leaving the flag out;
 - an empty `while`/`until`, and an empty `action: ""` (`action: []` is the explicit "no action");
 - both `while` and `until`, or both `action` and `actions`.
 

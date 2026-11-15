@@ -16,6 +16,8 @@ $schema:
 
 ## Presence is `required` alone
 
+The value and default rules built on presence are in [defaults.md](defaults.md).
+
 - `PropertyDef::is_required` / `PropertyAtom::is_required` are the written,
   inherited, or hoisted `required` marker. Null admission (`admits_null`)
   decides only whether a written `null` satisfies the type; it never cancels
@@ -48,6 +50,18 @@ $schema:
   (`invalid_constraint`'s dedicated message). Trigger conditions judge it by
   the value's shape (`triggers/matcher.rs`). Tests:
   `tests/l1/not_empty_values.rs`, `declaration_grammar.rs`.
+- `not-empty` never rejects `null` or a missing key. `yaml`/`json` judge the
+  text, so `"{}"` has content (see [defaults.md](defaults.md)). Placement
+  matters: `string[](not-empty)` is the list's `minItems`,
+  `string(not-empty)[]` each item's `pattern`.
+- Under `schema(mapping)` only `minProperties` is added (the mapping check
+  already refuses text and lists, and a second keyword would shrink DMLS's
+  diagnostic range for `types: []`).
+- `resolve.rs::is_array_container_constraint` admits `not-empty`, so
+  `action[](not-empty)` over a named union resolves.
+- Keep Darkmatter in parity when a family changes: the call-binding
+  translator (`call_binding/translate.rs`, conformance rows `not_empty_*`)
+  and the `about.rs` descriptors behind `md schema about` and completion.
 
 ## `closed` (`Constraint::Closed`)
 

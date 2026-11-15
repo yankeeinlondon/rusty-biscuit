@@ -569,7 +569,8 @@ The other inherited rules hold too:
 - A use-site bound that contradicts the definition's own bound is a
   `SchemaError::ConstraintConflict` naming the definition first, then the use.
 - A definition that admits `null` (`link: [null, "{ next: link(required) }"]`)
-  is never required at any use, whatever its markers say.
+  accepts a written `null` at every use; a `required` marker, inherited or
+  written at the use, still demands the key.
 - `[]` on a definition that is already a list is an error, as for any named
   type, and `suggest(...)` at a use site of a recursive type is a
   `SchemaError::Grammar`.
@@ -864,6 +865,11 @@ $schema:
 
 `$constraints` (dollar-prefixed, mirroring `$schema`) is **reserved only inside authored schema objects**: it is stripped before shape assembly and never participates in literal/pattern key matching. Flag constraints are written `name: true`. This does **not** reserve `$constraints` in user frontmatter data — only the schema-authoring language uses the sentinel.
 
+Key counts judge the value after [defaults are applied](../validation.md#applying-defaults):
+a key a default inserts counts like a written one, so adding a default to a
+property of a counted object can change whether a value passes. Use
+`uncounted-keys` (below) for companion keys that carry a default.
+
 The block and the postfix are one scope. Key bounds from a `$constraints` block, from the object's postfix, and from a use site that reuses the object as a named type merge under the [merge rules](#merging-use-site-constraints): the stricter bound wins, and a minimum above the maximum is an error whichever spelling declared it.
 
 #### Keys the count leaves out (`uncounted-keys`)
@@ -905,10 +911,10 @@ What else a block may hold depends on where it sits:
 
 | Block on | Accepted keys | Anything else |
 |---|---|---|
-| an object-typed property | `min-keys`, `max-keys`, `uncounted-keys`, `required`, `non-null`, `generated`, `closed` (a no-op: the object is already closed) | schema error ("`$constraints` key `…` is not valid on an inline object") |
+| an object-typed property | `min-keys`, `max-keys`, `uncounted-keys`, `required`, `not-empty`, `generated`, `closed` (a no-op: the object is already closed) | schema error ("`$constraints` key `…` is not valid on an inline object") |
 | the root schema, or one arm of a root union | `min-keys`, `max-keys`, `uncounted-keys`, [`closed`](#closed-roots-closed) | schema error ("… is not valid on the root object") |
 
-On a property's object, `required: true`, `non-null: true`, and `generated: true` mean exactly the same as the postfix spelling: they apply to the property, so this `author` is required:
+On a property's object, `required: true`, `not-empty: true`, and `generated: true` mean exactly the same as the postfix spelling: they apply to the property, so this `author` is required:
 
 ```yaml
 $schema:

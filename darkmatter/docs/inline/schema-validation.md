@@ -54,7 +54,17 @@ $schema:
 ---
 ```
 
-All properties are **optional** unless marked `required`, and a property whose type admits `null` (`null`, `unknown`, or a union with such an arm) stays optional even then. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `literal`, `url`, `email`, `yaml`, `json`, `expression`, `shell`, `alphanumeric`, `unknown` (alias `any`), `null` — and every constraint is tabulated in [the topic reference](../../../simplified-schema/docs/topics/language/types.md#types).
+All properties are **optional** unless marked `required`. A missing key and an explicit `null` are the same value, `null`, with one difference: `required` asks whether the key was **written**. So `n: null` meets `required`, and then the value must satisfy the type, which `number` rejects and `unknown`, `null`, or a union with a `null` arm accepts. A `default(...)` fills a missing or `null` value before that check (see [Properties with a default](#properties-with-a-default)):
+
+| Declaration | Key missing | `n: null` |
+|---|---|---|
+| `n: number` | valid; reads as `null` | valid; stays `null` |
+| `n: number(default(3))` | valid; `n` is `3` | valid; `n` is `3` |
+| `n: number(required)` | error: required key missing | error: `null` is not a number |
+| `n: number(required; default(3))` | valid; `n` is `3` | valid; `n` is `3` |
+| `n: unknown(required)` | error: required key missing | valid |
+
+Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `literal`, `url`, `email`, `yaml`, `json`, `expression`, `shell`, `alphanumeric`, `unknown` (alias `any`), `null` — and every constraint is tabulated in [the topic reference](../../../simplified-schema/docs/topics/language/types.md#types).
 
 ### 2. File reference
 
@@ -115,6 +125,7 @@ Every SimplifiedSchema is compiled to a single Draft 2020-12 JSON Schema and val
 A few behaviours worth knowing:
 
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
+- Defaults are applied **before** the verdict, as a separate step: a missing or `null` value with a `default(...)` is filled, then the completed value is converted and judged. Validation itself never sets a value; see [Properties with a default](#properties-with-a-default).
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
 - Conversion collects **every** independent per-property failure into one aggregate rather than stopping at the first, so a schema with two bad definitions reports two problems (and DMLS anchors one diagnostic per property). A structural failure that makes further traversal meaningless is still a single error.
 - `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values, at any depth, use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* in a single schema; in a root union an existing file outside an arm's declared globs rules that arm out (see [Root unions](#root-unions-and-file-match)).
@@ -144,13 +155,16 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
 - **`Launch` is the stabilized pre-provider seam**, not the instant the process
   started: caller overrides, interpolation, coercion, and deferred frontmatter
   shell expressions have all run.
-- Missing and explicit `null` are both **absence**, and `required` alone decides
-  whether absence is an error. An eager-only `null` is therefore allowed at both
-  phases; a `required; eager` `null` fails at launch; a required-but-not-eager
-  `null` is tolerated at launch and fails at completion. A null-admitting
-  property (`null`, `unknown`, or a union with such an arm) is the exception:
-  it is optional at both phases, whatever `required`, `eager`, or `generated`
-  says (see [Null-Admitting Properties](../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties)).
+- A phase relaxes only **whether the key must be written**, never the value's
+  type. A required, non-eager property may be missing at launch, but a
+  written `null` is judged by its type at both phases: with
+  `n: number(required)`, `n: null` fails at launch and at completion, because
+  `null` is not a number. An optional eager property (`eager` alone) accepts
+  `null` at both phases, as every optional property does. A null-admitting
+  type (`null`, `unknown`, or a union with a `null` arm) accepts a written
+  `null`, but its `required` still asks for the key at the phases that
+  demand it: `p: unknown(required)` may be missing at launch and must be
+  written by completion.
 - Both phases are **passive**: no mutation, no coercion, no expression or shell
   execution, no schema resolution, and no filesystem access. The eager-`file`
   existence probe belongs to ordinary schema preparation, not to phase
@@ -452,7 +466,7 @@ This placement is deliberate:
   or a list of strings is a caller file: an object value such as
   `{ children: [spec.md] }` is kept as supplied.
 - Full validation runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
-- It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes.
+- It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes. It does not run before a lifecycle `initialize` stack, though: `initialize` fires first, and its effects (such as a file an `edit` created) stay done when validation then refuses the document. The refusal is a composition failure, so `failed` and `finalize` run next (see [Lifecycle Error Handling](../topics/lifecycle/error-handling.md)). Put a side effect that must not happen for an invalid document in `composed`.
 
 By default, `md compose` validates documents with no `$schema` against the
 Darkmatter base frontmatter schema. Use `--disable baseline-schema` or
@@ -479,16 +493,49 @@ document as if the default were written there and lists what it relied on in
 
 Composition goes one step further: the schema stage writes those defaults
 into the composed frontmatter, so frontmatter shell expansion, interpolation
-pass 2, the body, and the composed output all see them.
+pass 2, the body, and the composed output all see them. What the author wrote
+is kept alongside, unchanged: the source file, what `md set` writes back, and
+the lifecycle stacks `md compose` parses all come from the authored values,
+never from the completed copy.
 
 ```mermaid
 flowchart LR
-    A["Frontmatter after<br/>interpolation pass 1"] --> B["Insert defaults of missing<br/>or null properties"]
-    B --> C["Convert values"]
-    C --> D["Validate; re-match triggers"]
-    D -->|"a newly matched trigger<br/>requires more defaults"| B
-    D --> E["Shell expansion, pass 2,<br/>body stages"]
+    A["Authored values<br/>(after --set, --state,<br/>interpolation pass 1)"] --> B["Apply defaults:<br/>fill missing or null values"]
+    B --> C["Convert values to<br/>their declared types"]
+    C --> D["Validate the<br/>completed value"]
+    D -->|"a newly matched trigger<br/>adds more defaults"| B
+    D -->|valid| E["Composed frontmatter:<br/>written values + defaults"]
+    D -->|invalid| X["Schema error"]
+    A -.->|"kept as written"| K["Source file, md set,<br/>lifecycle stacks"]
 ```
+
+For example, with this document:
+
+```yaml
+---
+$schema:
+  retries: number(default(3))            # optional, with a default
+  mode: string(required; default(auto))  # required, with a default
+  note: string                           # optional, no default
+mode: null
+---
+[{{ retries }}][{{ mode }}][{{ note }}]
+```
+
+`md compose` renders `[3][auto][]` and `md compose --frontmatter` shows
+`retries: 3` and `mode: auto` (and no `note` key), while the file on disk
+still says `mode: null` and has no `retries`. `md schema validate --output
+json` lists both defaults in the file's `defaults` array.
+
+Where each surface stands:
+
+| Surface | Defaults |
+|---|---|
+| `md compose` output, the body, shell expansion, interpolation pass 2 | present: the composed copy holds them |
+| `md schema validate`, `DarkmatterSchemas::validate`, DMLS | judged as if written, listed in `defaults`; nothing is changed |
+| Expressions, the call check, and DMLS typing | a property with a non-null literal default is never `null`: `retries` above is a `number`, so it needs no null guard. A default written as a `{{ }}` template does not count |
+| The source file | never edited |
+| `md set` | never writes a default. Under `server: "{ name: string(default(web)), port: number }"`, `md set doc.md server '{port: 80}'` writes `server: { port: 80 }` without `name: web` |
 
 Rules:
 
@@ -536,7 +583,8 @@ checks. A child that declares `title: unknown(required)` therefore reports
 parent wrote `title: null`.
 
 A property with a default is different: composition writes the default, so the
-composed frontmatter holds it (see the section above).
+composed frontmatter holds it, and expressions type it as present (see the
+section above).
 
 ### The shell-deferral contract
 

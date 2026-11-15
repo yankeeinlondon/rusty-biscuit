@@ -84,6 +84,30 @@ A `$schema` file must be one of these:
 Anything else is an error, including a types-only library and a trigger
 file.
 
+### Required, `null`, and defaults in the editor
+
+A missing key and `null` are the same value. `required` only asks that the
+key be written; a written `null` is then judged by the type. A `default(...)`
+fills a missing or `null` value, required or not.
+
+```yaml
+---
+$schema:
+  retries: number(default(3))   # never "missing", never null in expressions
+  mode: number(required)        # `mode: null` → error: null is not a number
+  note: string                  # optional, no default: may be null
+---
+```
+
+- A defaulted key is never reported missing, even with `schema.strict`, and
+  hover shows `Default: 3` on the key and its uses.
+- Only a property with no default and no `required` is "possibly null" to
+  expression checks.
+- A default that breaks its own definition is reported on the `$schema`
+  declaration. DMLS never writes the default into your file.
+- `non-null` is no longer part of the grammar and is a schema error; use
+  `not-empty` to refuse blank text, an empty list, or an empty mapping.
+
 ## The schema file kinds
 
 | File | Top-level keys | Used how |
@@ -163,8 +187,9 @@ $schema:
   - `kind: literal(report; required)` requires the value;
   - without `required`, the key may be absent, but if present it must match
     the type;
-  - a type that admits `null`, such as `unknown(required)`, can't prove
-    presence. Write `unknown[](required)` to require a list.
+  - `required` proves presence on any type: `unknown(required)` needs the
+    key written, with any value, `null` included. Write `unknown[](required)`
+    to also require a list.
 - **Only static constraints are allowed** in a match: `required`, `enum`,
   `pattern`, lengths, ranges, and counts. `eager`, `default`, `example`,
   `generated`, and imports are rejected.

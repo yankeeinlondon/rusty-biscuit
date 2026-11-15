@@ -485,7 +485,24 @@ initialize:
 ```
 
 A conditional requires `when` and `then`, allows `else`, and takes no sibling
-verb or `no_error`, at any depth. An `else` without `then` is a schema error.
+verb, at any depth. An `else` without `then` is a schema error. Beside `then`
+the schema admits `no_error` only as `false` or `null`, because completion
+fills `no_error: false` at every place an action could sit; the parser counts
+only a flag you wrote, so `no_error: null` there is fine and an authored
+`no_error: false` passes the schema but fails at launch:
+
+```yaml
+start:
+    - when: "fm.x"
+      then: [{ info: "a" }]
+      no_error: null    # valid: a null flag is no flag
+    - when: "fm.x"
+      then: [{ info: "a" }]
+      no_error: false   # schema valid; the parser refuses it
+    - when: "fm.x"
+      then: [{ info: "a" }]
+      no_error: true    # invalid
+```
 
 The schema has **no depth limit**. The parser allows conditionals five levels
 deep and rejects a sixth with `LifecycleStackInvalidShape`, naming the path of
@@ -674,6 +691,10 @@ before anything runs:
   placed inside a fifth-level `when`, which the parser counts as a sixth level
 - a shell expansion hidden in a `set` value in `initialize`
   (`set: { sha: "$(git rev-parse HEAD)" }`)
+- a `no_error` you wrote beside `then`/`else` (the schema admits `false`
+  there), or on a `set`, even `no_error: null`
+- one action carrying `no_error` both inside its long form and beside it;
+  a flag the schema filled in never counts as a second placement
 - the literal operand rules of the generated verbs: a literal YAML `null`,
   list, or mapping as one operand is rejected with a hint to write a
   whole-value `{{ … }}` template (see
@@ -869,26 +890,33 @@ verb keys; a bundle takes the short form only. The schema accepts it in
 
 | Form | Shape |
 |---|---|
-| short | a non-blank string, or a one-item array holding one: `edit: "{{ fqn }}"`, `edit: ["{{ fqn }}"]` |
-| long | `{ file, create_new, gui, no_error }`, closed; `file` is a required non-blank string, and `create_new`, `gui`, and `no_error` are booleans |
+| short | a non-blank file name, or a one-item array holding one: `edit: "{{ fqn }}"`, `edit: ["{{ fqn }}"]` |
+| long | `{ file, create_new, gui, no_error }`, closed; `file` is a required non-blank file name, and `create_new`, `gui`, and `no_error` are literal flags |
 
-Unlike other verbs, `edit` is typed strictly. The schema, `md schema validate`,
-and the editor's language server apply the lifecycle parser's own rules to it,
-so they refuse exactly what the parser refuses, with no conversion:
+The schema, `md schema validate`, and the editor's language server apply the
+lifecycle parser's own rules to `edit`, so they accept and refuse exactly what
+the parser does. A number or boolean file name is read as its text. A flag
+takes a YAML boolean or Boolean-like text (`"yes"`, `"false"`), and `null` is
+the same as leaving it out (`create_new` and `no_error` then default to
+`false`; `gui` lets either kind of editor open). A number, any other text,
+and a `{{ … }}` template are refused for a flag, because flags are never
+evaluated:
 
 ```yaml
 initialize:
     - edit: "{{ fqn }}"                         # valid
     - edit: { file: "{{ fqn }}", create_new: true, gui: false }   # valid
-    - edit: 5                                   # invalid: the file must be a string
+    - edit: 5                                   # valid: opens the file named `5`
+    - edit: { file: notes.md, gui: "yes" }      # valid: Boolean-like text converts
+    - edit: { file: notes.md, create_new: null } # valid: the same as leaving it out
     - edit: "   "                               # invalid: blank
     - edit: null                                # invalid: names no file (also bare `edit` and `edit: []`)
-    - edit: { file: notes.md, gui: "yes" }      # invalid: a literal boolean, not text
-    - edit: { file: notes.md, create_new: null } # invalid: null is not the absent default
+    - edit: { file: notes.md, gui: 1 }          # invalid: a number is not a flag
+    - edit: { file: notes.md, gui: "{{ fm.gui }}" } # invalid: flags are literal
     - edit: { path: notes.md }                  # invalid: unknown parameter
 ```
 
-A literal-boolean or `file` error is reported at the parameter itself
+A flag or `file` error is reported at the parameter itself
 (`initialize[0].edit.gui`); a short-form error at the action. A file name
 computed by a `{{ … }}` template is not known until the event runs, so it is
 checked then.
@@ -915,9 +943,12 @@ The diagram orders the checks by what they can see, not strictly by when
 they run: at launch, Claudine parses every stack before `initialize` and
 reaches the schema verdict after it (see
 [Composition → Claudine's trigger schemas](composition.md#claudines-trigger-schemas-in-the-launch-verdict)).
-Either failure stops the launch before `start` and the provider. Validation
-and editor requests never run an action: no expression is evaluated, no
-effect is dispatched, and no shell is started.
+Either failure stops the launch before `start` and the provider. A schema
+refusal does not undo `initialize`: whatever its actions already did (a
+file created, frontmatter set, an editor session) stands, so an invalid
+document is not one that ran nothing. Validation and editor requests never
+run an action: no expression is evaluated, no effect is dispatched, and no
+shell is started.
 
 ### What Claudine adds to expression checking
 
@@ -1000,7 +1031,13 @@ hand-written walk.
 
 Every Claudine property is optional, and the schema reads an explicit `null`
 as absent. Some readers are stricter: `loop`, the four timeouts,
-and `prompt` reject an explicit `null` when the document is parsed. A few
+and `prompt` reject an explicit `null` when the document is parsed. Lifecycle
+events are completed like any value, so a `no_error` you left out holds its
+default, `false`, once the schema stage has filled in defaults; the parser
+still treats it as unwritten. A `loop:` block is the exception: the schema
+judges it but fills nothing into it, so the effective block is exactly what
+you wrote. An unwritten `no_error` in its gate still
+reads `false`, from the lifecycle parser. A few
 properties are declared only so the editor
 can describe them:
 

@@ -47,7 +47,7 @@ Interactive setup wizard for initial configuration. Walks through 4 phases:
 3. **Action Defaults** — global interview (logging `all/some/none`, then input-needed actions)
 4. **Write & Register** — saves `~/.claudine/config.yaml` and registers hooks with each provider
 
-Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings.
+Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings, from the in-memory bindings; the saved file lists only events that have actions, because the schema refuses an empty event list (`action[](not-empty)`; the test-only `commands/init/mod.rs::write_init_config` filters them the same way).
 
 ```bash
 claudine init [OPTIONS]

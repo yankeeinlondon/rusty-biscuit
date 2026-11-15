@@ -162,9 +162,11 @@ such as `slug(allow-periods)` over `slug: alphanumeric(allow-dashes)`, is a
 `SchemaError::ConstraintConflict` (see
 [Alphanumeric Strings](types.md#alphanumeric-strings)).
 
-The one way to make a reused required type optional is a union with `null`:
-`draft_code: [code, null]` accepts `null`, omission, or a valid `code`,
-whatever `code`'s inherited `required` says (see
+A use cannot remove a `required` that the reused type carries: even
+`draft_code: [code, null]` inherits it, so the key must be written, though
+`null` is then accepted. To reuse a type both where it is required and where
+it is optional, leave `required` off the type and write it at the use sites
+that need it (see
 [Null-Admitting Properties](types.md#null-admitting-properties)).
 
 This is different from [Schema Layering](../../../../darkmatter/docs/topics/schemas/authoring-schemas.md#schema-layering).

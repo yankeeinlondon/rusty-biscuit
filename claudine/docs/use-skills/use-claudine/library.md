@@ -73,6 +73,31 @@ let report = list_skills(&ProviderSkillPaths::new(), &[])?;   // second arg: nam
 for s in &report.skills { println!("{} {:?} {}", s.name, s.scope, s.skill_md_path.display()); }
 ```
 
+## Read the configuration
+
+```rust
+use claudine::dispatch::loader::load_claudine_config;
+
+let repo_root = std::env::current_dir()?;
+let config = load_claudine_config(None, Some(repo_root.as_path()))?; // None: ~/.claudine/config.yaml
+for (event, actions) in &config.actions { println!("{event:?}: {} actions", actions.len()); }
+```
+
+(This snippet was written from the signatures and has not been compiled.)
+
+- **Load through the loader, not serde.** It validates both files against
+  the shipped schema, fills every default (optional ones too, and in place
+  of a `null`), converts a legacy `config.json`, and merges the repository
+  overrides. `serde_yaml` straight into `ClaudineConfig` skips all of that.
+- **The types didn't change.** `HookAction` and `MessengerProviderConfig`
+  are the same enums, and serializing one on its own still gives the tagged
+  form (`type: bash`, `provider: slack`). Only the `actions` and messenger
+  `configurations` fields of the config structs read and write the file's
+  keyed form (`- bash: { command: … }`).
+- **`RepoOverrideConfig::active_messenger` is `Option<String>`.** `None`
+  (missing or `null` in the file) inherits the user's route; there is no
+  "messaging off" value.
+
 ## Ask an agent (`claudine-contract`)
 
 ```rust

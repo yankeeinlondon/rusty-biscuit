@@ -883,8 +883,9 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   informal classifier. Substrate hover declines inside a root-`$schema`
   contract (`DocumentOverlay::yaml_contract_covers`), as inside a standalone
   region.
-- Required defaults: a required property with a resolved `default(...)` is
-  present (no `missing_required`, non-null in expressions); hover shows
+- Defaults: a property with a resolved `default(...)`, required or optional,
+  is present (no `missing_required`; non-null in expressions when the default
+  is a non-null literal, not a `{{ }}` template); hover shows
   `Default: _v_` on the key, a use, and the `$schema` declaration
   (`meta_schema_definition_hover_body`). A refused default (a
   `ConstraintViolation` at a path with no authored node) ranges its inline
