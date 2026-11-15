@@ -299,11 +299,10 @@ pub fn load_yaml_document(path: &Path) -> Result<Markdown, CompositionError> {
 ///
 /// Referenced through `sequence: steps.yaml` these keys never reach the
 /// invoking document's frontmatter at all; a directly invoked YAML document has
-/// only one mapping to put them in, so they must be lifted back out before
-/// composition — otherwise Darkmatter's always-on `$schema` stage would judge
-/// each step's *state* schema against the document root, which cannot satisfy
-/// it. The sequence plan has already consumed both by this point.
-const FORMAL_SEQUENCE_KEYS: [&str; 2] = ["$schema", "template"];
+/// only one mapping to put them in, so they are lifted back out before
+/// composition: they describe the plan, which has already consumed them, not
+/// the document. The root `$schema` is the document schema and stays.
+const FORMAL_SEQUENCE_KEYS: [&str; 2] = ["$state", "template"];
 
 /// Return `source` with [`FORMAL_SEQUENCE_KEYS`] removed when it is a directly
 /// invoked formal sequence document, and unchanged otherwise.

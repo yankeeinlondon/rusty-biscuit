@@ -602,12 +602,12 @@ fn a_referenced_formal_document_applies_template_before_generated_fields() {
 }
 
 #[test]
-fn a_referenced_formal_documents_schema_validates_the_step_state() {
+fn a_referenced_formal_documents_state_declaration_validates_the_step_state() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(
         &workspace,
         "formal.yaml",
-        "kind: sequence\nsequence:\n  - name: blue\n    rank: not-a-number\n$schema:\n  rank: number(required)\n",
+        "kind: sequence\nsequence:\n  - name: blue\n    rank: not-a-number\n$state:\n  rank: number(required)\n",
     );
     let doc = source_doc(&workspace, "ref.md", "formal.yaml");
 
@@ -627,7 +627,7 @@ fn a_referenced_formal_documents_schema_validates_the_step_state() {
 /// normalize the same way. It exercises scalar shorthand (`- blue`), an
 /// interpolated template value, a typed literal template default, a template
 /// default an item overrides, and generated fields, all of which the root
-/// `$schema` must then accept as step state.
+/// `$state` must then accept as step state.
 ///
 /// The two entry modes differ in exactly one respect: a directly invoked YAML
 /// has no Markdown body, so its steps render through a document-level `prompt`
@@ -643,7 +643,7 @@ fn write_parity_fixture(workspace: &CliProcessFixture) -> (std::path::PathBuf, s
             "kind: sequence\nprompt: \"{STEP_BODY}\"\n\
              sequence:\n  - blue\n  - name: red\n    rank: 3\n\
              template:\n  desc: \"{{{{ name }}}}!\"\n  rank: 5\n\
-             $schema:\n  desc: string(required)\n  rank: number(required)\n"
+             $state:\n  desc: string(required)\n  rank: number(required)\n"
         ),
     );
     let referenced = write(
@@ -673,17 +673,16 @@ fn a_formal_document_normalizes_identically_through_both_entry_paths() {
 }
 
 /// The counterpart to
-/// [`a_referenced_formal_documents_schema_validates_the_step_state`]: a
-/// directly invoked document's root `$schema` is the *step state* schema too,
-/// not its own frontmatter schema. Before this was unified, the direct mode
-/// reported `rank` merely missing from the document root.
+/// [`a_referenced_formal_documents_state_declaration_validates_the_step_state`]: a
+/// directly invoked document's root `$state` types the step state the same
+/// way; its root `$schema` would describe the document instead.
 #[test]
-fn a_directly_invoked_documents_schema_validates_the_step_state() {
+fn a_directly_invoked_documents_state_declaration_validates_the_step_state() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
     let doc = write(
         &workspace,
         "formal.yaml",
-        "kind: sequence\nprompt: \"Handle {{ seq.name }}\"\nsequence:\n  - name: blue\n    rank: not-a-number\n$schema:\n  rank: number(required)\n",
+        "kind: sequence\nprompt: \"Handle {{ seq.name }}\"\nsequence:\n  - name: blue\n    rank: not-a-number\n$state:\n  rank: number(required)\n",
     );
 
     let (_, stderr) = dry_run(&workspace, &doc, &[], false);
@@ -693,6 +692,34 @@ fn a_directly_invoked_documents_schema_validates_the_step_state() {
         "the direct mode must report the same step-state violation the referenced mode does; \
          stderr:\n{flat}"
     );
+}
+
+/// A setter supplies a value, never the sequence's plan: a `template=`
+/// setter (before or after the file) or a `--set` key naming `$state` or
+/// `template`, or a path under one, is refused before any step runs. (A
+/// setter name holds no `.` or `$`, so only `--set` can spell those.)
+#[test]
+fn a_setter_cannot_write_a_sequence_declaration() {
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
+    let doc = write(
+        &workspace,
+        "formal.yaml",
+        "kind: sequence\nprompt: \"Handle {{ seq.name }}\"\ntemplate:\n  desc: x\nsequence:\n  - blue\n",
+    );
+    let file = doc.to_str().unwrap();
+    for args in [
+        vec!["sequence", "--dry-run", file, "template={}"],
+        vec!["sequence", "--dry-run", "template=y", file],
+        vec!["sequence", "--dry-run", "--set", "{\"$state\": {}}", file],
+        vec!["sequence", "--dry-run", file, "--set", "{\"template.desc\": \"y\"}"],
+    ] {
+        let output = workspace.command().args(&args).assert().failure().get_output().clone();
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(flat.contains("is not accepted here"), "{args:?}: {flat}");
+        assert!(flat.contains("a setter supplies values, not declarations"), "{args:?}: {flat}");
+        assert!(!flat.contains("Handle blue"), "{args:?}: no step composed: {flat}");
+    }
 }
 
 /// A directly invoked YAML file has no Markdown body, so every step must carry

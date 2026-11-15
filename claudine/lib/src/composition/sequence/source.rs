@@ -130,7 +130,7 @@ pub(crate) fn plan_referenced_sequence(
         super::grammar::validate_sequence_root(root, path)?;
         let mut plan = formal::normalize_formal_plan(
             items,
-            formal::formal_keys(root)?,
+            formal::formal_keys(root, path)?,
             SequenceSource::External {
                 path: path.to_path_buf(),
             },

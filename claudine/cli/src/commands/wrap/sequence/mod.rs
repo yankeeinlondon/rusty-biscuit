@@ -265,7 +265,7 @@ pub(crate) fn execute_sequence(
     use claudine::composition::lifecycle::executor::StackExecutionContext;
     use claudine::composition::lifecycle::runtime::ContainerEventDecision;
     use claudine::composition::lifecycle::context::LifecycleErrorInfo;
-    let runtime = Arc::new(composition::RuntimeState::new());
+    let runtime = Arc::new(composition::RuntimeState::new_sequence());
     let seq = SequenceBinding::container(&plan.sequence_id, Vec::new()).to_value();
     runtime.set_sequence_binding(seq.clone());
     let mut frontmatter: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter().map(|(k,v)| (k.clone(),v.clone())).collect();

@@ -344,6 +344,14 @@ fn run_sequence_inner(
             parsed.shorthand_setters,
             parsed.positionals,
         )?;
+    // A setter supplies a value; the sequence's `$state`/`template` are its
+    // plan, so a setter (or `--set` key) naming one, or a path under one, is
+    // refused before anything reads it.
+    if let Some(serde_json::Value::Object(values)) = &set_overrides {
+        for key in values.keys() {
+            composition::sequence::declarations::reject_declaration_write(key, &source.resolved_path, "a setter")?;
+        }
+    }
     let mut authored_values: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter()
         .map(|(key, value)| (key.clone(), value.clone())).collect();
     if let Some(serde_json::Value::Object(values)) = &set_overrides { authored_values.extend(values.clone()); }

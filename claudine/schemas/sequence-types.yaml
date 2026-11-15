@@ -12,7 +12,8 @@
 # conditional-depth count, which the lifecycle parser checks.
 #
 # A task object is open: an undeclared key is authored step data, read as
-# `seq.<key>`. A group object is closed, so `execution` (removed) and a
+# `seq.<key>`. `$schema`, `$state`, and `template` are an inline sequence's own
+# declarations; the task parser refuses them on any other task. A group object is closed, so `execution` (removed) and a
 # misspelled key such as `max_paralel` are schema errors.
 kind: schema
 types:
@@ -40,6 +41,9 @@ types:
         flow: "string -> the task flow"
         timeout: "string -> the per-command shell timeout, such as 45s"
         loop: "loop@./lifecycle.yaml -> an inline sequence's loop, beside `sequence:`"
+        $schema: "schema -> an inline sequence's check of the values it sees at its turn, judged before its `initialize`; beside `sequence:`"
+        $state: "schema -> the schema each of this inline sequence's own steps' normalized state must satisfy; beside `sequence:`"
+        template: "object -> defaults merged into every item of this inline sequence's own list; beside `sequence:`"
         initialize: "initialize-stack@./lifecycle.yaml -> actions run before the container starts; shell-free"
         start: "stack@./lifecycle.yaml -> actions run when the container starts"
         blocked: "stack@./lifecycle.yaml -> actions run when the container is blocked"

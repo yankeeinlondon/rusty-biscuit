@@ -71,7 +71,7 @@ impl TaskExecution<'_> {
         use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
 
         let before = self.runtime.map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        let runtime = Arc::new(RuntimeState::from_snapshot(before));
+        let runtime = Arc::new(RuntimeState::from_sequence_snapshot(before));
         let live = Mutex::new(self.stack.live_frontmatter_snapshot()
             .unwrap_or_else(|| self.stack.frontmatter.clone()));
         let private_stack = self.stack.with_private_cells(&runtime, Some(&live));

@@ -424,3 +424,36 @@ fn field_projections_take_no_full_snapshot_and_copy_only_the_outputs_they_return
     let full = snapshot().since(&before);
     assert_eq!((full.get(Work::RuntimeSnapshot), full.get(Work::RuntimeOutputsCopy)), (1, 100));
 }
+
+/// A sequence execution's cell refuses a write to a sequence declaration,
+/// including a branch seeded from it, while an ordinary document's cell keeps
+/// a root `template`/`$state` as plain data.
+#[test]
+fn only_a_sequence_cell_refuses_declaration_writes() {
+    let engine = engine();
+    let sequence = RuntimeState::new_sequence();
+    let branch = RuntimeState::from_sequence_snapshot(sequence.snapshot());
+    for state in [&sequence, &branch] {
+        assert!(state.is_sequence());
+        for (key, declaration) in [("template", "template"), ("$state", "$state")] {
+            let error = state.set(&engine, key, json!({}), &base()).expect_err("declaration write");
+            assert!(
+                matches!(&error, RuntimeMutationError::DeclarationKey { key: refused, declaration: named }
+                    if refused == key && *named == declaration),
+                "{key} produced {error:?}"
+            );
+        }
+        // A key that merely starts with a declaration's name is ordinary data.
+        state.set(&engine, "templates", json!(1), &base()).unwrap();
+        assert!(!state.snapshot().mutations.contains_key("template"), "a refused write leaves no trace");
+    }
+
+    let document = RuntimeState::new();
+    let plain = RuntimeState::from_snapshot(RuntimeSnapshot::default());
+    for state in [&document, &plain] {
+        assert!(!state.is_sequence());
+        state.set(&engine, "template", json!({"a": 1}), &base()).unwrap();
+        state.set(&engine, "$state", json!("x"), &base()).unwrap();
+        assert_eq!(state.snapshot().mutations.get("template"), Some(&json!({"a": 1})));
+    }
+}

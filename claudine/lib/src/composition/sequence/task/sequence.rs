@@ -21,7 +21,7 @@ use crate::composition::sequence::preflight::{PreflightAction, PreflightSequence
 impl TaskExecution<'_> {
     pub(super) fn run_sequence(&self, sequence: &PreflightSequence) -> PrimaryOutcome {
         if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
-        let owned_runtime = Arc::new(RuntimeState::new());
+        let owned_runtime = Arc::new(RuntimeState::new_sequence());
         let runtime = self.runtime.unwrap_or(&owned_runtime);
         // The enclosing scope moves out and back; its outputs are never copied.
         let (outer_seq, outer_outputs) = runtime.replace_sequence_scope(None, Vec::new());
@@ -460,7 +460,7 @@ impl TaskExecution<'_> {
                 target, source, self.stack.file_resolution_context,
             )?;
             let path = biscuit_file::canonicalize_simplified(&path).unwrap_or(path);
-            let owned_runtime = Arc::new(RuntimeState::new());
+            let owned_runtime = Arc::new(RuntimeState::new_sequence());
             let runtime = self.runtime.unwrap_or(&owned_runtime);
             let _chain = runtime.enter_container_proxy(source, &path, target)?;
             if let Some(runtime) = self.runtime

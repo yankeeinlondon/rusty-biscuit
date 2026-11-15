@@ -483,7 +483,20 @@ may themselves be containers. Groups reject `execution:` (concurrency is implici
 unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 `failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
 Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
-grammar. Container `loop:` (group object, sequence-document root, inline
+grammar. Sequence declarations live in `composition/sequence/declarations.rs`:
+a root's `$state`/`template` and an inline container task's
+`$schema`/`$state`/`template` are judged by key presence (null included) for
+placement (only beside that owner's inline `sequence: [ … ]`; never on a
+group object) and shape before any row is read, so an empty list still
+fails. A root `$schema` is the document schema, never a declaration.
+`PreparedSequenceSchema` resolves a `$state` once per owner (no triggers,
+no baseline) and judges rows passively. Every value route refuses a
+declaration write through `reserved::declaration_written_by` (root of a
+dotted path): setters (`commands/sequence.rs`), `with:`, template keys, and
+runtime `set`, which only a sequence cell refuses
+(`RuntimeState::{new_sequence,from_sequence_snapshot}`; `new`/`from_snapshot`
+stay permissive for ordinary documents, so a group branch must use the
+sequence constructor). Container `loop:` (group object, sequence-document root, inline
 nested sequence task) is validated by `sequence/grammar.rs::container_loop`
 and frozen on `PreflightSequence`/`PreflightGroup.loop_config`
 (`PreflightLoop`, config plus location; the gate goes into the container's

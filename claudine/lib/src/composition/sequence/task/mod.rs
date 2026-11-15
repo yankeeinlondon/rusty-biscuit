@@ -1444,7 +1444,7 @@ impl TaskExecution<'_> {
     fn evaluate_with(&self) -> Result<Map<String, Value>, CompositionError> {
         let mut evaluated = Map::new();
         for (key, value) in &self.task.with {
-            if reserved::is_reserved_state_key(key) {
+            if reserved::is_reserved_state_key(key) || reserved::is_declaration_write(key) {
                 return Err(CompositionError::SequenceTaskWithReserved {
                     task: self.label(),
                     key: key.clone(),

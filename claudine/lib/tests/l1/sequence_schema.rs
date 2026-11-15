@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 
 use claudine::composition::{CompositionError, resolve_composition_source_in_context, resolve_sequence_plan};
 
-use crate::claudine_schemas::{Discovered, SchemaRepo, problems, shipped_bundle};
+use crate::claudine_schemas::{Discovered, SchemaRepo, embedded_bundle, problems, shipped_bundle};
 
 /// What the schema must decide for one fixture.
 enum Expect {
@@ -307,4 +307,60 @@ fn sequence_rejection(repo: &SchemaRepo, path: &std::path::Path) -> Option<Compo
     let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context)
         .expect("the document resolves");
     resolve_sequence_plan(&source, &context).err()
+}
+
+/// The declarations a sequence document and an inline container own:
+/// `$state` and an inline task's `$schema` are typed with the shared
+/// `schema` meta-type, `template` with `object`. The disk bundle and the
+/// copy embedded in the binary give every row the same verdict.
+#[test]
+fn sequence_declarations_are_typed_alike_on_disk_and_embedded() {
+    const VALID: &str = "---\n$schema:\n    spec: string\n$state:\n    color: string(required)\ntemplate:\n    desc: \"{{ color }}\"\nsequence:\n    - name: outer\n      $schema:\n          spec: string\n      $state: ./state.schema.yaml\n      template:\n          rank: 3\n      sequence:\n          - name: inner\n            shell: just inner\n---\nBody.\n";
+    const ROOT_STATE_NUMBER: &str = "---\n$state: 42\nsequence:\n    - one\n---\nBody.\n";
+    const TASK_TEMPLATE_NUMBER: &str = "---\nsequence:\n    - name: outer\n      template: 3\n      sequence:\n          - one\n---\nBody.\n";
+    let rows: [(&str, &str, Expect); 3] = [
+        ("declarations-valid", VALID, Valid),
+        ("root-state-number", ROOT_STATE_NUMBER, Invalid(&[("/$state", "")])),
+        ("task-template-number", TASK_TEMPLATE_NUMBER, Invalid(&[("/sequence/0/template", "object")])),
+    ];
+
+    let shipped = shipped_bundle!();
+    let disk = SchemaRepo::new(&shipped);
+    let embedded = SchemaRepo::new(&[]);
+    let verdicts = |repo: &SchemaRepo, discovered: &Discovered| -> Vec<(bool, Vec<(String, String)>)> {
+        repo.write_document("state.schema.yaml", "kind: schema\n$schema:\n    rank: number\n");
+        rows.iter()
+            .map(|(name, text, expect)| {
+                let path = repo.write_document(&format!("{name}.md"), text);
+                let report = discovered
+                    .judge(
+                        &path,
+                        include_str!("../../../schemas/claudine.yaml"),
+                        include_str!("../../../schemas/inline-compose.yaml"),
+                    )
+                    .expect("judged")
+                    .report;
+                let found = problems(&report);
+                match expect {
+                    Valid => assert!(report.valid, "{name}: {found:?}"),
+                    Invalid(expected) => {
+                        assert!(!report.valid, "{name} is invalid");
+                        for (pointer, needle) in *expected {
+                            assert!(
+                                found.iter().any(|(at, message)| at == pointer && message.contains(needle)),
+                                "{name}: expected a problem at `{pointer}` naming `{needle}`, got {found:?}"
+                            );
+                        }
+                    }
+                }
+                (report.valid, found)
+            })
+            .collect()
+    };
+    let on_disk = verdicts(&disk, &disk.discover().expect("the shipped bundle loads"));
+    let in_binary = verdicts(
+        &embedded,
+        &embedded.discover_embedded(embedded_bundle(&shipped)).expect("the embedded bundle loads"),
+    );
+    assert_eq!(on_disk, in_binary, "disk and embedded verdicts agree");
 }

@@ -319,7 +319,8 @@ fn external_template_non_object_fails() {
     let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceExternalWrongType(ref msg) if msg.contains("`template`")),
+        matches!(err, CompositionError::SequenceDeclarationShape { ref property, ref message, .. }
+            if property == "template" && message.contains("must be an object, got string")),
         "got: {err}"
     );
 }
@@ -2211,7 +2212,7 @@ mod dynamic_sources {
     }
 }
 
-// -- Phase 4: formal `template` + `$schema` on step state -----------------
+// -- Phase 4: formal `template` + `$state` on step state -----------------
 
 mod formal_documents {
     use super::*;
@@ -2225,7 +2226,7 @@ mod formal_documents {
 
     /// Template values land before generated fields, so a templated key is
     /// ordinary authored state by the time ids and positions are made — and it
-    /// can be validated by `$schema` alongside the authored keys.
+    /// can be validated by `$state` alongside the authored keys.
     #[test]
     fn templates_apply_before_generated_fields_and_satisfy_the_schema() {
         let plan = plan_from(
@@ -2239,7 +2240,7 @@ sequence:
     rank: 3
 template:
   desc: "{{ color }}({{ rank }})"
-$schema:
+$state:
   color: string(required)
   rank: number(required)
   desc: string(required)
@@ -2282,7 +2283,7 @@ sequence:
   - name: blue
     color: blue
   - name: red
-$schema:
+$state:
   color: string(required)
 "#,
         )
@@ -2308,7 +2309,7 @@ $schema:
 sequence:
   - name: blue
     config: {}
-$schema:
+$state:
   config: "{ shade: string(required) }"
 "#,
         )
@@ -2323,7 +2324,7 @@ $schema:
         }
     }
 
-    /// The schema judges the *state* portion only: executable and task keys
+    /// `$state` judges the *state* portion only: executable and task keys
     /// are not state and must not be validated as such.
     #[test]
     fn executable_keys_are_excluded_from_state_validation() {
@@ -2333,7 +2334,7 @@ sequence:
   - name: one
     color: blue
     shell: just test
-$schema:
+$state:
   color: string(required)
 "#,
         )

@@ -1946,15 +1946,90 @@ pub enum CompositionError {
         index: usize,
     },
 
-    /// A step's normalized state failed the sequence document's `$schema`.
+    /// A step's normalized state failed its owner's `$state` schema.
+    ///
+    /// `index` is zero-based within the owning list, so `source_path` and
+    /// `container` (the list's authored path: `sequence`, or
+    /// `sequence[1].sequence` for a nested container) are what tell two
+    /// owners' step 0 apart.
     #[error(
-        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message}"
+        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message} \
+         (`$state` of `{container}` in {source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     SequenceStateSchemaViolation {
         /// Zero-based step index.
         index: usize,
         /// The step's generated id.
         id: String,
+        /// The failing property path.
+        property: String,
+        /// The validation message.
+        message: String,
+        /// The file declaring the `$state` (and the list it types).
+        source_path: PathBuf,
+        /// The authored path of the typed list in `source_path`.
+        container: String,
+    },
+
+    /// A sequence declaration (`$schema`, `$state`, or `template`) written
+    /// where no inline list owns it, or supplied through a value route.
+    #[error(
+        "`{property}` is not accepted here ({source_path}): {hint}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationMisplaced {
+        /// The file holding the declaration, or the document a value route
+        /// targeted.
+        source_path: PathBuf,
+        /// The authored path of the declaration (`sequence[0].$state`).
+        property: String,
+        /// Where the declaration belongs instead.
+        hint: String,
+    },
+
+    /// A sequence declaration has a shape its key never accepts (a `null`
+    /// `$state`, an empty union, a non-mapping `template`, …).
+    #[error(
+        "invalid sequence declaration `{property}` ({source_path}): {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationShape {
+        /// The file holding the declaration.
+        source_path: PathBuf,
+        /// The authored path of the declaration.
+        property: String,
+        /// What is wrong with it.
+        message: String,
+    },
+
+    /// A well-shaped schema declaration failed to parse or resolve (an
+    /// unparsable type string, a missing referenced file, a bad import).
+    #[error(
+        "sequence declaration `{property}` ({source_path}) could not be loaded: {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationLoad {
+        /// The file holding the declaration.
+        source_path: PathBuf,
+        /// The authored path of the declaration.
+        property: String,
+        /// The schema layer's typed failure.
+        #[source]
+        source: Box<simplified_schema::SchemaError>,
+    },
+
+    /// The values an inline sequence container sees at its turn failed its
+    /// own `$schema` check, so the container never opened.
+    #[error(
+        "sequence container `{container}` ({source_path}) failed its `$schema` check at `{property}`: {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceContainerSchemaViolation {
+        /// The file declaring the container.
+        source_path: PathBuf,
+        /// The container task's authored path (`sequence[1]`).
+        container: String,
         /// The failing property path.
         property: String,
         /// The validation message.
@@ -2346,7 +2421,8 @@ pub enum CompositionError {
     /// one of the executor-owned `seq`, `group`, and `loop` views.
     #[error(
         "`with.{key}` in {task} targets a reserved key; generated step fields and \
-         `seq`, `group`, and `loop` are executor-owned"
+         `seq`, `group`, and `loop` are executor-owned, and the sequence declarations \
+         `$state` and `template` are not values"
     )]
     SequenceTaskWithReserved {
         /// A label locating the task.

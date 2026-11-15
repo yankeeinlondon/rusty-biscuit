@@ -29,6 +29,7 @@
 //! See `claudine/features/2026-07-11-sequence-plus/spec.md`.
 
 pub mod data;
+pub mod declarations;
 pub mod expr;
 pub mod formal;
 pub mod grammar;
@@ -144,7 +145,7 @@ pub fn resolve_sequence_plan_with(
         SequenceSourceSpec::Inline(items) if formal::is_direct_formal_document(source) => {
             formal::normalize_formal_plan(
                 items,
-                formal::formal_keys(&frontmatter)?,
+                formal::formal_keys(&frontmatter, &source.resolved_path)?,
                 Source::Inline,
                 &source.resolved_path,
                 &source.resolved_path,
