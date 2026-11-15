@@ -316,7 +316,7 @@ tests.
 
 Wave 1 (two tasks in parallel; they touch disjoint files in `darkmatter/lib`):
 
-- [ ] **Resolver rework** (`darkmatter/lib/src/lifecycle/executor.rs`)
+- [x] **Resolver rework** (`darkmatter/lib/src/lifecycle/executor.rs`)
   - Replace `mutation_target` per R4: contract lookup → recursive-refusal →
     first candidate → `ensure_within` containment, returning the cleaned path;
     delete the implicit-relative root-join branch.
@@ -332,7 +332,7 @@ Wave 1 (two tasks in parallel; they touch disjoint files in `darkmatter/lib`):
     `path(0)`-for-frontmatter change alters the engine input from raw text to
     an absolute path, so any engine-side behavior keyed on the raw string
     (none found — `resolve` joins then guards) is unaffected.
-- [ ] **Engine read guard** (`darkmatter/lib/src/effects/verbs.rs`)
+- [x] **Engine read guard** (`darkmatter/lib/src/effects/verbs.rs`)
   - Add `ensure_within` to `EffectEngine::load` before reading (R7), with a
     unit test proving an outside target fails on load, not on save.
   - Update the module's `///` docs where they describe load behavior.
