@@ -1274,7 +1274,7 @@ repository's CI makes such a change deliberate.
 `permission-scope` finishes in seconds and `permission-widening` is skipped.
 A pull request that narrows permissions, or leaves them equal, also passes
 without waiting. A pull request that **may widen** them shows
-`permission-widening (approval required)` as *waiting*: GitHub's
+`permission-widening` (shown as "Approve permission widening") as *waiting*: GitHub's
 [deployment review](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments)
 asks the environment's reviewer to approve the run, and `ci-gate` stays
 pending until they do. A rejection fails the job and so the gate.

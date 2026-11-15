@@ -6211,6 +6211,8 @@ const NAMING_CONTRACT: [WorkflowNaming; 4] = [
             ("build", None),
             ("area-ci", None),
             ("area-drift", Some("Verify package area mapping")),
+            ("permission-scope", Some("Classify permission changes")),
+            ("permission-widening", Some("Approve permission widening")),
             ("ci-gate", Some("ci-gate")),
             ("certify-nightly", Some("Publish nightly coverage evidence")),
             ("publish-observations", Some("Publish test observations")),

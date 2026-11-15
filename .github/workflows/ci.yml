@@ -1009,7 +1009,7 @@ jobs:
   # The trusted checker compiles only when `scope` says `compare`; the cheap
   # path check runs on every pull request and push.
   permission-scope:
-    name: permission-scope (classify permission changes)
+    name: Classify permission changes
     needs: validation
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -1132,7 +1132,7 @@ jobs:
   # bounds only this job's one step, never the wait for a reviewer. A
   # rejected approval fails the job; a new commit needs a new approval.
   permission-widening:
-    name: permission-widening (approval required)
+    name: Approve permission widening
     needs: permission-scope
     if: >-
       !cancelled() &&
