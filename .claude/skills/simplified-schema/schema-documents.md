@@ -47,6 +47,16 @@ admission; metadata from `accepted`) and prepares a `yaml-schema` with
 judges its shape twice. Tests: `envelope_admission.rs`,
 `yaml_schema_envelope.rs`.
 
+Null carriers are absent: a null `description`/`categories`/`types` is
+omitted, a tagged `$schema: null` beside a usable `types` table is a
+types-only document, and a trigger's `$schema: null` is matcher-only. An
+*empty* carrier is not absent: `types: {}` and a trigger's `$schema: {}`/`[]`/
+blank text are refused (`triggers/envelope.rs::parse_trigger_envelope`
+mirrors `schema-trigger.yaml`'s `schema(not-empty)`, so discovery and
+whole-YAML loading agree). `envelope_null_carriers.rs` runs every carrier cell
+through the parser, admission (normal and `PreparationMode::Uncached`), both
+factories, and whole-YAML loading, which must agree.
+
 Ownership boundary: this crate owns all three shipped definitions
 (`schemas/{schema,yaml-schema,schema-trigger}.yaml`, compiled into
 `envelope::ENVELOPE_DEFINITIONS`; only the first two admit envelopes, the

@@ -359,12 +359,6 @@ impl NestedTemplates {
         self.paths.iter().any(|(_, deferred)| within(pointer, deferred))
     }
 
-    /// Whether a problem at instance location `at` is owed to a template,
-    /// without the core's verdict (see [`Self::excuses`]).
-    pub(crate) fn excuses_location(&self, at: &str) -> bool {
-        self.excuses(at, &[])
-    }
-
     /// Whether the core should treat the value at `path` as matching.
     /// Membership, not reclassification: the value bound may be a decoded
     /// literal token that reads like a template.

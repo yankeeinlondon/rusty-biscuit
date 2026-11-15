@@ -1,6 +1,6 @@
 ---
 name: simplified-schema
-description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, `AppliedDefault`, `prepare_defaults`, or `SchemaError`; required properties with a `default(...)`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `required` presence versus null admission, `not-empty` (and the removed `non-null`), closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; schema triggers (`kind: schema-trigger`, `simplified_schema::triggers`, `TriggerRegistry`, `scan`, `scan_with_source`, `EmbeddedSchemaBundle`, `prepare_trigger_bundle`), schema roots (`SchemaRoots`, `SCHEMAS_DIR`), or whole YAML documents selected by `kind` (`yaml_documents`, `KindRegistry`, `KindHost`, `LoadedYamlDocument`, kind checks); deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
+description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, `AppliedDefault`, `DefaultPlan`, `prepare_defaults`, `ConflictingDefaults`, or `SchemaError`; required properties with a `default(...)`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `required` presence versus null admission, `not-empty` (and the removed `non-null`), closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; schema triggers (`kind: schema-trigger`, `simplified_schema::triggers`, `TriggerRegistry`, `scan`, `scan_with_source`, `EmbeddedSchemaBundle`, `prepare_trigger_bundle`), schema roots (`SchemaRoots`, `SCHEMAS_DIR`), or whole YAML documents selected by `kind` (`yaml_documents`, `KindRegistry`, `KindHost`, `LoadedYamlDocument`, kind checks); deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
 last_updated: 2026-11-13T00:00:00Z
 ---
 
@@ -54,16 +54,25 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   A failed soft validation reports on a diagnostic copy
   (`coerce.rs::partial_copy`): converted siblings, failing values as written,
   and unexpected keys/tuple elements masked from the retry then put back.
-- **One default engine.** An absent `required` property with a lowered
-  `default` passes through it: `defaults::prepare_defaults(json_schema,
-  value, templates, validators, cache)` builds the completed candidate, and
-  `Prepared` and Darkmatter's `EffectiveSchema` both judge that candidate.
-  Strict success stays `Cow::Borrowed` and lists `defaults`; soft inserts
-  them (defaults, then conversion, then any default the conversion made
-  reachable). Invalid or ambiguous defaults are `SchemaError::InvalidDefault`
-  / `AmbiguousDefaults` (JSON Pointer into the lowered schema, no source
-  span) inside `ValidationFailure::Unprepared`. Exported JSON Schema keeps
-  `required`. Never write a second defaulting walk in a host. Tests:
+- **One default engine, compiled once.** `defaults::DefaultPlan::compile(
+  json_schema, cache)` reads a lowered or raw schema into object locations
+  (merging `$ref`, `allOf`, and every `anyOf`/`oneOf` arm, never choosing
+  an arm); `DefaultPlan::for_identity` memoizes it per `SchemaIdentity`.
+  `prepare_defaults(&plan, value, templates)` fills every missing or `null`
+  property that declares a default, required or not (a `null` default only
+  inserts a missing *required* key), checks each used default against its
+  declaring definitions, then completes the default's own children.
+  `Prepared` and Darkmatter's `EffectiveSchema` hold a plan and run it on
+  every value, valid or not: there is no "already valid" shortcut before
+  preparation. Strict success stays `Cow::Borrowed` and lists `defaults`;
+  soft applies them (defaults, then conversion, then any default the
+  conversion made reachable). Different defaults for one property at one
+  location are `SchemaError::ConflictingDefaults`, raised by lowering
+  (`lower_document` → `check_declarations`) and by `Prepared::new` for raw
+  schemas; a used invalid default is `InvalidDefault`; endless expansion is
+  `RecursiveDefault` (all inside `ValidationFailure::Unprepared`, JSON
+  Pointers into the lowered schema). Exported JSON Schema keeps `required`.
+  Never write a second defaulting walk in a host. Tests:
   `tests/l1/required_defaults.rs`.
 - **One failure flattening.** `ConversionError::located_failures()` /
   `coercion::locate_failures` (null arms dropped, an arm unreachable only on

@@ -19,11 +19,12 @@
 //! definition, compiled into the library ([`crate::envelope`]): a tagged or
 //! informal document against `schema.yaml`, a `yaml-schema` against
 //! `yaml-schema.yaml`. The definitions own every structural rule (closed key
-//! set, `$schema` or `types` present, `types` a mapping, metadata types,
-//! no explicit `null`); this module keeps only the rules that need the parsed
-//! document: category entry grammar, duplicate and undeclared categories,
-//! and duplicate overloads. Metadata is read from the admitted, softly
-//! converted copy, so a `description: 123` reads as `"123"`.
+//! set, a usable `$schema` or `types` present, `types` a mapping, metadata
+//! types, no empty metadata or `types` table); this module keeps only the
+//! rules that need the parsed document: category entry grammar, duplicate
+//! and undeclared categories, and duplicate overloads. Metadata is read from
+//! the admitted, softly converted copy, so a `description: 123` reads as
+//! `"123"`.
 //!
 //! A host that has already validated a whole file against a definition it
 //! selected reads it with [`parse_selected_standalone_schema_document`],

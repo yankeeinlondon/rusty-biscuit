@@ -10,7 +10,10 @@
 //!
 //! - **Property-level unions** hoist `required` and `default(...)` from every
 //!   arm onto the parent property. Arm-local constraints stay arm-local. A
-//!   `default(...)` that disagrees across arms is a hard conversion error.
+//!   `default(...)` that disagrees across arms is a hard conversion error,
+//!   and so are different defaults for one property on different object
+//!   arms ([`SchemaError::ConflictingDefaults`], checked on the lowered
+//!   form by [`crate::defaults`]).
 //! - **`x-darkmatter-*` extensions** include the URL-scheme validator and the
 //!   grammar-backed semantic meta-type keywords. `file(match(...))` is
 //!   suggestion metadata in a single schema. In a root union a simplified
@@ -83,6 +86,10 @@ pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 ///   through a union, array, tuple, or object (named references are inlined
 ///   by the resolver before conversion); the error names the property path.
 ///
+/// Returns [`SchemaError::ConflictingDefaults`] when object arms, or other
+/// schemas that describe one location, declare different defaults for one
+/// property.
+///
 /// ## Examples
 ///
 /// ```ignore
@@ -149,7 +156,11 @@ pub(crate) fn lower_document(
         definitions.extend(lower_match_copies(&copies, defs, phase)?.into_iter().map(|copy| (copy.key, copy.body)));
         document.insert("$defs".into(), Value::Object(definitions));
     }
-    Ok(Value::Object(document))
+    let document = Value::Object(document);
+    // Object-arm defaults are judged on the lowered form, where every arm,
+    // reference, and nested union that can describe one location is visible.
+    crate::defaults::check_declarations(&document)?;
+    Ok(document)
 }
 
 // ── Recursive definitions ─────────────────────────────────────────────────

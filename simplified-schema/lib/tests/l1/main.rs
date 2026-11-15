@@ -15,6 +15,7 @@ mod deferred_positions;
 mod dependency_direction_guard;
 mod dynamic_slots;
 mod envelope_admission;
+mod envelope_null_carriers;
 mod expression_regions;
 mod expression_scanner;
 mod expression_syntax;

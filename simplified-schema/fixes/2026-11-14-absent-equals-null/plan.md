@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-11-14
-phase: 2
+phase: 4
 agent: codex/default
 yolo: 'true'
 source_files_during_phase_1:
@@ -104,6 +104,174 @@ skills_files_updated_during_phase_1:
 - .claude/skills/simplified-schema/SKILL.md
 - .claude/skills/simplified-schema/declaration-narrowing.md
 - .claude/skills/simplified-schema/schema-documents.md
+source_files_during_phase_2:
+- simplified-schema/lib/src/defaults.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/outcome.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/coerce.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/triggers/finding.rs
+- simplified-schema/lib/tests/l1/required_defaults.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/tests/schema.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/effective_default_preparation.rs
+- darkmatter/lib/tests/l1/composition_defaults.rs
+- darkmatter/lib/tests/l1/config_fields.rs
+- darkmatter/lib/tests/l1/config_load.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/recursive_schema_merge.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+- claudine/cli/src/commands/actions.rs
+- claudine/cli/src/commands/config_tui/tabs/messenger/input.rs
+- claudine/cli/src/commands/config_tui/tabs/messenger/modal.rs
+- claudine/cli/src/commands/config_tui/tabs/messenger/render.rs
+- claudine/cli/src/commands/config_tui/tabs/messenger/tests.rs
+- claudine/cli/src/commands/hooks/list.rs
+- claudine/cli/src/commands/hooks/variables.rs
+- claudine/cli/src/commands/init/mod.rs
+- claudine/cli/src/commands/init_wizard.rs
+- claudine/cli/tests/common/drain_interrupt.rs
+- claudine/cli/tests/common/webhook_listener.rs
+- claudine/cli/tests/l1/agent_cwd.rs
+- claudine/cli/tests/l1/command_routing.rs
+- claudine/cli/tests/l1/detached_audio.rs
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- claudine/cli/tests/l1/handle_blocking_output.rs
+- claudine/cli/tests/l1/handle_message_drain.rs
+- claudine/cli/tests/l1/handle_repo_config.rs
+- claudine/cli/tests/l1/pi_managed_rpc.rs
+- claudine/cli/tests/level2/level2_lifecycle_control.rs
+- claudine/lib/benches/runtime_hot_paths.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+- claudine/lib/src/composition/lifecycle/mod.rs
+- claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+- claudine/lib/src/composition/lifecycle/tests/grammar.rs
+- claudine/lib/src/composition/preflight.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/service/tests.rs
+- claudine/lib/src/composition/schema/classify.rs
+- claudine/lib/src/composition/schema/defaults_tests.rs
+- claudine/lib/src/composition/schema/launch_defaults.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/config/claudine_config.rs
+- claudine/lib/src/config/claudine_config/tests.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/load.rs
+- claudine/lib/src/config/merge.rs
+- claudine/lib/src/config/messaging_block.rs
+- claudine/lib/src/config/messaging_block/tests.rs
+- claudine/lib/src/config/mod.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/config/persist_tests.rs
+- claudine/lib/src/config/tts.rs
+- claudine/lib/src/dispatch/loader/tests.rs
+- claudine/lib/src/steering/automatic.rs
+- claudine/lib/src/steering/automatic/tests.rs
+- claudine/lib/tests/config/repository-control.yaml
+- claudine/lib/tests/config/user-control.yaml
+- claudine/lib/tests/l1/claudine_schemas_matrix.rs
+- claudine/lib/tests/l1/config_json_conversion.rs
+- claudine/lib/tests/l1/config_schema_matrix.rs
+- claudine/schemas/action.yaml
+- claudine/schemas/claudine-config.yaml
+- claudine/schemas/lifecycle.yaml
+- darkmatter/cli/tests/l1/compose_edit_action.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_schema.rs
+- darkmatter/dmls/src/overlay/event_views.rs
+- darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+- darkmatter/dmls/tests/l1/edit_action_editor.rs
+- darkmatter/dmls/tests/l1/lsp_session.rs
+- darkmatter/dmls/tests/l1/required_defaults.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/lifecycle/action_shape.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/host_profile.rs
+- darkmatter/lib/src/lifecycle/host_profile/tests.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/src/lifecycle/mod.rs
+- darkmatter/lib/src/lifecycle/parse.rs
+- darkmatter/lib/src/lifecycle/preflight/tests.rs
+- darkmatter/lib/src/lifecycle/run_guard/tests.rs
+- darkmatter/lib/src/lifecycle/schema_projection.rs
+- darkmatter/lib/src/lifecycle/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/tests/schema.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/catalog/discovery_tests.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-action.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/lib/tests/l1/absent_property_contract.rs
+- darkmatter/lib/tests/l1/composition_defaults.rs
+- darkmatter/lib/tests/l1/content_policy_compose_contract.rs
+- darkmatter/lib/tests/l1/directive_target_analysis.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/lifecycle_edit_action.rs
+- darkmatter/lib/tests/l1/lifecycle_edit_schema_parity.rs
+- darkmatter/lib/tests/l1/lifecycle_generated_operands.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+- darkmatter/lib/tests/l1/not_empty_frontmatter.rs
+- darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+- darkmatter/lib/tests/l1/schema_enhancements_matrix/frontmatter.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/trigger_input_matrix.rs
+- darkmatter/lib/tests/l1/variable_type_projection.rs
+- darkmatter/schemas/darkmatter-config.yaml
+- darkmatter/schemas/partials/fm.yaml
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/schemas/partials/md-lifecycle.yaml
+- darkmatter/schemas/partials/style.yaml
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/triggers/envelope.rs
+- simplified-schema/lib/tests/l1/main.rs
+- claudine/lib/src/config/wire.rs
+- claudine/lib/src/config/wire_tests.rs
+- darkmatter/lib/src/lifecycle/tests/authored_flags.rs
+- simplified-schema/lib/tests/l1/envelope_null_carriers.rs
+docs_updated_during_phase_3:
+- claudine/cli/README.md
+- claudine/docs/topics/automatic-steering.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/configuring-actions.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/topics/configuration.md
+- darkmatter/docs/topics/markdown-formatting.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/cli-commands.md
+- .claude/skills/claudine/hook-actions.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/simplified-schema/schema-documents.md
+- claudine/docs/use-skills/use-claudine/config.md
 packages:
 - simplified-schema
 - darkmatter
@@ -196,7 +364,7 @@ Checkpoint: focused nextest modules for presence, lowering, constraints, and pha
 
 ### Wave 3
 
-- [ ] **Compile defaults**
+- [x] **Compile defaults**
   - Implement Rules 4–8 in `simplified-schema/lib/src/defaults.rs`, with schema-location traversal over properties, local references, arrays/tuples, `allOf`, and unions. Compile reference graphs without expanding recursive schemas indefinitely.
   - Keep distinct default scopes below distinct parent properties. Do not create absent parent objects while collecting descendants. Existing `additionalProperties` object traversal remains supported; pattern-property dispatch remains owned by existing validation/conversion machinery and is not broadened by this fix.
   - Route lowered export and raw `Prepared::new` through the shared conflict check. Preserve `InvalidDefault` and `RecursiveDefault`; add `ConflictingDefaults` display/location handling and remove `AmbiguousDefaults` exhaustively.
@@ -204,7 +372,7 @@ Checkpoint: focused nextest modules for presence, lowering, constraints, and pha
 
 ### Wave 4
 
-- [ ] **Integrate preparation**
+- [x] **Integrate preparation**
   - Prerequisite: the compiled-plan API is in place. Update `Prepared`, `EffectiveSchema`, `outcome.rs` documentation, and all Rule 9 shortcuts. Store plans with prepared schemas rather than recompiling them per document.
   - Make final validation and conversion operate on the one shared completed candidate; retain original values and positions for diagnostics and authored-presence consumers. Preserve structural-only default checking.
   - Extend `simplified-schema/lib/tests/l1/required_defaults.rs` with the complete presence table, raw-schema equivalents, unchanged-input assertions, borrowed/owned results, optional invalid defaults, null defaults, falsey controls, nested parents, arrays, imports, and pending templates. Replace obsolete runtime-ambiguity expectations with preparation-time conflicts.
@@ -218,19 +386,19 @@ Checkpoint: direct library tests prove the complete contract without relying on 
 
 The following three tasks have disjoint ownership: envelope files, lifecycle files, and configuration files. Configuration owns both host config schemas; lifecycle owns only lifecycle schemas and generators. `markdown/schemas/mod.rs` remains owned by the completed Phase 2 task.
 
-- [ ] **Admit envelopes**
+- [x] **Admit envelopes**
   - Implement Rule 12 in `simplified/standalone.rs`, `envelope.rs`, trigger envelope/assembly readers, and all three library schemas. Apply `not-empty` to metadata, optional schema carriers, and both types-table alternatives without making optional metadata mandatory.
   - Exercise public `parse_standalone_schema_document`, `SimplifiedSchema` factories, envelope admission, and whole-YAML loading. Include `$schema: null` plus valid types, null optional metadata/types, missing mandatory exports, empty declarations, malformed carriers, and a payload's null-typed property.
   - Keep schema-source spans and YAML numeric/duplicate-key admission intact. Test selected and uncached admission as well as ordinary factory loading.
 
-- [ ] **Align lifecycle inputs**
+- [x] **Align lifecycle inputs**
   - Implement Rules 11, 14, and 15 in `lifecycle/{schema_projection,parse,action_shape,operands,host_profile,md_host}.rs` and `markdown/schemas/bound_operands.rs`.
   - Update handwritten lifecycle definitions and the typed generator. Every supported sibling/bundle/long-form `no_error` is `boolean(default(false))`; `edit.create_new` is defaulted false and `edit.gui` is optional Boolean. Keep `set` outside that flag contract. Required operands must stay required inside long forms without requiring the verb in the shared dictionary.
   - In the generated long arms, remove the old key-count/flag variants; retain optional-operand subsets and the passive `operands(...)` marker. Run `just regen-lifecycle-schema` from `darkmatter/`, and `just regen-lifecycle-artifact` from `claudine/` after updating its generator inputs. Do not hand-edit generated regions.
   - Thread authored values through Claudine's lifecycle/sequence entry points listed in Rule 15. Preserve authored order independently. Missing/null flags use default values while duplicate authored non-null placements fail.
   - Extend `lifecycle_edit_schema_parity.rs`, `lifecycle_schema_parity.rs`, parser tests, and fake-editor executor tests. Cover `{ edit: { file: notes.md } }`, both defaulted flag locations, null-versus-written duplicates, strings/native flags, numeric/Boolean file names, empty/missing targets, generated functions, bundles, conditionals, cancellation, and `set`.
 
-- [ ] **Migrate configuration**
+- [x] **Migrate configuration**
   - Implement Rules 16–20 in `darkmatter/schemas/darkmatter-config.yaml`, `darkmatter/lib/src/config/`, `claudine/schemas/claudine-config.yaml`, and `claudine/lib/src/config/`. Keep required nested default objects complete before optional descendant filling.
   - Reshape route/action schema unions to the keyed payload representation and add the configuration-only serde adapters. Preserve enum consumers in `messaging/{config,resolve,send}.rs`, dispatch, the init wizard, and config TUI; update their serialized configuration fixtures and persistence expectations.
   - Update the JSON5 converter to produce canonical keyed YAML before writing it, preserving its existing atomic write/backup behavior and refusing invalid input before publication. Use the biscuit-file skill for this conversion work.
@@ -239,7 +407,7 @@ The following three tasks have disjoint ownership: envelope files, lifecycle fil
 
 ### Wave 6
 
-- [ ] **Preserve written data**
+- [x] **Preserve written data**
   - Prerequisites: default preparation and lifecycle authored-input APIs. Remove synthesis in `markdown/compose/schema_validation.rs`, update default write-back, and use the existing declared-name warning reconciliation.
   - Ensure composition commits only an accepted completed copy and preserves pre-completion lifecycle flag origin through later composition passes. Failed conversions/defaults leave authored input and source files unchanged.
   - Update `darkmatter/schemas/partials/{fm,style}.yaml` commentary and host assumptions about newly inserted defaults. Exercise actual cleanup/style and hash readers with the new completed values; preserve absent parents.
@@ -247,7 +415,7 @@ The following three tasks have disjoint ownership: envelope files, lifecycle fil
 
 ### Wave 7
 
-- [ ] **Prove host parity**
+- [x] **Prove host parity**
   - Prerequisite: written-data integration. Extend DMLS `tests/l1/required_defaults.rs`, Darkmatter whole-YAML/schema tests, and CLI schema/compose tests using `CliProcessFixture`.
   - Assert defaulted values are visible to subsequent composition reads, DMLS publishes correct located diagnostics without edits, and CLI validation does not rewrite source. Use fake lifecycle services to prove no action executes on invalid inputs.
   - Add one conversion-produced-empty YAML interpolation case under `not-empty`, and phase-specific tests for supplied null/wrong-type values during launch versus missing required values at completion.

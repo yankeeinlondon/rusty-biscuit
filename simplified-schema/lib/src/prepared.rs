@@ -11,12 +11,12 @@
 //!   a host's ordinary validation performs. Conversion never repairs a
 //!   violated constraint: `"2.5"` against `number(integer)` fails both ways.
 //!
-//! Both borrow the input and never change it. An absent required property
-//! with a `default(...)` passes through its default ([`crate::defaults`]):
-//! both judge the completed value and report the defaults they relied on.
-//! On success the accepted value is the input itself, borrowed, unless soft
-//! validation converted it or inserted a default; strict success is always
-//! borrowed.
+//! Both run two steps: default preparation ([`crate::defaults`]) fills each
+//! missing or `null` property that declares a `default(...)`, then
+//! validation judges that completed candidate. Both report the defaults
+//! applied, and both borrow the input and never change it. On success the
+//! accepted value is the input itself, borrowed, unless soft validation
+//! converted it or applied a default; strict success is always borrowed.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ use jsonschema::Validator;
 use serde_json::Value;
 
 use crate::coerce::{self, ConversionPlan, NestedTemplates};
-use crate::defaults::{self, AppliedDefault, DefaultPreparation};
+use crate::defaults::{self, AppliedDefault, DefaultPlan, DefaultPreparation};
 use crate::outcome::{ValidationFailure, ValidationSuccess};
 use crate::validate::{self, FileRefAnchors, SHARED_VALIDATOR_CACHE, SchemaDigest, ValidatorCache};
 use crate::{SchemaAdvisory, SchemaError, ValidationProblem, discriminant};
@@ -191,9 +191,8 @@ pub struct Prepared {
     json_schema: Arc<Value>,
     validators: CompiledValidators,
     conversion: Arc<ConversionPlan>,
-    /// The cache `validators` came from, which also compiles the structural
-    /// validators that judge defaults.
-    cache: ValidatorCache,
+    /// The schema's defaults, compiled once.
+    defaults: DefaultPlan,
     /// The directory a relative file value resolves from; `context`'s `cwd`
     /// when `None`.
     base_dir: Option<PathBuf>,
@@ -212,12 +211,15 @@ impl std::fmt::Debug for Prepared {
 
 impl Prepared {
     /// Compiles `json_schema` (a lowered schema, see [`crate::to_json_schema`])
-    /// for validation. File values resolve from `base_dir` (or `context`'s
-    /// `cwd`) in `context`.
+    /// for validation, a raw JSON Schema's `default` keywords applying as a
+    /// SimplifiedSchema `default(...)` does. File values resolve from
+    /// `base_dir` (or `context`'s `cwd`) in `context`.
     ///
     /// ## Errors
     ///
-    /// [`SchemaError::BuildValidator`] when `jsonschema` rejects the schema.
+    /// [`SchemaError::BuildValidator`] when `jsonschema` rejects the schema;
+    /// [`SchemaError::ConflictingDefaults`] or [`SchemaError::RecursiveDefault`]
+    /// when its defaults cannot be compiled (see [`DefaultPlan::compile`]).
     pub fn new(
         json_schema: Arc<Value>,
         base_dir: Option<PathBuf>,
@@ -238,11 +240,12 @@ impl Prepared {
     ) -> Result<Self, SchemaError> {
         let validators = CompiledValidators::build(&json_schema, cache, base_dir.as_deref(), &context)?;
         let conversion = ConversionPlan::for_hashed(cache.shared_schema_hash(&json_schema));
+        let defaults = DefaultPlan::compile(Arc::clone(&json_schema), cache)?;
         Ok(Self {
             json_schema,
             validators,
             conversion,
-            cache: cache.clone(),
+            defaults,
             base_dir,
             context,
             file_checks: true,
@@ -269,46 +272,42 @@ impl Prepared {
         &self.json_schema
     }
 
-    /// Accepts `value` only if it already matches the schema's types and
-    /// constraints, an absent required property counting as its default;
-    /// nothing is converted or inserted. On success the accepted value is
-    /// `value` itself, borrowed, and `defaults` lists the defaults the
-    /// verdict relied on.
+    /// Accepts `value` only if, once its defaults are applied, it matches
+    /// the schema's types and constraints; nothing is converted. On success
+    /// the accepted value is `value` itself, borrowed, and `defaults` lists
+    /// the defaults the verdict relied on, which the caller may apply.
     ///
     /// ## Errors
     ///
     /// [`ValidationFailure`] with every problem found, or
-    /// [`ValidationFailure::Unprepared`] for a default that breaks its own
-    /// definition or is ambiguous.
+    /// [`ValidationFailure::Unprepared`] for a used default that breaks its
+    /// own definition.
     pub fn validate_strict<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
-        if self.validators.accepts(value) {
-            return Ok(self.accepted(Cow::Borrowed(value), Vec::new()));
-        }
-        let prepared = self.complete(Cow::Borrowed(value), false)?;
+        let prepared = self.complete(Cow::Borrowed(value))?;
         self.judge(prepared).map(|success| ValidationSuccess { value: Cow::Borrowed(value), ..success })
     }
 
-    /// Accepts `value` as written or after a conversion the conversion
-    /// engine permits (the string `"4"` for a `number`). On success the
-    /// accepted value is `value` itself, borrowed, when it was accepted as
-    /// written, and an owned copy with the conversions and the defaults of
-    /// absent required properties inserted otherwise.
+    /// Applies defaults, then converts what the conversion engine permits
+    /// (the string `"4"` for a `number`), then applies any default the
+    /// conversion made reachable, and judges the result. On success the
+    /// accepted value is `value` itself, borrowed, when nothing changed, and
+    /// an owned copy holding the defaults and conversions otherwise.
     ///
     /// ## Errors
     ///
     /// [`ValidationFailure`] with every problem left after conversion. A
     /// failure never carries the partially converted value.
-    /// [`ValidationFailure::Unprepared`] for a default that breaks its own
-    /// definition or is ambiguous.
+    /// [`ValidationFailure::Unprepared`] for a used default that breaks its
+    /// own definition.
     pub fn validate_soft<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
-        if self.validators.accepts(value) {
-            return Ok(self.accepted(Cow::Borrowed(value), Vec::new()));
+        // Defaults go in before conversion: conversion commits a nested value
+        // only once the complete schema accepts it, which a missing required
+        // child would prevent. Defaults reachable only after conversion (a
+        // union arm that the converted value selects) follow.
+        let before = self.complete(Cow::Borrowed(value))?;
+        if self.validators.accepts(&before.candidate) {
+            return Ok(self.accepted(before.candidate, before.defaults));
         }
-        // Defaults go in before conversion too: conversion commits a nested
-        // value only once the complete schema accepts it, which a missing
-        // required child would prevent. Defaults found only after conversion
-        // (a union arm that the converted value selects) follow.
-        let before = self.complete(Cow::Borrowed(value), false)?;
         let converted = match coerce::validation_working_copy(
             &self.conversion,
             &self.json_schema,
@@ -318,8 +317,10 @@ impl Prepared {
             Cow::Owned(converted) => Some(converted),
             Cow::Borrowed(_) => None,
         };
-        let working = converted.map_or(before.candidate, Cow::Owned);
-        let after = self.complete(working, true)?;
+        let Some(converted) = converted else {
+            return self.judge(before);
+        };
+        let after = self.complete(Cow::Owned(converted))?;
         let mut defaults = before.defaults;
         for late in after.defaults {
             if !defaults.iter().any(|early| early.path == late.path) {
@@ -329,25 +330,17 @@ impl Prepared {
         self.judge(DefaultPreparation { candidate: after.candidate, defaults })
     }
 
-    /// `instance` completed with the defaults of its absent required
-    /// properties; `check` first returns an instance the validators accept
-    /// unchanged.
-    fn complete<'input>(
-        &self,
-        instance: Cow<'input, Value>,
-        check: bool,
-    ) -> Result<DefaultPreparation<'input>, ValidationFailure> {
-        let none = NestedTemplates::default();
-        let prepared = if check {
-            defaults::prepare_defaults(&self.json_schema, instance, &none, &self.validators, &self.cache)
-        } else {
-            defaults::prepare_unaccepted(&self.json_schema, instance, &none, &self.validators, &self.cache)
-        };
-        prepared.map_err(|error| ValidationFailure::Unprepared { error: Arc::new(error) })
+    /// `instance` with its defaults applied.
+    fn complete<'input>(&self, instance: Cow<'input, Value>) -> Result<DefaultPreparation<'input>, ValidationFailure> {
+        defaults::prepare_defaults(&self.defaults, instance, &NestedTemplates::default())
+            .map_err(|error| ValidationFailure::Unprepared { error: Arc::new(error) })
     }
 
     /// Accepts the completed candidate when it has no problems.
     fn judge<'input>(&self, prepared: DefaultPreparation<'input>) -> Result<ValidationSuccess<'input>, ValidationFailure> {
+        if self.validators.accepts(&prepared.candidate) {
+            return Ok(self.accepted(prepared.candidate, prepared.defaults));
+        }
         let problems = self.problems(&prepared.candidate);
         if problems.is_empty() {
             Ok(self.accepted(prepared.candidate, prepared.defaults))

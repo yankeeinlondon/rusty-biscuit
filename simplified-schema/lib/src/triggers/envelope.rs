@@ -8,7 +8,9 @@
 //!   [`super::grammar`].
 //! - `$schema:` (optional) — the payload reference layered onto matching
 //!   documents. This module records the raw authored value without
-//!   resolving it; a trigger without one is matcher-only and layers nothing.
+//!   resolving it; a trigger without one, or with `$schema: null`, is
+//!   matcher-only and layers nothing. An empty carrier (`{}`, `[]`, blank
+//!   text) is an error, as in the trigger's definition.
 //!
 //! `kind` decides whether a file claims the envelope. A missing `kind` or any
 //! other string is ordinary data; `trigger-schema`, the spelling before the
@@ -56,8 +58,9 @@ pub struct TriggerEnvelope {
 /// not a mapping, or its `kind` is absent or a string other than
 /// `schema-trigger` and `trigger-schema`. Once the envelope is claimed, a
 /// malformed payload (missing `match:`, bad match grammar, vacuous trigger,
-/// unknown top-level keys, a null or non-reference `$schema`) is a hard
-/// [`SchemaError`].
+/// unknown top-level keys, an empty or non-reference `$schema`) is a hard
+/// [`SchemaError`]. A null `$schema` is an absent one: the trigger is
+/// matcher-only.
 ///
 /// Does **not** resolve the `$schema:` payload.
 ///
@@ -117,6 +120,14 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
     // A null `$schema` is an absent one: the trigger is matcher-only.
     let payload = match map.get(YamlValue::String("$schema".into())) {
         None | Some(YamlValue::Null) => None,
+        // The definition's `schema(not-empty)`: an empty carrier is not a
+        // way to spell "matcher-only".
+        Some(payload) if is_empty_carrier(payload) => {
+            return Err(field_error(
+                "$schema",
+                "must not be empty; omit it, or write `null`, for a matcher-only trigger".into(),
+            ));
+        }
         Some(payload @ (YamlValue::String(_) | YamlValue::Mapping(_) | YamlValue::Sequence(_))) => {
             Some(payload.clone())
         }
@@ -132,6 +143,17 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
         conditions,
         payload,
     }))
+}
+
+/// Whether `payload` is a `$schema` carrier with no content: blank text, `{}`,
+/// or `[]`, the values `schema(not-empty)` rejects in `schema-trigger.yaml`.
+fn is_empty_carrier(payload: &YamlValue) -> bool {
+    match payload {
+        YamlValue::String(text) => text.trim().is_empty(),
+        YamlValue::Mapping(map) => map.is_empty(),
+        YamlValue::Sequence(items) => items.is_empty(),
+        _ => false,
+    }
 }
 
 /// Checks the meaning of a `kind: schema-trigger` document a selected

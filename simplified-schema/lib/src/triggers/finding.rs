@@ -270,7 +270,7 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         | SchemaError::BareNameSiblingExists { .. }
         | SchemaError::TriggerSchemaReferenced { .. }
         | SchemaError::InvalidDefault { .. }
-        | SchemaError::AmbiguousDefaults { .. }
+        | SchemaError::ConflictingDefaults { .. }
         | SchemaError::RecursiveDefault { .. } => return None,
     };
     other_file(path, trigger)
