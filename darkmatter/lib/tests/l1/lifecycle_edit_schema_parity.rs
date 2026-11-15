@@ -34,6 +34,7 @@ const ACCEPTED: &[&str] = &[
     "{ edit: [1] }",
     "{ edit: { file: 5 } }",
     "{ edit: { file: true } }",
+    "{ edit: 2.5 }",
     // Boolean-like flag text converts; `null` is no value.
     "{ edit: { file: notes.md, gui: 'yes' } }",
     "{ edit: { file: notes.md, gui: 'true' } }",
@@ -58,6 +59,7 @@ const REFUSED: &[(&str, &str)] = &[
     ("short: empty string", "{ edit: '' }"),
     ("short: blank string", "{ edit: '   ' }"),
     ("short: blank list element", "{ edit: ['  '] }"),
+    ("short: object element", "{ edit: [{ file: a.md }] }"),
     ("long: file absent", "{ edit: { create_new: true } }"),
     ("long: file null", "{ edit: { file: null } }"),
     ("long: file empty", "{ edit: { file: '' } }"),
@@ -67,11 +69,13 @@ const REFUSED: &[(&str, &str)] = &[
     ("long: gui number", "{ edit: { file: notes.md, gui: 1 } }"),
     ("long: gui template", "{ edit: { file: notes.md, gui: '{{ true }}' } }"),
     ("long: gui object", "{ edit: { file: notes.md, gui: { a: 1 } } }"),
+    ("long: gui list", "{ edit: { file: notes.md, gui: [true] } }"),
     ("long: create_new number", "{ edit: { file: notes.md, create_new: 0 } }"),
     ("long: no_error number", "{ edit: { file: notes.md, no_error: 1 } }"),
     ("long: unknown key", "{ edit: { file: notes.md, bogus: 1 } }"),
     ("long: with", "{ edit: { file: notes.md, with: { a: 1 } } }"),
     ("long form in a bundle", "{ edit: { file: notes.md }, info: hi }"),
+    ("null in a bundle", "{ edit: null, info: hi }"),
 ];
 
 struct Fixture {

@@ -150,7 +150,16 @@ fn a_declaration_rejects_blank_text_and_empty_unions() {
 
 #[test]
 fn types_without_an_empty_value_refuse_not_empty() {
-    for declaration in ["number(not-empty)", "boolean(not-empty)", "null(not-empty)", "unknown(not-empty)"] {
+    for declaration in [
+        "number(not-empty)",
+        "boolean(not-empty)",
+        "null(not-empty)",
+        "unknown(not-empty)",
+        "literal(a; not-empty)",
+        "enum(a, b; not-empty)",
+        "date(not-empty)",
+        "file(not-empty)",
+    ] {
         let message = schema_error(declaration);
         assert!(message.contains("`not-empty`") && message.contains("\"empty\" has no meaning"), "{declaration}: {message}");
     }
@@ -173,4 +182,85 @@ fn a_not_empty_block_constraint_applies_to_its_object() {
     refuses(&declared, json!({}), "an empty object");
     accepts(&declared, Some(json!({ "a": "x" })), "a non-empty object");
     accepts(&declared, None, "missing");
+}
+
+/// The problem pointers of a refused `{ p: value }`, sorted, identical under
+/// strict and soft validation.
+#[track_caller]
+fn refused_at(schema: &SimplifiedSchema, value: Value, label: &str) -> Vec<String> {
+    let input = json!({ "p": value });
+    let [strict, soft] = [schema.validate_strict(&input), schema.validate_soft(&input)].map(|result| match result {
+        Err(failure @ ValidationFailure::InvalidData { .. }) => {
+            let mut pointers: Vec<String> = failure.problems().iter().map(|problem| problem.path.clone()).collect();
+            pointers.sort();
+            pointers
+        }
+        other => panic!("{label}: expected `{input}` refused as data, got {other:?}"),
+    });
+    assert_eq!(strict, soft, "{label}");
+    strict
+}
+
+#[test]
+fn a_whole_field_of_another_type_is_refused() {
+    for (declaration, value) in [
+        ("string(not-empty)", json!([])),
+        ("string(not-empty)", json!({})),
+        ("string(not-empty)", json!(["a"])),
+        ("string[](not-empty)", json!({ "a": "x" })),
+        ("string[](not-empty)", json!({})),
+        ("\"{ a: string }(not-empty)\"", json!("x")),
+        ("\"{ a: string }(not-empty)\"", json!(["a"])),
+        ("object(not-empty)", json!(5)),
+        ("object(not-empty)", json!([])),
+    ] {
+        let label = format!("{declaration} {value}");
+        assert_eq!(refused_at(&one_property(declaration), value, &label), ["/p"], "{label}");
+    }
+}
+
+#[test]
+fn soft_converts_a_scalar_to_text_with_content_and_strict_refuses_it() {
+    for declaration in ["string(not-empty)", "yaml(not-empty)", "json(not-empty)"] {
+        let declared = one_property(declaration);
+        let input = json!({ "p": 5 });
+        assert!(declared.validate_strict(&input).is_err(), "{declaration}");
+        let accepted = declared.validate_soft(&input).unwrap_or_else(|failure| panic!("{declaration}: {failure:?}"));
+        assert_eq!(accepted.value["p"], json!("5"), "{declaration}");
+    }
+}
+
+#[test]
+fn collections_locate_one_and_every_empty_or_invalid_item() {
+    for (declaration, value, expected) in [
+        ("string(not-empty)[]", json!(["a", ""]), &["/p/1"][..]),
+        ("string(not-empty)[]", json!(["", " "]), &["/p/0", "/p/1"]),
+        ("string[](not-empty)", json!(["a", {}]), &["/p/1"]),
+        ("string[](not-empty)", json!([{}, []]), &["/p/0", "/p/1"]),
+        ("\"{ <string>: string(not-empty) }\"", json!({ "a": "x", "b": "" }), &["/p/b"]),
+        ("\"{ <string>: string(not-empty) }\"", json!({ "a": "", "b": " " }), &["/p/a", "/p/b"]),
+    ] {
+        let label = format!("{declaration} {value}");
+        assert_eq!(refused_at(&one_property(declaration), value, &label), expected, "{label}");
+    }
+    accepts(&one_property("\"{ <string>: string(not-empty) }\""), Some(json!({ "a": "x" })), "every value has content");
+}
+
+/// `not-empty` adds to the content check, never replaces it: malformed or
+/// duplicate-keyed text is refused. The check is on the text, so text
+/// spelling an empty collection (`{}`, `[]`) has content.
+#[test]
+fn yaml_and_json_text_must_still_parse() {
+    let yaml = one_property("yaml(not-empty)");
+    for text in ["a: [", "a: 1\nb", "a: 1\na: 2"] {
+        assert_eq!(refused_at(&yaml, json!(text), text), ["/p"], "{text:?}");
+    }
+    let json = one_property("json(not-empty)");
+    for text in ["{", "x", "{\"a\": 1}x", "{\"a\": 1, \"a\": 2}"] {
+        assert_eq!(refused_at(&json, json!(text), text), ["/p"], "{text:?}");
+    }
+    for text in ["{}", "[]"] {
+        accepts(&json, Some(json!(text)), text);
+        accepts(&yaml, Some(json!(text)), text);
+    }
 }

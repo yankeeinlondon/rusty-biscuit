@@ -19,6 +19,8 @@ mod characterization_error_routes;
 mod cli_process_fixture;
 mod codex_app_server;
 mod command_routing;
+#[cfg(feature = "test-fixtures")]
+mod config_json5_wiring;
 #[cfg(unix)]
 mod config_yaml_wiring;
 mod darkmatter_config_gate;

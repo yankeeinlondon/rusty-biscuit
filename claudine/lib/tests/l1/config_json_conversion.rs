@@ -48,6 +48,15 @@ fn assert_refused(cell: &str, text: &str) {
     }
     assert_eq!(read(&scope.json()), text.as_bytes(), "{cell}: the source is untouched");
     assert!(!scope.yaml().exists() && !scope.backup().exists(), "{cell}: nothing was published");
+    assert_eq!(entries(&scope.dir), ["config.json"], "{cell}: no YAML, backup, receipt, or temporary file is left");
+}
+
+/// The names in `dir`, sorted.
+fn entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> =
+        std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    names
 }
 
 #[test]
@@ -71,6 +80,12 @@ fn the_legacy_fixture_converts_to_the_same_values_as_the_yaml_fixture() {
     assert_eq!(read(&scope.backup()), json5.as_bytes(), "the unchanged source is the backup");
     assert!(!scope.json().exists());
     assert!(!receipt_path(&scope.yaml()).unwrap().exists(), "cleanup finished");
+    // The transaction's lock file stays, as it does after every locked write.
+    assert_eq!(
+        entries(&scope.dir),
+        ["config.json.bak", "config.yaml", "config.yaml.darkmatter-lock"],
+        "no receipt or temporary file is left"
+    );
 
     let again = load_claudine_config_with_notices(Some(&scope.yaml()), None).unwrap();
     assert!(again.notices.is_empty(), "a repeated load converts nothing");
@@ -139,6 +154,23 @@ fn a_duplicate_key_is_located() {
         panic!("refused")
     };
     assert_eq!((problems[0].line, problems[0].pointer.as_str()), (Some(3), "/logging"));
+}
+
+/// A nested duplicate names the member's own pointer and the line and column
+/// of its second spelling.
+#[test]
+fn a_nested_duplicate_member_is_located_at_its_second_spelling() {
+    let scope = Scope::new();
+    let text = "{\n  guard_settings: {\n    volume: { max_lines: 1, max_lines: 2 },\n  },\n}\n";
+    std::fs::write(scope.json(), text).unwrap();
+    let Err(ClaudineError::ConfigConversion { problems }) = load_claudine_config(Some(&scope.yaml()), None) else {
+        panic!("refused")
+    };
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    let problem = &problems[0];
+    assert_eq!(problem.pointer, "/guard_settings/volume/max_lines");
+    assert_eq!((problem.line, problem.column), (Some(3), Some(29)), "{problem:?}");
+    assert_eq!(entries(&scope.dir), ["config.json"], "nothing was published");
 }
 
 #[test]

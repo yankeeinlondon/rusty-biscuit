@@ -530,6 +530,127 @@ mod raw_schemas {
     }
 }
 
+/// Raw JSON Schema cells beyond the presence table: optional null
+/// defaults, authored null admission, invalid and conflicting defaults
+/// through `Prepared`, and `oneOf` exclusivity over the completed value.
+mod raw_schema_inputs {
+    use std::sync::Arc;
+
+    use simplified_schema::Prepared;
+
+    use super::*;
+
+    fn raw(document: Value) -> Value {
+        let mut document = document;
+        document["$schema"] = json!("https://json-schema.org/draft/2020-12/schema");
+        document
+    }
+
+    fn prepared(document: Value) -> Result<Prepared, SchemaError> {
+        let dir = tempfile::tempdir().expect("temp dir");
+        Prepared::new(Arc::new(raw(document)), None, biscuit_file::FileResolutionContext::new(dir.path()))
+    }
+
+    #[test]
+    fn an_optional_raw_null_default_is_a_no_op() {
+        let nullable = prepared(json!({
+            "type": "object",
+            "properties": { "n": { "type": ["number", "null"], "default": null } }
+        }))
+        .expect("prepares");
+
+        for input in [json!({}), json!({ "n": null })] {
+            assert!(borrowed(nullable.validate_strict(&input), &input).defaults.is_empty(), "{input}");
+            assert!(borrowed(nullable.validate_soft(&input), &input).defaults.is_empty(), "{input}");
+        }
+    }
+
+    #[test]
+    fn authored_null_admission_and_required_stay_as_written() {
+        let nullable = prepared(json!({
+            "type": "object",
+            "properties": { "n": { "type": ["number", "null"] } },
+            "required": ["n"]
+        }))
+        .expect("prepares");
+
+        let written = json!({ "n": null });
+        borrowed(nullable.validate_strict(&written), &written);
+        assert_eq!(
+            invalid_codes(nullable.validate_strict(&json!({}))),
+            [("/n".to_string(), ValidationProblemCode::MissingRequired)]
+        );
+    }
+
+    #[test]
+    fn a_used_invalid_raw_default_is_unprepared_at_its_pointer() {
+        let wrong = prepared(json!({
+            "type": "object",
+            "properties": { "n": { "type": "number", "default": "x" } }
+        }))
+        .expect("an unused default is not judged");
+
+        let supplied = json!({ "n": 1 });
+        borrowed(wrong.validate_strict(&supplied), &supplied);
+        for input in [json!({}), json!({ "n": null })] {
+            for result in [wrong.validate_strict(&input), wrong.validate_soft(&input)] {
+                match schema_error(result) {
+                    SchemaError::InvalidDefault { path, pointer, .. } => {
+                        assert_eq!((path.to_string().as_str(), pointer.as_str()), ("n", "/properties/n/default"), "{input}");
+                    }
+                    other => panic!("{input}: expected InvalidDefault, got {other:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn conflicting_arm_defaults_fail_prepared_new_before_any_document() {
+        for keyword in ["anyOf", "oneOf"] {
+            let error = prepared(json!({
+                keyword: [
+                    { "type": "object", "properties": { "n": { "type": "number", "default": 1 } } },
+                    { "type": "object", "properties": { "n": { "type": "number", "default": 2 } } }
+                ]
+            }))
+            .err()
+            .unwrap_or_else(|| panic!("{keyword}: prepared"));
+
+            match error {
+                SchemaError::ConflictingDefaults { property, declarations, .. } => {
+                    assert_eq!(property, "n", "{keyword}");
+                    assert_eq!(
+                        declarations,
+                        [format!("/{keyword}/0/properties/n/default"), format!("/{keyword}/1/properties/n/default")],
+                        "{keyword}"
+                    );
+                }
+                other => panic!("{keyword}: expected ConflictingDefaults, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn one_of_exclusivity_judges_the_completed_value() {
+        // Without the default `{}` matches only the first arm; completed to
+        // `{ t: 3 }` it matches both, which `oneOf` forbids.
+        let exclusive = prepared(json!({
+            "oneOf": [
+                { "type": "object", "properties": { "t": { "type": "number", "default": 3 } } },
+                { "type": "object", "required": ["t"] }
+            ]
+        }))
+        .expect("prepares");
+
+        for input in [json!({}), json!({ "t": null })] {
+            let result = exclusive.validate_strict(&input);
+            assert!(matches!(result, Err(ValidationFailure::InvalidData { .. })), "{input}: {result:?}");
+        }
+        let second_arm_only = json!({ "t": "x" });
+        borrowed(exclusive.validate_strict(&second_arm_only), &second_arm_only);
+    }
+}
+
 /// `null` defaults terminate and falsey values are values.
 mod null_and_falsey {
     use super::*;
@@ -872,6 +993,123 @@ mod unions {
         let result = capped.validate_strict(&input);
 
         assert!(matches!(result, Err(ValidationFailure::InvalidData { .. })), "{result:?}");
+    }
+}
+
+/// Supplied values that are not null: each cell is one mutation of a
+/// valid `{ n: … }`. Strict refuses every one at its JSON Pointer; soft
+/// accepts only what the conversion engine converts, never fills a default
+/// over a written value, and its result validates again unchanged. The input
+/// is never edited.
+mod input_shapes {
+    use super::*;
+
+    const NUMBER: &str = "number(required; default(3))";
+    const LIST: &str = "number[](required; default([1]))";
+    const OBJECT: &str = "'{ a: number }(required; default({\"a\": 1}))'";
+    const ITEMS: &str = "'{ id: string(required), on: boolean(default(true)) }[](required)'";
+
+    /// What soft validation makes of a cell.
+    enum Soft {
+        /// Refused, with problems at these pointers.
+        Refused(&'static [&'static str]),
+        /// Accepted as an owned copy whose `n` is this value, reporting these
+        /// default paths.
+        Converted(Value, &'static [&'static str]),
+    }
+
+    #[track_caller]
+    fn pointers(result: Result<ValidationSuccess<'_>, ValidationFailure>) -> Vec<String> {
+        match result {
+            Err(ValidationFailure::InvalidData { problems }) => {
+                let mut pointers: Vec<String> = problems.into_iter().map(|problem| problem.path).collect();
+                pointers.sort();
+                pointers
+            }
+            other => panic!("expected invalid data, got {other:?}"),
+        }
+    }
+
+    fn cells() -> Vec<(&'static str, Value, &'static [&'static str], Soft)> {
+        use Soft::*;
+        vec![
+            // Native wrong types and non-coercible text.
+            (NUMBER, json!(true), &["/n"], Refused(&["/n"])),
+            (NUMBER, json!([1]), &["/n"], Refused(&["/n"])),
+            (NUMBER, json!({}), &["/n"], Refused(&["/n"])),
+            (NUMBER, json!("abc"), &["/n"], Refused(&["/n"])),
+            (NUMBER, json!(""), &["/n"], Refused(&["/n"])),
+            (NUMBER, json!("  "), &["/n"], Refused(&["/n"])),
+            (NUMBER, json!("4"), &["/n"], Converted(json!(4), &[])),
+            (OBJECT, json!("x"), &["/n"], Refused(&["/n"])),
+            (OBJECT, json!({ "a": "x" }), &["/n/a"], Refused(&["/n/a"])),
+            (OBJECT, json!({ "a": "1" }), &["/n/a"], Converted(json!({ "a": 1 }), &[])),
+            // A scalar for a list, then one and every invalid item; a null
+            // item is a value of the wrong type, never a missing default.
+            (LIST, json!("1"), &["/n"], Refused(&["/n"])),
+            (LIST, json!([1, "x"]), &["/n/1"], Refused(&["/n/1"])),
+            (LIST, json!(["x", "y"]), &["/n/0", "/n/1"], Refused(&["/n/0", "/n/1"])),
+            (LIST, json!([null]), &["/n/0"], Refused(&["/n/0"])),
+            (LIST, json!(["1", 2]), &["/n/0"], Converted(json!([1, 2]), &[])),
+            // Object items: an item's defaults fill only beside convertible
+            // siblings, and an invalid item blocks the whole copy.
+            (ITEMS, json!([{ "id": "a" }, { "id": {} }]), &["/n/1/id"], Refused(&["/n/1/id"])),
+            (ITEMS, json!([{ "id": [] }, { "id": {} }]), &["/n/0/id", "/n/1/id"], Refused(&["/n/0/id", "/n/1/id"])),
+            (ITEMS, json!([{ "id": "a", "on": "maybe" }, { "id": "b" }]), &["/n/0/on"], Refused(&["/n/0/on"])),
+            (
+                ITEMS,
+                json!([{ "id": "a", "on": "yes" }, { "id": "b" }]),
+                &["/n/0/on"],
+                Converted(json!([{ "id": "a", "on": true }, { "id": "b", "on": true }]), &["n.1.on"]),
+            ),
+        ]
+    }
+
+    #[test]
+    fn supplied_values_are_judged_at_their_pointer_and_never_replaced_by_the_default() {
+        for (declaration, value, strict, soft) in cells() {
+            let row = schema(&format!("$schema:\n  n: {declaration}\n"));
+            let input = json!({ "n": value });
+            let written = input.clone();
+            let label = format!("{declaration} {input}");
+
+            assert_eq!(pointers(row.validate_strict(&input)), strict, "{label}: strict");
+            match soft {
+                Soft::Refused(at) => assert_eq!(pointers(row.validate_soft(&input)), at, "{label}: soft"),
+                Soft::Converted(expected, defaults) => {
+                    let (value, reported) = owned(row.validate_soft(&input));
+                    assert_eq!(value, json!({ "n": expected }), "{label}");
+                    assert_eq!(paths(&reported), defaults, "{label}");
+                    let again = borrowed(row.validate_soft(&value), &value);
+                    assert!(again.defaults.is_empty(), "{label}: the soft result needs nothing more");
+                    borrowed(row.validate_strict(&value), &value);
+                }
+            }
+            assert_eq!(input, written, "{label}: the input is never changed");
+        }
+    }
+
+    #[test]
+    fn required_falsey_values_are_values() {
+        let falsey = schema(
+            "$schema:\n  n: number(required; default(3))\n  b: boolean(required; default(true))\n  s: string(required; default(\"x\"))\n  l: string[](required; default([\"x\"]))\n  o: '{ a: number }(required; default({\"a\": 1}))'\n",
+        );
+        let input = json!({ "n": 0, "b": false, "s": "", "l": [], "o": {} });
+
+        assert!(borrowed(falsey.validate_strict(&input), &input).defaults.is_empty());
+        assert!(borrowed(falsey.validate_soft(&input), &input).defaults.is_empty());
+    }
+
+    #[test]
+    fn a_failure_elsewhere_still_counts_the_default_toward_presence() {
+        let retries = schema(RETRIES);
+        let input = json!({ "name": [] });
+
+        let problems = invalid_codes(retries.validate_strict(&input));
+
+        assert_eq!(problems, [("/name/".to_string(), ValidationProblemCode::TypeMismatch)], "no missing `retries`");
+        assert_eq!(invalid_codes(retries.validate_soft(&input)), problems);
+        assert_eq!(input, json!({ "name": [] }));
     }
 }
 

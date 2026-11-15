@@ -159,6 +159,7 @@ mod diagnostic_source_provenance;
 mod diagnostic_projection;
 mod runtime_blocking;
 mod frontmatter_coercion_engine;
+mod frontmatter_extraction;
 mod frontmatter_surface_projection;
 mod fs_capability;
 mod git_context_integration;

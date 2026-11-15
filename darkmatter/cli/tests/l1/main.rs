@@ -46,6 +46,7 @@ mod compose_icmp;
 mod compose_interpolation;
 mod compose_layout;
 mod compose_lifecycle;
+mod compose_loader_wiring;
 mod compose_lazy_roots;
 mod compose_literal_only;
 mod compose_nested_markdown;

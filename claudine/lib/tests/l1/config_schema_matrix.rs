@@ -479,3 +479,73 @@ fn problems_name_the_file_line_and_pointer() {
     assert!(text.contains(&format!("{}:4:", path.display())), "{text}");
     assert!(text.contains("/protect"), "{text}");
 }
+
+/// A configuration root that holds nothing (blank, comment-only, or an
+/// explicit `null`) is refused in either scope; only `{}` keeps every default.
+#[test]
+fn a_blank_or_null_root_is_refused_in_either_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let user_path = dir.path().join("config.yaml");
+    let repository_path = dir.path().join("repo/.claudine/config.yaml");
+    std::fs::create_dir_all(repository_path.parent().unwrap()).unwrap();
+    for text in ["null\n", "~\n", "# nothing written\n", "   \n"] {
+        std::fs::write(&user_path, text).unwrap();
+        match load_claudine_config(Some(&user_path), None) {
+            Err(ClaudineError::ConfigInvalid { problems }) => {
+                assert!(problems.iter().any(|problem| problem.pointer.is_empty()), "user {text:?}: {problems:?}");
+                assert!(problems.iter().all(|problem| problem.file.as_deref() == Some(user_path.as_path())), "{problems:?}");
+            }
+            other => panic!("user {text:?}: expected a ConfigInvalid at the root, got {other:?}"),
+        }
+        std::fs::write(&repository_path, text).unwrap();
+        match load_repo_override_config(&repository_path) {
+            Err(ClaudineError::ConfigInvalid { problems }) => {
+                assert!(problems.iter().any(|problem| problem.pointer.is_empty()), "repository {text:?}: {problems:?}");
+            }
+            other => panic!("repository {text:?}: expected a ConfigInvalid at the root, got {other:?}"),
+        }
+    }
+}
+
+/// The YAML loader's own refusals reach the configuration caller located:
+/// the whole-YAML matrix lives in simplified-schema, so one duplicate key and
+/// one malformed document are enough here. A duplicate key is located at
+/// the mapping that holds it, the position the YAML parser reports.
+#[test]
+fn a_duplicate_key_or_malformed_yaml_is_a_located_problem() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
+    for (cell, text, lines, needle) in [
+        ("duplicate key", "logging: true\nprotect:\n  enabled: true\n  enabled: false\n", 2..=4, "\"enabled\""),
+        ("malformed", "logging: true\nprotect: [true\n", 2..=3, "YAML"),
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let Err(ClaudineError::ConfigInvalid { problems }) = load_claudine_config(Some(&path), None) else {
+            panic!("{cell}: refused");
+        };
+        assert_eq!(problems.len(), 1, "{cell}: {problems:?}");
+        let problem = &problems[0];
+        assert_eq!(problem.file.as_deref(), Some(path.as_path()), "{cell}");
+        assert!(problem.line.is_some_and(|line| lines.contains(&line)) && problem.column.is_some(), "{cell}: {problem:?}");
+        assert!(problem.message.contains(needle), "{cell}: {problem:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{cell}: the file is untouched");
+    }
+}
+
+/// A repository's per-event matcher override, like its action override, must
+/// override something: `matchers: {}` is refused, a written matcher replaces
+/// the user's for its event alone.
+#[test]
+fn a_repository_matcher_override_is_nonempty_and_replaces_per_event() {
+    let (_dir, empty) = load_with_repository(&user_control(), &edited(&repository_control(), "/matchers", Some(json!({}))));
+    assert_located("repository matchers {}", empty, "/matchers");
+    let (_dir, blank) =
+        load_with_repository(&user_control(), &edited(&repository_control(), "/matchers/session_end", Some(json!(""))));
+    assert_located("repository matcher \"\"", blank, "/matchers/session_end");
+
+    let repository = edited(&repository_control(), "/matchers/before_tool", Some(json!("Read")));
+    let (_dir, merged) = load_with_repository(&user_control(), &repository);
+    let matchers = merged.unwrap().matchers;
+    assert_eq!(matchers[&claudine::events::AgenticEvent::BeforeTool], "Read", "the repository's matcher replaces the user's");
+    assert_eq!(matchers[&claudine::events::AgenticEvent::SessionEnd], "true");
+}

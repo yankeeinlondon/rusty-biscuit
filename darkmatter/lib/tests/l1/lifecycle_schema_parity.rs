@@ -385,3 +385,140 @@ fn completed_flags_keep_the_schema_and_the_md_parser_in_agreement() {
     assert!(error.contains("`no_error` does not apply to `set`"), "{error}");
     assert_eq!(md_parses(frontmatter), Err(error));
 }
+
+/// The shared literal flag binder behind every `no_error` placement (beside
+/// an action, inside a generated long form, on a bundle): each placement
+/// takes Boolean-like text and refuses a native number, through both the
+/// schema and md's parser. The binder's whole shape walk is
+/// `lifecycle_edit_schema_parity.rs`'s `edit.gui` rows; these are the
+/// control and one invalid shape for each other placement.
+#[test]
+fn every_no_error_placement_converts_text_and_refuses_a_number_in_both_checks() {
+    let fixture = Fixture::new();
+    for (placement, accepted, refused) in [
+        ("beside an action", "{ info: hi, no_error: 'yes' }", "{ info: hi, no_error: 5 }"),
+        ("inside a hand-written long form", "{ warn: { text: hi, no_error: 'yes' } }", "{ warn: { text: hi, no_error: 1 } }"),
+        ("on a bundle", "{ info: hi, warn: careful, no_error: 'no' }", "{ info: hi, warn: careful, no_error: 2 }"),
+    ] {
+        let frontmatter = format!("composed: [{accepted}]");
+        let report = fixture.validate(&frontmatter);
+        assert!(report.valid, "{placement}: the baseline accepts `{frontmatter}`: {:?}", problems(&report));
+        assert_eq!(md_parses(&frontmatter), Ok(()), "{placement}: md parses `{frontmatter}`");
+
+        let frontmatter = format!("composed: [{refused}]");
+        let report = fixture.validate(&frontmatter);
+        assert!(!report.valid, "{placement}: the baseline rejects `{frontmatter}`");
+        assert!(
+            report.problems.iter().all(|problem| problem.path.starts_with("/composed/0")),
+            "{placement}: every problem sits at the action: {:?}",
+            problems(&report)
+        );
+        let error = md_parses(&frontmatter).expect_err(&format!("{placement}: md refuses `{frontmatter}`"));
+        assert!(error.contains("no_error"), "{placement}: the parser names the flag: {error}");
+    }
+}
+
+/// A side effect's generated long form types `no_error` with the same flag
+/// rule wherever a host types the verb (Claudine's recursive profile names
+/// the generated type), and md's parser agrees. md's own baseline types every
+/// side-effect and expression-function verb `unknown` and leaves their
+/// arguments to the parser (see `md-lifecycle.yaml`), so there the schema
+/// admits what the parser refuses.
+#[test]
+fn a_generated_long_form_no_error_follows_the_flag_rule_where_the_verb_is_typed() {
+    let fixture = Fixture::new();
+    let typed = "$schema:\n    action: ensure_file-long@darkmatter:lifecycle\n";
+    let report = fixture.validate_with(&fixture.plain, &format!("{typed}action: {{ file: a.md, no_error: 'yes' }}"));
+    assert!(report.valid, "{:?}", problems(&report));
+    let report = fixture.validate_with(&fixture.plain, &format!("{typed}action: {{ file: a.md, no_error: 1 }}"));
+    assert!(!report.valid, "a number is no flag");
+    assert!(report.problems.iter().all(|problem| problem.path.starts_with("/action")), "{:?}", problems(&report));
+
+    assert_eq!(md_parses("composed: [{ ensure_file: { file: a.md, no_error: 'yes' } }]"), Ok(()));
+    let frontmatter = "composed: [{ ensure_file: { file: a.md, no_error: 1 } }]";
+    let error = md_parses(frontmatter).expect_err("md refuses a numeric flag");
+    assert!(error.contains("no_error"), "{error}");
+    let report = fixture.validate(frontmatter);
+    assert!(report.valid, "md's baseline leaves a side effect's arguments to the parser: {:?}", problems(&report));
+}
+
+/// The key-count constraints of the md action dictionaries are judged on the
+/// completed value: the filled `no_error: false` is one of the
+/// `uncounted-keys`, so a one-verb action and a gated conditional stay
+/// valid once it is filled, while a second verb still breaks `max-keys`
+/// beside the filled flag, and a flag never makes a bare `when` reach the
+/// conditional's `min-keys`. Re-validating the completed value as authored
+/// gives the same verdicts.
+#[test]
+fn key_counts_are_judged_on_the_completed_value_and_a_filled_flag_is_never_counted() {
+    let fixture = Fixture::new();
+    let schema = "$schema:\n    one: md-communicate@darkmatter:md-lifecycle\n    two: md-communicate@darkmatter:md-lifecycle\n    \
+                  gate: md-item-1@darkmatter:md-lifecycle\n    bare: md-conditional-1@darkmatter:md-lifecycle\n";
+    let values = "one: { info: hi }\ntwo: { info: hi, warn: careful }\ngate: { when: 'true', then: [stop] }\nbare: { when: 'true', no_error: false }\n";
+    let report = fixture.validate_with(&fixture.plain, &format!("{schema}{values}"));
+    let filled: BTreeSet<String> = report.defaults.iter().map(|applied| applied.path.segments().join("/")).collect();
+    for path in ["one/no_error", "gate/no_error"] {
+        assert!(filled.contains(path), "`{path}` is filled: {filled:?}");
+    }
+    let failed: BTreeSet<String> = report
+        .problems
+        .iter()
+        .map(|problem| problem.path.trim_start_matches('/').split('/').next().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(failed, BTreeSet::from(["two".to_string(), "bare".to_string()]), "{:?}", problems(&report));
+
+    let authored: serde_json::Value = serde_yaml_ng::from_str(values).expect("YAML values");
+    let completed = completed(&report, &authored);
+    assert_eq!(completed["one"], serde_json::json!({ "info": "hi", "no_error": false }));
+    let completed_yaml: String = completed
+        .as_object()
+        .expect("a mapping")
+        .iter()
+        .map(|(key, value)| format!("{key}: {value}\n"))
+        .collect();
+    let again = fixture.validate_with(&fixture.plain, &format!("{schema}{completed_yaml}"));
+    let failed_again: BTreeSet<String> = again
+        .problems
+        .iter()
+        .map(|problem| problem.path.trim_start_matches('/').split('/').next().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(failed_again, failed, "the completed value keeps every verdict: {:?}", problems(&again));
+}
+
+/// No default creates an action or an event: a document without lifecycle
+/// keys gains none, and an authored stack gains only its `false` flags.
+#[test]
+fn no_default_creates_an_absent_event_or_action_payload() {
+    let fixture = Fixture::new();
+    let report = fixture.validate("title: T");
+    assert!(report.valid, "{:?}", problems(&report));
+    let registry = registry();
+    let events: BTreeSet<&str> = registry.authored_event_keys().into_iter().collect();
+    let verbs = known_verbs();
+    for applied in &report.defaults {
+        let segments = applied.path.segments();
+        assert!(
+            !segments.iter().any(|segment| events.contains(segment.as_str()) || verbs.contains(segment)),
+            "a default fills a lifecycle key: {}",
+            segments.join("/")
+        );
+    }
+}
+
+/// Pins a known gap: an authored `no_error: false` beside `then` meets the
+/// conditional's `literal(false)` (the slot exists for the filled default)
+/// and passes the schema, while md's parser refuses every authored flag
+/// there. An authored `true` fails both.
+#[test]
+fn an_authored_false_flag_beside_then_passes_the_schema_and_fails_the_parser() {
+    let fixture = Fixture::new();
+    let frontmatter = "composed: [{ when: 'true', then: [stop], no_error: false }]";
+    let report = fixture.validate(frontmatter);
+    assert!(report.valid, "{:?}", problems(&report));
+    let error = md_parses(frontmatter).expect_err("an authored flag beside `then`");
+    assert!(error.contains("cannot sit beside `then`/`else`"), "{error}");
+
+    let frontmatter = "composed: [{ when: 'true', then: [stop], no_error: true }]";
+    assert!(!fixture.validate(frontmatter).valid, "an authored `true` is no `literal(false)`");
+    assert!(md_parses(frontmatter).is_err());
+}

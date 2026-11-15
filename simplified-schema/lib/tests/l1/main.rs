@@ -20,6 +20,7 @@ mod expression_regions;
 mod expression_scanner;
 mod expression_syntax;
 mod foundations;
+mod input_robustness;
 mod located_failures;
 mod located_schema_errors;
 mod not_empty_values;

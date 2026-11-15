@@ -992,3 +992,47 @@ fn a_completed_loop_block_parses_with_the_document_as_its_authored_source() {
     // Read as authored, the filled root flag sits beside `gate`.
     assert!(parse(&completed, None).is_err());
 }
+
+/// The same through the whole preparation. `loop` is a deferred lifecycle
+/// key, so the schema stage judges it (the launch schema is selected) but
+/// writes no default into it: the effective block is the authored one, the
+/// gate action's unwritten `no_error` is the parser's `false`, and the
+/// lifecycle is the one the document was written with. An authored flag the
+/// parser refuses stops preparation, so nothing of the document runs.
+#[test]
+fn a_loop_document_prepares_as_authored_and_an_invalid_loop_flag_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\nloop:\n  until: \"true\"\n  max: 2\n  gate:\n    - info: { text: pass }\n---\nrun\n",
+    );
+    let prepared = prepare(DocumentEntryReason::Direct, &source, PrepareOptions::new(crate::test_support::context()));
+    let authored = super::super::authored_lifecycle_values(&source, &PrepareOptions::new(crate::test_support::context()));
+    let as_authored =
+        crate::composition::lifecycle::parse_lifecycle_config_with_orders(&authored, &source.resolved_path, None, None)
+            .expect("the document parses");
+    assert!(prepared.launch_schema.is_some() && prepared.deferred_lifecycle_keys == ["loop"]);
+    assert_eq!(prepared.effective_frontmatter["loop"], authored["loop"], "no default is written into the block");
+    assert_eq!(prepared.lifecycle, as_authored);
+    let darkmatter::lifecycle::actions::LifecycleNode::Action(action) = &prepared.lifecycle.stacks.loop_gate[0] else {
+        panic!("one gate action, got {:?}", prepared.lifecycle.stacks.loop_gate);
+    };
+    assert!(!action.no_error, "the filled flag is `false`");
+
+    let refused = source_at(
+        dir.path(),
+        "refused.md",
+        "---\nloop:\n  until: \"true\"\n  max: 2\n  gate:\n    - info: { text: pass }\n      no_error: 5\n---\nrun\n",
+    );
+    let error = prepare_document(DocumentPreparation {
+        entry: DocumentEntryReason::Direct,
+        mode: CompositionMode::ChainedDocument,
+        source: &refused,
+        prompt_source: PromptSource::ComposedBody,
+        schema: SchemaStage::Validate,
+        options: PrepareOptions::new(crate::test_support::context()),
+    })
+    .expect_err("a numeric `no_error` is not a flag");
+    assert!(error.to_string().contains("no_error"), "{error}");
+}

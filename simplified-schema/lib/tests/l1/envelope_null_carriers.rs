@@ -96,6 +96,20 @@ fn cells() -> Vec<(&'static str, String, Verdict)> {
         ("tagged types: [Id]", edit(TAGGED, TYPES, "types: [Id]\n"), rejected("`/types`", "[Id]")),
         ("tagged description: \"\"", edit(TAGGED, "description: Reviews", "description: \"\""), rejected("`/description`", "\"\"")),
         ("tagged categories: []", edit(TAGGED, "categories: [Core]", "categories: []"), rejected("`/categories`", "[]")),
+        // Wrong carriers and members. Scalar members keep the soft text
+        // conversion metadata has always had (see
+        // `scalar_metadata_is_converted_to_text`); a null or a mapping member
+        // is refused at itself.
+        ("tagged categories: Core", edit(TAGGED, "categories: [Core]", "categories: Core"), rejected("`/categories`", "Core")),
+        ("tagged categories: {Core: x}", edit(TAGGED, "categories: [Core]", "categories: {Core: x}"), rejected("`/categories`", "{Core: x}")),
+        ("tagged categories: [Core, 5]", edit(TAGGED, "categories: [Core]", "categories: [Core, 5]"), Exports),
+        ("tagged categories: [5, true]", edit(TAGGED, "categories: [Core]", "categories: [5, true]"), Exports),
+        ("tagged categories: [Core, null]", edit(TAGGED, "categories: [Core]", "categories: [Core, null]"), rejected("`/categories/1`", "null")),
+        ("tagged categories: [Core, {a: 1}]", edit(TAGGED, "categories: [Core]", "categories: [Core, {a: 1}]"), rejected("`/categories/1`", "{a: 1}")),
+        ("tagged categories: [{a: 1}, null]", edit(TAGGED, "categories: [Core]", "categories: [{a: 1}, null]"), rejected("`/categories/0`", "{a: 1}")),
+        ("tagged description: 5", edit(TAGGED, "description: Reviews", "description: 5"), Exports),
+        ("tagged description: [a]", edit(TAGGED, "description: Reviews", "description: [a]"), rejected("`/description`", "[a]")),
+        ("tagged types: Id", edit(TAGGED, TYPES, "types: Id\n"), rejected("`/types`", "Id")),
         // `$schema` is the required export of its arm, so an empty mapping is
         // an (open) export rather than an empty optional carrier.
         ("tagged $schema: {}", edit(TAGGED, TAGGED_EXPORT, "$schema: {}\n"), Exports),
@@ -257,6 +271,17 @@ fn a_tagged_null_export_is_the_types_only_schema_through_the_factory() {
     assert_eq!(with_null.to_json_schema().unwrap(), without.to_json_schema().unwrap());
     assert!(with_null.named_type("Id").is_some());
     assert!(with_null.property("title").is_none(), "a null export declares no document property");
+}
+
+/// A scalar `description` or category member is read as its text, the
+/// conversion every other string metadata value gets.
+#[test]
+fn scalar_metadata_is_converted_to_text() {
+    let text = edit(&edit(TAGGED, "description: Reviews", "description: 5"), "categories: [Core]", "categories: [Core, 5, true]");
+    let document = parse_standalone_schema_document(&text, "subject.yaml").unwrap().expect("claimed");
+    assert_eq!(document.description.as_deref(), Some("5"));
+    let names: Vec<&str> = document.categories.iter().flatten().map(|category| category.name.as_str()).collect();
+    assert_eq!(names, ["Core", "5", "true"]);
 }
 
 // ── Load-level controls ───────────────────────────────────────────────────

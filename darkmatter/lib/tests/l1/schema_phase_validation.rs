@@ -446,9 +446,9 @@ fn public_docs_and_skill_describe_required_and_eager_as_independent_axes() {
             "simplified-schema/docs/topics/language/types.md",
             vec![
                 "`required` and `eager` are independent axes",
-                "| `required; eager` | Required, and the value is validated eagerly | Required |",
+                "| `required; eager` | Key required, and the value is validated eagerly | Key required |",
                 "| `eager` | Optional; a present value is validated eagerly | Optional; present values remain type-checked |",
-                "An eager-only `null` is therefore allowed at both phases",
+                "An optional or eager-only property accepts `null` at both phases",
                 "Neither placement makes the property required",
             ],
         ),
@@ -457,7 +457,7 @@ fn public_docs_and_skill_describe_required_and_eager_as_independent_axes() {
             vec![
                 "| `eager` | valid when present; absence is allowed | valid when present; absence is allowed |",
                 "| `required; eager` | must be present and valid | must be present and valid |",
-                "An eager-only `null` is therefore allowed at both phases",
+                "An optional eager property (`eager` alone) accepts `null` at both phases",
             ],
         ),
         (
