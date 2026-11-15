@@ -487,27 +487,172 @@ decisions_for_review:
       `required` now means "the key must be written", and the regenerated lifecycle schemas
       use `unknown(required)` on purpose for required operands that admit null. Alternative:
       keep the guard and rewrite those operands, which would lose required presence.
+    - |-
+      Phase 4 found that an `initialize` lifecycle effect still runs when the document's
+      frontmatter or its raw JSON Schema is refused, because `initialize` runs before schema
+      validation by documented design. The matrix's default says an invalid input "launches no
+      action". I kept the documented behavior and wrote the new CLI cells
+      (`darkmatter/cli/tests/l1/compose_loader_wiring.rs`) so their marker effect sits in
+      `composed`, which does not run on a refusal. Alternative: validate before `initialize`,
+      which changes the lifecycle order and its docs. If reversed: move schema validation ahead
+      of `initialize` and add `initialize` marker cells to that file.
+    - |-
+      Overflowing YAML numbers such as `1e400` load as the text `"1e400"` (the YAML parser
+      turns them into strings); a pinned test (`setter_values::spellings_yaml_reads_as_strings_are_never_rounded`)
+      and Darkmatter's frontmatter matrix rely on that. But `SimplifiedSchema::try_from` reads
+      raw JSON text through YAML, so `"default": 1e400` loads and fails only later as
+      `InvalidDefault`, while the `.json` file loaders refuse it at load, and
+      `simplified-schema/docs/topics/foundations.md` and `darkmatter/docs/topics/numbers.md`
+      say such a number is rejected. I left the code unchanged (a fix was tried and reverted
+      because it broke the pinned behavior). Alternatives: refuse non-finite YAML numbers at
+      load everywhere (about 60 lines in the admitted-YAML loader, plus re-pinning those
+      tests), or correct the two docs. Related: the content factory also accepts YAML flow
+      syntax, such as a trailing comma, in raw JSON text that the `.json` loaders refuse.
+    - |-
+      `yaml(not-empty)` and `json(not-empty)` judge the text, not the parsed value, so `"{}"`
+      and `"[]"` count as content, and soft validation turns a native `{}` into the text
+      `"{}"` and accepts it. This follows the spec's wording ("empty or whitespace-only text")
+      and is pinned in `not_empty_values.rs::yaml_and_json_text_must_still_parse`. Alternative:
+      parse the text and refuse an empty parsed collection. If reversed: the `not-empty` check
+      for these types and that test.
+    - |-
+      Darkmatter's md baseline types side-effect and expression-function verbs as `unknown`,
+      so `ensure_file: { file: a.md, no_error: 1 }` passes the schema and is refused by
+      `md compose`'s parser; `{ when: 'true' }` without `then` likewise passes the schema.
+      Both are pinned as current behavior in `lifecycle_schema_parity.rs`; the existing
+      `no_error: false` beside `then` gap now has a schema-side test too. Closing them needs a
+      shipped-schema change and artifact regeneration, which Phase 4 did not make.
+    - |-
+      Phase 5 updated the pinned doc phrases in Darkmatter's doc-contract test
+      `schema_phase_validation::public_docs_and_skill_describe_required_and_eager_as_independent_axes`.
+      The library and Darkmatter pages used to say an eager-only `null` is allowed "because missing
+      and `null` both count as absence"; under the new rules a written `null` meets presence and is
+      judged by the type, so the pages were rewritten and the test now pins the new sentences
+      ("Key required, and the value is validated eagerly", "An optional or eager-only property
+      accepts `null` at both phases"). The test's validator re-derivation is unchanged and passes.
+      Alternative: restore the old sentences, which would document the old rule.
+    - |-
+      Documentation choices in Phase 5: the canonical missing/`null`/`required` table lives in
+      `simplified-schema/docs/topics/validation.md` and the types, Darkmatter, and Claudine pages
+      link to it; `types.md` keeps a short migration table for the removed `non-null`, and the
+      Darkmatter caller skills mention that `non-null` is now a schema error (use `not-empty`).
+      The anchors `#required-properties-with-a-default` and `#non-null-properties` were renamed or
+      dropped (only pages in that area linked them). The library's repo skill `SKILL.md` was cut
+      to under 200 lines by moving defaults and shipped-artifact/identity notes into new
+      `defaults.md` and `shipped-and-identities.md`. The Darkmatter docs state the known
+      schema/parser gap outright (two `no_error` placements pass `md schema validate` and DMLS but
+      fail `md compose`). Claudine's configuration page frames the changes as "Earlier releases
+      ..." before/after tables, and documents two inferred consequences no test pins: a
+      repository cannot clear an event's actions (`[]` is an error, `null` inherits), and an
+      empty event list in a legacy `config.json` fails conversion. Claudine's new `library.md`
+      config snippet was written from signatures and is labeled as not compiled.
+      Alternatives: put the table in `types.md`; keep migration notes out of caller skills;
+      accept a longer `SKILL.md`; describe the parser gap only as "an error"; state only current
+      Claudine behavior. If reversed, these are doc-only edits.
+    - |-
+      Phase 5 found that a property-level union whose arms declare different defaults is still
+      reported as a conversion error (`SchemaError::Convert`), not `ConflictingDefaults`, which
+      covers object arms and raw schemas. The docs describe both. Alternative: route that case
+      through `ConflictingDefaults` too (a lowering change and artifact regeneration).
 message_to_agent: |-
-    Phase 3 (schema and consumer migration) is complete; read its log section first.
-
-    - All three shipped artifacts were regenerated with one root `just shipped-schemas`
-      after Wave 5 (only Darkmatter's and Claudine's changed). Any further shipped YAML
-      or preparation-code edit in Phase 4 needs another run (and a `PREPARATION_REVISION`
-      bump for a code-only payload change).
-    - Gates passed in all three areas (`simplified-schema` `just test`/`just lint`;
-      Darkmatter and Claudine full `just test` plus `just lint`; `check-tier-coverage`).
-      The host was repeatedly loaded to 100-175 by other work; Darkmatter's second
-      package run had about 10 tests at 10-15.6 s that take at most 4.5 s alone. Expect
-      the same noise; measure alone before acting.
-    - Not yet covered (Phase 4/5 candidates): prepare-level completion of a Claudine
-      `loop:` block end to end; `simplified-schema/docs/topics/language/schema-documents.md`
-      still shows `non-null` and says `description: null` is rejected; the other
-      SimplifiedSchema topic pages (validation, conversion, types, unions) still describe
-      optional defaults as metadata only. The Phase 4 robustness matrix should include
-      the new config wire adapters (`claudine/lib/src/config/wire.rs`, with
-      `wire_tests.rs` as a starting point) and the empty-trigger-payload refusal.
-    - Known schema/parser gap to judge: an authored `no_error: false` beside `then`
-      passes the schema and fails the lifecycle parser (see decisions_for_review).
+    Phase 5 (documentation and caller skills) is complete; read its log section.
+    Docs and skills changed in all three areas, and `just publish-skills` ran in
+    `darkmatter/` and `claudine/`. The only code change was the pinned phrases in
+    `darkmatter/lib/tests/l1/schema_phase_validation.rs` (a doc-contract test), so
+    nothing that feeds the shipped artifacts changed; they are still revisions 3/4/4.
+    Several tests read docs: when Phase 6 runs the Darkmatter and Claudine gates, a doc
+    contract failure means a pinned sentence moved, not a behavior change. The resolved
+    CI plan for the docs alone selects whole `darkmatter::l1`, `darkmatter-lsp::l1`, and
+    `claudine-cli::l1` binaries, which Phase 6's full gates cover.
+    Note: Phases 4 and 5 are both uncommitted in the tree (Phase 4's test files still
+    show as modified/untracked).
+source_files_during_phase_4:
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/input_robustness.rs
+    - simplified-schema/lib/tests/l1/required_defaults.rs
+    - simplified-schema/lib/tests/l1/not_empty_values.rs
+    - simplified-schema/lib/tests/l1/envelope_null_carriers.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/frontmatter_extraction.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+    - darkmatter/lib/tests/l1/lifecycle_edit_schema_parity.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/compose_loader_wiring.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/config_keyed_entries.rs
+    - claudine/lib/tests/l1/config_schema_matrix.rs
+    - claudine/lib/tests/l1/config_json_conversion.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/config_json5_wiring.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/configuration.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/cli/schema.md
+    - darkmatter/docs/cli/set.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/frontmatter.md
+    - darkmatter/docs/topics/lifecycle/error-handling.md
+    - darkmatter/docs/topics/lifecycle/index.md
+    - darkmatter/docs/topics/numbers.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - simplified-schema/docs/topics/conversion.md
+    - simplified-schema/docs/topics/custom-vocabulary.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - simplified-schema/docs/topics/foundations.md
+    - simplified-schema/docs/topics/global-type-constraints.md
+    - simplified-schema/docs/topics/language-core.md
+    - simplified-schema/docs/topics/language/index.md
+    - simplified-schema/docs/topics/language/local-type-references.md
+    - simplified-schema/docs/topics/language/objects-and-named-types.md
+    - simplified-schema/docs/topics/language/schema-documents.md
+    - simplified-schema/docs/topics/language/schema-types.md
+    - simplified-schema/docs/topics/language/slots.md
+    - simplified-schema/docs/topics/language/subtyping.md
+    - simplified-schema/docs/topics/language/types.md
+    - simplified-schema/docs/topics/language/unions.md
+    - simplified-schema/docs/topics/simplified-schema-struct.md
+    - simplified-schema/docs/topics/types/basic-types.md
+    - simplified-schema/docs/topics/validation.md
+    - simplified-schema/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/simplified-schema/SKILL.md
+    - .claude/skills/simplified-schema/declaration-narrowing.md
+    - .claude/skills/simplified-schema/schema-documents.md
+    - claudine/docs/use-skills/use-claudine/composition.md
+    - claudine/docs/use-skills/use-claudine/config.md
+    - claudine/docs/use-skills/use-claudine/library.md
+    - claudine/docs/use-skills/use-claudine/lifecycle.md
+    - darkmatter/docs/use-skills/use-darkmatter/SKILL.md
+    - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+    - darkmatter/docs/use-skills/use-darkmatter/cli.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
+    - .claude/skills/simplified-schema/defaults.md
+    - .claude/skills/simplified-schema/shipped-and-identities.md
 ---
 
 # Implementation Log for 2026-11-14-absent-equals-null (6 phases)
@@ -698,3 +843,125 @@ Run by the orchestrator after every subagent had finished, serially, one area at
 - Rule 13 / Wave 6 written data → `absent_property_contract.rs` parent/child table and `every_schema_form_declares_without_writing` (F2), `composition_defaults.rs` hash/style reader tests, CLI `compose_schema::defaults_fill_missing_and_null_values_without_editing_the_source` (F3).
 - Wave 7 host parity → DMLS `required_defaults.rs` (F3 LSP session), `composition_defaults::yaml_document_validation_defaults_missing_and_null_values`, `not_empty_frontmatter::an_interpolation_that_produced_no_yaml_is_refused`, Claudine `defaults_tests::launch::{a_supplied_null_or_wrong_type_is_judged_by_type_at_launch, a_missing_non_eager_required_value_is_deferred_at_launch_and_missing_when_composed}`.
 - Pre-existing or skipped: none failing. The scope calculator was not used to skip gates; every gate ran.
+
+## Phase 4
+
+### Orchestration
+
+- Wave 8 ran as three parallel subagents with no shared files (`simplified-schema/`, `darkmatter/`, `claudine/`). Each listed the matrix cells that already existed and added only the missing ones, then ran nextest scoped to what it touched. The orchestrator ran the gates afterward, alone on the host (load average about 8 on 16 cores).
+- No subagent changed library, schema, or preparation source. Two fixes were tried and reverted: an overflowing-number refusal in the admitted-YAML loader, which contradicted a pinned test, and a `bound_operands.rs` flag check, which was unreachable for `unknown`-typed verbs. Both are recorded in decisions_for_review.
+
+### Wave 8 — Complete input coverage (complete)
+
+Matrix default: an invalid shape gives a located public error, runs nothing, and publishes nothing. Exceptions are as the plan lists them. Cells added by row (cells that already existed are named in each subagent's survey and in the Phase 1–3 sections):
+
+- **Defaulted/required mapping properties** (`simplified-schema/lib/tests/l1/required_defaults.rs::input_shapes`):
+  - A 19-cell table covers native wrong types, coercible and non-coercible text, empty and blank strings, a scalar given for a list, one and every invalid list item, a `[null]` item, a wrong-typed object child, and invalid object items whose item defaults are filled after soft conversion. Each cell checks strict and soft problem pointers, owned values and the `defaults` report, that the soft result validates again unchanged under both strict and soft, and that the input is not mutated.
+  - Also added: `required_falsey_values_are_values`, and `a_failure_elsewhere_still_counts_the_default_toward_presence`.
+- **`not-empty`** (`not_empty_values.rs`):
+  - Added `a_whole_field_of_another_type_is_refused`, `soft_converts_a_scalar_to_text_with_content_and_strict_refuses_it`, `collections_locate_one_and_every_empty_or_invalid_item`, and `yaml_and_json_text_must_still_parse`.
+  - `types_without_an_empty_value_refuse_not_empty` now also covers `literal`, `enum`, `date`, and `file`.
+- **Envelope metadata and carriers** (`envelope_null_carriers.rs`):
+  - 12 more cells, each run through every load path in both preparation modes: categories given as a scalar, a mapping, mixed lists, all-non-string lists, and lists holding `null` or a mapping member; `description: 5` and `[a]`; `types: Id`.
+  - Also added `scalar_metadata_is_converted_to_text`.
+- **Raw JSON Schema defaults** (`required_defaults.rs::raw_schema_inputs`): `an_optional_raw_null_default_is_a_no_op`, `authored_null_admission_and_required_stay_as_written`, `a_used_invalid_raw_default_is_unprepared_at_its_pointer`, `conflicting_arm_defaults_fail_prepared_new_before_any_document` (`anyOf` and `oneOf`), and `one_of_exclusivity_judges_the_completed_value`.
+- **Lifecycle flags and operands** (Darkmatter):
+  - `lifecycle_edit_schema_parity.rs` gains `{ edit: 2.5 }` accepted, and `gui: [true]`, a list-of-mapping `edit`, and a null `edit` in a bundle refused.
+  - `lifecycle_schema_parity.rs` gains `every_no_error_placement_converts_text_and_refuses_a_number_in_both_checks`, `a_generated_long_form_no_error_follows_the_flag_rule_where_the_verb_is_typed`, and `an_authored_false_flag_beside_then_passes_the_schema_and_fails_the_parser` (pins the known gap).
+- **Key counts on completed values:**
+  - Darkmatter `key_counts_are_judged_on_the_completed_value_and_a_filled_flag_is_never_counted` (one-verb passes; two-verb still fails `max-keys`; a `when`-only conditional still fails `min-keys`; validating again is stable) and `no_default_creates_an_absent_event_or_action_payload`.
+  - Claudine `config_keyed_entries::defaults_fill_only_inside_written_payloads`.
+- **Claudine overrides and keyed payloads:**
+  - New `claudine/lib/tests/l1/config_keyed_entries.rs` generates one `#[test]` per action (`sound_effect`, `speak`, `bash`, `call`, `report`, `message`) and per route (`discord`, `slack`, `signal`, `whatsapp`, `discord_webhook`, `slack_webhook`). Each runs through `load_claudine_config` on the real control fixture: the entry as written is the control, and one changed field is refused at that kind's payload in `config.yaml`.
+  - The guard `every_schema_action_and_route_kind_has_its_own_test` compares the macro lists with the shipped schema's unions.
+  - `config_schema_matrix.rs` gains `a_blank_or_null_root_is_refused_in_either_scope` and `a_repository_matcher_override_is_nonempty_and_replaces_per_event`. The shared-wrapper cells (absent/null, scalar, zero keys, two keys, unknown key) already existed once in `wire_tests.rs`.
+- **Loaders:**
+  - Admitted YAML (new `simplified-schema/lib/tests/l1/input_robustness.rs`): `an_unset_value_loads_as_null_in_every_spelling`, `trailing_content_is_a_located_load_error`, and `a_load_error_after_a_byte_order_mark_and_crlf_lines_points_into_the_original_text`. Duplicate keys, second documents, and `---`/`...` already had cells in `darkmatter/lib/tests/l1/yaml_document_loading.rs`.
+  - Raw JSON Schema text (same file): `the_content_factory_admits_raw_json_numbers`, `json_files::both_json_loaders_admit_numbers_from_their_spelling`, and `json_files::loaded_raw_defaults_fill_missing_and_null_values` (through the factory and `Prepared`).
+  - Markdown frontmatter (new `darkmatter/lib/tests/l1/frontmatter_extraction.rs`, public `Markdown::try_from_content` / `try_from(&Path)`): omitted versus null properties, body after the fence, and malformed YAML and a duplicate key as located load errors that leave the source unchanged.
+  - Claudine JSON5 (`config_json_conversion.rs`): `a_nested_duplicate_member_is_located_at_its_second_spelling`. Every refusal cell now asserts the directory holds only `config.json`. The successful conversion asserts exactly `config.json.bak`, `config.yaml`, and the retained lock file.
+  - Claudine YAML config wiring: `config_schema_matrix::a_duplicate_key_or_malformed_yaml_is_a_located_problem`.
+- **CLI wiring:**
+  - New `darkmatter/cli/tests/l1/compose_loader_wiring.rs`, six tests with one `md compose` spawn each: malformed frontmatter, a field-invalid frontmatter value, a raw JSON Schema control, a raw JSON Schema with a duplicate member, a field-invalid value under raw JSON Schema, and a malformed user config. Each failure asserts exit 1, the located error, no `composed` effect marker, no published body, and an unchanged source.
+  - New `claudine/cli/tests/l1/config_json5_wiring.rs` (fake goose provider, portable): a malformed legacy file and a schema-refused field both stop before any launch, keep the source bytes, and write no YAML or backup. The valid control is the existing `config_yaml_wiring::a_legacy_json_file_is_converted_once_with_a_notice`.
+  - `md schema validate` whole-YAML wiring already existed in `schema_validate_yaml.rs`.
+- **`loop:` end to end:** `claudine/lib/src/composition/prepare/service/tests.rs::a_loop_document_prepares_as_authored_and_an_invalid_loop_flag_is_refused`. `loop` is a deferred lifecycle key: the schema stage judges it and fills nothing, the effective block equals the authored one, and the gate's `no_error` reads false from the parser. An authored `no_error: 5` fails preparation.
+- **Code-smell grep** over the changed readers in all three areas: no silent-loss defect found. Dispositions:
+  - `wire.rs` null-entry dropping drops only `null`; a malformed entry still fails.
+  - `defaults.rs`' `required` names read with `filter_map(as_str)` reads schema structure, not data.
+  - `with.unwrap_or_default()` in `action_shape.rs` is the documented empty overlay.
+  - The `.ok()` calls are message-only, constant-text parses, or documented "nothing loaded" returns.
+  - `#[serde(default)]` appears only on post-validation typed extraction of schema-filled fields or on intentional absent-equals-null options.
+  - One documented non-application remains: a default under an empty nested key (`o.""`) is neither applied nor reported, because `AppliedDefault.path` cannot spell it.
+
+### Wave 9 — Refresh shipped artifacts (complete)
+
+- The plan's revision bumps (2→3, 3→4, 3→4) had already landed in Phase 1, and Phase 4 changed no shipped YAML or preparation code, so no further bump was needed. The root `just shipped-schemas` reported "every shipped artifact is current" with no diff. Cached and uncached verdict parity is covered by `envelope_null_carriers.rs` (both modes, every new cell).
+- `source-inputs`: unchanged. No new test reads another package's source file. The new Claudine tests read their own package's `tests/config/user-control.yaml` through `include_str!`, the same way the existing `config_schema_matrix.rs` does. The guard reads the library's embedded schema constant. The new CLI test binary needs `test-fixtures`, which `claudine-cli`'s CI `features` already enable.
+- No lowering goldens, identity pins, or generator parity expectations changed.
+
+### Phase 4 verification
+
+- `simplified-schema` `just test`: exit 0. L1 ran 2237 tests and the minimal build 1878, none at or above 5.0 s.
+- `simplified-schema` `just lint`: exit 0.
+- `just check-tier-coverage` for `simplified-schema`, `darkmatter`, and `claudine`: 0 stranded.
+- Dependents, serial and scoped to the changed test files, because no library source changed:
+  - `cargo nextest run -p darkmatter --test l1 -E 'test(/lifecycle_schema_parity|lifecycle_edit_schema_parity|frontmatter_extraction|test_layout/)'`: 26 passed.
+  - `cargo nextest run -p darkmatter-cli --test l1 -E 'test(/compose_loader_wiring|test_placement|test_layout/)'`: 7 passed.
+  - `cargo nextest run -p claudine --features work-counters --test l1 -E 'test(/config_keyed_entries|config_schema_matrix|config_json_conversion|test_layout/)'`: 47 passed.
+  - `cargo nextest run -p claudine --features work-counters --lib -E 'test(/a_loop_document_prepares_as_authored/)'`: 1 passed.
+  - `cargo nextest run -p claudine-cli --features test-fixtures --test l1 -E 'test(/config_json5_wiring|test_placement/)'`: 14 passed.
+- The subagents' wider scoped runs also passed, alongside `just lint` in `darkmatter/` and `claudine/`: Darkmatter lifecycle/frontmatter 539 and CLI 88; Claudine config/prepare lib 557, l1 config and guards 55, CLI 110; simplified-schema scoped 143, and 128 under `--no-default-features`. Every new test ran in under 0.5 s.
+- No failures, slow tests, or skipped gates. No cross-OS check: no path, process, or `#[cfg]` code changed, and the new tests build paths from temp dirs.
+
+### Requirement → test mapping (Phase 4)
+
+- Field validators: `required_defaults.rs::{input_shapes, raw_schema_inputs}`, `not_empty_values.rs`, `envelope_null_carriers.rs`, `lifecycle_{edit_,}schema_parity.rs`, `config_keyed_entries.rs`, and `config_schema_matrix.rs` (F1, public crate APIs).
+- Loaders: `input_robustness.rs` (admitted YAML, raw JSON text), `frontmatter_extraction.rs`, `config_json_conversion.rs`, and `config_schema_matrix::a_duplicate_key_or_malformed_yaml_is_a_located_problem` (F1/F2, temp dirs).
+- CLI wiring: `compose_loader_wiring.rs` and `config_json5_wiring.rs` (F3, spawned binaries, no launch or publication).
+- Prepare path: `a_loop_document_prepares_as_authored_and_an_invalid_loop_flag_is_refused` (F2).
+
+## Phase 5
+
+### Orchestration
+
+- Wave 10 ran as three parallel documentation writers, one per area (SimplifiedSchema, Darkmatter, Claudine), each owning only its area's `docs/`, repo skill, and canonical caller-skill sources. None ran a test suite. The orchestrator then published caller skills, ran the audit search, and ran the gates alone.
+
+### Wave 10 — Document library semantics, Darkmatter behavior, Claudine migration (complete)
+
+- **SimplifiedSchema**: `validation.md` is now the canonical page for the new rules: default application and validation as separate steps (diagrams redrawn), the missing/`null`/`required` table with the positional-argument/tuple rule, missing versus `null` parents, `null` and recursive defaults, compile-time conflicts, the public `DefaultPlan`/`prepare_defaults` API, and why exported JSON Schema applies no defaults. `types.md` replaces "Non-Null Properties" with "Empty Values (`not-empty`)" (per-type table, `yaml`/`json` judging text, a `non-null` migration table) and rewrites the phase table; `unions.md` adds defaults in unions and an optional-positional-argument example; `schema-documents.md` swaps `non-null` for `not-empty` and adds a `null`/empty carrier table; `foundations.md` and `conversion.md` now say `1e400` loads from YAML as the text `"1e400"` while the `.json` loaders refuse it; `diagnostics.md` lists `InvalidDefault`, `ConflictingDefaults`, `RecursiveDefault`. Eleven other stale pages were corrected (see `docs_updated_during_phase_5`). The repo skill `SKILL.md` went from 262 to 197 lines, with new `defaults.md` and `shipped-and-identities.md`.
+- **Darkmatter**: `inline/schema-validation.md` carries the missing/`null` rule, the requested Mermaid flow (authored values → defaults → conversion → final validation → output, authored values retained), and a table of where defaults appear (composed copy, report, expression typing, never the source file or `md set`). Lifecycle pages replace the literal-only `edit` flag guidance with the real rules (boolean-like text converts; omitted or `null` takes the default; a number or template is an error), keep mandatory-target rules, separate duplicate authored placement from completed defaults, and say `initialize` runs before schema validation and keeps its effects. `numbers.md` and `frontmatter.md` drift fixed. Trigger pages now treat `unknown(required)` as a presence gate. Repo skill and the `use-darkmatter`/`use-dmls` sources updated.
+- **Claudine**: configuration (before/after loaded values for TTS and steering, rejected empty overrides, no repository off switch for messaging, keyed route kinds, flat-format migration error text, JSON5 conversion, unchanged runtime enums), messaging, configuring-actions, schemas, lifecycle, looping, and composition pages; repo skill and `use-claudine/{config,lifecycle,composition,library}.md`. Stale `edit` rules (`edit: 5`, `gui: "yes"`, `create_new: null` called errors) were corrected to match `lifecycle_edit_schema_parity.rs`.
+- Discrepancies resolved toward the code are listed in the writers' reports and summarized in `decisions_for_review` (property-level union default conflicts are `SchemaError::Convert`; `[code, null]` no longer makes a required named type optional; `categories: []` is rejected; `null | literal(a; required)` is `NullAdmitted`).
+
+### Wave 11 — Publish caller skills (complete)
+
+- `just publish-skills` in `darkmatter/` published `use-darkmatter` and `use-dmls`; in `claudine/` it published `use-claudine`. The published copies have no stray triple braces except one pre-existing, intentional fenced literal in `use-claudine/lifecycle.md`.
+- Audit search (`NonNull`, `non-null`, `AmbiguousDefaults`, null-cancels-required, optional-defaults-as-metadata) over source, schemas, docs, and skills. Remaining legitimate categories:
+  - the grammar's rejection of `non-null` (`grammar.rs::NON_NULL_REMOVED`, `simplified/mod.rs`) and tests pinning it (`declaration_grammar.rs`, `matcher.rs`, `not_empty_values.rs`, DMLS completion tests asserting it is not offered);
+  - descriptive prose meaning "a value other than null" (Claudine trigger schemas and README, matcher and validator comments, protocol parsers, signal `exists`);
+  - Darkmatter's expression-typing `FactType::NonNull` / `NON_NULL_FACT_TYPE`, a fact kind unrelated to the schema marker;
+  - comments that a required property's type gets no `null` arm (`convert.rs`, Darkmatter schema tests), which still holds;
+  - docs and caller skills that mention `non-null` only to say it was removed;
+  - historical specs, completed features, frozen benchmark fixtures, and unrelated packages (schematic, tree-hugger, playa).
+  - No `AmbiguousDefaults` remains anywhere active; no "metadata only" claim remains in the three areas.
+
+### Phase 5 verification
+
+- `git status … | xargs python3 scripts/ci/affected_scope.py`: `packages` = claudine, claudine-cli, darkmatter, darkmatter-cli, simplified-schema, test-toolkit, darkmatter-lsp; `change_class` = package (Phase 4's uncommitted tests are also in the tree). Gates were therefore run. With only the docs/skills, the resolved plan (`--resolved-plan`) still selects narrowed cells in darkmatter, darkmatter-lsp, claudine-cli, and test-toolkit.
+- First dependent run found one failure: `darkmatter::l1 schema_phase_validation::public_docs_and_skill_describe_required_and_eager_as_independent_axes` pinned three sentences the rewrite replaced (they stated the old "null counts as absence" rule). Updated the pins to the new sentences; the test's validator re-derivation is unchanged.
+- `simplified-schema` `just test`: exit 0; L1 2237 and minimal 1878 tests, 0 at or above 5.0 s; `just slow-tests fresh` exit 0. `just lint`: exit 0.
+- `darkmatter` `just lint`: exit 0 (after the test edit).
+- Dependents, serial, from the resolved plan's filters plus doc/skill/guard/corpus tests in the binaries it selects whole:
+  - `cargo nextest run -p darkmatter --test l1 -E 'test(/schema_phase_validation|current_root_documentation_contract|current_root_migration_guard|trigger_spelling_guard/)'`: 25 passed.
+  - `cargo nextest run -p darkmatter --lib --test l1 -E '(binary_id(darkmatter) & test(/narrative_doc_function_table_matches_catalog|query_vocabulary_link_resolves_to_an_existing_doc_anchor/)) | (binary_id(darkmatter::l1) & test(/doc|skill|guard|corpus|readme/))'`: 463 passed.
+  - `cargo nextest run -p darkmatter-lsp --lib --test l1 -E '(binary_id(darkmatter-lsp) & test(=overlay::expressions::tests::embedded_vocabulary_matches_the_topic_doc)) | (binary_id(darkmatter-lsp::l1) & test(/doc|skill|guard|lsp_session|anchor|link/))'`: 280 passed.
+  - `cargo nextest run -p claudine-cli --features test-fixtures --test l1 -E 'test(/doc|skill|guard|loop_gate_ambient|readme/)'`: 255 passed.
+  - `cargo nextest run -p test-toolkit -E 'test(=active_ci_authority_matches_the_retirement_contract)'`: 1 passed.
+- No slow tests, no skipped gates, no pre-existing failures. No cross-OS check: documentation and one string-pin test edit only.
+
+### Requirement → test mapping (Phase 5)
+
+- Docs agree with the validator on the required/eager/phase matrix: `schema_phase_validation::public_docs_and_skill_describe_required_and_eager_as_independent_axes` (F1; pins prose in `types.md`, `inline/schema-validation.md`, and the Darkmatter skill, then re-derives the matrix from the real validator).
+- Doc anchors and vocabulary tables still resolve: Darkmatter catalog doc tests and DMLS `embedded_vocabulary_matches_the_topic_doc`.
+- Behavior itself is covered by Phases 1–4; Phase 5 changed no behavior.

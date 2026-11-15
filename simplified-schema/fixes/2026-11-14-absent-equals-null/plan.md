@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-11-14
-phase: 4
+phase: 6
 agent: codex/default
 yolo: 'true'
 source_files_during_phase_1:
@@ -279,6 +279,93 @@ packages:
 - darkmatter-cli
 - claudine
 - claudine-cli
+source_files_during_phase_4:
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/input_robustness.rs
+- simplified-schema/lib/tests/l1/required_defaults.rs
+- simplified-schema/lib/tests/l1/not_empty_values.rs
+- simplified-schema/lib/tests/l1/envelope_null_carriers.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/frontmatter_extraction.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+- darkmatter/lib/tests/l1/lifecycle_edit_schema_parity.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/compose_loader_wiring.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/config_keyed_entries.rs
+- claudine/lib/tests/l1/config_schema_matrix.rs
+- claudine/lib/tests/l1/config_json_conversion.rs
+- claudine/lib/src/composition/prepare/service/tests.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/config_json5_wiring.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+- darkmatter/lib/tests/l1/schema_phase_validation.rs
+docs_updated_during_phase_5:
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/configuring-actions.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/flow-control/looping.md
+- claudine/docs/topics/messaging.md
+- claudine/docs/topics/schemas.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/cli/set.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/frontmatter.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/numbers.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/schema-targeting.md
+- simplified-schema/docs/topics/conversion.md
+- simplified-schema/docs/topics/custom-vocabulary.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/foundations.md
+- simplified-schema/docs/topics/global-type-constraints.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/local-type-references.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/docs/topics/language/schema-types.md
+- simplified-schema/docs/topics/language/slots.md
+- simplified-schema/docs/topics/language/subtyping.md
+- simplified-schema/docs/topics/language/types.md
+- simplified-schema/docs/topics/language/unions.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- simplified-schema/docs/topics/types/basic-types.md
+- simplified-schema/docs/topics/validation.md
+- simplified-schema/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/architecture.md
+- .claude/skills/claudine/cli-reference.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/frontmatter.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/simplified-schema/declaration-narrowing.md
+- .claude/skills/simplified-schema/schema-documents.md
+- claudine/docs/use-skills/use-claudine/composition.md
+- claudine/docs/use-skills/use-claudine/config.md
+- claudine/docs/use-skills/use-claudine/library.md
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+- darkmatter/docs/use-skills/use-darkmatter/SKILL.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- darkmatter/docs/use-skills/use-darkmatter/cli.md
+- darkmatter/docs/use-skills/use-dmls/schemas.md
+- .claude/skills/simplified-schema/defaults.md
+- .claude/skills/simplified-schema/shipped-and-identities.md
 ---
 
 # Absent values, defaults, and written presence
@@ -450,14 +537,14 @@ CLI coverage is wiring only: valid control plus one malformed and one field-inva
 
 ### Wave 8
 
-- [ ] **Complete input coverage**
+- [x] **Complete input coverage**
   - Close every applicable matrix row through public results and existing fixture helpers. Register all tests in their consolidated binaries. Preserve native fake editor/services and cross-platform path construction; no Unix-only stand-in for common behavior.
   - Search changed readers for `#[serde(default)]`, load-bearing `Option<T>`, `filter_map` plus `as_str`, `unwrap_or_default()`, and `.ok()`. Record the disposition in the implementation log: intentional null/unset handling, post-validation typed extraction, or fixed silent loss. Do not filter malformed collection entries.
   - Verify all retained key-count constraints against completed values, especially lifecycle `uncounted-keys` and new one-key config wrappers. Confirm no default creates an absent route/action payload.
 
 ### Wave 9
 
-- [ ] **Refresh shipped artifacts**
+- [x] **Refresh shipped artifacts**
   - Prerequisite: all schema migrations and source fixes above are complete. Bump `simplified-schema/lib/src/shipped/registry.rs::PREPARATION_REVISION` 2→3, `darkmatter/lib/src/markdown/schemas/shipped.rs` 3→4, and `claudine/lib/src/composition/schema/shipped.rs` 3→4.
   - Run the single root `just shipped-schemas` recipe after lifecycle region regeneration. Do not hand-edit generated JSON. Check cached and uncached envelope, baseline, config, and lifecycle preparation against the same fixtures and completed values.
   - Add newly introduced preparation source files to affected `[package.metadata.ci.tests].source-inputs`, including `defaults.rs` dependencies and the configuration wire adapter where tests explicitly read it. Spell fixture reads in CI-indexable forms. Load the rust-devops skill before editing these evidence declarations; add no CI jobs or matrix cells.
@@ -471,24 +558,24 @@ Checkpoint: all three shipped artifacts pass freshness checks, and cached/uncach
 
 These tasks may run concurrently, each owning its area's docs and matching repo skill. Publication follows all three edits.
 
-- [ ] **Document library semantics**
+- [x] **Document library semantics**
   - Update SimplifiedSchema validation, conversion, language types, unions, schema documents, custom vocabulary, runtime phase guidance, and facade API docs. Separate default application from validation, show the required/null table, and explain plain JSON Schema export limitations.
   - Document compile-time default conflicts, recursive/default-null behavior, the new public default-plan API, and `not-empty` by type. Include examples for missing versus null parents and optional positional arguments.
   - Update `.claude/skills/simplified-schema/` guidance, especially required defaults and declaration narrowing. Update README claims only where summarized behavior changes; there is no SimplifiedSchema caller-skill publication recipe or directory to invent.
 
-- [ ] **Document Darkmatter behavior**
+- [x] **Document Darkmatter behavior**
   - Update `docs/inline/schema-validation.md`, schema definition/validation topic pages, lifecycle actions/error handling, configuration, and cleanup/style guidance. Explain declared-but-unwritten bindings and the composed-copy/default write-back boundary.
   - Replace obsolete literal-only `edit` flag guidance with supported coercion and null behavior; retain nondeferred flag limits and mandatory target rules. Explain duplicate authored placement separately from completed defaults.
   - Update `.claude/skills/darkmatter/`, canonical `docs/use-skills/use-darkmatter/`, and `docs/use-skills/use-dmls/`. Include a compact flow diagram for authored values → default application → conversion → final validation → successful output, with authored metadata retained alongside it.
 
-- [ ] **Document Claudine migration**
+- [x] **Document Claudine migration**
   - Update configuration, schemas, lifecycle, messaging, and relevant README overview claims. Show canonical keyed route/action examples and old-flat-YAML diagnostic guidance; explain legacy JSON5 conversion and unchanged runtime enum APIs.
   - Document missing/null override inheritance, removal of null-as-disable messenger selection, newly rejected empty overrides, and newly inserted user defaults. Include before/after completed-value examples for TTS and steering.
   - Update `.claude/skills/claudine/` and canonical `docs/use-skills/use-claudine/{config,lifecycle,composition,library}.md`. Avoid links from topic docs to feature/fix directories.
 
 ### Wave 11
 
-- [ ] **Publish caller skills**
+- [x] **Publish caller skills**
   - Run `just publish-skills` in `darkmatter/` and `claudine/` after canonical docs are finalized. Inspect composed outputs for interpolation corruption and stale rules; never directly edit installed user-scope copies.
   - Search active source, schemas, help, docs, and skills for `NonNull`, `non-null`, `AmbiguousDefaults`, null-cancels-required claims, and optional-defaults-as-metadata-only claims. Keep rejection tests, historical specs, frozen benchmarks, and accurate descriptive uses. Record remaining legitimate match categories in the implementation log.
 
