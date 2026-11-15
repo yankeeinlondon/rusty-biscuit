@@ -1,0 +1,75 @@
+kind: sequence
+$schema:
+    spec: file(required;match(**/*spec*.md);eager) -> the specification which will be _completed_
+    plan: file -> the spec's plan file (if it exists)
+    implemented: boolean -> whether this spec has been implemented yet
+    review: file -> the implementation's latest review file (if it exists)
+    spec-name: string -> a unique identifier for the spec
+    iteration: number -> the number of reviews that have taken place in the fix/review cycle
+
+plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
+iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
+spec-name: "{{ parent_dir(spec) }}"
+review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
+
+# Gates: a missing or unreviewed spec ends the run before any step starts.
+initialize:
+    - when: "!file_exists(spec)"
+      then:
+          - warn: "The specification '{{spec}}' doesn't exist; can't complete this prompt!"
+          - edit: spec
+          - skip
+    - when: "!frontmatter(spec, 'reviewed')"
+      then:
+          - warn: "the **spec** `{{spec-name}}` has not been reviewed yet!"
+          - skip
+    - success: "the **spec** `{{spec-name}}` has been reviewed"
+
+sequence:
+    # planning
+    - name: planning
+      start:
+          - when: "file_exists(plan)"
+            then:
+                - success: "the **plan** for the spec `{{spec-name}}` has been created"
+            else:
+                - warn: "the **plan** for the spec `{{spec-name}}` still needs to be created"
+      sequence:
+          - name: plan
+            when: "!file_exists(plan)"
+            prompt: ./plan.md
+            with:
+                spec: "{{ spec }}"
+                plan: "{{ plan }}"
+
+    # implementation
+    - name: implementation
+      start:
+          - when: "frontmatter(plan, 'implemented')"
+            then:
+                - success: "the `{{spec-name}}` has been implemented already"
+      sequence:
+          - name: ensure-rulings
+            when: "!frontmatter(plan, 'implemented')"
+            prompt: ./ensure-rulings.md
+          - name: implement
+            when: "!frontmatter(plan, 'implemented')"
+            prompt: ./implement.md
+            with:
+                spec: "{{ spec }}"
+
+    # human review (when required)
+    - name: human-review
+      when: "frontmatter(spec, 'human-review')"
+      prompt: ./_reviews/human-rulings.md
+      with:
+          spec: "{{ spec }}"
+          review: "{{ review }}"
+
+    # review/fix cycle
+    - name: fix-review
+      when: "!frontmatter(spec, 'ready')"
+      sequence: ./_fix/fix-review.yaml
+
+success:
+    - success: "the `{{spec-name}}` spec was implemented and has completed the fix/review cycle"
