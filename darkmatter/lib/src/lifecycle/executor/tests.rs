@@ -618,7 +618,10 @@ fn a_host_without_an_editor_fails_the_action_as_unsupported_and_no_error_continu
     let error = outcome.action_error.expect("a dispatch failure");
     assert_eq!(error.property.as_deref(), Some("success[0].edit"));
     assert!(error.msg.contains("error: Unsupported"), "{}", error.msg);
-    assert!(error.msg.contains(&fixture.root().join("a.md").display().to_string()), "names the target: {}", error.msg);
+    // The fake host labels a failure with its `Debug` form, which escapes a
+    // Windows path's backslashes.
+    let target = format!("{:?}", fixture.root().join("a.md").display().to_string());
+    assert!(error.msg.contains(target.trim_matches('"')), "names the target: {}", error.msg);
     assert_eq!(*fixture.host.failures.borrow(), ["EditFailed"]);
     assert!(fixture.effects.lines().is_empty(), "no continuation after an unsuppressed failure");
 
@@ -1069,7 +1072,7 @@ fn a_url_target_is_refused_as_not_local_without_writing() {
 fn a_target_outside_the_root_is_refused_naming_target_and_root_before_any_parent_exists() {
     let workspace = Workspace::with_editor(Some(FakeEditor::default()));
     let before = workspace.tree();
-    let target = workspace.outside.join("deep/new/file.md");
+    let target = workspace.outside.join("deep").join("new").join("file.md");
 
     let ensure = workspace.run(json!({ "success": [{ "ensure_file": target.to_string_lossy() }] }));
     let edit = workspace.run(json!({ "success": [{ "edit": target.to_string_lossy() }] }));
@@ -1082,7 +1085,7 @@ fn a_target_outside_the_root_is_refused_naming_target_and_root_before_any_parent
         assert!(message.contains("outside the mutation root"), "{message}");
         assert!(message.contains(&*workspace.ws.to_string_lossy()), "names the root: {message}");
     }
-    assert!(action_message(&ensure).contains(&*target.to_string_lossy()), "names the target");
+    assert!(action_message(&ensure).contains(&*target.to_string_lossy()), "names the target: {}", action_message(&ensure));
     assert!(workspace.fixture.seen().is_empty(), "the editor is never invoked");
     assert_eq!(workspace.tree(), before, "no file or parent was created");
 }
@@ -1259,4 +1262,227 @@ fn a_symlink_inside_the_root_cannot_redirect_a_write_outside_it() {
 
     assert!(action_message(&outcome).contains("outside the mutation root"), "{}", action_message(&outcome));
     assert!(!workspace.outside.join("escape.md").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_junction_or_directory_symlink_inside_the_root_cannot_redirect_a_write_outside_it() {
+    let workspace = Workspace::new();
+    // A junction needs no privilege; `cmd` reads a `/` inside an argument as
+    // a switch, so both paths are re-spelled natively.
+    let junction = workspace.ws.join("prompts/junction");
+    let native = |path: &Path| path.components().collect::<PathBuf>();
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(native(&junction))
+        .arg(native(&workspace.outside))
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success(), "mklink /J failed");
+    let symlink = workspace.ws.join("prompts/symlink");
+    std::os::windows::fs::symlink_dir(&workspace.outside, &symlink)
+        .expect("creating a directory symlink needs Developer Mode or SeCreateSymbolicLinkPrivilege");
+
+    for link in [junction, symlink] {
+        let through_link = link.join("escape.md");
+        let outcome = workspace.run(json!({ "success": [{ "ensure_file": through_link.to_string_lossy() }] }));
+
+        assert!(action_message(&outcome).contains("outside the mutation root"), "{}", action_message(&outcome));
+        assert!(!workspace.outside.join("escape.md").exists(), "{}", link.display());
+    }
+}
+
+impl Workspace {
+    /// This workspace with its resolution context passed through `configure`.
+    fn configure_files(
+        mut self,
+        configure: impl FnOnce(biscuit_file::FileResolutionContext) -> biscuit_file::FileResolutionContext,
+    ) -> Self {
+        self.fixture.files = configure(self.fixture.files.clone());
+        self
+    }
+
+    /// This workspace with `root` as the engine's mutation root instead of `ws`.
+    fn with_mutation_root(mut self, root: &Path) -> Self {
+        self.fixture.engine = EffectEngine::builder().mutation_root(root).auto_rehash(false).build();
+        self
+    }
+
+    /// `path` relative to the fixture's temp directory, for messages.
+    fn relative(&self, path: &Path) -> String {
+        path.strip_prefix(self.fixture.root()).unwrap_or(path).to_string_lossy().replace('\\', "/")
+    }
+
+    /// Run each `(action, expected)` row as its own `success` stack, in order,
+    /// asserting the row succeeds (`None`) or fails with a message containing
+    /// the expected text.
+    fn run_rows(&self, rows: &[(Value, Option<&str>)]) {
+        for (action, expected) in rows {
+            let outcome = self.run(json!({ "success": [action] }));
+            match expected {
+                None => assert_eq!(outcome, LifecycleEventOutcome::default(), "{action}: {}", self.failure_message(&outcome)),
+                Some(text) => {
+                    let message = self.failure_message(&outcome);
+                    assert!(message.contains(text), "{action}: expected `{text}` in {message}");
+                }
+            }
+        }
+    }
+}
+
+const OUTSIDE_ROOT: &str = "outside the mutation root";
+
+#[test]
+fn the_specs_example_table_selects_each_target_by_the_file_reference_contract() {
+    let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+    let home = workspace.outside.clone();
+    let workspace = workspace.configure_files(|files| files.with_home_dir(home));
+    let auth = workspace.ws.join("specs/auth.md");
+    std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+    std::fs::write(&auth, "# Auth\nexisting\n").unwrap();
+
+    workspace.run_rows(&[
+        (json!({ "edit": "specs/auth.md" }), None),
+        (json!({ "ensure_file": ["specs/auth.md", "# Auth"] }), None),
+        (json!({ "append_line": ["specs/auth.md", "reviewed"] }), None),
+        (json!({ "ensure_file": ["specs/new.md", "# New"] }), None),
+        (json!({ "edit": "~/notes.md" }), Some(OUTSIDE_ROOT)),
+    ]);
+
+    let seen: Vec<PathBuf> = workspace.fixture.seen().into_iter().map(|edit| edit.target).collect();
+    assert_eq!(seen, std::slice::from_ref(&auth), "the second candidate opens; the refused `~` never reaches the editor");
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), "# Auth\nexisting\nreviewed\n", "unchanged by ensure_file, then appended");
+    assert_eq!(std::fs::read_to_string(workspace.ws.join("prompts/specs/new.md")).unwrap(), "# New");
+    assert!(!workspace.ws.join("specs/new.md").exists(), "a missing target is the first candidate");
+    assert!(!workspace.outside.join("notes.md").exists());
+}
+
+#[test]
+fn prefixed_targets_inside_the_root_resolve_by_their_prefix_and_write() {
+    let workspace = Workspace::new();
+    let (ws, outside) = (workspace.ws.clone(), workspace.outside.clone());
+    let package = ws.join("pkg");
+    let vault = ws.join("vault");
+    for dir in [&package, &vault, &ws.join("specs")] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    std::fs::write(ws.join("specs/shared.md"), "repo\n").unwrap();
+    std::fs::write(vault.join("kept.md"), "vault\n").unwrap();
+    let workspace = workspace.configure_files(|files| {
+        files.with_package_root(&package).add_vault(&vault).with_home_dir(outside)
+    });
+
+    workspace.run_rows(&[
+        // Existing targets: each prefix's lookup result.
+        (json!({ "append_line": ["&specs/shared.md", "amp"] }), None),
+        (json!({ "append_line": ["^specs/shared.md", "caret"] }), None),
+        (json!({ "append_line": ["@specs/shared.md", "magic"] }), None),
+        (json!({ "append_line": ["vault:kept.md", "vault"] }), None),
+        // Missing targets: each prefix's first candidate.
+        (json!({ "ensure_file": ["&specs/amp-new.md", "amp"] }), None),
+        (json!({ "ensure_file": ["^caret-new.md", "caret"] }), None),
+        (json!({ "ensure_file": ["@magic-new.md", "magic"] }), None),
+        (json!({ "ensure_file": ["vault:notes/vault-new.md", "vault"] }), None),
+    ]);
+
+    assert_eq!(std::fs::read_to_string(ws.join("specs/shared.md")).unwrap(), "repo\namp\ncaret\nmagic\n");
+    assert_eq!(std::fs::read_to_string(vault.join("kept.md")).unwrap(), "vault\nvault\n");
+    for (created, prefix) in [
+        (ws.join("specs/amp-new.md"), "&: the repository root"),
+        (package.join("caret-new.md"), "^: the package root before the repository"),
+        (package.join("magic-new.md"), "@: the launch package root first"),
+        (vault.join("notes/vault-new.md"), "vault: the first vault root"),
+    ] {
+        assert!(created.is_file(), "{prefix}: {}", workspace.relative(&created));
+    }
+    assert!(!ws.join("prompts/specs").exists(), "no prefix falls back beside the document");
+}
+
+#[test]
+fn prefixed_targets_resolving_outside_the_root_are_refused_and_create_nothing() {
+    let workspace = Workspace::with_editor(Some(FakeEditor::default()));
+    let outside = workspace.outside.clone();
+    let (vault, convention) = (outside.join("vault"), outside.join("conventions"));
+    for dir in [&vault, &convention] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    std::fs::write(vault.join("kept.md"), "vault\n").unwrap();
+    std::fs::write(outside.join("home-only.md"), "home\n").unwrap();
+    std::fs::write(convention.join("convention-only.md"), "convention\n").unwrap();
+    let workspace = workspace.configure_files(|files| {
+        files
+            .add_vault(&vault)
+            .with_home_dir(&outside)
+            .add_magic_path(&convention, biscuit_file::PathPosition::End)
+    });
+    let before = workspace.tree();
+
+    workspace.run_rows(&[
+        // Existing targets the prefix finds outside the root.
+        (json!({ "append_line": ["vault:kept.md", "x"] }), Some(OUTSIDE_ROOT)),
+        (json!({ "append_line": ["@home-only.md", "x"] }), Some(OUTSIDE_ROOT)),
+        (json!({ "append_line": ["@convention-only.md", "x"] }), Some(OUTSIDE_ROOT)),
+        (json!({ "edit": "vault:kept.md" }), Some(OUTSIDE_ROOT)),
+        // Missing targets whose first candidate lies outside the root.
+        (json!({ "ensure_file": ["vault:notes/new.md", "x"] }), Some(OUTSIDE_ROOT)),
+        (json!({ "ensure_file": ["~/new/home.md", "x"] }), Some(OUTSIDE_ROOT)),
+    ]);
+
+    assert_eq!(workspace.tree(), before, "no file or parent was created");
+    assert_eq!(std::fs::read_to_string(vault.join("kept.md")).unwrap(), "vault\n");
+    assert_eq!(std::fs::read_to_string(outside.join("home-only.md")).unwrap(), "home\n");
+    assert_eq!(std::fs::read_to_string(convention.join("convention-only.md")).unwrap(), "convention\n");
+    assert!(workspace.fixture.seen().is_empty(), "the editor is never invoked");
+}
+
+/// `&` and `^` refuse targets outside their repository on their own, so an
+/// outside-the-root case needs a mutation root narrower than the document's
+/// repository; in production that is a shared prompt whose repository is not
+/// the caller's.
+#[test]
+fn repository_prefixes_are_not_write_grants_when_the_root_is_narrower_than_the_repository() {
+    let workspace = Workspace::new();
+    let narrow = workspace.ws.join("prompts");
+    let workspace = workspace.with_mutation_root(&narrow);
+    let shared = workspace.ws.join("specs/shared.md");
+    std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
+    std::fs::write(&shared, "repo\n").unwrap();
+    let before = workspace.tree();
+
+    workspace.run_rows(&[
+        (json!({ "append_line": ["&specs/shared.md", "x"] }), Some(OUTSIDE_ROOT)),
+        (json!({ "append_line": ["^specs/shared.md", "x"] }), Some(OUTSIDE_ROOT)),
+        (json!({ "ensure_file": ["&specs/new.md", "x"] }), Some(OUTSIDE_ROOT)),
+        (json!({ "ensure_file": ["^new.md", "x"] }), Some(OUTSIDE_ROOT)),
+    ]);
+
+    assert_eq!(workspace.tree(), before, "no file or parent was created");
+    assert_eq!(std::fs::read_to_string(&shared).unwrap(), "repo\n");
+    // The same root still admits a target beside the document.
+    workspace.run_rows(&[(json!({ "ensure_file": ["./inside.md", "x"] }), None)]);
+    assert!(narrow.join("inside.md").is_file());
+}
+
+/// A lifecycle operand is itself a template, so an author reaches
+/// biscuit-file's `{{NAME}}` placeholder through an interpolation literal:
+/// `{{{NAME}}}` renders the text `{{NAME}}`, which the file reference expands
+/// from the captured environment.
+#[test]
+fn an_environment_expanded_absolute_target_is_judged_as_that_absolute_path() {
+    let workspace = Workspace::new();
+    let env = HashMap::from([
+        ("INSIDE_DIR".to_string(), workspace.ws.join("specs").to_string_lossy().into_owned()),
+        ("OUTSIDE_DIR".to_string(), workspace.outside.to_string_lossy().into_owned()),
+    ]);
+    let workspace = workspace.configure_files(|files| files.with_env(env));
+
+    workspace.run_rows(&[
+        (json!({ "ensure_file": ["{{{INSIDE_DIR}}}/env/a.md", "inside"] }), None),
+        (json!({ "ensure_file": ["{{{OUTSIDE_DIR}}}/env/b.md", "outside"] }), Some(OUTSIDE_ROOT)),
+    ]);
+
+    assert_eq!(std::fs::read_to_string(workspace.ws.join("specs/env/a.md")).unwrap(), "inside");
+    assert!(!workspace.ws.join("prompts/specs").exists(), "never joined beside the document");
+    assert!(!workspace.outside.join("env").exists(), "no parent was created outside");
 }

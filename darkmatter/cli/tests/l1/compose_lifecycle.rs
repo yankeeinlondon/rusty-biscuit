@@ -680,3 +680,214 @@ fn a_launch_from_a_repository_subdirectory_bounds_writes_by_the_working_tree_top
         "from-prompt"
     );
 }
+
+/// `md compose <input>` launched from `launch` (a directory the test built),
+/// reading `stdin` when given.
+fn compose_from(fixture: &CliProcessFixture, launch: &Path, input: &Path, stdin: Option<&str>) -> Ran {
+    let mut command = fixture.command_builder().host_path().ambient_context(launch).build();
+    command.arg("compose").arg(input);
+    if let Some(text) = stdin {
+        command.write_stdin(text);
+    }
+    let output = command.output().expect("md runs");
+    Ran {
+        status: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+/// How a run that wrote `written` and left every `absent` path uncreated ended.
+enum Ended {
+    Succeeded,
+    /// Failed on a target outside the mutation root.
+    Refused,
+}
+
+/// The run's path expectations: it ended as `ended`, every `written` file
+/// holds exactly its text, and no `absent` path exists.
+fn assert_writes(ran: &Ran, ended: Ended, written: &[(&Path, &str)], absent: &[&Path]) {
+    match ended {
+        Ended::Succeeded => assert_eq!(ran.status, Some(0), "{}", ran.stderr),
+        Ended::Refused => {
+            assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+            assert!(ran.stderr.contains("outside the mutation root"), "{}", ran.stderr);
+        }
+    }
+    for (path, text) in written {
+        let found = std::fs::read_to_string(path).unwrap_or_else(|_| panic!("{} was written: {}", path.display(), ran.stderr));
+        assert_eq!(found, *text, "{}", path.display());
+    }
+    for path in absent {
+        assert!(!path.exists(), "{} must not exist", path.display());
+    }
+}
+
+/// A document whose `initialize` runs each action, in order.
+fn initializing(actions: &[String], body: &str) -> String {
+    let mut text = String::from("---\ninitialize:\n");
+    for action in actions {
+        text.push_str(&format!("  - {action}\n"));
+    }
+    text.push_str("---\n");
+    text.push_str(body);
+    text
+}
+
+/// `ensure_file: [<path>, <content>]`, quoted for YAML.
+fn ensure_file(path: impl AsRef<Path>, content: &str) -> String {
+    let path = serde_json::to_string(&path.as_ref().to_string_lossy()).expect("a path string");
+    format!("ensure_file: [{path}, \"{content}\"]")
+}
+
+#[test]
+fn the_specs_example_resolves_each_target_by_the_file_reference_contract() {
+    let fixture = CliProcessFixture::named("lifecycle-root-spec-example");
+    // The implicit relative path's second candidate is the repository root.
+    if !fixture.initialize_repository() {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let auth = fixture.write_file("cwd/specs/auth.md", "# Auth\nexisting\n");
+    let doc = fixture.write_file(
+        "cwd/prompts/doc.md",
+        &initializing(
+            &[
+                ensure_file("specs/auth.md", "# Auth"),
+                "append_line: [\"specs/auth.md\", \"reviewed\"]".to_string(),
+                ensure_file("specs/new.md", "# New"),
+            ],
+            "body\n",
+        ),
+    );
+
+    let ran = compose_from(&fixture, fixture.cwd(), &doc, None);
+
+    let created = fixture.cwd().join("prompts/specs/new.md");
+    assert_writes(
+        &ran,
+        Ended::Succeeded,
+        &[(&auth, "# Auth\nexisting\nreviewed\n"), (&created, "# New")],
+        &[&fixture.cwd().join("specs/new.md")],
+    );
+}
+
+#[test]
+fn stdin_input_resolves_relative_targets_against_the_launch_directory() {
+    let fixture = CliProcessFixture::named("lifecycle-root-stdin");
+    let launch = fixture.cwd().join("here");
+    std::fs::create_dir_all(&launch).expect("launch directory");
+    let document = initializing(&[ensure_file("notes.md", "x"), ensure_file("a/b/c.md", "nested")], "body\n");
+
+    let ran = compose_from(&fixture, &launch, Path::new("-"), Some(&document));
+
+    assert_writes(&ran, Ended::Succeeded, &[(&launch.join("notes.md"), "x"), (&launch.join("a/b/c.md"), "nested")], &[]);
+    assert!(ran.stdout.contains("body"), "{}", ran.stdout);
+    assert!(!fixture.cwd().join("notes.md").exists());
+}
+
+#[test]
+fn outside_any_repository_the_launch_directory_is_the_root() {
+    let fixture = CliProcessFixture::named("lifecycle-root-no-repository");
+    let inside = fixture.cwd().join("inside.md");
+    let sibling = fixture.workspace_path().join("sibling/beyond.md");
+    let doc = fixture.write_file("cwd/doc.md", &initializing(&[ensure_file(&inside, "in"), ensure_file(&sibling, "out")], "body\n"));
+
+    let ran = compose_from(&fixture, fixture.cwd(), &doc, None);
+
+    assert_writes(&ran, Ended::Refused, &[(&inside, "in")], &[&sibling, sibling.parent().unwrap()]);
+}
+
+#[test]
+fn a_launch_from_a_monorepo_package_is_bounded_by_the_repository_top_not_the_package() {
+    let fixture = CliProcessFixture::named("lifecycle-root-package");
+    // A one-member workspace is not detected as a monorepo; two are.
+    fixture.write_file("cwd/Cargo.toml", "[workspace]\nmembers = [\"area/pkg\", \"other\"]\n");
+    for (relative, name) in [("area/pkg", "pkg"), ("other", "other")] {
+        fixture.write_file(
+            format!("cwd/{relative}/Cargo.toml"),
+            &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+        );
+        fixture.write_file(format!("cwd/{relative}/src/lib.rs"), "");
+    }
+    if !fixture.initialize_repository() {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let package = fixture.cwd().join("area/pkg");
+    let beyond = fixture.workspace_path().join("beyond.md");
+    let doc = fixture.write_file(
+        "cwd/area/pkg/doc.md",
+        &initializing(
+            &[ensure_file("../../top-note.md", "from-package"), ensure_file(&beyond, "out")],
+            "body\n",
+        ),
+    );
+
+    let ran = compose_from(&fixture, &package, &doc, None);
+
+    assert_writes(&ran, Ended::Refused, &[(&fixture.cwd().join("top-note.md"), "from-package")], &[&beyond]);
+    // The launch really was a package launch.
+    let pinned = fixture.write_file("cwd/area/pkg/scope.md", "package={{ ctx.current_package }}\n");
+    let scope = compose_from(&fixture, &package, &pinned, None);
+    assert!(scope.stdout.contains("package=pkg"), "{}{}", scope.stdout, scope.stderr);
+}
+
+#[test]
+fn a_launch_inside_a_linked_worktree_is_bounded_by_that_worktree_never_the_main_checkout() {
+    let fixture = CliProcessFixture::named("lifecycle-root-worktree");
+    let main = fixture.cwd().join("main");
+    let linked = fixture.cwd().join("linked");
+    fixture.write_file("cwd/main/README.md", "main\n");
+    if !fixture.initialize_repository_at(&main) || !fixture.add_worktree(&main, &linked) {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let in_worktree = linked.join("in-worktree.md");
+    let in_main = main.join("in-main.md");
+    let doc = fixture.write_file("cwd/linked/doc.md", &initializing(&[ensure_file(&in_worktree, "wt"), ensure_file(&in_main, "main")], "body\n"));
+
+    let ran = compose_from(&fixture, &linked, &doc, None);
+
+    assert_writes(&ran, Ended::Refused, &[(&in_worktree, "wt")], &[&in_main]);
+}
+
+#[test]
+fn a_corrupt_repository_at_launch_fails_before_any_file_action() {
+    let fixture = CliProcessFixture::named("lifecycle-root-corrupt-git");
+    // `objects/` and `refs/` make it a repository to discovery; a `.git`
+    // holding only `HEAD` is no repository at all, to Git and to `md`.
+    for dir in ["objects", "refs"] {
+        std::fs::create_dir_all(fixture.cwd().join(".git").join(dir)).expect("repository directory");
+    }
+    fixture.write_file("cwd/.git/HEAD", "garbage\n");
+    let made = fixture.cwd().join("made.md");
+    let doc = fixture.write_file("cwd/doc.md", &initializing(&[ensure_file("made.md", "x")], "body\n"));
+
+    let ran = compose_from(&fixture, fixture.cwd(), &doc, None);
+
+    assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+    assert!(ran.stderr.contains("\"HEAD\" could not be decoded"), "{}", ran.stderr);
+    assert!(!made.exists(), "no file action ran");
+    assert!(ran.stdout.is_empty(), "nothing composed: {}", ran.stdout);
+}
+
+#[test]
+fn a_broken_gitfile_at_launch_fails_rather_than_bounding_writes_by_the_enclosing_repository() {
+    let fixture = CliProcessFixture::named("lifecycle-root-broken-gitfile");
+    if !fixture.initialize_repository() {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let inner = fixture.cwd().join("inner");
+    let missing = fixture.workspace_path().join("missing-admin");
+    fixture.write_file("cwd/inner/.git", &format!("gitdir: {}\n", missing.display()));
+    let doc = fixture.write_file("cwd/inner/doc.md", &initializing(&[ensure_file("../escaped.md", "x")], "body\n"));
+
+    let ran = compose_from(&fixture, &inner, &doc, None);
+
+    assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+    assert!(ran.stderr.contains("does not point to a valid repository"), "{}", ran.stderr);
+    assert!(!fixture.cwd().join("escaped.md").exists(), "the enclosing repository is never the boundary");
+    assert!(ran.stdout.is_empty(), "nothing composed: {}", ran.stdout);
+}
