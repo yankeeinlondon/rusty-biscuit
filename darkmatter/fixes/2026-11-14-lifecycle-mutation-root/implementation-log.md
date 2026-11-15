@@ -29,6 +29,7 @@ packages:
   - claudine
   - claudine-cli
   - darkmatter-cli
+  - sniff
 decisions_for_review:
   - |-
     Claudine's existing tests that encoded the old "create a missing relative
@@ -81,34 +82,72 @@ decisions_for_review:
     possible for system temp dirs). If a reviewer wants the full root in
     every diagnostic, the change is in how `md` builds its lifecycle
     failure diagnostic, and the test would then assert the whole message.
+  - |-
+    Sniff's repository discovery was changed (outside the two areas this
+    fix names) so a `.git` file that points at no repository is an error
+    rather than skipped. Without it, `md compose` launched in a directory
+    with a broken `.git` file inside a larger repository used that larger
+    repository as the write boundary, which the spec forbids ("do not turn
+    a discovery failure into permission to write under a guessed root").
+    The rule matches git, which refuses such a directory. Alternatives: fix
+    only the lifecycle hosts (they cannot see what gix skipped), or leave it
+    and file it. Every sniff consumer now gets an error where it used to
+    get the enclosing repository; sniff, darkmatter, claudine and worktree
+    suites pass. Reverting means restoring `trusted_discover` in
+    `sniff/lib/src/filesystem/git/open.rs` and dropping its two tests.
+  - |-
+    Claudine treats a failed launch-repository discovery as "no repository":
+    lifecycle writes are then bounded by the launch directory and nothing is
+    reported. The spec says the failure must be reported; the plan assumed
+    `InvocationContext::capture` already propagates it, but it does not.
+    This was not fixed in Phase 3 because the fix is a design choice: fail
+    only lifecycle file actions at the seven engine constructions, or fail
+    every Claudine run at capture. The current behavior never widens the
+    boundary (a test pins that). Filed as the draft follow-up
+    `2026-11-15-launch-discovery-failure-reporting`. If the reviewer wants
+    it in this fix, the work is a shared helper plus a check at each of the
+    seven hosts, and tightening that test to assert the reported error.
+  - |-
+    A referenced sequence or group now runs its event, child, and loop-gate
+    stacks in a file-resolution context derived for its own document
+    (keeping the launch scope), not the caller's. The spec says "a
+    referenced sequence or group uses its own document" but the code passed
+    the caller's context, which made every lifecycle write from a shared
+    library's sequence fail as an unsuppressible evaluation error. If
+    derivation fails, the caller's context is used as before. The
+    alternative was to derive the context inside Darkmatter's resolver from
+    `source_path` alone, which would lose Claudine's launch-scope and trust
+    rules.
+  - |-
+    The plan's corrupt-repository fixture (a `.git` directory with a garbage
+    `HEAD`) is not a repository at all to git, gix, or sniff, so it cannot
+    test a discovery failure. The `md` test adds `objects/` and `refs/` so
+    it is a repository with a bad `HEAD`, and the broken-gitfile case is
+    tested separately. Claudine's version uses a corrupt `.git/config`.
 message_to_agent: |-
-  Phase 2 rewired every lifecycle host to the launch scope's local root
-  (`launch_magic_scope().local_root()` from the request's resolution
-  context): `md compose`, and Claudine's compose loop route, staged single
-  boot, wrapper pipeline, sequence container, task stack, step guard, and
-  loop harness. The plan's sweep finds no remaining old-root engine
-  construction. Things to know for Phase 3:
-  - The darkmatter `docs/` pages and Claudine docs still describe the old
-    roots; Phase 4 rewrites them as planned. The repo skill
-    `.claude/skills/darkmatter/lifecycle.md` already states the new rule.
-  - New CLI tests: `darkmatter/cli/tests/l1/compose_lifecycle.rs` (three
-    tests at the end: subdirectory prompt writes to the launch root via
-    `../`, a foreign prompt is refused, a launch from a repo subdirectory
-    is bounded by the working-tree top) and four in
-    `claudine/cli/tests/l1/lifecycle_mutation_root.rs` (two new sequence
-    tests). Extend these rather than starting new modules.
-  - A sequence container event that fails with no `failure:` stack exits 1
-    with no output at all; the sequence test adds a `failure:` stack that
-    prints `err.msg` to see the reason. This silence predates this fix.
-  - The lifecycle failure message is clamped to 240 characters, even in
-    `md compose --output json` diagnostics, so with temp-dir paths the root
-    is cut off; assert a prefix of it (see decisions_for_review).
-  - Run Claudine CLI tests with `--features test-fixtures` (what `just test`
-    passes). Without it, `document_environment_routes` and
-    `lifecycle_message_drain` fail for reasons unrelated to this fix.
-  - The step-guard engine (`task_run.rs`, guard of a `when` step) has no
-    test of its own: a guard only evaluates a condition with shell
-    disabled, so it is covered only by the shared wiring.
+  Phase 3 added the verification suites and fixed two production defects
+  they found; Phase 4 (docs, skills, publish) should know:
+  - Claudine: referenced sequences/groups now run their stacks in their own
+    document's file-resolution context (`TaskExecution::authoring_context`
+    in `claudine/lib/src/composition/sequence/task/mod.rs`), keeping the
+    launch scope. The Claudine lifecycle docs should state that a referenced
+    container's relative targets resolve beside its own file, and an inline
+    group/task beside its containing document.
+  - sniff: `trusted_discover` now fails on a `.git` file that points at no
+    repository instead of skipping it (git parity). Already documented in
+    `sniff/docs/sniff-library-architecture.md` and the sniff repo skill.
+  - Claudine still treats a failed launch-repository discovery as "no
+    repository" (narrows the boundary to the launch dir, reports nothing).
+    Not fixed; filed as `2026-11-15-launch-discovery-failure-reporting` and
+    listed in decisions_for_review. Docs must not claim Claudine reports it.
+  - `md compose` stdin uses the launch directory as the authoring base;
+    Claudine has no stdin or text-input route (`inline-compose` takes a
+    file), so R9 for Claudine is covered by a document at the launch dir.
+  - An env placeholder reaches a lifecycle operand as `"{{{NAME}}}/x.md"`
+    (renders the literal `{{NAME}}`), worth a line in the lifecycle docs.
+  - Host load from other sessions was very high (30-250); 19 passive
+    Claudine schema tests measured ~5.0 s even alone. They are older and
+    untouched by this fix; re-measure on a quiet host at the final gate.
 source_files_during_phase_2:
   - darkmatter/cli/src/commands/compose/lifecycle.rs
   - darkmatter/cli/tests/l1/compose_lifecycle.rs
@@ -124,6 +163,30 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/darkmatter/lifecycle.md
+source_files_during_phase_3:
+  - darkmatter/lib/src/lifecycle/executor/tests.rs
+  - darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+  - darkmatter/cli/tests/l1/compose_lifecycle.rs
+  - darkmatter/cli/tests/common/fixture.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/sequence/task/mod.rs
+  - claudine/lib/src/composition/sequence/task/sequence.rs
+  - claudine/lib/src/composition/sequence/task/group.rs
+  - claudine/cli/tests/common/mod.rs
+  - claudine/cli/tests/common/mutation_paths.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/lifecycle_mutation_root.rs
+  - claudine/cli/tests/l1/lifecycle_mutation_lifetime.rs
+  - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+  - sniff/lib/src/filesystem/git/open.rs
+  - sniff/lib/tests/l1/integration.rs
+docs_updated_during_phase_3:
+  - sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_3:
+  - claudine/fixes/2026-11-15-launch-discovery-failure-reporting/spec.md
+skills_files_updated_during_phase_3:
+  - .claude/skills/darkmatter/lifecycle.md
+  - .claude/skills/sniff/remote-and-repository.md
 ---
 
 # Implementation Log for 2026-11-14-lifecycle-mutation-root (4 phases)
@@ -218,3 +281,219 @@ skills_files_updated_during_phase_2:
   absent-equals-null work). This session staged nothing and unstaged
   nothing.
 
+
+## Phase 2
+
+- Started Phase 2 (Host wiring: the same boundary everywhere). The five
+  tasks were small, separate edits, so they were done inline with no
+  subagents.
+- **Wiring** — every lifecycle `EffectEngine` construction now takes its
+  root from the request's `FileResolutionContext::launch_magic_scope().local_root()`:
+  - `md compose` (`darkmatter/cli/src/commands/compose/lifecycle.rs`):
+    replaced the document-directory selection; the module docs now state
+    the boundary.
+  - Claudine compose loop route and staged single boot (`compose/prep.rs`,
+    via `loop_prepare_options` / `options.file_resolution_context`); the
+    `staged_boot.rs` comment now names the launch-scope root.
+  - Claudine wrapper pipeline (`wrap/composition/pipeline.rs`), through
+    `request.prepared.input_layers.file_resolution_context`.
+  - Sequence container (`wrap/sequence/mod.rs`): was `source_context.base_dir()`.
+  - Task stack and step guard (`wrap/sequence/task_run.rs`): were
+    `task.origin_dir`. The comment that called the authoring directory the
+    root now says it is the resolution base only.
+  - Loop harness (`wrap/harness_orch/loop_control.rs`): was `run.child_cwd`.
+  - The plan's checkpoint sweep (`rg "launch_workspace.child_cwd|source_context.base_dir\(\)|origin_dir|env_plan.child_cwd|source_path.*parent"`
+    filtered to engine constructions) finds nothing. A search for every
+    `EffectEngine::builder()` in the two areas' production code lists only
+    these eight sites.
+  - Failure reporting for capture errors is unchanged (R3): every site reads
+    a scope that was already captured.
+- **Behavior changes and their tests** (each new test was run against the
+  old code and failed there, then passed with the fix):
+
+  | Changed behavior | Boundary / tier | Test |
+  |---|---|---|
+  | `md`: a prompt in `prompts/` writes `../root-note.md` into the launch dir (was refused) | CLI process, F3, L1 | `compose_lifecycle::a_prompt_in_a_subdirectory_writes_to_the_launch_root_through_a_parent_reference` |
+  | `md`: a prompt outside the launch scope cannot write beside itself (was allowed); exit 1, no document, nothing created; message names the exact target and starts the launch root | CLI process (`--output json`), F3, L1 | `compose_lifecycle::a_prompt_outside_the_launch_scope_cannot_write_beside_itself` |
+  | `md`: launched from a repository subdirectory, the boundary is the working-tree top, not the launch dir or the prompt dir | CLI process + `git init`, F3, L1 | `compose_lifecycle::a_launch_from_a_repository_subdirectory_bounds_writes_by_the_working_tree_top` |
+  | `md`: a sibling-library prompt editing a `{{ ctx.cwd }}` file now succeeds and opens that same file (the old test expected a refusal) | CLI process + fake editor, F3, L1 | `compose_edit_action::a_prompt_outside_the_launch_directory_edits_the_absolute_target_inside_its_root` (rewritten) |
+  | Claudine sequence container `initialize` and a side-effect task in `sequences/` both write `../events.log` at the repository top (were refused) | CLI process, F3, L1 | `lifecycle_mutation_root::a_sequence_in_a_subdirectory_writes_to_the_launch_root_from_initialize_and_a_task` |
+  | Claudine: a foreign-library sequence cannot write beside itself, from its container `initialize` or from a task alone (both were allowed) | CLI process, F3, L1 | `lifecycle_mutation_root::a_foreign_sequence_cannot_write_beside_itself_from_initialize_or_a_task` |
+
+  The task route was also checked on its own: with only `task_run.rs`
+  reverted, the task-only half of the foreign-sequence test failed.
+  Unchanged in practice: Claudine's compose, staged, wrapper, and loop
+  routes, where `child_cwd` already equaled the launch repository top. The
+  existing `lifecycle_mutation_root` compose tests and the Claudine suite
+  cover them. The step guard has no test of its own (it evaluates a
+  condition with shell disabled). No input-robustness matrix applies: no
+  parser or loader changed.
+- **Findings, not changed (outside this phase)**:
+  - The lifecycle failure message is clamped to 240 characters
+    (`concise_message`), and that includes the `md compose --output json`
+    diagnostic. With macOS temp-dir paths, the root in a containment
+    refusal is cut off, so the test checks a prefix (decisions_for_review).
+  - A sequence container event that fails with no `failure:` stack exits 1
+    with no output. The foreign-sequence test adds a `failure:` stack that
+    prints `err.msg` (the Claudine name; `failed:` is rejected as
+    Darkmatter's name).
+  - Running Claudine CLI tests without `--features test-fixtures` fails
+    `document_environment_routes` (7) and the drain-budget test. The
+    failures were the same with this phase's Claudine changes reverted,
+    and `just test` passes the feature.
+- **Skill** — `.claude/skills/darkmatter/lifecycle.md`: replaced the old
+  host-root sentence ("`md`'s mutation root is the prompt's own directory")
+  with the one rule for every host. The `docs/` pages and caller skills are
+  Phase 4 work in the plan, and until then they still describe the old
+  roots.
+- **Gates** (macOS, nothing else running):
+  - `darkmatter/`: `just test` gave 16751 passed, 0 failed, "none at or above
+    5.0s". `just lint` was clean. `just check-tier-coverage darkmatter`
+    showed 0 stranded.
+  - `claudine/` (changed directly; it is also the only dependent of
+    `darkmatter-cli`): `just test` gave 12172 passed, 0 failed, none at or
+    above 5.0 s. `just lint` exited 0 (only the macOS linker's
+    `__eh_frame` notice). `just check-tier-coverage claudine` showed 0
+    stranded.
+  - Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+    `packages` = `claudine-cli`, `darkmatter-cli`, `test-toolkit`,
+    `darkmatter`; `change_class` = `package`. The gates were therefore
+    required, and they ran.
+  - Cross-OS (Windows, `just cross-check --os windows`): `darkmatter-cli
+    compose_lifecycle` 54 passed, `darkmatter-cli compose_edit_action` 13
+    passed, `claudine-cli lifecycle_mutation_root` 4 passed. A first
+    attempt with an `-E 'test(...)'` filter failed on shell quoting inside
+    the recipe and ran nothing; positional filters were used instead.
+
+## Phase 3
+
+- Started Phase 3 (verification suites). Three foreground subagents ran in
+  parallel, each scoped to its own tests: Darkmatter library and CLI tests,
+  Claudine caller/source and inline tests (`lifecycle_mutation_root.rs`),
+  and Claudine lifetime/wiring tests (new `lifecycle_mutation_lifetime.rs`).
+  The orchestrator then fixed what they found and ran the gates.
+- **Requirement-to-test mapping** (all L1; library tests are F1 in-process
+  through `StackExecutor::execute_event`, CLI tests are F3 binary spawns):
+  | Spec Verification bullet | Test(s) |
+  |---|---|
+  | Relative targets: the spec's example table (library) | `lifecycle::executor::tests::the_specs_example_table_selects_each_target_by_the_file_reference_contract` |
+  | Relative targets: the spec's example table (`md`, git repo) | `compose_lifecycle::the_specs_example_resolves_each_target_by_the_file_reference_contract` |
+  | Relative targets: stdin | `compose_lifecycle::stdin_input_resolves_relative_targets_against_the_launch_directory` |
+  | Relative targets: inline input | `lifecycle_mutation_root::inline_compose_creates_bare_and_nested_relative_targets_beside_a_document_at_the_launch_directory`; `lifecycle_mutation_lifetime::inline_compose_events_write_beside_the_document` (Unix) |
+  | Reference semantics: prefixes inside the root, missing targets at the prefix's first candidate | `prefixed_targets_inside_the_root_resolve_by_their_prefix_and_write` |
+  | Reference semantics: prefixes outside the root (`vault:`, `@` through home or a magic path, `~`) | `prefixed_targets_resolving_outside_the_root_are_refused_and_create_nothing` |
+  | Reference semantics: `&`/`^` are not write grants | `repository_prefixes_are_not_write_grants_when_the_root_is_narrower_than_the_repository` |
+  | Reference semantics: environment expansion to an absolute path | `an_environment_expanded_absolute_target_is_judged_as_that_absolute_path` (the operand `"{{{NAME}}}/x.md"` renders the literal `{{NAME}}/x.md`, which biscuit-file expands) |
+  | Reference semantics: unmatched `%`, URL | Phase 1 tests (unchanged) |
+  | Boundary enforcement: Windows link counterpart | `a_junction_or_directory_symlink_inside_the_root_cannot_redirect_a_write_outside_it` (`#[cfg(windows)]`; junction via `mklink /J`, plus `symlink_dir` that fails rather than passes without privilege) |
+  | Boundary enforcement: `../`, sibling prefix, unix symlink | Phase 1 tests (unchanged) |
+  | Boundary selection: outside a repository | `compose_lifecycle::outside_any_repository_the_launch_directory_is_the_root` |
+  | Boundary selection: monorepo package | `compose_lifecycle::a_launch_from_a_monorepo_package_is_bounded_by_the_repository_top_not_the_package` (asserts `ctx.current_package` so it really is a package launch) |
+  | Boundary selection: linked worktree | `compose_lifecycle::a_launch_inside_a_linked_worktree_is_bounded_by_that_worktree_never_the_main_checkout` |
+  | Boundary selection: discovery failure reported | `compose_lifecycle::a_corrupt_repository_at_launch_fails_before_any_file_action`, `compose_lifecycle::a_broken_gitfile_at_launch_fails_rather_than_bounding_writes_by_the_enclosing_repository`, `sniff integration::test_a_broken_gitfile_is_a_discovery_failure_not_the_enclosing_repository`; Claudine: `lifecycle_mutation_root::a_failed_launch_discovery_never_widens_the_boundary_to_the_repository_top` (see the Claudine finding below) |
+  | Caller and source differ | existing `lifecycle_mutation_root` compose tests (absolute in-root write succeeds, relative write beside the foreign prompt refused); new `outside_a_repository_the_launch_directory_bounds_a_prompt_from_inside_one` |
+  | Lifetime: `prep`/`proxy` | `lifecycle_mutation_lifetime::prep_switches_the_base_to_the_target_and_back_while_the_boundary_stays`, `proxy_hops_move_the_base_with_the_active_document_but_never_the_boundary` |
+  | Lifetime: retry and resume | `a_retried_attempt_…`, `a_resumed_attempt_…` (one macro) |
+  | Lifetime: loop progression, loop events | `every_pass_and_gate_of_a_document_loop_writes_beside_the_document`, `every_pass_of_a_sequence_loop_keeps_each_documents_base` |
+  | Host wiring: nested sequences/groups | `referenced_containers_write_beside_themselves_and_inline_ones_beside_their_container`, `a_foreign_referenced_sequence_is_bounded_by_the_callers_root` |
+  | Lifetime: parallel members | `parallel_members_resolve_relative_targets_against_their_own_documents` |
+  | Host wiring: staged init and the wrapper pipeline | `compose_staged_initialize_and_pipeline_events_write_beside_the_document`; root sequence and task: Phase 2 tests |
+  | Passive surfaces | `lifecycle_passive_compose` (extended with `append_line`, `edit`, `set_frontmatter`) and `schema_validating_a_document_with_lifecycle_writers_dispatches_none_of_them` |
+  Shared path-expectation helpers: `claudine/cli/tests/common/mutation_paths.rs`
+  (`CallerTree`, `assert_written_beside`, `assert_refused_outside_root`, …)
+  and `compose_lifecycle.rs`'s `assert_writes`. Darkmatter's CLI fixture gained
+  `add_worktree`. Not covered: `kind: task` adapters, and the step guard (it
+  evaluates a condition with shell disabled and cannot write). No input
+  robustness matrix applies: no parser or loader changed.
+- **Production bug found and fixed (Claudine)**: a referenced sequence or
+  group's event, child, and loop-gate stacks switched `source_path` to the
+  nested document but kept the caller's `file_resolution_context`. The
+  Phase 1 resolver then failed with "repository root … does not contain the
+  resolution source …" (as an evaluation error that `no_error` cannot
+  suppress) for a nested document in a shared library, or reached through a
+  symlinked spelling (macOS `/tmp`). Fix: `TaskExecution::authoring_context`
+  (`claudine/lib/src/composition/sequence/task/mod.rs`) derives the
+  document's own context via `InvocationContext::derive_source`, which keeps
+  the launch scope, so the boundary is unchanged; `sequence.rs` and
+  `group.rs` use it for their stacks, while their rereads keep the caller's
+  context. It returns a `Cow` because Claudine's context-construction guard
+  forbids `Option<FileResolutionContext>`, and the first full run failed
+  that guard. Reverting the group half fails the nested test.
+- **Production bug found and fixed (sniff, the widening case)**: gix's upward
+  search skips a `.git` *file* that points at no repository and keeps
+  walking, so `md compose` launched in `outer/inner` (with `inner/.git`
+  reading `gitdir: /nonexistent`) used the enclosing repository `outer/` as
+  the mutation root and wrote `outer/escaped.md`. Git itself refuses this
+  directory. `sniff/lib/src/filesystem/git/open.rs::trusted_discover` now
+  rejects a discovery that walked past a `.git` file below the repository it
+  found (or found none), as a `SniffError::Git("discover", …)`. Both sides
+  are canonicalized once per discovery. A `.git` *directory* that is not a
+  repository is still skipped, as git skips it. Tests: the sniff integration
+  test above (broken gitfile, garbage gitfile, valid separate-git-dir
+  gitfile, invalid `.git` directory, no repository) and the `md` CLI test.
+- **Finding not fixed (Claudine, the narrowing case)**: `InvocationContext`
+  records a launch-repository discovery error (`RepositoryEntry::failed`)
+  and continues, so the launch scope has no repository root and lifecycle
+  writes are bounded by the launch directory. The plan's R3 assumed
+  `capture` propagates the error; it does not. The fallback only narrows the
+  boundary (the test above pins that it never widens), but the spec says a
+  discovery failure must be reported. Recorded in `decisions_for_review`.
+- **Plan fixture correction**: a `.git` directory holding only a garbage
+  `HEAD` is "no repository" to git, gix, and sniff alike. The Darkmatter
+  corrupt-repository test adds `objects/` and `refs/` so it is a repository
+  with a bad `HEAD`; `md` then fails before any file action.
+  The Claudine finding is filed as the draft follow-up
+  `2026-11-15-launch-discovery-failure-reporting` (Claudine fixes).
+- **Windows-only test defects fixed**: `cross-check --os windows` of the
+  executor tests showed two older assertions that could not pass on Windows:
+  `a_host_without_an_editor_fails_the_action_as_unsupported_and_no_error_continues`
+  (the fake host labels a failure with its `Debug` form, which escapes
+  backslashes) and `a_target_outside_the_root_is_refused_naming_target_and_root_before_any_parent_exists`
+  (its expected path joined `deep/new/file.md`, leaving mixed separators).
+  Both assertions now build the spelling the message uses. Production was
+  correct.
+- **Skills and docs**: `.claude/skills/darkmatter/lifecycle.md` (a host
+  running a stack for another document must pass that document's own
+  context); `.claude/skills/sniff/remote-and-repository.md` and
+  `sniff/docs/sniff-library-architecture.md` (`GitRequest` section: a broken
+  `.git` file is a discovery error, not the enclosing repository). The
+  Darkmatter and Claudine lifecycle `docs/` rewrites remain Phase 4.
+- **Gates** (macOS; host load from other sessions ran 30–250 throughout):
+  - `darkmatter/`: `just test` gave 16764 passed, 0 failed, none at or above
+    5.0 s (load ~11–17). After it, only `executor/tests.rs` changed (the two
+    Windows assertions); its 52 tests pass. `just lint` was clean;
+    `just check-tier-coverage darkmatter` showed 0 stranded.
+  - `claudine/`: the first `just test` failed one test,
+    `context_construction_guard::production_source_builds_contexts_only_through_the_builder`
+    (the new `Option<FileResolutionContext>`), fixed with the `Cow`. The
+    second `just test` gave 12186 passed, 0 failed, with 182 tests at
+    5.0–9.2 s while the load average was 120–180; none reached 10 s. Rerun
+    serially (`-j 1`): every `claudine-cli` slow test, including all the new
+    ones, came in under 5 s. 19 `claudine` passive schema tests
+    (`claudine_schemas*`, `claudine_schema_shipped_corpus`) stayed at about
+    5 s; measured alone at load 250 they took 4.9–5.0 s. The local timing
+    history already records them as slow on earlier commits (`200a476e`),
+    and they exercise no code this phase changed, so they are recorded as
+    load-sensitive, not cleared at a quiet 5 s. `just lint` was clean;
+    0 stranded.
+  - `sniff/` (changed directly): `just test` gave 3594 passed, none slow;
+    `just lint` was clean; 0 stranded.
+  - Dependent `worktree` (most broken-gitfile fixtures in the repository):
+    `just test` gave 1506 passed. A first run failed
+    `live_remote::tests::the_deadline_kills_the_http_transport_and_closes_its_connection`
+    at load 98, and it passed alone in 0.63 s (load-sensitive, unrelated).
+    Its `git_graph` slow tests (12–15 s in the package run) were timed with
+    the sniff change reverted and restored: 3.1–4.2 s either way, and they
+    were recorded at up to 19.8 s on earlier commits, so they are existing
+    and unaffected. Darkmatter's own gitfile fixture
+    (`git_context_integration`) passed in `just test`.
+  - Cross-OS (Windows, `just cross-check`): `sniff broken_gitfile` 1 passed;
+    `darkmatter lifecycle::executor::tests` failed 2 on the first attempt
+    (fixed above), then 52 passed, including the new junction test;
+    `darkmatter-cli compose_lifecycle` 61 passed;
+    `claudine-cli lifecycle_mutation` 17 passed (the inline-compose
+    lifetime test is Unix-only).
+  - Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+    `packages` = `claudine`, `claudine-cli`, `darkmatter`, `darkmatter-cli`,
+    `sniff`, `test-toolkit`; `change_class` = `package`. The gates were
+    required, and they ran.

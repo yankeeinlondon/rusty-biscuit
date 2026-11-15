@@ -1,7 +1,7 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 2
+phase: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1:
@@ -30,6 +30,7 @@ packages:
 - claudine
 - claudine-cli
 - darkmatter-cli
+- sniff
 source_files_during_phase_2:
 - darkmatter/cli/src/commands/compose/lifecycle.rs
 - darkmatter/cli/tests/l1/compose_lifecycle.rs
@@ -45,6 +46,30 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
 - .claude/skills/darkmatter/lifecycle.md
+source_files_during_phase_3:
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/common/fixture.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/common/mutation_paths.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/lifecycle_mutation_root.rs
+- claudine/cli/tests/l1/lifecycle_mutation_lifetime.rs
+- claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+- sniff/lib/src/filesystem/git/open.rs
+- sniff/lib/tests/l1/integration.rs
+docs_updated_during_phase_3:
+- sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_3:
+- claudine/fixes/2026-11-15-launch-discovery-failure-reporting/spec.md
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/sniff/remote-and-repository.md
 ---
 
 # Plan — One mutation root for every lifecycle host
@@ -445,7 +470,7 @@ fixture.
 
 Wave 1 (parallel):
 
-- [ ] **Contract table tests** (darkmatter lib executor tests, plus one CLI
+- [x] **Contract table tests** (darkmatter lib executor tests, plus one CLI
   fixture test in `darkmatter/cli/tests/l1/compose_lifecycle.rs`)
   - The spec's example as a table: prompt at `prompts/doc.md` run from the
     repo root where `specs/auth.md` exists — `edit: specs/auth.md` opens the
@@ -455,7 +480,7 @@ Wave 1 (parallel):
   - Cover implicit, explicit (`./`), and nested missing-parent forms, stdin
     input, and inline-composition text input (R9), asserting through the
     public result (executor outcome and the filesystem).
-- [ ] **Caller/source differ tests** (claudine CLI L1 fixture, extending
+- [x] **Caller/source differ tests** (claudine CLI L1 fixture, extending
   `lifecycle_mutation_root.rs`)
   - An external shared prompt writing an absolute target inside the caller's
     root succeeds; writing beside itself through a relative target is refused
@@ -464,7 +489,7 @@ Wave 1 (parallel):
   - Launch outside any repository with a prompt inside one: the caller's
     launch directory still wins (the boundary is the launch scope, not the
     document's repository).
-- [ ] **Reference-semantics tests** (darkmatter lib executor tests)
+- [x] **Reference-semantics tests** (darkmatter lib executor tests)
   - Prefixed targets inside the root (`&`, `^`, `@`, and `vault:` with a vault
     root configured in the fixture) resolve and write; the same prefixes
     outside the root are refused — prefixes are not write grants (spec: "This
@@ -475,7 +500,7 @@ Wave 1 (parallel):
     treated as an absolute target (containment decides).
   - An unmatched recursive `%` reference is refused; a URL makes zero fetch
     attempts (assert the error kind; no network in tests).
-- [ ] **Boundary-enforcement tests** (darkmatter lib + CLI tests)
+- [x] **Boundary-enforcement tests** (darkmatter lib + CLI tests)
   - An in-root `../` target succeeds; an escaping `..`, a sibling text prefix
     (`~/proj-x` versus `~/proj`), and a symlink escape fail before any file or
     parent is created.
@@ -487,7 +512,7 @@ Wave 1 (parallel):
 
 Wave 2 (after Wave 1):
 
-- [ ] **Lifetime and wiring tests** (claudine L1 fixtures: compose staged boot,
+- [x] **Lifetime and wiring tests** (claudine L1 fixtures: compose staged boot,
   wrap composition tests, sequence containers, loop primitives)
   - Change source documents through `prep`/`proxy`, retry, resume, and loop
     progression: the boundary stays fixed (writes always land inside the
@@ -505,7 +530,7 @@ Wave 2 (after Wave 1):
     package subdirectory, linked worktree, corrupt `.git`.
   - Passive surfaces: one guard test that schema validation and composition
     without a lifecycle host dispatch no mutation and open no editor.
-- [ ] **Existing-test sweep and full L1 runs**
+- [x] **Existing-test sweep and full L1 runs**
   - Run `just test` in `darkmatter/` and `claudine/`; fix every expectation
     that encoded root-joined creation or a host-specific root, per R10.3.
   - Run `just lint` in both areas.
