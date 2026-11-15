@@ -2421,7 +2421,9 @@ mod side_effect_tasks {
             dir.path(),
             json!({ "name": "alpha", "side_effect": { "ensure_dir": ["made-here"] } }),
         );
-        let fixture = Fixture::build(dir, &source).unwrap();
+        // A relative target is created beside the authoring document, so the
+        // boundary must contain the fixture directory.
+        let fixture = Fixture::build(dir, &source).unwrap().mutating_its_directory();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
         let runtime = Arc::new(RuntimeState::new());

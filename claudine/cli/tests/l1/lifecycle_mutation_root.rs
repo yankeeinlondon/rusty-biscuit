@@ -1,13 +1,12 @@
-//! Lifecycle side effects write into the **launch** workspace, not the
-//! repository that holds the prompt.
+//! Lifecycle side effects are bounded by the **caller's** tree, while their
+//! targets are selected relative to the document that authored them.
 //!
 //! A shared prompt library such as `~/.claudine/prompts` is often its own git
 //! repository. When a prompt from that library runs against a different
-//! project, its lifecycle actions (`ensure_file`, `append_line`, …) must target
-//! the project being worked on. Before this was fixed the effect engine's
-//! mutation root was the *prompt's* repository root, so a write into the launch
-//! repo failed with `refusing to write outside the mutation root` as soon as
-//! the prompt library became a git repo.
+//! project, its lifecycle actions (`ensure_file`, `append_line`, …) may write
+//! only inside the project being worked on: an absolute target there is
+//! allowed, while a relative target resolves beside the prompt, in the
+//! library, and is refused before anything is created.
 
 use std::fs;
 use std::path::PathBuf;
@@ -46,9 +45,9 @@ impl CrossRepo {
         Self { fixture, library, doc }
     }
 
-    /// Run `claudine compose --claude` on `doc_body`, asserting success and
-    /// that no lifecycle write was refused. Returns the plain stderr.
-    fn compose(&self, doc_body: &str) -> String {
+    /// Run `claudine compose --claude` on `doc_body`; returns its status and
+    /// plain stderr.
+    fn run(&self, doc_body: &str) -> (std::process::ExitStatus, String) {
         fs::write(&self.doc, doc_body).unwrap();
         let output = self
             .fixture
@@ -56,44 +55,50 @@ impl CrossRepo {
             .args(["compose", "--claude", self.doc.to_str().unwrap()])
             .output()
             .expect("spawn claudine");
-        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        (output.status, strip_ansi(&String::from_utf8_lossy(&output.stderr)))
+    }
+
+    /// [`Self::run`], asserting success and that no lifecycle write was
+    /// refused. Returns the plain stderr.
+    fn compose(&self, doc_body: &str) -> String {
+        let (status, stderr) = self.run(doc_body);
         assert!(
             !stderr.contains("outside the mutation root"),
             "lifecycle writes into the launch repo must not be refused; stderr was:\n{stderr}"
         );
         assert!(
-            output.status.success(),
-            "compose failed ({:?}); stderr was:\n{stderr}",
-            output.status
+            status.success(),
+            "compose failed ({status:?}); stderr was:\n{stderr}"
         );
         stderr
     }
 }
 
+/// A relative target authored by a foreign prompt resolves beside the prompt
+/// (its first candidate), outside the caller's tree, so it is refused before
+/// anything is created on either side.
 #[test]
-fn lifecycle_relative_writes_land_in_launch_repo_when_prompt_lives_in_another_repo() {
+fn a_relative_write_from_a_prompt_in_another_repo_is_refused_and_creates_nothing() {
     let staged = CrossRepo::stage();
-    let stderr = staged.compose(
+    let (status, stderr) = staged.run(
         "---\n\
          title: cross-repo lifecycle writes\n\
          initialize:\n  \
            - {append_line: [\"events.log\", \"initialize\"]}\n\
-         finalize:\n  \
-           - {append_line: [\"events.log\", \"finalize\"]}\n\
          ---\n\
          Body\n",
     );
 
-    let launch_log = staged.fixture.cwd().join("events.log");
-    assert_eq!(
-        fs::read_to_string(&launch_log).unwrap_or_default().replace("\r\n", "\n"),
-        "initialize\nfinalize\n",
-        "a new relative lifecycle target is created in the launch repo; stderr was:\n{stderr}"
-    );
-    assert!(
-        !staged.library.join("events.log").exists(),
-        "lifecycle writes must not land in the prompt library's repository"
-    );
+    assert!(!status.success(), "the refused write fails the run; stderr was:\n{stderr}");
+    let prose = stderr.replace('┃', " ").split_whitespace().collect::<String>();
+    assert!(prose.contains("outsidethemutationroot"), "stderr was:\n{stderr}");
+    assert!(prose.contains("events.log"), "names the target; stderr was:\n{stderr}");
+    // The status line is length-clamped, so only the root's label survives
+    // here; the library tests pin the full root text.
+    assert!(prose.contains("(root:"), "names the root; stderr was:\n{stderr}");
+    assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the prompt");
+    assert!(!staged.library.join("events.log").exists(), "nothing at the library root");
+    assert!(!staged.fixture.cwd().join("events.log").exists(), "never root-joined in the caller");
 }
 
 /// The incident shape: an `initialize` `ensure_file` targeting an absolute path

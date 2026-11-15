@@ -281,16 +281,16 @@ fn compose_motivating_workflow_creates_and_opens_the_spec_then_skips_the_provide
     assert_eq!(run.provider_launches(), 0);
 }
 
-/// Claudine's mutation root is the launch workspace, not the prompt's own
-/// directory: a prompt kept in a library outside the launch directory still
-/// edits the launch directory's file.
+/// A prompt kept in a library outside the launch directory edits a file in
+/// the launch directory by naming it through `ctx.cwd`: a relative target
+/// would be created beside the prompt, outside the mutation root.
 #[test]
 fn compose_edits_inside_the_launch_workspace_from_a_prompt_kept_elsewhere() {
     let run = EditRun::new("edit-compose-library-prompt", "code").writing("written");
     let library = run.fixture.workspace_path().join("library");
     fs::create_dir_all(&library).unwrap();
     let document = library.join("prompt.md");
-    fs::write(&document, "---\ninitialize:\n  - edit: notes/today.md\n  - skip\n---\nbody\n").unwrap();
+    fs::write(&document, "---\ninitialize:\n  - edit: \"{{ ctx.cwd }}/notes/today.md\"\n  - skip\n---\nbody\n").unwrap();
 
     let output = run.compose(&document, &[]);
 

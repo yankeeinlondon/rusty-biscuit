@@ -403,6 +403,7 @@ fn side_effect_short_form_quoted_args_dispatch_to_engine() {
     .unwrap();
     let fm = map(json!({}));
     let (dir, engine) = temp_engine();
+    let source = dir.path().join("t.md");
     std::fs::write(dir.path().join("state.md"), "---\n---\nbody\n").unwrap();
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
@@ -415,7 +416,7 @@ fn side_effect_short_form_quoted_args_dispatch_to_engine() {
         &shell,
         &recorder,
         &harness,
-        Path::new("t.md"),
+        &source,
     );
     let outcome = context.execute_event(&config);
     assert_eq!(outcome, LifecycleEventOutcome::default());
