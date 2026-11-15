@@ -1,9 +1,34 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 1
+phase: 2
 agent: opencode/zai-coding-plan/glm-5.3
-yolo: "true"
+yolo: 'true'
+source_files_during_phase_1:
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/effects/verbs.rs
+- darkmatter/lib/src/effects/fs_write.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/cli/tests/l1/compose_initialize_acceptance.rs
+- claudine/cli/tests/l1/lifecycle_prep.rs
+- claudine/cli/tests/l1/lifecycle_mutation_root.rs
+- claudine/cli/tests/l1/lifecycle_edit_action.rs
+- claudine/cli/tests/l1/compose_schema_cli.rs
+- claudine/cli/tests/l1/compose_caller_file_provenance.rs
+- claudine/cli/tests/l1/with_file_provenance.rs
+- claudine/cli/tests/l1/ctx_launch_anchor.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/darkmatter/lifecycle.md
+packages:
+- darkmatter
+- claudine
+- claudine-cli
 ---
 
 # Plan — One mutation root for every lifecycle host
@@ -339,7 +364,7 @@ Wave 1 (two tasks in parallel; they touch disjoint files in `darkmatter/lib`):
 
 Wave 2 (after Wave 1 compiles):
 
-- [ ] **Library test suite** (`darkmatter/lib/src/lifecycle/executor/tests.rs`)
+- [x] **Library test suite** (`darkmatter/lib/src/lifecycle/executor/tests.rs`)
   - Update the two R10.1 tests; extend `Fixture` to build a
     `FileResolutionContext` with `with_repository_root` so the implicit
     relative candidate order (document dir → repository root) is exercisable,
