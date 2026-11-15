@@ -960,7 +960,7 @@ decided but not yet implemented.
   outside a repository) as the write boundary, and relative targets resolve
   from the document's directory. Replaces `md compose`'s document-directory
   root and Claudine's launch-workspace root.
-- **`edit` follows coercion (pending).** Overrides the spec's strict-string
+- **`edit` follows coercion (pending; implemented entirely by `2026-11-14-absent-equals-null`, together with the `null` correction and `no_error` below).** Overrides the spec's strict-string
   rule (spec "deliberately requires a string"): `edit` operands go through the
   same conversion engine as every other lifecycle action's, so `edit: 5` is
   the file `5` and `gui: "yes"` is `true`. For `null`, see the correction
