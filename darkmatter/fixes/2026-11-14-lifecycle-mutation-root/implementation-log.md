@@ -28,6 +28,7 @@ packages:
   - darkmatter
   - claudine
   - claudine-cli
+  - darkmatter-cli
 decisions_for_review:
   - |-
     Claudine's existing tests that encoded the old "create a missing relative
@@ -68,24 +69,61 @@ decisions_for_review:
     assert each message. Unifying them would mean catching the reference
     error and re-wording it, which the plan's R4 (keep the contract's
     errors, do not reimplement) argues against.
+  - |-
+    The new `md compose` refusal test checks the exact target but only a
+    prefix of the root, because the lifecycle failure message (in the
+    terminal summary and in the `--output json` diagnostic alike) is clamped
+    to 240 characters, and macOS temp-dir paths push the target-plus-root
+    text past that. With ordinary project paths the full root shows. The
+    plan did not address this. Alternatives: give the data-output
+    diagnostic the unclamped message (a product change to the shared
+    diagnostic path, outside this fix), or shorten fixture paths (not
+    possible for system temp dirs). If a reviewer wants the full root in
+    every diagnostic, the change is in how `md` builds its lifecycle
+    failure diagnostic, and the test would then assert the whole message.
 message_to_agent: |-
-  Phase 1 landed the library contract and also fixed every Claudine test that
-  the contract change alone broke (see decisions_for_review). Both areas' full
-  L1 suites are green at the end of Phase 1 (darkmatter 16748, claudine 12170)
-  and both lint clean. Things to know for Phase 2:
-  - `mutation_target` no longer takes the raw text; it returns a lexically
-    clean path that has already passed `ensure_within(mutation_root, …)`.
-    Frontmatter verbs now hand the engine that absolute path.
-  - The darkmatter executor test module has a `Workspace` fixture
-    (`<tmp>/ws/prompts/doc.md`, root `<tmp>/ws`, `<tmp>/outside`) and a
-    13-row `WRITERS` table; Phase 3's contract/reference tests can extend it.
-  - In the Claudine CLI fixtures `child_cwd` already equals the launch
-    repository top (`package_context.rs` uses `detect_repo_root(launch_cwd)`),
-    so the Phase 2 rewiring should not flip those fixtures; the sequence route
-    (`base_dir()`) and task route (`origin_dir`) are where behavior can change.
-  - Something outside this session staged the whole working tree (including
-    earlier uncommitted absent-equals-null work) during Phase 1. Nothing was
-    unstaged; do not assume the index reflects only one phase.
+  Phase 2 rewired every lifecycle host to the launch scope's local root
+  (`launch_magic_scope().local_root()` from the request's resolution
+  context): `md compose`, and Claudine's compose loop route, staged single
+  boot, wrapper pipeline, sequence container, task stack, step guard, and
+  loop harness. The plan's sweep finds no remaining old-root engine
+  construction. Things to know for Phase 3:
+  - The darkmatter `docs/` pages and Claudine docs still describe the old
+    roots; Phase 4 rewrites them as planned. The repo skill
+    `.claude/skills/darkmatter/lifecycle.md` already states the new rule.
+  - New CLI tests: `darkmatter/cli/tests/l1/compose_lifecycle.rs` (three
+    tests at the end: subdirectory prompt writes to the launch root via
+    `../`, a foreign prompt is refused, a launch from a repo subdirectory
+    is bounded by the working-tree top) and four in
+    `claudine/cli/tests/l1/lifecycle_mutation_root.rs` (two new sequence
+    tests). Extend these rather than starting new modules.
+  - A sequence container event that fails with no `failure:` stack exits 1
+    with no output at all; the sequence test adds a `failure:` stack that
+    prints `err.msg` to see the reason. This silence predates this fix.
+  - The lifecycle failure message is clamped to 240 characters, even in
+    `md compose --output json` diagnostics, so with temp-dir paths the root
+    is cut off; assert a prefix of it (see decisions_for_review).
+  - Run Claudine CLI tests with `--features test-fixtures` (what `just test`
+    passes). Without it, `document_environment_routes` and
+    `lifecycle_message_drain` fail for reasons unrelated to this fix.
+  - The step-guard engine (`task_run.rs`, guard of a `when` step) has no
+    test of its own: a guard only evaluates a condition with shell
+    disabled, so it is covered only by the shared wiring.
+source_files_during_phase_2:
+  - darkmatter/cli/src/commands/compose/lifecycle.rs
+  - darkmatter/cli/tests/l1/compose_lifecycle.rs
+  - darkmatter/cli/tests/l1/compose_edit_action.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/wrap/composition/pipeline.rs
+  - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/tests/l1/lifecycle_mutation_root.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/darkmatter/lifecycle.md
 ---
 
 # Implementation Log for 2026-11-14-lifecycle-mutation-root (4 phases)

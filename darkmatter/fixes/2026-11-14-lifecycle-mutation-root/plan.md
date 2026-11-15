@@ -29,6 +29,22 @@ packages:
 - darkmatter
 - claudine
 - claudine-cli
+- darkmatter-cli
+source_files_during_phase_2:
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_edit_action.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/composition/staged_boot.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+- claudine/cli/tests/l1/lifecycle_mutation_root.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/lifecycle.md
 ---
 
 # Plan — One mutation root for every lifecycle host
@@ -395,28 +411,28 @@ capture errors untouched (R3).
 
 Wave 1 (parallel):
 
-- [ ] **`md compose` root** (`darkmatter/cli/src/commands/compose/lifecycle.rs`)
+- [x] **`md compose` root** (`darkmatter/cli/src/commands/compose/lifecycle.rs`)
   - Replace the `source_path.parent()` selection (lines 377-381) with
     `compose.request.resolution_context().launch_magic_scope().local_root()`.
   - Update the struct docs that describe the root. Prerequisite: Phase 1
     Wave 1 has landed (the executor now honors the boundary correctly).
-- [ ] **Claudine prep routes** (`claudine/cli/src/commands/compose/prep.rs`)
+- [x] **Claudine prep routes** (`claudine/cli/src/commands/compose/prep.rs`)
   - Rework lines 1134-1138 (loop route) and 1965-1970 (staged single) per R2,
     and update `staged_boot.rs`'s parameter comment.
-- [ ] **Claudine wrapper pipeline**
+- [x] **Claudine wrapper pipeline**
   (`claudine/cli/src/commands/wrap/composition/pipeline.rs`)
   - Rework line 1362 per R2; the pipeline's no-invocation fallback path
     (tests, ambient fallback) reads the scope off
     `request.prepared.input_layers.file_resolution_context`, which every
     prepared composition carries, so no `Option` handling is introduced.
-- [ ] **Claudine sequence and task roots**
+- [x] **Claudine sequence and task roots**
   (`claudine/cli/src/commands/wrap/sequence/mod.rs`, `.../task_run.rs`)
   - Rework mod.rs:283, task_run.rs:110-111, and task_run.rs:257 per R2; delete
     the "A task stack mutates relative to the document that authored the
     task" comment's implication that the authoring directory is the boundary —
     the authoring directory remains the *resolution base*, the boundary is the
     caller's root.
-- [ ] **Claudine loop harness root**
+- [x] **Claudine loop harness root**
   (`claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`)
   - Rework line 334 per R2, using `run.prompt_state.file_resolution_context()`;
     update the adjacent comment.
