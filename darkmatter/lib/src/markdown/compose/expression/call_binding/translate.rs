@@ -467,10 +467,10 @@ impl<'r> Translator<'r> {
             Some(Inlined::Definition(key, resolved)) => return self.within(key, |this| this.property(path, &resolved)),
             Some(Inlined::Recursive(shape, target)) => {
                 // The presence rules the inlined target would get: a type
-                // that admits null is never required, an optional use also
-                // admits null.
+                // that admits null needs no wrapper but stays required when
+                // marked, an optional use also admits null.
                 return Ok(if target.admits_null() {
-                    (shape, false)
+                    (shape, def.is_required() && !matches!(def, PropertyDef::Single(atom) if is_generated(atom)))
                 } else if def.is_required() {
                     (shape, !matches!(def, PropertyDef::Single(atom) if is_generated(atom)))
                 } else if def.marks_non_null() {
@@ -550,8 +550,7 @@ impl<'r> Translator<'r> {
         container: Option<&PropertyAtom>,
     ) -> Result<(Shape, bool), TranslateError> {
         let admits_null = container.map_or_else(|| arms.iter().any(PropertyAtom::admits_null), PropertyAtom::admits_null);
-        let required = !admits_null
-            && container.map_or_else(|| arms.iter().any(marks_required), marks_required);
+        let required = container.map_or_else(|| arms.iter().any(marks_required), marks_required);
         let generated = container.map_or_else(|| arms.iter().any(is_generated), is_generated);
         let non_null =
             container.map_or_else(|| arms.iter().any(PropertyAtom::marks_non_null), PropertyAtom::marks_non_null);
@@ -573,7 +572,7 @@ impl<'r> Translator<'r> {
     fn atom_property(&mut self, path: &str, atom: &PropertyAtom) -> Result<(Shape, bool), TranslateError> {
         let (shape, required) = self.atom(path, atom, true)?;
         if atom.admits_null() {
-            return Ok((shape, false));
+            return Ok((shape, required && !is_generated(atom)));
         }
         if required {
             return Ok((shape, !is_generated(atom)));

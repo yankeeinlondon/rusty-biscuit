@@ -276,30 +276,6 @@ impl DefinitionTable {
         json_key
     }
 
-    /// This table with every body replaced by `project(body)`, under the
-    /// same identities, `$defs` keys, and allocation order, so a schema
-    /// lowered against either table emits the same references.
-    pub(crate) fn map_bodies(&self, mut project: impl FnMut(&PropertyDef) -> PropertyDef) -> DefinitionTable {
-        DefinitionTable {
-            entries: self
-                .entries
-                .iter()
-                .map(|(key, definition)| {
-                    // Field by field, not `..definition.clone()`: that would
-                    // clone the body being replaced, and a new field must be
-                    // handled here explicitly.
-                    let projected = Definition {
-                        body: project(&definition.body),
-                        origin: definition.origin.clone(),
-                        json_key: definition.json_key.clone(),
-                    };
-                    (key.clone(), projected)
-                })
-                .collect(),
-            by_json_key: self.by_json_key.clone(),
-        }
-    }
-
     /// Adds every definition of `other` that this table lacks, in `other`'s
     /// allocation order, and returns the `$defs` keys that changed: `other`'s
     /// key mapped to the key it has here. A definition both tables hold keeps

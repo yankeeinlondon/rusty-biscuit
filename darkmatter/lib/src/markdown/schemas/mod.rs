@@ -2026,14 +2026,12 @@ impl EffectiveSchema {
     /// This schema projected to `phase`'s presence rules.
     fn phase_projection(&self, phase: SchemaPhase) -> Result<Self, SchemaError> {
         let _resolve = timings::stage(ValidationStage::Resolve);
-        let (projected, definitions, projected_document) = match &self.simplified {
-            Some(simplified) => {
-                let projected = phase::project(simplified, phase);
-                let definitions = phase::project_definitions(&self.definitions, phase);
-                let projected_document = simplified::to_json_schema_with_definitions(&projected, &definitions)?;
-                (Some(projected), Arc::new(definitions), Some(projected_document))
-            }
-            None => (None, Arc::clone(&self.definitions), None),
+        // The projection changes only which properties each object lists in
+        // `required`; the AST and definitions keep their authored markers, so
+        // later presence and value-type questions read the declaration.
+        let projected_document = match &self.simplified {
+            Some(simplified) => Some(phase::lower(simplified, &self.definitions, phase)?),
+            None => None,
         };
         let (json_schema, digest) = phase_json_schema(&self.json_schema, self.digest, projected_document, phase)?;
         let mut cache = SHARED_VALIDATOR_CACHE.clone().with_caller_origins(self.caller_origins.clone());
@@ -2051,11 +2049,11 @@ impl EffectiveSchema {
             None => CompiledValidators::build(&json_schema, &cache, self.base_dir.as_deref(), &self.file_resolution_context)?,
         };
         let projected = Self {
-            simplified: projected,
+            simplified: self.simplified.clone(),
             raw_document: self.raw_document.clone(),
             baseline_declarations: self.baseline_declarations.clone(),
             declared_trigger_shapes: self.declared_trigger_shapes.clone(),
-            definitions,
+            definitions: Arc::clone(&self.definitions),
             trigger_shapes: self.trigger_shapes.clone(),
             trigger_definitions: self.trigger_definitions.clone(),
             layers: self.layers.clone(),

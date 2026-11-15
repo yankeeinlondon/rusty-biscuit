@@ -51,6 +51,7 @@ use super::types::{
 use crate::numeric::json_number;
 use crate::expression::parse as parse_expression;
 use crate::errors::SchemaError;
+use crate::phase::SchemaPhase;
 use crate::file_match::{
     DARKMATTER_MATCH_KEYWORD, DARKMATTER_MATCH_PROPERTY_KEYWORD, file_match_groups,
 };
@@ -114,17 +115,29 @@ pub fn to_json_schema_with_definitions(
     schema: &SchemaRoot,
     defs: &DefinitionTable,
 ) -> Result<Value, SchemaError> {
+    lower_document(schema, defs, None)
+}
+
+/// Lowers `schema` as [`to_json_schema_with_definitions`] does, with every
+/// object's `required` array decided by `phase`'s presence policy when one
+/// is given (see [`crate::phase::lower`]). Value fragments never depend on
+/// the phase.
+pub(crate) fn lower_document(
+    schema: &SchemaRoot,
+    defs: &DefinitionTable,
+    phase: Option<SchemaPhase>,
+) -> Result<Value, SchemaError> {
     crate::slots::reject_unresolved(schema, defs)?;
     let mut copies = MatchCopies::default();
     let root = match schema {
-        SchemaRoot::Single(shape) => shape_to_object_schema(shape, Lowering::suggesting(defs))?,
+        SchemaRoot::Single(shape) => shape_to_object_schema(shape, Lowering::suggesting(defs).in_phase(phase))?,
         SchemaRoot::Union(arms) => {
             for arm in arms {
                 if let SchemaArm::Inline(shape) = arm {
                     copies.collect_arm(shape, defs);
                 }
             }
-            union_to_root_schema(arms, Lowering::enforcing(defs, &copies))?
+            union_to_root_schema(arms, Lowering::enforcing(defs, &copies).in_phase(phase))?
         }
     };
     // `$schema` leads the document, as JSON Schema readers expect, now that
@@ -132,8 +145,8 @@ pub fn to_json_schema_with_definitions(
     let mut document = Map::with_capacity(root.len() + 2);
     document.insert("$schema".into(), Value::String(DRAFT_2020_12.into()));
     document.extend(root);
-    if let Some(mut definitions) = lower_reachable_definitions(schema, defs)? {
-        definitions.extend(lower_match_copies(&copies, defs)?.into_iter().map(|copy| (copy.key, copy.body)));
+    if let Some(mut definitions) = lower_reachable_definitions(schema, defs, phase)? {
+        definitions.extend(lower_match_copies(&copies, defs, phase)?.into_iter().map(|copy| (copy.key, copy.body)));
         document.insert("$defs".into(), Value::Object(definitions));
     }
     Ok(Value::Object(document))
@@ -151,6 +164,7 @@ pub fn to_json_schema_with_definitions(
 fn lower_reachable_definitions(
     schema: &SchemaRoot,
     defs: &DefinitionTable,
+    phase: Option<SchemaPhase>,
 ) -> Result<Option<Map<String, Value>>, SchemaError> {
     if defs.is_empty() {
         return Ok(None);
@@ -179,7 +193,7 @@ fn lower_reachable_definitions(
     let mut lowered: Vec<(usize, String, Value)> = Vec::with_capacity(first_use.len());
     for (key, path) in &first_use {
         let definition = defs.get(key).ok_or_else(|| missing_definition(path, key))?;
-        let body = lower_definition_body(path, &definition.body, Lowering::suggesting(defs))?;
+        let body = lower_definition_body(path, &definition.body, Lowering::suggesting(defs).in_phase(phase))?;
         let order = defs
             .iter()
             .position(|(candidate, _)| candidate == key)
@@ -367,6 +381,9 @@ fn union_to_root_schema(arms: &[SchemaArm], defs: Lowering<'_>) -> Result<Map<St
 struct Lowering<'a> {
     defs: &'a DefinitionTable,
     matching: Matching<'a>,
+    /// The runtime phase whose presence policy fills each object's
+    /// `required` array; `None` for the ordinary lowering.
+    phase: Option<SchemaPhase>,
 }
 
 #[derive(Clone, Copy)]
@@ -393,11 +410,27 @@ enum Matching<'a> {
 
 impl<'a> Lowering<'a> {
     fn suggesting(defs: &'a DefinitionTable) -> Self {
-        Self { defs, matching: Matching::Suggest }
+        Self { defs, matching: Matching::Suggest, phase: None }
     }
 
     fn enforcing(defs: &'a DefinitionTable, copies: &'a MatchCopies) -> Self {
-        Self { defs, matching: Matching::Enforce { copies, property: None, in_copy: false } }
+        Self { defs, matching: Matching::Enforce { copies, property: None, in_copy: false }, phase: None }
+    }
+
+    fn in_phase(self, phase: Option<SchemaPhase>) -> Self {
+        Self { phase, ..self }
+    }
+
+    /// Whether the parent object lists a property in `required`: the
+    /// ordinary lowering's answer (`lowered`), or the phase's policy. Launch
+    /// demands only an `eager` required property; completion demands every
+    /// required one, `generated` included, since every actor has run.
+    fn lists_required(&self, def: &PropertyDef, lowered: bool) -> bool {
+        match self.phase {
+            None => lowered,
+            Some(SchemaPhase::Launch) => def.is_required() && crate::phase::property_eager(def),
+            Some(SchemaPhase::Completion) => def.is_required(),
+        }
     }
 
     /// This lowering for the value of `property` of the object at `context`;
@@ -411,6 +444,7 @@ impl<'a> Lowering<'a> {
             Matching::Enforce { copies, in_copy: false, property: None } if context == "<root>" => Lowering {
                 defs: self.defs,
                 matching: Matching::Enforce { copies, property: Some(property), in_copy: false },
+                phase: self.phase,
             },
             _ => self,
         }
@@ -634,13 +668,18 @@ struct LoweredCopy {
     body: Value,
 }
 
-fn lower_match_copies(copies: &MatchCopies, defs: &DefinitionTable) -> Result<Vec<LoweredCopy>, SchemaError> {
+fn lower_match_copies(
+    copies: &MatchCopies,
+    defs: &DefinitionTable,
+    phase: Option<SchemaPhase>,
+) -> Result<Vec<LoweredCopy>, SchemaError> {
     let mut lowered = Vec::with_capacity(copies.keys.len());
     for ((key, property, enforcing), copy_key) in &copies.keys {
         let definition = defs.get(key).ok_or_else(|| missing_definition(copy_key, key))?;
         let lowering = Lowering {
             defs,
             matching: Matching::Enforce { copies, property: property.as_deref(), in_copy: *enforcing },
+            phase,
         };
         lowered.push(LoweredCopy {
             key: copy_key.clone(),
@@ -691,7 +730,7 @@ pub(crate) fn attach_root_union_match(
     }
     let enforced = Value::Object(shape_to_object_schema(shape, Lowering::enforcing(defs, &copies))?);
     graft_enforcement(arm_schema, &enforced);
-    for copy in lower_match_copies(&copies, defs)? {
+    for copy in lower_match_copies(&copies, defs, None)? {
         // Start from the shared body as the arm's resolution left it, so its
         // resolved annotations are kept.
         let mut body = root_defs.get(&copy.original).cloned().unwrap_or_else(|| copy.body.clone());
@@ -808,20 +847,20 @@ fn union_property_to_schema(
     defs: Lowering<'_>,
 ) -> Result<(Value, bool), SchemaError> {
     // Union requiredness must be known *before* building arms: a required
-    // union (any arm carries `required`, and no arm admits null) gets neither
-    // the property-level `null` arm nor the optional-`file` empty-string
-    // tolerance. Deciding this up front lets each arm be built with
-    // empty-`file` suppression so a required union containing an
-    // otherwise-optional `file` arm still rejects the `""` sentinel.
+    // union (any arm carries `required`) gets neither the property-level
+    // `null` arm nor the optional-`file` empty-string tolerance. Deciding
+    // this up front lets each arm be built with empty-`file` suppression so a
+    // required union containing an otherwise-optional `file` arm still
+    // rejects the `""` sentinel. A `null` or `unknown` arm admits a written
+    // `null` but does not cancel the presence requirement.
     let admits_null = container.map_or_else(
         || arms.iter().any(PropertyAtom::admits_null),
         PropertyAtom::admits_null,
     );
-    let required = !admits_null
-        && container.map_or_else(
-            || arms.iter().any(PropertyAtom::marks_required),
-            PropertyAtom::marks_required,
-        );
+    let required = container.map_or_else(
+        || arms.iter().any(PropertyAtom::marks_required),
+        PropertyAtom::marks_required,
+    );
     // `generated` is a property-level ownership semantic: if any arm is
     // host-supplied, the static `required` entry is suppressed (spec point 1).
     let any_generated = container.map_or_else(
@@ -934,22 +973,25 @@ fn atom_to_schema(
     atom: &PropertyAtom,
     defs: Lowering<'_>,
 ) -> Result<(Value, bool), SchemaError> {
-    let (mut fragment, non_nullable) = atom_fragment_without_null_wrap(name, atom, true, defs)?;
+    let (mut fragment, required) = atom_fragment_without_null_wrap(name, atom, true, defs)?;
     let generated = atom.is_generated();
 
-    // `null` and `unknown` already accept null and are never required, so they
-    // lower bare: `{"type": "null"}` and `{}`.
+    // `null` and `unknown` already accept null, so they lower bare:
+    // `{"type": "null"}` and `{}`. Admitting `null` does not cancel
+    // `required`, which only asks that the key be written.
     if atom.admits_null() {
-        return Ok((fragment, false));
+        return Ok((fragment, required && !generated));
     }
 
-    // Non-nullable atoms (those carrying `Required`) are emitted unchanged.
+    // Required atoms are emitted unchanged.
     // Optional atoms are wrapped so that JSON `null` validates as "absent".
     // The optional `file` case also preserves the legacy empty-string sentinel.
     // The null-wrap decision keys off `Required` presence, NOT off membership
     // in the parent's `required` array — so `string(generated; required)` still
-    // lowers to a bare non-nullable `string` (spec semantics point 4).
-    if non_nullable {
+    // lowers to a bare non-nullable `string` (spec semantics point 4), and a
+    // phase projection that leaves a required property unlisted keeps its
+    // value type.
+    if required {
         // `generated` suppresses the static `required` entry so an authored
         // document validates cleanly when the host has not yet supplied the
         // value (spec semantics point 1). The non-nullable type is preserved,
@@ -1445,7 +1487,7 @@ fn object_body_from_shape(
         };
         match property_def_to_schema(&qualified_name, def, defs.for_property(context, prop_name)) {
             Ok((prop_schema, is_required)) => {
-                if is_required {
+                if defs.lists_required(def, is_required) {
                     required.push(Value::String(prop_name.clone()));
                 }
                 properties.insert(prop_name.clone(), prop_schema);

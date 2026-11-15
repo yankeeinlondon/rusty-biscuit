@@ -1,16 +1,14 @@
 //! Passive runtime-phase projection for resolved SimplifiedSchema values.
 
-use super::simplified::{
-    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, TypeExpr,
-};
+use super::simplified::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, SchemaRoot};
 use super::{SchemaError, resolve};
 use serde_json::{Map, Value};
 
-/// The revision of a phase projection: [`project`], [`merge_with_effective`],
+/// The revision of a phase projection: [`lower`], [`merge_with_effective`],
 /// and [`make_passive`] together. A
 /// [`LayeredIdentity`](crate::validate::LayeredIdentity) folds it in;
 /// increment it with any change to what a projection produces.
-pub const PROJECTION_REVISION: u32 = 1;
+pub const PROJECTION_REVISION: u32 = 2;
 
 /// Runtime seam at which a resolved schema instance is validated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,33 +19,27 @@ pub enum SchemaPhase {
     Completion,
 }
 
-pub fn project(schema: &SchemaRoot, phase: SchemaPhase) -> SchemaRoot {
-    match schema {
-        SchemaRoot::Single(shape) => SchemaRoot::Single(project_shape(shape, phase)),
-        SchemaRoot::Union(arms) => SchemaRoot::Union(
-            arms.iter()
-                .map(|arm| match arm {
-                    SchemaArm::Inline(shape) => SchemaArm::Inline(project_shape(shape, phase)),
-                    SchemaArm::FileRef(path) => SchemaArm::FileRef(path.clone()),
-                })
-                .collect(),
-        ),
-    }
-}
-
-/// Projects every definition body of `definitions` for `phase`, under the
-/// same keys, so the projected document's references reach projected bodies.
+/// Lowers a resolved schema to Draft 2020-12 JSON Schema with `phase`'s
+/// presence rules.
 ///
-/// A body carries no presence or timing of its own (each use site holds
-/// them), so projecting it touches only the properties nested inside it,
-/// each timed by its own markers. One projected body therefore serves an
-/// eager use and a deferred use alike; the two differ only at their sites.
-pub fn project_definitions(definitions: &DefinitionTable, phase: SchemaPhase) -> DefinitionTable {
-    definitions.map_bodies(|body| {
-        let mut body = body.clone();
-        project_def(&mut body, phase);
-        body
-    })
+/// Only each object's `required` array changes. [`SchemaPhase::Launch`]
+/// lists a required property only when it is also `eager`;
+/// [`SchemaPhase::Completion`] lists every required property, `generated`
+/// included, since every content-producing actor has run. Value fragments
+/// are lowered from the authored markers exactly as
+/// [`to_json_schema_with_definitions`](crate::simplified::to_json_schema_with_definitions)
+/// lowers them, so a required number that launch leaves unlisted still
+/// rejects a supplied `null`. The rule applies inside nested objects, union
+/// arms, and every definition body under `$defs`: a body carries no
+/// presence of its own, so one lowered body serves an eager use and a
+/// deferred use alike.
+///
+/// ## Errors
+///
+/// Whatever the ordinary lowering reports for `schema`, including
+/// [`SchemaError::UnresolvedSlots`] for an unresolved template.
+pub fn lower(schema: &SchemaRoot, definitions: &DefinitionTable, phase: SchemaPhase) -> Result<Value, SchemaError> {
+    crate::simplified::convert::lower_document(schema, definitions, Some(phase))
 }
 
 /// Replaces the document SimplifiedSchema portion of an effective schema while
@@ -136,88 +128,14 @@ pub fn make_passive(schema: &mut Value) {
     }
 }
 
-fn project_shape(shape: &SchemaShape, phase: SchemaPhase) -> SchemaShape {
-    let mut projected = shape.clone();
-    for def in projected.properties.values_mut() {
-        project_def(def, phase);
-    }
-    projected
-}
-
-fn project_def(def: &mut PropertyDef, phase: SchemaPhase) {
+/// Whether a property's definition sets `eager` validation timing on the
+/// property itself (see [`atom_has_property_eager`]); a property-level union
+/// is eager when any arm is.
+pub(crate) fn property_eager(def: &PropertyDef) -> bool {
     match def {
-        PropertyDef::Single(atom) => project_atom(atom, phase, atom_has_property_eager(atom)),
-        PropertyDef::Union(atoms) => {
-            let eager = atoms.iter().any(atom_has_property_eager);
-            for atom in atoms {
-                project_atom(atom, phase, eager);
-            }
-        }
+        PropertyDef::Single(atom) => atom_has_property_eager(atom),
+        PropertyDef::Union(atoms) => atoms.iter().any(atom_has_property_eager),
     }
-}
-
-/// Rewrites one property atom's presence markers for `phase`.
-///
-/// The arms of a [`TypeExpr::Union`] (`U[]`, `U(required)`) hold presence
-/// markers that hoist to the property, so they are read into the property's
-/// authored presence, stripped from the arms, and re-applied once on the
-/// container. Every other arm constraint, including an inherited
-/// `file(eager)`, is left alone: phase projection changes presence, never an
-/// arm's file-existence semantics. Nested object fields, whether in an
-/// inline-object type or in a union arm, are projected as their own shape.
-fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: bool) {
-    // A pending template type is kept as authored: its presence is unknown
-    // until it resolves, and lowering refuses it until then.
-    if atom.is_pending_type() {
-        return;
-    }
-    let authored_required = atom.is_required();
-    match &mut atom.ty {
-        TypeExpr::InlineObject(shape) => *shape = project_shape(shape, phase),
-        TypeExpr::Union(arms) => arms.iter_mut().for_each(|arm| strip_union_arm(arm, phase)),
-        TypeExpr::Primitive(_)
-        | TypeExpr::Imported { .. }
-        | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_)
-        | TypeExpr::Ref(_)
-        | TypeExpr::Slot(_) => {}
-    }
-    strip_presence(atom);
-
-    let phase_required = match phase {
-        SchemaPhase::Launch => property_eager && authored_required,
-        SchemaPhase::Completion => authored_required,
-    };
-    if phase_required {
-        if atom.is_array {
-            atom.array_constraints.push(Constraint::Required);
-        } else {
-            atom.constraints.push(Constraint::Required);
-        }
-    }
-}
-
-/// Removes a union arm's hoisted presence markers, recursing into the item
-/// arms of an array-of-union arm, and projects an object arm's own fields.
-fn strip_union_arm(arm: &mut PropertyAtom, phase: SchemaPhase) {
-    match &mut arm.ty {
-        TypeExpr::InlineObject(shape) => *shape = project_shape(shape, phase),
-        TypeExpr::Union(arms) => arms.iter_mut().for_each(|arm| strip_union_arm(arm, phase)),
-        TypeExpr::Primitive(_)
-        | TypeExpr::Imported { .. }
-        | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_)
-        | TypeExpr::Ref(_)
-        | TypeExpr::Slot(_) => {}
-    }
-    strip_presence(arm);
-}
-
-fn strip_presence(atom: &mut PropertyAtom) {
-    atom.constraints
-        .retain(|constraint| !matches!(constraint, Constraint::Required | Constraint::Generated));
-    atom.array_constraints
-        .retain(|constraint| !matches!(constraint, Constraint::Required | Constraint::Generated));
 }
 
 /// Whether `atom` sets the property's validation timing.

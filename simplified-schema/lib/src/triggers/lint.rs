@@ -67,8 +67,9 @@ fn requires_presence(expr: &super::grammar::MatchExpr) -> bool {
             non_present < *count
         }
         // A property condition is presence-requiring iff it is a gate
-        // (effectively `required`). A guard, including `unknown(required)` and
-        // `null(required)`, can be satisfied by absence.
+        // (`required`, including `unknown(required)` and `null(required)`,
+        // which a written `null` satisfies). A guard can be satisfied by
+        // absence.
         MatchExpr::Property { atom, .. } => atom.is_required(),
         // `$path` is inherently a gate (the path always exists).
         MatchExpr::Path(_) => true,

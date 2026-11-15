@@ -72,7 +72,7 @@ pub(super) struct UseSummary {
     /// a use site's bounds are checked against them so a contradiction is
     /// reported with both declarations.
     bounds: Vec<Tagged>,
-    /// Whether the value admits null, which makes every use optional.
+    /// Whether the value admits null, which `non-null` at a use contradicts.
     pub(super) admits_null: bool,
 }
 
@@ -647,7 +647,7 @@ impl ImportEngine<'_> {
 
     /// Whether `base`, a shared definition's expansion, behaves the same
     /// stored once as at each use. Its top level must not admit null (which
-    /// makes each use optional) or carry an annotation the converter places
+    /// lowers each use without its optional `null` wrapper) or carry an annotation the converter places
     /// at the use (`operands`, `deferred`); a union's alternatives must
     /// carry no property marker or suggestion, which a property hoists or
     /// counts, no optional `file` alternative, whose empty-string tolerance
@@ -1038,11 +1038,7 @@ fn apply_reference_postfix(
             (merge_constraints(inherited_value, use_site, &merge_site)?, inherited_array)
         }
     };
-    let (mut value, mut array) = reconcile_property_defaults(value, array, &merge_site)?;
-    if summary.admits_null {
-        value.retain(|(constraint, _)| !matches!(constraint, Constraint::Required));
-        array.retain(|(constraint, _)| !matches!(constraint, Constraint::Required));
-    }
+    let (value, array) = reconcile_property_defaults(value, array, &merge_site)?;
     let (constraints, value_origins) = value.into_iter().unzip();
     let (array_constraints, array_origins) = array.into_iter().unzip();
     Ok(ExpandedDef::Single(
