@@ -675,8 +675,8 @@ fn an_invalid_optional_is_dropped_and_recorded_on_the_harness_route() {
     );
     assert_eq!(
         prepared.effective_frontmatter.get("count"),
-        Some(&serde_json::Value::Null),
-        "the invalid value must be dropped before the document-owned optional binding is materialized",
+        None,
+        "the invalid value is dropped and the declared but unset key stays absent",
     );
 }
 
@@ -954,4 +954,41 @@ fn late_caller_file_verdict_names_the_callers_base_directory() {
         assert!(message.contains(&caller_base), "{label}: {message}");
         assert!(!message.contains(&document_base), "{label}: {message}");
     }
+}
+
+/// A document's `loop:` block is not one of the deferred event keys, so a
+/// schema completion may fill `no_error: false` at the loop root and in the
+/// gate's actions. The lifecycle of such a completed value, parsed with the
+/// document's authored values (`authored_lifecycle_values`) as its source, is
+/// the lifecycle of the document as written: the filled flag is never a loose
+/// key beside `gate`, and the authored sibling flag counts once.
+#[test]
+fn a_completed_loop_block_parses_with_the_document_as_its_authored_source() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\nloop:\n  until: \"true\"\n  max: 2\n  gate:\n    - info: { text: pass }\n      no_error: true\n---\nrun\n",
+    );
+    let options = PrepareOptions::new(crate::test_support::context());
+    let authored = super::super::authored_lifecycle_values(&source, &options);
+    let completed = serde_json::json!({ "loop": {
+        "until": "true",
+        "max": 2,
+        "gate": [{ "info": { "text": "pass", "no_error": false }, "no_error": true }],
+        "no_error": false,
+    } });
+
+    let parse = |value: &serde_json::Value, authored: Option<&serde_json::Value>| {
+        crate::composition::lifecycle::parse_lifecycle_config_with_orders(value, &source.resolved_path, None, authored)
+    };
+    let from_completed = parse(&completed, Some(&authored)).expect("the filled flags are not authored");
+    assert_eq!(from_completed, parse(&authored, None).expect("the document parses"));
+    let gate = &from_completed.stacks.loop_gate;
+    let darkmatter::lifecycle::actions::LifecycleNode::Action(action) = &gate[0] else {
+        panic!("one gate action, got {gate:?}");
+    };
+    assert!(action.no_error, "the authored sibling flag is the one placement");
+    // Read as authored, the filled root flag sits beside `gate`.
+    assert!(parse(&completed, None).is_err());
 }

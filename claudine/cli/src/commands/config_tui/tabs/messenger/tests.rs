@@ -48,6 +48,49 @@ fn messenger_names_are_sorted_alphabetically() {
 }
 
 #[test]
+fn the_repo_override_modal_offers_inherit_and_each_route_and_no_off_switch() {
+    let mut app = test_app();
+    app.is_in_repo = true;
+    let route = |channel: &str| MessengerProviderConfig::Slack {
+        channel_id: channel.to_string(),
+        bot_token_env: "SLACK_BOT_TOKEN".to_string(),
+    };
+    app.config.messenger = Some(ClaudineMessengerConfig {
+        active_config: Some("alpha".to_string()),
+        configurations: std::collections::HashMap::from([
+            ("alpha".to_string(), route("1")),
+            ("zeta".to_string(), route("2")),
+        ]),
+    });
+    let reopen = |app: &mut App| {
+        handle_key(app, key(KeyCode::Char('r')));
+        match app.modal {
+            Some(ModalState::MessengerSelect { highlighted, for_repo: true }) => highlighted,
+            ref other => panic!("repo modal: {other:?}"),
+        }
+    };
+
+    assert_eq!(reopen(&mut app), 0, "an unset override highlights `(inherit user)`");
+    handle_messenger_select_modal(&mut app, key(KeyCode::Down));
+    handle_messenger_select_modal(&mut app, key(KeyCode::Enter));
+    assert_eq!(app.repo_config.as_ref().unwrap().active_messenger.as_deref(), Some("alpha"), "the entry after inherit is the first route");
+
+    assert_eq!(reopen(&mut app), 1);
+    for _ in 0..5 {
+        handle_messenger_select_modal(&mut app, key(KeyCode::Down));
+    }
+    handle_messenger_select_modal(&mut app, key(KeyCode::Enter));
+    assert_eq!(app.repo_config.as_ref().unwrap().active_messenger.as_deref(), Some("zeta"), "the list ends at the last route");
+
+    assert_eq!(reopen(&mut app), 2);
+    for _ in 0..5 {
+        handle_messenger_select_modal(&mut app, key(KeyCode::Up));
+    }
+    handle_messenger_select_modal(&mut app, key(KeyCode::Enter));
+    assert_eq!(app.repo_config.as_ref().unwrap().active_messenger, None, "inherit clears the override");
+}
+
+#[test]
 fn s_hotkey_opens_select_modal() {
     let mut app = test_app();
     app.config.messenger = Some(ClaudineMessengerConfig {

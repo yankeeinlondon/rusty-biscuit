@@ -1,7 +1,7 @@
 # A user configuration that writes every setting, for the input robustness
 # matrix (`tests/l1/config_schema_matrix.rs`). Each negative cell edits one
 # value of this file; `user-control.json5` is the same values in the legacy
-# format.
+# format, with actions and routes in their former flat spelling.
 tts:
   provider: say
   voice:
@@ -13,24 +13,24 @@ messenger:
   active_config: alerts
   configurations:
     alerts:
-      provider: discord
-      channel_id: "123"
+      discord:
+        channel_id: "123"
     team:
-      provider: slack
-      channel_id: C01
-      bot_token_env: TEAM_TOKEN
+      slack:
+        channel_id: C01
+        bot_token_env: TEAM_TOKEN
     phone:
-      provider: signal
-      recipient: "+15550100"
+      signal:
+        recipient: "+15550100"
     biz:
-      provider: whatsapp
-      recipient: "+15550101"
+      whatsapp:
+        recipient: "+15550101"
     hook:
-      provider: discord-webhook
-      webhook_url_env: MY_DISCORD_URL
+      discord_webhook:
+        webhook_url_env: MY_DISCORD_URL
     slackhook:
-      provider: slack_webhook
-      webhook_url: https://hooks.slack.com/services/T000/B000/XXXX
+      slack_webhook:
+        webhook_url: https://hooks.slack.com/services/T000/B000/XXXX
 logging: false
 protect:
   enabled: true
@@ -48,30 +48,30 @@ protect:
       surface: mcp_response
 actions:
   session_start:
-    - type: sound_effect
-      effect: doorbell
-    - type: speak
-      message: Starting {{ tool_name }}
-      voice: Samantha
-      gender: female
+    - sound_effect:
+        effect: doorbell
+    - speak:
+        message: Starting {{ tool_name }}
+        voice: Samantha
+        gender: female
   before_tool:
-    - type: bash
-      command: echo
-      when: tool_name == 'Bash'
-    - type: call
-      command: ./check.sh
-      args:
-        - --strict
-      timeout_ms: 5000
-      mapper:
-        type: json_field
-        field: decision
+    - bash:
+        command: echo
+        when: tool_name == 'Bash'
+    - call:
+        command: ./check.sh
+        args:
+          - --strict
+        timeout_ms: 5000
+        mapper:
+          type: json_field
+          field: decision
   turn_complete:
-    - type: report
-      handler:
-        format: json
-    - type: message
-      message: Done
+    - report:
+        handler:
+          format: json
+    - message:
+        message: Done
 matchers:
   before_tool: Bash|Edit
 preferred_agent: codex

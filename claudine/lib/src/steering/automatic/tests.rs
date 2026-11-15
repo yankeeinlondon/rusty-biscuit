@@ -89,27 +89,33 @@ const CONTROL: &str = r#"{ "steering": { "automatic": { "enabled": false } } }"#
 /// `Ok(value)` is the field the loader reads, `Err(())` a load error.
 type Expected = std::result::Result<Option<bool>, ()>;
 
-/// `(cell, file text, expected)`.
-fn cells() -> Vec<(&'static str, &'static str, Expected)> {
-    vec![
-        ("control", CONTROL, Ok(Some(false))),
-        ("control true", r#"{ "steering": { "automatic": { "enabled": true } } }"#, Ok(Some(true))),
-        ("empty automatic", r#"{ "steering": { "automatic": {} } }"#, Ok(None)),
-        ("absent automatic", r#"{ "steering": {} }"#, Ok(None)),
-        ("absent steering", r#"{}"#, Ok(None)),
-        ("null value", r#"{ "steering": { "automatic": { "enabled": null } } }"#, Err(())),
-        ("null automatic", r#"{ "steering": { "automatic": null } }"#, Err(())),
-        ("null steering", r#"{ "steering": null }"#, Err(())),
-        ("string value", r#"{ "steering": { "automatic": { "enabled": "false" } } }"#, Err(())),
-        ("number value", r#"{ "steering": { "automatic": { "enabled": 0 } } }"#, Err(())),
-        ("array value", r#"{ "steering": { "automatic": { "enabled": [false] } } }"#, Err(())),
-        ("automatic not an object", r#"{ "steering": { "automatic": false } }"#, Err(())),
-        ("steering not an object", r#"{ "steering": false }"#, Err(())),
-        ("unknown key beside", r#"{ "steering": { "automatic": { "enabled": false, "enable": true } } }"#, Err(())),
-        ("unknown steering key", r#"{ "steering": { "automatic": { "enabled": false }, "auto": {} } }"#, Err(())),
-        ("trailing content", r#"{ "steering": { "automatic": { "enabled": false } } } false"#, Err(())),
-        ("duplicate key", r#"{ "steering": { "automatic": { "enabled": false, "enabled": true } } }"#, Err(())),
-    ]
+/// `(cell, file text, expected in a user file, expected in a repo file)`.
+///
+/// A user file's unset `enabled` (absent or `null`, at any level) takes the
+/// schema default `true`; a repo file's stays unset so the user's value
+/// decides. A repo's `steering` and `automatic` overrides are `not-empty`.
+fn cells() -> Vec<(&'static str, &'static str, Expected, Expected)> {
+    let both = |expected: Expected| (expected, expected);
+    let rows: Vec<(&'static str, &'static str, (Expected, Expected))> = vec![
+        ("control", CONTROL, both(Ok(Some(false)))),
+        ("control true", r#"{ "steering": { "automatic": { "enabled": true } } }"#, both(Ok(Some(true)))),
+        ("empty automatic", r#"{ "steering": { "automatic": {} } }"#, (Ok(Some(true)), Err(()))),
+        ("absent automatic", r#"{ "steering": {} }"#, (Ok(Some(true)), Err(()))),
+        ("absent steering", r#"{}"#, (Ok(Some(true)), Ok(None))),
+        ("null value", r#"{ "steering": { "automatic": { "enabled": null } } }"#, (Ok(Some(true)), Ok(None))),
+        ("null automatic", r#"{ "steering": { "automatic": null } }"#, (Ok(Some(true)), Ok(None))),
+        ("null steering", r#"{ "steering": null }"#, (Ok(Some(true)), Ok(None))),
+        ("string value", r#"{ "steering": { "automatic": { "enabled": "false" } } }"#, both(Err(()))),
+        ("number value", r#"{ "steering": { "automatic": { "enabled": 0 } } }"#, both(Err(()))),
+        ("array value", r#"{ "steering": { "automatic": { "enabled": [false] } } }"#, both(Err(()))),
+        ("automatic not an object", r#"{ "steering": { "automatic": false } }"#, both(Err(()))),
+        ("steering not an object", r#"{ "steering": false }"#, both(Err(()))),
+        ("unknown key beside", r#"{ "steering": { "automatic": { "enabled": false, "enable": true } } }"#, both(Err(()))),
+        ("unknown steering key", r#"{ "steering": { "automatic": { "enabled": false }, "auto": {} } }"#, both(Err(()))),
+        ("trailing content", r#"{ "steering": { "automatic": { "enabled": false } } } false"#, both(Err(()))),
+        ("duplicate key", r#"{ "steering": { "automatic": { "enabled": false, "enabled": true } } }"#, both(Err(()))),
+    ];
+    rows.into_iter().map(|(cell, text, (user, repo))| (cell, text, user, repo)).collect()
 }
 
 fn write(dir: &Path, text: &str) -> std::path::PathBuf {
@@ -120,10 +126,7 @@ fn write(dir: &Path, text: &str) -> std::path::PathBuf {
 
 #[test]
 fn repo_file_matrix() {
-    for (cell, text, expected) in cells() {
-        // The repository's `steering` and `automatic` overrides are
-        // `not-empty`: an empty override mapping is refused.
-        let expected = if matches!(cell, "empty automatic" | "absent automatic") { Err(()) } else { expected };
+    for (cell, text, _, expected) in cells() {
         let tmp = tempfile::tempdir().unwrap();
         let loaded = loader::load_repo_override_config(&write(tmp.path(), text));
         let actual = loaded.map(|config| config.expect("file exists").steering.automatic.enabled).map_err(|_| ());
@@ -133,7 +136,7 @@ fn repo_file_matrix() {
 
 #[test]
 fn user_file_matrix() {
-    for (cell, text, expected) in cells() {
+    for (cell, text, expected, _) in cells() {
         let tmp = tempfile::tempdir().unwrap();
         let loaded = loader::load_claudine_config(Some(&write(tmp.path(), text)), None);
         let actual = loaded.map(|config| config.steering.automatic.enabled).map_err(|_| ());
@@ -158,14 +161,14 @@ fn a_repo_file_merged_by_the_user_loader_overrides_only_what_it_sets() {
 }
 
 #[test]
-fn a_saved_config_round_trips_the_setting_and_omits_it_when_unset() {
+fn a_saved_config_round_trips_the_setting_and_starts_at_its_default() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("config.yaml");
     let defaults = crate::config::claudine_config::ClaudineConfig::default();
     persist::initialize_config(&path, ConfigScope::User, &defaults, &defaults.clone()).unwrap();
     let created: serde_json::Value =
         biscuit_file::serde_yaml_ng::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(created.pointer("/steering/automatic/enabled").is_none(), "{created}");
+    assert_eq!(created.pointer("/steering/automatic/enabled"), Some(&serde_json::json!(true)), "{created}");
 
     for _ in 0..2 {
         let opened = loader::load_claudine_config(Some(&path), None).unwrap();

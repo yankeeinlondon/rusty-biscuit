@@ -51,6 +51,7 @@ types:
         when: "expression(required) -> the condition choosing then or else"
         then: "stack(required) -> the actions to run when the condition holds"
         else: "stack -> the actions to run when it does not"
+        no_error: "literal(false) -> filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
     initialize-stack:
         - initialize-item[]
         - initialize-entry
@@ -67,6 +68,7 @@ types:
         when: "expression(required) -> the condition choosing then or else"
         then: "initialize-stack(required) -> the actions to run when the condition holds"
         else: "initialize-stack -> the actions to run when it does not"
+        no_error: "literal(false) -> filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
     loop-action: "{ op: enum(increment, decrement, set, append, prepend, merge; required), prop: string(not-empty; required), value: unknown }"
     loop-action-entry:
         - string
@@ -90,7 +92,7 @@ types:
             - "interpolation@./action.yaml -> a cap such as {{ cap }}, resolved once before the loop starts"
         on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
         gate: "stack -> the lifecycle stack run after each iteration; never beside loose verb keys"
-        no_error: "boolean -> keep the loop running when one of the loose actions fails"
+        no_error: "boolean(default(false)) -> keep the loop running when one of the loose actions fails"
         say: say-short@darkmatter:lifecycle
         speak: speak-short@darkmatter:lifecycle
         effect: effect-short@darkmatter:lifecycle
@@ -258,7 +260,7 @@ types:
             - "number(integer; min(1)) -> the most iterations to run"
             - "interpolation@./action.yaml -> a cap such as {{ cap }}, resolved once before the loop starts"
         on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
-        no_error: "boolean -> keep the loop running when one of the loose actions fails"
+        no_error: "boolean(default(false)) -> keep the loop running when one of the loose actions fails"
         say:
             - say-short@darkmatter:lifecycle
             - say-long@darkmatter:lifecycle
@@ -729,3 +731,4 @@ types:
         when: "expression(required) -> the condition choosing then or else"
         then: "cancelled-stack(required) -> the actions to run when the condition holds"
         else: "cancelled-stack -> the actions to run when it does not"
+        no_error: "literal(false) -> filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"

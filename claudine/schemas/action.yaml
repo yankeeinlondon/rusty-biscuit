@@ -55,7 +55,7 @@ types:
             - success-short@darkmatter:lifecycle
             - success-long@darkmatter:lifecycle
         when: "expression -> run the action only when this condition holds; a list item only"
-        no_error: "boolean -> keep the stack running when this action fails"
+        no_error: "boolean(default(false)) -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
@@ -89,7 +89,7 @@ types:
             - prep-short@darkmatter:lifecycle
             - prep-long@darkmatter:lifecycle
         when: "expression -> run the action only when this condition holds; a list item only"
-        no_error: "boolean -> keep the stack running when this action fails"
+        no_error: "boolean(default(false)) -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
@@ -99,7 +99,7 @@ types:
             - shell-short@darkmatter:lifecycle
             - shell-long@darkmatter:lifecycle
         when: "expression -> run the action only when this condition holds; a list item only"
-        no_error: "boolean -> keep the stack running when this action fails"
+        no_error: "boolean(default(false)) -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
@@ -499,7 +499,7 @@ types:
             - without_date-short@darkmatter:lifecycle
             - without_date-long@darkmatter:lifecycle
         when: "expression -> run the action only when this condition holds; a list item only"
-        no_error: "boolean -> keep the stack running when this action fails"
+        no_error: "boolean(default(false)) -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
@@ -659,7 +659,7 @@ types:
         values: values-short@darkmatter:lifecycle
         without_date: without_date-short@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
-        no_error: "boolean -> keep the stack running when one of these actions fails"
+        no_error: "boolean(default(false)) -> keep the stack running when one of these actions fails"
     initialize-bundle:
         say: say-short@darkmatter:lifecycle
         speak: speak-short@darkmatter:lifecycle
@@ -814,14 +814,14 @@ types:
         values: values-short@darkmatter:lifecycle
         without_date: without_date-short@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
-        no_error: "boolean -> keep the stack running when one of these actions fails"
+        no_error: "boolean(default(false)) -> keep the stack running when one of these actions fails"
     cancelled-stop:
         stop:
             - null
             - "unknown[](max(0))"
             - stop-long@darkmatter:lifecycle
         when: "expression -> run the action only when this condition holds; a list item only"
-        no_error: "boolean -> keep the stack running when this action fails"
+        no_error: "boolean(default(false)) -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
@@ -973,4 +973,4 @@ types:
         values: values-short@darkmatter:lifecycle
         without_date: without_date-short@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
-        no_error: "boolean -> keep the stack running when one of these actions fails"
+        no_error: "boolean(default(false)) -> keep the stack running when one of these actions fails"

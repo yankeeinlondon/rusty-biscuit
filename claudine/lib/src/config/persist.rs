@@ -170,9 +170,10 @@ pub fn initial_text(scope: ConfigScope) -> String {
 /// Mappings are compared key by key, recursively, while the file holds a
 /// mapping (or nothing) at that path. A changed sequence, scalar, or change
 /// of shape is one [`YamlEdit::Set`] of the whole new value. A key `edited`
-/// gained is set; a key it lost is removed when the file writes it, and set
-/// to `null` when it came from a schema default (removing what the file never
-/// wrote would change nothing).
+/// gained is set; a key it lost is removed when the file writes it, and left
+/// alone when it came from a schema default: the file never wrote it, and
+/// neither removing it nor writing `null` (which takes the default again)
+/// would change the configuration.
 ///
 /// ## Errors
 ///
@@ -210,14 +211,11 @@ fn diff(
         segments.pop();
     }
     for key in before.keys().filter(|key| !after.contains_key(*key)) {
-        segments.push(key.clone());
-        let written = authored.and_then(|value| value.get(key)).is_some();
-        edits.push(if written {
-            YamlEdit::Remove { path: path_of(segments)? }
-        } else {
-            YamlEdit::Set { path: path_of(segments)?, value: Value::Null }
-        });
-        segments.pop();
+        if authored.and_then(|value| value.get(key)).is_some() {
+            segments.push(key.clone());
+            edits.push(YamlEdit::Remove { path: path_of(segments)? });
+            segments.pop();
+        }
     }
     Ok(())
 }

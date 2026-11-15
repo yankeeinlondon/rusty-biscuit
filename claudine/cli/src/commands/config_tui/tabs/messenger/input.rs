@@ -25,18 +25,17 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('r') | KeyCode::Char('R') if app.is_in_repo => {
             let configs = sorted_messenger_names(app);
-            // Index 0 = "(inherit user)", 1 = "(disabled)", 2+ = config names
+            // Index 0 = "(inherit user)", 1+ = config names
             let repo_active = app
                 .repo_config
                 .as_ref()
                 .and_then(|rc| rc.active_messenger.as_ref());
             let highlighted = match repo_active {
-                None => 0,       // inherits
-                Some(None) => 1, // disabled
-                Some(Some(name)) => configs
+                None => 0, // inherits
+                Some(name) => configs
                     .iter()
                     .position(|k| k == name)
-                    .map(|i| i + 2)
+                    .map(|i| i + 1)
                     .unwrap_or(0),
             };
             app.modal = Some(ModalState::MessengerSelect {

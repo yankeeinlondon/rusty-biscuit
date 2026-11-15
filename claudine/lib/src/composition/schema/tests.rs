@@ -298,8 +298,8 @@ fn invalid_optional_is_dropped_and_retried() {
     assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("Plan"));
     assert_eq!(
         fm.get("count"),
-        Some(&serde_json::Value::Null),
-        "invalid optional `count` should be dropped and rematerialized as null",
+        None,
+        "invalid optional `count` should be dropped and stay absent: composition never writes a declared but unset key",
     );
 }
 
@@ -326,8 +326,8 @@ fn invalid_optional_setter_is_dropped_and_retried() {
     assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("Plan"));
     assert_eq!(
         fm.get("count"),
-        Some(&serde_json::Value::Null),
-        "invalid optional override `count` should be dropped and rematerialized as null",
+        None,
+        "invalid optional override `count` should be dropped and stay absent: composition never writes a declared but unset key",
     );
 }
 

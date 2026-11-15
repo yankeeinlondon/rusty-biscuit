@@ -14,8 +14,9 @@ fn seed_user_config(home: &std::path::Path) {
         "actions": {
             "session_start": [
                 {
-                    "type": "report",
-                    "handler": { "format": "json" }
+                    "report": {
+                        "handler": { "format": "json" }
+                    }
                 }
             ]
         }
@@ -91,7 +92,7 @@ fn explicit_config_path_loads_configured_actions() {
   "protect": { "enabled": false },
   "actions": {
     "session_start": [
-      { "type": "report", "handler": { "format": "json" } }
+      { "report": { "handler": { "format": "json" } } }
     ]
   }
 }"#,

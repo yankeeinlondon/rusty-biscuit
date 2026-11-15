@@ -5,11 +5,13 @@
 //! it strictly against its scope's contract ([`super::schema`]): nothing is
 //! converted, and every problem names the file, line, column, and JSON
 //! pointer. The defaults the user file relies on are put in place by the
-//! shared default engine, and the result is what serde reads into
+//! shared default engine, filling a setting that is absent or `null` alike,
+//! and the result is what serde reads into
 //! [`ClaudineConfig`](super::ClaudineConfig) or
-//! [`RepoOverrideConfig`](super::RepoOverrideConfig). A repository type
-//! declares no defaults, so nothing is inserted into a repository file and an
-//! absent override inherits.
+//! [`RepoOverrideConfig`](super::RepoOverrideConfig). A repository's overrides
+//! declare no default, so an absent or `null` one inherits. An action or route
+//! still written in the flat form of earlier releases is refused with its
+//! keyed spelling.
 //!
 //! `permissions` belongs to Darkmatter: it is validated here through the
 //! imported type, but the typed value carries it only as written, never with
@@ -175,9 +177,18 @@ fn project(
             format!("the configuration {what}; write `{{}}` for one that keeps every default"),
         )]);
     };
+    let flat = flat_entry_problems(document, problem);
     let defaults = match contract(scope).validate_strict(document) {
-        Ok(success) => success.defaults,
-        Err(failure) => return Err(failure_problems(&failure, problem)),
+        Ok(success) if flat.is_empty() => success.defaults,
+        Ok(_) => return Err(flat),
+        Err(failure) => {
+            // A flat action or route fails every keyed arm; its migration
+            // message replaces what the union reports about it.
+            let mut problems = failure_problems(&failure, problem);
+            problems.retain(|found| !flat.iter().any(|entry| is_at_or_below(&found.pointer, &entry.pointer)));
+            problems.extend(flat);
+            return Err(problems);
+        }
     };
     let mut problems = Vec::new();
     if map.contains_key("preferred_agent") && map.contains_key("favorite_agent") {
@@ -207,6 +218,17 @@ fn project(
         }
     }
     Ok((effective, defaults))
+}
+
+/// A migration problem for every action or route still written in the flat
+/// form (`type: bash`, `provider: discord`), with its keyed spelling.
+fn flat_entry_problems(document: &Value, problem: &Problem<'_>) -> Vec<ConfigProblem> {
+    super::wire::flat_entries(document).into_iter().map(|(segments, message)| problem(&segments, message)).collect()
+}
+
+/// Whether JSON pointer `pointer` is `parent` or inside it.
+fn is_at_or_below(pointer: &str, parent: &str) -> bool {
+    pointer.strip_prefix(parent).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// An exit-expression entry writes exactly one of `pattern` and `patterns`,

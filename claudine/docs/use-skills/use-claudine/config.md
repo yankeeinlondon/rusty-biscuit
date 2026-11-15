@@ -43,19 +43,24 @@ those native events onto one **unified** event set.
   variables you can use.
 - `claudine actions` shows what you've configured.
 
-Each entry under `actions.<event>` is one of six types. Every type also
-accepts `when`, and unknown fields are rejected.
+Each entry under `actions.<event>` is a one-key mapping: the key is one of six
+types and holds that type's fields. Every type also accepts `when`, and
+unknown fields are rejected. The older flat form (`- type: bash` beside
+`command:`) no longer loads; the error spells the keyed form.
 
 ```yaml
 actions:
   "<event>":
-    - { type: sound_effect, effect: crowd-applause, volume: 0.5 }
-    - { type: speak, message: "{{ hook.tool_name }} finished" }
-    - { type: bash, command: notify-send done }                  # fixed 3 s timeout
-    - { type: call, command: ./gate.sh, mapper: exit_code }      # the ONLY blocking action: 0 = allow, 2 = deny
-    - { type: report }
-    - { type: message, message: Agent needs you }
+    - sound_effect: { effect: crowd-applause, volume: 0.5 }
+    - speak: { message: "{{ hook.tool_name }} finished" }
+    - bash: { command: notify-send done }                        # fixed 3 s timeout
+    - call: { command: ./gate.sh, mapper: { type: exit_code } }  # the ONLY blocking action: 0 = allow, 2 = deny
+    - report: {}
+    - message: { message: Agent needs you }
 ```
+
+Messenger routes are keyed the same way:
+`messenger.configurations.<name>: { slack: { channel_id: C012345ABC } }`.
 
 - `call` mappers: `exit_code`, `json_field`, `json_object`, and `regex`.
 - `hook.*` holds the event payload.
@@ -76,8 +81,9 @@ from **document lifecycle events** in a prompt's frontmatter
 | `true` | on, auto-detect | auto-detect |
 | `{ provider, voice, gender, prewarm }` (all optional) | on, with these settings | these settings |
 
-`voice` may be `{ male, female }`. `null` and unknown keys are rejected.
-`prewarm` (default on) prepares early phrases ahead of time.
+`voice` may be `{ male, female }`. `null` means the same as leaving a key
+out; unknown keys are rejected. `prewarm` (default on) prepares early phrases
+ahead of time.
 
 ### Protect
 

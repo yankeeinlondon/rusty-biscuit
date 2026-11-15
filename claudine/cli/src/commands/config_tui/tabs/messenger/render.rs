@@ -70,8 +70,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .as_ref()
             .and_then(|rc| rc.active_messenger.as_ref())
         {
-            Some(Some(name)) => format!("Repo override: {name}"),
-            Some(None) => "Repo override: (disabled)".to_string(),
+            Some(name) => format!("Repo override: {name}"),
             None => "Repo override: (inherits user)".to_string(),
         };
         let repo_line = Paragraph::new(Span::styled(
@@ -168,7 +167,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     {
         let config_names: Vec<String> = configs.iter().map(|(k, _)| k.clone()).collect();
         let (title, items) = if *for_repo {
-            let mut items = vec!["(inherit user)".to_string(), "(disabled)".to_string()];
+            let mut items = vec!["(inherit user)".to_string()];
             items.extend(config_names);
             ("Repo Messenger Override", items)
         } else {

@@ -80,7 +80,7 @@ fn busy_call_action() -> serde_json::Value {
         "ping",
         vec!["-n".to_string(), (BUSY_SECONDS + 1).to_string(), "127.0.0.1".to_string()],
     );
-    serde_json::json!({ "type": "call", "command": command, "args": args, "timeout_ms": 60_000 })
+    serde_json::json!({ "call": { "command": command, "args": args, "timeout_ms": 60_000 } })
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn a_hook_message_is_delivered_before_the_handler_exits() {
     let fixture = CliProcessFixture::named("handle-message-drain");
     write_session_end_actions(
         &fixture,
-        serde_json::json!([{ "type": "message", "message": "handle-drain-marker" }]),
+        serde_json::json!([{ "message": { "message": "handle-drain-marker" } }]),
     );
     let listener = WebhookListener::start(ListenerMode::WithholdUntilReleased);
     let run = spawn_handle(&fixture, &listener, None);
@@ -116,7 +116,7 @@ fn a_stalled_hook_message_waits_only_for_the_rest_of_the_handler_deadline() {
     let fixture = CliProcessFixture::named("handle-message-stalled");
     write_session_end_actions(
         &fixture,
-        serde_json::json!([{ "type": "message", "message": "handle-stalled-body" }]),
+        serde_json::json!([{ "message": { "message": "handle-stalled-body" } }]),
     );
     let listener = WebhookListener::start(ListenerMode::NeverReply);
     let run = spawn_handle(&fixture, &listener, Some(HANDLE_DEADLINE_SECONDS));
@@ -151,7 +151,7 @@ fn a_handler_past_its_deadline_exits_124_and_reports_the_pending_message() {
     write_session_end_actions(
         &fixture,
         serde_json::json!([
-            { "type": "message", "message": "handle-deadline-body" },
+            { "message": { "message": "handle-deadline-body" } },
             busy_call_action(),
         ]),
     );

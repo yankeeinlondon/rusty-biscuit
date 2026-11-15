@@ -89,11 +89,11 @@ Booleans render as `true`/`false`. Unknown bare-variable references like `{{unkn
 
 **Action `when` Clauses.** Every hook action variant accepts an optional `when` boolean expression. When it evaluates to false (or fails to parse), the action is skipped without short-circuiting the rest of the binding. A skipped `Call` action cannot replace a previously selected blocking response.
 
-```json
-{ "type": "speak", "message": "Bash on {{git.branch}}", "when": "tool_name == 'Bash'" }
-{ "type": "bash",  "command": "say done", "when": "git.is_dirty" }
-{ "type": "call",  "command": "/usr/local/bin/check", "when": "provider == 'claude' && tool_name == 'Bash'" }
-{ "type": "message", "message": "build red on {{git.branch}}", "when": "event == 'tool_error'" }
+```yaml
+- speak: { message: "Bash on {{git.branch}}", when: "tool_name == 'Bash'" }
+- bash: { command: "say done", when: "git.is_dirty" }
+- call: { command: /usr/local/bin/check, when: "provider == 'claude' && tool_name == 'Bash'" }
+- message: { message: "build red on {{git.branch}}", when: "event == 'tool_error'" }
 ```
 
 **Matcher Modes.** Event binding matchers accept either a Darkmatter condition or a regex (legacy mode). Matcher strings are first attempted as conditions; bare-variable strings like `Bash|Edit` deliberately fall through to regex compilation so historical configurations keep their original semantics. Examples:

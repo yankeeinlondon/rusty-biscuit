@@ -13,10 +13,10 @@ Actions live under the top-level `actions` map, keyed by canonical event name. E
 ```yaml
 actions:
   before_tool:
-    - type: report
-    - type: sound_effect
-      effect: space-alarm
-      volume: 0.5
+    - report: {}
+    - sound_effect:
+        effect: space-alarm
+        volume: 0.5
 matchers:
   before_tool: "^Bash$"
 ```
@@ -36,7 +36,18 @@ A matcher can also be a Darkmatter condition over the same paths as [`when`](#av
 
 ## Action Types
 
-Every action is a mapping with a `type` discriminator. Claudine supports six action types; an unknown `type`, or an unknown field on an action, fails to load.
+Every action is a mapping with exactly one key, the action's type, whose value holds that action's fields (`- bash: { command: notify-send }`). An action with no fields to set is written with an empty mapping (`- report: {}`). Claudine supports six action types; an unknown type, a second key beside the type, `null` in place of the fields, or an unknown field fails to load. A field's default applies when it is absent or `null`.
+
+Earlier releases wrote the type as a field (`- type: bash` beside `command:`). A `config.yaml` in that form fails to load with a message that spells the entry in the keyed form; a legacy `config.json` is rewritten in the keyed form when it is [converted](configuration.md#converting-a-configjson).
+
+```yaml
+# before
+- type: sound_effect
+  effect: doorbell
+# now
+- sound_effect:
+    effect: doorbell
+```
 
 ### `sound_effect`
 
@@ -51,10 +62,10 @@ The global scheduler serializes it with lifecycle, speech, and other Playa jobs.
 | `speed` | `f32` | `1.0` | Playback speed multiplier |
 
 ```yaml
-type: sound_effect
-effect: confirmation
-volume: 0.8
-speed: 1.2
+sound_effect:
+  effect: confirmation
+  volume: 0.8
+  speed: 1.2
 ```
 
 ### `speak`
@@ -76,8 +87,8 @@ redact private preparation text.
 | `gender` | `male` \| `female` | `null` | Gender preference for voice selection |
 
 ```yaml
-type: speak
-message: "Tool {{tool_name}} completed on {{git.branch}}"
+speak:
+  message: "Tool {{tool_name}} completed on {{git.branch}}"
 ```
 
 The provider and default voice come from the [`tts` setting](#text-to-speech-settings-tts);
@@ -108,14 +119,14 @@ Print event information to stdout, making it visible in the agent's output strea
 | `compact` | `[EVENT] tool_name` |
 
 ```yaml
-type: report
+report: {}
 ```
 
 ```yaml
-type: report
-handler:
-  format: compact
-  template: "[TOOL] {{tool_name}}: executing on {{os.type}}"
+report:
+  handler:
+    format: compact
+    template: "[TOOL] {{tool_name}}: executing on {{os.type}}"
 ```
 
 ### `bash`
@@ -130,9 +141,9 @@ Run an external command without inspecting its output. The command is spawned di
 Both fields support template interpolation. Quote a placeholder whose value may contain spaces (`--message '{{tool_name}}'`); otherwise the value splits into several arguments.
 
 ```yaml
-type: bash
-command: notify-send
-params: "Claudine '{{event}} fired'"
+bash:
+  command: notify-send
+  params: "Claudine '{{event}} fired'"
 ```
 
 ### `message`
@@ -147,14 +158,14 @@ Requires messaging configuration under the top-level `messenger` key (see [Messa
 | `image` | `string?` | `null` | File path to a raster image attachment (Discord only in v1; ignored with a warning for other providers) |
 
 ```yaml
-type: message
-message: "**{{provider}}** `{{event}}` in `{{cwd}}`"
+message:
+  message: "**{{provider}}** `{{event}}` in `{{cwd}}`"
 ```
 
 ```yaml
-type: message
-message: Build artifact ready
-image: "{{cwd}}/.claudine/artifacts/last-run.png"
+message:
+  message: Build artifact ready
+  image: "{{cwd}}/.claudine/artifacts/last-run.png"
 ```
 
 Image path resolution: absolute paths stay absolute, `~/` expands to the home directory, relative paths resolve from `{{cwd}}` then the repo root.
@@ -192,21 +203,21 @@ Execute an external command synchronously and map its output to a `HookResponse`
 When multiple `call` actions appear in a binding, the last non-`continue` decision wins.
 
 ```yaml
-type: call
-command: security-check
-args: ["--tool", "{{tool_name}}"]
-timeout_ms: 4000
-mapper:
-  type: exit_code
+call:
+  command: security-check
+  args: ["--tool", "{{tool_name}}"]
+  timeout_ms: 4000
+  mapper:
+    type: exit_code
 ```
 
 ```yaml
-type: call
-command: policy-engine
-args: ["--event", "{{event}}"]
-mapper:
-  type: json_field
-  field: result.decision
+call:
+  command: policy-engine
+  args: ["--event", "{{event}}"]
+  mapper:
+    type: json_field
+    field: result.decision
 ```
 
 ## Conditional Execution (`when`)
@@ -236,17 +247,17 @@ The following paths can be referenced in `when` expressions:
 Only speak when on the `main` branch:
 
 ```yaml
-type: speak
-message: Deploying to production
-when: "git.branch == 'main'"
+speak:
+  message: Deploying to production
+  when: "git.branch == 'main'"
 ```
 
 Only call a policy engine when `ctx.today` is available:
 
 ```yaml
-type: call
-command: policy-engine
-when: "!is_empty(ctx.today)"
+call:
+  command: policy-engine
+  when: "!is_empty(ctx.today)"
 ```
 
 ### The `hook` root
@@ -257,9 +268,9 @@ payload (its event fields, `extra`, and the `os`, `hardware`, `git`, and
 above read the same fields, so `tool_name` and `hook.tool_name` agree.
 
 ```yaml
-type: speak
-message: "{{ hook.tool_name }} finished"
-when: "hook.tool_name == 'Bash'"
+speak:
+  message: "{{ hook.tool_name }} finished"
+  when: "hook.tool_name == 'Bash'"
 ```
 
 - A missing `hook.<path>` is absent (`null`); it never falls back to an
@@ -398,8 +409,8 @@ The value is validated strictly against the shipped schema
 
 - an unknown key in the object (for example `enabled` or `pre_warm`) is
   rejected;
-- an explicit `null` for `tts`, `provider`, or `prewarm` is rejected, not read
-  as absent;
+- an explicit `null` is the same as leaving the key out: `tts: null` is
+  `false`, `provider: null` auto-detects, and `prewarm: null` is `true`;
 - a wrong type (`tts: "say"`, `provider: 1`, `prewarm: "no"`) is rejected;
 - `{}` loads as an object with every key at its default;
 - a key written twice is rejected, as it is anywhere in `config.yaml`.
@@ -415,53 +426,53 @@ The `message` action requires a destination configured under the top-level `mess
 
 ### Named Config Pattern
 
-Multiple provider configurations are stored under a `configurations` map keyed by user-chosen names. An `active_config` field selects which named configuration is currently in use; it must name a key in `configurations`. Omitting `active_config` disables messaging.
+Multiple provider configurations are stored under a `configurations` map keyed by user-chosen names. Each named route is a mapping with one key, the provider, holding that provider's fields (`team: { slack: { channel_id: C012345ABC } }`); a route written in the earlier flat form (`provider: slack` beside `channel_id:`) fails to load with its keyed spelling. An `active_config` field selects which named configuration is currently in use; it must name a key in `configurations`. Omitting `active_config` disables messaging.
 
-Scope resolution: a repo-scope `active_messenger` string replaces the user-scope `active_config` for that repo. A repo-scope `active_messenger: null` disables messaging for that repo. When the repo config omits `active_messenger`, the user-scope `active_config` applies.
+Scope resolution: a repo-scope `active_messenger` string replaces the user-scope `active_config` for that repo. When the repo config omits `active_messenger` or sets it to `null`, the user-scope `active_config` applies; a repository cannot turn off a route the user selected.
 
 ### Provider Configs
 
-Secrets are read from the environment variables named by the `*_env` fields (e.g., `bot_token_env`); each field has a default that follows the `messenger` CLI conventions. Only the webhook routes also accept an inline secret, `webhook_url`, which takes precedence over `webhook_url_env`.
+Secrets are read from the environment variables named by the `*_env` fields (e.g., `bot_token_env`); each field has a default that follows the `messenger` CLI conventions, used when the field is absent or `null`. Each example below is the value of one named route. Only the webhook routes also accept an inline secret, `webhook_url`, which takes precedence over `webhook_url_env`.
 
 **Discord:**
 
 ```yaml
-provider: discord
-channel_id: "123456789012345678"
-bot_token_env: DISCORD_BOT_TOKEN
+discord:
+  channel_id: "123456789012345678"
+  bot_token_env: DISCORD_BOT_TOKEN
 ```
 
 **Slack:**
 
 ```yaml
-provider: slack
-channel_id: C012345ABC
-bot_token_env: SLACK_BOT_TOKEN
+slack:
+  channel_id: C012345ABC
+  bot_token_env: SLACK_BOT_TOKEN
 ```
 
 **Discord Webhook:**
 
 ```yaml
-provider: discord_webhook
-webhook_url: https://discord.com/api/webhooks/123456789/abcdef...
-webhook_url_env: DISCORD_WEBHOOK_URL
+discord_webhook:
+  webhook_url: https://discord.com/api/webhooks/123456789/abcdef...
+  webhook_url_env: DISCORD_WEBHOOK_URL
 ```
 
 **Slack Webhook:**
 
 ```yaml
-provider: slack_webhook
-webhook_url: https://hooks.slack.com/services/T00/B00/XXXX
-webhook_url_env: SLACK_WEBHOOK_URL
+slack_webhook:
+  webhook_url: https://hooks.slack.com/services/T00/B00/XXXX
+  webhook_url_env: SLACK_WEBHOOK_URL
 ```
 
 **Signal:**
 
 ```yaml
-provider: signal
-recipient: "+15551234567"
-rpc_url_env: SIGNAL_RPC_URL
-account_env: SIGNAL_ACCOUNT
+signal:
+  recipient: "+15551234567"
+  rpc_url_env: SIGNAL_RPC_URL
+  account_env: SIGNAL_ACCOUNT
 ```
 
 Recipients starting with `+` are treated as phone numbers; other values are treated as Signal group IDs.
@@ -469,10 +480,10 @@ Recipients starting with `+` are treated as phone numbers; other values are trea
 **WhatsApp:**
 
 ```yaml
-provider: whatsapp
-recipient: "+15559876543"
-access_token_env: WHATSAPP_ACCESS_TOKEN
-phone_number_id_env: WHATSAPP_PHONE_NUMBER_ID
+whatsapp:
+  recipient: "+15559876543"
+  access_token_env: WHATSAPP_ACCESS_TOKEN
+  phone_number_id_env: WHATSAPP_PHONE_NUMBER_ID
 ```
 
 ### Env-Only Webhook Configuration
@@ -480,8 +491,8 @@ phone_number_id_env: WHATSAPP_PHONE_NUMBER_ID
 Webhook routes can omit the inline `webhook_url` and rely solely on an environment variable:
 
 ```yaml
-provider: slack_webhook
-webhook_url_env: DEPLOY_SLACK_WEBHOOK_URL
+slack_webhook:
+  webhook_url_env: DEPLOY_SLACK_WEBHOOK_URL
 ```
 
 This is useful when the config file is shared or backed up and the webhook secret should not be stored in it.
@@ -497,19 +508,19 @@ messenger:
   active_config: work-slack
   configurations:
     work-slack:
-      provider: slack
-      channel_id: C012345ABC
-      bot_token_env: SLACK_BOT_TOKEN
+      slack:
+        channel_id: C012345ABC
+        bot_token_env: SLACK_BOT_TOKEN
     personal-discord:
-      provider: discord
-      channel_id: "123456789012345678"
-      bot_token_env: DISCORD_BOT_TOKEN
+      discord:
+        channel_id: "123456789012345678"
+        bot_token_env: DISCORD_BOT_TOKEN
     deploy-webhook:
-      provider: slack_webhook
-      webhook_url_env: DEPLOY_SLACK_WEBHOOK_URL
+      slack_webhook:
+        webhook_url_env: DEPLOY_SLACK_WEBHOOK_URL
     alerts-webhook:
-      provider: discord_webhook
-      webhook_url_env: DISCORD_WEBHOOK_URL
+      discord_webhook:
+        webhook_url_env: DISCORD_WEBHOOK_URL
 ```
 
 ## Full Example
@@ -519,28 +530,28 @@ A complete set of event bindings with multiple actions:
 ```yaml
 actions:
   before_tool:
-    - type: call
-      command: security-check
-      args: ["--tool", "{{tool_name}}", "--branch", "{{git.branch}}"]
-      timeout_ms: 5000
-      mapper:
-        type: exit_code
-    - type: report
-      handler:
-        format: compact
+    - call:
+        command: security-check
+        args: ["--tool", "{{tool_name}}", "--branch", "{{git.branch}}"]
+        timeout_ms: 5000
+        mapper:
+          type: exit_code
+    - report:
+        handler:
+          format: compact
   turn_complete:
-    - type: sound_effect
-      effect: confirmation
-    - type: speak
-      message: "Turn complete on {{git.branch}}"
-    - type: message
-      message: "Turn complete on **{{git.branch}}**"
+    - sound_effect:
+        effect: confirmation
+    - speak:
+        message: "Turn complete on {{git.branch}}"
+    - message:
+        message: "Turn complete on **{{git.branch}}**"
   tool_error:
-    - type: sound_effect
-      effect: error-1
-      volume: 0.6
-    - type: speak
-      message: "{{tool_name}} failed: {{error}}"
+    - sound_effect:
+        effect: error-1
+        volume: 0.6
+    - speak:
+        message: "{{tool_name}} failed: {{error}}"
 matchers:
   before_tool: "^Bash$"
 ```

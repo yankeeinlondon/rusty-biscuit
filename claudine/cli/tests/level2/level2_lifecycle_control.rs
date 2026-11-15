@@ -2036,7 +2036,7 @@ fn seed_dispatch_recorder_config(staged: &Staged) {
         r#"{{
   "actions": {{
     "session_start": [
-      {{ "type": "bash", "command": "{recorder}", "params": "'{{{{extra.resolved_model}}}}'" }}
+      {{ "bash": {{ "command": "{recorder}", "params": "'{{{{extra.resolved_model}}}}'" }} }}
     ]
   }}
 }}

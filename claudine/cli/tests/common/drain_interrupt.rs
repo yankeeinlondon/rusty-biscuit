@@ -80,7 +80,7 @@ impl DrainCommand {
         write_one_line_claude(bin_dir);
         let actions = match self {
             Self::Wrapper => serde_json::json!({
-                "actions": { "turn_complete": [{ "type": "message", "message": MESSAGE }] },
+                "actions": { "turn_complete": [{ "message": { "message": MESSAGE } }] },
             }),
             _ => serde_json::json!({}),
         };

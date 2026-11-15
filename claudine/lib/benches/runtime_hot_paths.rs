@@ -146,20 +146,22 @@ impl RuntimeConfigFixture {
             "actions": {
                 "before_tool": [
                     {
-                        "type": "call",
-                        "command": "echo",
-                        "args": ["allow because benchmark"],
-                        "mapper": {
-                            "type": "regex",
-                            "pattern": "(?P<decision>allow|deny)\\s+because\\s+(?P<reason>.*)"
+                        "call": {
+                            "command": "echo",
+                            "args": ["allow because benchmark"],
+                            "mapper": {
+                                "type": "regex",
+                                "pattern": "(?P<decision>allow|deny)\\s+because\\s+(?P<reason>.*)"
+                            }
                         }
                     },
                     {
-                        "type": "report",
-                        "handler": {
-                            "format": "json",
-                            "template": null,
-                            "include_metadata": false
+                        "report": {
+                            "handler": {
+                                "format": "json",
+                                "template": null,
+                                "include_metadata": false
+                            }
                         }
                     }
                 ]

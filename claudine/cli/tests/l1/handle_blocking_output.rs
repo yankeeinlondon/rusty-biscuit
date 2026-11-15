@@ -20,9 +20,10 @@ fn handle_flushes_blocking_payload_before_nonzero_exit() {
         "actions": {
             "turn_complete": [
                 {
-                    "type": "call",
-                    "command": "/bin/sh",
-                    "args": ["-c", "echo blocked by handler; exit 2"]
+                    "call": {
+                        "command": "/bin/sh",
+                        "args": ["-c", "echo blocked by handler; exit 2"]
+                    }
                 }
             ]
         }

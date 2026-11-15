@@ -79,10 +79,18 @@ audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#spe
 `dispatch/loader.rs`): both files are YAML judged strictly by
 `claudine/schemas/claudine-config.yaml` (`include_str!`, prepared with
 Darkmatter's shipped sources so `permissions@darkmatter:config` resolves; not
-part of the trigger bundle or shipped artifact). Schema defaults are inserted
-before serde reads `ClaudineConfig` (no top-level serde defaults;
-`ClaudineConfig::default()` is the projection of `{}`); `RepoOverrideConfig`
-keeps presence-sensitive serde defaults and gets nothing inserted. Errors are
+part of the trigger bundle or shipped artifact). Schema defaults are inserted,
+replacing an absent or `null` value alike, before serde reads `ClaudineConfig`
+(no top-level serde defaults; `ClaudineConfig::default()` is the projection of
+`{}`); `RepoOverrideConfig`'s overrides declare no default and read absent and
+`null` as unset (`config/wire.rs::{null_as_default, null_entries_unset}`;
+`active_messenger` is `Option<String>`). Actions and messenger routes are
+one-key mappings in the file (`- bash: { command: … }`,
+`team: { slack: { channel_id: … } }`); `config/wire.rs`'s serde adapters on
+the `actions` and `configurations` fields turn them into the internally tagged
+`HookAction`/`MessengerProviderConfig`, which keep their tagged serialization
+everywhere else. A flat (`type:`/`provider:`) entry is refused by `load.rs`
+with its keyed spelling, and `json_conversion` rewrites it (`wire::upgrade_flat`). Errors are
 `ClaudineError::ConfigInvalid`/`ConfigConversion` with file:line:column and
 JSON pointer. A legacy `config.json` beside a canonical
 `<base>/.claudine/config.yaml` is converted by the temporary
@@ -98,8 +106,8 @@ the scope's schema plus `ClaudineConfig::validate` before replacement
 `edit_config` takes explicit edits (setters); `save_changes(path, scope,
 opened, edited)` diffs two serialized values (`changed_edits`: mappings
 recurse while the file holds a mapping, sequences/scalars are replaced whole,
-a lost key is removed or set `null` when it came from a default) — the config
-TUI keeps `App::opening_config`/`opening_repo_config` for this;
+a lost key is removed when the file writes it, left alone when it came from a
+default) — the config TUI keeps `App::opening_config`/`opening_repo_config` for this;
 `initialize_config(path, scope, defaults, chosen)` is setup's form, always
 creating a missing file from `initial_text(scope)`. Edits that already hold
 are dropped, so an unchanged save starts no transaction. A user file spelling
@@ -128,8 +136,8 @@ rewrites `~/.darkmatter.yaml` to the reference; read saved rules from
 **`tts` in `~/.claudine/config.yaml`** (`config/tts.rs::TtsValue`) is `true`,
 `false`, or an object whose keys are all optional: `provider` (absent = default
 provider, as `true`), `voice` (string or `{ male, female }`), `gender`
-(`female` default), `prewarm` (default `true`). Explicit `null` is rejected
-(`present` deserializer), unknown keys are rejected. `bridge_tts_settings` maps
+(`female` default), `prewarm` (default `true`, inserted by the schema).
+Explicit `null` is the same as absent; unknown keys are rejected. `bridge_tts_settings` maps
 it to `GlobalSettings { tts, tts_prewarm }`; read the switch only through
 `TtsValue::prewarm_enabled`.
 

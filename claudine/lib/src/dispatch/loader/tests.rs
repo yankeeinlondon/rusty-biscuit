@@ -58,12 +58,12 @@ fn load_claudine_config_converts_a_legacy_json5_user_file() {
 }
 
 #[test]
-fn load_claudine_config_accepts_hyphenated_discord_webhook_provider() {
+fn load_claudine_config_reads_a_keyed_discord_webhook_route() {
     let dir = tempfile::tempdir().unwrap();
     let config_dir = dir.path().join(".claudine");
     std::fs::create_dir_all(&config_dir).unwrap();
 
-    let yaml_content = "preferred_agent: claude\nmessenger:\n  active_config: alerts\n  configurations:\n    alerts:\n      provider: discord-webhook\n      webhook_url_env: MY_DISCORD_URL\n";
+    let yaml_content = "preferred_agent: claude\nmessenger:\n  active_config: alerts\n  configurations:\n    alerts:\n      discord_webhook:\n        webhook_url_env: MY_DISCORD_URL\n";
     let path = config_dir.join("config.yaml");
     std::fs::write(&path, yaml_content).unwrap();
 
@@ -898,7 +898,8 @@ fn tts_config_input_robustness_matrix() {
 
     // Column `tts`.
     assert_tts_cell("tts absent", "", (None, true));
-    assert_tts_cell_rejected("tts null", "tts: null");
+    // A null setting is an absent one: it takes the default `false`.
+    assert_tts_cell("tts null", "tts: null", (None, true));
     assert_tts_cell_rejected("tts wrong type", r#"tts: "say""#);
     assert_tts_cell("tts empty object", "tts: {}", bridged(None, None, true));
     assert_tts_cell_rejected(
@@ -916,9 +917,10 @@ fn tts_config_input_robustness_matrix() {
         r#"tts: { voice: "af_heart" }"#,
         bridged(None, Some("af_heart"), true),
     );
-    assert_tts_cell_rejected(
+    assert_tts_cell(
         "provider null",
         r#"tts: { provider: null, voice: "af_heart" }"#,
+        bridged(None, Some("af_heart"), true),
     );
     assert_tts_cell_rejected(
         "provider wrong type",
@@ -945,9 +947,10 @@ fn tts_config_input_robustness_matrix() {
         r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: true }"#,
         bridged(Some("kokoro"), Some("af_heart"), true),
     );
-    assert_tts_cell_rejected(
+    assert_tts_cell(
         "prewarm null",
         r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: null }"#,
+        bridged(Some("kokoro"), Some("af_heart"), true),
     );
     assert_tts_cell_rejected(
         "prewarm wrong type",

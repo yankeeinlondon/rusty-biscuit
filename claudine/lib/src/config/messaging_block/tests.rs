@@ -9,8 +9,9 @@ fn messenger_discord_deserializes_with_env_default() {
             "active_config": "work",
             "configurations": {
                 "work": {
-                    "provider": "discord",
-                    "channel_id": "123456789"
+                    "discord": {
+                        "channel_id": "123456789"
+                    }
                 }
             }
         }
@@ -38,8 +39,9 @@ fn messenger_slack_deserializes() {
         "messenger": {
             "configurations": {
                 "alerts": {
-                    "provider": "slack",
-                    "channel_id": "C0ABC"
+                    "slack": {
+                        "channel_id": "C0ABC"
+                    }
                 }
             }
         }
@@ -67,8 +69,9 @@ fn messenger_signal_deserializes_with_defaults() {
         "messenger": {
             "configurations": {
                 "personal": {
-                    "provider": "signal",
-                    "recipient": "+15551234567"
+                    "signal": {
+                        "recipient": "+15551234567"
+                    }
                 }
             }
         }
@@ -97,8 +100,9 @@ fn messenger_whatsapp_deserializes_with_defaults() {
         "messenger": {
             "configurations": {
                 "biz": {
-                    "provider": "whatsapp",
-                    "recipient": "+15559876543"
+                    "whatsapp": {
+                        "recipient": "+15559876543"
+                    }
                 }
             }
         }
@@ -128,8 +132,9 @@ fn messenger_round_trip() {
             "active_config": "main",
             "configurations": {
                 "main": {
-                    "provider": "slack",
-                    "channel_id": "C999"
+                    "slack": {
+                        "channel_id": "C999"
+                    }
                 }
             }
         }
@@ -148,8 +153,9 @@ fn messenger_discord_webhook_deserializes_with_defaults() {
         "messenger": {
             "configurations": {
                 "alerts": {
-                    "provider": "discord_webhook",
-                    "webhook_url_env": "MY_DISCORD_URL"
+                    "discord_webhook": {
+                        "webhook_url_env": "MY_DISCORD_URL"
+                    }
                 }
             }
         }
@@ -169,24 +175,21 @@ fn messenger_discord_webhook_deserializes_with_defaults() {
 }
 
 #[test]
-fn messenger_discord_webhook_accepts_hyphenated_provider_alias() {
+fn a_hyphenated_webhook_key_is_not_a_route_kind() {
+    // The flat form accepted `provider: discord-webhook`; the keyed form
+    // has one spelling per kind, and the legacy converter normalizes it.
     let json = serde_json::json!({
-        "preferred_agent": "claude",
         "messenger": {
             "configurations": {
                 "alerts": {
-                    "provider": "discord-webhook",
-                    "webhook_url_env": "MY_DISCORD_URL"
+                    "discord-webhook": {
+                        "webhook_url_env": "MY_DISCORD_URL"
+                    }
                 }
             }
         }
     });
-    let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
-    let messenger = config.messenger.unwrap();
-    assert!(matches!(
-        messenger.configurations.get("alerts").unwrap(),
-        MessengerProviderConfig::DiscordWebhook { .. }
-    ));
+    assert!(ClaudineConfig::from_user_document(json).is_err());
 }
 
 #[test]
@@ -196,9 +199,10 @@ fn messenger_slack_webhook_deserializes_with_inline_url() {
         "messenger": {
             "configurations": {
                 "deploys": {
-                    "provider": "slack_webhook",
-                    "webhook_url": "https://hooks.slack.com/services/T000/B000/XXXX",
-                    "webhook_url_env": "SLACK_WEBHOOK_URL"
+                    "slack_webhook": {
+                        "webhook_url": "https://hooks.slack.com/services/T000/B000/XXXX",
+                        "webhook_url_env": "SLACK_WEBHOOK_URL"
+                    }
                 }
             }
         }
@@ -228,12 +232,14 @@ fn messenger_webhook_round_trip() {
             "active_config": "deploys",
             "configurations": {
                 "deploys": {
-                    "provider": "slack_webhook",
-                    "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
+                    "slack_webhook": {
+                        "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
+                    }
                 },
                 "personal-alerts": {
-                    "provider": "discord_webhook",
-                    "webhook_url_env": "DISCORD_WEBHOOK_URL"
+                    "discord_webhook": {
+                        "webhook_url_env": "DISCORD_WEBHOOK_URL"
+                    }
                 }
             }
         }
@@ -254,8 +260,9 @@ fn validate_rejects_invalid_discord_webhook_url() {
         "messenger": {
             "configurations": {
                 "bad": {
-                    "provider": "discord_webhook",
-                    "webhook_url": "not-a-url"
+                    "discord_webhook": {
+                        "webhook_url": "not-a-url"
+                    }
                 }
             }
         }
@@ -278,8 +285,9 @@ fn validate_rejects_invalid_slack_webhook_url() {
         "messenger": {
             "configurations": {
                 "bad": {
-                    "provider": "slack_webhook",
-                    "webhook_url": "https://example.com/hook"
+                    "slack_webhook": {
+                        "webhook_url": "https://example.com/hook"
+                    }
                 }
             }
         }
@@ -302,8 +310,9 @@ fn validate_accepts_env_only_webhook_config() {
         "messenger": {
             "configurations": {
                 "env-only": {
-                    "provider": "discord_webhook",
-                    "webhook_url_env": "MY_DISCORD_URL"
+                    "discord_webhook": {
+                        "webhook_url_env": "MY_DISCORD_URL"
+                    }
                 }
             }
         }
@@ -319,8 +328,9 @@ fn validate_accepts_valid_inline_webhook_url() {
         "messenger": {
             "configurations": {
                 "inline": {
-                    "provider": "discord_webhook",
-                    "webhook_url": "https://discord.com/api/webhooks/123456/abcDEF"
+                    "discord_webhook": {
+                        "webhook_url": "https://discord.com/api/webhooks/123456/abcDEF"
+                    }
                 }
             }
         }
@@ -336,8 +346,9 @@ fn validate_rejects_blank_webhook_url_env_when_no_inline() {
         "messenger": {
             "configurations": {
                 "bad": {
-                    "provider": "slack_webhook",
-                    "webhook_url_env": ""
+                    "slack_webhook": {
+                        "webhook_url_env": ""
+                    }
                 }
             }
         }

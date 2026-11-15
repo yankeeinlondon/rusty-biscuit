@@ -49,6 +49,8 @@ fn default_slack_webhook_url() -> String {
 /// Provider-specific configuration for a single messaging route.
 ///
 /// Serializes/deserializes with a `"provider"` tag and snake_case variants.
+/// A configuration file keys a route by its provider instead
+/// (`{ discord: { channel_id: … } }`); see [`ClaudineMessengerConfig::configurations`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MessengerProviderConfig {
@@ -124,8 +126,9 @@ pub struct ClaudineMessengerConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_config: Option<String>,
 
-    /// Named messenger route configurations.
-    #[serde(default)]
+    /// Named messenger route configurations, written in the file as keyed
+    /// routes (`team: { discord: { channel_id: … } }`).
+    #[serde(default, with = "crate::config::wire::routes")]
     pub configurations: HashMap<String, MessengerProviderConfig>,
 }
 

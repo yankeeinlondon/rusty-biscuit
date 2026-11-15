@@ -74,6 +74,37 @@ fn the_legacy_fixture_converts_to_the_same_values_as_the_yaml_fixture() {
 
     let again = load_claudine_config_with_notices(Some(&scope.yaml()), None).unwrap();
     assert!(again.notices.is_empty(), "a repeated load converts nothing");
+
+    // The flat JSON5 actions and routes are written keyed.
+    let written: serde_json::Value =
+        biscuit_file::serde_yaml_ng::from_str(&String::from_utf8(read(&scope.yaml())).unwrap()).unwrap();
+    assert_eq!(written["actions"]["session_start"][0], serde_json::json!({ "sound_effect": { "effect": "doorbell" } }));
+    assert_eq!(written["actions"]["before_tool"][1]["call"]["mapper"], serde_json::json!({ "type": "json_field", "field": "decision" }));
+    assert_eq!(
+        written["messenger"]["configurations"]["hook"],
+        serde_json::json!({ "discord_webhook": { "webhook_url_env": "MY_DISCORD_URL" } }),
+        "the hyphenated flat provider is written with its one keyed spelling"
+    );
+}
+
+#[test]
+fn a_converted_file_round_trips_through_a_save() {
+    let scope = Scope::new();
+    std::fs::write(scope.json(), include_str!("../config/user-control.json5")).unwrap();
+    let opened = load_claudine_config(Some(&scope.yaml()), None).unwrap();
+    let mut edited = opened.clone();
+    edited.actions.insert(
+        claudine::events::AgenticEvent::TurnError,
+        vec![claudine::actions::HookAction::Bash { command: "echo".into(), params: String::new(), when: None }],
+    );
+    claudine::config::persist::save_changes(&scope.yaml(), claudine::config::schema::ConfigScope::User, &opened, &edited).unwrap();
+    let reread = load_claudine_config(Some(&scope.yaml()), None).unwrap();
+    assert_eq!(serde_json::to_value(&reread).unwrap(), serde_json::to_value(&edited).unwrap());
+    let text = String::from_utf8(read(&scope.yaml())).unwrap();
+    assert!(text.contains("turn_error:") && text.contains("- bash:"), "the new list is written keyed: {text}");
+    let unchanged = load_claudine_config(Some(&scope.yaml()), None).unwrap();
+    claudine::config::persist::save_changes(&scope.yaml(), claudine::config::schema::ConfigScope::User, &reread, &unchanged).unwrap();
+    assert_eq!(String::from_utf8(read(&scope.yaml())).unwrap(), text, "a second read/write/read changes nothing");
 }
 
 #[test]
@@ -94,6 +125,9 @@ fn malformed_legacy_files_are_refused_and_kept() {
     assert_refused("wrong root", "[1, 2]");
     assert_refused("scalar root", "\"x\"");
     assert_refused("schema refusal", "{ logging: \"yes\" }");
+    assert_refused("unknown flat action", "{ actions: { session_start: [{ type: \"shout\" }] } }");
+    assert_refused("flat action missing a field", "{ actions: { session_start: [{ type: \"bash\" }] } }");
+    assert_refused("flat route unknown provider", "{ messenger: { configurations: { a: { provider: \"telegram\" } } } }");
     assert_refused("not JSON5", "{ logging: ");
 }
 

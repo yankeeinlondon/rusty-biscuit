@@ -1275,10 +1275,15 @@ fn effective_surface(
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
+    // The schema completed `effective_frontmatter` (a `loop:` block's
+    // `no_error` defaults); its authored values tell the parser which flags
+    // were written.
+    let authored_values = authored_lifecycle_values(source, options);
     let mut lifecycle = super::lifecycle::parse_lifecycle_config_with_orders(
         effective_frontmatter,
         &source.resolved_path,
         Some(composed.frontmatter()),
+        Some(&authored_values),
     )?;
     // A nested span in a single-pass lifecycle literal can never interpolate;
     // reject it here, before any provider or lifecycle event runs.
@@ -1492,6 +1497,25 @@ fn reject_removed_sequence_reads_in_source(
 }
 
 /// Convert a `Frontmatter` to a `serde_json::Value::Object`.
+/// The values a composition's lifecycle was written with: the source
+/// document's frontmatter with the caller's proxy overlay and layered
+/// overrides applied, as they stand before the schema completes them. It is
+/// the authored source of every lifecycle parse of the completed frontmatter
+/// ([`darkmatter::lifecycle::LifecycleParseOptions::authored_values`]): a
+/// `no_error` the completion filled is not in it.
+pub(super) fn authored_lifecycle_values(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+) -> serde_json::Value {
+    let mut authored_values = frontmatter_to_value(source.markdown.frontmatter());
+    if let serde_json::Value::Object(values) = &mut authored_values {
+        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
+        overrides.extend(&options.layered_overrides());
+        values.extend(overrides.values().clone());
+    }
+    authored_values
+}
+
 pub(super) fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::Value {
     serde_json::Value::Object(
         fm.as_map()
@@ -1546,16 +1570,12 @@ pub fn validate_document_shell_late_values(
     )?;
     source.markdown.compose_preflight(&request)
         .map_err(|error| map_compose_error(&source.resolved_path, error))?;
-    let mut authored_values = frontmatter_to_value(source.markdown.frontmatter());
-    if let serde_json::Value::Object(values) = &mut authored_values {
-        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
-        overrides.extend(&options.layered_overrides());
-        values.extend(overrides.values().clone());
-    }
+    let authored_values = authored_lifecycle_values(source, options);
     let authored = super::lifecycle::parse_lifecycle_config_with_orders(
         &authored_values,
         &source.resolved_path,
         Some(source.markdown.frontmatter()),
+        None,
     )?;
     let mut has_shell = false;
     for signal in super::lifecycle::LifecycleSignal::ALL {

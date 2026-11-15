@@ -19,9 +19,10 @@ fn handle_human_in_the_loop_leaves_durable_doorbell_job_after_exit() {
         "protect": { "enabled": false },
         "actions": {
             "human_in_the_loop": [{
-                "type": "sound_effect",
-                "effect": "doorbell-2",
-                "volume": 0.0
+                "sound_effect": {
+                    "effect": "doorbell-2",
+                    "volume": 0.0
+                }
             }]
         }
     });

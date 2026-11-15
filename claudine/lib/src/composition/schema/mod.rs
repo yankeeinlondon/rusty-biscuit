@@ -60,14 +60,12 @@ pub mod bundle;
 pub mod classify;
 pub mod findings;
 pub mod globals;
-mod launch_defaults;
 pub mod shipped;
 mod status_render;
 pub mod supplied;
 pub mod translate;
 
 pub use classify::*;
-use launch_defaults::complete_launch_defaults;
 pub use findings::{TriggerFindings, TriggerWarning};
 pub use status_render::{
     description_suffix, escape_schema_prose, render_optional_line, render_required_line,
@@ -325,7 +323,6 @@ fn post_shell_validate(
             })?,
             None => effective.validate(instance),
         };
-        complete_launch_defaults(&effective, phase, instance, &mut report);
         if trigger_declared_only {
             report.problems.retain(|problem| {
                 top_level_pointer_segment(&problem.path).is_some_and(|name| {
@@ -918,7 +915,7 @@ fn pre_validate_verdict(
     // without ever deferring it as a template.
     let mut instance = raw_instance.clone();
     normalize_file_array_values(&mut instance, Some(&effective));
-    let mut report = effective
+    let report = effective
         .validate_stored(&instance, &PositionMap::new(), phase)
         .map_err(|error| {
             schema_error_to_composition_error(
@@ -927,7 +924,6 @@ fn pre_validate_verdict(
                 Some(&error),
             )
         })?;
-    complete_launch_defaults(&effective, phase, &instance, &mut report);
     if report.valid {
         return Ok(PreValidatedSchema {
             source,

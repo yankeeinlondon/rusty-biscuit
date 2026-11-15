@@ -21,6 +21,7 @@ pub(crate) mod pi;
 pub(crate) mod qwen;
 mod trait_def;
 pub mod tts;
+pub(crate) mod wire;
 
 pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 

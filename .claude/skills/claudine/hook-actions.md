@@ -34,10 +34,10 @@ is no blocking fallback or second scheduler. Unknown effect names also warn.
 
 **Example:**
 ```yaml
-type: sound_effect
-effect: success
-volume: 0.8
-speed: 1.2
+sound_effect:
+  effect: success
+  volume: 0.8
+  speed: 1.2
 ```
 
 ---
@@ -69,8 +69,8 @@ is redacted from journal and `playa spool` output.
 
 **Example:**
 ```yaml
-type: speak
-message: "Tool {{tool_name}} completed on {{git.branch}}"
+speak:
+  message: "Tool {{tool_name}} completed on {{git.branch}}"
 ```
 
 ---
@@ -92,9 +92,9 @@ Execute a shell command asynchronously without waiting for a result. Command and
 
 **Example:**
 ```yaml
-type: bash
-command: notify-send
-params: "Claudine {{event}} fired"
+bash:
+  command: notify-send
+  params: "Claudine {{event}} fired"
 ```
 
 ---
@@ -118,8 +118,8 @@ Send a message to the configured messaging destination (Discord, Slack, Signal, 
 
 **Example:**
 ```yaml
-type: message
-message: "Agent finished turn on **{{git.repo_name}}**"
+message:
+  message: "Agent finished turn on **{{git.repo_name}}**"
 ```
 
 ---
@@ -155,10 +155,10 @@ When `handler` is omitted, defaults to: `[EVENT] tool_name (provider)`.
 
 **Example:**
 ```yaml
-type: report
-handler:
-  format: compact
-  template: "[TOOL] {{tool_name}}: executing on {{os.type}}"
+report:
+  handler:
+    format: compact
+    template: "[TOOL] {{tool_name}}: executing on {{os.type}}"
 ```
 
 ---
@@ -201,13 +201,13 @@ Execute an external command synchronously and map its output to a `HookResponse`
 
 **Example:**
 ```yaml
-type: call
-command: security-check
-args: ["--tool", "{{tool_name}}"]
-timeout_ms: 4000
-mapper:
-  type: json_field
-  field: decision
+call:
+  command: security-check
+  args: ["--tool", "{{tool_name}}"]
+  timeout_ms: 4000
+  mapper:
+    type: json_field
+    field: decision
 ```
 
 ## Context Variables
@@ -267,8 +267,8 @@ Shell environment variables are supported via `{{env.VAR_NAME}}` with optional d
 ### Example
 
 ```yaml
-type: speak
-message: "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
+speak:
+  message: "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
 ```
 
 ## Conditional Execution (`when`)
@@ -299,15 +299,15 @@ before/after table is in
 ### Example
 
 ```yaml
-type: speak
-when: "git.branch == 'main'"
-message: Running on main branch
+speak:
+  when: "git.branch == 'main'"
+  message: Running on main branch
 ```
 
 ```yaml
-type: call
-when: "!is_empty(ctx.today)"
-command: daily-check
-mapper:
-  type: exit_code
+call:
+  when: "!is_empty(ctx.today)"
+  command: daily-check
+  mapper:
+    type: exit_code
 ```

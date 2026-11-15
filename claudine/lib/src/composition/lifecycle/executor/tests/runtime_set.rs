@@ -51,6 +51,7 @@ fn config_from_markdown(source: &str) -> LifecycleConfig {
         &frontmatter,
         Path::new("t.md"),
         Some(markdown.frontmatter()),
+        None,
     )
     .unwrap()
 }

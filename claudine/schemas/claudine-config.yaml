@@ -4,8 +4,9 @@
 #
 # This document is the one authority for their shape and defaults. Claudine
 # validates both files against it before reading them, and every default the
-# user file relies on comes from here. A repository setting is an override:
-# an absent one inherits the user's value, so the repository types declare no
+# user file relies on comes from here, and a default fills a setting that is
+# absent or `null` alike. A repository setting is an override: an absent or
+# `null` one inherits the user's value, so the repository types declare no
 # defaults and nothing is inserted into a repository file.
 #
 # `permissions` is Darkmatter's block, imported and never declared again here.
@@ -29,43 +30,64 @@ types:
         provider: "string(not-empty) -> The TTS engine (`say`, `espeak`, `elevenlabs`, ...). Absent auto-detects one, as `tts: true` does."
         voice: "voice-selection -> The voice, or a voice per gender. A `speak` action's own `voice` wins."
         gender: "gender(required; default(female)) -> Which voice of a gendered pair to use. A `speak` action's own `gender` wins."
-        # Absent means on; it is never inserted, so saving a file does not add it.
         prewarm: "boolean(default(true)) -> Whether lifecycle speech is synthesized ahead of time into the audio cache."
 
     # ---------------------------------------------------------- messenger
+    # A route is a one-key mapping: the key names the provider and holds that
+    # provider's settings (`{ discord: { channel_id: "…" } }`). Each
+    # provider's defaults live under its own key, so no two arms of
+    # `messenger-route` default the same property.
     discord-route:
-        provider: "literal(discord; required)"
         channel_id: "string(required) -> The Discord channel to post to."
         bot_token_env: "string(required; default(DISCORD_BOT_TOKEN)) -> The environment variable holding the bot token."
+        $constraints: { closed: true }
     slack-route:
-        provider: "literal(slack; required)"
         channel_id: "string(required) -> The Slack channel to post to."
         bot_token_env: "string(required; default(SLACK_BOT_TOKEN)) -> The environment variable holding the bot token."
+        $constraints: { closed: true }
     signal-route:
-        provider: "literal(signal; required)"
         recipient: "string(required) -> The recipient phone number or group ID."
         rpc_url_env: "string(required; default(SIGNAL_RPC_URL)) -> The environment variable holding the RPC URL."
         account_env: "string(required; default(SIGNAL_ACCOUNT)) -> The environment variable holding the account."
+        $constraints: { closed: true }
     whatsapp-route:
-        provider: "literal(whatsapp; required)"
         recipient: "string(required) -> The recipient phone number."
         access_token_env: "string(required; default(WHATSAPP_ACCESS_TOKEN)) -> The environment variable holding the access token."
         phone_number_id_env: "string(required; default(WHATSAPP_PHONE_NUMBER_ID)) -> The environment variable holding the phone number ID."
+        $constraints: { closed: true }
     discord-webhook-route:
-        provider: "enum(discord_webhook, discord-webhook; required)"
         webhook_url: "string -> The webhook URL; absent reads it from `webhook_url_env`."
         webhook_url_env: "string(required; default(DISCORD_WEBHOOK_URL)) -> The environment variable holding the webhook URL."
+        $constraints: { closed: true }
     slack-webhook-route:
-        provider: "enum(slack_webhook, slack-webhook; required)"
         webhook_url: "string -> The webhook URL; absent reads it from `webhook_url_env`."
         webhook_url_env: "string(required; default(SLACK_WEBHOOK_URL)) -> The environment variable holding the webhook URL."
+        $constraints: { closed: true }
+    discord-route-entry:
+        discord: "discord-route(required) -> A Discord bot."
+        $constraints: { closed: true }
+    slack-route-entry:
+        slack: "slack-route(required) -> A Slack bot."
+        $constraints: { closed: true }
+    signal-route-entry:
+        signal: "signal-route(required) -> A Signal account."
+        $constraints: { closed: true }
+    whatsapp-route-entry:
+        whatsapp: "whatsapp-route(required) -> A WhatsApp Business account."
+        $constraints: { closed: true }
+    discord-webhook-route-entry:
+        discord_webhook: "discord-webhook-route(required) -> A Discord webhook."
+        $constraints: { closed: true }
+    slack-webhook-route-entry:
+        slack_webhook: "slack-webhook-route(required) -> A Slack webhook."
+        $constraints: { closed: true }
     messenger-route:
-        - "discord-route -> A Discord bot."
-        - "slack-route -> A Slack bot."
-        - "signal-route -> A Signal account."
-        - "whatsapp-route -> A WhatsApp Business account."
-        - "discord-webhook-route -> A Discord webhook."
-        - "slack-webhook-route -> A Slack webhook."
+        - "discord-route-entry -> A Discord bot."
+        - "slack-route-entry -> A Slack bot."
+        - "signal-route-entry -> A Signal account."
+        - "whatsapp-route-entry -> A WhatsApp Business account."
+        - "discord-webhook-route-entry -> A Discord webhook."
+        - "slack-webhook-route-entry -> A Slack webhook."
     messenger-routes:
         "<string>": "messenger-route -> A named messaging route."
     messenger-settings:
@@ -121,46 +143,67 @@ types:
         format: "enum(text, json, compact; required) -> The report line's format."
         template: "string -> A template for the report line."
         include_metadata: "boolean(required; default(false)) -> Whether the event's metadata is included."
+    # An action is a one-key mapping: the key names the action and holds its
+    # settings (`{ bash: { command: "…" } }`). Each action's defaults live
+    # under its own key, so no two arms of `action` default the same property.
     sound-effect-action:
-        type: "literal(sound_effect; required)"
         effect: "string(required) -> The sound effect's name."
         volume: "number(required; default(1.0)) -> Playback volume, 0.0 to 1.0."
         speed: "number(required; default(1.0)) -> Playback speed multiplier."
         when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
     speak-action:
-        type: "literal(speak; required)"
         message: "string(required) -> The message template to speak."
         voice: "string -> The voice for this action."
         gender: "gender -> The voice gender for this action."
         when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
     bash-action:
-        type: "literal(bash; required)"
         command: "string(required) -> The shell command, run without waiting for it."
         params: "string(required; default(\"\")) -> Template parameters appended to the command."
         when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
     call-action:
-        type: "literal(call; required)"
         command: "string(required) -> The command, run and waited for."
         args: "string[] -> Its arguments."
         timeout_ms: "number(integer; min(0)) -> How long to wait, in milliseconds."
         mapper: "mapper -> How its output becomes a hook response."
         when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
     report-action:
-        type: "literal(report; required)"
         handler: "report-handler -> How the report is written."
         when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
     message-action:
-        type: "literal(message; required)"
         message: "string(required) -> The message to send to the active messenger route."
         image: "string -> An image to attach."
         when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
+    sound-effect-action-entry:
+        sound_effect: "sound-effect-action(required) -> Play a sound effect."
+        $constraints: { closed: true }
+    speak-action-entry:
+        speak: "speak-action(required) -> Speak a message."
+        $constraints: { closed: true }
+    bash-action-entry:
+        bash: "bash-action(required) -> Run a shell command in the background."
+        $constraints: { closed: true }
+    call-action-entry:
+        call: "call-action(required) -> Run a command and use its output as the hook's response."
+        $constraints: { closed: true }
+    report-action-entry:
+        report: "report-action(required) -> Report the event."
+        $constraints: { closed: true }
+    message-action-entry:
+        message: "message-action(required) -> Send a message."
+        $constraints: { closed: true }
     action:
-        - "sound-effect-action -> Play a sound effect."
-        - "speak-action -> Speak a message."
-        - "bash-action -> Run a shell command in the background."
-        - "call-action -> Run a command and use its output as the hook's response."
-        - "report-action -> Report the event."
-        - "message-action -> Send a message."
+        - "sound-effect-action-entry -> Play a sound effect."
+        - "speak-action-entry -> Speak a message."
+        - "bash-action-entry -> Run a shell command in the background."
+        - "call-action-entry -> Run a command and use its output as the hook's response."
+        - "report-action-entry -> Report the event."
+        - "message-action-entry -> Send a message."
     # One optional entry per event; an event not listed has no actions.
     event-actions:
         session_start: "action[](not-empty) -> The actions run, in order, on `session_start`."
@@ -254,14 +297,14 @@ types:
         volume: 'volume-guard(required; default({"enabled": true, "max_lines": 50000, "max_bytes": 33554432})) -> The volume guard.'
 
     # ----------------------------------------------------------- steering
-    # `enabled` is never inserted: an unset value lets a repository's value,
-    # then the built-in `true`, decide.
+    # The user's `enabled` defaults to `true`; a repository's value, when it
+    # sets one, still wins over the user's.
     user-automatic-steering:
         enabled: "boolean(default(true)) -> Whether automatic repetition help is on."
     user-steering:
         automatic: "user-automatic-steering(required; default({})) -> Automatic repetition help."
     repository-automatic-steering:
-        enabled: "boolean -> Whether automatic repetition help is on; absent inherits the user's setting."
+        enabled: "boolean -> Whether automatic repetition help is on; absent or `null` inherits the user's setting."
     repository-steering:
         automatic: "repository-automatic-steering(not-empty) -> Automatic repetition help."
 
@@ -294,9 +337,9 @@ types:
         canonical_provider: "provider -> The canonical provider for this repository; absent inherits the user's."
         actions: "event-actions(not-empty) -> Actions for this repository; each event listed replaces the user's actions for it."
         matchers: "event-matchers(not-empty) -> Matchers for this repository; each event listed replaces the user's matcher for it."
-        active_messenger: "string -> The messenger route for this repository; `null` turns messaging off here and absent inherits."
+        active_messenger: "string -> The messenger route for this repository; absent or `null` inherits the user's `messenger.active_config`."
         exit_expressions: "exit-expressions -> Output that stops a run in this repository; the list form replaces the user's rules."
         guard_settings: "guard-settings -> Guard thresholds for this repository, replacing the user's whole setting."
-        steering: "repository-steering(not-empty) -> Steering settings for this repository; absent inherits."
+        steering: "repository-steering(not-empty) -> Steering settings for this repository; absent or `null` inherits."
         permissions: 'repository-permissions(required; default({"file-read": ["&**/*.txt", "&**/*.text", "&**/*.md", "&**/*.csv", "&**/*.tsv", "&**/*.json", "&**/*.json5", "&**/*.yaml", "&**/*.yml", "&**/*.toml"], "shell-commands": [], "network": "deny"}))@darkmatter:config | permissions-reference@darkmatter:config -> The permissions block, or a reference to another file that holds it.'
         $constraints: { closed: true }

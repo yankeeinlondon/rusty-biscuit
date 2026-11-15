@@ -3,8 +3,8 @@
 canonical_provider: gemini
 actions:
   session_end:
-    - type: sound_effect
-      effect: doorbell
+    - sound_effect:
+        effect: doorbell
 matchers:
   session_end: "true"
 active_messenger: team

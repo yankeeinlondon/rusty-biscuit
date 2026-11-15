@@ -25,8 +25,8 @@ pub fn handle_messenger_select_modal(app: &mut App, key: KeyEvent) {
         .unwrap_or_default();
 
     if for_repo {
-        // Repo selection: 0 = inherit, 1 = disabled, 2+ = config names
-        let count = configs.len() + 2;
+        // Repo selection: 0 = inherit, 1+ = config names
+        let count = configs.len() + 1;
         match key.code {
             KeyCode::Up => {
                 let idx = app.modal_highlighted();
@@ -48,11 +48,10 @@ pub fn handle_messenger_select_modal(app: &mut App, key: KeyEvent) {
                 }
                 if let Some(ref mut repo_cfg) = app.repo_config {
                     match idx {
-                        0 => repo_cfg.active_messenger = None,       // inherit
-                        1 => repo_cfg.active_messenger = Some(None), // disabled
+                        0 => repo_cfg.active_messenger = None, // inherit
                         i => {
-                            if let Some(name) = configs.get(i - 2) {
-                                repo_cfg.active_messenger = Some(Some(name.clone()));
+                            if let Some(name) = configs.get(i - 1) {
+                                repo_cfg.active_messenger = Some(name.clone());
                             }
                         }
                     }

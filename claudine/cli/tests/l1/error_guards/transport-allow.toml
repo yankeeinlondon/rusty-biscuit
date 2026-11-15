@@ -165,6 +165,22 @@ biscuit-contract's InferenceError is a ratified cross-package contract with a St
 
 [[allow]]
 shape = "format_context"
+file = "lib/src/config/wire.rs"
+symbol = "actions::deserialize"
+tag = "retained"
+reason = """
+A serde adapter: `Deserializer::Error::custom` accepts only `Display`, so the cause cannot be kept as a source. `message` is the adapter's own prose (`Family::untag` returns `Result<Value, String>`), and `error` is the inner `serde_json::Error` of the tagged action, prefixed with the entry's key path. The load path judges the file by the schema first, so this message is reached only by documents that bypass it."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/config/wire.rs"
+symbol = "routes::deserialize"
+tag = "retained"
+reason = """
+As `actions::deserialize`: a serde adapter whose `Error::custom` accepts only `Display`. `message` is the adapter's own prose and `error` the inner `serde_json::Error` of the tagged route, prefixed with the route's key path."""
+
+[[allow]]
+shape = "format_context"
 file = "lib/src/composition/looping/config.rs"
 symbol = "parse_on_rate_limit"
 tag = "retained"

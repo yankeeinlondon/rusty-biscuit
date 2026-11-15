@@ -232,7 +232,7 @@ mod tests {
             r#"{
   "actions": {
     "session_start": [
-      { "type": "report", "handler": { "format": "json" } }
+      { "report": { "handler": { "format": "json" } } }
     ]
   }
 }"#,

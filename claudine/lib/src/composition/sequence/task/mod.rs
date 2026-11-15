@@ -1165,9 +1165,12 @@ impl TaskExecution<'_> {
             self.dry_run_note(&format!("rendered (dry-run): would run `{action}`"));
             return PrimaryOutcome::withheld();
         }
+        // A task's action comes from the sequence data as written; no schema
+        // completed it, so it is its own authored value.
         let parsed = match parse_single_action_with_order(
             LifecycleSignal::Start,
             action,
+            None,
             &self.task.origin_path,
             &self.task.diagnostic.action_property,
             authored_set_order,
@@ -1246,6 +1249,7 @@ impl TaskExecution<'_> {
             Some(value) => parse_task_action_stack_with_order(
                 signal,
                 value,
+                None,
                 &self.task.origin_path,
                 &self.stack_property(stage),
                 &self.task.authored.child(stage.key()),

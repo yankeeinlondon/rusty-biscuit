@@ -141,13 +141,14 @@ CLAUDINE_AUTO_STEER=off claudine pi "refactor the parser"
 Rules:
 
 - Only a value that is set takes part: a repo config that does not mention
-  `steering.automatic.enabled` keeps the user's choice.
+  `steering.automatic.enabled`, or sets it (or `automatic`, or `steering`) to
+  `null`, keeps the user's choice. In the user config an absent or `null`
+  value is the default, on.
 - `CLAUDINE_AUTO_STEER` accepts `true/false`, `1/0`, `yes/no`, and `on/off`,
   trimmed and in any letter case. An empty or unrecognized value stops the run
   with a configuration error before the agent starts.
-- In a config file, `enabled` must be a boolean. `null`, a string, a number, or
-  an unknown key beside it is a configuration error, also before the agent
-  starts. (A duplicated key is not detected: Claudine config files keep the
-  last occurrence of any repeated key.)
+- In a config file, `enabled` must be a boolean or `null`. A string, a number,
+  an unknown key beside it, or a key written twice is a configuration error,
+  also before the agent starts.
 - There is no CLI flag or frontmatter setting, and the warning point, the
   three-opportunity cap, and the recovery rule are not configurable.

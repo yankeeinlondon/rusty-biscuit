@@ -322,8 +322,9 @@ fn webhook_route_messenger() -> serde_json::Value {
         "active_config": ROUTE_NAME,
         "configurations": {
             ROUTE_NAME: {
-                "provider": "discord_webhook",
-                "webhook_url_env": WEBHOOK_URL_ENV,
+                "discord_webhook": {
+                    "webhook_url_env": WEBHOOK_URL_ENV,
+                }
             }
         }
     })

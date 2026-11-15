@@ -44,11 +44,11 @@ fn sound(effect: &str) -> HookAction {
 }
 
 #[test]
-fn initial_user_text_is_the_default_without_the_never_written_values() {
+fn initial_user_text_is_the_projection_of_an_empty_file() {
     let text = initial_text(ConfigScope::User);
     let written = load_yaml_document(&text, Path::new("config.yaml")).unwrap().json;
     assert_eq!(written["tts"], json!(false), "{text}");
-    assert!(written.pointer("/steering/automatic/enabled").is_none(), "{text}");
+    assert_eq!(written.pointer("/steering/automatic/enabled"), Some(&json!(true)), "an optional default is in place too: {text}");
 
     let (_dir, path) = user_file(&text);
     assert_eq!(value_of(&load(&path)), value_of(&ClaudineConfig::default()));
@@ -119,7 +119,7 @@ fn two_sessions_and_another_writer_keep_each_others_edits() {
 
 #[test]
 fn a_changed_sequence_is_replaced_as_one_node() {
-    let text = "actions:\n  human_in_the_loop:   # ring\n    - type: sound_effect\n      effect: doorbell\n  session_start:\n    - type: sound_effect\n      effect: error-1\n";
+    let text = "actions:\n  human_in_the_loop:   # ring\n    - sound_effect:\n        effect: doorbell\n  session_start:\n    - sound_effect:\n        effect: error-1\n";
     let (_dir, path) = user_file(text);
     let opened = load(&path);
     let mut edited = opened.clone();
@@ -137,7 +137,8 @@ fn a_changed_sequence_is_replaced_as_one_node() {
     assert_eq!(saved.actions[&AgenticEvent::HumanInTheLoop], vec![sound("doorbell"), sound("error-1")]);
     let written = std::fs::read_to_string(&path).unwrap();
     assert!(written.starts_with("actions:\n  human_in_the_loop:   # ring\n"), "{written}");
-    assert!(written.ends_with("  session_start:\n    - type: sound_effect\n      effect: error-1\n"), "{written}");
+    assert!(written.ends_with("  session_start:\n    - sound_effect:\n        effect: error-1\n"), "{written}");
+    assert!(written.contains("- sound_effect:"), "the replaced list is written keyed: {written}");
 }
 
 #[test]
@@ -153,11 +154,12 @@ fn a_removed_key_is_removed() {
 }
 
 #[test]
-fn a_removed_default_is_written_as_null() {
-    let opened = json!({"tts": {"gender": "female", "voice": "Samantha"}});
+fn a_lost_key_the_file_never_wrote_needs_no_edit() {
+    // `prewarm` came from the schema default; `null` would take it again.
+    let opened = json!({"tts": {"gender": "female", "prewarm": true}});
     let edited = json!({"tts": {"gender": "female"}});
-    let edits = changed_edits(Some(&json!({})), &opened, &edited).unwrap();
-    assert_eq!(edits, vec![set_path("tts.voice", Value::Null).unwrap()]);
+    let edits = changed_edits(Some(&json!({"tts": {"gender": "female"}})), &opened, &edited).unwrap();
+    assert!(edits.is_empty(), "{edits:?}");
 }
 
 #[test]
