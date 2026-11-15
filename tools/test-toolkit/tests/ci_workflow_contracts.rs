@@ -10193,13 +10193,17 @@ fn the_permission_classifier_runs_only_trusted_base_code() {
         "a base without the checker is reported as not compared (bootstrap), never as unchanged"
     );
     let cargo_steps: Vec<&str> = job.split("\n      - ").filter(|step| step.contains("cargo ") || step.contains("rustup ")).collect();
-    assert_eq!(cargo_steps.len(), 2, "one toolchain step and one checker step");
+    assert_eq!(cargo_steps.len(), 3, "one toolchain step, one checker step, and one report render");
     for step in cargo_steps {
         assert!(
             step.contains("working-directory: ${{ runner.temp }}/permissions-trusted"),
             "Rust runs only in the trusted checkout: {step}"
         );
-        assert!(step.contains("if: steps.scope.outputs.decision == 'compare'"), "compile only on a changed input");
+        assert!(
+            step.contains("if: steps.scope.outputs.decision == 'compare'")
+                || step.contains(r#"if: contains(fromJSON('["widens","narrows","unknown"]'), steps.report.outputs.change)"#),
+            "compile only on a changed input, and render only a real permission change: {step}"
+        );
     }
     assert!(job.contains("cargo run -q --locked -p darkmatter --example permission_widening"));
     assert!(job.contains("RUSTC_WRAPPER: \"\""));
@@ -10230,10 +10234,14 @@ fn a_possible_widening_is_reported_on_the_pull_request_without_an_approval() {
     );
     let report = step_containing(&job, "id: report");
     assert!(
-        report.contains(r#"if [ "$verdict" = "potential_widening=true" ]; then"#),
-        "only a possible widening writes the comment body"
+        report.contains(r#"PERMISSION_REPORT_DATA="$RUNNER_TEMP/permission-data.json""#),
+        "the trusted script hands the template its data through a file an older copy ignores"
     );
-    assert!(!report.contains("--markdown"), "the step uses only the interface every trusted copy has");
+    let render = step_containing(&job, "--render ");
+    assert!(
+        render.contains(r#"--render "$TRUSTED/.github/ci/permission-report.md""#),
+        "the comment is composed from the BASE commit's template"
+    );
     let comment = step_containing(&job, "<!-- permission-report -->");
     for condition in [
         "steps.report.outcome == 'success'",
@@ -10265,6 +10273,7 @@ fn the_permission_inputs_name_the_gate_itself() {
         ".github/ci/permission-inputs.json",
         ".github/workflows/ci.yml",
         "scripts/ci/permission_scope.py",
+        ".github/ci/permission-report.md",
         "darkmatter/lib/examples/permission_widening.rs",
         "darkmatter/lib/src/config/",
     ] {

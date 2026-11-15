@@ -1269,29 +1269,68 @@ without asking. `darkmatter/docs/topics/configuration.md` ("The
 cloned-repository risk") explains the risk; this section is how this
 repository's CI makes sure whoever merges such a change knows it does so.
 
-**What a developer sees.** Most pull requests touch no permission input:
-`permission-scope` (shown as "Report permission changes") finishes in seconds
-and says nothing. A pull request that narrows permissions, or leaves them
-equal, gets one line in the run's summary page. A pull request that **may
-widen** them gets a comment on the pull request, headed "This pull request may
-widen committed permissions", that lists each widening rule:
+**What a developer sees.** Most pull requests change no committed
+permission: `permission-scope` (shown as "Report permission changes")
+finishes in seconds and posts nothing. A change to the check's own files
+(`ci.yml`, its scripts, its template) is ordinary code review and is not a
+permission change either. A pull request that **does** change what the
+resolved permissions allow gets one comment, which says definitively whether
+the change **widens** or **narrows** them and lists every entry that changed,
+in words:
 
 ```markdown
-## This pull request may widen committed permissions
+_This pull request **widens** what Darkmatter and Claudine may do without
+asking, during composition, on every clone of this repository._
 
-Merging this change lets Darkmatter and Claudine pre-approve more, without
-asking, on every clone of this repository:
+(what the three settings govern, and that they are not an AI agent's permissions)
 
-- `.darkmatter.yaml` (added-allow): `shell-commands` gains `prefix rm`
+## Changes
 
-Compared `1a2b…` with `3c4d…`. Changed inputs: `.darkmatter.yaml`.
+### `.darkmatter.yaml`
+
+#### Shell commands
+
+Before this change there were **12** shell rules.
+
+Added:
+
+- Commands **starting with** `git status` will run without asking
+- The `make tidy` command (exact command, no variation) will run without asking
+
+Removed, so these will now ask first:
+
+- Commands **starting with** `ls`
+
+#### Network
+
+- Changed from **no URLs** to **every URL** fetched without asking
+
+## When this takes effect
+
+For anyone who checks out a commit that contains it: …
 ```
+
+Only when a changed default schema cannot be read by the base commit's code
+does the comment say the permissions **could not be fully compared**, and it
+names that file.
 
 Nothing waits for an approval: the merge is the decision, made with the
 comment in view. The comment is rewritten on every push, so it always describes
-the newest commit; when a later push stops widening, it says so instead of
-disappearing. A pull request from a fork cannot be commented on with the run's
-token, so its report stays on the run's summary page.
+the newest commit; when a later push leaves the permissions unchanged, it says
+so instead of disappearing. A pull request from a fork cannot be commented on
+with the run's token, so its report stays on the run's summary page.
+
+**How the comment is made.** The message is a Darkmatter document,
+`.github/ci/permission-report.md`. `scripts/ci/permission_scope.py decide`
+turns the checker's before-and-after policies into the template's `report`
+data (each entry it changed, by kind), and
+`darkmatter/lib/examples/permission_widening.rs --render` composes the
+template with that data. Every value taken from the repository is passed as
+a [literal token](../../darkmatter/docs/inline/interpolation.md#literal-tokens),
+so a rule such as `template git add {{ string }}` is shown verbatim and never
+read as template syntax, and any composition warning fails the job rather
+than posting a broken comment. To change the wording, edit the template; to
+add a value, add it to `decide`'s data and the template's `$schema`.
 
 ```mermaid
 flowchart TD
@@ -1300,8 +1339,10 @@ flowchart TD
     B -- yes --> C[build the BASE commit's checker<br/>compare base and head as Git objects]
     B -- base has no checker --> U[comment: not compared, read the policy files]
     C -- error --> F[permission-scope fails: ci-gate blocks]
-    C -- unchanged or narrower --> M[one line in the run summary]
-    C -- may widen --> W[comment on the pull request lists each widening rule]
+    C -- no resolved permission changed --> S
+    C -- widens, narrows, or unreadable default --> D[decide: report data]
+    D --> R[Darkmatter composes the BASE commit's template]
+    R --> W[one comment on the pull request]
     U --> G[reviewer decides at merge]
     W --> G
 ```
@@ -1309,8 +1350,10 @@ flowchart TD
 **What counts as widening.** The checker (`darkmatter::config::widening`,
 run as `darkmatter/lib/examples/permission_widening.rs`) resolves each policy
 file in both commits, follows a `permissions` reference to its target in that
-same commit, and fills in the shipped defaults. It reports potential widening
-for:
+same commit, and fills in the shipped defaults. It flags these as possible
+widening (the report itself is built from the resolved before-and-after
+entries, and a change to the check's own inputs is not reported on the pull
+request):
 
 | change | example |
 |---|---|

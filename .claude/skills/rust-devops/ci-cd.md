@@ -1182,12 +1182,20 @@ when the checker errors. It builds the **base** commit's checker
 (`darkmatter::config::widening`, run as
 `darkmatter/lib/examples/permission_widening.rs`) outside the workspace and
 reads the candidate only as Git objects; it never checks out, builds, or runs
-candidate code. When the trusted `scripts/ci/permission_scope.py decide`
-prints `potential_widening=true`, the job turns the lines it wrote to stderr
-(the interface every base copy has) into one marked pull-request comment (`<!-- permission-report -->`,
-rewritten on every push; `pull-requests: write` is the job's only write).
-Nothing waits for an approval: the merge is the decision. User docs:
-`docs/topics/ci-cd.md` ("Permission-change report").
+candidate code. The trusted `scripts/ci/permission_scope.py decide` prints
+`permission_change=widens|narrows|unknown|none` from the resolved
+before/after policies only (a `checker-input-changed` reason is code review,
+never reported) and writes the template's data to `$PERMISSION_REPORT_DATA`
+(an older base copy ignores the variable, so it posts nothing). For anything
+but `none`, the example's `--render` mode composes the base commit's
+`.github/ci/permission-report.md` with that data through Darkmatter (values
+arrive as literal tokens; any composition warning fails the job), and the job
+keeps the result as one marked pull-request comment
+(`<!-- permission-report -->`, rewritten on every push; `pull-requests: write`
+is its only write). Nothing waits for an approval: the merge is the decision.
+`config_widening::the_permission_report_template_states_each_change_verbatim`
+pins the template. User docs: `docs/topics/ci-cd.md` ("Permission-change
+report").
 
 Ruleset `protect-your-bacon` (19747338) has required `ci-gate` since
 2026-09-13. It named `ci-verdict` until then, and because that job no longer

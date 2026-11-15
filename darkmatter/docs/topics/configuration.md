@@ -609,8 +609,9 @@ for reason in &report.reasons {
 | a file, Git, YAML, or reference error in either commit | an error, never "no change" |
 
 This repository runs the comparison in CI from the base commit's code and,
-when a pull request may widen, lists each reason in a comment on that pull
-request, so whoever merges it decides with the widening in view; see
+when a pull request widens or narrows the resolved permissions, says which in
+a comment on that pull request and lists every entry that changed, so whoever
+merges it decides with the change in view; see
 "Permission-change report" in `docs/topics/ci-cd.md`. The report makes a
 widening visible, not impossible.
 

@@ -5,6 +5,7 @@ reports (unchanged, narrowing, widening, error) with the pull-request comment
 it writes."""
 from __future__ import annotations
 
+import base64
 import io
 import json
 import subprocess
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import permission_scope
-from permission_scope import CHECKER_SOURCE, decide, main, scope
+from permission_scope import CHECKER_SOURCE, DATA_ENVIRONMENT, code, decide, literal, main, scope
 from tool_guard import require_tools
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -148,30 +149,105 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(lines[0], "decision=compare")
 
 
-def report(reasons: list[dict[str, Any]], **extra: Any) -> str:
+BEFORE = {"block_file": ".darkmatter.yaml", "file-read": ["!&secrets/**", "&docs/**"],
+          "shell-commands": ["exact pwd", "prefix ls"], "network": "deny"}
+
+
+def report(reasons: list[dict[str, Any]], after: dict[str, Any] | None = None, **extra: Any) -> str:
+    """A checker report for one `.darkmatter.yaml` policy, `BEFORE` → `after`."""
+    policy = {"input": ".darkmatter.yaml", "scope": "repository", "before": BEFORE, "after": after or BEFORE}
     document = {
         "base": "a" * 40, "head": "b" * 40, "changed_inputs": [".darkmatter.yaml"],
-        "policies": [], "reasons": reasons, "potential_widening": bool(reasons),
+        "policies": [policy], "reasons": reasons, "potential_widening": bool(reasons),
     }
     document.update(extra)
     return json.dumps(document)
 
 
+def text(token: str) -> str:
+    """The text a literal token carries."""
+    assert token.startswith("{{!data:v1:") and token.endswith("}}"), token
+    payload = token[len("{{!data:v1:"):-2]
+    return base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode("utf-8")
+
+
 WIDENING = [{"input": ".darkmatter.yaml", "kind": "added-allow", "detail": "`shell-commands` gains `prefix rm`"}]
+WIDER = dict(BEFORE, **{"shell-commands": ["exact pwd", "prefix ls", "prefix git status", "template git add {{ string }}"],
+                        "file-read": ["&docs/**"], "network": "allow"})
+
+
+class LiteralTests(unittest.TestCase):
+    def test_a_value_round_trips_through_its_literal_token(self) -> None:
+        for value in ("prefix ls", "git add {{ string }}", "$(touch x)", "", "東京"):
+            self.assertEqual(text(literal(value)), value)
+
+    def test_an_inline_code_span_survives_any_backticks(self) -> None:
+        self.assertEqual(text(code("ls")), "`ls`")
+        self.assertEqual(text(code("echo `x`")), "`` echo `x` ``")
+        self.assertEqual(text(code("a`b")), "``a`b``")
+        self.assertEqual(text(code("`edge")), "`` `edge ``")
 
 
 class DecideTests(unittest.TestCase):
-    def test_an_unchanged_or_narrowing_report_says_nothing_widens(self) -> None:
-        outputs, lines = decide(report([]), 0)
-        self.assertEqual(outputs, {"potential_widening": "false"})
-        self.assertEqual(lines[0], "No committed permission widens.")
-        self.assertNotIn("approval", "\n".join(lines))
+    def test_an_unchanged_policy_reports_no_change(self) -> None:
+        self.assertEqual(decide(report([]), 0), ({"permission_change": "none"}, None))
 
-    def test_a_widening_report_names_each_reason(self) -> None:
-        outputs, lines = decide(report(WIDENING), 0)
-        self.assertEqual(outputs, {"potential_widening": "true"})
-        self.assertIn("- `.darkmatter.yaml` (added-allow): `shell-commands` gains `prefix rm`", lines)
-        self.assertNotIn("approval", "\n".join(lines))
+    def test_a_change_to_the_checks_own_files_is_not_a_permission_change(self) -> None:
+        checker = [{"input": ".github/workflows/ci.yml", "kind": "checker-input-changed", "detail": "an input"}]
+        self.assertEqual(decide(report(checker), 0), ({"permission_change": "none"}, None))
+
+    def test_a_widening_lists_each_entry_by_kind(self) -> None:
+        outputs, data = decide(report(WIDENING, WIDER), 0)
+        self.assertEqual(outputs, {"permission_change": "widens"})
+        assert data is not None
+        self.assertEqual(data["verdict"], "widens")
+        self.assertEqual([text(source) for source in data["sources"]], ["`.darkmatter.yaml`"])
+        [policy] = data["policies"]
+        self.assertEqual(text(policy["title"]), "`.darkmatter.yaml`")
+        shell = policy["shell"]
+        self.assertEqual(shell["before_count"], 2)
+        self.assertEqual(
+            [(rule["form"], text(rule["code"])) for rule in shell["added"]],
+            [("prefix", "`git status`"), ("template", "`git add {{ string }}`")],
+        )
+        self.assertEqual(shell["removed"], [])
+        reads = policy["file_read"]
+        self.assertEqual([text(entry) for entry in reads["unexcluded"]], ["`&secrets/**`"])
+        self.assertEqual(policy["network"], {"changed": True, "before": "deny", "after": "allow"})
+
+    def test_a_narrowing_is_reported_as_one(self) -> None:
+        narrower = dict(BEFORE, **{"shell-commands": ["exact pwd", "!prefix git push"]})
+        outputs, data = decide(report([], narrower), 0)
+        self.assertEqual(outputs, {"permission_change": "narrows"})
+        assert data is not None
+        shell = data["policies"][0]["shell"]
+        self.assertEqual([text(rule["code"]) for rule in shell["removed"]], ["`ls`"])
+        self.assertEqual([text(rule["code"]) for rule in shell["excluded"]], ["`git push`"])
+        self.assertFalse(data["policies"][0]["file_read"]["changed"])
+
+    def test_a_default_the_trusted_code_cannot_read_is_unknown(self) -> None:
+        unreadable = [{"input": "darkmatter/schemas/darkmatter-config.yaml", "kind": "defaults-not-understood",
+                       "detail": "the default cannot be read"}]
+        outputs, data = decide(report(unreadable), 0)
+        self.assertEqual(outputs, {"permission_change": "unknown"})
+        assert data is not None
+        self.assertEqual(
+            [(text(entry["input"]), text(entry["detail"])) for entry in data["unreadable"]],
+            [("`darkmatter/schemas/darkmatter-config.yaml`", "the default cannot be read")],
+        )
+
+    def test_the_repository_defaults_are_recognized_as_defaults(self) -> None:
+        defaults = {"block_file": None, "file-read": ["&**/*.md"], "shell-commands": [], "network": "deny"}
+        before = dict(BEFORE, **{"file-read": ["&**/*.md"]})
+        policies = [
+            {"input": ".darkmatter.yaml", "scope": "repository", "before": before,
+             "after": dict(before, **{"file-read": ["&**/*.md", "&notes/**"]})},
+            {"input": "darkmatter/schemas/darkmatter-config.yaml", "scope": "repository-entry-defaults",
+             "before": defaults, "after": defaults},
+        ]
+        _, data = decide(report(WIDENING, policies=policies), 0)
+        assert data is not None
+        self.assertTrue(data["policies"][0]["file_read"]["before_default"])
 
     def test_a_failed_or_unreadable_check_is_an_error_never_no_change(self) -> None:
         for text, status in (
@@ -183,33 +259,34 @@ class DecideTests(unittest.TestCase):
             (report([], potential_widening=True), 0),
             (report(WIDENING, potential_widening=False), 0),
             (report([], potential_widening="false"), 0),
+            (report([], policies=None), 0),
         ):
             with self.subTest(text=text, status=status), self.assertRaises(ValueError):
                 decide(text, status)
 
-    def test_the_command_fails_the_job_on_an_error_and_writes_the_summary_otherwise(self) -> None:
+    def test_the_command_writes_the_data_only_for_a_change_and_fails_on_an_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.json"
-            summary = Path(directory) / "summary.md"
-            path.write_text(report(WIDENING), encoding="utf-8")
+            data = Path(directory) / "data.json"
             lines: list[str] = []
-            original = permission_scope.os.environ.get("GITHUB_STEP_SUMMARY")
-            permission_scope.os.environ["GITHUB_STEP_SUMMARY"] = str(summary)
+            original = permission_scope.os.environ.get(DATA_ENVIRONMENT)
+            permission_scope.os.environ[DATA_ENVIRONMENT] = str(data)
             try:
-                stderr = io.StringIO()
-                with redirect_stderr(stderr):
+                with redirect_stderr(io.StringIO()):
+                    path.write_text(report([]), encoding="utf-8")
                     self.assertEqual(main(["decide", "--report", str(path), "--status", "0"], out=lines.append), 0)
-                    self.assertIn("prefix rm", stderr.getvalue(), "CI builds the comment from these lines")
-                    self.assertEqual(lines, ["potential_widening=true"])
+                    self.assertFalse(data.exists(), "no change writes no data")
+                    path.write_text(report(WIDENING, WIDER), encoding="utf-8")
+                    self.assertEqual(main(["decide", "--report", str(path), "--status", "0"], out=lines.append), 0)
+                    self.assertEqual(json.loads(data.read_text(encoding="utf-8"))["verdict"], "widens")
+                    self.assertEqual(lines, ["permission_change=none", "permission_change=widens"])
                     missing = Path(directory) / "absent.json"
                     self.assertEqual(main(["decide", "--report", str(missing), "--status", "0"], out=lines.append), 1)
             finally:
                 if original is None:
-                    permission_scope.os.environ.pop("GITHUB_STEP_SUMMARY", None)
+                    permission_scope.os.environ.pop(DATA_ENVIRONMENT, None)
                 else:
-                    permission_scope.os.environ["GITHUB_STEP_SUMMARY"] = original
-            self.assertIn("prefix rm", summary.read_text(encoding="utf-8"))
-
+                    permission_scope.os.environ[DATA_ENVIRONMENT] = original
 
 
 if __name__ == "__main__":

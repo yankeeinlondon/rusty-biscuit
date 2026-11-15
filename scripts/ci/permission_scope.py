@@ -13,10 +13,12 @@ or run. Both commands print `key=value` lines for `$GITHUB_OUTPUT`.
   base has no trusted checker, or there is no base commit). A policy file
   that is a committed symbolic link or whose `permissions` is a reference
   can read any file, so then any change at all is compared.
-* `decide` reads the checker's JSON report, prints
-  `potential_widening=true|false` on stdout, writes the report's lines to
-  stderr and the job summary. CI builds the pull-request comment from those
-  stderr lines, so a base commit's older copy of this script still works. A
+* `decide` reads the checker's JSON report and prints
+  `permission_change=widens|narrows|unknown|none` on stdout, and the report
+  (a Markdown section naming each entry that changed, per policy) on stderr
+  and in the job summary. CI posts that section as the pull-request comment
+  whenever the change is not `none`. Only the resolved policies count; a
+  change to the check's own files is code review and is not reported. A
   failed checker or an unreadable report exits 1, which fails the job: an
   error never means "no change".
 
@@ -34,6 +36,7 @@ python3 -I scripts/ci/permission_scope.py decide --report report.json --status 0
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -136,8 +139,101 @@ def scope(repository: Path, inputs_path: Path, base: str, head: str, git: Git | 
     return {"decision": "skip", "reason": "no permission input changed"}
 
 
-def decide(report_text: str, status: int) -> tuple[dict[str, str], list[str]]:
-    """The outputs and the summary lines for one checker run.
+SCOPE_NOTES = {
+    "user-block-default": "The default for a user whose configuration has no `permissions` block.",
+    "user-entry-defaults": "The default for each setting a user's `permissions` block leaves out.",
+    "repository-block-default": "The default for a repository whose configuration has no `permissions` block.",
+    "repository-entry-defaults": "The default for each setting a repository's `permissions` block leaves out.",
+}
+UNREADABLE = "defaults-not-understood"
+ENTRY_DEFAULTS = "repository-entry-defaults"
+DATA_ENVIRONMENT = "PERMISSION_REPORT_DATA"
+
+
+def literal(text: str) -> str:
+    """`text` as a Darkmatter literal token, so the report template shows it
+    verbatim and never reads it as `{{ … }}` or `$( … )` syntax."""
+    payload = base64.urlsafe_b64encode(text.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"{{{{!data:v1:{payload}}}}}"
+
+
+def code(text: str) -> str:
+    """`text` as one Markdown inline code span, whatever backticks it holds."""
+    fence = "`" * (max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
+    padded = f" {text} " if text.startswith("`") or text.endswith("`") or not text.strip() else text
+    return literal(f"{fence}{padded}{fence}")
+
+
+def _split(entries: list[str]) -> tuple[set[str], set[str]]:
+    """The allows and the exclusions (without their `!`) of one entry list."""
+    return {entry for entry in entries if not entry.startswith("!")}, {
+        entry[1:] for entry in entries if entry.startswith("!")
+    }
+
+
+def _rule(rule: str) -> dict[str, str]:
+    form, _, command = rule.partition(" ")
+    return {"form": form, "code": code(command)}
+
+
+def _entries(before: list[str], after: list[str], default: list[str] | None, item: Callable[[str], Any]) -> dict[str, Any]:
+    old_allows, old_exclusions = _split(before)
+    new_allows, new_exclusions = _split(after)
+    changes = {
+        "added": [item(entry) for entry in sorted(new_allows - old_allows)],
+        "removed": [item(entry) for entry in sorted(old_allows - new_allows)],
+        "excluded": [item(entry) for entry in sorted(new_exclusions - old_exclusions)],
+        "unexcluded": [item(entry) for entry in sorted(old_exclusions - new_exclusions)],
+    }
+    return {
+        "changed": any(changes.values()),
+        "before_count": len(before),
+        "before_default": default is not None and sorted(before) == sorted(default),
+        **changes,
+    }
+
+
+def policy_data(policy: dict[str, Any], defaults: dict[str, Any] | None) -> dict[str, Any]:
+    """One policy's changes, as the report template reads them."""
+    before, after = policy.get("before") or {}, policy.get("after") or {}
+    shell = _entries(
+        before.get("shell-commands") or [], after.get("shell-commands") or [],
+        (defaults or {}).get("shell-commands") if defaults else None, _rule,
+    )
+    reads = _entries(
+        before.get("file-read") or [], after.get("file-read") or [],
+        (defaults or {}).get("file-read") if defaults else None, code,
+    )
+    network = {
+        "changed": before.get("network") != after.get("network"),
+        "before": before.get("network") or "deny",
+        "after": after.get("network") or "deny",
+    }
+    return {
+        "title": code(str(policy.get("input"))),
+        "scope_note": SCOPE_NOTES.get(str(policy.get("scope")), ""),
+        "shell": shell,
+        "file_read": reads,
+        "network": network,
+    }
+
+
+def _widens(policy: dict[str, Any]) -> bool:
+    return bool(
+        policy["shell"]["added"] or policy["shell"]["unexcluded"]
+        or policy["file_read"]["added"] or policy["file_read"]["unexcluded"]
+        or (policy["network"]["changed"] and policy["network"]["after"] == "allow")
+    )
+
+
+def decide(report_text: str, status: int) -> tuple[dict[str, str], dict[str, Any] | None]:
+    """The verdict for one checker run, and the data the report template
+    renders (`None` when no committed permission changed).
+
+    `permission_change` is `widens`, `narrows`, `unknown` (a changed default
+    the trusted code cannot read), or `none`. Only the resolved policies
+    count: a change to the check's own files is code review, not a change in
+    what the tools may do, and is not reported.
 
     ## Errors
 
@@ -153,25 +249,37 @@ def decide(report_text: str, status: int) -> tuple[dict[str, str], list[str]]:
         raise ValueError(f"the checker failed (status {status}): {report.get('error', 'no error given')}")
     widening = report.get("potential_widening")
     reasons = report.get("reasons")
+    policies = report.get("policies")
     if not isinstance(widening, bool) or not isinstance(reasons, list) or widening != bool(reasons):
         raise ValueError("the checker's report has no consistent `potential_widening` and `reasons`")
-    if widening:
-        lines = [
-            "Merging this change lets Darkmatter and Claudine pre-approve more, without asking, "
-            "on every clone of this repository:",
-            "",
-        ]
-        lines += [f"- `{reason.get('input')}` ({reason.get('kind')}): {reason.get('detail')}" for reason in reasons]
-    else:
-        lines = ["No committed permission widens."]
-    changed = report.get("changed_inputs") or []
-    lines += [
-        "",
-        f"Compared `{report.get('base')}` with `{report.get('head')}`. Changed inputs: "
-        + (", ".join(f"`{path}`" for path in changed) if changed else "none")
-        + ".",
+    if not isinstance(policies, list):
+        raise ValueError("the checker's report has no `policies`")
+    defaults = next((p.get("after") for p in policies if p.get("scope") == ENTRY_DEFAULTS), None)
+    changed = []
+    for policy in policies:
+        data = policy_data(policy, defaults if policy.get("scope") == "repository" else None)
+        if data["shell"]["changed"] or data["file_read"]["changed"] or data["network"]["changed"]:
+            changed.append(data)
+    unreadable = [
+        {"input": code(str(reason.get("input"))), "detail": literal(str(reason.get("detail")))}
+        for reason in reasons
+        if reason.get("kind") == UNREADABLE
     ]
-    return {"potential_widening": "true" if widening else "false"}, lines
+    if any(_widens(policy) for policy in changed):
+        verdict = "widens"
+    elif unreadable:
+        verdict = "unknown"
+    elif changed:
+        verdict = "narrows"
+    else:
+        return {"permission_change": "none"}, None
+    sources = sorted({str(p.get("input")) for p in policies if p.get("scope") == "repository"})
+    return {"permission_change": verdict}, {
+        "verdict": verdict,
+        "sources": [code(source) for source in sources],
+        "policies": changed,
+        "unreadable": unreadable,
+    }
 
 
 def emit(outputs: dict[str, str], out: Callable[[str], None] = print) -> None:
@@ -196,16 +304,14 @@ def main(argv: list[str] | None = None, out: Callable[[str], None] = print) -> i
             emit(scope(arguments.repository, arguments.inputs, arguments.base, arguments.head), out)
             return 0
         text = arguments.report.read_text(encoding="utf-8") if arguments.report.exists() else ""
-        outputs, lines = decide(text, arguments.status)
+        outputs, data = decide(text, arguments.status)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         print(f"permission-scope: {error}", file=sys.stderr)
         return 1
-    body = "\n".join(lines) + "\n"
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as handle:
-            handle.write("## Permission changes\n\n" + body)
-    print("\n".join(lines), file=sys.stderr)
+    destination = os.environ.get(DATA_ENVIRONMENT)
+    if destination and data is not None:
+        Path(destination).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print(f"Committed permissions: {outputs['permission_change']}.", file=sys.stderr)
     emit(outputs, out)
     return 0
 

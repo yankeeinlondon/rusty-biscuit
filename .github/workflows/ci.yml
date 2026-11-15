@@ -1094,6 +1094,7 @@ jobs:
           set -euo pipefail
           report="$RUNNER_TEMP/permission-report.md"
           echo "report=${report}" >>"$GITHUB_OUTPUT"
+          change=none
           case "$DECISION" in
             skip) echo "No permission input changed." ;;
             uncompared)
@@ -1105,20 +1106,37 @@ jobs:
               } | tee "$report" >>"$GITHUB_STEP_SUMMARY"
               ;;
             compare)
-              # The verdict is on stdout and the report's lines on stderr, the
-              # interface every trusted copy of the script has, so a base
-              # older than this step still works.
-              lines="$RUNNER_TEMP/permission-lines.md"
-              verdict="$(python3 -I "$TRUSTED/scripts/ci/permission_scope.py" decide \
+              # The verdict is on stdout; the template's data goes to the file
+              # PERMISSION_REPORT_DATA names. A base whose script predates
+              # `permission_change` prints no such verdict and writes no data,
+              # so nothing is rendered or posted for it.
+              lines="$RUNNER_TEMP/permission-lines.txt"
+              verdict="$(PERMISSION_REPORT_DATA="$RUNNER_TEMP/permission-data.json" \
+                python3 -I "$TRUSTED/scripts/ci/permission_scope.py" decide \
                 --report "$RUNNER_TEMP/permission-report.json" --status "${STATUS:-1}" 2>"$lines")" \
                 || { cat "$lines" >&2; exit 1; }
               cat "$lines"
-              if [ "$verdict" = "potential_widening=true" ]; then
-                { echo "## This pull request may widen committed permissions"; echo; cat "$lines"; } >"$report"
-              fi
+              case "$verdict" in
+                permission_change=widens|permission_change=narrows|permission_change=unknown)
+                  change="${verdict#permission_change=}" ;;
+              esac
               ;;
             *) echo "no scope decision was made" >&2; exit 1 ;;
           esac
+          echo "change=${change}" >>"$GITHUB_OUTPUT"
+      # The comment is composed by Darkmatter from the BASE commit's template
+      # (`.github/ci/permission-report.md`); a composition warning fails it.
+      - name: Render the report
+        if: contains(fromJSON('["widens","narrows","unknown"]'), steps.report.outputs.change)
+        working-directory: ${{ runner.temp }}/permissions-trusted
+        shell: bash
+        env:
+          REPORT: ${{ steps.report.outputs.report }}
+        run: |
+          set -euo pipefail
+          cargo run -q --locked -p darkmatter --example permission_widening -- \
+            --render "$TRUSTED/.github/ci/permission-report.md" --data "$RUNNER_TEMP/permission-data.json" >"$REPORT"
+          cat "$REPORT" >>"$GITHUB_STEP_SUMMARY"
       # One comment per pull request, found by its marker and rewritten on
       # every push, so the newest head's report is what the merger reads. A
       # fork's token cannot write, so a fork's report stays in the summary.
@@ -1141,7 +1159,7 @@ jobs:
           if [ -s "$REPORT" ]; then
             body="$(printf '%s\n%s\n\n_Reported for %s._\n' "$marker" "$(cat "$REPORT")" "$HEAD")"
           elif [ -n "$existing" ]; then
-            body="$(printf '%s\n## Committed permissions no longer widen\n\nAs of %s, nothing in this pull request widens committed permissions.\n' "$marker" "$HEAD")"
+            body="$(printf '%s\n## No committed permission changes\n\nAs of %s, this pull request does not change committed permissions.\n' "$marker" "$HEAD")"
           else
             echo "Nothing to report on the pull request."
             exit 0
