@@ -144,6 +144,16 @@ WAN IP results are cached per run; call `.force_refresh(true)` to bypass the cac
 
 All constructors return a builder, so you can further adjust with methods like `.commit_count(5)`, `.include_worktrees(false)`, `.include_file_diffs(true)`, or `.refresh_remote_tracking(false)`.
 
+Every request starts by finding the repository that contains the directory, searching upward the way
+`git` does. Only an upward search that finds nothing means "not a repository" (`Ok(None)`). A
+repository that cannot be opened (untrusted ownership, permissions, I/O, corruption) is a
+`SniffError::Git` error. So is a `.git` *file* between the directory and the repository found that
+points at no repository: `git` refuses such a directory, and reporting the enclosing repository
+instead would let a caller that limits writes to the repository root write outside the broken
+checkout. For example, with `outer/` a repository and `outer/inner/.git` reading
+`gitdir: /missing`, discovery from `outer/inner` fails rather than returning `outer/`. A `.git`
+*directory* that is not a repository is skipped, as `git` skips it.
+
 ### RepoRequest
 
 | Constructor | What it includes |
