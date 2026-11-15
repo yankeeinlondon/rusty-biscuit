@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide whether a change needs the permission-widening comparison, and read
+"""Decide whether a change needs the permission-widening comparison, and report
 what the trusted checker found.
 
 CI runs this file from a checkout of the BASE commit only (the trusted side);
@@ -9,22 +9,25 @@ or run. Both commands print `key=value` lines for `$GITHUB_OUTPUT`.
 * `scope` is the cheap path check every pull request and push pays. It prints
   `decision=skip` when no input listed in `.github/ci/permission-inputs.json`
   changed, `decision=compare` when the trusted checker must compare the two
-  commits, and `decision=widening` when they cannot be compared at all (the
+  commits, and `decision=uncompared` when they cannot be compared at all (the
   base has no trusted checker, or there is no base commit). A policy file
   that is a committed symbolic link or whose `permissions` is a reference
   can read any file, so then any change at all is compared.
-* `decide` reads the checker's JSON report and prints
-  `potential_widening=true|false`. A failed checker or an unreadable report
-  exits 1, which fails the job: an error never means "no change".
+* `decide` reads the checker's JSON report, prints
+  `potential_widening=true|false`, and writes the report to the job summary.
+  With `--markdown PATH` it also writes, only when the change may widen, the
+  pull-request comment that tells whoever merges what widens. A failed
+  checker or an unreadable report exits 1, which fails the job: an error never
+  means "no change".
 
-User-facing guide: `docs/topics/ci-cd.md` ("Permission-widening approval").
+User-facing guide: `docs/topics/ci-cd.md` ("Permission-change report").
 
 ## Examples
 
 ```bash
 python3 -I scripts/ci/permission_scope.py scope --repository . \\
     --inputs .github/ci/permission-inputs.json --base "$BASE" --head "$HEAD"
-python3 -I scripts/ci/permission_scope.py decide --report report.json --status 0
+python3 -I scripts/ci/permission_scope.py decide --report report.json --status 0 --markdown comment.md
 ```
 """
 
@@ -111,14 +114,14 @@ def reads_beyond_itself(git: Git, commit: str, path: str) -> bool:
 def scope(repository: Path, inputs_path: Path, base: str, head: str, git: Git | None = None) -> dict[str, str]:
     """The scope decision for comparing `base` with `head`."""
     if not base or base == ZERO_ID:
-        return {"decision": "widening", "reason": "there is no base commit to compare with"}
+        return {"decision": "uncompared", "reason": "there is no base commit to compare with"}
     for name, value in (("base", base), ("head", head)):
         if not FULL_ID.fullmatch(value):
             raise ValueError(f"the {name} commit must be a full 40-character id, got `{value}`")
     if base == head:
         return {"decision": "skip", "reason": "the base and head commits are the same"}
     if not (repository / CHECKER_SOURCE).is_file():
-        return {"decision": "widening", "reason": "the base commit has no trusted checker (bootstrap)"}
+        return {"decision": "uncompared", "reason": "the base commit has no trusted checker (bootstrap)"}
     git = git or make_git(repository)
     groups = load_inputs(inputs_path)
     changed = changed_paths(git, base, head)
@@ -152,14 +155,22 @@ def decide(report_text: str, status: int) -> tuple[dict[str, str], list[str]]:
     reasons = report.get("reasons")
     if not isinstance(widening, bool) or not isinstance(reasons, list) or widening != bool(reasons):
         raise ValueError("the checker's report has no consistent `potential_widening` and `reasons`")
-    lines = [f"Compared `{report.get('base')}` with `{report.get('head')}`."]
-    changed = report.get("changed_inputs") or []
-    lines.append("Changed inputs: " + (", ".join(f"`{path}`" for path in changed) if changed else "none") + ".")
     if widening:
-        lines.append("This change may widen permissions, so it needs an approval of the `permission-widening` environment:")
+        lines = [
+            "Merging this change lets Darkmatter and Claudine pre-approve more, without asking, "
+            "on every clone of this repository:",
+            "",
+        ]
         lines += [f"- `{reason.get('input')}` ({reason.get('kind')}): {reason.get('detail')}" for reason in reasons]
     else:
-        lines.append("No permission widens; no approval is needed.")
+        lines = ["No committed permission widens."]
+    changed = report.get("changed_inputs") or []
+    lines += [
+        "",
+        f"Compared `{report.get('base')}` with `{report.get('head')}`. Changed inputs: "
+        + (", ".join(f"`{path}`" for path in changed) if changed else "none")
+        + ".",
+    ]
     return {"potential_widening": "true" if widening else "false"}, lines
 
 
@@ -179,6 +190,7 @@ def main(argv: list[str] | None = None, out: Callable[[str], None] = print) -> i
     deciding = commands.add_parser("decide")
     deciding.add_argument("--report", type=Path, required=True)
     deciding.add_argument("--status", type=int, required=True)
+    deciding.add_argument("--markdown", type=Path, help="where to write the pull-request comment when the change may widen")
     arguments = parser.parse_args(argv)
     try:
         if arguments.command == "scope":
@@ -189,10 +201,13 @@ def main(argv: list[str] | None = None, out: Callable[[str], None] = print) -> i
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         print(f"permission-scope: {error}", file=sys.stderr)
         return 1
+    body = "\n".join(lines) + "\n"
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as handle:
-            handle.write("## Permission widening\n\n" + "\n".join(lines) + "\n")
+            handle.write("## Permission changes\n\n" + body)
+    if arguments.markdown and outputs["potential_widening"] == "true":
+        arguments.markdown.write_text("## This pull request may widen committed permissions\n\n" + body, encoding="utf-8")
     print("\n".join(lines), file=sys.stderr)
     emit(outputs, out)
     return 0

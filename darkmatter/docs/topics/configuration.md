@@ -608,11 +608,11 @@ for reason in &report.reasons {
 | any change to a file the check depends on | `checker-input-changed` |
 | a file, Git, YAML, or reference error in either commit | an error, never "no change" |
 
-This repository runs the comparison in CI from the base commit's code and
-pauses a pull request that may widen until its reviewer approves it; see
-"Permission-widening approval" in `docs/topics/ci-cd.md`. Anyone holding that
-reviewer's GitHub credentials can approve, so the gate makes a widening
-visible and deliberate, not impossible.
+This repository runs the comparison in CI from the base commit's code and,
+when a pull request may widen, lists each reason in a comment on that pull
+request, so whoever merges it decides with the widening in view; see
+"Permission-change report" in `docs/topics/ci-cd.md`. The report makes a
+widening visible, not impossible.
 
 ## Saving an "Always Allow" Approval
 

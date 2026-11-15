@@ -620,14 +620,13 @@ WSL2. Defining that scope, aggregating its evidence, enforcing the release
 gate, and handling capability gaps are deferred release-process work; this
 policy is not yet implemented by the cadence correction.
 
-`ci.yml` defines exactly 12 top-level jobs: `validation`
+`ci.yml` defines exactly 11 top-level jobs: `validation`
 (does successful PR validation cover this tree?), `scope` (source the plan), `preflight`
 (bootstrap prerequisites per selected OS — no test suite), `build` (the native build owners),
 `area-ci` (one caller identity per selected area), `area-drift` (the planner's areas match
-`sniff`), `permission-scope` (may this change widen the repository's permissions?),
-`permission-widening` (the approval such a change needs; see
-[Permission-widening approval](#permission-widening-approval)), `ci-gate` (the required
-check, a policy-free fold of the other eight blocking jobs),
+`sniff`), `permission-scope` (does this change widen the repository's permissions? see
+[Permission-change report](#permission-change-report)), `ci-gate` (the required
+check, a policy-free fold of the other seven blocking jobs),
 `certify-nightly` (publish a successful nightly's coverage certification), `publish-observations`
 (publish finished nightly cells' observations), and advisory `ci-reporting`. Certification and
 observation publication are outside the merge gate; either can fail the scheduled run without
@@ -1260,7 +1259,7 @@ document carries `accepted_evidence`, one entry per reused cell — the same set
 generation is refused by its version, before any cell is interpreted, with the migration that
 applies named; the fix is to re-run the rollup that produced it.
 
-### Permission-widening approval
+### Permission-change report
 
 **What it protects.** Darkmatter and Claudine read a repository's committed
 `permissions` (in `.darkmatter.yaml`, or `.claudine/config.yaml`) and let it
@@ -1268,30 +1267,43 @@ pre-approve file reads, shell commands, and network access. A committed change
 that grants more is therefore a change in what tools on every clone may do
 without asking. `darkmatter/docs/topics/configuration.md` ("The
 cloned-repository risk") explains the risk; this section is how this
-repository's CI makes such a change deliberate.
+repository's CI makes sure whoever merges such a change knows it does so.
 
 **What a developer sees.** Most pull requests touch no permission input:
-`permission-scope` finishes in seconds and `permission-widening` is skipped.
-A pull request that narrows permissions, or leaves them equal, also passes
-without waiting. A pull request that **may widen** them shows
-`permission-widening` (shown as "Approve permission widening") as *waiting*: GitHub's
-[deployment review](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments)
-asks the environment's reviewer to approve the run, and `ci-gate` stays
-pending until they do. A rejection fails the job and so the gate.
+`permission-scope` (shown as "Report permission changes") finishes in seconds
+and says nothing. A pull request that narrows permissions, or leaves them
+equal, gets one line in the run's summary page. A pull request that **may
+widen** them gets a comment on the pull request, headed "This pull request may
+widen committed permissions", that lists each widening rule:
+
+```markdown
+## This pull request may widen committed permissions
+
+Merging this change lets Darkmatter and Claudine pre-approve more, without
+asking, on every clone of this repository:
+
+- `.darkmatter.yaml` (added-allow): `shell-commands` gains `prefix rm`
+
+Compared `1a2b…` with `3c4d…`. Changed inputs: `.darkmatter.yaml`.
+```
+
+Nothing waits for an approval: the merge is the decision, made with the
+comment in view. The comment is rewritten on every push, so it always describes
+the newest commit; when a later push stops widening, it says so instead of
+disappearing. A pull request from a fork cannot be commented on with the run's
+token, so its report stays on the run's summary page.
 
 ```mermaid
 flowchart TD
     A[pull request or push] --> B{permission input changed?<br/>trusted path check}
-    B -- no --> S[skip: no approval]
+    B -- no --> S[nothing to report]
     B -- yes --> C[build the BASE commit's checker<br/>compare base and head as Git objects]
+    B -- base has no checker --> U[comment: not compared, read the policy files]
     C -- error --> F[permission-scope fails: ci-gate blocks]
-    C -- unchanged or narrower --> S
-    C -- may widen --> V{environment protected?}
-    B -- base has no checker --> V
-    V -- no --> F
-    V -- yes --> W[permission-widening waits for the reviewer]
-    W -- approved --> G[ci-gate continues]
-    W -- rejected --> F
+    C -- unchanged or narrower --> M[one line in the run summary]
+    C -- may widen --> W[comment on the pull request lists each widening rule]
+    U --> G[reviewer decides at merge]
+    W --> G
 ```
 
 **What counts as widening.** The checker (`darkmatter::config::widening`,
@@ -1314,53 +1326,19 @@ Moving an unchanged block from inline to a reference (or back), reordering or
 deduplicating entries, removing entries, and adding exclusions are not
 widening. No containment between two globs or two command templates is
 attempted, and entry counts are never compared. A file, Git, YAML, or
-reference error fails `permission-scope`; it never reads as "no change".
-`.github/ci/permission-inputs.json` lists every input the check reads.
+reference error fails `permission-scope`, which blocks `ci-gate`; an error
+never reads as "no change". `.github/ci/permission-inputs.json` lists every
+input the check reads.
 
-**The trust boundary.** Everything `permission-scope` runs comes from the
-**base** commit, checked out under `$RUNNER_TEMP/permissions-trusted`, outside
-the workspace. The candidate commit is fetched as Git objects only and is
-never checked out, built, or run. When the base predates the checker (the
-change that introduced it), the change is treated as potential widening.
-`ci.yml` itself belongs to the candidate in a pull request, so a change that
-edits or removes these jobs is visible only as a changed checker input; the
-gate makes a widening deliberate, not impossible.
-
-**The environment.** The approval is a GitHub deployment environment,
-`permission-widening`, whose required reviewers are the people allowed to
-merge (today `yankeeinlondon`, user id `980757`). Self-review is allowed,
-because the one reviewer authors every change and the gate needs a deliberate
-approval rather than a second person; administrators cannot bypass it, and it
-has no wait timer. An approval covers one workflow run, so a new commit that
-still may widen needs a new approval. Before `permission-widening` is
-requested, `permission-scope` reads the environment and fails if it is
-missing or weaker, because GitHub would otherwise create an unprotected
-environment on first use. Anyone holding the reviewer's GitHub credentials
-(including an agent using `gh` with that token) can approve a run.
-
-Set the environment up once with `scripts/ci/permission_environment.py`. It
-is a dry run unless given `--apply`, and `verify` is read-only:
-
-```bash
-python3 scripts/ci/permission_environment.py            # show what would change
-python3 scripts/ci/permission_environment.py --apply    # configure, then read back
-python3 scripts/ci/permission_environment.py verify     # exit 1 unless protected
-```
-
-`--apply` sends exactly this request through the existing `gh` login:
-
-```bash
-gh api --method PUT repos/yankeeinlondon/rusty-biscuit/environments/permission-widening \
-  -H 'Accept: application/vnd.github+json' --input - <<'JSON'
-{
-  "wait_timer": 0,
-  "prevent_self_review": false,
-  "reviewers": [{ "type": "User", "id": 980757 }],
-  "can_admins_bypass": false,
-  "deployment_branch_policy": null
-}
-JSON
-```
+**The trust boundary.** Everything `permission-scope` runs to reach its
+verdict comes from the **base** commit, checked out under
+`$RUNNER_TEMP/permissions-trusted`, outside the workspace. The candidate
+commit is fetched as Git objects only and is never checked out, built, or run.
+When the base predates the checker, or there is no base, nothing can be
+compared and the report says so. `ci.yml` itself belongs to the candidate in a
+pull request, so a change that edits or removes this job is visible only as a
+changed checker input; the report makes a widening visible, not impossible.
+The job's token can write pull-request comments and nothing else.
 
 ### The run report
 

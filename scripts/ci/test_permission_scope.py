@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Decision tests for the permission-widening gate: `permission_scope.py`'s
-`scope` over real temporary Git repositories, `decide` over checker reports
-(unchanged, narrowing, widening, error), and `ci.yml`'s own inline
-environment-protection filter over fake GitHub responses (protected, weak,
-missing)."""
+"""Decision tests for the permission-change report: `permission_scope.py`'s
+`scope` over real temporary Git repositories, and `decide` over checker
+reports (unchanged, narrowing, widening, error) with the pull-request comment
+it writes."""
 from __future__ import annotations
 
-import copy
 import io
 import json
-import re
 import subprocess
 import tempfile
 import unittest
@@ -19,12 +16,10 @@ from typing import Any
 
 import permission_scope
 from permission_scope import CHECKER_SOURCE, decide, main, scope
-from test_permission_environment import PROTECTED, weakened
 from tool_guard import require_tools
 
 ROOT = Path(__file__).resolve().parents[2]
 GIT_ENFORCED_BY = "`_package-ci.yml`'s `test` job for repo-deps, which checks this repository out with Git"
-JQ_ENFORCED_BY = "`_package-ci.yml`'s `test` job for repo-deps, which provisions jq for its companion suites"
 
 INPUTS = {
     "policy-files": [
@@ -127,17 +122,17 @@ class ScopeTests(unittest.TestCase):
         head = self.repo.commit({"policies/real.yaml": "permissions:\n  network: allow\n"})
         self.assertEqual(self.repo.scope(base, head)["decision"], "compare")
 
-    def test_a_base_without_the_trusted_checker_is_potential_widening(self) -> None:
+    def test_a_base_without_the_trusted_checker_is_uncompared(self) -> None:
         repo = Repository()
         self.addCleanup(repo.close)
         base = repo.commit({"README.md": "before the checker\n"})
         head = repo.commit({"README.md": "after\n"})
         decision = repo.scope(base, head)
-        self.assertEqual(decision, {"decision": "widening", "reason": "the base commit has no trusted checker (bootstrap)"})
+        self.assertEqual(decision, {"decision": "uncompared", "reason": "the base commit has no trusted checker (bootstrap)"})
 
-    def test_no_base_commit_is_potential_widening(self) -> None:
+    def test_no_base_commit_is_uncompared(self) -> None:
         for base in ("", "0" * 40):
-            self.assertEqual(self.repo.scope(base, self.base)["decision"], "widening")
+            self.assertEqual(self.repo.scope(base, self.base)["decision"], "uncompared")
 
     def test_an_abbreviated_or_symbolic_commit_is_an_error(self) -> None:
         for base in ("HEAD", self.base[:12]):
@@ -166,15 +161,17 @@ WIDENING = [{"input": ".darkmatter.yaml", "kind": "added-allow", "detail": "`she
 
 
 class DecideTests(unittest.TestCase):
-    def test_an_unchanged_or_narrowing_report_needs_no_approval(self) -> None:
+    def test_an_unchanged_or_narrowing_report_says_nothing_widens(self) -> None:
         outputs, lines = decide(report([]), 0)
         self.assertEqual(outputs, {"potential_widening": "false"})
-        self.assertIn("no approval is needed", lines[-1])
+        self.assertEqual(lines[0], "No committed permission widens.")
+        self.assertNotIn("approval", "\n".join(lines))
 
-    def test_a_widening_report_needs_an_approval_and_names_each_reason(self) -> None:
+    def test_a_widening_report_names_each_reason(self) -> None:
         outputs, lines = decide(report(WIDENING), 0)
         self.assertEqual(outputs, {"potential_widening": "true"})
-        self.assertTrue(any("prefix rm" in line for line in lines))
+        self.assertIn("- `.darkmatter.yaml` (added-allow): `shell-commands` gains `prefix rm`", lines)
+        self.assertNotIn("approval", "\n".join(lines))
 
     def test_a_failed_or_unreadable_check_is_an_error_never_no_change(self) -> None:
         for text, status in (
@@ -190,10 +187,11 @@ class DecideTests(unittest.TestCase):
             with self.subTest(text=text, status=status), self.assertRaises(ValueError):
                 decide(text, status)
 
-    def test_the_command_fails_the_job_on_an_error_and_writes_the_summary_otherwise(self) -> None:
+    def test_the_command_fails_the_job_on_an_error_and_writes_the_summary_and_comment_otherwise(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.json"
             summary = Path(directory) / "summary.md"
+            comment = Path(directory) / "comment.md"
             path.write_text(report(WIDENING), encoding="utf-8")
             lines: list[str] = []
             original = permission_scope.os.environ.get("GITHUB_STEP_SUMMARY")
@@ -202,6 +200,16 @@ class DecideTests(unittest.TestCase):
                 with redirect_stderr(io.StringIO()):
                     self.assertEqual(main(["decide", "--report", str(path), "--status", "0"], out=lines.append), 0)
                     self.assertEqual(lines, ["potential_widening=true"])
+                    self.assertFalse(comment.exists(), "no comment unless --markdown asks for one")
+                    arguments = ["decide", "--report", str(path), "--status", "0", "--markdown", str(comment)]
+                    self.assertEqual(main(arguments, out=lines.append), 0)
+                    self.assertTrue(comment.read_text(encoding="utf-8").startswith(
+                        "## This pull request may widen committed permissions\n"))
+                    self.assertIn("prefix rm", comment.read_text(encoding="utf-8"))
+                    comment.unlink()
+                    path.write_text(report([]), encoding="utf-8")
+                    self.assertEqual(main(arguments, out=lines.append), 0)
+                    self.assertFalse(comment.exists(), "a change that widens nothing writes no comment")
                     missing = Path(directory) / "absent.json"
                     self.assertEqual(main(["decide", "--report", str(missing), "--status", "0"], out=lines.append), 1)
             finally:
@@ -211,52 +219,6 @@ class DecideTests(unittest.TestCase):
                     permission_scope.os.environ["GITHUB_STEP_SUMMARY"] = original
             self.assertIn("prefix rm", summary.read_text(encoding="utf-8"))
 
-
-def protection_filter() -> str:
-    """`ci.yml`'s inline `PROTECTION_FILTER`, folded as YAML folds it."""
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    block = re.search(r"\n( +)PROTECTION_FILTER: >-\n((?:\1  .*\n)+)", workflow)
-    assert block, "ci.yml declares PROTECTION_FILTER as a folded scalar"
-    return " ".join(line.strip() for line in block.group(2).splitlines())
-
-
-class WorkflowProtectionFilterTests(unittest.TestCase):
-    """The gate that runs before `permission-widening` is requested."""
-
-    def setUp(self) -> None:
-        require_tools("jq", enforced_by=JQ_ENFORCED_BY)
-        self.filter = protection_filter()
-
-    def verdict(self, environment: Any) -> str:
-        return subprocess.run(
-            ["jq", self.filter], input=json.dumps(environment), check=True, capture_output=True, text=True, timeout=30,
-        ).stdout.strip()
-
-    def test_the_configured_environment_passes(self) -> None:
-        self.assertEqual(self.verdict(PROTECTED), "true")
-
-    def test_every_weak_or_missing_setting_fails_closed(self) -> None:
-        cases = {
-            "no environment body": None,
-            "no rules": weakened(lambda e: e.update(protection_rules=[])),
-            "another reviewer": weakened(lambda e: e["protection_rules"][0]["reviewers"].append(
-                {"type": "User", "reviewer": {"id": 1}})),
-            "self review prevented": weakened(lambda e: e["protection_rules"][0].update(prevent_self_review=True)),
-            "admin bypass": weakened(lambda e: e.update(can_admins_bypass=True)),
-            "wait timer": weakened(lambda e: e["protection_rules"].append({"type": "wait_timer", "wait_timer": 5})),
-            "branch policy": weakened(lambda e: e.update(deployment_branch_policy={"protected_branches": True})),
-        }
-        for name, environment in cases.items():
-            with self.subTest(name):
-                self.assertEqual(self.verdict(environment), "false", name)
-
-    def test_the_filter_and_the_setup_script_agree(self) -> None:
-        import permission_environment
-        variants = [copy.deepcopy(PROTECTED), weakened(lambda e: e.update(can_admins_bypass=True)),
-                    weakened(lambda e: e["protection_rules"][0].update(reviewers=[]))]
-        for environment in variants:
-            self.assertEqual(self.verdict(environment) == "true", permission_environment.problems(environment) == [])
-        self.assertIn(f'"User:{permission_environment.REVIEWERS[0]["id"]}"', self.filter)
 
 
 if __name__ == "__main__":
