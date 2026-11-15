@@ -1,0 +1,52 @@
+kind: sequence
+$schema:
+    spec: file(required;match(**/*spec*.md);eager) -> the specification which will be _completed_
+    plan: file -> the spec's plan file (if it exists)
+    implemented: boolean -> whether this spec has been implemented yet
+    review: file -> the implementation's latest review file (if it exists)
+    spec-name: string -> a unique identifier for the spec
+    iteration: number -> the number of reviews that have taken place in the fix/review cycle
+
+plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
+iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
+spec-name: "{{ parent_dir(spec) }}"
+review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
+
+sequence:
+    # spec exists
+    - when: "!file_exists(spec)"
+      then:
+          - warn: "The specification '{{spec}}' doesn't exist; can't complete this prompt!"
+            edit: spec
+      else:
+          - when: "frontmatter(spec,'reviewed')"
+            then:
+                - success: "the **spec** `{{spec-name}}` has been reviewed"
+            else:
+                - warn: "the **spec** `{{spec-name}}` has not been reviewed yet!"
+                - stop
+    # planning
+    - when: "file_exists(plan)"
+      then:
+          - success: "the **plan** for the spec `{{spec-name}} has been created`"
+      else:
+          - warn: "the **plan** for the spec `{{spec-name}}` still needs to be created"
+          - proxy: "./plan.md"
+    # implementation
+    - when: "frontmatter(plan, 'implemented')"
+      success: "the `{{spec-name}}` has been implemented already"
+      else:
+          - proxy: "./ensure-rulings.md"
+          - proxy: "./implement.md"
+    # human review (when required)
+    - when: "frontmatter(spec, 'human-review')"
+      then:
+          - proxy: "./_review/human-rulings.md"
+      else:
+          - info: "the implementation of `{{spec-name}}`"
+    # review/fix cycle
+    - when: "frontmatter(spec, 'ready')"
+      then:
+          - success: "the `{{spec-name}}` spec was implemented and has completed the fix/review cycle"
+      else:
+          - sequence: ./fix/fix-review.yaml

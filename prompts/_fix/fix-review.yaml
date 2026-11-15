@@ -1,0 +1,34 @@
+kind: sequence
+$schema:
+    spec: file(required;match(**/*spec*.md);eager) -> the specification which will be _completed_
+    plan: file -> the spec's plan file (if it exists)
+    implemented: boolean -> whether this spec has been implemented yet
+    review: file -> the implementation's latest review file (if it exists)
+    spec-name: string -> a unique identifier for the spec
+    iteration: number -> the number of reviews that have taken place in the fix/review cycle
+
+plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
+iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
+spec-name: "{{ parent_dir(spec) }}"
+review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
+
+sequence:
+    - when: "file_exists(review) && frontmatter(review,'implemented')"
+      then:
+          - info: |-
+                {{
+                    iterations == 1
+                        ? 'beginning the fix/review cycle with a review of `' + spec-name + '`'
+                        : 'starting feature review #' + iterations + ' of `' + spec-name + '`'
+                }}
+          - proxy: ../review/feature-review.md
+      else:
+          - info: |-
+                Implementing the suggestions in review # {{}}
+loop:
+    until: "!file_exists(spec) || frontmatter(spec,'ready')"
+    max: 5
+success:
+    - message: "the fix/review cycle for `{{spec-name}}` has completed and the spec is considered production ready! [{{ctx.repo}},{{ctx.branch}}]"
+failure:
+    - message: "the fix/review cycle for `{{spec-name}}` failed: {{err.msg}}"
