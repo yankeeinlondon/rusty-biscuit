@@ -1128,6 +1128,18 @@ sibling also stops the background processes the command started. What that
 covers on each OS is described in
 [Process trees](../../../../sniff/docs/topics/process-trees.md).
 
+A task command is not interactive: its stdin is empty and its stdout is
+captured, so it never takes the terminal, and a Ctrl-C you type reaches
+Claudine, which stops the task. A command that must prompt belongs in a
+lifecycle `shell:` action instead, which runs on Claudine's terminal and holds
+its foreground while it runs (see
+[Shell Actions](lifecycle.md#shell-actions)):
+
+```yaml
+start:
+  - shell: "just commit"
+```
+
 Caller values (`key=value`, `--set`) are plain names to `shell:` commands and
 to authored step data, in the first task and in later ones, so
 `claudine sequence ship.md target=staging` lets a task run

@@ -542,13 +542,19 @@ terminal execution on `LifecycleRunGuard::run_event_stack`: its cleanup scope
 allows terminal actions to finish after cancellation while preserving repeat
 interrupt grace. Task shells and lifecycle shell exact/template dispatch own
 their process trees through Sniff's `sniff::process::ProcessTree`
-([process trees](../../../sniff/docs/topics/process-trees.md)), except on
-Unix while Claudine holds its terminal's
-foreground (`task/shell.rs::holds_terminal_foreground`): an inherited-terminal
-child in a group of its own is stopped by `SIGTTIN`/`SIGTTOU` forever (a
-nested `claudine compose` from `shell: just commit` hung this way), so it runs
-in Claudine's group and only the direct child is terminated on cancellation.
-Regression: `cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`.
+([process trees](../../../sniff/docs/topics/process-trees.md)). On Unix a
+lifecycle command also takes the terminal's foreground through
+`sniff::process::ForegroundHandoff` (`task/shell.rs::run_owned_lifecycle_command`),
+or an inherited-terminal child in a group of its own is stopped by
+`SIGTTIN`/`SIGTTOU` forever (a nested `claudine compose` from
+`shell: just commit` hung this way). A foreground command's `SIGINT` end or
+exit 130 marks the run interrupted, and `StackExecutionContext::stops_on_interrupt`
+then ends `initialize`/`start`/`loop` before their next action. A second
+concurrent lifecycle command fails before spawn (`WouldBlock` →
+`ShellRunError::Spawn`), and `settle_lifecycle_command` lets a restore failure
+fail only an exit-0 command. Without the foreground, SIGINT is `-1` and 130 an
+ordinary code. Regressions: `cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`,
+`task/shell/lifecycle_tests.rs`, `lifecycle/executor/tests/interrupt_stops.rs`.
 Container events use
 `lifecycle::runtime::ContainerRunner` and `LifecycleRunGuard`; root initialize
 precedes static preflight, nested preparation is just in time. Retry preserves

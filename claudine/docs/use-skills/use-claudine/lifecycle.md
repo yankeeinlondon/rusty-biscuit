@@ -116,6 +116,23 @@ without one and in a parallel group member, which may run only a GUI
 editor. No timeout closes an open editor; Ctrl-C or a failing sibling
 does.
 
+A `shell` command runs on Claudine's terminal, so it may prompt
+(`start: [shell: "just commit"]`). On macOS and Linux, while Claudine is the
+terminal's foreground job, the command holds the terminal until it exits:
+
+- it reads the keyboard, and a Ctrl-C you type goes to it, not to Claudine;
+- if it ends from that Ctrl-C (killed by `SIGINT`, or a shell exiting 130),
+  the run is cancelled: the next `start` or `loop` action does not run, even
+  with `no_error`, and `cancelled` and `finalize` run;
+- a command that ignores Ctrl-C keeps the terminal; `kill -INT <claudine pid>`
+  cancels the run from outside;
+- only one command may hold the terminal at a time in one Claudine process;
+  a second fails before it starts.
+
+Without the foreground (a background job, CI, no terminal) nothing is handed
+over and 130 is an ordinary exit code. Either way, background processes a
+command leaves running are stopped when it finishes.
+
 **Flow control:**
 
 | Directive | Does |

@@ -1087,15 +1087,57 @@ A non-zero exit code is an action error unless `no_error: true` is set. A
 
 A `shell` command uses Claudine's own terminal, so it can be interactive:
 `shell: just commit` may launch another `claudine compose` that prompts or
-drives an agent's TUI. When cancellation stops a running command, the command
-and everything it started end together, with one exception on macOS and Linux:
-while Claudine is the terminal's foreground job, the command runs in
-Claudine's own process group so the terminal does not stop it. Ctrl-C still
-reaches everything it started, but a sibling-failure cancellation ends only
-the command itself, not background processes it left running. Every other
-lifecycle shell command, and every sequence shell task, owns its process tree;
-see [Process trees](../../../../sniff/docs/topics/process-trees.md) for what
-that covers on each OS.
+drives an agent's TUI.
+
+```yaml
+start:
+  - shell: "just commit"   # may prompt, open an editor, or run a nested agent
+  - say: "Committed"       # skipped if you pressed Ctrl-C during `just commit`
+```
+
+On macOS and Linux, while Claudine is the terminal's foreground job, the
+command is handed the terminal's foreground for as long as it runs, and
+Claudine takes it back, with your terminal settings, before the next action.
+While the command runs:
+
+- **It can read the keyboard**, through the stdin it inherits from Claudine
+  or by opening the terminal directly, as `ssh` and `gpg` do for a
+  passphrase.
+- **A Ctrl-C you type reaches the command, not Claudine.** A command that
+  ignores Ctrl-C keeps the terminal until it exits; to stop Claudine anyway,
+  signal Claudine itself (`kill -INT <claudine pid>`), which cancels the run
+  as described in [Signal handling](../signal-handling.md).
+- **A command that ends because of that Ctrl-C cancels the run.** A command
+  killed by `SIGINT`, or a shell that exits 130 because its child was, counts
+  as your interrupt: its background processes are stopped, the terminal is
+  restored, the run is marked interrupted, and the action's result is 130.
+  The next `start` or `loop` action does not run, even after
+  `no_error: true`, and the `cancelled` and `finalize` events run as usual.
+
+When Claudine is not the terminal's foreground job (it runs in the
+background with `&`, under CI, or with no terminal at all) nothing is handed
+over. A command ended by `SIGINT` is then an ordinary signal exit, and exit
+130 an ordinary non-zero exit code.
+
+Two more rules follow from a terminal having a single foreground:
+
+- **One terminal command at a time.** If a lifecycle command starts while
+  another one in the same Claudine process holds the terminal, the second
+  fails before it starts, with an I/O error "another terminal foreground
+  handoff is active in this process".
+- **The terminal must come back.** If Claudine cannot restore the terminal
+  after a command that exited 0, the action fails. After any other result the
+  restoration failure is logged and the command's own result stands.
+
+Every lifecycle shell command, like every sequence shell task, owns its process
+tree: when the command finishes, background processes it left running are
+stopped, and when cancellation stops a running command, the command and
+everything it started end together (after a 250 ms grace period on macOS and
+Linux). See [Process trees](../../../../sniff/docs/topics/process-trees.md) for
+what that covers on each OS, and its
+[terminal handoff section](../../../../sniff/docs/topics/process-trees.md#handing-the-terminal-to-an-interactive-child)
+for how the foreground is lent and restored. On Windows nothing is handed
+over: the command shares Claudine's console.
 
 #### Shell actions approved by their shape
 
