@@ -374,6 +374,25 @@ pub struct PreflightSequence {
     /// The sequence's `loop:` controls, when it repeats. Its gate is
     /// [`Self::lifecycle`]'s `loop` stack.
     pub loop_config: Option<PreflightLoop>,
+    /// An inline container's own `$schema`, prepared from its declaring file
+    /// and located at its authored property (`sequence[1].$schema`).
+    ///
+    /// It is a check on the values the container sees at its turn, never a
+    /// document schema: it types no placeholder, predicts no provider, asks
+    /// for no caller input, and does not reach its parent's state. A whole
+    /// referenced document has none; its own `$schema` is its document
+    /// schema, judged through [`super::super::model::SequencePlan::document_scope`].
+    pub inline_schema: Option<super::super::declarations::PreparedSequenceSchema>,
+}
+
+impl PreflightSequence {
+    /// The whole document that owns this container's list: the referenced
+    /// file for a `sequence: child.yaml` task; `None` for an inline list or
+    /// a data selection, which own no document inputs.
+    #[must_use]
+    pub fn document_scope(&self) -> Option<&super::super::document::SequenceDocumentScope> {
+        self.plan.document_scope.as_deref()
+    }
 }
 
 /// A resolved group and its member tasks.

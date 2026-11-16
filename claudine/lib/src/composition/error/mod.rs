@@ -2468,18 +2468,18 @@ pub enum CompositionError {
         failure_count: usize,
     },
 
-    /// One or more sequence steps have missing required schema properties
-    /// and Interactive Mode is not allowed.
+    /// One or more sequence steps or sequence documents have missing
+    /// required schema properties and Interactive Mode is not allowed.
     ///
     /// Aggregated so the user can fix the full sequence in a single edit
-    /// pass instead of discovering each step's gaps one at a time.
+    /// pass instead of discovering each owner's gaps one at a time.
     #[error(
-        "sequence schema validation failed for {failure_count} step(s); missing required properties"
+        "sequence schema validation failed for {failure_count} step(s) or document(s); missing required properties"
     )]
     SequenceMissingProperties {
-        /// Per-step missing-property records in execution order.
-        failures: Vec<SequenceMissingPropertiesStep>,
-        /// Number of steps that reported missing properties.
+        /// Missing-property records in discovery order.
+        failures: Vec<SequenceMissingPropertiesEntry>,
+        /// Number of entries that reported missing properties.
         failure_count: usize,
     },
 
@@ -3572,17 +3572,38 @@ pub struct TaskTimeoutContext {
     pub raw: String,
 }
 
-/// Per-step missing-property record for [`CompositionError::SequenceMissingProperties`].
+/// Who owes the missing properties of one
+/// [`CompositionError::SequenceMissingProperties`] entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SequenceMissingSubject {
+    /// A root step's prompt document.
+    Step {
+        /// 1-based step number.
+        number: usize,
+        /// Display name of the step.
+        name: String,
+    },
+    /// A sequence document that owns a step list: the invoked root, or a
+    /// whole document a `sequence:` references. It may have no steps at all,
+    /// so it is never given a step number.
+    Document {
+        /// The container property path of the reference that reached it
+        /// (`sequence[1].sequence`); empty for the invoked root.
+        property: String,
+    },
+}
+
+/// One owner's missing-property record for
+/// [`CompositionError::SequenceMissingProperties`].
 ///
-/// Carries the same fields as a single-step [`CompositionError::MissingProperties`]
-/// so the CLI can render each step's report without having to re-validate.
+/// Carries the same fields as a single-document
+/// [`CompositionError::MissingProperties`] so the CLI can render each report
+/// without having to re-validate.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SequenceMissingPropertiesStep {
-    /// 1-based step number.
-    pub step: usize,
-    /// Display name of the step.
-    pub step_name: String,
-    /// The prompt file whose schema declared the missing properties.
+pub struct SequenceMissingPropertiesEntry {
+    /// The step or sequence document the properties are missing from.
+    pub subject: SequenceMissingSubject,
+    /// The file whose schema declared the missing properties.
     pub source_path: PathBuf,
     /// Missing properties in declaration order.
     pub missing: Vec<MissingProperty>,

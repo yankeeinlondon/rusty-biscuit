@@ -613,10 +613,7 @@ fn an_external_sequence_reference_resolves_under_each_documents_own_map() {
         let context = view.derive_source(&source.resolved_path).unwrap();
         let plan = resolve_sequence_plan_with(
             &source,
-            SequenceSourceOptions {
-                shell_runner: None,
-                file_resolution_context: context.file_resolution_context(),
-            },
+            SequenceSourceOptions::new(context.file_resolution_context()),
         )
         .unwrap()
         .expect("sequence plan");
@@ -2164,10 +2161,7 @@ mod dynamic_sources {
         };
         let plan = resolve_sequence_plan_with(
             &source,
-            SequenceSourceOptions {
-                shell_runner: Some(&runner),
-                file_resolution_context: crate::test_support::process_context(),
-            },
+            SequenceSourceOptions::new(crate::test_support::process_context()).with_shell_runner(&runner),
         )
         .unwrap()
         .unwrap();
@@ -2193,10 +2187,7 @@ mod dynamic_sources {
         };
         let error = resolve_sequence_plan_with(
             &source,
-            SequenceSourceOptions {
-                shell_runner: Some(&runner),
-                file_resolution_context: crate::test_support::process_context(),
-            },
+            SequenceSourceOptions::new(crate::test_support::process_context()).with_shell_runner(&runner),
         )
         .unwrap_err();
         assert!(

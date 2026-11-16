@@ -78,7 +78,7 @@ pub use error::{
     DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
     LifecycleEvaluationReason, LoopExpressionCause, MarkdownLoadCause, MissingProperty,
     SequenceExpressionCause,
-    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, SequenceShellCause,
+    SequenceLoadCause, SequenceMissingPropertiesEntry, SequenceMissingSubject, SequenceSelectionFailure, SequenceShellCause,
     ShellApprovalFailure, TextFormat,
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
@@ -143,7 +143,7 @@ pub use resolve::{
     derive_request_context_for_source,
     enrich_composition_source_load_error_in_context,
     is_yaml_source, load_yaml_document, prompt_magic_fallback_roots, prompt_magic_roots,
-    reload_composition_source,
+    reload_authored_source, reload_composition_source,
     resolve_composition_source, resolve_composition_source_in_context, validate_file_permissions,
     with_prompt_magic_roots, without_formal_sequence_keys,
 };
@@ -173,6 +173,8 @@ pub use sequence::preflight::{
     PreflightStep, PreflightTask, PreparedShellSite, PromptDocument, PromptReference,
     ShellSiteKind, SiteMode, TaskPosition, build_preflight_graph,
     build_preflight_graph_with_context, build_preflight_graph_with_invocation,
+    build_preflight_graph_after_discovery, discover_sequence_inputs, InlineContainer, InputDiscoveryOptions,
+    InputOwner, InputOwnerRole, InputPrompt, PendingReference, SequenceInputInventory,
     reject_non_sequence_kind, resolve_task_late_values, sequence_deferred_roots,
 };
 pub use sequence::task::{

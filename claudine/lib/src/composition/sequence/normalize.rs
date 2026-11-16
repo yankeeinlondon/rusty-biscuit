@@ -132,6 +132,7 @@ pub fn normalize_plan_at(
         // The caller owns provenance: only it knows which document declared the
         // list and whether that document recorded authored key order at all.
         authored: AuthoredOrder::default(),
+        document_scope: None,
     })
 }
 

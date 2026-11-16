@@ -378,10 +378,8 @@ fn run_sequence_inner(
         shared.yolo,
     );
     let shell_runner = |command: &str| expand_shell_source(command, &shell_options);
-    let source_options = composition::SequenceSourceOptions {
-        shell_runner: Some(&shell_runner),
-        file_resolution_context: &file_resolution_context,
-    };
+    let source_options = composition::SequenceSourceOptions::new(&file_resolution_context)
+        .with_shell_runner(&shell_runner);
 
     let plan = composition::resolve_sequence_plan_with(&source, source_options)?.ok_or_else(
         || {
@@ -392,9 +390,10 @@ fn run_sequence_inner(
         },
     )?;
 
-    // The plan now owns a formal document's `template:` and `$schema`; from here
-    // down `source` is only ever composed, and there those are not frontmatter.
-    // Every later re-read sheds them too (`reload_composition_source`).
+    // The plan now owns the document's `$state`/`template:` and its inline
+    // containers' declarations; from here down `source` is only ever
+    // composed, and there those are not frontmatter. Every later re-read
+    // sheds them too (`reload_composition_source`).
     let source = composition::without_formal_sequence_keys(&source);
 
     // Empty containers still enter their lifecycle and produce an empty result.

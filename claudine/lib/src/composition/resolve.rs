@@ -294,50 +294,126 @@ pub fn load_yaml_document(path: &Path) -> Result<Markdown, CompositionError> {
     ))
 }
 
-/// Frontmatter keys that belong to a *formal sequence document* rather than to
-/// the composition frontmatter of the document carrying them.
+/// Root keys that declare a sequence document's own step list rather than
+/// describe the document: dropped from its composition view whenever its
+/// `sequence:` is an authored list, in YAML and Markdown alike.
 ///
-/// Referenced through `sequence: steps.yaml` these keys never reach the
-/// invoking document's frontmatter at all; a directly invoked YAML document has
-/// only one mapping to put them in, so they are lifted back out before
-/// composition: they describe the plan, which has already consumed them, not
-/// the document. The root `$schema` is the document schema and stays.
+/// The root `$schema` is the document schema and stays.
 const FORMAL_SEQUENCE_KEYS: [&str; 2] = ["$state", "template"];
 
-/// Return `source` with [`FORMAL_SEQUENCE_KEYS`] removed when it is a directly
-/// invoked formal sequence document, and unchanged otherwise.
+/// The declarations an inline container task owns beside its `sequence:`
+/// list. Its `$schema` is a check of the container, never the document's.
+const CONTAINER_DECLARATION_KEYS: [&str; 3] = ["$schema", "$state", "template"];
+
+/// Return `source`'s composition view: the authored document without the
+/// sequence declarations composition must never read.
+///
+/// The plan is built from the authored view, which keeps them; a composed
+/// view would interpolate a `template: { desc: "{{ color }}" }` against the
+/// document before any step supplies `color`. When the root `sequence:` is
+/// an authored list, the view drops [`FORMAL_SEQUENCE_KEYS`] from the root and
+/// [`CONTAINER_DECLARATION_KEYS`] from every inline container task beneath it,
+/// through nested `sequence:` lists and inline `group:` legs. Only that task
+/// structure is walked, so a user value that happens to hold a `template` key
+/// is left alone. Anything else returns `source` unchanged.
 #[must_use]
 pub fn without_formal_sequence_keys(
     source: &ResolvedCompositionSource,
 ) -> ResolvedCompositionSource {
-    if !super::sequence::formal::is_direct_formal_document(source) {
-        return source.clone();
+    composition_view(source).into_owned()
+}
+
+/// [`without_formal_sequence_keys`], borrowing `source` when it carries
+/// nothing to drop.
+pub(crate) fn composition_view(
+    source: &ResolvedCompositionSource,
+) -> std::borrow::Cow<'_, ResolvedCompositionSource> {
+    use std::borrow::Cow;
+    let authored = source.markdown.frontmatter();
+    let Some(serde_json::Value::Array(items)) = authored.as_map().get("sequence") else {
+        return Cow::Borrowed(source);
+    };
+    let root_declares = FORMAL_SEQUENCE_KEYS.iter().any(|key| authored.as_map().contains_key(*key));
+    if !root_declares && !items.iter().any(task_declares) {
+        return Cow::Borrowed(source);
     }
 
     let mut frontmatter = darkmatter::markdown::Frontmatter::new();
-    for (key, value) in source.markdown.frontmatter().as_map() {
+    for (key, value) in authored.as_map() {
         if FORMAL_SEQUENCE_KEYS.contains(&key.as_str()) {
             continue;
         }
+        let value = if key == "sequence" {
+            serde_json::Value::Array(items.iter().map(without_task_declarations).collect())
+        } else {
+            value.clone()
+        };
         // The values round-trip from a frontmatter that already accepted them,
         // so a rejection here is not reachable; keeping the key is strictly
         // better than panicking on an unreachable branch.
-        let _ = frontmatter.insert(key, value.clone());
+        let _ = frontmatter.insert(key, value);
     }
-    // Dropping two root keys does not move anything the order index points at,
-    // so it travels with the rebuilt frontmatter.
-    let frontmatter =
-        frontmatter.with_mapping_orders(source.markdown.frontmatter().mapping_orders().clone());
+    // Dropping keys moves no list position the order index points at, and an
+    // object's recorded order simply skips the keys it no longer holds.
+    let frontmatter = frontmatter.with_mapping_orders(authored.mapping_orders().clone());
 
-    ResolvedCompositionSource {
+    Cow::Owned(ResolvedCompositionSource {
         original_ref: source.original_ref.clone(),
         resolved_path: source.resolved_path.clone(),
         original_text: source.original_text.clone(),
         markdown: Markdown::with_frontmatter(frontmatter, source.markdown.content()),
+    })
+}
+
+/// The inline group legs of `task`, when it runs an inline `group:` object.
+fn inline_group_legs(task: &serde_json::Map<String, serde_json::Value>) -> Option<&Vec<serde_json::Value>> {
+    task.get("group")?.as_object()?.get("tasks")?.as_array()
+}
+
+/// Whether `task`, or a container task beneath it, carries a declaration the
+/// composition view drops.
+fn task_declares(task: &serde_json::Value) -> bool {
+    let Some(task) = task.as_object() else { return false };
+    match task.get("sequence") {
+        Some(serde_json::Value::Array(children)) => {
+            CONTAINER_DECLARATION_KEYS.iter().any(|key| task.contains_key(*key)) || children.iter().any(task_declares)
+        }
+        _ => inline_group_legs(task).is_some_and(|legs| legs.iter().any(task_declares)),
     }
 }
 
-/// Re-read an already-resolved source from disk.
+/// `task` without the declarations of any inline container at or beneath it.
+fn without_task_declarations(task: &serde_json::Value) -> serde_json::Value {
+    let Some(map) = task.as_object() else { return task.clone() };
+    if !task_declares(task) {
+        return task.clone();
+    }
+    let mut stripped = serde_json::Map::with_capacity(map.len());
+    let inline = matches!(map.get("sequence"), Some(serde_json::Value::Array(_)));
+    for (key, value) in map {
+        if inline && CONTAINER_DECLARATION_KEYS.contains(&key.as_str()) {
+            continue;
+        }
+        let value = match (key.as_str(), value) {
+            ("sequence", serde_json::Value::Array(children)) => {
+                serde_json::Value::Array(children.iter().map(without_task_declarations).collect())
+            }
+            ("group", serde_json::Value::Object(group)) => {
+                let mut group = group.clone();
+                if let Some(serde_json::Value::Array(legs)) = group.get_mut("tasks") {
+                    *legs = legs.iter().map(without_task_declarations).collect();
+                }
+                serde_json::Value::Object(group)
+            }
+            _ => value.clone(),
+        };
+        stripped.insert(key.clone(), value);
+    }
+    serde_json::Value::Object(stripped)
+}
+
+/// Re-read an already-resolved source from disk as authored, sequence
+/// declarations included.
 ///
 /// Sequence steps compose just in time, so each step reads the file as it
 /// stands at its turn — an earlier step's inline-compose write-back or an
@@ -346,15 +422,15 @@ pub fn without_formal_sequence_keys(
 /// magic-root discovery mid-sequence could silently retarget the run.
 ///
 /// A YAML source reloads through [`load_yaml_document`], the same conversion
-/// its initial resolution used, and then sheds its formal sequence keys
-/// ([`without_formal_sequence_keys`]) so every step composes the same document
-/// shape the first one did.
+/// its initial resolution used. A caller that composes the result wants
+/// [`reload_composition_source`]; this authored view is for a caller that
+/// reads the declarations themselves.
 ///
 /// ## Errors
 ///
 /// Returns [`CompositionError::MarkdownLoad`] when the file has become
 /// unreadable or its frontmatter no longer parses.
-pub fn reload_composition_source(
+pub fn reload_authored_source(
     source: &ResolvedCompositionSource,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
     let original_text =
@@ -369,12 +445,29 @@ pub fn reload_composition_source(
             .map_err(|e| map_load_error(&source.resolved_path, e))?
     };
 
-    Ok(without_formal_sequence_keys(&ResolvedCompositionSource {
+    Ok(ResolvedCompositionSource {
         original_ref: source.original_ref.clone(),
         resolved_path: source.resolved_path.clone(),
         original_text,
         markdown,
-    }))
+    })
+}
+
+/// [`reload_authored_source`] in its composition view
+/// ([`without_formal_sequence_keys`]), so every step composes the same
+/// document shape the first one did.
+///
+/// ## Errors
+///
+/// As [`reload_authored_source`].
+pub fn reload_composition_source(
+    source: &ResolvedCompositionSource,
+) -> Result<ResolvedCompositionSource, CompositionError> {
+    let authored = reload_authored_source(source)?;
+    Ok(match composition_view(&authored) {
+        std::borrow::Cow::Borrowed(_) => authored,
+        std::borrow::Cow::Owned(view) => view,
+    })
 }
 
 /// Parse a top-level Claudine prompt argument with the shared file-reference

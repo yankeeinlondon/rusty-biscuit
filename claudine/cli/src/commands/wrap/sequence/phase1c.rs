@@ -21,7 +21,7 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
     self, CompositionError, MissingProperty, PrepareOptions,
-    PreparedComposition, ResolvedCompositionSource, SequenceMissingPropertiesStep, SequencePlan,
+    PreparedComposition, ResolvedCompositionSource, SequenceMissingPropertiesEntry, SequenceMissingSubject, SequencePlan,
 };
 use claudine::harness::ShellApprovalOptions;
 use color_eyre::eyre::{Result, eyre};
@@ -158,7 +158,7 @@ pub(super) fn run_phase_1c_with_schema(
 
 /// Per-step missing-properties context.
 ///
-/// Pairs the typed `SequenceMissingPropertiesStep` (returned to the user
+/// Pairs the typed `SequenceMissingPropertiesEntry` (returned to the user
 /// as part of `CompositionError::SequenceMissingProperties`) with the
 /// post-overlay effective override map for that step. The effective
 /// overrides are needed by [`build_schema_status_report`] so the
@@ -167,7 +167,7 @@ pub(super) fn run_phase_1c_with_schema(
 /// and CLI `--set` / shorthand setters must show as `Valid` (or omitted)
 /// rather than as `Missing`.
 struct StepMissingContext {
-    failure: SequenceMissingPropertiesStep,
+    failure: SequenceMissingPropertiesEntry,
     effective_overrides: Option<serde_json::Value>,
 }
 
@@ -178,14 +178,14 @@ enum Phase1cAttempt {
 }
 
 /// Borrow just the failure records out of a `[StepMissingContext]` slice
-/// for helpers that already operate on `&[SequenceMissingPropertiesStep]`.
-fn failures_slice(contexts: &[StepMissingContext]) -> Vec<SequenceMissingPropertiesStep> {
+/// for helpers that already operate on `&[SequenceMissingPropertiesEntry]`.
+fn failures_slice(contexts: &[StepMissingContext]) -> Vec<SequenceMissingPropertiesEntry> {
     contexts.iter().map(|c| c.failure.clone()).collect()
 }
 
 /// Convert per-step contexts into the typed aggregated error variant.
 fn into_sequence_missing(contexts: Vec<StepMissingContext>) -> CompositionError {
-    let failures: Vec<SequenceMissingPropertiesStep> =
+    let failures: Vec<SequenceMissingPropertiesEntry> =
         contexts.into_iter().map(|c| c.failure).collect();
     CompositionError::SequenceMissingProperties {
         failure_count: failures.len(),
@@ -260,9 +260,8 @@ fn run_phase_1c_attempt(
             }) => {
                 let step = &plan.steps[step_index];
                 missing_contexts.push(StepMissingContext {
-                    failure: SequenceMissingPropertiesStep {
-                        step: step_index + 1,
-                        step_name: step.name.clone(),
+                    failure: SequenceMissingPropertiesEntry {
+                        subject: SequenceMissingSubject::Step { number: step_index + 1, name: step.name.clone() },
                         source_path,
                         missing,
                         frontmatter_description,
@@ -326,10 +325,12 @@ fn collect_sequence_missing_values(
                     &composition::TriggerFindings::default(),
                 )
             {
-                let status = Status::from_prose(format!(
-                    "<b>Step {}:</b> <cyan>{}</cyan>",
-                    failure.step, failure.step_name
-                ))
+                let heading = match &failure.subject {
+                    SequenceMissingSubject::Step { number, name } => format!("<b>Step {number}:</b> <cyan>{name}</cyan>"),
+                    SequenceMissingSubject::Document { property } if property.is_empty() => "<b>Document</b>".to_string(),
+                    SequenceMissingSubject::Document { property } => format!("<b>Document</b> <cyan>`{property}`</cyan>"),
+                };
+                let status = Status::from_prose(heading)
                 .state(StatusState::Info);
                 log::message(&status.render(&term));
                 render_status_report(&report, &term);
@@ -364,7 +365,7 @@ fn collect_sequence_missing_values(
 /// matches the direct `compose` path. The shape label falls back to
 /// `(unknown)` when the property has no recorded type label.
 pub(super) fn find_first_unsupported(
-    failures: &[SequenceMissingPropertiesStep],
+    failures: &[SequenceMissingPropertiesEntry],
 ) -> Option<(std::path::PathBuf, String, String)> {
     for failure in failures {
         for prop in &failure.missing {

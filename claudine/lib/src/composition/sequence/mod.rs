@@ -14,9 +14,10 @@
 //!   `<file-ref> [-> offset] [::op(args)]` suffix parser;
 //! - [`data`] — multi-format loading, offset traversal, operator application;
 //! - [`expr`] — expression evaluation for dynamic sources and templates;
-//! - [`formal`] — the one formal-document pipeline (scalar shorthand →
-//!   `template:` → generated fields → step-state `$schema`) both entry modes
-//!   share;
+//! - [`formal`] — the one pipeline for authored lists (scalar shorthand →
+//!   `template:` → generated fields → `$state`) every entry mode shares;
+//! - [`document`] — the document that owns a list, and the prepared values
+//!   its `template:` reads;
 //! - [`normalize`] — strict/lenient state normalization, id suffixing, and the
 //!   `sequence_id` invocation token;
 //! - [`preflight`] — the recursive task graph: external task/group/catalog/
@@ -30,6 +31,7 @@
 
 pub mod data;
 pub mod declarations;
+pub mod document;
 pub mod expr;
 pub mod formal;
 pub mod grammar;
@@ -68,20 +70,56 @@ use model::SequenceSource as Source;
 pub type ShellSourceRunner<'a> = &'a dyn Fn(&str) -> Result<String, CompositionError>;
 
 /// Caller-supplied capabilities for sequence-source resolution.
+///
+/// Start from [`Self::new`] and add capabilities with the `with_*` builders.
 #[derive(Clone, Copy)]
 pub struct SequenceSourceOptions<'a> {
     /// Expander for `$( … )` sources. `None` rejects them.
-    pub shell_runner: Option<ShellSourceRunner<'a>>,
+    shell_runner: Option<ShellSourceRunner<'a>>,
     /// The request's file-resolution context, for external file-backed
     /// sources and source expressions.
-    pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    /// The invocation's captured context. With it, an owner's `template:`
+    /// reads the owner's prepared values
+    /// ([`document::prepare_sequence_document_values`]); without it, its
+    /// authored values under the caller's setters.
+    compose_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
+    /// The invocation's caller inputs: setters with their recorded origins.
+    caller_layers: Option<&'a super::types::CallerInputLayers>,
 }
 
 impl<'a> SequenceSourceOptions<'a> {
     /// Options resolving through `file_resolution_context`, with no shell
-    /// runner.
+    /// runner, no captured context, and no caller input.
     pub fn new(file_resolution_context: &'a biscuit_file::FileResolutionContext) -> Self {
-        Self { shell_runner: None, file_resolution_context }
+        Self { shell_runner: None, file_resolution_context, compose_context: None, caller_layers: None }
+    }
+
+    /// Expand `$( … )` sources through `runner`.
+    #[must_use]
+    pub fn with_shell_runner(mut self, runner: ShellSourceRunner<'a>) -> Self {
+        self.shell_runner = Some(runner);
+        self
+    }
+
+    /// Prepare owner values against the invocation's captured `context`
+    /// rather than capturing one.
+    #[must_use]
+    pub fn with_compose_context(mut self, context: &'a darkmatter::markdown::compose::ComposeContext) -> Self {
+        self.compose_context = Some(context);
+        self
+    }
+
+    /// Lay the invocation's caller inputs over every owner's own values.
+    #[must_use]
+    pub fn with_caller_layers(mut self, layers: &'a super::types::CallerInputLayers) -> Self {
+        self.caller_layers = Some(layers);
+        self
+    }
+
+    /// The request's file-resolution context.
+    pub fn file_resolution_context(&self) -> &'a biscuit_file::FileResolutionContext {
+        self.file_resolution_context
     }
 }
 
@@ -139,27 +177,35 @@ pub fn resolve_sequence_plan_with(
     // so a refused root runs no `$( … )` source either.
     grammar::validate_sequence_root(&frontmatter, &source.resolved_path)?;
     let mut plan = match grammar::classify_source(&sequence_value)? {
-        // A directly invoked YAML document is itself the formal document, so it
-        // takes the same template/`$schema` pipeline a referenced one does; a
-        // Markdown frontmatter that merely declares a list is not.
-        SequenceSourceSpec::Inline(items) if formal::is_direct_formal_document(source) => {
-            formal::normalize_formal_plan(
+        // An authored list is the document's own, in Markdown frontmatter or a
+        // YAML root alike, and takes the one formal pipeline.
+        SequenceSourceSpec::Inline(items) => {
+            let authored = Arc::new(frontmatter.clone());
+            let keys = formal::formal_keys(&authored, &source.resolved_path)?;
+            let values = Arc::new(document::owner_values(&authored, &keys, &options, || {
+                Ok(std::borrow::Cow::Borrowed(source))
+            })?);
+            let mut plan = formal::normalize_formal_plan(
                 items,
-                formal::formal_keys(&frontmatter, &source.resolved_path)?,
+                formal::FormalOwner {
+                    keys,
+                    declaring_path: &source.resolved_path,
+                    list_property: "sequence",
+                    values: &*values,
+                },
                 Source::Inline,
                 &source.resolved_path,
-                &source.resolved_path,
-                &frontmatter,
                 fail_fast,
                 options.file_resolution_context,
-            )?
+            )?;
+            plan.document_scope = Some(Arc::new(document::SequenceDocumentScope {
+                declaring_path: source.resolved_path.clone(),
+                property: "sequence".into(),
+                authored: Arc::clone(&authored),
+                values,
+            }));
+            plan
         }
-        SequenceSourceSpec::Inline(items) => normalize::normalize_plan(
-            &items,
-            Source::Inline,
-            &source.resolved_path,
-            fail_fast,
-        )?,
         SequenceSourceSpec::Expression(expression) => resolve_expression_source(
             &expression,
             &frontmatter,
@@ -182,7 +228,7 @@ pub fn resolve_sequence_plan_with(
                 &source.resolved_path,
                 &frontmatter,
                 fail_fast,
-                options.file_resolution_context,
+                &options,
             )?
         }
     };

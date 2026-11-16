@@ -11,7 +11,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::{
     self, CompositionError, MissingProperty, ResolvedCompositionSource, SequenceExecutionOptions,
-    SequenceMissingPropertiesStep, SequencePlan, SequenceStepDraft,
+    SequenceMissingPropertiesEntry, SequencePlan, SequenceStepDraft,
 };
 use claudine::composition::preflight::checks::{AGENT_RESOLUTION, LIFECYCLE_SHELL_AUDIT, sequence_preflight};
 use color_eyre::eyre::Result;

@@ -82,6 +82,15 @@ const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
                  not a second composer",
     },
     AllowedSite {
+        site: "composition::prepare::prepare_values_on",
+        calls: 1,
+        reason: "a sequence owner's value-only read: the canonical option assembly \
+                 narrowed to the frontmatter surface with frontmatter shells disabled, \
+                 judged by the schema layer like any preparation; it produces no prompt \
+                 and runs nothing, so it is a stage of the sanctioned owner, not a \
+                 second composer",
+    },
+    AllowedSite {
         site: "composition::preflight::resolve_graph_shell_approvals",
         calls: 1,
         reason: "passive sequence discovery reuses the referenced document's prepared request, \

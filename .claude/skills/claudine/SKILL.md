@@ -490,7 +490,38 @@ placement (only beside that owner's inline `sequence: [ … ]`; never on a
 group object) and shape before any row is read, so an empty list still
 fails. A root `$schema` is the document schema, never a declaration.
 `PreparedSequenceSchema` resolves a `$state` once per owner (no triggers,
-no baseline) and judges rows passively. Every value route refuses a
+no baseline) and judges rows passively. Every authored inline list (YAML root or
+Markdown frontmatter) goes through `formal::normalize_formal_plan` with a
+`FormalOwner` (declaring path, list property, owner values); template
+expressions resolve from the declaring file. Composition reads the view
+`resolve.rs::composition_view`/`without_formal_sequence_keys` (root
+`$state`/`template` and inline containers' `$schema`/`$state`/`template`
+dropped, applied by the preparation service too); declaration readers use
+`reload_authored_source`. Owner values come from
+`sequence/document.rs::prepare_sequence_document_values` (frontmatter only,
+shells disabled, body unread, judged through `schema::PrepareMode::Values`)
+when `SequenceSourceOptions::with_compose_context` is set and the template
+has a string default; otherwise authored values under the setters. A whole
+referenced document fills its template from its own values (the referrer's
+are a transitional lowest layer for the shared research rosters) and sets
+`SequencePlan::document_scope`. The preflight `Loader` normalizes every
+inline nested list through the same pipeline
+(`formal::normalize_formal_plan_prepared`: the task's own `template`/`$state`,
+the enclosing values) and prepares an inline container's `$schema` into
+`PreflightSequence::inline_schema` (a check only: never a document schema,
+input, or provider hint). Prepared declarations are cached in `NestedSources`
+by file and property, invalidated by declaration or schema-file bytes
+(`Work::SequenceSchemaPrepare`). A nested reread (`prepare_nested_sequence`,
+`load_sequence_with(…, refresh = true)`) rejudges declarations, the check, and
+events, discovers commands from the reread rows as authored (no template, no
+`$state`), and keeps the frozen plan and steps. Document inputs are found
+before the graph by `preflight/inputs.rs::discover_sequence_inputs`
+(`SequenceInputInventory`: owners root/root-reference/nested with their
+`Document` missing entries and prepared values, prompts, inline containers,
+template references left pending by a missing input), which reuses the
+`Loader`'s reference and cycle machinery; `build_preflight_graph_after_discovery`
+reuses its parses. Graph root rows are still located `tasks[i]`; the inventory
+uses the authored `sequence[i]`. Every value route refuses a
 declaration write through `reserved::declaration_written_by` (root of a
 dotted path): setters (`commands/sequence.rs`), `with:`, template keys, and
 runtime `set`, which only a sequence cell refuses

@@ -544,10 +544,7 @@ mod file_references_resolve_from_the_authoring_document {
         .unwrap();
         let plan = claudine::composition::resolve_sequence_plan_with(
             &source,
-            claudine::composition::SequenceSourceOptions {
-                shell_runner: None,
-                file_resolution_context: &request_context,
-            },
+            claudine::composition::SequenceSourceOptions::new(&request_context),
         )
         .unwrap()
         .expect("tilde fixture declares a sequence");

@@ -117,6 +117,22 @@ pub fn task_declarations<'a>(
             hint: misplaced_task_hint(task, key),
         });
     }
+    inline_container_declarations(task, source_path, property)
+}
+
+/// Read and judge the declarations of a task already known to hold an inline
+/// `sequence:` list: `options` is the task's map, with or without its
+/// executable.
+///
+/// ## Errors
+///
+/// [`CompositionError::SequenceDeclarationShape`] or
+/// [`CompositionError::SequenceReservedTemplateKey`], located at `property`.
+pub fn inline_container_declarations<'a>(
+    task: &'a Map<String, Value>,
+    source_path: &Path,
+    property: &str,
+) -> Result<OwnerDeclarations<'a>, CompositionError> {
     let located = |key: &str| child_property(property, key);
     Ok(OwnerDeclarations {
         state: task
@@ -330,6 +346,7 @@ impl PreparedSequenceSchema {
             source: SequenceLoadCause::Frontmatter(Box::new(error)),
         })?;
         let view = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");
+        crate::note_work!(SequenceSchemaPrepare, 1);
         let schema = DarkmatterSchemas::new(file_resolution_context.for_source(source_path))
             .effective_for(&view)
             .map_err(load)?;

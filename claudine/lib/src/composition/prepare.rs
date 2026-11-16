@@ -948,6 +948,67 @@ pub fn read_selection_hints(
     super::parse_selection_hints_from_frontmatter(frontmatter).ok()
 }
 
+/// Compose `source`'s document values alone, for a sequence document's
+/// owner preparation ([`crate::composition::sequence::document`]).
+///
+/// The canonical assembly narrowed to the frontmatter surface, with frontmatter
+/// `$( … )` expansion disabled, so nothing runs and the body is never read: a
+/// value that a shell produces keeps its authored text. Caller layers, schema
+/// coercion and defaults, and interpolation apply as they would to the
+/// document's full preparation. The returned composition carries no prompt,
+/// lifecycle, or selection hints and is never launched; the schema layer
+/// ([`crate::composition::schema`]) judges it like any other.
+pub(super) fn prepare_values_on(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    mode: CompositionMode,
+) -> Result<PreparedComposition, CompositionError> {
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
+    let mut ctx = derive_compose_context(source, &options);
+    for (key, value) in &options.env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
+    }
+    let schema_phase = match mode {
+        CompositionMode::ChainedDocument => None,
+        CompositionMode::InlineFrontmatterPrompt => Some(SchemaPhase::Launch),
+    };
+    let compose_opts = canonical_compose_options(source, &ctx, &options, schema_phase)
+        .only_frontmatter_surface()
+        .disable(darkmatter::markdown::compose::ComposeOperation::FrontmatterShellExpansion)
+        .with_pre_approved_commands(
+            darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new(),
+        );
+    let request = prepared_request(compose_opts, &options)?;
+    let input_layers = super::CallerInputLayers::from_options(&options);
+    let (composed, report) =
+        recording_triggers(source.markdown.compose_with_warnings(&request), &source.resolved_path, &options)?;
+    let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, schema_phase, &request)?;
+    Ok(PreparedComposition {
+        mode,
+        entry: DocumentEntryReason::Direct,
+        schema_verdict_deferred: options.defer_schema_verdict,
+        resolved_path: source.resolved_path.clone(),
+        source_repo_root: options.source_repo_root.clone(),
+        prompt: String::new(),
+        effective_frontmatter,
+        selection_hints: EffectiveSelectionHints::default(),
+        closure: CompositionClosurePlan::Direct,
+        launch_schema,
+        lifecycle: super::lifecycle::LifecycleConfig::default(),
+        deferred_lifecycle_keys: sorted_deferred_keys(&report),
+        compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
+        input_layers,
+        compose_context: ctx,
+        document_epoch: options.document_epoch,
+    })
+}
+
 fn prepare_direct_on(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,

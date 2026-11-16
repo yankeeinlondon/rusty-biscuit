@@ -597,9 +597,8 @@ fn sequence_missing_properties_status_block_lists_each_step() {
     let err = CompositionError::SequenceMissingProperties {
         failure_count: 2,
         failures: vec![
-            SequenceMissingPropertiesStep {
-                step: 1,
-                step_name: "research".to_string(),
+            SequenceMissingPropertiesEntry {
+                subject: SequenceMissingSubject::Step { number: 1, name: "research".to_string() },
                 source_path: PathBuf::from("prompts/seq.md"),
                 missing: vec![MissingProperty {
                     name: "topic".to_string(),
@@ -610,9 +609,8 @@ fn sequence_missing_properties_status_block_lists_each_step() {
                 frontmatter_description: None,
                 pointer_paths: Vec::new(),
             },
-            SequenceMissingPropertiesStep {
-                step: 2,
-                step_name: "summarize".to_string(),
+            SequenceMissingPropertiesEntry {
+                subject: SequenceMissingSubject::Step { number: 2, name: "summarize".to_string() },
                 source_path: PathBuf::from("prompts/seq.md"),
                 missing: vec![MissingProperty {
                     name: "tone".to_string(),
@@ -644,7 +642,7 @@ fn sequence_missing_properties_display_includes_failure_count() {
         failures: Vec::new(),
     };
     let rendered = err.to_string();
-    assert!(rendered.contains("3 step(s)"), "got: {rendered}");
+    assert!(rendered.contains("3 step(s) or document(s)"), "got: {rendered}");
 }
 
 // -------------------------------------------------------------------------
@@ -3442,10 +3440,9 @@ fn sequence_step(
     step: usize,
     missing: Vec<MissingProperty>,
     pointer_paths: Vec<String>,
-) -> SequenceMissingPropertiesStep {
-    SequenceMissingPropertiesStep {
-        step,
-        step_name: format!("step{step}"),
+) -> SequenceMissingPropertiesEntry {
+    SequenceMissingPropertiesEntry {
+        subject: SequenceMissingSubject::Step { number: step, name: format!("step{step}") },
         source_path: PathBuf::from("prompts/seq.md"),
         missing,
         frontmatter_description: Some(format!("what step {step} does")),
@@ -3479,6 +3476,48 @@ fn sequence_missing_properties_keeps_each_step_description_and_property_row() {
         "Step 2: step2 (",
         &["what step 2 does", "- `audience`: string"],
     );
+}
+
+/// A sequence document owes its own inputs even when it has no steps, so its
+/// entry is headed by the document (and the reference that reached it), never
+/// by an invented step number.
+#[test]
+fn sequence_missing_properties_heads_a_document_entry_by_its_file_and_container() {
+    let property = |name: &str| MissingProperty {
+        name: name.into(),
+        type_label: Some("file".into()),
+        description: Some("the spec".into()),
+        interactive_shape: None,
+    };
+    let document = |container: &str, path: &str| SequenceMissingPropertiesEntry {
+        subject: SequenceMissingSubject::Document { property: container.into() },
+        source_path: PathBuf::from(path),
+        missing: vec![property("spec")],
+        frontmatter_description: None,
+        pointer_paths: Vec::new(),
+    };
+    let err = CompositionError::SequenceMissingProperties {
+        failure_count: 3,
+        failures: vec![
+            document("", "prompts/complete.yaml"),
+            document("sequence[1].sequence", "prompts/child.yaml"),
+            sequence_step(1, vec![property("topic")], Vec::new()),
+        ],
+    };
+    let rows = display_rows(&err);
+    assert!(
+        rows.iter().any(|row| row.contains("Missing required schema properties in 1 step and 2 documents of the sequence.")),
+        "{rows:#?}"
+    );
+    let root = rows.iter().position(|row| row.starts_with("Document ") && row.contains("complete.yaml"))
+        .unwrap_or_else(|| panic!("no root document heading: {rows:#?}"));
+    assert!(!rows[root].contains('('), "the root names no container: {}", rows[root]);
+    assert_eq!(rows[root + 1], "- `spec`: file — the spec", "{rows:#?}");
+    let nested = rows.iter().find(|row| row.contains("child.yaml"))
+        .unwrap_or_else(|| panic!("no nested document heading: {rows:#?}"));
+    assert!(nested.starts_with("Document ") && nested.ends_with("(`sequence[1].sequence`)"), "{nested}");
+    assert!(rows.iter().any(|row| row.starts_with("Step 1: step1 (")), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.starts_with("Step 0")), "{rows:#?}");
 }
 
 #[test]

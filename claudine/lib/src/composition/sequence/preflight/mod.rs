@@ -47,16 +47,22 @@ use super::super::error::CompositionError;
 use super::super::lifecycle::{parse_lifecycle_config, validate_no_nested_spans_in_literals};
 use super::super::json_util::json_type_name;
 use super::super::types::ResolvedCompositionSource;
+use super::declarations::PreparedSequenceSchema;
 use super::model::{ExecutableField, SequencePlan, StepExecutable};
 use super::task::TaskStage;
 use super::{reserved, source as source_resolution};
 use crate::invocation_context::{InvocationContext, SourceContext};
 
+mod inputs;
 mod reapproval;
 mod shape;
 mod containers;
 pub mod providers;
 
+pub use inputs::{
+    InlineContainer, InputDiscoveryOptions, InputOwner, InputOwnerRole, InputPrompt, PendingReference,
+    SequenceInputInventory, discover_sequence_inputs,
+};
 pub use reapproval::PreflightApproval;
 pub use shape::{
     ApprovedCommand, ApprovedSetValue, CommandSiteId, GroupExecution, PreflightAction,
@@ -528,6 +534,29 @@ pub fn build_preflight_graph_with_invocation(
     Ok(loader.finish())
 }
 
+/// [`build_preflight_graph_with_invocation`] after input discovery: the walk
+/// reuses every parse `inventory`'s discovery made of a file whose bytes are
+/// unchanged, so a referenced document is parsed once for both passes.
+///
+/// ## Errors
+///
+/// As [`build_preflight_graph`].
+pub fn build_preflight_graph_after_discovery(
+    plan: &SequencePlan,
+    source: &ResolvedCompositionSource,
+    context: ComposeContext,
+    invocation: &InvocationContext,
+    source_context: &SourceContext,
+    caller_setters: Option<&Value>,
+    inventory: &SequenceInputInventory,
+) -> Result<PreflightGraph, CompositionError> {
+    let mut loader = Loader::new_with_invocation(source, context, invocation, source_context.clone());
+    loader.graph.nested_sources = inventory.sources.clone();
+    loader.caller_setters = caller_setters.and_then(Value::as_object).cloned().unwrap_or_default();
+    loader.walk_plan(plan)?;
+    Ok(loader.finish())
+}
+
 /// A container's authoring document as one nested preparation read it: the
 /// Markdown view its reread [`Loader`] walks, and the same parse in the common
 /// value model, where the container's pointer finds its authored task.
@@ -550,6 +579,28 @@ pub(crate) struct NestedSource {
 pub(crate) struct NestedSources {
     sources: Arc<std::sync::Mutex<HashMap<PathBuf, Arc<NestedSource>>>>,
     documents: Arc<std::sync::Mutex<HashMap<PathBuf, Arc<ReferencedDocument>>>>,
+    /// Prepared inline-container declarations (`$state`, `$schema`) by
+    /// declaring file and authored property.
+    schemas: Arc<std::sync::Mutex<HashMap<DeclarationKey, Arc<PreparedDeclaration>>>>,
+}
+
+/// A declaration's declaring file and authored property.
+type DeclarationKey = (PathBuf, String);
+
+/// One prepared declaration and what it was prepared from: reused while the
+/// authored declaration and every schema file it read are unchanged.
+struct PreparedDeclaration {
+    declaration: Value,
+    schema: PreparedSequenceSchema,
+    /// Each schema file the preparation read, with its bytes then.
+    dependencies: Vec<(PathBuf, Option<Vec<u8>>)>,
+}
+
+impl PreparedDeclaration {
+    fn current(&self, declaration: &Value) -> bool {
+        self.declaration == *declaration
+            && self.dependencies.iter().all(|(path, bytes)| std::fs::read(path).ok() == *bytes)
+    }
 }
 
 impl std::fmt::Debug for NestedSources {
@@ -574,6 +625,33 @@ impl NestedSources {
             entries.insert(key, Arc::clone(&parsed));
         }
         Ok(parsed)
+    }
+
+    /// `declaration`, authored at `property` in `source_path`, prepared once
+    /// per revision: an unchanged declaration whose schema files are
+    /// unchanged reuses its earlier preparation in this invocation.
+    ///
+    /// ## Errors
+    ///
+    /// As [`PreparedSequenceSchema::prepare`]; a failure is never kept.
+    fn prepared_schema(
+        &self, declaration: &Value, source_path: &Path, property: &str,
+        resolution: &biscuit_file::FileResolutionContext,
+    ) -> Result<PreparedSequenceSchema, CompositionError> {
+        let key = (canonical(source_path), property.to_string());
+        let cached = self.schemas.lock().ok()
+            .and_then(|entries| entries.get(&key).filter(|entry| entry.current(declaration)).cloned());
+        if let Some(cached) = cached {
+            return Ok(cached.schema.clone());
+        }
+        let schema = PreparedSequenceSchema::prepare(declaration, source_path, property, resolution)?;
+        let dependencies = schema.dependencies().iter().map(|path| (path.clone(), std::fs::read(path).ok())).collect();
+        if let Ok(mut entries) = self.schemas.lock() {
+            entries.insert(key, Arc::new(PreparedDeclaration {
+                declaration: declaration.clone(), schema: schema.clone(), dependencies,
+            }));
+        }
+        Ok(schema)
     }
 
     /// The parse of the referenced data document at `path` whose bytes are
@@ -686,11 +764,14 @@ fn parse_nested_source(path: &Path, text: String) -> Result<NestedSource, Compos
 /// Re-read a nested container at its preparation boundary while retaining the
 /// original approval graph as the authority for every executable command.
 ///
-/// The returned container takes its own events from the reread source but
-/// keeps `frozen`'s children and their order: the discovered task graph is
-/// fixed for the invocation, so a child an earlier task added to the source
-/// never runs, even when its command is already approved. The returned graph
-/// is the reread's, for refusing commands approval never saw.
+/// The returned container takes its own events, its declarations, and its
+/// inline `$schema` check from the reread source but keeps `frozen`'s plan,
+/// children, and their order: the discovered task graph is fixed for the
+/// invocation, so a child an earlier task added to the source never runs,
+/// even when its command is already approved, and a changed `template:` or
+/// `$state` is judged for its syntax but neither refills nor retypes a row.
+/// The returned graph is the walk of the reread's rows as authored, for
+/// refusing commands approval never saw.
 ///
 /// `supplied` holds the invocation setters and runtime mutations: a
 /// referenced document's events and children read them above its own
@@ -720,10 +801,11 @@ pub(crate) fn prepare_nested_sequence(
     crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
     loader.caller_setters = supplied;
     loader.ancestry.push((canonical(&task.origin_path), None));
-    let mut sequence = loader.load_sequence(
+    let mut sequence = loader.load_sequence_with(
         value, raw_task, &task.origin_path, &task.label, &task.diagnostic.task_property,
         &task.authored, state,
         Placement { position: task.position, in_group },
+        true,
     )?;
     sequence.plan = frozen.plan.clone();
     sequence.steps = frozen.steps.clone();
@@ -1185,38 +1267,107 @@ impl<'a> Loader<'a> {
         label: &str, property: &str, authored: &AuthoredOrder,
         state: &EffectiveState, placement: Placement,
     ) -> Result<PreflightSequence, CompositionError> {
+        self.load_sequence_with(value, options, origin, label, property, authored, state, placement, false)
+    }
+
+    /// Load a nested `sequence:` task. With `refresh` (a nested reread), the
+    /// container's declarations, check, and events are read again from the
+    /// current source, and its rows are read as authored only so their
+    /// commands are discovered for the approval check: no template is filled
+    /// and no `$state` judges them. The caller keeps its frozen plan.
+    #[allow(clippy::too_many_arguments)]
+    fn load_sequence_with(
+        &mut self, value: &Value, options: &Map<String, Value>, origin: &Path,
+        label: &str, property: &str, authored: &AuthoredOrder,
+        state: &EffectiveState, placement: Placement, refresh: bool,
+    ) -> Result<PreflightSequence, CompositionError> {
         use super::grammar::{SequenceSourceSpec, classify_source};
-        let (plan, child_origin, child_authored, events, entered, frontmatter) = match classify_source(value)? {
+        let resolution = self.source_context_for(origin)
+            .map_or_else(|| self.file_resolution_context.clone(), |context| context.file_resolution_context().clone());
+        let (plan, child_origin, child_authored, events, entered, frontmatter, inline_schema) = match classify_source(value)? {
             SequenceSourceSpec::Inline(items) => {
-                let mut plan = super::normalize::normalize_plan_at(
-                    &items, super::model::SequenceSource::Inline, origin, true,
-                    &property_child(property, "sequence"),
-                )?;
+                let list_property = property_child(property, "sequence");
+                // The task's own declarations, judged on every read (a reread
+                // included) whatever its guard says.
+                let declarations = super::declarations::inline_container_declarations(options, origin, property)?;
+                let inline_schema = declarations.check
+                    .map(|check| self.graph.nested_sources.prepared_schema(
+                        check, origin, &property_child(property, super::declarations::CHECK_KEY), &resolution,
+                    ))
+                    .transpose()?;
+                let mut plan = match refresh {
+                    // The reread rows as authored, for discovering their
+                    // commands only: no template fill, no `$state`.
+                    true => super::normalize::normalize_plan_at(
+                        &items, super::model::SequenceSource::Inline, origin, true, &list_property,
+                    )?,
+                    false => {
+                        let state_schema = declarations.state
+                            .map(|declaration| self.graph.nested_sources.prepared_schema(
+                                declaration, origin, &property_child(property, super::declarations::STATE_KEY), &resolution,
+                            ))
+                            .transpose()?;
+                        // An inline list fills its template from the values
+                        // its container sees: the enclosing document's.
+                        let values = self.step_frontmatter.clone();
+                        super::formal::normalize_formal_plan_prepared(
+                            items,
+                            super::formal::FormalOwner {
+                                keys: super::formal::FormalKeys { template: declarations.template, state_schema: declarations.state },
+                                declaring_path: origin, list_property: &list_property, values: &values,
+                            },
+                            state_schema.as_ref(), super::model::SequenceSource::Inline, origin, true, &resolution,
+                        )?
+                    }
+                };
                 plan.authored = authored.child("sequence");
-                (plan, origin.to_path_buf(), authored.child("sequence"), options.clone(), false, None)
+                (plan, origin.to_path_buf(), authored.child("sequence"), options.clone(), false, None, inline_schema)
             }
             SequenceSourceSpec::Reference(reference) => {
                 let path = self.resolve_reference(&reference.reference, origin)?;
                 self.enter(&path)?;
                 let (document, order) = self.load_data_document(&path)?;
-                let context = self.source_context_for(origin);
-                let resolution = context.as_ref().map(SourceContext::file_resolution_context)
-                    .unwrap_or(&self.file_resolution_context);
-                let plan = source_resolution::plan_referenced_sequence(
-                    &reference, &path, &document.value, Arc::clone(&document.orders),
-                    origin, &self.step_frontmatter, true, resolution,
-                )?;
+                let whole = reference.offset.is_none() && reference.operator.is_none();
+                let formal_root = document.value.as_object().filter(|root| whole && root.contains_key("sequence"));
+                let plan = match (refresh, formal_root) {
+                    // A reread whole document's declarations are judged
+                    // again, and its rows are read as authored, for
+                    // discovering their commands only.
+                    (true, Some(root)) => {
+                        super::grammar::validate_sequence_root(root, &path)?;
+                        super::formal::formal_keys(root, &path)?;
+                        let items = super::data::expect_list(&root["sequence"], Some("sequence"))?;
+                        super::normalize::normalize_plan_at(
+                            &items, super::model::SequenceSource::External { path: path.clone() }, origin, true, "sequence",
+                        )?
+                    }
+                    _ => {
+                        // A whole referenced document's `template:` reads its
+                        // own values under the invocation's supplied ones,
+                        // never the referrer's frontmatter.
+                        let supplied = (!self.caller_setters.is_empty()).then(|| crate::composition::CallerInputLayers::from_caller_overrides(
+                            Some(Value::Object(self.caller_setters.clone())), resolution.clone(),
+                        ));
+                        // With the walk's captured context, a template
+                        // expression reads the document's prepared values.
+                        let mut options = super::SequenceSourceOptions::new(&resolution).with_compose_context(&self.context);
+                        if let Some(supplied) = &supplied { options = options.with_caller_layers(supplied); }
+                        source_resolution::plan_referenced_sequence(
+                            &reference, &path, &document.value, Arc::clone(&document.orders),
+                            origin, &self.step_frontmatter, true, &options,
+                        )?
+                    }
+                };
                 // A reference to a whole sequence document brings the
                 // document's events and its authored properties; an offset or
                 // operator selects a list of steps, which has neither.
-                let frontmatter = (reference.offset.is_none() && reference.operator.is_none())
-                    .then(|| document.value.as_object().cloned()).flatten();
+                let frontmatter = whole.then(|| document.value.as_object().cloned()).flatten();
                 crate::note_work!(ReferencedDocumentNodes, frontmatter.as_ref().map_or(0, crate::work_counters::value_nodes));
                 let events = frontmatter.clone().unwrap_or_default();
                 let child_authored = if let Some(offset) = &reference.offset {
                     offset.split('.').fold(order, |cursor, segment| cursor.child(segment))
                 } else if document.value.is_array() { order } else { order.child("sequence") };
-                (plan, path, child_authored, events, true, frontmatter)
+                (plan, path, child_authored, events, true, frontmatter, None)
             }
             _ => return Err(CompositionError::SequenceInvalid(
                 "a nested `sequence:` must be a list or file reference".into(),
@@ -1262,7 +1413,9 @@ impl<'a> Loader<'a> {
             self.step_derived = step_derived;
         }
         if entered { self.leave(); }
-        Ok(PreflightSequence { steps: result?, plan, lifecycle: Box::new(lifecycle), origin_path: child_origin, frontmatter, loop_config })
+        Ok(PreflightSequence {
+            steps: result?, plan, lifecycle: Box::new(lifecycle), origin_path: child_origin, frontmatter, loop_config, inline_schema,
+        })
     }
 
     /// Prepare a nested sequence's events and children. With `own_state`
@@ -2964,3 +3117,7 @@ pub(crate) mod runtime_fixture;
 #[cfg(test)]
 #[path = "tests/scaling.rs"]
 mod scaling_tests;
+
+#[cfg(test)]
+#[path = "tests/scoped_graph.rs"]
+mod scoped_graph_tests;
