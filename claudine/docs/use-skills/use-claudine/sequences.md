@@ -55,8 +55,87 @@ Other task keys:
 - `name`;
 - `when` (false means the task is skipped, not failed);
 - `with` (overrides for prompt tasks only);
+- `$schema`, `$state`, `template` (inline nested sequences only; see below);
 - `timeout`;
 - `operation`.
+
+A relative path in a task (`prompt: ./draft.md`, `task:`, `sequence:`,
+`group:`, and a `with:` value the prompt types as a file) resolves from the
+folder of the file that wrote the task, never the launch folder. A shared
+`sub/child.yaml` finds its own neighbors whether it runs directly, is named
+by a root (`sequence: sub/child.yaml`), or is nested as a task.
+
+## Document inputs, step types, and templates
+
+A sequence document has three declaration keys, the same in YAML and
+Markdown, run directly or referenced:
+
+| Key | Describes |
+|---|---|
+| `$schema` | the document: its properties and the caller's inputs (setters) |
+| `$state` | every step's state in this document's inline list |
+| `template:` | values merged into every step (a string is an expression) |
+
+```yaml
+kind: sequence
+$schema:
+    spec: file(required;eager) -> the spec to complete   # a caller input
+$state:
+    color: string(required)                              # every step needs it
+template:
+    desc: "{{ color }} for {{ spec }}"                   # step fields shadow document values
+sequence:
+    - { name: blue, color: blue }
+```
+
+- `claudine sequence colors.yaml spec=work/spec.md` supplies the input
+  (before or after the file). Without it, a terminal asks once for every
+  missing input of the root and each referenced sequence document; anything
+  else fails with one report and starts no step. A required `$state` field
+  never asks. A value the root's `initialize` writes (`- set: { spec: … }`)
+  counts as supplied for the root and every document it references; a dry
+  run fires no `initialize`, so preview such a file with the setter.
+- `$schema` used to type the steps in a YAML sequence. That is now
+  `$state`; no warning flags an old file, so rename the key.
+- Each sequence owns its declarations; nothing is inherited. A parent's
+  `$state` judges a nested container step's own fields, never its children.
+  An inline nested `sequence:` task may declare its own `$state` and
+  `template:`, plus a `$schema` that checks the values it sees at its turn
+  (after earlier tasks' `set` writes, after its `when:`, before its
+  `initialize`), as its file reads then, so an earlier task's edit to the
+  declaration applies. A failed check is that task's failure, and it never asks
+  the caller.
+- `$state`/`template:` belong beside an inline list. Beside a file reference
+  or a dynamic source, or on a prompt/shell task, they are an error. No
+  setter, `with:`, or `set` may write them.
+- A template, a root's or an inline container's, reads its document's
+  prepared values: `$schema` defaults (for an absent or `null` value),
+  derived properties, and converted values, never the raw file text.
+- Templates are filled once, when the task graph is built. Writes from the
+  root's `initialize` are seen, later writes and on-disk edits are not.
+- A referenced sequence document's `template:` reads its own properties,
+  setters, and the root's `initialize` writes, never the referring
+  document's properties. To parameterize a shared step list, write the value
+  in the referrer's `initialize` (`- set: { research_prompt: … }`). A dry
+  run fires no events, so preview it with the value as a setter.
+- A referenced sequence document's events and steps read its prepared
+  values (`$schema` defaults and conversions, then setters, then runtime
+  writes), and its `$schema` judges them each time it runs: a nested task,
+  group leg, or `kind: task` file when the container starts (after its own
+  `initialize`; again each loop pass and retry), a root
+  `sequence: child.yaml` at each root step. An earlier `set` that breaks the
+  contract fails the document, naming the property and the file, before any
+  of its rows run.
+- Direct, root-reference (`sequence: child.yaml`), nested, group-leg,
+  task-file, and container-`proxy` runs agree: a step authored in a document
+  reads that document's values (its `when:`, its pre-flight `shell` binding,
+  its run state), never the invoking root's. A directly run document's own
+  events read its prepared values too (`initialize` under the caller's
+  values, each `start` again with every write so far), and pre-flight binds
+  `shell: "echo {{{ who }}}"` under `who: string(default(ada))` as `echo ada`.
+- An empty `sequence: []` still validates its `$schema` and `$state`.
+- A dry run judges inputs, `$schema`, and `$state`, and names each inline
+  container check instead of evaluating it.
 
 ## Results
 

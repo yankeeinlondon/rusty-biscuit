@@ -1171,7 +1171,7 @@ authored it**.
 | Value | Resolves from |
 |---|---|
 | a caller setter (`key=value`, `--set`) | the launch directory |
-| a prompt task's `with:` | the sequence document, or the `kind: task`/`kind: group` file that wrote the task |
+| a prompt task's `with:` | the sequence document that wrote the task (one a root `sequence:` names included), or the `kind: task`/`kind: group` file that wrote it |
 | a `proxy.with:` or `prep.with:` | the document whose lifecycle holds the directive, not the target |
 | a `retry.with:` | the retried document itself |
 | the document's own frontmatter | the document |

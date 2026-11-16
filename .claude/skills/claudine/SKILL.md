@@ -504,12 +504,18 @@ dropped, applied by the preparation service too); declaration readers use
 shells disabled, body unread, judged through `schema::PrepareMode::Values`)
 when `SequenceSourceOptions::with_compose_context` is set and the template
 has a string default; otherwise authored values under the setters. A whole
-referenced document fills its template from its own values (the referrer's
-are a transitional lowest layer for the shared research rosters) and sets
-`SequencePlan::document_scope`. The preflight `Loader` normalizes every
+referenced document fills its template from its own values under the
+setters (and the root's `initialize` writes), never the referrer's, in both
+`source.rs::plan_referenced_sequence` and `inputs.rs::walk_referenced`; the
+research fleets pass `research_prompt` to their shared rosters through a
+root `initialize` `set`. It sets `SequencePlan::document_scope`, whose `declaring_path` is where the root's rows resolve their references (`Loader::walk_plan`, `inputs.rs::walk_referenced`), so a root reference behaves as a direct or nested run; a data selection has no scope and reads as the root's. A prompt task's `with:` files resolve from `PromptReference::with_origin` in passive approval and from `PromptTaskRequest::with_origin_path` in the step barrier and the run (`task_run.rs::task_caller_records`). A container-start reread (`prepare_nested_{sequence,group}`) resolves through the task's `InvocationContext`, as the launch walk did. The preflight `Loader` normalizes every
 inline nested list through the same pipeline
 (`formal::normalize_formal_plan_prepared`: the task's own `template`/`$state`,
-the enclosing values) and prepares an inline container's `$schema` into
+and the prepared values of its owner, `Loader::owner_template_values`: the
+invoking document or the whole referenced document the walk is inside,
+taken from discovery's `InputOwner::values` after discovery, else prepared
+once per owner, and only for a string template; never the step view
+`step_frontmatter`, whose authored values miss defaults and derived values) and prepares an inline container's `$schema` into
 `PreflightSequence::inline_schema` (a check only: never a document schema,
 input, or provider hint). Prepared declarations are cached in `NestedSources`
 by file and property, invalidated by declaration or schema-file bytes
@@ -542,11 +548,64 @@ graph, provider, and Phase 1c errors keep their order; the root's is left to
 Phase 1c, any other's (or an empty root's) is raised by `recheck_owners`
 after provider selection. The root's own missing inputs are left to Phase 1c
 (step headings) unless another owner is missing, a reference is pending, or
-the root is empty. An inline container's `$schema` is judged in
-`TaskExecution::run_validated` (`task/sequence.rs::check_inline_container`;
-state + setters + runtime writes) after `when:` and before the run opens, and
-again at each `start` reread; a refusal is an unstarted failure, a dry run
-only names it. Graph root rows are still located `tasks[i]`; the inventory
+the root is empty. Phase 1c's per-step probes compose against the root's
+`RuntimeState` snapshot (its `initialize` writes; `None` in a dry run), as
+the first step does at its turn, so an `initialize` write satisfies a
+required root input on every route. An inline container's `$schema` is judged in
+`TaskExecution::run_validated` (`task/sequence.rs::admit_inline_container`;
+state + setters + runtime writes) after `when:` and before the run opens,
+against the declaration as the file reads then
+(`preflight::reread_inline_check`: the task's own declarations only, through
+the `NestedSources` declaration cache; children and approval stay frozen),
+and again at each `start` reread (including the first, after `initialize`);
+a container proxy judges the approved check (a whole-document target has
+none); a refusal at admission is an unstarted
+failure (no container event runs), one at a `start` reread blocks the started
+container, and a dry run only names it. User docs:
+[Sequences → Sequence documents](topics/flow-control/sequences.md#sequence-documents-schema-state-and-template).
+A whole referenced document is prepared at run time, never read as authored:
+`task/sequence.rs::referenced_owner_values` (its events' and children's base
+state) calls `PreflightGraph::prepare_whole_document` (the file as it reads
+now, through the `NestedSources` memo; its derived context via
+`document::owner_resolution`) under `PreflightGraph::caller_layers` (recorded
+by `build_preflight_graph_after_discovery`; bare `user_setters` otherwise)
+plus runtime writes as data. Before `initialize` the verdict is deferred; at
+each `start` reread (nested, leg, task file, loop pass, retry, container
+proxy) the document's `$schema` judges, and a refusal blocks the started
+container; a dry run only prepares. A root `sequence: child.yaml` is judged
+at each root step after the step composes
+(`cli/.../iterate.rs::judge_referenced_root_document`, the step's
+`input_layers` and `compose_context`), where the direct control is judged;
+its prepared values are the state the step's row runs in (`run_step_task`'s
+`referenced`), and its authored values the row's `when:` reads
+(`PreflightGraph::authored_document`), never the invoking root's. A
+container proxy's `start` reread (`prepare_nested_sequence`, task origin ==
+frozen whole document) reads its target as a reference to itself, so the
+target's root `$schema` stays its document schema, never an inline check.
+A directly run root's events read prepared values too (CLI
+`sequence/mod.rs::root_event_values`, verdict withheld): before
+`initialize` under the setters, and at each `start` again with collected
+values and runtime writes as data (`RootRun::refresh_event_values` layers
+them into the live cell). Preflight shell early binding reads each owner's
+prepared values (`Loader::prepared_view` → `layer_prepared_values`:
+`Loader::prepared_owner_values`, shared with `owner_template_values`, over
+the authored view; a templated key the preparation changed takes its
+prepared value unless it reads, transitively, a late root, `env`, the
+target identity (`ctx.agent`/`ctx.model`, `shape::first_target_identity_root`,
+so a `with:` hint through it stays circular), a `$(…)` key, `agent`/`model`,
+or a key some `set` writes, in which case it stays
+authored and joins the view's late keys, so its command is a template) for the root
+events, the root steps' seed (`seed_steps`; a root `sequence: child.yaml`
+seeds from the child, and `owner_schema` types none of its rows), and a
+referenced document's events and children. Each replaced key's authored
+value travels with its view (`Loader::step_authored`/`seed_authored`,
+installed, swapped, and restored beside `step_frontmatter`/`step_seed`;
+a root step drops the keys its reserved overlay sets), so provider
+prediction follows a `with:` read through the whole authored chain. Tests: lib
+`task/tests/referenced_owner_schema.rs` (proxy target cases included),
+`preflight/tests/prepared_shell_values.rs` (routes × builders), CLI
+`sequence_referenced_state.rs` (routes, controls, empty, loop, prepared
+values, direct/root-reference/nested agreement). Graph root rows are still located `tasks[i]`; the inventory
 uses the authored `sequence[i]`. Every value route refuses a
 declaration write through `reserved::declaration_written_by` (root of a
 dotted path): setters (`commands/sequence.rs`), `with:`, template keys, and
@@ -666,9 +725,16 @@ task's provider from its own `agent` (`PreflightTask.provider`, computed in
 `composition/sequence/preflight/providers.rs` without running or composing
 anything; a literal hint is classified before any state is built, so only a
 document hint that reads an expression builds `PredictionStateBuild` state;
-`ProviderPrediction.dependencies` is per task, so `defer_runtime_written`
-moves both `agent` and `model` to launch when either reads a runtime-written
-key) and keys every task by its graph `TaskIdentity`. The CLI
+`ProviderPrediction.dependencies` is per task and per owner, recorded at
+construction: one `DependencyScope` closure for the hint over the scope that
+evaluates it (a `with:` value over the step view, following
+`HintLayers::step_authored` in place of prepared values; a document value
+over the document under the setters, where an un-set `with:` key has no
+value), plus a `feeds` closure in step scope for each `with:` key a document
+closure reads. Names never cross owners, so a prompt's literal `choice` is
+not a sequence's derived `choice`. `defer_runtime_written` moves both
+`agent` and `model` to launch when either reaches a runtime-written key;
+`preflight/tests/provider_dependencies.rs` covers the placements) and keys every task by its graph `TaskIdentity`. The CLI
 (`wrap/sequence/providers.rs`) turns predictions into per-task targets
 (own / enclosing-document fallback / decided at launch / unresolved), fails an
 unusable static hint with `SequenceTaskProviderSelection` before any task

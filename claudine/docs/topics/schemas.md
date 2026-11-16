@@ -113,7 +113,7 @@ but a document they accept can still be rejected by the parser (see
 | [`document.yaml`](../../schemas/document.yaml) | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that both `claudine.yaml` and `inline-compose.yaml` import, so the two triggers declare them identically |
 | [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model`; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
-| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
+| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, `$state`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
 Three of the eight are triggers; the other five are libraries. A library
 reaches a document only through a trigger's imports, so the eight files work
@@ -606,8 +606,42 @@ a five-level stack is valid in every event of every container.
 A task's `when:` is typed by shape only: non-empty text.
 
 A referenced sequence or group file (`sequence: "@tasks.yaml"`) is not
-Markdown, so no schema judges it; the task parser checks it when the
-sequence is prepared.
+Markdown, so no trigger schema judges it; the task parser checks it when the
+sequence is prepared. A referenced sequence document's own `$schema` and
+`$state` still apply to it.
+
+### Sequence declarations
+
+A sequence document has two schema keys with different scopes. Its root
+`$schema` is the document schema, exactly as in any other document: it types
+the document's properties and caller inputs, in YAML and Markdown alike. Its
+root `$state` types each step's normalized state in the document's inline
+`sequence:` list. `sequence.yaml` declares `$state` with the shared `schema`
+type, so the editor checks and completes it like a `$schema`, and declares
+`template` as an object:
+
+```yaml
+kind: sequence
+$schema:
+    reviewer: string(required)        # the document's input
+$state:
+    color: string(required)           # every step's state
+template:
+    desc: "{{ color }}"
+sequence:
+    - { name: blue, color: blue }
+```
+
+On a task, `sequence-types.yaml` declares `$schema`, `$state`, and `template`
+as an inline nested sequence's own options: `$state` and `template` for its
+children, and `$schema` as a check of the values the container sees at its
+turn. Because a task object is open and one type covers every task, the
+schema cannot tell an inline container from a `shell:` task; the task parser
+refuses the three keys anywhere but beside an inline `sequence: [ … ]`, and
+refuses a root `$state` or `template` beside a file reference, expression, or
+shell source. A group object is closed, so the schema reports them there
+too. See [Sequences → Sequence documents](flow-control/sequences.md#sequence-documents-schema-state-and-template)
+for what each declaration does and when it is checked.
 
 ### Keeping recursive schemas small and quick to validate
 
