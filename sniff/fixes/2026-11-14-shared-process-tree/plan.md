@@ -1,7 +1,7 @@
 ---
 created: 2026-11-14
 total_phases: 4
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -16,6 +16,53 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
 - sniff
+- darkmatter
+- claudine
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/shell_expansion/launcher.rs
+- darkmatter/lib/src/editor/launch.rs
+- darkmatter/lib/src/editor/mod.rs
+- darkmatter/lib/src/editor/service.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/src/lib.rs
+- darkmatter/lib/src/process_tree.rs
+- darkmatter/lib/Cargo.toml
+- claudine/lib/src/composition/sequence/task/shell.rs
+- claudine/lib/src/composition/sequence/task/shell/tests.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/Cargo.toml
+- .config/nextest.toml
+docs_updated_during_phase_2:
+- darkmatter/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/sniff/testing.md
+- .claude/skills/os/macos.md
+source_files_during_phase_3:
+- sniff/lib/src/programs/install/options.rs
+docs_updated_during_phase_3:
+- sniff/docs/sniff-library-architecture.md
+- sniff/lib/README.md
+- sniff/README.md
+- sniff/cli/README.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/inline/shell-expansion.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/flow-control/sequences.md
+docs_created_during_phase_3:
+- sniff/docs/topics/process-trees.md
+skills_files_updated_during_phase_3:
+- .claude/skills/sniff/architecture.md
+- .claude/skills/sniff/SKILL.md
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/windows.md
+- .claude/skills/os/macos.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/claudine/SKILL.md
 ---
 
 # Plan: one shared process tree, race-free on Windows
@@ -666,21 +713,21 @@ edit.
 
 ### Wave 4 (parallel: Tasks 2.1, 2.2, 2.3 touch different packages/files)
 
-- [ ] **2.1 Darkmatter probe launcher** — Rule 20.
-- [ ] **2.2 Darkmatter editor and `edit` warning** — Rules 21 and 22 (files:
+- [x] **2.1 Darkmatter probe launcher** — Rule 20.
+- [x] **2.2 Darkmatter editor and `edit` warning** — Rules 21 and 22 (files:
   `editor/launch.rs`, `editor/service.rs`, `editor/mod.rs`,
   `lifecycle/executor.rs`, `lifecycle/executor/tests.rs`).
-- [ ] **2.3 Claudine** — Rules 24 and 25.
+- [x] **2.3 Claudine** — Rules 24 and 25.
 
 ### Wave 5 (after Wave 4; Darkmatter-only)
 
-- [ ] **2.4 Darkmatter cleanup** — Rule 23 (delete `process_tree.rs` and the
+- [x] **2.4 Darkmatter cleanup** — Rule 23 (delete `process_tree.rs` and the
   `mod` line, edit `Cargo.toml`, edit `docs/dependencies.md`). Prerequisite: 2.1
   and 2.2 no longer reference `crate::process_tree`.
 
 ### Wave 6 (validation checkpoint)
 
-- [ ] **2.5 Phase 2 checkpoint**
+- [x] **2.5 Phase 2 checkpoint**
   - `just test` and `just lint` pass in `darkmatter` and `claudine`.
   - `cargo check -p darkmatter --all-targets` passes (Sniff with `remote`);
     `cargo check -p claudine --all-targets` passes.
@@ -810,18 +857,18 @@ fix it in the canonical `docs/use-skills/` source and run that area's
 
 ### Wave 7 (parallel: Tasks 3.1–3.4 edit disjoint files)
 
-- [ ] **3.1 Canonical topic page** — Rule 26 (`sniff/docs/topics/process-trees.md`).
-- [ ] **3.2 Sniff docs and skills** — Rule 27 bullets for `sniff/**` and
+- [x] **3.1 Canonical topic page** — Rule 26 (`sniff/docs/topics/process-trees.md`).
+- [x] **3.2 Sniff docs and skills** — Rule 27 bullets for `sniff/**` and
   `.claude/skills/sniff/**`.
-- [ ] **3.3 OS skill and Darkmatter docs/skills** — Rule 27 bullets for
+- [x] **3.3 OS skill and Darkmatter docs/skills** — Rule 27 bullets for
   `.claude/skills/os/**`, `.claude/skills/darkmatter/**`, and
   `darkmatter/docs/**`.
-- [ ] **3.4 Claudine docs and skill** — Rule 27 bullets for
+- [x] **3.4 Claudine docs and skill** — Rule 27 bullets for
   `claudine/docs/**` and `.claude/skills/claudine/SKILL.md`.
 
 ### Wave 8 (validation checkpoint)
 
-- [ ] **3.5 Phase 3 checkpoint**
+- [x] **3.5 Phase 3 checkpoint**
   - Search current docs, skills, and source comments (exclude `_completed`,
     `features/`, `fixes/`, `research/`, `.gitnexus`, `target`) for the stale
     claims: `git grep -n -i -E "assignment window|escapes the Job|escape the Job|accepted by every caller|atomic with respect to forks|process_tree\.rs|crate::process_tree|ProcessTree::attach\` returns|returns \`None\`" -- ':!*/features/*' ':!*/fixes/*' ':!*/research/*'`
