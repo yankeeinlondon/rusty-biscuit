@@ -18,6 +18,7 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::body_origin::BodyOrigin;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
+use crate::markdown::compose::context::options::ProseInterpolation;
 use crate::markdown::compose::toc_linking;
 use biscuit_terminal::errors::SourceContext;
 
@@ -414,16 +415,20 @@ fn authored_directive_line(locator: Option<&AuthoredLocator<'_>>, span: &std::op
 
 /// `opening` is the reference that resolved to `path`, when the caller has it
 /// (see [`SourceOpening`](crate::markdown::compose::context::options::SourceOpening)).
+/// `prose` is the child's folded prose-interpolation setting, the one
+/// composition gives it, so preparation suppresses the same prose.
 fn accepted_child_options(
     options: &ReferenceGraphOptions,
     path: &std::path::Path,
     opening: Option<crate::markdown::compose::context::options::SourceOpening>,
+    prose: ProseInterpolation,
 ) -> ReferenceGraphOptions {
     ReferenceGraphOptions::from_compose_options(
         options
             .compose
             .clone()
-            .with_accepted_source_file(path, opening),
+            .with_accepted_source_file(path, opening)
+            .derive(|compose| compose.with_prose_interpolation(prose)),
     )
 }
 
@@ -632,6 +637,10 @@ fn build_node(
                                     options,
                                     &child_path,
                                     crate::markdown::compose::transclusion::source_opening(&directive.raw_target, &child_path),
+                                    crate::markdown::compose::transclusion::effective_prose_interpolation(
+                                        options.compose.prose_interpolation,
+                                        &directive.options,
+                                    ),
                                 ),
                                 runtime,
                                 extract_references,
@@ -741,7 +750,7 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            &accepted_child_options(options, &path, None),
+                            &accepted_child_options(options, &path, None, options.compose.prose_interpolation),
                             runtime,
                             extract_references,
                             dependencies,
@@ -934,6 +943,7 @@ fn build_node(
                                 options,
                                 &child_path,
                                 crate::markdown::compose::transclusion::source_opening(prologue, &child_path),
+                                options.compose.prose_interpolation,
                             ),
                             runtime,
                             extract_references,
@@ -1024,6 +1034,7 @@ fn build_node(
                                 options,
                                 &child_path,
                                 crate::markdown::compose::transclusion::source_opening(epilogue, &child_path),
+                                options.compose.prose_interpolation,
                             ),
                             runtime,
                             extract_references,
@@ -1120,8 +1131,10 @@ pub(super) fn prepare_content_for_validation(
     options: &ReferenceGraphOptions,
 ) -> MarkdownResult<String> {
     let node_options = match source {
+        // A fragment target outside the graph is read as its own document,
+        // not through an inclusion, so its prose interpolates.
         ComposeSource::File(path) if options.compose.source != *source => {
-            accepted_child_options(options, path, None)
+            accepted_child_options(options, path, None, ProseInterpolation::Enabled)
         }
         ComposeSource::Url(url) if options.compose.source != *source => {
             ReferenceGraphOptions::from_compose_options(
@@ -2247,5 +2260,147 @@ mod tests {
             weak.upgrade().is_none(),
             "with no strong owner left the preflight node is dropped: the graph held only a Weak"
         );
+    }
+
+    // ── `::file … interpolate=false` ────────────────────────────────
+
+    /// A child whose prose holds interpolation examples, a malformed
+    /// expression, and links built from examples.
+    const PROSE_EXAMPLES_CHILD: &str = "# Child\n\nSee [the {{ name }} page](./{{name}}.md) and [guide](./guide.md).\nUnknown {{ undeclared }}. Malformed {{ 1 + }}.\n";
+
+    /// Builds the graph of `root_text` (written as `root.md` beside
+    /// `PROSE_EXAMPLES_CHILD` and `guide.md`) under a deny-all policy.
+    fn prose_example_graph(
+        dir: &std::path::Path,
+        root_text: &str,
+    ) -> (Markdown, ReferenceGraphOptions, MarkdownResult<ReferenceGraph>) {
+        std::fs::write(dir.join("child.md"), PROSE_EXAMPLES_CHILD).unwrap();
+        std::fs::write(dir.join("guide.md"), "# Guide\n").unwrap();
+        let root_path = dir.join("root.md");
+        std::fs::write(&root_path, root_text).unwrap();
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::with_compose(&crate::markdown::compose::test_request_in(
+            ComposeOptions::new()
+                .with_source_file(&root_path)
+                .with_blocking_policy(crate::markdown::compose::policy::BlockingPolicy::default().deny_all()),
+            biscuit_file::FileResolutionContext::new(dir),
+        ));
+        let graph = build_reference_graph(&md, &options);
+        (md, options, graph)
+    }
+
+    fn child_link_targets(graph: &ReferenceGraph) -> Vec<String> {
+        let child = graph
+            .nodes()
+            .iter()
+            .find(|node| matches!(&node.source, ComposeSource::File(path) if path.ends_with("child.md")))
+            .expect("the child is a graph node");
+        child
+            .local_references
+            .hyperlinks()
+            .iter()
+            .map(|record| record.target.raw().expect("a link target is never inline").to_string())
+            .collect()
+    }
+
+    /// Preparation composes an `interpolate=false` child under the setting
+    /// composition gives it: its prose (link targets included) stays as
+    /// written, its examples raise no warning under a deny-all policy, and
+    /// its links are still references.
+    #[test]
+    fn a_disabled_child_prepares_its_prose_literally_and_keeps_its_links() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (_, _, graph) =
+            prose_example_graph(dir.path(), "---\nname: Caller\n---\n::file ./child.md interpolate=false\n");
+        let graph = graph.expect("suppressed prose cannot fail preparation");
+
+        assert_eq!(graph.node_count(), 2);
+        assert_eq!(child_link_targets(&graph), ["./{{name}}.md", "./guide.md"]);
+        assert!(graph.earlier_warnings().is_empty(), "{:?}", graph.earlier_warnings());
+    }
+
+    /// Links in suppressed prose are still validated: a missing target is a
+    /// located issue that names the inclusion it came through.
+    #[test]
+    fn links_in_suppressed_prose_are_still_validated() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // A destination spelled `{{VAR}}` is biscuit-file variable syntax, so
+        // this case keeps its interpolation examples in the label.
+        let (md, options, _) = prose_example_graph(dir.path(), "::file ./child.md interpolate=false\n");
+        std::fs::write(
+            dir.path().join("child.md"),
+            "See [the {{ name }} page](./gone.md) and [{{ 1 + }}](./guide.md).\n",
+        )
+        .unwrap();
+        let report = md.validate_references(ReferenceValidationOptions::with_graph(options)).expect("validation runs");
+        let broken: Vec<(&str, usize)> = report
+            .issues
+            .iter()
+            .map(|issue| (issue.reference_display.as_str(), issue.included_via.len()))
+            .collect();
+        assert_eq!(broken, [("./gone.md", 1)], "{:?}", report.issues);
+        assert_eq!(report.references_valid, 2, "the inclusion and `./guide.md` are valid");
+    }
+
+    /// Control: the same child included normally evaluates its prose, so the
+    /// malformed example fails preparation.
+    #[test]
+    fn an_enabled_child_still_evaluates_its_prose_in_preparation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (_, _, graph) = prose_example_graph(dir.path(), "---\nname: Caller\n---\n::file ./child.md\n");
+        assert!(graph.is_err(), "the malformed example is evaluated without the option");
+    }
+
+    /// The setting is inherited through a nested child (even one that writes
+    /// `interpolate=true`) and a prologue child, and never reaches a sibling.
+    #[test]
+    fn the_disabled_setting_reaches_descendants_but_not_siblings() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("leaf.md"), "[leaf {{ who }}](./leaf-{{who}}.md)\n").unwrap();
+        std::fs::write(dir.path().join("intro.md"), "[intro](./intro-{{who}}.md)\n").unwrap();
+        std::fs::write(
+            dir.path().join("middle.md"),
+            "---\nwho: Ann\nprologue: ./intro.md\n---\n::file ./leaf.md interpolate=true\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("sibling.md"), "---\nwho: Bo\n---\n[sib](./sib-{{who}}.md)\n").unwrap();
+        let root_path = dir.path().join("root.md");
+        std::fs::write(&root_path, "::file ./middle.md interpolate=false\n\n::file ./sibling.md\n").unwrap();
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+
+        let graph = build_reference_graph(&md, &graph_options_at(dir.path())).unwrap();
+        let mut targets: Vec<String> = graph
+            .nodes()
+            .iter()
+            .flat_map(|node| node.local_references.hyperlinks())
+            .map(|record| record.target.raw().unwrap().to_string())
+            .collect();
+        targets.sort();
+        assert_eq!(targets, ["./intro-{{who}}.md", "./leaf-{{who}}.md", "./sib-Bo.md"]);
+    }
+
+    /// Two requests differing only in the setting have different graph
+    /// options identities, so a graph built under one is never reused for
+    /// the other.
+    #[test]
+    fn a_graph_built_with_prose_disabled_is_not_reused_with_it_enabled() {
+        use crate::markdown::compose::context::options::ProseInterpolation;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root_path = dir.path().join("root.md");
+        std::fs::write(&root_path, "[a](./a.md)\n").unwrap();
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let enabled = graph_options_at(dir.path());
+        let disabled = ReferenceGraphOptions::from_compose_options(
+            enabled.compose.clone().derive(|compose| compose.with_prose_interpolation(ProseInterpolation::DisabledByInclusion)),
+        );
+
+        let graph = md.reference_graph(disabled.clone()).unwrap();
+        md.validate_references_with_graph(&graph, ReferenceValidationOptions::with_graph(disabled))
+            .expect("same-setting reuse is accepted");
+        let err = md
+            .validate_references_with_graph(&graph, ReferenceValidationOptions::with_graph(enabled))
+            .unwrap_err();
+        assert_eq!(graph_mismatch_kind(&err), ReferenceGraphMismatchKind::Options);
     }
 }

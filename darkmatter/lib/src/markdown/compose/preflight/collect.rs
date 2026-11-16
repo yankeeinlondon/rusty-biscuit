@@ -452,7 +452,7 @@ fn collect_document(
     // ── Deferred context reads ─────────────────────────────────────
     // Metadata only (R30): planning names the lazy reads and function calls
     // this source can reach, and observes none of them.
-    *capabilities = std::mem::take(capabilities).union(&DeferredCapabilities::for_document(markdown));
+    *capabilities = std::mem::take(capabilities).union(&DeferredCapabilities::for_document_with(markdown, options.prose_enabled()));
 
     // ── Frontmatter commands ───────────────────────────────────────
     let deferred_keys = derived_deferred_keys(
@@ -1183,7 +1183,7 @@ fn collect_document(
     // Runtime composes the content against the root source, inheriting this
     // document's state as a `::file` child does; so does this walk.
     let mut nested_contents = discovery.nested_compose.take_discovered();
-    nested_contents.extend(authored_as_markdown_literals(markdown));
+    nested_contents.extend(authored_as_markdown_literals(markdown, options.prose_enabled()));
     for content in nested_contents {
         let key = format!("as_markdown:{}", biscuit_hash::xx_hash(&content));
         let mut nested_options = transclusion::inherited_child_options(
@@ -1914,10 +1914,11 @@ const UNEVALUATED_IN_DISCOVERY: &[&str] = &[
 ];
 
 /// Every string-literal `as_markdown` argument in the authored frontmatter and
-/// body, including conditional branches and regions discovery never reaches.
-fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
+/// body, including conditional branches and regions discovery never reaches
+/// (but not prose an `interpolate=false` inclusion keeps as written).
+fn authored_as_markdown_literals(markdown: &Markdown, prose_enabled: bool) -> Vec<String> {
     let mut literals = Vec::new();
-    for expression in authored_expressions(markdown) {
+    for expression in authored_expressions(markdown, prose_enabled) {
         visit_calls(&expression, &mut |name, args, _locals| {
             if name == "as_markdown"
                 && let [Expr::StringLiteral(content)] = args
@@ -1930,13 +1931,14 @@ fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
 }
 
 /// Every `ping`/`ping_under` call in the authored frontmatter and body whose
-/// arguments are all literals, including branches discovery never evaluates.
+/// arguments are all literals, including branches discovery never evaluates
+/// (but not prose an `interpolate=false` inclusion keeps as written).
 ///
 /// A call whose arguments do not validate is left to the compose pass to
 /// reject: preflight reports effects, it does not diagnose authoring.
 fn authored_icmp_probes(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> Vec<PlannedIcmpProbe> {
     let authority = options.icmp_authority().discovering();
-    for expression in authored_expressions(markdown) {
+    for expression in authored_expressions(markdown, options.prose_enabled()) {
         visit_calls(&expression, &mut |name, args, _locals| {
             if name != "ping" && name != "ping_under" {
                 return;
@@ -1964,14 +1966,22 @@ fn literal_value(expression: &Expr) -> Option<Value> {
 }
 
 /// Parsed `{{ … }}` expressions from frontmatter string values and the whole
-/// body, code blocks included.
-fn authored_expressions(markdown: &Markdown) -> Vec<Expr> {
+/// body, code blocks included; with `prose_enabled` false (an
+/// `interpolate=false` inclusion), only the body's directive inputs.
+fn authored_expressions(markdown: &Markdown, prose_enabled: bool) -> Vec<Expr> {
+    let body = match prose_enabled {
+        true => std::borrow::Cow::Borrowed(markdown.content()),
+        false => std::borrow::Cow::Owned(crate::markdown::compose::interpolation::active_inputs::mask_prose(
+            markdown.content(),
+            None,
+        )),
+    };
     markdown
         .frontmatter()
         .as_map()
         .values()
         .filter_map(serde_json::Value::as_str)
-        .chain(std::iter::once(markdown.content()))
+        .chain(std::iter::once(body.as_ref()))
         .flat_map(ExpressionFinder::find_all_plain)
         .filter_map(|location| parse(&location.expression).ok())
         .collect()

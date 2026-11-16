@@ -1214,6 +1214,14 @@ impl<'a> TransclusionEngine<'a> {
 
                 let child_source = ComposeSource::Url(url.clone());
 
+                // This path does not go through `inherited_child_options`, so
+                // it folds the directive's `interpolate=` itself, before the
+                // fetched body is scanned for what it reaches.
+                let prose_interpolation =
+                    effective_prose_interpolation(options.prose_interpolation, &directive_options);
+                let prose_enabled =
+                    prose_interpolation == crate::markdown::compose::context::options::ProseInterpolation::Enabled;
+
                 // Eagerly register any remote URLs the fetched document itself
                 // references, so the child pipeline's point-of-use waits land on
                 // an already-in-flight slot rather than an unregistered one.
@@ -1237,9 +1245,10 @@ impl<'a> TransclusionEngine<'a> {
                     }
 
                     if options.is_enabled(ComposeOperation::Interpolation) {
-                        for entry in remote::discover_remote_urls_from_expressions(
+                        for entry in remote::discover_remote_urls_from_expressions_with(
                             child.content(),
                             &child_source,
+                            prose_enabled,
                         ) {
                             child_catalog.add(entry);
                         }
@@ -1256,14 +1265,10 @@ impl<'a> TransclusionEngine<'a> {
                 };
                 let child_context = child_runtime.context_epoch.context_for_source(
                     state.context(),
-                    &crate::markdown::compose::ContextRequirements::for_document(&child),
+                    &crate::markdown::compose::ContextRequirements::for_document_with(&child, prose_enabled),
                     options.context_authority(),
                 );
                 child_runtime.record_context_groups(child_context.capture_requirements());
-                // This path does not go through `inherited_child_options`, so
-                // it folds the directive's `interpolate=` itself.
-                let prose_interpolation =
-                    effective_prose_interpolation(options.prose_interpolation, &directive_options);
                 let mut child_options = options.clone().derive(|options| {
                     options
                         .with_request_context(child_context)
@@ -1597,9 +1602,11 @@ impl<'a> TransclusionEngine<'a> {
         // inherit it.
         let mut child = runtime.load_markdown(path)?;
         apply_directive_set_overlay(&mut child, directive_options);
+        let child_prose_enabled = effective_prose_interpolation(options.prose_interpolation, directive_options)
+            == crate::markdown::compose::context::options::ProseInterpolation::Enabled;
         let child_context = runtime.context_epoch.context_for_source(
             state.context(),
-            &crate::markdown::compose::ContextRequirements::for_document(&child),
+            &crate::markdown::compose::ContextRequirements::for_document_with(&child, child_prose_enabled),
             options.context_authority(),
         );
 
@@ -1640,10 +1647,7 @@ impl<'a> TransclusionEngine<'a> {
         // `options_hash` covers the parent's setting; the child's folded one
         // also depends on this directive's `interpolate=`, so a normal and an
         // `interpolate=false` inclusion of one file never share a result.
-        let prose = match effective_prose_interpolation(options.prose_interpolation, directive_options) {
-            crate::markdown::compose::context::options::ProseInterpolation::Enabled => 0,
-            crate::markdown::compose::context::options::ProseInterpolation::DisabledByInclusion => 1,
-        };
+        let prose = u8::from(!child_prose_enabled);
         let cache_key = format!(
             "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}:{opening_hash:016x}:{overlay_origin}:{prose}",
             cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),

@@ -900,12 +900,30 @@ strings to numbers.
 - `ComposeOptions.prose_interpolation` (`ProseInterpolation`, crate-private,
   never set by a root request) is folded only by
   `transclusion::effective_prose_interpolation`, applied in
-  `inherited_child_options` and by hand on the remote `RemoteFile` child. It
+  `inherited_child_options`, by hand on the remote `RemoteFile` child, and in
+  the reference graph's `accepted_child_options` (a `::file` child folds its
+  directive; prologue, epilogue, and `::toc-linking` children inherit; a
+  fragment target outside the graph is `Enabled`). The preflight walk needs
+  no fold of its own: it derives children through `inherited_child_options`. It
   is in both identity encoders; `parameters_identity` and the `compose:`
   child cache key also carry it, so a normal and an `interpolate=false` use
   of one file never share a composed result.
-- **Planned:** the folded setting does not yet suppress prose evaluation;
-  until it does, `interpolate=false` composes like the plain directive.
+- Suppression reads one classifier,
+  `interpolation::active_inputs::{active_input_ranges, mask_prose}`: an
+  authored directive line from its keyword on (whole line, because the
+  directive tokenizer splits a target like `./{{ lang }}.rs`), a
+  `::disclosure`/`::details` line's option values, and a `::shell-block`
+  body are active; everything else, code blocks included, is prose. Body
+  interpolation (`inline::interpolation::run_stage`) declines non-active
+  spans through its `SpanSelection` (a declined literal token is not a
+  failure, a declined `{{{ … }}}` keeps three braces) and ignores
+  `interpolate_code_blocks`. The passive surfaces take the same flag: the
+  call precheck's body scan, `ContextRequirements::for_document_with`,
+  `DeferredCapabilities::for_document_with`,
+  `remote::discover_remote_urls_from_expressions_with`, and the preflight
+  walk's `authored_expressions` (ICMP and `as_markdown` literals). A masked
+  body has lost its Markdown structure: scan it plain, never with
+  code-region detection. `ComposeOptions::prose_enabled()` is the read.
 
 ### Code Region Protection
 

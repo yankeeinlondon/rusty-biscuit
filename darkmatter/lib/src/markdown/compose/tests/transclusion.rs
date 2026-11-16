@@ -2464,11 +2464,11 @@ mod file_links_compose {
     }
 }
 
-/// Until prose suppression lands, `interpolate=false` is accepted and changes
-/// nothing about the composed result: both spellings compose the same bytes,
-/// with the same counts and warnings.
+/// `interpolate=false` keeps the child's prose as written; the plain
+/// directive interpolates it. Both count one transclusion and neither reports
+/// `interpolate` as an unknown option.
 #[test]
-fn interpolate_false_is_accepted_and_composes_like_the_plain_directive() {
+fn interpolate_false_keeps_the_childs_prose_literal() {
     let dir = tempfile::tempdir().unwrap();
     let child = dir.path().join("child.md");
     std::fs::write(&child, "# Child\n\nHello {{ name }}.\n").unwrap();
@@ -2485,11 +2485,15 @@ fn interpolate_false_is_accepted_and_composes_like_the_plain_directive() {
     let (off, off_report) = compose("::file ./child.md interpolate=false");
 
     assert!(plain.content().contains("Hello World."), "{}", plain.content());
-    assert_eq!(plain.content(), off.content());
+    assert!(off.content().contains("Hello {{ name }}."), "{}", off.content());
+    assert_eq!(
+        plain.content().replace("Hello World.", "Hello {{ name }}."),
+        off.content(),
+        "only the child's interpolation differs"
+    );
     assert_eq!(plain_report.transclusions_applied, 1);
     assert_eq!(off_report.transclusions_applied, 1);
     let messages = |report: &ComposeReport| report.warnings.iter().map(|w| w.message.clone()).collect::<Vec<_>>();
-    assert_eq!(messages(&plain_report), messages(&off_report));
     assert!(
         !messages(&off_report).iter().any(|message| message.contains("interpolate")),
         "a ::file never reports interpolate as unknown: {:?}",

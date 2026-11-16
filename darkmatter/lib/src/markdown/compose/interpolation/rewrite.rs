@@ -283,8 +283,9 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
 }
 
 /// Which spans a rewrite evaluates: given a span of its input and the
-/// expression's source (`None` for a `{{{ … }}}` literal), whether to rewrite
-/// it now. A span it declines stays as written.
+/// expression's source (`None` for a `{{{ … }}}` literal or a literal token),
+/// whether to rewrite it now. A span it declines stays as written, and a
+/// declined literal token is not a failure.
 pub(crate) type SpanSelection<'s> = Option<&'s dyn Fn(std::ops::Range<usize>, Option<&str>) -> bool>;
 
 /// [`interpolate_text_guarded`], rewriting only the spans `select` accepts
@@ -322,8 +323,12 @@ pub(crate) fn interpolate_text_selected<L: EvaluationLookup>(
     };
     let straddles = |start: usize, end: usize| data.is_some_and(|data| data.intersects(&(start..end)));
     // A token the masked view still shows was authored here, not as an entire
-    // frontmatter value, so it is malformed under either policy.
-    if let Some(token) = scan.tokens.first() {
+    // frontmatter value, so it is malformed under either policy, unless
+    // `select` declines its span (prose an `interpolate=false` inclusion keeps
+    // as written).
+    if let Some(token) =
+        scan.tokens.iter().find(|token| select.is_none_or(|select| select(token.start..token.end, None)))
+    {
         return Err(literal_token_failure(input, token.start..token.end, TokenError::Embedded));
     }
 

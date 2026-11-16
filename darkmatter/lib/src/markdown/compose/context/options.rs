@@ -884,14 +884,14 @@ impl ComposeOptions {
         // The first document composed under a growable context is the
         // request's root, unless the caller captured the context for one.
         self.context.attach_root_document(document);
-        let requirements = super::capture::ContextRequirements::for_document(document);
+        let requirements = super::capture::ContextRequirements::for_document_with(document, self.prose_enabled());
         self.context_authority.extend(&mut self.context, &requirements);
     }
 
     /// Whether [`extend_context_for`](Self::extend_context_for) would capture
     /// a group `document` names that these options lack.
     pub(crate) fn needs_extension_for(&self, document: &crate::markdown::Markdown) -> bool {
-        let requirements = super::capture::ContextRequirements::for_document(document);
+        let requirements = super::capture::ContextRequirements::for_document_with(document, self.prose_enabled());
         self.context_authority.is_extendable()
             && self
                 .context
@@ -2038,6 +2038,12 @@ impl ComposeOptions {
     pub fn with_trigger_schemas(mut self, enabled: bool) -> Self {
         self.trigger_schemas = enabled;
         self
+    }
+
+    /// Whether this document's body prose interpolates (it does unless an
+    /// `interpolate=false` inclusion disabled it).
+    pub(crate) fn prose_enabled(&self) -> bool {
+        self.prose_interpolation == ProseInterpolation::Enabled
     }
 
     /// Internal builder: sets whether prose interpolation is evaluated.
