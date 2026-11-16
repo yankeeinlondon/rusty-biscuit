@@ -532,7 +532,7 @@ fn research_agent_cli_fleet() {
     assert_shipped(&Shipped {
         label: "docs/research/agent-cli/_fleet.md",
         text: include_str!("../../../docs/research/agent-cli/_fleet.md"),
-        selects: SEQUENCE,
+        selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
     });
@@ -807,7 +807,7 @@ fn research_reasoning_level_fleet() {
     assert_shipped(&Shipped {
         label: "docs/research/reasoning-level/_fleet.md",
         text: include_str!("../../../docs/research/reasoning-level/_fleet.md"),
-        selects: SEQUENCE,
+        selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
     });

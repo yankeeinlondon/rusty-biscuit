@@ -144,20 +144,8 @@ pub(crate) fn owner_values<'s>(
     referenced: Option<&Path>,
     source: impl FnOnce() -> Result<std::borrow::Cow<'s, ResolvedCompositionSource>, CompositionError>,
 ) -> Result<Map<String, Value>, CompositionError> {
-    if let Some(context) = options.compose_context
-        && super::formal::template_reads_values(keys)
-    {
-        let mut prepare = PrepareOptions::new(options.file_resolution_context.clone());
-        if let Some(layers) = options.caller_layers {
-            prepare = layers.apply_to(prepare);
-        }
-        if let (Some(invocation), Some(path)) = (options.invocation, referenced) {
-            prepare = prepare.resolving_document_from(owner_resolution(invocation, path)?);
-        }
-        prepare.prepared_context = Some(context.clone());
-        prepare.defer_schema_verdict = true;
-        let source = source()?;
-        return Ok(prepare_sequence_document_values(&source, prepare, CompositionMode::ChainedDocument)?.values);
+    if options.compose_context.is_some() && super::formal::template_reads_values(keys) {
+        return prepared_owner_values(options, referenced, source).map(|values| values.unwrap_or_default());
     }
     let mut values = authored.clone();
     if let Some(Value::Object(setters)) = options.caller_layers.and_then(|layers| layers.set_overrides.as_ref()) {
@@ -166,9 +154,37 @@ pub(crate) fn owner_values<'s>(
     Ok(values)
 }
 
+/// An owner's prepared values ([`prepare_sequence_document_values`], verdict
+/// withheld) under `options`' caller layers, read from `source`, which is
+/// only loaded here; `None` when `options` carries no captured context.
+///
+/// `referenced` is as for [`owner_values`].
+///
+/// ## Errors
+///
+/// As [`owner_values`].
+pub(crate) fn prepared_owner_values<'s>(
+    options: &super::SequenceSourceOptions<'_>,
+    referenced: Option<&Path>,
+    source: impl FnOnce() -> Result<std::borrow::Cow<'s, ResolvedCompositionSource>, CompositionError>,
+) -> Result<Option<Map<String, Value>>, CompositionError> {
+    let Some(context) = options.compose_context else { return Ok(None) };
+    let mut prepare = PrepareOptions::new(options.file_resolution_context.clone());
+    if let Some(layers) = options.caller_layers {
+        prepare = layers.apply_to(prepare);
+    }
+    if let (Some(invocation), Some(path)) = (options.invocation, referenced) {
+        prepare = prepare.resolving_document_from(owner_resolution(invocation, path)?);
+    }
+    prepare.prepared_context = Some(context.clone());
+    prepare.defer_schema_verdict = true;
+    let source = source()?;
+    Ok(Some(prepare_sequence_document_values(&source, prepare, CompositionMode::ChainedDocument)?.values))
+}
+
 /// The file-resolution context of the referenced owner at `path`, derived as
 /// the graph walk derives each origin document's.
-fn owner_resolution(
+pub(crate) fn owner_resolution(
     invocation: &crate::invocation_context::InvocationContext,
     path: &Path,
 ) -> Result<biscuit_file::FileResolutionContext, CompositionError> {

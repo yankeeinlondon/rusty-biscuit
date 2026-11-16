@@ -263,3 +263,74 @@ fn a_failed_inline_check_never_reopens_command_approval() {
     assert!(flat.contains("introduced an unapproved command after sequence approval closed"), "{flat}");
     assert!(!stdout.lines().any(|line| line.trim() == "forbidden"), "{stdout}");
 }
+
+/// The check an earlier step tightens: appending a line to the file that
+/// declares it adds a required property under the container's `$schema`,
+/// which is authored last, so the container is refused at its turn. The
+/// root's `failure` sees whether the container's `initialize` wrote.
+const TIGHTENED: &str = "reviewer: string(required)";
+
+/// A root that appends `TIGHTENED`, indented by `indent`, to `target`, and
+/// then runs `rest` (the rest of its `sequence:` list).
+fn tightening_root(target: &str, indent: usize, rest: &str) -> String {
+    format!(
+        "kind: sequence\ninitialized: false\nworked: false\nfailure:\n  - stdout: \"handled initialized={{{{ initialized }}}} worked={{{{ worked }}}}: {{{{ err.msg }}}}\"\nsuccess:\n  - stdout: \"done worked={{{{ worked }}}}\"\nsequence:\n  - name: tighten\n    side_effect: {{ append_line: [{target}, '{}{TIGHTENED}'] }}\n{rest}",
+        " ".repeat(indent),
+    )
+}
+
+/// An inline container, indented by `indent`, whose `$schema` is its last key.
+fn checked_container(indent: usize) -> String {
+    let pad = " ".repeat(indent);
+    format!("{pad}- name: inner\n{pad}  initialize:\n{pad}    - stdout: INIT-RAN\n{pad}    - set: {{ initialized: true }}\n{pad}  sequence:\n{pad}    - {{ name: work, side_effect: {{ set: {{ worked: true }} }} }}\n{pad}  $schema:\n{pad}    rank: number\n")
+}
+
+/// The refused container printed nothing, neither its `initialize` nor its
+/// child wrote, and the root's `failure` handled the refusal.
+fn assert_refused_before_initialize(stdout: &str, stderr: &str, code: i32) {
+    assert_ne!(code, 0, "{stderr}\n{stdout}");
+    assert!(!stdout.contains("INIT-RAN"), "{stdout}");
+    assert!(stdout.contains("handled initialized=false worked=false"), "{stdout}\n{stderr}");
+    assert!(stdout.contains("failed its `$schema` check at `reviewer`"), "{stdout}");
+}
+
+#[test]
+fn a_check_tightened_by_an_earlier_step_refuses_the_container_before_initialize() {
+    let root = tightening_root("root.yaml", 6, &checked_container(2));
+    let (stdout, stderr, code) = run_sequence("root.yaml", &[("root.yaml", &root)]);
+    assert_refused_before_initialize(&stdout, &stderr, code);
+}
+
+#[test]
+fn a_tightened_check_on_a_group_leg_refuses_the_leg_before_initialize() {
+    let root = tightening_root("root.yaml", 12,
+        &format!("  - name: legs\n    group:\n      name: legs\n      tasks:\n{}", checked_container(8)));
+    let (stdout, stderr, code) = run_sequence("root.yaml", &[("root.yaml", &root)]);
+    assert_refused_before_initialize(&stdout, &stderr, code);
+}
+
+#[test]
+fn a_tightened_check_in_a_task_file_refuses_the_container_before_initialize() {
+    let root = tightening_root("task.yaml", 2, "  - { name: inner, task: task.yaml }\n");
+    let task = "kind: task\nname: inner\ninitialize:\n  - stdout: INIT-RAN\n  - set: { initialized: true }\nsequence:\n  - { name: work, side_effect: { set: { worked: true } } }\n$schema:\n  rank: number\n";
+    let (stdout, stderr, code) = run_sequence("root.yaml", &[("root.yaml", &root), ("task.yaml", task)]);
+    assert_refused_before_initialize(&stdout, &stderr, code);
+}
+
+#[test]
+fn a_tightened_check_in_a_referenced_document_refuses_its_child_before_initialize() {
+    let root = tightening_root("child.yaml", 6, "  - { name: nested, sequence: child.yaml }\n");
+    let child = format!("kind: sequence\nsequence:\n{}", checked_container(2));
+    let (stdout, stderr, code) = run_sequence("root.yaml", &[("root.yaml", &root), ("child.yaml", &child)]);
+    assert_refused_before_initialize(&stdout, &stderr, code);
+}
+
+/// The control: an unedited check admits the container, whose events and
+/// child run.
+#[test]
+fn an_unedited_check_admits_the_container() {
+    let root = tightening_root("unrelated.yaml", 0, &checked_container(2));
+    let (stdout, stderr, code) = run_sequence("root.yaml", &[("root.yaml", &root), ("unrelated.yaml", "")]);
+    assert_eq!(code, 0, "{stderr}\n{stdout}");
+    assert!(stdout.contains("INIT-RAN") && stdout.contains("done worked=true"), "{stdout}");
+}

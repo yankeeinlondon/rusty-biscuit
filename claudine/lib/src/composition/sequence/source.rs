@@ -70,8 +70,8 @@ pub fn resolve_sequence_reference(
 /// invocation, not the data file. `frontmatter` is that document's frontmatter,
 /// which a `::map`/`::name`/`::template` operator reads below each item. A
 /// whole referenced document is its own owner: its `template:` reads its own
-/// values under the caller's inputs in `options`, with `frontmatter` only as
-/// a transitional lowest layer for keys neither defines.
+/// values under the caller's inputs in `options`, never `frontmatter`, so a
+/// key neither defines stays undefined.
 ///
 /// ## Errors
 ///
@@ -144,15 +144,10 @@ pub(crate) fn plan_referenced_sequence(
         let own = super::document::owner_values(&authored, &keys, options, Some(path), || {
             whole_document_source(path, root, &orders).map(std::borrow::Cow::Owned)
         })?;
-        // Transitional: the referrer's values sit *below* the document's own
-        // values and the caller's setters, so a shared roster whose template
-        // reads a value only its referrer defines keeps filling. A document's
-        // own property always wins. This layer goes once runtime writes made
-        // before preflight reach a root plan's template, which is how a
-        // referrer is meant to parameterize a referenced document.
-        let mut values = frontmatter.to_object();
-        values.extend(own);
-        let values = Arc::new(values);
+        // Only the document's own values and the caller's inputs: the
+        // referrer's `frontmatter` never enters them (it serves the data
+        // operators above), so a key neither defines stays undefined.
+        let values = Arc::new(own);
         let mut plan = formal::normalize_formal_plan(
             items,
             formal::FormalOwner { keys, declaring_path: path, list_property: "sequence", values: &*values },

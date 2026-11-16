@@ -23,6 +23,13 @@ impl TaskExecution<'_> {
         if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
         let owned_runtime = Arc::new(RuntimeState::new_sequence());
         let runtime = self.runtime.unwrap_or(&owned_runtime);
+        // A referenced document's `initialize` reads its prepared values
+        // before its schema has judged them: that event may still supply or
+        // correct a value, and the verdict waits for `start`.
+        let base = match self.referenced_owner_values(sequence, runtime, false) {
+            Ok(base) => base,
+            Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+        };
         // The enclosing scope moves out and back; its outputs are never copied.
         let (outer_seq, outer_outputs) = runtime.replace_sequence_scope(None, Vec::new());
         // The position `sequence_binding` reads: the runtime's, else the overlay's.
@@ -37,9 +44,9 @@ impl TaskExecution<'_> {
         };
         let guard = LifecycleRunGuard::new(&sequence.lifecycle, &runtime_context, self.stack.emitter);
         let mut runner = ContainerRunner::new(guard).with_subject(SubjectKind::Sequence);
-        let state = self.sequence_frontmatter(sequence).unwrap_or_else(|| self.stack.frontmatter.clone());
+        let state = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
         let result = match self.open_loop(sequence.loop_config.as_ref(), LoopResultKind::Sequence, &state, runtime) {
-            Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut()),
+            Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut(), base),
             Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
         };
         runtime.replace_sequence_scope(outer_seq, outer_outputs);
@@ -49,6 +56,7 @@ impl TaskExecution<'_> {
     fn run_sequence_attempts(
         &self, sequence: &PreflightSequence, runtime: &Arc<RuntimeState>, run_id: &str,
         runner: &mut ContainerRunner<'_>, mut frame: Option<&mut LoopFrame>,
+        mut base: Option<SharedFrontmatter>,
     ) -> PrimaryOutcome {
         let mut signal = LifecycleSignal::Initialize;
         // Taken as each pass enters `start`; a retry of the pass returns here.
@@ -81,19 +89,26 @@ impl TaskExecution<'_> {
                 supplied.extend(runtime.mutations());
                 match crate::composition::sequence::preflight::prepare_nested_sequence(
                     self.task, sequence, self.state, supplied, context, self.stack.file_resolution_context,
-                    self.stack.group.is_some(), self.graph.nested_sources(),
+                    self.stack.group.is_some(), self.graph.nested_sources(), self.document,
                 ).and_then(|(fresh, graph)| {
                     self.verify_nested_graph(&graph)?;
                     // Each entry judges the check as it reads now (a reread
-                    // may have changed it) against the values of this entry;
-                    // the first one already passed admission before
-                    // `initialize`, and a preview names the check once.
+                    // may have changed it) against the values of this entry,
+                    // which on the first entry include `initialize`'s writes
+                    // (admission judged the values before it); a preview
+                    // names the check once.
                     if !self.prompt.is_dry_run() {
                         self.check_inline_container(&fresh, Some(runtime))?;
                     }
-                    Ok(fresh)
+                    // A whole referenced document is judged by its own
+                    // schema against the values of this entry, as a directly
+                    // run document is at each step; a preview, which makes no
+                    // writes, only prepares them.
+                    let values = self.referenced_owner_values(&fresh, runtime, !self.prompt.is_dry_run())?;
+                    Ok((fresh, values))
                 }) {
-                    Ok(fresh) => {
+                    Ok((fresh, values)) => {
+                        base = values;
                         runner.guard_mut().set_config((*fresh.lifecycle).clone());
                         prepared = Some(fresh);
                         shell_enabled = true;
@@ -115,7 +130,6 @@ impl TaskExecution<'_> {
             let sequence = prepared.as_ref().unwrap_or(sequence);
             let (mutations, outputs) = runtime.mutations_and_outputs();
             let seq = SequenceBinding::container(run_id, outputs).to_value();
-            let base = self.sequence_frontmatter(sequence);
             let mut event_frontmatter = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
             event_frontmatter.extend(mutations.clone());
             if let Some(live) = &own_live {
@@ -410,13 +424,6 @@ impl TaskExecution<'_> {
 }
 
 impl TaskExecution<'_> {
-    /// The base state of a referenced sequence document's events and
-    /// children: its authored properties under the invocation setters.
-    /// Runtime mutations are layered above it at each read. `None` for an
-    /// inline list or a step selection, which read the enclosing state.
-    ///
-    /// The view is decoded once per call and shared by every event and child
-    /// that reads it, so a child never copies the document's own steps.
     /// Judge `sequence`'s inline `$schema` check, when it declares one,
     /// against the values visible at its turn: the enclosing values, the
     /// caller's setters, and every runtime write so far.
@@ -432,7 +439,34 @@ impl TaskExecution<'_> {
     pub(super) fn check_inline_container(
         &self, sequence: &PreflightSequence, runtime: Option<&RuntimeState>,
     ) -> Result<(), CompositionError> {
-        let Some(check) = &sequence.inline_schema else { return Ok(()) };
+        self.judge_inline_check(sequence.inline_schema.as_ref(), runtime)
+    }
+
+    /// Admit `sequence` at this task's turn: judge its inline `$schema` as
+    /// the declaring file reads now, not as the approved graph froze it, so a
+    /// declaration an earlier task edited refuses the container before its
+    /// `initialize` runs. A dry run names the frozen check without reading.
+    ///
+    /// ## Errors
+    ///
+    /// As [`crate::composition::sequence::preflight::reread_inline_check`]
+    /// for a declaration that no longer reads, and as
+    /// [`Self::check_inline_container`] for values it refuses.
+    pub(super) fn admit_inline_container(
+        &self, sequence: &PreflightSequence, runtime: Option<&RuntimeState>,
+    ) -> Result<(), CompositionError> {
+        if self.prompt.is_dry_run() { return self.check_inline_container(sequence, runtime) }
+        let current = crate::composition::sequence::preflight::reread_inline_check(
+            self.task, sequence, self.stack.file_resolution_context, self.graph.nested_sources(), self.document,
+        )?;
+        self.judge_inline_check(current.as_ref(), runtime)
+    }
+
+    fn judge_inline_check(
+        &self, check: Option<&crate::composition::sequence::declarations::PreparedSequenceSchema>,
+        runtime: Option<&RuntimeState>,
+    ) -> Result<(), CompositionError> {
+        let Some(check) = check else { return Ok(()) };
         let container = check.property().strip_suffix(".$schema").unwrap_or(check.property());
         if self.prompt.is_dry_run() {
             self.dry_run_note(&format!("`{container}` checks its `$schema` at its turn (not evaluated in a dry run)"));
@@ -461,13 +495,40 @@ impl TaskExecution<'_> {
         }
     }
 
-    fn sequence_frontmatter(&self, sequence: &PreflightSequence) -> Option<SharedFrontmatter> {
-        let mut base: Map<String, Value> = sequence.frontmatter.as_ref()?.iter()
-            .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
-        if let Some(Value::Object(setters)) = self.user_setters {
-            base.extend(setters.clone());
+    /// The base state of a whole referenced sequence document's events and
+    /// children: the document's prepared values (its own properties, coerced,
+    /// defaulted and derived by its `$schema`), under the invocation's caller
+    /// inputs and then every runtime write so far. `None` for an inline list
+    /// or a step selection, which read the enclosing state.
+    ///
+    /// With `verdict`, the document's schema judges those values, which is
+    /// what a direct run does at each of its steps; without, they are only
+    /// prepared. Runtime writes made after this call layer above the result
+    /// at each read, unprepared: no check runs between children of one pass.
+    ///
+    /// ## Errors
+    ///
+    /// The document's preparation errors, located in the document:
+    /// [`CompositionError::SchemaValidation`] or
+    /// [`CompositionError::MissingProperties`] for a value its schema refuses.
+    fn referenced_owner_values(
+        &self, sequence: &PreflightSequence, runtime: &RuntimeState, verdict: bool,
+    ) -> Result<Option<SharedFrontmatter>, CompositionError> {
+        if sequence.frontmatter.is_none() { return Ok(None) }
+        let mut options = crate::composition::PrepareOptions::new(self.stack.file_resolution_context.clone());
+        match self.graph.caller_layers() {
+            Some(layers) => options = layers.apply_to(options),
+            None => options.set_overrides = self.user_setters.cloned(),
         }
-        Some(base.into())
+        let mut overrides = options.layered_overrides();
+        for (key, value) in runtime.mutations() {
+            overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, key, value);
+        }
+        options.set_layered_overrides(overrides);
+        options.prepared_context = Some(self.stack.prepared_context.cloned().unwrap_or_else(|| self.state.context().clone()));
+        options.defer_schema_verdict = !verdict;
+        let prepared = self.graph.prepare_whole_document(&sequence.origin_path, options, self.document)?;
+        Ok(Some(prepared.values.into()))
     }
 
     pub(super) fn verify_nested_graph(&self, fresh: &crate::composition::sequence::preflight::PreflightGraph) -> Result<(), CompositionError> {
@@ -527,7 +588,9 @@ impl TaskExecution<'_> {
                 task.origin_dir = sequence.origin_path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
                 task.authored = Default::default();
                 // A proxy enters its container through the same admission as
-                // a task's turn, never around it.
+                // a task's turn, never around it. Its target is a file, whose
+                // container has no authored task here to reread a check at,
+                // so the approved check judges.
                 let execution = TaskExecution { task: &task, runtime: Some(runtime), ..*self };
                 execution.check_inline_container(sequence, Some(runtime))?;
                 return Ok(execution.run_sequence(sequence));

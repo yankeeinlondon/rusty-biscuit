@@ -49,6 +49,15 @@ impl<'a> RootRun<'a> {
             frame, checkpoint: None, prewarm }
     }
 
+    /// Make `values` the root's own values for the events that follow, over
+    /// whatever its live document cell holds; later runtime writes layer
+    /// above them at each event.
+    pub(super) fn refresh_event_values(&self, values: serde_json::Map<String, serde_json::Value>) {
+        if let Some(live) = self.stack.live_frontmatter {
+            live.lock().expect("root frontmatter poisoned").extend(values);
+        }
+    }
+
     /// The `loop` values of the pass being run, when the root loops.
     pub(super) fn loop_values(&self) -> Option<claudine::composition::LoopAmbient> {
         self.frame.as_ref().map(LoopFrame::ambient)

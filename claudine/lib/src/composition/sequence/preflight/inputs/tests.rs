@@ -290,26 +290,32 @@ mod counted {
     }
 }
 
-/// A referenced document's `template:` reads its referrer's values below its
-/// own, as the plan does, so a shared roster parameterized by its referrer
-/// resolves its rows in discovery too.
+/// A referenced document's `template:` reads only its own values in
+/// discovery, as the plan does: a prompt path only the referrer defines never
+/// selects the referenced rows' prompt, through a root or a nested reference,
+/// while the document's own value and a caller setter do.
 #[test]
-fn a_referenced_template_reads_the_referrers_values_below_its_own() {
+fn a_referenced_template_never_selects_a_prompt_from_its_referrers_values() {
     let dir = TempDir::new().unwrap();
-    write(dir.path(), "fleet/research.md", "---\ntitle: r\n---\nResearch.\n");
-    write(dir.path(), "fleet/own.md", "---\ntitle: o\n---\nOwn.\n");
-    write(dir.path(), "roster.yaml", "kind: sequence\ntemplate:\n  prompt: \"{{ research_prompt }}\"\nsequence:\n  - name: one\n");
-    write(dir.path(), "own.yaml", "kind: sequence\nresearch_prompt: ./own.md\ntemplate:\n  prompt: \"{{ research_prompt }}\"\nsequence:\n  - name: one\n");
-    for (roster, expected) in [("../roster.yaml", "research.md"), ("../own.yaml", "own.md")] {
-        let root = write(
-            dir.path(),
-            "fleet/_fleet.md",
-            &format!("---\nsequence: \"{roster}\"\nresearch_prompt: ./research.md\n---\n"),
-        );
-        let inventory = discover(&root, dir.path(), json!({})).unwrap();
-        let prompts: Vec<_> = inventory.prompts.iter().map(|prompt| prompt.path.file_name().unwrap().to_owned()).collect();
-        assert_eq!(prompts, vec![std::ffi::OsString::from(expected)], "{roster}");
+    let leaked = write(dir.path(), "elsewhere/leaked.md", "---\ntitle: l\n---\nLeaked.\n");
+    let fallback = write(dir.path(), "fallback.md", "---\ntitle: f\n---\nFallback.\n");
+    let own = write(dir.path(), "own.md", "---\ntitle: o\n---\nOwn.\n");
+    let template = format!("template:\n  prompt: \"{{{{ prompt_path || '{}' }}}}\"\nsequence:\n  - name: one\n", fallback.display());
+    write(dir.path(), "roster.yaml", &format!("kind: sequence\n{template}"));
+    write(dir.path(), "own.yaml", &format!("kind: sequence\nprompt_path: {}\n{template}", own.display()));
+    let prompts = |root: &Path, setters: Value| -> Vec<std::ffi::OsString> {
+        let inventory = discover(root, dir.path(), setters).unwrap();
+        inventory.prompts.iter().map(|prompt| prompt.path.file_name().unwrap().to_owned()).collect()
+    };
+    for (roster, expected) in [("roster.yaml", "fallback.md"), ("own.yaml", "own.md")] {
+        let referrer = format!("prompt_path: {}\n", leaked.display());
+        let root = write(dir.path(), "root.md", &format!("---\nsequence: \"{roster}\"\n{referrer}---\n"));
+        assert_eq!(prompts(&root, json!({})), vec![std::ffi::OsString::from(expected)], "root reference to {roster}");
+        let nested = write(dir.path(), "nested.md", &format!("---\nsequence:\n  - name: child\n    sequence: \"{roster}\"\n{referrer}---\n"));
+        assert_eq!(prompts(&nested, json!({})), vec![std::ffi::OsString::from(expected)], "nested reference to {roster}");
     }
+    let root = write(dir.path(), "root.md", &format!("---\nsequence: roster.yaml\nprompt_path: {}\n---\n", leaked.display()));
+    assert_eq!(prompts(&root, json!({"prompt_path": own.display().to_string()})), vec![std::ffi::OsString::from("own.md")], "a setter selects it");
 }
 
 /// Under `leaving_verdicts`, an owner whose own preparation fails for a
@@ -393,4 +399,77 @@ fn a_referenced_owners_authored_file_value_is_not_found_beside_the_caller() {
     );
     let declaring = biscuit_file::canonicalize_simplified(&dir.path().join("nested")).unwrap();
     assert!(message.ends_with(&format!("while resolving from `{}`", declaring.display())), "{message}");
+}
+
+use super::super::{PreflightAction, PreflightGraph, PreflightTask, TaskIdentity, canonical};
+
+/// Discover `path`'s inputs and build its graph from them, as the CLI does,
+/// with the invocation anchored at `dir`.
+fn discover_and_build(path: &Path, dir: &Path) -> (SequenceInputInventory, PreflightGraph) {
+    let source = load(path);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), dir).unwrap();
+    let source_context = invocation.derive_source(&source.resolved_path).unwrap();
+    let context = ComposeContext::capture_for_content(dir, "");
+    let resolution = source_context.file_resolution_context().clone();
+    let inventory = discover_sequence_inputs(
+        &source, InputDiscoveryOptions::new(&resolution, &context).with_invocation(&invocation, &source_context),
+    ).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let plan = crate::composition::sequence::resolve_sequence_plan(&source, &resolution).unwrap().unwrap();
+    let graph = crate::composition::build_preflight_graph_after_discovery(
+        &plan, &source, context, &invocation, &source_context, None, &inventory,
+    ).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    (inventory, graph)
+}
+
+/// Every prompt document a task reaches, with the file whose row authored it.
+fn graph_prompts(graph: &PreflightGraph) -> Vec<(PathBuf, PathBuf)> {
+    fn visit(task: &PreflightTask, found: &mut Vec<(PathBuf, PathBuf)>) {
+        match &task.action {
+            PreflightAction::Prompt { path, .. } => found.push((path.clone(), task.origin_path.clone())),
+            PreflightAction::Group(group) => group.tasks.iter().for_each(|task| visit(task, found)),
+            PreflightAction::Sequence(sequence) => sequence.steps.iter()
+                .filter_map(|step| step.task.as_ref()).for_each(|task| visit(task, found)),
+            PreflightAction::Shell { .. } | PreflightAction::SideEffect { .. } => {}
+        }
+    }
+    let mut found = Vec::new();
+    graph.steps.iter().filter_map(|step| step.task.as_ref()).for_each(|task| visit(task, &mut found));
+    found
+}
+
+/// A sequence document in `sub/` resolves its rows' `prompt:`, `task:`,
+/// `sequence:`, and `group:` references beside itself, in discovery and in
+/// the graph, whether it is invoked directly, named by a root `sequence:`,
+/// or nested as a task. Nothing it references exists beside the referrer, so
+/// resolving from the referrer's folder fails the walk.
+#[test]
+fn a_documents_relative_references_resolve_beside_it_through_a_root_reference() {
+    let dir = TempDir::new().unwrap();
+    let leaves = ["p.md", "tp.md", "sp.md", "gp.md"].map(|name| write(dir.path(), &format!("sub/{name}"), "---\ntitle: t\n---\nT.\n"));
+    write(dir.path(), "sub/t.yaml", "kind: task\nprompt: ./tp.md\n");
+    write(dir.path(), "sub/s.yaml", "kind: sequence\nsequence:\n  - name: inner\n    prompt: ./sp.md\n");
+    write(dir.path(), "sub/g.yaml", "kind: group\nname: G\ntasks:\n  - name: leg\n    prompt: ./gp.md\n");
+    let child = write(dir.path(), "sub/child.yaml", "kind: sequence\nsequence:\n  - name: a\n    prompt: ./p.md\n    with:\n      brief: ./brief.md\n  - name: b\n    task: ./t.yaml\n  - name: c\n    sequence: ./s.yaml\n  - name: d\n    group: ./g.yaml\n");
+    let root = write(dir.path(), "root.yaml", "kind: sequence\nsequence: sub/child.yaml\n");
+    let nested = write(dir.path(), "nested.yaml", "kind: sequence\nsequence:\n  - name: outer\n    sequence: sub/child.yaml\n");
+
+    for document in [&child, &root, &nested] {
+        let (inventory, graph) = discover_and_build(document, dir.path());
+        let mut discovered: Vec<PathBuf> = inventory.prompts.iter().map(|prompt| prompt.path.clone()).collect();
+        discovered.sort();
+        let mut expected = leaves.to_vec();
+        expected.sort();
+        assert_eq!(discovered, expected, "{}: discovery", document.display());
+
+        let prompts = graph_prompts(&graph);
+        assert_eq!(prompts.iter().map(|(path, _)| path.clone()).collect::<Vec<_>>(), leaves.to_vec(), "{}: graph", document.display());
+        // A row of the child document is authored there, so its task's
+        // later preparation (execution context, `with:` files) starts there.
+        assert_eq!(canonical(&prompts[0].1), child, "{}: the child's own row", document.display());
+        let reference = graph.prompt_references.iter().find(|reference| reference.path == leaves[0]).expect("the prompt row's reference");
+        assert_eq!(canonical(&reference.with_origin), child, "{}: its `with:` is the child's", document.display());
+    }
+    let (_, graph) = discover_and_build(&root, dir.path());
+    assert_eq!(graph.steps.iter().map(|step| step.name.as_str()).collect::<Vec<_>>(), ["a", "b", "c", "d"], "the root keeps the child's rows, in order");
+    assert!(graph.steps.iter().enumerate().all(|(index, step)| step.task.as_ref().is_some_and(|task| task.identity == TaskIdentity::root(index))));
 }

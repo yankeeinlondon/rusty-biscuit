@@ -113,10 +113,11 @@ macro_rules! matrix {
     };
 }
 
-/// A nested sequence written into a referenced formal document cannot be
-/// reread at its turn: the reread resolves the task against the invoking
-/// Markdown file, which does not hold it. The loop is accepted; this
-/// existing reread limitation then fails the step before it runs anything.
+/// A nested sequence written into a row a data operator selects cannot be
+/// reread at its turn: a selection has no document of its own, so the reread
+/// resolves the task against the invoking Markdown file, which does not hold
+/// it. The loop is accepted; this existing reread limitation then fails the
+/// step before it runs anything.
 const NESTED_REREAD: &str = "nested sequence disappeared before preparation";
 /// The replacement a removed `loop.fail_fast` names.
 const FAIL_FAST: &str = "a loop has no `fail_fast`";
@@ -302,10 +303,9 @@ mod standalone_yaml {
 /// sequence document (`sequence: tasks.<ext>`), whose second step references
 /// a `kind: group` file in the same format.
 ///
-/// The formal document carries no inline nested sequence in its control: a
-/// root-referenced formal document's nested container is reread against the
-/// invoking Markdown file, which does not hold it. The nested-loop cells edit
-/// a step into one instead, and are refused before that reread.
+/// The formal document carries no inline nested sequence in its control; the
+/// nested-loop cells edit a step into one. A root-referenced formal document's
+/// rows are its own, so their nested container is reread from it and runs.
 macro_rules! json_family {
     ($module:ident, $doc:literal, $tasks_name:literal, $group_name:literal, $tasks:expr, $group:expr,
      first: $first:literal, first_step: $first_step:literal, fan: $fan:literal, fan_step: $fan_step:literal,
@@ -358,7 +358,7 @@ macro_rules! json_family {
                 loop_on_a_side_effect_task_is_misplaced: tasks($first, &after($first, "\"loop\": {\"until\": \"true\"}")) => Expect::Rejects { file: $tasks_name, says: LOOP_ON_LEAF };
                 loop_beside_a_group_reference_is_misplaced: tasks($fan, &after($fan, "\"loop\": {\"until\": \"true\"}")) => Expect::Rejects { file: $tasks_name, says: LOOP_ON_GROUP_REF };
                 loop_beside_a_sequence_reference_is_misplaced: tasks($fan_step, "{\"name\": \"fan\", \"sequence\": \"other.json\", \"loop\": {\"until\": \"true\"}}") => Expect::Rejects { file: $tasks_name, says: LOOP_ON_SEQUENCE_REF };
-                nested_loop_is_accepted: tasks($first_step, concat!("{\"name\": \"first\", \"loop\": {\"until\": \"true\"}, ", nested_inner!(), "}")) => Expect::FailsAfter { effects: 0, says: NESTED_REREAD };
+                nested_loop_is_accepted: tasks($first_step, concat!("{\"name\": \"first\", \"loop\": {\"until\": \"true\"}, ", nested_inner!(), "}")) => Expect::Runs(2);
                 nested_loop_empty_is_rejected: tasks($first_step, concat!("{\"name\": \"first\", \"loop\": {}, ", nested_inner!(), "}")) => Expect::Rejects { file: $tasks_name, says: LOOP_EMPTY };
                 nested_loop_on_rate_limit_is_rejected: tasks($first_step, concat!("{\"name\": \"first\", \"loop\": {\"until\": \"true\", \"on_rate_limit\": \"pause\"}, ", nested_inner!(), "}")) => Expect::Rejects { file: $tasks_name, says: RATE_LIMIT };
 

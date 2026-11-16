@@ -881,6 +881,67 @@ fn a_reference_inside_an_external_task_resolves_from_that_tasks_directory() {
     assert_eq!(composed_steps(&workspace, &doc, &[]), ["alpha"]);
 }
 
+/// A sequence document in `sub/` resolves the four executable references of
+/// its rows beside itself, however it is reached: invoked directly, named by
+/// a root `sequence:`, or nested as a task. Nothing it references exists in
+/// the launch folder, so a wrong base fails the run.
+#[test]
+fn a_sequence_documents_relative_references_resolve_beside_it_on_every_route() {
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
+    for (name, body) in [("p.md", "prompt"), ("tp.md", "task"), ("sp.md", "sequence"), ("gp.md", "group")] {
+        write(&workspace, &format!("sub/{name}"), &format!("---\ntitle: {body}\n---\nStep {body}.\n"));
+    }
+    write(&workspace, "sub/t.yaml", "kind: task\nprompt: ./tp.md\n");
+    write(&workspace, "sub/s.yaml", "kind: sequence\nsequence:\n  - name: inner\n    prompt: ./sp.md\n");
+    write(&workspace, "sub/g.yaml", "kind: group\nname: G\ntasks:\n  - name: leg\n    prompt: ./gp.md\n");
+    let child = write(
+        &workspace,
+        "sub/child.yaml",
+        "kind: sequence\nsequence:\n  - name: a\n    prompt: ./p.md\n  - name: b\n    task: ./t.yaml\n  - name: c\n    sequence: ./s.yaml\n  - name: d\n    group: ./g.yaml\n",
+    );
+    let root = write(&workspace, "root.yaml", "kind: sequence\nsequence: sub/child.yaml\n");
+    let nested = write(&workspace, "nested.yaml", "kind: sequence\nsequence:\n  - name: outer\n    sequence: sub/child.yaml\n");
+
+    for document in [&child, &root, &nested] {
+        let (stdout, stderr) = dry_run(&workspace, document, &["--yolo"], true);
+        let steps: Vec<&str> = stdout.lines().map(str::trim).filter(|line| line.starts_with("Step ")).collect();
+        assert_eq!(
+            steps,
+            ["Step prompt.", "Step task.", "Step sequence.", "Step group."],
+            "{}: stdout:\n{stdout}\nstderr:\n{stderr}",
+            document.display(),
+        );
+    }
+    assert!(!workspace.audio_spool().exists());
+}
+
+/// A nested sequence document rereads its rows when it starts, and resolves
+/// their references as the launch's walk did even when the sequence is named
+/// through a symlinked folder, whose spelling differs from the canonical
+/// one every referenced file takes.
+#[cfg(unix)] // unix symlink API
+#[test]
+fn a_nested_document_reached_through_a_symlinked_folder_starts_and_runs_its_rows() {
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
+    // A repository bounds resolution, so a spelling outside its root fails.
+    workspace.initialize_repository();
+    write(&workspace, "real/sub/t.yaml", "kind: task\nshell: echo ran-task\n");
+    write(&workspace, "real/sub/child.yaml", "kind: sequence\nsequence:\n  - name: a\n    task: ./t.yaml\n");
+    write(&workspace, "real/nested.yaml", "kind: sequence\nsequence:\n  - name: outer\n    sequence: sub/child.yaml\n");
+    let link = workspace.cwd().join("link");
+    std::os::unix::fs::symlink(workspace.cwd().join("real"), &link).unwrap();
+
+    let output = workspace
+        .command()
+        .args(["sequence", "--yolo", link.join("nested.yaml").to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(stdout.contains("ran-task"), "stdout:\n{stdout}\nstderr:\n{stderr}");
+}
+
 #[test]
 fn shipped_runner_sequence_renders_lexical_rows_through_the_cli() {
     let fixture = CliProcessFixture::named("shipped-sequence-bindings");
@@ -1321,4 +1382,71 @@ mod declaration_routes {
     route!(a_yaml_duplicate_declaration_key_is_refused_with_its_file, "flow.yaml",
         YAML.replace("sequence:\n", "$state:\n  rank: string\nsequence:\n"),
         refuses: ["flow.yaml", "duplicate entry with key \"$state\""]);
+}
+
+// ============================================================================
+// Provider reads through derived values
+// ============================================================================
+
+/// A task's provider read through derived sequence values that a runtime
+/// `set` feeds is decided at its turn, and a prompt's own property is never
+/// another owner's of the same name. The writer and the derived reader use
+/// the compiled `claudine-fake-goose` in marker mode; Claude is absent from
+/// the fixture `PATH`, so any launch of it fails as not installed.
+#[cfg(feature = "test-fixtures")]
+mod derived_provider_reads {
+    use super::*;
+
+    const WRITES: &str = "---\nagent: goose\nsuccess: [{ set: { pick: goose } }]\n---\nWrite.\n";
+
+    /// Runs `seq.yaml` (`root`) beside `files` with `--yolo`, returning
+    /// whether it succeeded, its flattened stderr, and the provider launch
+    /// count.
+    fn run(root: &str, files: &[(&str, &str)]) -> (bool, String, usize) {
+        let workspace = CliProcessFixture::named("sequence-derived-provider-reads");
+        let path = write(&workspace, "seq.yaml", root);
+        write(&workspace, "writes.md", WRITES);
+        for (name, body) in files {
+            write(&workspace, name, body);
+        }
+        fs::copy(
+            biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+            workspace.bin_dir().join(format!("goose{}", std::env::consts::EXE_SUFFIX)),
+        )
+        .expect("the fake provider is built with `test-fixtures`");
+        let marker = workspace.cwd().join("provider-launched.txt");
+        let output = workspace.command().env("PROVIDER_MARKER", &marker)
+            .args(["sequence", "--yolo"]).arg(&path).output().unwrap();
+        assert!(!workspace.audio_spool().exists());
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+        (output.status.success(), flat, fs::read_to_string(&marker).map_or(0, |log| log.lines().count()))
+    }
+
+    /// Two derived links from `with.agent` to the writer's `pick`: the reader
+    /// waits for the write and launches Goose after the writer.
+    #[test]
+    fn a_provider_read_through_two_derived_values_waits_for_the_write() {
+        let (success, stderr, launches) = run(
+            "kind: sequence\npick: claude\nmid: \"{{ pick }}\"\nchoice: \"{{ mid }}\"\nsequence:\n  - { name: writer, prompt: writes.md }\n  - { name: reader, prompt: plain.md, with: { agent: \"{{ choice }}\" } }\n",
+            &[("plain.md", "Plain.\n")],
+        );
+        assert!(success, "{stderr}");
+        assert_eq!(launches, 2, "{stderr}");
+    }
+
+    /// The prompt's literal `choice` is its own, whatever the sequence's
+    /// derived `choice` reads: its fixed, unavailable provider is refused
+    /// before the writer runs.
+    #[test]
+    fn a_prompts_own_property_is_not_the_sequences_derived_one() {
+        let (success, stderr, launches) = run(
+            "kind: sequence\npick: goose\nchoice: \"{{ pick }}\"\nsequence:\n  - { name: writer, prompt: writes.md }\n  - { name: reader, prompt: reads.md }\n",
+            &[("reads.md", "---\nchoice: claude\nagent: \"{{ choice }}\"\n---\nRead.\n")],
+        );
+        assert!(!success, "{stderr}");
+        assert!(stderr.contains("Agent Not Installed:(Claude)"), "{stderr}");
+        assert!(stderr.contains("No task has started"), "{stderr}");
+        assert_eq!(launches, 0, "{stderr}");
+    }
 }

@@ -66,12 +66,17 @@ pub(super) struct SequencePreflight {
 /// pass that would ask nothing new reports instead. When Interactive Mode is
 /// not allowed, an aggregated [`CompositionError::SequenceMissingProperties`]
 /// is returned so the user can fix the full sequence in one edit.
+///
+/// `runtime` is the root's runtime state as the first step will compose
+/// against it (its `initialize` writes; `None` for a dry run, which fires
+/// no lifecycle), so a value `initialize` wrote is never reported missing.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_phase_1c_with_schema(
     source: &ResolvedCompositionSource,
     plan: &SequencePlan,
     resolved_targets: &[Option<claudine::composition::ResolvedExecutionTarget>],
     user_set_overrides: &Option<serde_json::Value>,
+    runtime: Option<&claudine::composition::RuntimeSnapshot>,
     ctx: &StepComposeContext<'_>,
     effective_fail_fast: bool,
     initial_cumulative_approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
@@ -88,6 +93,7 @@ pub(super) fn run_phase_1c_with_schema(
             plan,
             resolved_targets,
             &overrides,
+            runtime,
             ctx,
             effective_fail_fast,
             initial_cumulative_approved.clone(),
@@ -339,6 +345,7 @@ fn run_phase_1c_attempt(
     plan: &SequencePlan,
     resolved_targets: &[Option<claudine::composition::ResolvedExecutionTarget>],
     user_set_overrides: &Option<serde_json::Value>,
+    runtime: Option<&claudine::composition::RuntimeSnapshot>,
     ctx: &StepComposeContext<'_>,
     effective_fail_fast: bool,
     initial_cumulative_approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
@@ -352,14 +359,13 @@ fn run_phase_1c_attempt(
         if interrupted.load(Ordering::SeqCst) {
             return Ok(Phase1cAttempt::Interrupted);
         }
-        // Validation layers against the *initial* runtime state — empty
-        // `outputs`, no mutations — which is exactly what the first step sees
-        // and what `--dry-run` composes against.
+        // Validation layers against the runtime state the first step sees:
+        // the root `initialize` writes, no outputs yet.
         let step_set_overrides = super::jit::step_set_overrides(
             plan,
             step_index,
             user_set_overrides.as_ref(),
-            None,
+            runtime,
         );
 
         let target = resolved_targets

@@ -377,21 +377,30 @@ fn a_selection_ignores_the_selected_documents_declarations() {
     }
 }
 
-/// Transitional: a value only the referrer defines still fills a referenced
-/// document's template, as the shipped research fleets' shared rosters need,
-/// but it is the lowest layer: the document's own value wins.
+/// A referenced document's template never reads its referrer's properties:
+/// a key only the referrer defines stays undefined (the template's own
+/// fallback applies), the document's own value fills its key, and a caller
+/// setter wins over both.
 #[test]
-fn a_referrer_value_is_only_a_lowest_layer_under_a_referenced_documents_own() {
+fn a_referenced_template_never_reads_a_value_only_its_referrer_defines() {
     let dir = TempDir::new().unwrap();
     write(
         dir.path(),
-        "roster.yaml",
-        "kind: sequence\nshared: roster\ntemplate:\n  topic: \"{{ research_prompt }}\"\n  shared: \"{{ shared }}\"\nsequence:\n  - one\n",
+        "sub/child.yaml",
+        "kind: sequence\nshared: own\ntemplate:\n  who: \"{{ reviewer || 'none' }}\"\n  shared: \"{{ shared }}\"\nsequence:\n  - one\n",
     );
-    let referrer = write(dir.path(), "fleet.yaml", "kind: sequence\nresearch_prompt: ./topic.md\nshared: fleet\nsequence: roster.yaml\n");
+    let referrer = write(dir.path(), "root.yaml", "kind: sequence\nreviewer: leaked\nshared: referrer\nsequence: sub/child.yaml\n");
+    let direct = plan_with(&dir.path().join("sub/child.yaml"), dir.path(), json!({})).unwrap();
+    assert_eq!(direct.steps[0].state.extra["who"], json!("none"), "the direct owner control");
+
     let plan = plan_with(&referrer, dir.path(), json!({})).unwrap();
-    assert_eq!(plan.steps[0].state.extra["topic"], json!("./topic.md"));
-    assert_eq!(plan.steps[0].state.extra["shared"], json!("roster"));
+    assert_eq!(plan.steps[0].state.extra["who"], json!("none"), "the referrer's `reviewer` never reaches the child");
+    assert_eq!(plan.steps[0].state.extra["shared"], json!("own"));
+    assert_eq!(plan.document_scope.as_ref().unwrap().values.get("reviewer"), None, "the owner's values hold no referrer key");
+
+    let plan = plan_with(&referrer, dir.path(), json!({"reviewer": "caller", "shared": "caller"})).unwrap();
+    assert_eq!(plan.steps[0].state.extra["who"], json!("caller"), "a setter supplies the key");
+    assert_eq!(plan.steps[0].state.extra["shared"], json!("caller"), "a setter wins over the owner's value");
 }
 
 /// A document input's absent and `null` forms are told apart through the

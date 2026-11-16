@@ -1,6 +1,8 @@
 ---
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
-research_prompt: "@claudine/docs/research/hooks/_research.md"
+initialize:
+    - set:
+          research_prompt: "@claudine/docs/research/hooks/_research.md"
 agent: opencode
 model: kimi-for-coding/k2p7
 ---

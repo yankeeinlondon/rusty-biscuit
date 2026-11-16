@@ -254,7 +254,7 @@ pub fn discover_sequence_inputs(
         SequenceSourceSpec::Inline(items) => {
             let keys = formal::formal_keys(&authored, &root_path)?;
             let scope = Scope { owner: root, template: keys.template, values: Arc::clone(&discovery.inventory.owners[root].values) };
-            discovery.walk_owner_list(&items, &root_path, &root_path, "sequence", &scope)?;
+            discovery.walk_owner_list(&items, &root_path, "sequence", &scope)?;
         }
         SequenceSourceSpec::Reference(reference) => {
             discovery.walk_reference(&reference, &root_path, "sequence", root, InputOwnerRole::RootReference)?;
@@ -355,17 +355,16 @@ impl Discovery<'_> {
 
     /// Walk the items of an owner's own `sequence:` list. Each item's grammar
     /// is judged here, which judges every inline list nested in it too.
-    /// `origin` resolves the items' references: the declaring file, except
-    /// for a root reference's rows, which run as the root's rows.
+    /// The items' references resolve from `declaring_path`.
     fn walk_owner_list(
-        &mut self, items: &[Value], declaring_path: &Path, origin: &Path, list_property: &str, scope: &Scope<'_>,
+        &mut self, items: &[Value], declaring_path: &Path, list_property: &str, scope: &Scope<'_>,
     ) -> Result<(), CompositionError> {
         for (index, item) in items.iter().enumerate() {
             if let Value::Object(map) = item {
                 grammar::validate_task_grammar(map, declaring_path, &format!("{list_property}[{index}]"))?;
             }
         }
-        self.walk_items(items, declaring_path, origin, list_property, scope)
+        self.walk_items(items, declaring_path, declaring_path, list_property, scope)
     }
 
     fn walk_items(
@@ -563,27 +562,25 @@ impl Discovery<'_> {
         role: InputOwnerRole,
     ) -> Result<(), CompositionError> {
         let (document, _) = self.loader.load_data_document(path)?;
-        // A root reference's rows run as the root's rows, from the root's
-        // directory; a nested container's from its own document's.
-        let rows_origin = if role == InputOwnerRole::RootReference { origin.to_path_buf() } else { path.to_path_buf() };
         let whole = reference.offset.is_none() && reference.operator.is_none();
         if whole && let Some(root) = document.value.as_object() && root.contains_key("sequence") {
             grammar::validate_sequence_root(root, path)?;
             let keys = formal::formal_keys(root, path)?;
             let source = source_resolution::whole_document_source(path, root, &document.orders)?;
-            let referrer = Arc::clone(&self.inventory.owners[owner].values);
             let owner = self.push_owner(&source, role, Some(origin.to_path_buf()), property.to_string())?;
             let items = super::super::data::expect_list(&root["sequence"], Some("sequence"))?;
-            // The template reads the referrer's values below the document's
-            // own, as the plan does (the transitional layer in
-            // `source::plan_referenced_sequence`), so both fill it alike.
-            let mut values = (*referrer).clone();
-            values.extend(self.inventory.owners[owner].values.iter().map(|(key, value)| (key.clone(), value.clone())));
-            let scope = Scope { owner, template: keys.template, values: Arc::new(values) };
-            return self.walk_owner_list(&items, path, &rows_origin, "sequence", &scope);
+            // The template reads only this owner's prepared values, as the
+            // plan does; the referrer's never enter them.
+            let scope = Scope { owner, template: keys.template, values: Arc::clone(&self.inventory.owners[owner].values) };
+            // A whole document's rows resolve their references from it, a
+            // root reference's included, as the graph resolves them.
+            return self.walk_owner_list(&items, path, "sequence", &scope);
         }
         // A selection is the enclosing owner's data: its rows are read the
-        // way the graph reads them, with no document of their own.
+        // way the graph reads them, with no document of their own. A root
+        // reference's selection runs as the root's rows, from the root's
+        // directory; a nested container's from the selected file's.
+        let rows_origin = if role == InputOwnerRole::RootReference { origin.to_path_buf() } else { path.to_path_buf() };
         let values = Arc::clone(&self.inventory.owners[owner].values);
         let plan = source_resolution::plan_referenced_sequence(
             reference, path, &document.value, Arc::clone(&document.orders), origin, &*values, true,

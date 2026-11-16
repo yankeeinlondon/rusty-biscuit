@@ -153,7 +153,7 @@ fn reread(graph: &PreflightGraph, frozen: &PreflightSequence) -> Result<Prefligh
     let context = ComposeContext::capture_for_content(task.origin_dir.as_path(), "");
     let state = reapproval::early_binding_state(&SharedFrontmatter::default(), context.clone())?;
     let resolution = crate::test_support::context_for(&task.origin_path);
-    prepare_nested_sequence(task, frozen, &state, Map::new(), context, &resolution, false, graph.nested_sources())
+    prepare_nested_sequence(task, frozen, &state, Map::new(), context, &resolution, false, graph.nested_sources(), None)
         .map(|(sequence, _)| sequence)
 }
 
