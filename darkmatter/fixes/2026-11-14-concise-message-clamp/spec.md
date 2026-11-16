@@ -32,7 +32,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-14
-review_iterations: 0
+review_iterations: 1
+completed: true
 needs_rulings: false
 required_rulings:
 implemented: true
