@@ -292,6 +292,13 @@ finalize:
   wait flag (`code --wait`); one that cannot wait is never chosen. A terminal editor needs stdin,
   stdout, and stderr on a terminal, so it fails with `--output json`, a
   redirected stdout, or a document read from stdin.
+- On Linux and macOS a terminal editor holds the terminal while it is open: a
+  Ctrl-C you type goes to the editor, not to `md`. Quit the editor to go on
+  (`:cq` fails the action), or signal `md` itself to cancel the run, which
+  stops the editor (`SIGTERM`, then `SIGKILL` after 2 s). `md` takes the
+  terminal and its settings back when the editor exits; if it cannot lend or
+  restore the terminal, the edit fails (`prepare the terminal` or
+  `restore the terminal`).
 - The target is mandatory: `edit: null`, `edit: []`, a blank path, or a long
   form without `file` is an error. A native number or boolean names a file by
   its text (`edit: 5` opens `5`).

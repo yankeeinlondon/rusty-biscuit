@@ -252,9 +252,13 @@ directly: `darkmatter::markdown::schemas` does not re-export them.
   (process group / Job Object, the same owner the login-shell probe launcher uses;
   [process trees](../../../sniff/docs/topics/process-trees.md)), polls
   `cancelled` every 20 ms, terminates with `SIGTERM` then `SIGKILL` after
-  `EDITOR_TERMINATE_GRACE`, hands a terminal editor the foreground (`pre_exec`
-  `tcsetpgrp`, registered after `TreeConfig::configure`), and restores the host's
-  foreground group and `termios` on drop. A successful exit `release`s the tree
+  `EDITOR_TERMINATE_GRACE`, hands a terminal editor that inherits stdin the
+  foreground through `sniff::process::ForegroundHandoff` (prepared after
+  `TreeConfig::configure`), and restores the host's foreground group and
+  `termios` explicitly after the editor is reaped: a prepare failure (including
+  `WouldBlock` while another handoff is active) is `EditorError::Io`
+  `prepare the terminal`; a restore failure fails only an otherwise successful
+  edit (`restore the terminal`) and is logged otherwise. A successful exit `release`s the tree
   (Windows clears kill-on-close) so a GUI client's main window survives.
   `LaunchPlan::run_reporting` returns a `LaunchReport` whose `warning` is set when
   that Windows release fails; `ProcessEditorService` copies it to

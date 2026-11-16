@@ -210,9 +210,9 @@ features their tier requires.
   host application's signal disposition. The ungated `wait`/`kill` core we use
   is `waitid`/`WaitForSingleObject`-based and installs nothing, so Darkmatter
   carries no platform split of its own.
-- `libc` (Unix only) supplies the editor's terminal-foreground handoff
-  (`editor/launch.rs`) and the terminal checks in `editor/surface.rs` and
-  `markdown/compose/shell_expansion/probe.rs`. The login-shell query's new
+- `libc` (Unix only) supplies the terminal checks in `editor/surface.rs` and
+  `markdown/compose/shell_expansion/probe.rs`. The editor's terminal-foreground
+  handoff comes from Sniff (`sniff::process::ForegroundHandoff`). The login-shell query's new
   session is applied through Sniff's session mode
   (`sniff::process::TreeConfig::session`), not a `setsid` call of Darkmatter's
   own. A session is needed because the lookup must run the shell interactively

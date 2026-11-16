@@ -111,7 +111,9 @@ pages with the behavior.
   Object assigned before the editor runs on Windows) and polls
   `EditRequest::cancelled` every 20 ms; cancellation terminates the tree
   (Unix `SIGTERM`, `EDITOR_TERMINATE_GRACE`, then `SIGKILL`) and reaps it
-  before returning. When Windows cannot release a finished editor's tree,
+  before returning. On Unix a terminal editor with inherited stdin also runs
+  under `sniff::process::ForegroundHandoff`, restored explicitly after the
+  editor is reaped (details in [library-surfaces.md](library-surfaces.md)). When Windows cannot release a finished editor's tree,
   `EditOutcome::warning` carries the text and the executor passes it to
   `LifecycleEffects::warn` once; the edit still succeeds. Contract:
   [process trees](../../../sniff/docs/topics/process-trees.md); Windows

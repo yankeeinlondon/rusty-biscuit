@@ -823,6 +823,18 @@ interrupt signal, or, under Claudine, a sibling fails in a group. While a
 terminal editor holds the terminal, a Ctrl-C you type goes to the editor, not
 to `md`; an interrupt sent to the `md` process itself still cancels the run.
 
+On Linux and macOS a terminal editor runs in a process group of its own, so
+`md` lends it the terminal's foreground while it runs and takes the terminal
+back, with its settings, once the editor has exited. How that works, and when
+nothing is lent (no terminal, or `md` running as a background job), is
+described in
+[Process trees: handing the terminal to an interactive child](../../../../sniff/docs/topics/process-trees.md#handing-the-terminal-to-an-interactive-child).
+Two failures belong to that step: the terminal cannot be lent (operation
+`prepare the terminal`; nothing is started), or it cannot be given back after
+an edit that otherwise succeeded (`restore the terminal`). After any other
+failure a restoration problem is only logged, and the first failure is the
+one reported. A GUI editor is never lent the terminal.
+
 The action stops only processes it started, never an editor that was already
 running:
 

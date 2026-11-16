@@ -150,6 +150,7 @@ stack continues with the next action:
 | The file reference or filesystem refuses the target | a malformed reference, a URL, a path outside the [mutation root](./index.md#where-file-actions-write), a directory at the path, a parent directory that cannot be created |
 | The name is taken under `create_new: true` | a file, directory, or symlink already holds the name |
 | The editor cannot be started | the resolved program fails to launch |
+| The terminal cannot be lent to a terminal editor, or given back | Linux and macOS: `prepare the terminal` failed before the editor started, or `restore the terminal` failed after an edit that otherwise succeeded |
 | The editor exits with a nonzero status | the user quits Vim with `:cq` |
 | The target is gone after the editor exits | the file was deleted, replaced by a directory, or moved outside the mutation root |
 
