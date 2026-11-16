@@ -2,9 +2,26 @@
 kind: plan
 created: 2026-11-14
 total_phases: 6
-phase: 1
+phase: 2
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
+source_files_during_phase_1:
+- darkmatter/lib/src/markdown/compose/directives_api.rs
+- darkmatter/lib/src/markdown/compose/parse_utils.rs
+- darkmatter/lib/src/markdown/compose/transclusion/types.rs
+- darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/preflight/mod.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+- darkmatter/dmls/src/overlay/directives.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/darkmatter/compose.md
+packages:
+- darkmatter
+- darkmatter-lsp
 ---
 
 # Plan: `::file interpolate=false` — transclude prose without evaluating it
@@ -247,7 +264,7 @@ absent/null conflation; the null distinction lives in
 
 **Wave 1** (two tasks, independent files, parallelizable):
 
-- [ ] Option parsing
+- [x] Option parsing
     - Add `parse_interpolate_value` to `directives_api.rs` (public) per Rule 1;
       re-export nothing else
     - Add `BlockOptions.interpolate: bool` with the hand-written `Default`
@@ -257,7 +274,7 @@ absent/null conflation; the null distinction lives in
     - Parser unit tests in `transclusion/parser.rs` `mod tests` covering every
       row of the matrix above, asserting the `ctx`/`line`/`caret_col` of one
       representative error
-- [ ] Options and identity plumbing
+- [x] Options and identity plumbing
     - Add `ProseInterpolation` + field + builder to `compose/context/options.rs`
       (Rule 4); classify in both encoders (Rule 5)
     - Add `effective_prose_interpolation` in `transclusion` with unit tests
