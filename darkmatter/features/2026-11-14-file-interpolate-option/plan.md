@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-14
 total_phases: 6
-phase: 2
+phase: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1:
@@ -22,6 +22,35 @@ skills_files_updated_during_phase_1:
 packages:
 - darkmatter
 - darkmatter-lsp
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/interpolation/active_inputs.rs
+- darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+- darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/tests/mod.rs
+- darkmatter/lib/src/markdown/compose/tests/file_interpolate.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/compose.md
+source_files_during_phase_3:
+- darkmatter/lib/src/markdown/reference/graph.rs
+- darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+- darkmatter/lib/src/markdown/compose/tests/file_interpolate.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/compose.md
 ---
 
 # Plan: `::file interpolate=false` — transclude prose without evaluating it
@@ -423,14 +452,14 @@ classifier.
 
 **Wave 2** (two tasks, parallelizable — different modules):
 
-- [ ] Active-input classifier
+- [x] Active-input classifier
     - Create `interpolation/active_inputs.rs` with `active_input_ranges` and
       `mask_prose` per Rule 10; unit tests over: option values (incl. `set.x=`,
       `when=`, `exclude=`), `::map`/`::filter` callback and source, `::shell`
       command, `::shell-block` body, `::file` target, prose/inline
       code/fenced code (not active), directives inside repeated bodies, data
       regions excluded via the `data` mask
-- [ ] Child-setting derivation
+- [x] Child-setting derivation
     - Apply the fold in `inherited_child_options` (Rule 6) and verify the
       `RemoteFile` manual fold from Phase 1 composes the fetched body under
       the folded setting; prologue/epilogue inheritance test (a disabled
@@ -438,7 +467,7 @@ classifier.
 
 **Wave 3** (depends on Wave 2):
 
-- [ ] Prose suppression
+- [x] Prose suppression
     - `run_stage` body-pass selection per Rule 11; token selection per
       Rule 12; `interpolate_code_blocks` override; `resolve_pending` audit
     - Engine-level behavior tests in a new
@@ -463,7 +492,7 @@ classifier.
 are disjoint from Wave 3's `inline/interpolation.rs` and the new test
 file):
 
-- [ ] Passive-consumer gating
+- [x] Passive-consumer gating
     - call_precheck filtering, `ContextRequirements::for_document_with` and
       call-site switches, `DeferredCapabilities` prose flag,
       remote-expression discovery gating/masking, per Rule 13
@@ -531,7 +560,7 @@ that identity separation holds.
 
 **Wave 5** (two tasks, parallelizable):
 
-- [ ] Preflight agreement
+- [x] Preflight agreement
     - Tests in `compose/tests/preflight.rs` (and `compose/tests/caching.rs`
       for identity): a child under `interpolate=false` whose prose shows a
       `::shell`-looking sample or command-like text yields the same approval
@@ -544,7 +573,7 @@ that identity separation holds.
       both directive orders, cache enabled and disabled — independent
       outputs and warnings; a cache entry from one setting is never served
       to the other (assert via `cache_stats` reuse counters)
-- [ ] Reference-graph propagation
+- [x] Reference-graph propagation
     - Implement Rule 19 in `markdown/reference/graph.rs`
     - Tests (in `markdown/reference/` test module or
       `lib/tests/l1/…` where graph tests live): a child under `false`
