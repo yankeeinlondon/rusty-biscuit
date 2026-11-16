@@ -1,9 +1,77 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1:
+- darkmatter/lib/src/lifecycle/envelope.rs
+- darkmatter/lib/src/lifecycle/envelope/tests.rs
+- darkmatter/lib/src/lifecycle/context.rs
+- darkmatter/lib/src/lifecycle/context/tests.rs
+- darkmatter/lib/src/lifecycle/cancellation.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/preflight/tests.rs
+- darkmatter/lib/src/lifecycle/run_guard.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/tests/l1/global_catalog.rs
+- darkmatter/lib/tests/l1/lifecycle_run_protocol.rs
+- darkmatter/lib/tests/l1/lifecycle_boundary/replay.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/tests/l1/compose_lifecycle_refusals.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+- claudine/cli/src/commands/wrap/sequence/container.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/lifecycle/context/tests.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs
+- claudine/lib/src/composition/lifecycle/report.rs
+- claudine/lib/src/composition/looping/engine.rs
+- claudine/lib/src/diagnostics/restored.rs
+- claudine/lib/src/diagnostics/restored/tests.rs
+- claudine/lib/src/diagnostics/snapshot.rs
+- claudine/lib/src/diagnostics/snapshot/tests.rs
+- claudine/lib/src/reporting/types.rs
+docs_updated_during_phase_1:
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/topics/lifecycle/index.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/claudine/SKILL.md
+packages:
+- darkmatter
+- darkmatter-cli
+- claudine
+- claudine-cli
+source_files_during_phase_2:
+- claudine/lib/src/harness/runtime.rs
+- claudine/lib/src/harness/runtime/tests.rs
+- claudine/lib/src/diagnostics/snapshot.rs
+- claudine/lib/src/diagnostics/snapshot/tests.rs
+- claudine/lib/src/stream/task_ledger.rs
+- claudine/lib/src/stream/task_ledger/tests.rs
+- claudine/lib/src/stream/logs/opencode/classify/mod.rs
+- claudine/lib/src/stream/logs/opencode/classify/asset.rs
+- claudine/lib/src/stream/logs/opencode/classify/tests.rs
+- claudine/lib/src/composition/lifecycle/report.rs
+- claudine/lib/src/composition/lifecycle/context/tests.rs
+- claudine/lib/src/render/incomplete_subagents.rs
+- claudine/cli/tests/l1/lifecycle_refusal_reports.rs
+- claudine/cli/tests/l1/wrap_incomplete_subagents.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/claudine/SKILL.md
+---
 ---
 
 # Plan: keep the whole error message; fit it at delivery
@@ -127,7 +195,7 @@ already normalized, to `snapshot_for_code`.
     - Add `the_suffix_is_normalized_too`: suffix `" (attempt \u{1b}[31m2\u{1b}[0m\n)"`
       yields `"base (attempt 2 )"` with no escape or newline.
     - Keep `concise_message_is_idempotent`; extend it to run the whole table twice.
-- [ ] **Validate Phase 1**
+- [x] **Validate Phase 1**
     - `cd darkmatter && just test` and `just lint` pass. (Claudine does not
       compile until Phase 2 removes its references to the deleted constant;
       that is expected and Phase 2 follows immediately.)
@@ -189,7 +257,7 @@ producer). Evidence: spec's reader's note.
 
 ### Wave 1 tasks (run concurrently)
 
-- [ ] **Harness and snapshots** (`claudine/lib/src/harness/runtime.rs`,
+- [x] **Harness and snapshots** (`claudine/lib/src/harness/runtime.rs`,
   `runtime/tests.rs`, `claudine/lib/src/diagnostics/snapshot.rs`,
   `diagnostics/snapshot/tests.rs`)
     - Implement R9-R12.
@@ -224,7 +292,7 @@ producer). Evidence: spec's reader's note.
           `subagent_outcomes`; drop the `<= 240` assertion.
     - Add to the snapshot tests: `from_code("<any catalog code>", "a\n\x1b[1mb\x1b[0m")`
       has `message == "a b"`.
-- [ ] **Task ledger** (`task_ledger.rs`, `task_ledger/tests.rs`)
+- [x] **Task ledger** (`task_ledger.rs`, `task_ledger/tests.rs`)
     - Implement R13. Rewrite docs at `task_ledger.rs:395-398`, `:403-410`
       (deleted with the constant) and `:430-436`: the headline names every task and
       the complete displaced failure.
@@ -242,7 +310,7 @@ producer). Evidence: spec's reader's note.
       (line ~365) so the message names all 40 tasks. Add
       `an_escape_only_displaced_message_leaves_no_dangling_clause`: kind `None`,
       message `"\x1b[0m"` produces no `after provider failure` text.
-- [ ] **OpenCode** (`classify/mod.rs`, `classify/asset.rs`, `classify/tests.rs`)
+- [x] **OpenCode** (`classify/mod.rs`, `classify/asset.rs`, `classify/tests.rs`)
     - Implement R14. Rewrite the doc at `mod.rs:155-163` ("apply the same
       char-boundary-safe cap") and the comment at `asset.rs:69-70` ("truncated if
       huge").
@@ -255,7 +323,7 @@ producer). Evidence: spec's reader's note.
 
 ### Validate Phase 2
 
-- [ ] `cd claudine && just test` and `just lint` pass. Claudine's L1 CLI tests
+- [x] `cd claudine && just test` and `just lint` pass. Claudine's L1 CLI tests
   that mention 240 are handled in Phase 3.
 
 ## Phase 3: Parity, command-path and delivery-isolation tests
@@ -290,7 +358,7 @@ not on truncation. The words "truncated" (L2 line 106) and "240-character"
       `snapshot.cause.message` is complete (the real field is `cause`, with
       `DiagnosticCause.message`; add no alias); and
       `serde_json::to_value` then `from_value` round-trips the same message.
-- [ ] **md compose command paths** (`darkmatter/cli/tests/l1/compose_lifecycle.rs`,
+- [x] **md compose command paths** (`darkmatter/cli/tests/l1/compose_lifecycle.rs`,
   `compose_data_output.rs`)
     - In `compose_lifecycle.rs`, model on
       `a_composed_error_runs_finalize_without_failed_and_exits_nonzero` (line 251):
