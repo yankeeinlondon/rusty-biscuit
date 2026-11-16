@@ -200,9 +200,10 @@ error: unexpected argument '--help' found
 ```
 
 The selector returns nothing (the ordinary path runs) when completion is
-active, when a root `-V`/`--version` comes before the command and before any
-help token, or when the only help token follows `--`. Tokens are matched
-exactly: `name=--help`, `--help=x`, and `-hh` are not help.
+active or when the only help token follows `--`. Help takes precedence over
+`-V`/`--version` in either order (`claudine --version compose --help` shows
+composition help). Tokens are matched exactly: `name=--help`, `--help=x`, and
+`-hh` are not help.
 
 **The hoist is a normalization contract.** `argv::normalize` still scans the
 argv between a composition subcommand and the first literal `--` for an exact

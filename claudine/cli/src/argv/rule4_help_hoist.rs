@@ -38,8 +38,7 @@ pub(crate) enum HelpDestination {
 /// token decides, and nothing after the first literal `--` counts). The first
 /// exact standalone `-h`/`--help` before that `--` decides the destination:
 /// before the command it is [`HelpDestination::Root`], after it the command's
-/// own screen. An exact root `-V`/`--version` before the command, or before
-/// any help token, leaves the argv to the ordinary parser.
+/// own screen. Help takes precedence over `-V`/`--version` in either order.
 ///
 /// Tokens are compared exactly and never interpreted, so an incomplete or
 /// invalid option beside the help token cannot prevent help, while
@@ -76,9 +75,6 @@ pub(crate) fn select_help(
         }
         if token == "-h" || token == "--help" {
             return Some(if before_command { HelpDestination::Root } else { command_help });
-        }
-        if before_command && (token == "-V" || token == "--version") {
-            return None;
         }
         cursor += 1;
     }
@@ -178,10 +174,9 @@ mod tests {
     }
 
     #[test]
-    fn selection_defers_to_completion_version_and_other_commands() {
+    fn selection_defers_to_completion_and_other_commands() {
         let input = argv(&["claudine", "compose", "--help"]);
         assert_eq!(select_help(&input, true), None);
-        assert_eq!(select(&["claudine", "--version", "compose", "-h"]), None);
         assert_eq!(select(&["claudine", "mcp", "compose", "--help"]), None);
         assert_eq!(select(&["claudine", "__complete", "compose", "--help"]), None);
         assert_eq!(
@@ -318,15 +313,14 @@ mod tests {
     }
 
     #[test]
-    fn selection_yields_to_a_root_version_request() {
+    fn selection_prioritizes_help_over_a_root_version_request() {
         let compose = Some(HelpDestination::Composition("compose"));
         assert_rows(&[
-            (&["claudine", "--version", "compose", "-h"], None),
-            (&["claudine", "-V", "compose", "--help"], None),
-            (&["claudine", "-V", "sequence", "x.md", "-h"], None),
+            (&["claudine", "--version", "compose", "-h"], compose),
+            (&["claudine", "-V", "compose", "--help"], compose),
+            (&["claudine", "-V", "sequence", "x.md", "-h"], Some(HelpDestination::Composition("sequence"))),
+            (&["claudine", "--version", "--help", "compose"], Some(HelpDestination::Root)),
             (&["claudine", "--help", "--version", "compose"], Some(HelpDestination::Root)),
-            // After the command a version token is the command's argument,
-            // not a root request.
             (&["claudine", "compose", "-V", "--help"], compose),
             (&["claudine", "compose", "x.md", "--version", "-h"], compose),
         ]);

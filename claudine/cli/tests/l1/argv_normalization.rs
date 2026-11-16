@@ -800,6 +800,8 @@ fn help_before_the_separator_wins_in_every_position() {
             ("attached output", vec![command, "x.md", "--output=json", "--help"]),
             ("unknown option", vec![command, "--no-such-option", "x.md", "--help"]),
             ("missing value", vec![command, "x.md", "--help", "-m"]),
+            ("long version before help", vec!["--version", command, "--help"]),
+            ("short version before help", vec!["-V", command, "-h"]),
         ] {
             let help = run_help(&cli, &args);
             assert!(help.stderr.is_empty(), "{command} {label}: stderr: {}", help.stderr);

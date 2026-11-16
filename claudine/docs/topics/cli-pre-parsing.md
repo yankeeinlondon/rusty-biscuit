@@ -93,10 +93,11 @@ Selection never validates the other tokens. That is the point: an unknown
 provider, a missing option value, malformed `--set` JSON, or conflicting
 switches would otherwise fail in the partition or in clap before help could
 be shown. Tokens are compared exactly, so `name=--help`, `--help=x`, and
-`-hh` are not help. Three things leave the argv to the ordinary path:
-completion mode (`COMPLETE` set, or the `__complete` command), a root
-`-V`/`--version` before the command and before any help token, and a help
-token only after `--`, which belongs to the provider.
+`-hh` are not help. Help takes precedence over `-V`/`--version` in either
+order: `claudine --version compose --help` shows composition help.
+Completion mode (`COMPLETE` set, or the `__complete` command) and a help
+token only after `--`, which belongs to the provider, leave the argv to the
+ordinary path.
 
 ## Pre-parsing stage
 

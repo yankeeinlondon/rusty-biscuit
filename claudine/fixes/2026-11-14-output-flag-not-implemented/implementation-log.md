@@ -321,3 +321,22 @@ second full run:
   `claude --dry-run hi -ojson` exit 2 with the refusal; `claude hi -m`,
   `claude -m`, `compose x.md -m`, and `sequence x.md --model` exit 2;
   `claude hi -- -o json --help` passes both tokens to the provider.
+
+## Help precedence follow-up (2026-11-16)
+
+Review found that the early help selector still yielded to a root `-V` or
+`--version` written before help. The author requested removing that exception.
+The selector now answers help in either order, so
+`claudine --version compose --help` shows composition help and exits 0.
+Updated the selector's existing version cases, the CLI help-precedence matrix
+(both version spellings across wrappers and composition commands), and both
+pre-parsing topic pages.
+
+Focused macOS validation, run sequentially to limit load while another agent
+was working:
+
+- `just test-cli selection_prioritizes_help_over_a_root_version_request`:
+  1 passed.
+- `CARGO_BUILD_JOBS=2 just test-cli help_before_the_separator_wins_in_every_position --test-threads 2`:
+  1 passed.
+- `git diff --check`: clean.
