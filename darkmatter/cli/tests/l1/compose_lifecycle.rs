@@ -638,14 +638,8 @@ fn a_prompt_outside_the_launch_scope_cannot_write_beside_itself() {
         .and_then(|rest| rest.split_once(" (root: "))
         .unwrap_or_else(|| panic!("a containment refusal: {message}"));
     assert_eq!(named_target, target.display().to_string());
-    // The lifecycle failure message is length-clamped, which can cut a long
-    // temp-dir root; what is shown must still be the launch root.
     let root = biscuit_file::canonicalize_simplified(fixture.cwd()).expect("the launch directory exists");
-    let shown_root = named_root.trim_end_matches(')').trim_end_matches('…');
-    assert!(
-        !shown_root.is_empty() && root.display().to_string().starts_with(shown_root),
-        "{message}"
-    );
+    assert_eq!(named_root, format!("{})", root.display()), "{message}");
     assert!(envelope["document"].is_null(), "no document was written: {envelope}");
     assert!(!fixture.workspace_path().join("shared/beside.md").exists());
     assert!(!fixture.cwd().join("beside.md").exists());

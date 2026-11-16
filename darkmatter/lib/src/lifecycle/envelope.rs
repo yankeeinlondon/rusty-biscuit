@@ -73,6 +73,16 @@ pub struct DiagnosticSnapshot {
     /// rendered block.
     pub message: String,
 
+    /// The selected diagnostic's complete message when [`Self::message`] had to
+    /// be clamped: one escape-free line (see [`single_line_message`]), for a
+    /// host's actionable error output, which must keep every path and name the
+    /// author needs to correct the failure. `None` when `message` is already
+    /// complete. In-process only, like [`Self::frontmatter_excerpt`]: never
+    /// serialized, so `err.*`, persistence, and wire forms keep the concise
+    /// text.
+    #[serde(skip)]
+    pub full_message: Option<String>,
+
     /// The next registered diagnostic below this one, when the chain has one.
     ///
     /// One level only: [`DiagnosticCause`] carries no cause of its own, so
@@ -223,12 +233,40 @@ pub fn concise_message(text: &str) -> String {
     concise_message_with_suffix(text, "")
 }
 
+/// Reduce arbitrary error text to one escape-free line without clamping it.
+///
+/// The form a host's actionable error output shows: the same hygiene as
+/// [`concise_message`], but every character of the text kept, so a long path
+/// in a containment refusal survives. Never send it to speech, messaging, or
+/// a notification.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::lifecycle::envelope::single_line_message;
+///
+/// let long = "x".repeat(300);
+/// assert_eq!(single_line_message(&format!("a\n{long}")).chars().count(), 302);
+/// ```
+pub fn single_line_message(text: &str) -> String {
+    collapse_to_line(&strip_ansi_codes(text))
+}
+
+/// `concise` and, when it differs, the complete one-line form of `text`
+/// ([`single_line_message`]) it was clamped from.
+pub fn concise_and_full(text: &str) -> (String, Option<String>) {
+    let full = single_line_message(text);
+    let concise = concise_message(&full);
+    let full = (full != concise).then_some(full);
+    (concise, full)
+}
+
 /// [`concise_message`] with `suffix` appended after clamping.
 ///
 /// The suffix's characters are reserved from the budget, so a suffix such as
 /// `" (attempt 2)"` survives truncation rather than being cut off.
 pub fn concise_message_with_suffix(base: &str, suffix: &str) -> String {
-    let single_line = collapse_to_line(&strip_ansi_codes(base));
+    let single_line = single_line_message(base);
     let budget = CONCISE_MESSAGE_MAX_CHARS.saturating_sub(suffix.chars().count());
     format!("{}{suffix}", clamp_chars(&single_line, budget))
 }

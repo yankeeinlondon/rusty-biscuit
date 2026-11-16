@@ -175,7 +175,7 @@ pub(super) fn run(mut compose: LifecycleCompose<'_>) -> Result<()> {
             // problem in the document.
             Some(sink) if error.cause.is_some() => sink.document_diagnostics(lifecycle_failure_diagnostics(error)),
             Some(sink) => sink.diagnostics(lifecycle_failure_diagnostics(error)),
-            None => effects.status(StatusState::Error, &error.msg),
+            None => effects.status(StatusState::Error, error.actionable_msg()),
         }
     }
     if let (Some(sink), Some(started)) = (sink, started) {

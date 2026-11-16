@@ -29,6 +29,7 @@ fn info() -> LifecycleErrorInfo {
         kind: "HostCheck",
         variant: "agent".to_string(),
         msg: "the agent did not resolve".to_string(),
+        full_msg: None,
         snapshot: None,
         property: None,
         reason: Default::default(),

@@ -24,6 +24,7 @@ fn coded() -> DiagnosticSnapshot {
         severity: "error".to_string(),
         detail: json!({}),
         message: "cancelled".to_string(),
+        full_message: None,
         cause: None,
         frontmatter_excerpt: Some(SourceExcerpt::new(Lines("a: 1"))),
     }
@@ -65,4 +66,18 @@ fn the_excerpt_never_serializes() {
     assert!(value.get("cause").is_none());
     let restored: DiagnosticSnapshot = serde_json::from_value(value).unwrap();
     assert_eq!(restored.frontmatter_excerpt, None);
+}
+
+#[test]
+fn a_clamped_message_keeps_its_complete_one_line_form_beside_it() {
+    let long = format!("\u{1b}[31mrefusing\u{1b}[0m\n{}", "p/".repeat(200));
+
+    let (concise, full) = concise_and_full(&long);
+    let (short, none) = concise_and_full("short\ntext");
+
+    let full = full.expect("a clamped message keeps its complete form");
+    assert_eq!(concise.chars().count(), CONCISE_MESSAGE_MAX_CHARS);
+    assert_eq!(full, format!("refusing {}", "p/".repeat(200)));
+    assert_eq!(concise, concise_message(&full), "the concise form is the complete one clamped");
+    assert_eq!((short.as_str(), none), ("short text", None));
 }

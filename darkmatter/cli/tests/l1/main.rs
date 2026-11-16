@@ -145,6 +145,7 @@ mod compose_edit_action;
 mod toc;
 mod validate_refs;
 mod compose_lifecycle_approval;
+mod compose_lifecycle_refusals;
 mod lifecycle_passive_surfaces;
 mod lifecycle_schema_fallback;
 mod schema_recursive;

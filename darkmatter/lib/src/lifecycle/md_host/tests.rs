@@ -508,3 +508,104 @@ fn a_late_interrupt_flag_is_seen_and_a_missing_one_gives_up() {
     assert!(wait_for_interrupt(&|| true, Duration::from_secs(30)));
     assert!(started.elapsed() < Duration::from_secs(30));
 }
+
+// ── Long containment refusals ────────────────────────────────────────────
+
+/// A 50-character project directory: with the system temp prefix it makes a
+/// refusal naming both the target and the root longer than the concise
+/// message limit on every host.
+const LONG_PROJECT: &str = "a-project-directory-with-a-fifty-character-name-xy";
+const LONG_OUTSIDE: &str = "an-outside-directory-with-a-fifty-character-name-x";
+
+/// An editor that records being asked: a refused `edit` must never reach it.
+#[derive(Default)]
+struct NeverEditor(std::sync::atomic::AtomicBool);
+
+impl EditorService for NeverEditor {
+    fn edit(&self, _: &crate::editor::EditRequest<'_>) -> crate::editor::EditOutcome {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::editor::EditOutcome { attempted: false, result: Ok(()) }
+    }
+}
+
+/// Runs `action` (given the refused target) in `composed` under a mutation
+/// root of the system temp directory plus [`LONG_PROJECT`], and returns the
+/// action error with the root and target it must name.
+fn refused_under_a_long_root(action: impl Fn(&str) -> Value) -> (LifecycleErrorInfo, String, String) {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join(LONG_PROJECT);
+    let target = temp.path().join(LONG_OUTSIDE).join("nested-target-directory").join("refused-target-file.md");
+    std::fs::create_dir_all(&root).unwrap();
+    let document = root.join("doc.md");
+    std::fs::write(&document, "---\ncount: 1\n---\nBody\n").unwrap();
+    let request = crate::markdown::compose::test_request_in(
+        crate::markdown::compose::ComposeOptions::new(),
+        biscuit_file::FileResolutionContext::new(&root),
+    );
+    let lines = Lines::default();
+    let frontmatter = SharedFrontmatter::default();
+    let live = Mutex::new(SharedFrontmatter::default());
+    let state = MdRuntimeState::default();
+    let approved = ShellPreApprovals::new();
+    let engine = EffectEngine::builder().mutation_root(&root).auto_rehash(false).build();
+    let timing = LifecycleTiming::default();
+    let editor = NeverEditor::default();
+    let probe = || false;
+    let context = MdStackContext {
+        request: &request,
+        source_path: &document,
+        frontmatter: &frontmatter,
+        live_frontmatter: &live,
+        state: &state,
+        approved: &approved,
+        effect_engine: &engine,
+        effects: &lines,
+        output: &lines,
+        timing: &timing,
+        interrupted: &probe,
+        editor: Some(&editor),
+    };
+    let config = parsed(json!({ "composed": [action(&target.to_string_lossy())] }));
+    let event = MdEvent { signal: LifecycleSignal::Start, name: "composed", error: None, shells: Err(ShellRefusal::Locked) };
+
+    let outcome = evaluate(&context, &config, &event);
+
+    assert!(!editor.0.load(std::sync::atomic::Ordering::SeqCst), "the editor is never asked for a refused target");
+    assert!(!target.exists(), "nothing was written outside the root");
+    let error = outcome.action_error.expect("the refusal is the action's error");
+    (error, root.display().to_string(), target.display().to_string())
+}
+
+/// The refusal's complete text names the whole target and root, both in the
+/// action error and in the diagnostic `md compose` publishes, while `err.msg`
+/// stays within the concise limit.
+fn assert_full_refusal(error: &LifecycleErrorInfo, root: &str, target: &str) {
+    let full = error.actionable_msg();
+    assert!(full.contains("outside the mutation root"), "{full}");
+    assert!(full.contains(target), "names the whole target {target}: {full}");
+    assert!(full.contains(&format!("(root: {root})")), "names the whole root {root}: {full}");
+    assert!(error.msg.chars().count() <= crate::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS, "{}", error.msg);
+    assert_ne!(error.msg, full, "the fixture is long enough that `err.msg` is clamped");
+    assert_eq!(error.to_value()["msg"], json!(error.msg), "`err.msg` reads the concise text");
+    let diagnostics = crate::markdown::compose::report_diagnostics::lifecycle_failure_diagnostics(error);
+    assert_eq!(diagnostics.iter().map(|diagnostic| diagnostic.message.as_str()).collect::<Vec<_>>(), [full]);
+}
+
+#[test]
+fn a_long_root_survives_in_an_effect_writers_refusal() {
+    let (error, root, target) = refused_under_a_long_root(|target| json!({ "ensure_file": target }));
+    assert_full_refusal(&error, &root, &target);
+}
+
+#[test]
+fn a_long_root_survives_in_a_frontmatter_writers_refusal() {
+    let (error, root, target) = refused_under_a_long_root(|target| json!({ "set_frontmatter": [target, "count", 2] }));
+    assert_full_refusal(&error, &root, &target);
+}
+
+#[test]
+fn a_long_root_and_target_survive_in_an_edit_refusal() {
+    let (error, root, target) = refused_under_a_long_root(|target| json!({ "edit": target }));
+    assert!(error.actionable_msg().contains("`composed[0].edit` could not edit the file"), "{}", error.actionable_msg());
+    assert_full_refusal(&error, &root, &target);
+}

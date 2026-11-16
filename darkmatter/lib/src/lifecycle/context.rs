@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use super::envelope::{DiagnosticCatalog, DiagnosticSnapshot, concise_message};
+use super::envelope::{DiagnosticCatalog, DiagnosticSnapshot, concise_and_full};
 use super::error::LifecycleExprError;
 use crate::markdown::MarkdownError;
 use crate::markdown::compose::expression::ExpressionError;
@@ -86,6 +86,13 @@ pub struct LifecycleErrorInfo {
     /// its multi-line rendered block. Equal to `snapshot.message` when the
     /// snapshot is present, so `err.msg` reads one value regardless.
     pub msg: String,
+
+    /// The complete one-line message `msg` was clamped from, or `None` when
+    /// `msg` is already complete. Not projected into `err.*`: it exists for a
+    /// host's actionable error output (terminal and machine diagnostics), which
+    /// must keep a long target and mutation root intact. Read it through
+    /// [`Self::actionable_msg`].
+    pub full_msg: Option<Box<str>>,
 
     /// The shared owned projection of the selected diagnostic, when the source
     /// is classifiable.
@@ -188,15 +195,19 @@ impl LifecycleErrorInfo {
     ) -> Self {
         match catalog.select(error) {
             Some(snapshot) => Self::from_snapshot(kind, variant, snapshot),
-            None => Self {
-                kind,
-                variant,
-                msg: concise_message(&error.to_string()),
-                snapshot: None,
-                property: None,
-                reason: LifecycleEvaluationReason::Expression,
-                cause: None,
-            },
+            None => {
+                let (msg, full_msg) = concise_and_full(&error.to_string());
+                Self {
+                    kind,
+                    variant,
+                    msg,
+                    full_msg: full_msg.map(Into::into),
+                    snapshot: None,
+                    property: None,
+                    reason: LifecycleEvaluationReason::Expression,
+                    cause: None,
+                }
+            }
         }
     }
 
@@ -249,19 +260,24 @@ impl LifecycleErrorInfo {
     ///
     /// `msg` passes through [`concise_message`], so a hand-built message here
     /// cannot reach TTS or a webhook multi-line or escape-bearing. The pass is
-    /// idempotent, so text that already went through it is unchanged.
+    /// idempotent, so text that already went through it is unchanged. When the
+    /// clamp cut the text, its complete one-line form is kept as
+    /// [`Self::full_msg`].
+    ///
+    /// [`concise_message`]: super::envelope::concise_message
     pub fn from_action_failure_with(
         catalog: &dyn DiagnosticCatalog,
         verb: impl Into<String>,
         msg: impl Into<String>,
     ) -> Self {
         let variant = verb.into();
-        let msg = concise_message(&msg.into());
+        let (msg, full_msg) = concise_and_full(&msg.into());
         let snapshot = catalog.snapshot_for_error_kind(&variant, msg.clone()).map(Box::new);
         Self {
             kind: "LifecycleAction",
             variant,
             msg,
+            full_msg: full_msg.map(Into::into),
             snapshot,
             property: None,
             reason: LifecycleEvaluationReason::Expression,
@@ -270,17 +286,28 @@ impl LifecycleErrorInfo {
     }
 
     /// Wrap an already-projected [`DiagnosticSnapshot`], mirroring `err.msg`
-    /// from the snapshot's own concise message so the two never diverge.
+    /// (and [`Self::full_msg`]) from the snapshot's own messages so the two
+    /// never diverge.
     pub fn from_snapshot(kind: &'static str, variant: String, snapshot: DiagnosticSnapshot) -> Self {
         Self {
             kind,
             variant,
             msg: snapshot.message.clone(),
+            full_msg: snapshot.full_message.as_deref().map(Into::into),
             snapshot: Some(Box::new(snapshot)),
             property: None,
             reason: LifecycleEvaluationReason::Expression,
             cause: None,
         }
+    }
+
+    /// The message a host's actionable error output shows: the complete
+    /// one-line text ([`Self::full_msg`]) when `msg` was clamped, else `msg`.
+    ///
+    /// Speech, messaging, notifications, and `err.msg` keep reading the
+    /// concise [`Self::msg`].
+    pub fn actionable_msg(&self) -> &str {
+        self.full_msg.as_deref().unwrap_or(&self.msg)
     }
 
     /// Attach the lifecycle property that raised, unless a more specific one

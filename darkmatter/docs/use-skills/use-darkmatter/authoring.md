@@ -281,8 +281,7 @@ finalize:
   in your editor, waits for it to close, then runs the next action. A missing
   file is created first; `create_new: true` refuses an existing one; `gui`
   picks a graphical (`true`) or terminal (`false`) editor. A known editor gets its
-  wait flag (`code --wait`); one that cannot wait is never chosen. Under `md` the file
-  must sit inside the prompt's own directory. A terminal editor needs stdin,
+  wait flag (`code --wait`); one that cannot wait is never chosen. A terminal editor needs stdin,
   stdout, and stderr on a terminal, so it fails with `--output json`, a
   redirected stdout, or a document read from stdin.
 - The target is mandatory: `edit: null`, `edit: []`, a blank path, or a long
@@ -296,6 +295,16 @@ finalize:
   beside it fails `md compose` before any event fires, even when the values
   agree (`md schema validate` does not catch this). The `no_error: false`
   that schema validation fills in never counts as a second placement.
+- Every file action (`edit`, the `*_frontmatter` writers, `ensure_file`,
+  `ensure_dir`, `append_line`, `append_jsonl`) writes only inside the working
+  tree you launched `md` in: the repository or worktree top level, or the
+  launch directory outside a repository. A relative path resolves like a
+  read from the document: an existing file is the one a read finds (for
+  `notes.md`, the document's folder, then the repository root), a missing one
+  is created beside the document. Write `./notes.md` to pin the document's
+  folder, or `{{{ ctx.cwd }}}/notes.md` for the launch directory. A prompt
+  stored outside your project cannot write beside itself; a target outside
+  the boundary, through a symlink too, is refused before anything is created.
 - `initialize` runs before schema validation, so its effects stay done when
   the frontmatter is then refused (the run goes on to `failed`, `finalize`).
   Put effects that must not happen for an invalid document in `composed`.

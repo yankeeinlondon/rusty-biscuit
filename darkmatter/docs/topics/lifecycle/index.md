@@ -422,6 +422,144 @@ action or creates its file or directories. They still check its shape and
 types. Within a run, an `edit` in a branch that is not taken never chooses an
 editor or touches the disk, although the branch's actions are still validated.
 
+## Where file actions write
+
+This section covers every lifecycle action that writes a file: the seven
+frontmatter writers (`set_frontmatter`, `merge_frontmatter`,
+`delete_frontmatter`, `increment_frontmatter`, `decrement_frontmatter`,
+`append_frontmatter`, `prepend_frontmatter`), both forms of `ensure_file`,
+`ensure_dir`, `append_line`, `append_jsonl`, and [`edit`](#editing-a-file-edit).
+Every host follows the same rules, `md compose` and Claudine alike.
+
+Two different directories decide where a write lands:
+
+| | What it is | What it decides |
+|---|---|---|
+| **The base** | the folder of the document that wrote the action (the launch directory for a document piped on stdin) | where a relative path such as `notes.md` points |
+| **The mutation root** | the working tree you launched the command in | whether the write is allowed at all |
+
+The mutation root is the top level of the Git repository (or linked worktree)
+that contains the directory you ran the command from. Outside a repository it
+is that directory itself. It is captured once when the command starts and
+never changes during the run: not for a transcluded or `prep`/`proxy`
+document, a sequence member, a loop iteration, or a retry. Launching from a
+package directory inside a monorepo still gives the monorepo's top level; a
+linked worktree gives its own top level, never the main checkout. If
+`md compose` cannot read the repository it was launched in (a damaged `.git`,
+for example), the run fails before any file action rather than guessing a
+root.
+
+The root is only a boundary. It is never used as the base of a relative path.
+
+### Choosing the target: resolve, then check
+
+Each file action picks its target in two steps:
+
+```mermaid
+flowchart TD
+    A["file operand, e.g. notes.md"] --> U{"a URL?"}
+    U -- yes --> R1["refused: nothing fetched or written"]
+    U -- no --> B["resolve it like a read<br/>from the authoring document"]
+    B --> C{"does a file exist?"}
+    C -- yes --> D["target = the file the read would find"]
+    C -- no --> E["target = the first place the read would look"]
+    D & E --> F{"inside the mutation root?"}
+    F -- no --> R2["refused: nothing opened, created, or written"]
+    F -- yes --> G["run the action on that one target"]
+```
+
+1. **Resolve the operand as a [file reference](../file-referencing.md).**
+   An existing file is the one a read of the same text would find. For a
+   bare name such as `notes.md`, that is the document's folder first and
+   then the repository root; for `./notes.md`, only the document's folder;
+   for a prefixed reference such as `&/docs/plan.md`, that prefix's roots. A
+   missing file is created at the first place the read would look, which for
+   a bare or `./` name is beside the document.
+2. **Check the target against the mutation root.** A target outside it is
+   refused before any parent directory is created, any document is loaded,
+   or any editor starts. A refused target is never skipped in favor of
+   another candidate.
+
+The check compares where paths really lead on disk, not how they are
+spelled: a symlink inside the root that points outside it is refused, and so
+is a sibling directory whose name merely starts with the root's name
+(`/work/repo-old` is not inside `/work/repo`). A `../` path that stays inside
+the root works; one that climbs out of the document's file tree is refused by
+the file-reference rules before the root is checked. The refusal names the
+target and the root:
+
+```text
+refusing to write outside the mutation root: /Users/me/notes.md (root: /Users/me/proj)
+```
+
+The command reports this line whole, in its terminal output and in the JSON
+diagnostic alike, even when long paths make it longer than the 240-character
+`err.msg` a later event reads.
+
+### A prompt in a subfolder
+
+A prompt at `~/proj/prompts/new-spec.md`, run from `~/proj`, where
+`~/proj/specs/auth.md` already exists:
+
+| Action in `initialize` | Result |
+|---|---|
+| `edit: specs/auth.md` | opens the existing `~/proj/specs/auth.md` (the repository-root candidate) |
+| `ensure_file: ["specs/auth.md", "# Auth"]` | the same file; it exists, so nothing is written |
+| `append_line: ["specs/auth.md", "reviewed"]` | appends to `~/proj/specs/auth.md` |
+| `ensure_file: ["specs/new.md", "# New"]` | creates `~/proj/prompts/specs/new.md` (beside the prompt) |
+| `ensure_file: ["{{ ctx.cwd }}/specs/new.md", "# New"]` | creates `~/proj/specs/new.md` |
+| `edit: "~/notes.md"` | refused: outside `~/proj` |
+
+Because writes resolve exactly like reads, a bare name means the same file
+for both. If `prompts/notes.md` is missing but `~/proj/notes.md` exists,
+`edit: notes.md` opens the repository-root file, just as `::file notes.md`
+would read it. Write `./notes.md` to pin the document's folder for both.
+
+### A shared prompt from another repository
+
+The root comes from where you ran the command, not from where the prompt is
+stored. A prompt kept in a shared library outside your working tree can
+write into your project through an absolute path, usually built from
+`ctx.cwd`, but it cannot write beside itself:
+
+```yaml
+# ~/shared-prompts/release.md, run from ~/proj
+initialize:
+    - ensure_file: ["{{ ctx.cwd }}/CHANGELOG.md", "# Changelog"]   # writes ~/proj/CHANGELOG.md
+    - append_line: ["release-log.md", "started"]                   # refused: ~/shared-prompts is outside ~/proj
+```
+
+The same holds when you launch outside any repository and the prompt lives
+inside one: the launch directory is the root.
+
+### Operands that name no file
+
+- **A URL** is refused before anything is fetched or written.
+- **A recursive `%` reference that matches nothing** is refused: its search
+  folders are never used as a new file's name.
+- **An environment-variable reference** follows its value: if `NOTES`
+  expands to an absolute path, `{{NOTES}}/today.md` is an absolute target. A
+  lifecycle operand is interpolated before it is read as a reference, so
+  write it with triple braces, which produce the literal `{{NOTES}}`:
+
+  ```yaml
+  initialize:
+      - ensure_file: ["{{{NOTES}}}/today.md", "# Today"]
+  ```
+
+### Moving from root-relative creation
+
+Earlier releases created a missing bare name such as `notes.md` at the
+mutation root, and `md compose` used the composed document's own folder as
+that root. Now a missing bare name is created beside the document, and the
+root is your working tree. To keep a file at the top of your project, name it
+with an absolute path such as `{{ ctx.cwd }}/notes.md` (or `&/notes.md` for a
+prompt stored in the same repository). To make sure a name never falls back
+to a repository-root file, write `./notes.md`.
+
+The mutation root limits lifecycle file actions only. It does not sandbox an
+approved `shell` command or what the editor itself writes.
+
 ## Editing a file: `edit`
 
 The `edit` action opens a named file in your editor and waits until you close
@@ -604,16 +742,17 @@ Set `gui: true` when the run's streams cannot be lent to a terminal editor.
 absolute, and prefixed forms such as `&docs/plan.md` all work, and a URL is
 refused without fetching anything.
 
-- **Where it resolves.** An existing file is found the way the document's
-  other references find one. A missing plain relative name, such as
-  `notes.md`, is created under the host's mutation root.
+- **Where it resolves.** The target is chosen like every file action's, as
+  described in [Where file actions write](#where-file-actions-write): an
+  existing file is the one a read of the same text would find, and a missing
+  one is created where that read would look first, so a missing `notes.md` is
+  created beside the document.
 - **The mutation root.** Every target, including an absolute path, must lie
-  inside the host's mutation root, the directory within which lifecycle
-  actions may write; a symlink that leads outside it is refused too. Under
-  `md compose` the root is the directory that holds the composed document, so
-  the example above works when the prompt is stored in the launch directory or
-  one of its ancestors, while a prompt kept in a sibling directory is refused.
-  Claudine's root is the launch workspace.
+  inside the mutation root, the working tree the command was launched in; a
+  symlink that leads outside it is refused too. The example above therefore
+  works wherever the prompt is stored, because `ctx.cwd` is inside the root,
+  while a relative path in a prompt kept outside your working tree is
+  refused.
 - **A missing file** is created empty, together with any missing parent
   directories. The creation is exclusive: if another process creates the name
   first, nothing is overwritten. Without `create_new`, the action then opens

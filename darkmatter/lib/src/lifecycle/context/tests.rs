@@ -35,6 +35,7 @@ fn snapshot(code: &str, message: String) -> DiagnosticSnapshot {
         severity: "error".to_string(),
         detail: json!({ "retry_after_ms": 500, "reset_at": null }),
         message,
+        full_message: None,
         cause: None,
         frontmatter_excerpt: None,
     }

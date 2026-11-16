@@ -147,7 +147,7 @@ stack continues with the next action:
 |---|---|
 | No editor matches | every set variable (`$EDITOR`, `$VISUAL`) names a program that is missing or cannot wait for the file to close; with `gui` set, no editor of that kind is configured or installed |
 | The host cannot run the chosen editor | a terminal editor under a data output (`--output json`), with stdin or stdout redirected, with the document read from stdin, in a parallel group member, or while another editor holds the terminal; a GUI editor with no display session |
-| The file reference or filesystem refuses the target | a malformed reference, a URL, a path outside the mutation root, a directory at the path, a parent directory that cannot be created |
+| The file reference or filesystem refuses the target | a malformed reference, a URL, a path outside the [mutation root](./index.md#where-file-actions-write), a directory at the path, a parent directory that cannot be created |
 | The name is taken under `create_new: true` | a file, directory, or symlink already holds the name |
 | The editor cannot be started | the resolved program fails to launch |
 | The editor exits with a nonzero status | the user quits Vim with `:cq` |
@@ -183,9 +183,12 @@ added in parentheses only when the reason does not already name it:
 `initialize[1].edit` could not edit the file: `nvim` is a terminal editor and needs an interactive terminal, but stdout is not a terminal (/work/plan.md)
 ```
 
-Like every lifecycle failure message, it is folded onto one line of at most
-240 characters, and it is the `msg` that `failed` and `finalize` read in
-`err.msg`.
+Like every lifecycle failure message, it is folded onto one line. The
+command's own failure report (the terminal status line, or the diagnostic's
+`message` under `--output json`) shows that whole line, however long the
+paths in it are. `err.msg`, which `failed` and `finalize` read, is the same
+line cut to at most 240 characters, so it stays safe to speak or send; see
+[Fields](#fields).
 
 ## Cancellation
 
@@ -260,7 +263,7 @@ finalize:
 
 | Field | Meaning |
 |---|---|
-| `msg` | A concise, single-line message. Always present. Safe to print; do not branch on it. |
+| `msg` | A concise, single-line message of at most 240 characters. Always present. Safe to print, speak, or send; do not branch on it. A longer failure is cut here, but the command still reports it in full. |
 | `code` | A stable dotted code such as `composition.invalid_file_reference`. |
 | `category` | The coarse domain: the dotted prefix of `code`. |
 | `disposition` | How to handle it: `transient`, `throttled`, `correctable`, `needs_input`, or `unrecoverable`. |
