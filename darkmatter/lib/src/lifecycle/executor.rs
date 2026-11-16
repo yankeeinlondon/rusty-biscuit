@@ -1365,6 +1365,9 @@ impl<'a> StackExecutor<'a> {
         if outcome.attempted {
             self.inputs.host.side_effect_attempted();
         }
+        if let Some(text) = &outcome.warning {
+            self.effects.warn(text);
+        }
         match outcome.result {
             Err(error) if error.is_cancelled() => Err(self.edit_cancelled()),
             _ if cancelled() => Err(self.edit_cancelled()),

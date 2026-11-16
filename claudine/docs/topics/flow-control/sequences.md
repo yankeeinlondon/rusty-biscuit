@@ -1123,6 +1123,11 @@ duration (`45s`, `2m`) — a bare integer is rejected because the unit is part o
 the grammar, and `0s` is rejected rather than read as unbounded. A task passes
 when every command exits `0`. Stdout is concatenated in declaration order.
 
+Each command owns its process tree, so a timeout, a Ctrl-C, or a failing
+sibling also stops the background processes the command started. What that
+covers on each OS is described in
+[Process trees](../../../../sniff/docs/topics/process-trees.md).
+
 Caller values (`key=value`, `--set`) are plain names to `shell:` commands and
 to authored step data, in the first task and in later ones, so
 `claudine sequence ship.md target=staging` lets a task run

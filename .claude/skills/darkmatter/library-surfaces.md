@@ -248,13 +248,17 @@ directly: `darkmatter::markdown::schemas` does not re-export them.
   allowance.
 - `LaunchPlan::run(LaunchOptions)` is the only launcher. `LaunchOptions::PLAIN`
   (`md edit`, `--edit`) keeps the host's process group and an uninterruptible
-  wait. `own_tree: true` makes the editor the root of a `crate::process_tree::ProcessTree`
-  (process group / Job Object, shared with the login-shell probe launcher), polls
+  wait. `own_tree: true` makes the editor the root of a `sniff::process::ProcessTree`
+  (process group / Job Object, the same owner the login-shell probe launcher uses;
+  [process trees](../../../sniff/docs/topics/process-trees.md)), polls
   `cancelled` every 20 ms, terminates with `SIGTERM` then `SIGKILL` after
   `EDITOR_TERMINATE_GRACE`, hands a terminal editor the foreground (`pre_exec`
-  `tcsetpgrp`), and restores the host's foreground group and `termios` on drop. A
-  successful exit `release`s the tree (Windows clears kill-on-close) so a GUI
-  client's main window survives.
+  `tcsetpgrp`, registered after `TreeConfig::configure`), and restores the host's
+  foreground group and `termios` on drop. A successful exit `release`s the tree
+  (Windows clears kill-on-close) so a GUI client's main window survives.
+  `LaunchPlan::run_reporting` returns a `LaunchReport` whose `warning` is set when
+  that Windows release fails; `ProcessEditorService` copies it to
+  `EditOutcome::warning`, and the edit still succeeds.
 - `ProcessEditorService` (trait `EditorService`) is the `edit` action's service:
   cancellation check, resolution, eligibility (`EditorHostFacts`,
   `EnvironmentProbe`, the thread-local `deny_terminal_in_this_thread` scope for

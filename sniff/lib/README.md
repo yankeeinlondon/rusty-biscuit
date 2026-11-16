@@ -8,6 +8,7 @@
 - **Hardware Detection**: CPU with SIMD capabilities, GPU with Metal/Vulkan support, memory, storage, audio devices
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses, flags, and WAN IP lookup
 - **Filesystem Usage Queries**: `filesystem::query::query_path_usage` finds observable processes holding a file or directory tree, with a shared scheduling budget and explicit coverage. Supports Linux/WSL2 inotify, macOS descriptors/cwd, and Windows handle owners/modules. See [filesystem usage queries](../docs/topics/filesystem-query.md).
+- **Process Trees**: `process::ProcessTree` owns a spawned child and every process it starts, so a caller can stop or release them together. See [process trees](../docs/topics/process-trees.md).
 - **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig, blast radius, justfile detection, recent commits
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
 - **Programs Detection**: 10 categories (editors, utilities, package managers, TTS, terminals, headless audio, AI tools, notification helpers, test runners)
@@ -952,8 +953,10 @@ Installation timeout is a first-class outcome, not an ordinary failure. On Unix 
 timed-out install may leave a **partial install** behind: process-tree
 termination is best-effort there, so a descendant that forks and calls
 `setsid()` between sniff's samples can survive and keep modifying the host.
-Windows containment is kernel-enforced via Job Objects and total. See the
-`process` module documentation for the exact per-platform guarantee.
+On Windows the installer runs in a kill-on-close Job Object attached before it
+starts, so nothing it starts escapes. See
+[process trees](../docs/topics/process-trees.md) for the exact per-platform
+guarantee.
 
 **Categories:**
 

@@ -219,7 +219,12 @@ flowchart LR
   whole process tree is terminated, a GUI editor's waiting client only. Bytes
   it saved and a file it created are kept, and the next action never runs,
   even with `no_error`. While a terminal editor holds the terminal, Ctrl-C
-  typed at the keyboard goes to the editor rather than to `md`.
+  typed at the keyboard goes to the editor rather than to `md`. See
+  [Process trees](../../../../sniff/docs/topics/process-trees.md) for what
+  "the whole process tree" covers on each OS.
+- If Windows cannot keep a finished GUI editor running, the edit still
+  succeeds and a warning says the editor was closed; under `--deny all` that
+  warning blocks like any other.
 
 `cancelled` can only clean up. Its one flow verb is `stop`; `skip` and
 `error` there are parse errors.

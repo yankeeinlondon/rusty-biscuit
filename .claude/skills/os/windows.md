@@ -289,18 +289,24 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   non-fatal and degrade to terminating the child alone, as `windows_wait_loop`
   does. Code that spawns through a Job behaves differently under
   `just cross-check` than in an interactive session; check `IsProcessInJob`
-  before blaming the code.
+  before blaming the code. That degrade-to-direct-child fallback is
+  `windows_wait_loop`'s provider policy only: Sniff's shared
+  `ProcessTree::attach` reports the assignment failure and every caller fails
+  closed, so on such a host an owned spawn fails rather than running unowned
+  ([process trees](../../../sniff/docs/topics/process-trees.md)).
 - **The lifecycle `edit` launcher on Windows** (`darkmatter/lib/src/editor/launch.rs`,
-  `process_tree.rs`) differs from Unix in three ways:
-  - *Job assignment window.* The editor is spawned, then assigned to a
-    kill-on-close Job; a process it starts in that instant escapes the Job
-    and survives cancellation. Accepted and commented at the site. If
-    assignment fails (`ProcessTree::attach` returns `None`) the editor is
-    killed and the edit fails ("could not be placed in its own process
-    tree"); it does not degrade the way `windows_wait_loop` does. A
+  using `sniff::process::ProcessTree`) differs from Unix in three ways:
+  - *Job assignment before the editor runs.* The editor is spawned
+    suspended, assigned to a kill-on-close Job, and only then resumed, so
+    nothing it starts escapes the Job. If assignment fails
+    (`ProcessTree::attach` returns an error) the editor is killed and the
+    edit fails; it does not degrade the way `windows_wait_loop` does. A
     successful edit clears kill-on-close before closing the Job
     (`ProcessTree::release`), so a GUI window the waiting client started
-    stays open; cancellation calls `TerminateJobObject` (no grace period).
+    stays open; if clearing fails, the Job is closed (the editor with it)
+    and the edit still succeeds with a warning. Cancellation terminates the
+    Job (no grace period). See
+    [process trees](../../../sniff/docs/topics/process-trees.md).
   - *Shared console.* There is no foreground handoff (`terminal::Handoff`
     is uninhabited off Unix): a terminal editor shares the host's console
     and is not given its own process group. A Ctrl-C the console turns into

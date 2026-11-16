@@ -118,7 +118,6 @@ macro_rules! note_work {
 mod perf_harness;
 
 mod atomic_replace;
-mod process_tree;
 mod strict_json;
 
 pub use markdown::schemas::{

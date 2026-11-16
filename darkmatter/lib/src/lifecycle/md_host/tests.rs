@@ -524,7 +524,7 @@ struct NeverEditor(std::sync::atomic::AtomicBool);
 impl EditorService for NeverEditor {
     fn edit(&self, _: &crate::editor::EditRequest<'_>) -> crate::editor::EditOutcome {
         self.0.store(true, std::sync::atomic::Ordering::SeqCst);
-        crate::editor::EditOutcome { attempted: false, result: Ok(()) }
+        crate::editor::EditOutcome { attempted: false, result: Ok(()), warning: None }
     }
 }
 

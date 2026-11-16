@@ -102,8 +102,9 @@ pub struct InstallCapturedResult {
     /// Termination is best-effort on Unix: the installer's process tree was
     /// signaled, but a descendant that forked and detached with `setsid()`
     /// between sniff's samples survives and may still be modifying the host.
-    /// See the `process` module documentation for the exact guarantee per
-    /// platform. Windows containment is kernel-enforced and total.
+    /// On Windows the installer's Job is attached before it runs, so nothing
+    /// it starts escapes. The per-platform guarantee is described in
+    /// `sniff/docs/topics/process-trees.md`.
     pub timed_out: bool,
 }
 

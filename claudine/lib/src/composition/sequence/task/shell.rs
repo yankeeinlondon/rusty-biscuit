@@ -11,8 +11,9 @@
 //! leaves a descendant that inherits stdout and outlives the shell, so killing
 //! the shell alone reports a kill while the pipe stays open — the caller then
 //! blocks forever on a command it believes it already terminated. Every command
-//! therefore owns a *tree*: a process group on Unix, a kill-on-close Job Object
-//! on Windows. Termination targets the tree, capture is bounded by the runaway
+//! therefore owns a *tree* through Sniff's process-tree owner
+//! ([`sniff::process::ProcessTree`]): a process group on Unix, a kill-on-close
+//! Job Object on Windows. Termination targets the tree, capture is bounded by the runaway
 //! volume cap, and the wait for the capture thread is bounded too, so no
 //! descendant can defeat the deadline by retaining a pipe handle.
 //!
@@ -20,23 +21,31 @@
 //!
 //! Tree ownership is uniform across macOS, Linux, and Windows, and fail-closed:
 //!
-//! - **Establishment is fallible.** A command whose tree cannot be owned — the
-//!   Unix process group is missing, or the Windows Job Object cannot be
-//!   created, configured, assigned, or resumed — is killed and reported as
+//! - **Establishment is fallible.** A command whose tree cannot be owned —
+//!   [`ProcessTree::attach`] fails because the Unix child is not in its own
+//!   process group, or the Windows Job Object cannot be created, configured,
+//!   assigned, or the child resumed — is killed and reported as
 //!   [`TaskShellError::Isolation`]. There is no degraded direct-child-only
 //!   mode: the deadline and the runaway guards are only enforceable against a
 //!   tree that is actually owned.
 //! - **Descendants are reaped at completion, on every exit path.** When the
 //!   command finishes — success, kill, or a failed wait — the remaining
-//!   members of its tree are killed before the capture threads are waited on,
+//!   members of its tree (the process group, plus any descendant recorded
+//!   while it ran that left the group) are killed before the capture threads
+//!   are waited on,
 //!   so `x &` never outlives its task on any platform and no descendant can
 //!   hold the output pipe open to emit frames after the task's footer. Every
 //!   post-spawn exit shares the one execution epilogue (tree teardown, bounded
 //!   reader settlement, live-stream flush); a panic unwind still reaches the
 //!   reap through [`ProcessTree`]'s `Drop`.
-//! - **Windows assignment is race-free.** The child is spawned suspended,
-//!   assigned to the kill-on-close Job, and only then resumed, so it cannot
-//!   create a descendant outside the Job.
+//! - **Windows assignment is race-free.** Sniff spawns the child suspended,
+//!   assigns it to the kill-on-close Job, and only then resumes it, so it
+//!   cannot create a descendant outside the Job.
+//!
+//! The owner's rules and limits on each OS are described in
+//! `sniff/docs/topics/process-trees.md`. Lifecycle commands share this
+//! ownership with one exception, a Unix command that holds the terminal's
+//! foreground (see [`run_owned_lifecycle_command`]).
 //!
 //! ## Both pipes, live, on their own channels
 //!
@@ -58,6 +67,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use sniff::process::{
+    CleanupScan, ProcessTree, TreeConfig, WINDOWS_CREATE_NEW_PROCESS_GROUP,
+};
 
 use darkmatter::markdown::compose::shell_expansion::template::{
     FilledChain, TemplateTargetError, resolve_direct_target,
@@ -84,16 +97,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// expired by the time we get here. Spending seconds more on politeness would
 /// make the per-command timeout a lie.
 ///
-/// Unix-only: the Windows path terminates the Job Object outright, which offers
-/// no graceful rung to schedule.
-#[cfg(unix)]
+/// Windows terminates the Job Object at once and ignores it: a Job offers no
+/// graceful rung to schedule.
 const TREE_KILL_GRACE: Duration = Duration::from_millis(250);
-
-/// The most [`ProcessTree`]'s drop spends re-killing a group whose members
-/// were forked while it was being killed. A bound, not a pace: the loop ends
-/// as soon as the group has no live member, normally within a millisecond.
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
-const GROUP_REAP_LIMIT: Duration = Duration::from_millis(250);
 
 /// How long the capture thread gets to notice its pipe closed.
 ///
@@ -485,9 +491,9 @@ impl SystemTaskShell {
             StderrTarget::Capture if live.is_none() => Stdio::inherit(),
             _ => Stdio::piped(),
         }).stdin(Stdio::null());
-        isolate_process_tree(&mut builder);
+        tree_config().configure(&mut builder);
         let mut child = builder.spawn()?;
-        let ownership = ProcessTree::own(&child);
+        let ownership = ProcessTree::attach(&child);
         #[cfg(test)]
         let ownership = ownership.and_then(|tree| {
             if self.fail_isolation {
@@ -499,7 +505,7 @@ impl SystemTaskShell {
                 Ok(tree)
             }
         });
-        let tree = match ownership {
+        let mut tree = match ownership {
             Ok(tree) => tree,
             Err(error) => {
                 // Fail closed: a command whose descendants cannot be reaped
@@ -567,7 +573,7 @@ impl SystemTaskShell {
             }
             match child.try_wait() {
                 Ok(Some(status)) => break Ok(status),
-                Ok(None) => {}
+                Ok(None) => tree.sample(),
                 Err(error) => break Err(error),
             }
             if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst))
@@ -583,15 +589,23 @@ impl SystemTaskShell {
                 std::thread::sleep(POLL_INTERVAL);
                 continue;
             }
-            tree.terminate(&mut child);
-            break child.wait();
+            let termination = tree.terminate_gracefully(TREE_KILL_GRACE, &mut child);
+            if let Err(error) = termination.cleanup {
+                tracing::warn!(error = %error, "could not stop a task command's whole process tree");
+            }
+            break termination.status;
         };
         // The ratified policy for every post-spawn exit: an owned tree does
-        // not outlive its command, on any platform. Dropping here — before the
-        // reader settle — reaps whatever the command backgrounded (and, on a
-        // wait error, the command itself), which is also what closes the pipes
-        // those readers are parked on: a dead descendant cannot emit a frame
-        // after the task's footer.
+        // not outlive its command, on any platform. Terminating here — before
+        // the reader settle — kills whatever the command backgrounded (and, on
+        // a wait error, the command itself), which is also what closes the
+        // pipes those readers are parked on: a dead descendant cannot emit a
+        // frame after the task's footer. After a graceful termination above
+        // this does nothing; a failure leaves the drop to try once more.
+        let scan = if wait_outcome.is_err() { CleanupScan::Always } else { CleanupScan::WhenObserved };
+        if let Err(error) = tree.terminate(scan) {
+            tracing::warn!(error = %error, "could not stop a task command's background processes");
+        }
         drop(tree);
 
         // Never `join()`: see `READER_SHUTDOWN_GRACE`. Dropping the handles
@@ -616,7 +630,7 @@ impl SystemTaskShell {
             live.flush();
         }
         // Only now — readers settled, stream flushed — may the preserved wait
-        // error surface. The tree drop above already killed the still-running
+        // error surface. The tree teardown above already killed the still-running
         // command; waiting reaps the direct child so a failed `try_wait` does
         // not also leak a zombie.
         let status = match wait_outcome {
@@ -790,262 +804,11 @@ impl Utf8Stream {
     }
 }
 
-/// Ownership of one command's whole process tree.
-///
-/// Constructing one is fallible — see the module's *Ownership contract* — and
-/// dropping one reaps every member still alive, which is what makes every exit
-/// path (success, early wait error, panic unwind) end the tree.
-#[cfg(unix)]
-struct ProcessTree {
-    /// The process-group id, equal to the direct child's pid per
-    /// `process_group(0)`.
-    pgid: i32,
-}
-
-/// Ownership of one command's whole process tree. See the Unix twin.
-#[cfg(windows)]
-struct ProcessTree {
-    /// The kill-on-close Job Object owning the tree. Always valid: `own`
-    /// refuses to return a tree it does not fully own.
-    job: isize,
-}
-
-#[cfg(unix)]
-impl ProcessTree {
-    /// Take ownership of `child`'s tree.
-    ///
-    /// `process_group(0)` already ran between fork and exec — a failure there
-    /// fails the spawn itself — so this *verifies* the group rather than
-    /// establishing it: a child observed outside its own group means the
-    /// isolation the deadline depends on does not exist, and the command must
-    /// not run.
-    ///
-    /// A child that already exited is still owned: its group id was its pid by
-    /// construction, and any descendant that outlives it stays in that group.
-    /// macOS answers `getpgid` with `ESRCH` for an exited-but-unreaped process
-    /// (Linux still reports the zombie's group), so a command as fast as
-    /// `printf` would otherwise fail ownership on macOS purely by timing.
-    fn own(child: &Child) -> Result<Self, std::io::Error> {
-        let pid = child.id() as i32;
-        let pgid = unsafe { libc::getpgid(pid) };
-        if pgid < 0 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
-                return Ok(Self { pgid: pid });
-            }
-            return Err(error);
-        }
-        if pgid != pid {
-            return Err(std::io::Error::other(format!(
-                "child {pid} is in foreign process group {pgid}"
-            )));
-        }
-        Ok(Self { pgid: pid })
-    }
-
-    /// Terminate every process in the tree, not merely the direct child.
-    fn terminate(&self, child: &mut Child) {
-        // SAFETY: a negative pid addresses a process group. `own` verified the
-        // group id equals this child's pid, so the group can contain nothing
-        // but this command's own descendants.
-        let signalled = unsafe { libc::kill(-self.pgid, libc::SIGTERM) } == 0;
-        if !signalled {
-            let _ = child.kill();
-            return;
-        }
-        let deadline = Instant::now() + TREE_KILL_GRACE;
-        while Instant::now() < deadline {
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                break;
-            }
-            std::thread::sleep(POLL_INTERVAL);
-        }
-        // Unconditional, even when the direct child already reaped: the
-        // descendants this exists for are precisely the ones that outlive it,
-        // and they are the ones still holding stdout open.
-        //
-        // SAFETY: as above.
-        unsafe {
-            libc::kill(-self.pgid, libc::SIGKILL);
-        }
-    }
-}
-
-#[cfg(unix)]
-impl Drop for ProcessTree {
-    /// Reap every remaining member of the group.
-    ///
-    /// `SIGKILL` with no graceful rung: on every path that reaches here the
-    /// command itself has already finished or been terminated, so whatever
-    /// remains is a backgrounded straggler the ownership contract says dies
-    /// with the task. Killing an already-empty group is an `ESRCH` no-op.
-    fn drop(&mut self) {
-        // SAFETY: as in `terminate`.
-        unsafe {
-            libc::kill(-self.pgid, libc::SIGKILL);
-        }
-        // WHY repeat: macOS does not make `fork` atomic with a signal sent to
-        // the forking process's group. A child forked while the kill went out
-        // joins the group without the signal and survives it: about 3 in 100
-        // group kills of `sh -c 'echo started; sleep 300'`, sent on reading
-        // `started`, left `sleep` running. Killing again until the group
-        // answers with an error (`ESRCH` when empty, `EPERM` on macOS when only
-        // zombies are left) reaches every such child. Linux delivers the
-        // signal to a concurrently forked child, and answers `0` for a group
-        // holding only the unreaped command's zombie, so it skips the loop.
-        #[cfg(not(any(target_os = "linux", target_os = "android")))]
-        {
-            let stop = Instant::now() + GROUP_REAP_LIMIT;
-            // SAFETY: as in `terminate`.
-            while unsafe { libc::kill(-self.pgid, libc::SIGKILL) } == 0 && Instant::now() < stop {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-impl ProcessTree {
-    /// Take ownership of `child`'s tree by assigning it to a fresh
-    /// kill-on-close Job Object and only then letting it run.
-    ///
-    /// The child was spawned `CREATE_SUSPENDED` (see [`isolate_process_tree`]),
-    /// so the create → configure → assign → resume sequence is race-free: a
-    /// process that has never been scheduled cannot have created a descendant
-    /// outside the Job. Any failure leaves the child suspended for the caller
-    /// to kill.
-    fn own(child: &Child) -> Result<Self, std::io::Error> {
-        use std::os::windows::io::AsRawHandle;
-        use windows::Win32::Foundation::{CloseHandle, HANDLE};
-        use windows::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject,
-        };
-
-        let job = unsafe { CreateJobObjectW(None, None) }.map_err(std::io::Error::other)?;
-        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let established = unsafe {
-            SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                std::ptr::from_ref(&info).cast(),
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-            .and_then(|()| AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())))
-        }
-        .and_then(|()| resume_main_thread(child.id()));
-        if let Err(error) = established {
-            // Kill-on-close reaps the child if assignment got that far; the
-            // caller kills the still-suspended direct child either way.
-            unsafe {
-                let _ = CloseHandle(job);
-            }
-            return Err(std::io::Error::other(error));
-        }
-        Ok(Self { job: job.0 as isize })
-    }
-
-    /// Terminate every process in the tree, not merely the direct child.
-    fn terminate(&self, _child: &mut Child) {
-        unsafe {
-            let _ =
-                windows::Win32::System::JobObjects::TerminateJobObject(as_handle(self.job), 1);
-        }
-    }
-}
-
-#[cfg(windows)]
-impl Drop for ProcessTree {
-    /// Reap every remaining member of the Job. See the Unix twin.
-    fn drop(&mut self) {
-        unsafe {
-            let _ =
-                windows::Win32::System::JobObjects::TerminateJobObject(as_handle(self.job), 1);
-            // Kill-on-close makes the close a backstop for the terminate.
-            let _ = windows::Win32::Foundation::CloseHandle(as_handle(self.job));
-        }
-    }
-}
-
-/// Resume the `CREATE_SUSPENDED` child's initial thread.
-///
-/// A suspended, freshly created process has exactly one thread, so resuming
-/// the first thread the snapshot attributes to `pid` completes the spawn. Not
-/// finding one — or the resume failing — leaves the child suspended and is
-/// reported as an ownership failure.
-#[cfg(windows)]
-fn resume_main_thread(pid: u32) -> windows::core::Result<()> {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
-    };
-    use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
-
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }?;
-    let outcome = (|| {
-        let mut entry = THREADENTRY32 {
-            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
-            ..Default::default()
-        };
-        unsafe { Thread32First(snapshot, &mut entry) }?;
-        loop {
-            if entry.th32OwnerProcessID == pid {
-                let thread =
-                    unsafe { OpenThread(THREAD_SUSPEND_RESUME, false, entry.th32ThreadID) }?;
-                let resumed = unsafe { ResumeThread(thread) };
-                unsafe {
-                    let _ = CloseHandle(thread);
-                }
-                // `u32::MAX` is the documented `ResumeThread` failure sentinel.
-                if resumed == u32::MAX {
-                    return Err(windows::core::Error::from_thread());
-                }
-                return Ok(());
-            }
-            // Exhausting the snapshot without a match reports the iterator's
-            // own `ERROR_NO_MORE_FILES`, which is exactly what happened.
-            unsafe { Thread32Next(snapshot, &mut entry) }?;
-        }
-    })();
-    unsafe {
-        let _ = CloseHandle(snapshot);
-    }
-    outcome
-}
-
-#[cfg(windows)]
-fn as_handle(raw: isize) -> windows::Win32::Foundation::HANDLE {
-    windows::Win32::Foundation::HANDLE(raw as *mut core::ffi::c_void)
-}
-
-/// Put the command in its own process group so termination can address the
-/// whole tree.
-#[cfg(unix)]
-fn isolate_process_tree(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-
-    // `0` means "new group whose id is the child's pid", which is what lets
-    // `ProcessTree::terminate` name the group without a second lookup.
-    command.process_group(0);
-}
-
-/// Put the command in its own process group so termination can address the
-/// whole tree.
-#[cfg(windows)]
-fn isolate_process_tree(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-
-    // Defined locally rather than imported so the spawn path does not pull the
-    // `windows` crate in for two constants.
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    // Suspended so `ProcessTree::own` can assign the child to its Job before
-    // it executes a single instruction — the race-free half of the ownership
-    // contract. `own` resumes it; an ownership failure kills it suspended.
-    const CREATE_SUSPENDED: u32 = 0x0000_0004;
-
-    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED);
+/// How a task or lifecycle command's tree is set up: its own process group on
+/// Unix; on Windows its own console process group, so a console control event
+/// sent to Claudine's group does not reach it directly.
+fn tree_config() -> TreeConfig {
+    TreeConfig::process_group().windows_creation_flags(WINDOWS_CREATE_NEW_PROCESS_GROUP)
 }
 
 /// `program` as a child starting from `environment`, or inheriting this
@@ -1096,8 +859,9 @@ mod tests;
 mod structured_tests;
 
 /// Lifecycle commands retain inherited streams while sharing task shells' tree
-/// ownership, except one that shares this process's terminal (see
-/// [`holds_terminal_foreground`]). Cancellation is worker-local; cleanup
+/// ownership, except a Unix command that shares this process's terminal (see
+/// [`holds_terminal_foreground`]): it stays in Claudine's process group, and
+/// cancellation reaches only the direct child. Cancellation is worker-local; cleanup
 /// suspends the original stop request so its commands can finish under their
 /// own contract.
 pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, std::io::Error> {
@@ -1106,9 +870,9 @@ pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, 
     if holds_terminal_foreground() {
         return run_in_own_group(command);
     }
-    isolate_process_tree(command);
+    tree_config().configure(command);
     let mut child = command.spawn()?;
-    let tree = match ProcessTree::own(&child) {
+    let mut tree = match ProcessTree::attach(&child) {
         Ok(tree) => tree,
         Err(error) => {
             let _ = child.kill();
@@ -1118,20 +882,32 @@ pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, 
     };
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return Ok(status.code().unwrap_or(-1)),
-            Ok(None) => {},
+            Ok(Some(status)) => {
+                if let Err(error) = tree.terminate(CleanupScan::WhenObserved) {
+                    tracing::warn!(error = %error, "could not stop a lifecycle command's background processes");
+                }
+                return Ok(status.code().unwrap_or(-1));
+            }
+            Ok(None) => tree.sample(),
             Err(error) => {
-                tree.terminate(&mut child);
-                let _ = child.wait();
+                terminate_lifecycle_tree(&mut tree, &mut child);
                 return Err(error);
             }
         }
         if crate::composition::lifecycle::cancellation::requested() {
-            tree.terminate(&mut child);
-            let _ = child.wait();
+            terminate_lifecycle_tree(&mut tree, &mut child);
             return Ok(130);
         }
         std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// Stops a lifecycle command's tree and reaps the command; the caller reports
+/// its own outcome, not the command's status.
+fn terminate_lifecycle_tree(tree: &mut ProcessTree, child: &mut Child) {
+    let termination = tree.terminate_gracefully(TREE_KILL_GRACE, child);
+    if let Err(error) = termination.cleanup {
+        tracing::warn!(error = %error, "could not stop a lifecycle command's whole process tree");
     }
 }
 

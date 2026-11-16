@@ -106,12 +106,16 @@ pages with the behavior.
   `EditError::Editor(EditorError::Cancelled)`, test with `is_cancelled()`).
   `EditOutcome::attempted` turns true at the first create or launch; the
   executor then calls `host.side_effect_attempted()` once so cached reads
-  are dropped. The service owns the editor's process tree
-  (`process_tree.rs`: own process group on Unix, kill-on-close Job Object on
-  Windows) and polls `EditRequest::cancelled` every 20 ms; cancellation
-  terminates the tree (Unix `SIGTERM`, `EDITOR_TERMINATE_GRACE`, then
-  `SIGKILL`) and reaps it before returning. Windows specifics are in the
-  `os` skill.
+  are dropped. The service owns the editor's process tree with Sniff's
+  `sniff::process::ProcessTree` (own process group on Unix, kill-on-close Job
+  Object assigned before the editor runs on Windows) and polls
+  `EditRequest::cancelled` every 20 ms; cancellation terminates the tree
+  (Unix `SIGTERM`, `EDITOR_TERMINATE_GRACE`, then `SIGKILL`) and reaps it
+  before returning. When Windows cannot release a finished editor's tree,
+  `EditOutcome::warning` carries the text and the executor passes it to
+  `LifecycleEffects::warn` once; the edit still succeeds. Contract:
+  [process trees](../../../sniff/docs/topics/process-trees.md); Windows
+  specifics are in the `os` skill.
 - `edit` is a lifecycle-only verb, never a catalog entry: schema projection
   (`hand_owner`) fails generation when a catalog function or effect is named
   `edit`. Its schema types (`edit-short`/`edit-long` in

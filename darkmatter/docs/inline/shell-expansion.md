@@ -137,6 +137,8 @@ A program name that is not on `PATH` may be one of your shell aliases. Compositi
 
 `SHELL` is read from the request's environment, not from the process. `md` captures its own environment, so aliases work there as in your terminal. A library caller whose `RequestSnapshot` carries no `SHELL` gets no alias expansion and no shell start-up: an unknown name is reported as not found straight away.
 
+Each login-shell query has a deadline and runs as an owned [process tree](../../../sniff/docs/topics/process-trees.md), so anything the shell profile starts in the background is stopped when the query ends.
+
 Starting a login shell can take a second or more when its profile is heavy, so one composition asks it about each name at most once. Pre-flight approval, the pre-approval check, and execution all need the answer; the first lookup is remembered for the rest of the run, and so is "not an alias". A `$( … )` in frontmatter and a `::shell` directive that use the same name share that one lookup, and so do transcluded files.
 
 ```md

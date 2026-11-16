@@ -34,6 +34,7 @@ A comprehensive Rust library for system detection:
 - **Filesystem Analysis**: Git repos, monorepo tools, language detection, file type classification, EditorConfig, document discovery, blast radius, justfile detection, recent commits
 - **Programs Module**: Detect installed software across 10 categories, with installation support for 8, test-runner availability, and remote-bash consent gating
 - **Services Module**: Detect and list system services across 10+ init systems
+- **Process Trees**: Own a spawned command and everything it starts, then stop or release them together ([process trees](docs/topics/process-trees.md))
 - **Remote Inspection**: Query GitHub, GitLab, Gitea, and Bitbucket APIs for repository metadata
 
 The library exposes three API tiers: `detect()` for convenience, `detect_with_plan(DetectionPlan)` for fine-grained control, and module-level functions for expert composition. See [sniff/lib/README.md](lib/README.md) for the full API and [sniff/docs/sniff-library-architecture.md](docs/sniff-library-architecture.md) for the cost model and shared-work design.

@@ -540,8 +540,10 @@ Sibling cancellation uses `composition.cancelled` with `err.detail.group`,
 explicitly inherit `lifecycle::cancellation::CancellationToken` scopes. Keep
 terminal execution on `LifecycleRunGuard::run_event_stack`: its cleanup scope
 allows terminal actions to finish after cancellation while preserving repeat
-interrupt grace. Lifecycle shell exact/template dispatch shares task shells'
-owned process trees, except on Unix while Claudine holds its terminal's
+interrupt grace. Task shells and lifecycle shell exact/template dispatch own
+their process trees through Sniff's `sniff::process::ProcessTree`
+([process trees](../../../sniff/docs/topics/process-trees.md)), except on
+Unix while Claudine holds its terminal's
 foreground (`task/shell.rs::holds_terminal_foreground`): an inherited-terminal
 child in a group of its own is stopped by `SIGTTIN`/`SIGTTOU` forever (a
 nested `claudine compose` from `shell: just commit` hung this way), so it runs

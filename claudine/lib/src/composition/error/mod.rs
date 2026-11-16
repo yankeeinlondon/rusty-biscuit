@@ -2320,8 +2320,8 @@ pub enum CompositionError {
     /// tree could not be established, so it was killed without running.
     ///
     /// Fail-closed by design: the per-command deadline and the runaway guards
-    /// are only enforceable against an owned tree (a Unix process group, a
-    /// Windows Job Object), so a command that could only be given
+    /// are only enforceable against a tree owned by Sniff's process-tree
+    /// owner, so a command that could only be given
     /// direct-child cleanup is refused rather than run degraded.
     #[error("command `{command}` in {task} could not be isolated into an owned process tree: {source}")]
     SequenceTaskShellIsolation {

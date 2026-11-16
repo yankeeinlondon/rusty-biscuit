@@ -640,21 +640,16 @@ early stop is used.
 Every subprocess goes through `process::run_with_timeout` or its builder-capable
 `process::run_command_with_timeout` form, which own the deadline, concurrent pipe draining, and
 process-tree termination/reaping. The builder form preserves caller-configured working directories
-and environments. Unix probes run in a dedicated process group;
-Windows probes run in a kill-on-close Job Object. Descendant-held pipe handles therefore cannot
-extend the helper's deadline. **Never poll `try_wait()` over a piped stdout you are not draining** —
-the child blocks in `write()` past one pipe buffer (64 KiB Linux, ~16 KiB macOS), never exits, and
-gets killed at its deadline with its output lost.
+and environments. The process tree is owned by the public `sniff::process::ProcessTree` (a dedicated
+process group on Unix, a kill-on-close Job Object attached before the child runs on Windows), so
+descendant-held pipe handles cannot extend the helper's deadline. **Never poll `try_wait()` over a
+piped stdout you are not draining** — the child blocks in `write()` past one pipe buffer (64 KiB
+Linux, ~16 KiB macOS), never exits, and gets killed at its deadline with its output lost.
 
-**Tree termination is total on Windows and best-effort on Unix.** Job Object membership is inherited
-and kernel-enforced, so nothing escapes. Unix has no equivalent primitive, so the guarantee is
-layered: the process-group kill is absolute for anything still in the group, while a descendant that
-calls `setsid()` is handled best-effort. Such a descendant is kept addressable by sampling the
-child's descendant tree every `DESCENDANT_SAMPLE_INTERVAL` (250ms) *while the child is alive*, so its
-PID survives the reparenting that follows the child's exit; recorded PIDs are re-validated against
-process start time before signaling, so a recycled PID is never hit. The residual gap — a descendant
-that forks *and* `setsid()`s entirely between two samples, whose parent then exits — is not portably
-closable without Linux cgroups or a supervising process.
+What the owner guarantees and where it stops, on each OS, is described in
+[Process trees](./topics/process-trees.md). In short: on Windows nothing escapes once the owner is
+attached; on Unix a descendant that forks *and* `setsid()`s entirely between two descendant samples
+(`DESCENDANT_SAMPLE_INTERVAL`, 250 ms), whose parent then exits, can escape.
 
 Whether a caller reaches that residual depends on what it runs. Sniff's *detection* probes are a
 fixed, in-tree set of well-known commands, none of which daemonize. The *installation* boundary is

@@ -846,7 +846,12 @@ cancellation, in `cancelled` or in the `finalize` that follows it, does not
 open an editor and fails.
 
 On Windows, a successful edit releases the job without closing what is left in
-it, so a GUI editor window that the waiting client started stays open.
+it, so a GUI editor window that the waiting client started stays open. If
+Windows cannot keep that window running, it is closed, the edit still
+succeeds, and a warning says the editor was closed after the edit; under
+`--deny all` that warning blocks like any other. How the editor's process
+tree is owned and released on each OS is described in
+[Process trees](../../../../sniff/docs/topics/process-trees.md).
 
 ### `edit` compared with similar features
 

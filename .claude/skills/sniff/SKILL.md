@@ -19,6 +19,8 @@ and runtime path; it does not cross into native Windows detectors.
 - Build `PATH` with `std::env::join_paths`; never hard-code `:` or `;`.
 - Use bounded subprocess helpers from `process`; never poll a child with piped
   output that is not being drained.
+- Other crates own a child's whole process tree with `sniff::process::ProcessTree`
+  ([process trees](../../../sniff/docs/topics/process-trees.md)).
 - Windows audio detection uses PowerShell CIM, not `wmic`.
 - `current_user_id()` returns the effective Unix UID or Windows process-token
   SID without subprocess, registry, environment-variable, or network fallback.

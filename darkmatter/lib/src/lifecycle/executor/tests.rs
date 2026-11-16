@@ -495,6 +495,7 @@ struct FakeEditor {
     attempted: bool,
     fail: Option<fn(&Path) -> crate::editor::EditError>,
     cancel: Option<cancellation::CancellationToken>,
+    warning: Option<String>,
 }
 
 impl crate::editor::EditorService for FakeEditor {
@@ -515,6 +516,7 @@ impl crate::editor::EditorService for FakeEditor {
                 Some(fail) => Err(fail(request.target)),
                 None => Ok(()),
             },
+            warning: self.warning.clone(),
         }
     }
 }
@@ -590,6 +592,26 @@ fn edit_opens_the_interpolated_absolute_path_with_its_flags_then_continues() {
     );
     assert_eq!(fixture.effects.lines(), [format!("info ready at {}", target.display())]);
     assert_eq!(fixture.host.side_effects_attempted.get(), 1, "an attempted edit forgets reused reads");
+}
+
+#[test]
+fn an_edit_warning_reaches_the_host_once_and_the_stack_continues() {
+    let warning = "Windows could not keep the editor running after the edit; it was closed: Access is denied.";
+    let fixture = Fixture::with_editor(FakeEditor {
+        attempted: true,
+        warning: Some(warning.into()),
+        ..Default::default()
+    });
+
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": "a.md" }, { "info": "after" }] }),
+    );
+
+    assert_eq!(outcome, LifecycleEventOutcome::default(), "a warning does not fail the edit");
+    assert_eq!(fixture.effects.lines(), [format!("warn {warning}"), "info after".to_string()]);
+    assert_eq!(fixture.host.side_effects_attempted.get(), 1);
 }
 
 #[test]

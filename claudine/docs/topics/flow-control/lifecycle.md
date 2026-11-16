@@ -1092,7 +1092,10 @@ and everything it started end together, with one exception on macOS and Linux:
 while Claudine is the terminal's foreground job, the command runs in
 Claudine's own process group so the terminal does not stop it. Ctrl-C still
 reaches everything it started, but a sibling-failure cancellation ends only
-the command itself, not background processes it left running.
+the command itself, not background processes it left running. Every other
+lifecycle shell command, and every sequence shell task, owns its process tree;
+see [Process trees](../../../../sniff/docs/topics/process-trees.md) for what
+that covers on each OS.
 
 #### Shell actions approved by their shape
 
