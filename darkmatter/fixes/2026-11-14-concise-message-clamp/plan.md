@@ -96,14 +96,14 @@ already normalized, to `snapshot_for_code`.
 
 ### Tasks (Wave 1, sequential: one file family)
 
-- [ ] **Rewrite hygiene**
+- [x] **Rewrite hygiene**
     - In `darkmatter/lib/src/lifecycle/envelope.rs`, implement R1-R4.
     - Rewrite the `///` docs of `concise_message` and
       `concise_message_with_suffix`: strip escapes, fold to one line, no length
       limit, idempotent; the caller supplies any separator. Remove "clamped",
       "notification-safe" and the "budget" wording.
     - Keep the doc example `concise_message("first\n  second\t") == "first second"`.
-- [ ] **Fix field docs**
+- [x] **Fix field docs**
     - `envelope.rs:70-74` (`DiagnosticSnapshot.message`) and `:108`
       (`DiagnosticCause.message`): "Complete, single-line, escape-free message of the
       selected diagnostic; no length limit. Delivery adapters fit it to their
@@ -113,7 +113,7 @@ already normalized, to `snapshot_for_code`.
       reach TTS or a webhook multi-line or escape-bearing" in favor of
       "normalized to one escape-free line, not shortened".
     - `context.rs:273` says "concise message"; change it to "normalized message".
-- [ ] **Rewrite envelope tests** (`darkmatter/lib/src/lifecycle/envelope/tests.rs`)
+- [x] **Rewrite envelope tests** (`darkmatter/lib/src/lifecycle/envelope/tests.rs`)
     - Replace `a_suffix_survives_clamping` with
       `a_long_base_and_suffix_stay_intact`: a 600-character base plus
       `" (attempt 2)"` equals the base followed by the suffix; no `…`.
