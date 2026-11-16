@@ -287,6 +287,20 @@ failed:
           - warn: "a link is broken: {{ err.msg }}"
 ```
 
+Because `msg` is never shortened, it can be long. Where a long message would
+be unwelcome, such as a notification banner, write fixed text and leave the
+full message to the terminal report:
+
+```yaml
+failed:
+    - warn: "{{ err.msg }}"          # the terminal gets the whole explanation
+    - notify: "the document did not compose"
+```
+
+`notify` is a host verb (Claudine supplies it; `md` does not). Submitting the
+full message is not a promise that it is shown in full: a notification center
+or remote service may display only part of a long one.
+
 ## Host-level rules
 
 The rules below only come into play under a host that does its own work
