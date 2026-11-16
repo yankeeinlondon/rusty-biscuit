@@ -33,7 +33,6 @@ fn io_err(msg: &str) -> LifecycleErrorInfo {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: msg.to_string(),
-        full_msg: None,
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,

@@ -24,19 +24,34 @@ fn coded() -> DiagnosticSnapshot {
         severity: "error".to_string(),
         detail: json!({}),
         message: "cancelled".to_string(),
-        full_message: None,
         cause: None,
         frontmatter_excerpt: Some(SourceExcerpt::new(Lines("a: 1"))),
     }
 }
 
-#[test]
-fn a_suffix_survives_clamping() {
-    let long = "x".repeat(CONCISE_MESSAGE_MAX_CHARS * 2);
-    let message = concise_message_with_suffix(&long, " (attempt 2)");
+/// `(input, expected)` pairs covering every hygiene rule: escapes, every line
+/// boundary, stray controls, empty and blank input, and interior spacing.
+const HYGIENE: &[(&str, &str)] = &[
+    ("\u{1b}[1;31mred\u{1b}[0m text", "red text"),
+    ("see \u{1b}]8;;https://example.com\u{7}the docs\u{1b}]8;;\u{7} now", "see the docs now"),
+    ("first\nsecond", "first second"),
+    ("first\r\nsecond", "first second"),
+    ("first\tsecond", "first second"),
+    ("bell\u{7}here", "bell here"),
+    ("line\u{2028}separator", "line separator"),
+    ("paragraph\u{2029}separator", "paragraph separator"),
+    ("next\u{85}line", "next line"),
+    ("", ""),
+    (" \n\t\r\n  ", ""),
+    ("interior  double  spaces", "interior  double  spaces"),
+    ("  padded\n  lines  \n", "padded lines"),
+];
 
-    assert_eq!(message.chars().count(), CONCISE_MESSAGE_MAX_CHARS);
-    assert!(message.ends_with("… (attempt 2)"), "{message}");
+#[test]
+fn hygiene_table() {
+    for (input, expected) in HYGIENE {
+        assert_eq!(concise_message(input), *expected, "input {input:?}");
+    }
 }
 
 #[test]
@@ -45,6 +60,40 @@ fn concise_message_is_idempotent() {
 
     assert_eq!(once, "red line");
     assert_eq!(concise_message(&once), once);
+    for (input, _) in HYGIENE {
+        let once = concise_message(input);
+        assert_eq!(concise_message(&once), once, "input {input:?}");
+    }
+}
+
+#[test]
+fn a_long_base_and_suffix_stay_intact() {
+    let long = "x".repeat(600);
+
+    let message = concise_message_with_suffix(&long, " (attempt 2)");
+
+    assert_eq!(message, format!("{long} (attempt 2)"));
+    assert!(!message.contains('…'), "{message}");
+}
+
+#[test]
+fn lengths_around_the_old_limit_are_unchanged() {
+    let mixed: String = "path/段落/🦀 ".chars().cycle().take(2_000).collect::<String>().trim_end().to_string();
+    let mut inputs: Vec<String> = [239, 240, 241].iter().map(|len| "a".repeat(*len)).collect();
+    inputs.push(mixed);
+
+    for input in &inputs {
+        let message = concise_message(input);
+        assert_eq!(message, *input);
+        assert_eq!(message.chars().count(), input.chars().count());
+    }
+}
+
+#[test]
+fn the_suffix_is_normalized_too() {
+    let message = concise_message_with_suffix("base", " (attempt \u{1b}[31m2\u{1b}[0m\n)");
+
+    assert_eq!(message, "base (attempt 2 )");
 }
 
 #[test]
@@ -66,18 +115,4 @@ fn the_excerpt_never_serializes() {
     assert!(value.get("cause").is_none());
     let restored: DiagnosticSnapshot = serde_json::from_value(value).unwrap();
     assert_eq!(restored.frontmatter_excerpt, None);
-}
-
-#[test]
-fn a_clamped_message_keeps_its_complete_one_line_form_beside_it() {
-    let long = format!("\u{1b}[31mrefusing\u{1b}[0m\n{}", "p/".repeat(200));
-
-    let (concise, full) = concise_and_full(&long);
-    let (short, none) = concise_and_full("short\ntext");
-
-    let full = full.expect("a clamped message keeps its complete form");
-    assert_eq!(concise.chars().count(), CONCISE_MESSAGE_MAX_CHARS);
-    assert_eq!(full, format!("refusing {}", "p/".repeat(200)));
-    assert_eq!(concise, concise_message(&full), "the concise form is the complete one clamped");
-    assert_eq!((short.as_str(), none), ("short text", None));
 }

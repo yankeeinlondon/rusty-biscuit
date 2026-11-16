@@ -35,7 +35,6 @@ fn snapshot(code: &str, message: String) -> DiagnosticSnapshot {
         severity: "error".to_string(),
         detail: json!({ "retry_after_ms": 500, "reset_at": null }),
         message,
-        full_message: None,
         cause: None,
         frontmatter_excerpt: None,
     }
@@ -98,7 +97,7 @@ fn a_registered_cause_projects_one_level_under_cause() {
 }
 
 #[test]
-fn an_action_failure_message_is_made_concise() {
+fn an_action_failure_message_is_normalized() {
     let info = LifecycleErrorInfo::from_action_failure_with(&OneCode, "shell", "first\n\tsecond");
 
     assert_eq!(info.msg, "first second");

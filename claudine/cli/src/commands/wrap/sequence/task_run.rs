@@ -224,7 +224,7 @@ pub(super) fn run_step_task(
             message: outcome
                 .error
                 .as_ref()
-                .map_or_else(|| "task failed".to_string(), |d| d.info.actionable_msg().to_string()),
+                .map_or_else(|| "task failed".to_string(), |d| d.info.msg.clone()),
             // The task diagnostic already carries the projection `err.*` reads;
             // reuse it rather than re-deriving a second, possibly divergent one.
             snapshot: outcome

@@ -49,7 +49,6 @@ impl CancellationCause {
                 let mut info = error.clone();
                 let leg_failed = format!("group `{group}` leg `{leg}` failed: ");
                 info.msg = format!("{leg_failed}{}", error.msg);
-                info.full_msg = error.full_msg.as_ref().map(|full| format!("{leg_failed}{full}").into());
                 info.snapshot = catalog
                     .snapshot_for_code("composition.cancelled", info.msg.clone())
                     .map(|mut snapshot| {

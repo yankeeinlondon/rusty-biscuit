@@ -507,8 +507,8 @@ fn failure_message(failure: LifecycleRunFailure) -> (&'static str, String) {
         LifecycleRunFailure::WithEvaluationFailed { property, path, message, .. } => {
             ("with", format!("`{property}.{path}` failed to evaluate: {message}"))
         }
-        // The reason comes first: the message is clamped to one short line,
-        // and most reasons already name the target, often more than once.
+        // The reason comes first because it reads better: most reasons
+        // already name the target, often more than once.
         LifecycleRunFailure::EditFailed { property, target, error, .. } => {
             let reason = error.to_string();
             let target = target.display().to_string();

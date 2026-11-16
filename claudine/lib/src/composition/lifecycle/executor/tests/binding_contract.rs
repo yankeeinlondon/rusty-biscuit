@@ -357,7 +357,6 @@ fn lifecycle_globals_shadow_frontmatter_keys_that_fm_still_reads() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "real failure".to_string(),
-        full_msg: None,
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,

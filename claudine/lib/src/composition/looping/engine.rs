@@ -170,7 +170,7 @@ where
             0,
             CompositionError::LifecycleInitializeFailed {
                 source_path: prompt_path.to_path_buf(),
-                reason: setup_error.actionable_msg().to_string(),
+                reason: setup_error.msg.clone(),
             },
         ));
     }

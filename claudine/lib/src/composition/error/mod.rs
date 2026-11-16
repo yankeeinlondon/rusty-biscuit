@@ -3689,7 +3689,7 @@ impl CompositionError {
             .as_ref()
             .and_then(|snapshot| snapshot.detail.get("message"))
             .and_then(Value::as_str)
-            .unwrap_or(info.actionable_msg())
+            .unwrap_or(info.msg.as_str())
             .to_string();
         Self::LifecycleEvaluationError {
             source_path: source_path.into(),

@@ -1542,9 +1542,9 @@ pub(super) fn route_initialize(
             execute_initialize_catch(guard, init_ctx, source_path, term, init_outcome.clone())?;
         if let Some(setup_error) = init_result.setup_error.as_ref() {
             let message = if matches!(init_result.control, Some(StackControl::Error { .. })) {
-                setup_error.actionable_msg().to_string()
+                setup_error.msg.clone()
             } else {
-                format!("lifecycle initialize failed: {}", setup_error.actionable_msg())
+                format!("lifecycle initialize failed: {}", setup_error.msg)
             };
             return Err(eyre!(message));
         }

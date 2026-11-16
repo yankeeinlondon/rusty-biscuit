@@ -512,8 +512,8 @@ fn a_late_interrupt_flag_is_seen_and_a_missing_one_gives_up() {
 // ── Long containment refusals ────────────────────────────────────────────
 
 /// A 50-character project directory: with the system temp prefix it makes a
-/// refusal naming both the target and the root longer than the concise
-/// message limit on every host.
+/// refusal naming both the target and the root longer than the 240-character
+/// limit messages were once cut to, on every host.
 const LONG_PROJECT: &str = "a-project-directory-with-a-fifty-character-name-xy";
 const LONG_OUTSIDE: &str = "an-outside-directory-with-a-fifty-character-name-x";
 
@@ -576,17 +576,16 @@ fn refused_under_a_long_root(action: impl Fn(&str) -> Value) -> (LifecycleErrorI
     (error, root.display().to_string(), target.display().to_string())
 }
 
-/// The refusal's complete text names the whole target and root, both in the
-/// action error and in the diagnostic `md compose` publishes, while `err.msg`
-/// stays within the concise limit.
+/// `err.msg` itself is the refusal's complete text: it names the whole target
+/// and root, is projected unchanged, and is what `md compose` publishes.
 fn assert_full_refusal(error: &LifecycleErrorInfo, root: &str, target: &str) {
-    let full = error.actionable_msg();
+    let full = error.msg.as_str();
     assert!(full.contains("outside the mutation root"), "{full}");
     assert!(full.contains(target), "names the whole target {target}: {full}");
     assert!(full.contains(&format!("(root: {root})")), "names the whole root {root}: {full}");
-    assert!(error.msg.chars().count() <= crate::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS, "{}", error.msg);
-    assert_ne!(error.msg, full, "the fixture is long enough that `err.msg` is clamped");
-    assert_eq!(error.to_value()["msg"], json!(error.msg), "`err.msg` reads the concise text");
+    assert!(full.chars().count() > 240, "the fixture is longer than the removed 240-character limit: {full}");
+    assert!(!full.contains('…'), "nothing is cut: {full}");
+    assert_eq!(error.to_value()["msg"], json!(full), "`err.msg` projects the complete text");
     let diagnostics = crate::markdown::compose::report_diagnostics::lifecycle_failure_diagnostics(error);
     assert_eq!(diagnostics.iter().map(|diagnostic| diagnostic.message.as_str()).collect::<Vec<_>>(), [full]);
 }
@@ -606,6 +605,6 @@ fn a_long_root_survives_in_a_frontmatter_writers_refusal() {
 #[test]
 fn a_long_root_and_target_survive_in_an_edit_refusal() {
     let (error, root, target) = refused_under_a_long_root(|target| json!({ "edit": target }));
-    assert!(error.actionable_msg().contains("`composed[0].edit` could not edit the file"), "{}", error.actionable_msg());
+    assert!(error.msg.contains("`composed[0].edit` could not edit the file"), "{}", error.msg);
     assert_full_refusal(&error, &root, &target);
 }

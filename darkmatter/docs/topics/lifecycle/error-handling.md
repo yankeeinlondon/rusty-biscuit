@@ -183,12 +183,12 @@ added in parentheses only when the reason does not already name it:
 `initialize[1].edit` could not edit the file: `nvim` is a terminal editor and needs an interactive terminal, but stdout is not a terminal (/work/plan.md)
 ```
 
-Like every lifecycle failure message, it is folded onto one line. The
-command's own failure report (the terminal status line, or the diagnostic's
-`message` under `--output json`) shows that whole line, however long the
-paths in it are. `err.msg`, which `failed` and `finalize` read, is the same
-line cut to at most 240 characters, so it stays safe to speak or send; see
-[Fields](#fields).
+Like every lifecycle failure message, it is folded onto one line; it is never
+shortened, so a long error stays whole. A channel that cannot show it all fits
+it itself. The command's own failure report (the terminal status line, or the
+diagnostic's `message` under `--output json`) and `err.msg`, which `failed`
+and `finalize` read, carry the same complete line, however long the paths in
+it are; see [Fields](#fields).
 
 ## Cancellation
 
@@ -263,7 +263,7 @@ finalize:
 
 | Field | Meaning |
 |---|---|
-| `msg` | A concise, single-line message of at most 240 characters. Always present. Safe to print, speak, or send; do not branch on it. A longer failure is cut here, but the command still reports it in full. |
+| `msg` | The complete, single-line, escape-free message. Always present, never shortened, so it can be long; do not branch on it. |
 | `code` | A stable dotted code such as `composition.invalid_file_reference`. |
 | `category` | The coarse domain: the dotted prefix of `code`. |
 | `disposition` | How to handle it: `transient`, `throttled`, `correctable`, `needs_input`, or `unrecoverable`. |

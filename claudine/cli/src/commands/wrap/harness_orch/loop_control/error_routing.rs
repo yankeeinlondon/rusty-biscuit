@@ -587,12 +587,12 @@ pub(super) fn run_cancelled_prompt_cleanup(
         );
         // `run_lifecycle_event` already warned about an action error.
         for info in cleanup.evaluation_error.iter() {
-            guard.emitter().emit_warn(info.actionable_msg(), term);
+            guard.emitter().emit_warn(info.msg.as_str(), term);
         }
         if let Some(StackControl::Error { reason }) = &cleanup.control {
             let info = LifecycleErrorInfo::from_action_failure("error",
                 reason.clone().unwrap_or_else(|| "cancellation cleanup failed".into()));
-            guard.emitter().emit_warn(info.actionable_msg(), term);
+            guard.emitter().emit_warn(info.msg.as_str(), term);
         }
         if let Some(control) = &cleanup.control
             && let Some(action) = claudine::composition::lifecycle::policy::refused_recovery(
@@ -604,7 +604,7 @@ pub(super) fn run_cancelled_prompt_cleanup(
                 source_path: source_path.to_path_buf(), action: action.into(),
             };
             let info = LifecycleErrorInfo::from_composition_error(&error);
-            guard.emitter().emit_warn(info.actionable_msg(), term);
+            guard.emitter().emit_warn(info.msg.as_str(), term);
         }
     }
 }

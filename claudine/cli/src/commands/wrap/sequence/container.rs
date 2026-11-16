@@ -175,7 +175,7 @@ impl<'a> RootRun<'a> {
                 decision => {
                     if matches!(decision, ContainerEventDecision::Finished { .. }) && self.runner.is_cancelled() {
                         for error in self.runner.secondary_errors() {
-                            self.stack.emitter.emit_warn(error.actionable_msg(), self.stack.term);
+                            self.stack.emitter.emit_warn(error.msg.as_str(), self.stack.term);
                         }
                     } else if matches!(decision, ContainerEventDecision::Finished { failed: true }) {
                         self.report_recorded(&[reported.as_ref()]);

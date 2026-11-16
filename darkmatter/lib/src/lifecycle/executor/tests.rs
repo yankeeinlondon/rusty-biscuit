@@ -942,7 +942,7 @@ impl Workspace {
 
 impl Workspace {
     /// The failure message of `outcome`: an `edit` failure's error display
-    /// (the fake host's classification clamps it), else the action error.
+    /// (the fake host's classification carries its debug label), else the action error.
     fn failure_message(&self, outcome: &LifecycleEventOutcome) -> String {
         match self.fixture.host.edit_errors.borrow().last() {
             Some(error) if outcome.action_error.as_ref().is_some_and(|info| info.msg.starts_with("EditFailed")) => {

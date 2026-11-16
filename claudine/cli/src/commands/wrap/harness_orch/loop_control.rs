@@ -225,7 +225,7 @@ pub(crate) fn run_harness_loop(
     let result = match run_harness_loop_inner(ctx) {
         Err(error) if claudine::composition::lifecycle::cancellation::requested() => {
             let info = LifecycleErrorInfo::from_error_or_action("cancelled_setup", error.as_ref());
-            lifecycle_guard.emitter().emit_warn(info.actionable_msg(), term);
+            lifecycle_guard.emitter().emit_warn(info.msg.as_str(), term);
             return Ok((130, None, None, None));
         }
         result => result?,
@@ -715,9 +715,9 @@ fn start_lifecycle_phase(
             catch_result.control,
             Some(StackControl::Error { .. })
         ) {
-            setup_error.actionable_msg().to_string()
+            setup_error.msg.clone()
         } else {
-            format!("lifecycle start failed: {}", setup_error.actionable_msg())
+            format!("lifecycle start failed: {}", setup_error.msg)
         };
         return Err(eyre!(message));
     }

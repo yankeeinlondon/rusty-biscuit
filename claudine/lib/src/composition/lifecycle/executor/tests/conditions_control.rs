@@ -323,7 +323,6 @@ fn err_global_visible_in_failure_stack_when() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
-        full_msg: None,
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,

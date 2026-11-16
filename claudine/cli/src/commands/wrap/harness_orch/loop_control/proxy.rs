@@ -71,9 +71,9 @@ pub(super) fn run_target_initialize(
         // what the non-loop route returns, so the two agree on the typed
         // identity of "the target's `initialize` raised".
         let reason = if matches!(catch_result.control, Some(StackControl::Error { .. })) {
-            setup_error.actionable_msg().to_string()
+            setup_error.msg.clone()
         } else {
-            format!("lifecycle initialize failed: {}", setup_error.actionable_msg())
+            format!("lifecycle initialize failed: {}", setup_error.msg)
         };
         return TargetInitializeAction::Abort(
             CompositionError::LifecycleInitializeFailed {

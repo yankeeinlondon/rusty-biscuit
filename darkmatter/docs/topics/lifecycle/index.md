@@ -493,8 +493,8 @@ refusing to write outside the mutation root: /Users/me/notes.md (root: /Users/me
 ```
 
 The command reports this line whole, in its terminal output and in the JSON
-diagnostic alike, even when long paths make it longer than the 240-character
-`err.msg` a later event reads.
+diagnostic alike, however long the paths are, and a later event reads the same
+complete line as `err.msg`.
 
 ### A prompt in a subfolder
 

@@ -127,7 +127,6 @@ fn snapshot_from_cause(cause: &DiagnosticCause) -> DiagnosticSnapshot {
         severity: cause.severity.clone(),
         detail: cause.detail.clone(),
         message: cause.message.clone(),
-        full_message: None,
         cause: None,
         frontmatter_excerpt: None,
     }
@@ -135,9 +134,7 @@ fn snapshot_from_cause(cause: &DiagnosticCause) -> DiagnosticSnapshot {
 
 impl fmt::Display for RestoredDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // The complete message, when the snapshot kept one, so a restored
-        // failure renders what the original did; re-projecting clamps it again.
-        let message = self.snapshot.full_message.as_deref().unwrap_or(&self.snapshot.message);
+        let message = &self.snapshot.message;
         match &self.context {
             Some(context) => write!(f, "{context}: {message}"),
             None => f.write_str(message),

@@ -14,10 +14,9 @@ use super::LifecycleSignal;
 use super::context::LifecycleErrorInfo;
 use super::executor::LifecycleEventOutcome;
 
-/// The text a reported failure shows the author: the complete message, never
-/// the clamped `err.msg`, so a refused write keeps its whole target and root.
+/// The text a reported failure shows the author: the complete `err.msg`.
 fn actionable_text(error: &LifecycleErrorInfo) -> &str {
-    error.actionable_msg()
+    error.msg.as_str()
 }
 
 /// Warn about a document event's action error that the run's error does not

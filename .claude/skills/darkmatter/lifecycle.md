@@ -84,14 +84,13 @@ pages with the behavior.
   host running a stack for another document (Claudine's referenced sequences
   and groups) must pass that document's own context, keeping the launch
   scope, or the reference fails as "does not contain the resolution source".
-  `err.msg` is clamped to one 240-character line (`concise_message`), so
-  `md` puts the reason before the target; the clamped text's complete
-  one-line form rides beside it (`LifecycleErrorInfo::full_msg`,
-  `DiagnosticSnapshot::full_message`, in-process only, never serialized),
-  and every actionable report (`report_diagnostics::lifecycle_failure_diagnostics`,
-  `md compose`'s status line, Claudine's `report::actionable_text`, run and
-  step errors) reads `actionable_msg()`; speech, messaging, and `err.*`
-  keep `msg`. Terminal-editor success is provable only in L2
+  Failure messages are folded to one escape-free line (`concise_message`)
+  and never shortened, so `err.msg`, `DiagnosticSnapshot::message`, and
+  every report (`report_diagnostics::lifecycle_failure_diagnostics`,
+  `md compose`'s status line, Claudine's run and step errors) carry the same
+  complete text; delivery adapters (speech, messaging, notifications) fit it
+  to their channel. `edit` keeps its reason-first wording because it reads
+  better. Terminal-editor success is provable only in L2
   (`cli/tests/level2/level2_edit_action.rs`); L1 process tests use the fake
   editor installed as `code` (GUI, `--wait`) with `DISPLAY` set.
 - The editor seam is `darkmatter::editor::EditorService` (`edit(&EditRequest)
