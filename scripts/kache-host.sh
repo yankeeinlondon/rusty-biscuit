@@ -124,13 +124,18 @@ usage() {
     exit 2
 }
 
+# Decided once per run: the device and OS checks below ask for it many times
+# per subcommand, and each `$(uname -s)` was a process spawn.
+UNAME_S="$(uname -s)"
+case "$UNAME_S" in
+    Darwin) OS_NAME=darwin ;;
+    Linux) if grep -qi microsoft /proc/version 2> /dev/null; then OS_NAME=wsl; else OS_NAME=linux; fi ;;
+    MINGW* | MSYS* | CYGWIN*) OS_NAME=windows ;;
+    *) OS_NAME=unknown ;;
+esac
+
 os_name() {
-    case "$(uname -s)" in
-        Darwin) echo darwin ;;
-        Linux) if grep -qi microsoft /proc/version 2> /dev/null; then echo wsl; else echo linux; fi ;;
-        MINGW* | MSYS* | CYGWIN*) echo windows ;;
-        *) echo unknown ;;
-    esac
+    echo "$OS_NAME"
 }
 
 # Native Windows programs (python3, kache.exe, cargo) cannot open a
@@ -164,7 +169,7 @@ cargo_home() {
 # base that is a link (`C:\Users\<user>\wt` -> `B:\coding\wt`) lives where it
 # points.
 device_id() {
-    case "$(uname -s)" in
+    case "$UNAME_S" in
         Darwin) stat -L -f %d "$1" ;;
         *) stat -L -c %d "$1" ;;
     esac
@@ -360,7 +365,7 @@ clone_probe() {
         return 1
     fi
     rm -f "$dst"
-    case "$(uname -s)" in
+    case "$UNAME_S" in
         Darwin)
             [[ "$(device_id "$src_dir")" == "$(device_id "$dst_dir")" ]] \
                 && cp -c "$src" "$dst" 2> /dev/null || ok=1
@@ -462,7 +467,7 @@ candidate_store() {
     local checkout="$1" cache_anchor cache_dir checkout_device mount_point try
     checkout_device="$(device_id "$checkout")"
 
-    if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ "$UNAME_S" == "Darwin" ]]; then
         mount_point="$(mount_point_of "$checkout")"
         try="${mount_point%/}/kache"
         if [[ -n "$mount_point" && "$try" != "$mount_point" ]] \
@@ -573,7 +578,7 @@ do_qualify() {
             candidate="$CANDIDATE"
             ;;
         *)
-            echo "kache-host: verdict=no-qualify reason=unsupported-os-$(uname -s)"
+            echo "kache-host: verdict=no-qualify reason=unsupported-os-${UNAME_S}"
             exit 1
             ;;
     esac
