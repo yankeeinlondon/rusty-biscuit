@@ -326,6 +326,8 @@ mod scope_site_conformance;
 mod set_shell_values;
 mod shell_templates;
 mod guarded_shell_sites;
+#[cfg(unix)]
+mod interrupt_stops;
 mod proxy_with_evaluation;
 mod recovery;
 mod retry_with_evaluation;

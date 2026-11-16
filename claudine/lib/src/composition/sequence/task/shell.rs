@@ -44,8 +44,8 @@
 //!
 //! The owner's rules and limits on each OS are described in
 //! `sniff/docs/topics/process-trees.md`. Lifecycle commands share this
-//! ownership with one exception, a Unix command that holds the terminal's
-//! foreground (see [`run_owned_lifecycle_command`]).
+//! ownership, and on Unix also take the terminal's foreground while they run
+//! (see [`run_owned_lifecycle_command`]).
 //!
 //! ## Both pipes, live, on their own channels
 //!
@@ -69,7 +69,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sniff::process::{
-    CleanupScan, ProcessTree, TreeConfig, WINDOWS_CREATE_NEW_PROCESS_GROUP,
+    CleanupScan, ForegroundHandoff, ProcessTree, TreeConfig, WINDOWS_CREATE_NEW_PROCESS_GROUP,
 };
 
 use darkmatter::markdown::compose::shell_expansion::template::{
@@ -858,19 +858,106 @@ mod tests;
 #[cfg(test)]
 mod structured_tests;
 
-/// Lifecycle commands retain inherited streams while sharing task shells' tree
-/// ownership, except a Unix command that shares this process's terminal (see
-/// [`holds_terminal_foreground`]): it stays in Claudine's process group, and
-/// cancellation reaches only the direct child. Cancellation is worker-local; cleanup
-/// suspends the original stop request so its commands can finish under their
-/// own contract.
+#[cfg(test)]
+mod lifecycle_tests;
+
+/// Runs one lifecycle command with inherited streams as an owned process tree,
+/// like a task command, and returns its exit code.
+///
+/// On Unix the command's group is handed the terminal's foreground through
+/// [`ForegroundHandoff`] when Claudine holds it, so an interactive command
+/// reads the keyboard and a typed Ctrl-C reaches the command rather than
+/// Claudine. Every return settles the tree first (completion stops any
+/// background process the command left behind; cancellation stops the whole
+/// tree) and then gives the terminal back, before the lifecycle executor does
+/// anything else.
+///
+/// - Cancellation already requested: nothing starts, `130`.
+/// - Cancellation requested while the command runs (it is worker-local; cleanup
+///   suspends the original stop request so its commands can finish under their
+///   own contract): the tree is stopped, `130`.
+/// - A command holding the foreground that ends by `SIGINT`, or exits `130`,
+///   was interrupted from the keyboard, which Claudine itself never saw: the
+///   run is marked user-interrupted (unless a cancellation cause is already
+///   established) and the result is `130`. Without the foreground, a `SIGINT`
+///   end is `-1` like any other signal, and `130` is an ordinary exit code.
+///
+/// ## Errors
+///
+/// The terminal could not be prepared (another lifecycle command in this
+/// process holds it is [`std::io::ErrorKind::WouldBlock`]), the command could
+/// not be spawned or contained, waiting on it failed, or the terminal could
+/// not be given back after a command that exited `0`. A restoration failure
+/// after any other result is logged and that result stands.
 pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, std::io::Error> {
     if crate::composition::lifecycle::cancellation::requested() { return Ok(130); }
-    #[cfg(unix)]
-    if holds_terminal_foreground() {
-        return run_in_own_group(command);
-    }
     tree_config().configure(command);
+    // Held by this frame, outside the tree's, so an unwind stops the tree
+    // before the terminal goes back.
+    let mut handoff = ForegroundHandoff::prepare(command)?;
+    let foreground = handoff.is_active() || test_seams::foreground();
+    let outcome = run_lifecycle_tree(command, foreground);
+    settle_lifecycle_command(outcome, handoff.restore())
+}
+
+/// Fault injection for the lifecycle runner's tests, which run without a
+/// terminal: in production the foreground flag is always clear and the wait
+/// is `Child::try_wait`.
+mod test_seams {
+    use std::process::{Child, ExitStatus};
+
+    #[cfg(test)]
+    thread_local! {
+        /// Treat this thread's lifecycle commands as holding the foreground.
+        pub(super) static FOREGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// Fail the first wait once this file exists.
+        pub(super) static FAIL_WAIT_AFTER: std::cell::RefCell<Option<std::path::PathBuf>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn foreground() -> bool {
+        false
+    }
+
+    #[cfg(test)]
+    pub(super) fn foreground() -> bool {
+        FOREGROUND.get()
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn try_wait(child: &mut Child) -> std::io::Result<Option<ExitStatus>> {
+        child.try_wait()
+    }
+
+    #[cfg(test)]
+    pub(super) fn try_wait(child: &mut Child) -> std::io::Result<Option<ExitStatus>> {
+        let fail = FAIL_WAIT_AFTER.with_borrow_mut(|after| {
+            let reached = after.as_ref().is_some_and(|path| path.exists());
+            if reached {
+                *after = None;
+            }
+            reached
+        });
+        if fail {
+            return Err(std::io::Error::other("injected lifecycle wait failure"));
+        }
+        child.try_wait()
+    }
+}
+
+/// How a lifecycle command's tree ended, before the terminal is given back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LifecycleExit {
+    /// The command exited on its own with this code (`-1` for a signal).
+    Code(i32),
+    /// The command held the foreground and was interrupted from the keyboard.
+    ForegroundInterrupt,
+    /// Claudine cancelled the command and stopped its tree.
+    Cancelled,
+}
+
+fn run_lifecycle_tree(command: &mut Command, foreground: bool) -> Result<LifecycleExit, std::io::Error> {
     let mut child = command.spawn()?;
     let mut tree = match ProcessTree::attach(&child) {
         Ok(tree) => tree,
@@ -881,12 +968,12 @@ pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, 
         }
     };
     loop {
-        match child.try_wait() {
+        match test_seams::try_wait(&mut child) {
             Ok(Some(status)) => {
                 if let Err(error) = tree.terminate(CleanupScan::WhenObserved) {
                     tracing::warn!(error = %error, "could not stop a lifecycle command's background processes");
                 }
-                return Ok(status.code().unwrap_or(-1));
+                return Ok(classify_lifecycle_exit(status, foreground));
             }
             Ok(None) => tree.sample(),
             Err(error) => {
@@ -896,9 +983,52 @@ pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, 
         }
         if crate::composition::lifecycle::cancellation::requested() {
             terminate_lifecycle_tree(&mut tree, &mut child);
-            return Ok(130);
+            return Ok(LifecycleExit::Cancelled);
         }
         std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// A shell reports a child it lost to `SIGINT` either by dying of the same
+/// signal or by exiting `128 + SIGINT`; both mean the keyboard interrupted a
+/// command that held the foreground.
+fn classify_lifecycle_exit(status: std::process::ExitStatus, foreground: bool) -> LifecycleExit {
+    #[cfg(unix)]
+    let by_sigint = {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal() == Some(libc::SIGINT)
+    };
+    #[cfg(not(unix))]
+    let by_sigint = false;
+    if foreground && (by_sigint || status.code() == Some(130)) {
+        return LifecycleExit::ForegroundInterrupt;
+    }
+    LifecycleExit::Code(status.code().unwrap_or(-1))
+}
+
+/// The lifecycle command's result once the terminal has been given back. A
+/// keyboard interrupt is recorded only now, after cleanup and restoration.
+fn settle_lifecycle_command(
+    outcome: Result<LifecycleExit, std::io::Error>,
+    restored: Result<(), std::io::Error>,
+) -> Result<i32, std::io::Error> {
+    if let Err(restoration) = restored {
+        if matches!(outcome, Ok(LifecycleExit::Code(0))) {
+            return Err(restoration);
+        }
+        tracing::warn!(error = %restoration, "could not restore the terminal after a lifecycle command");
+    }
+    match outcome? {
+        LifecycleExit::Code(code) => Ok(code),
+        LifecycleExit::ForegroundInterrupt => {
+            // A worker or sibling cancellation already explains the stop; only
+            // an unexplained interrupt is the user's.
+            if !crate::composition::lifecycle::cancellation::requested() {
+                crate::interrupt::mark_interrupted();
+            }
+            Ok(130)
+        }
+        LifecycleExit::Cancelled => Ok(130),
     }
 }
 
@@ -908,65 +1038,5 @@ fn terminate_lifecycle_tree(tree: &mut ProcessTree, child: &mut Child) {
     let termination = tree.terminate_gracefully(TREE_KILL_GRACE, child);
     if let Err(error) = termination.cleanup {
         tracing::warn!(error = %error, "could not stop a lifecycle command's whole process tree");
-    }
-}
-
-/// Whether this process is in the foreground process group of its controlling
-/// terminal.
-///
-/// A lifecycle command inherits that terminal. Moved into a group of its own,
-/// it would be a background job: the kernel stops it (`SIGTTIN`/`SIGTTOU`) the
-/// first time it reads the terminal or changes its modes, and nothing ever
-/// resumes it, so a nested interactive `claudine` never finishes. The provider
-/// wrapper's inherited-output spawn keeps such a child in its group for the
-/// same reason.
-#[cfg(unix)]
-fn holds_terminal_foreground() -> bool {
-    use std::os::fd::AsRawFd;
-
-    // Opening `/dev/tty` fails when there is no controlling terminal, the case
-    // (CI, test runners) where isolation cannot stop anything.
-    let Ok(terminal) = std::fs::File::open("/dev/tty") else {
-        return false;
-    };
-    // SAFETY: both calls only read process state; the descriptor is open for
-    // the duration of the call.
-    let foreground = unsafe { libc::tcgetpgrp(terminal.as_raw_fd()) };
-    foreground > 0 && foreground == unsafe { libc::getpgrp() }
-}
-
-/// Run a lifecycle command in this process's own group, where it keeps the
-/// terminal's foreground.
-///
-/// Ctrl-C reaches the whole tree through the terminal. Any other cancellation
-/// can address only the direct child: what it left running in the background
-/// outlives it, as it did before lifecycle commands owned their trees.
-#[cfg(unix)]
-fn run_in_own_group(command: &mut Command) -> Result<i32, std::io::Error> {
-    let mut child = command.spawn()?;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return Ok(status.code().unwrap_or(-1)),
-            Ok(None) => {}
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(error);
-            }
-        }
-        if crate::composition::lifecycle::cancellation::requested() {
-            // SAFETY: a positive pid addresses only this unreaped child.
-            unsafe {
-                libc::kill(child.id() as i32, libc::SIGTERM);
-            }
-            let deadline = Instant::now() + TREE_KILL_GRACE;
-            while Instant::now() < deadline && matches!(child.try_wait(), Ok(None)) {
-                std::thread::sleep(POLL_INTERVAL);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-            return Ok(130);
-        }
-        std::thread::sleep(POLL_INTERVAL);
     }
 }

@@ -9,11 +9,16 @@
 //! OS chord needs stay in the `level3_` file.
 //!
 //! The fixtures mirror `wrap_sigint.rs`'s `OrphanTeardownFixture` and
-//! `TerminalLifecycleFixture` with one difference. `SystemShellRunner` runs a
-//! lifecycle `shell` action in Claudine's own process group, so a keyboard
-//! press also signals it; the blocking action here ignores `SIGINT`, standing
-//! in for lifecycle work a press does not kill. Without that the first press
-//! would end the action, and the grace would have nothing to wait for.
+//! `TerminalLifecycleFixture` with one difference. A lifecycle `shell` action
+//! runs in its own process group and is handed the terminal's foreground, so a
+//! keyboard press reaches the command, not Claudine, and a blocking shell
+//! cannot hold Claudine inside a terminal event while its repeat-interrupt
+//! ladder is pressed. The terminal-lifecycle scenarios therefore block in
+//! Claudine itself: an `info: terminal-lifecycle-test-hold` action that a
+//! `test-fixtures` build holds in process while `CLAUDINE_TEST_LIFECYCLE_HOLD`
+//! names a marker prefix, until the test writes its release file (a
+//! [`HostBarrier`]). The orphan-teardown scenarios still block in a shell (a
+//! [`ShellBarrier`]), since their subject is an orphaned process.
 //!
 //! The repeat-press teardown scenario needs the teardown held open, because
 //! the first press ends it within one 50 ms poll and an orphan that exits on
@@ -27,7 +32,7 @@
 //! says which latencies it absorbs.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
@@ -90,12 +95,74 @@ const CTRL_C_ECHO: &str = "^C";
 /// grace-expired rungs.
 const FORCE_EXIT_TEXT: &str = "force-exiting";
 
+/// What a scenario's blocked work waits on.
+enum Barrier {
+    /// A shell snippet: the orphan in the teardown scenarios.
+    Shell(ShellBarrier),
+    /// Claudine's own in-process lifecycle hold: the `failure` action in the
+    /// terminal-lifecycle scenarios.
+    Host(HostBarrier),
+}
+
+impl Barrier {
+    /// Let the blocked work continue.
+    fn release(&self) {
+        match self {
+            Self::Shell(barrier) => barrier.release(),
+            Self::Host(barrier) => barrier.release(),
+        }
+    }
+
+    /// Release, and for a shell also end it; never panics. See
+    /// [`PaneCompose`]'s `Drop`.
+    fn release_on_drop(&self) {
+        match self {
+            Self::Shell(barrier) => barrier.release_or_kill(Duration::from_secs(5)),
+            Self::Host(barrier) => barrier.release_quietly(),
+        }
+    }
+}
+
+/// The marker files of the `test-fixtures` lifecycle hold
+/// (`CLAUDINE_TEST_LIFECYCLE_HOLD`): Claudine writes `<prefix>.reached` once
+/// it is held and continues once `<prefix>.release` exists.
+///
+/// The held process is the wrapper itself, so this barrier only ever writes
+/// its release file: it records no pid and signals nothing.
+struct HostBarrier {
+    prefix: PathBuf,
+}
+
+impl HostBarrier {
+    fn new(dir: &Path, name: &str) -> Self {
+        Self {
+            prefix: dir.join(name),
+        }
+    }
+
+    fn marker(&self, suffix: &str) -> PathBuf {
+        PathBuf::from(format!("{}{suffix}", self.prefix.display()))
+    }
+
+    fn reached_path(&self) -> PathBuf {
+        self.marker(".reached")
+    }
+
+    fn release(&self) {
+        fs::write(self.marker(".release"), b"").expect("release the lifecycle hold");
+    }
+
+    fn release_quietly(&self) {
+        let _ = fs::write(self.marker(".release"), b"");
+    }
+}
+
 /// One `claudine compose` typed into a pane, with the files it reads and
 /// writes in a private workspace that is also the pane's `HOME` and CWD.
 pub struct PaneCompose {
     /// The orphan in the teardown scenario, the `failure` action otherwise.
-    /// Ended in `Drop`; see there.
-    barrier: ShellBarrier,
+    /// Released in `Drop`; see there.
+    barrier: Barrier,
     workspace: TempDir,
     events_log: PathBuf,
     /// Written once the wrapper sits in the window a press must land in.
@@ -192,7 +259,7 @@ exit 1
         }
         let mut compose = Self::new(
             workspace,
-            orphan,
+            Barrier::Shell(orphan),
             term_marker,
             format!("--opencode -y {}", sh_quote(&md_file.display().to_string())),
             env,
@@ -202,48 +269,48 @@ exit 1
     }
 
     /// A compose whose provider fails and whose `failure` stack appends
-    /// `failure-started`, blocks in a `SIGINT`-ignoring `shell` action until
+    /// `failure-started`, is held in process by its `info` action until
     /// released, then appends `failure-done`; `finalize` appends `finalize`.
-    /// Ready once the action is blocked, which is inside the terminal
-    /// lifecycle scope.
+    /// Ready once the hold is reached, which is inside the terminal lifecycle
+    /// scope.
     pub fn terminal_lifecycle() -> Self {
         let workspace = tempfile::tempdir().expect("workspace");
         let root = workspace.path();
         super::wrap::seed_minimal_config(root);
         write_executable(&root.join("bin").join("claude"), "#!/bin/sh\nexit 1\n");
-        let failure_action = ShellBarrier::new(root, "failure-action");
+        let failure_action = HostBarrier::new(root, "failure-action");
         let md_file = root.join("grace.md");
         write(
             &md_file,
-            &format!(
-                r#"---
+            r#"---
 title: terminal grace
 failure:
   - append_line: ["events.log", "failure-started"]
-  - shell: |
-      trap '' INT; {}
+  - info: terminal-lifecycle-test-hold
   - append_line: ["events.log", "failure-done"]
 finalize:
-  - {{append_line: ["events.log", "finalize"]}}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Prompt body
 "#,
-                failure_action.block_snippet()
-            ),
         );
-        let ready = failure_action.reached_path().to_path_buf();
+        let ready = failure_action.reached_path();
+        let env = vec![(
+            "CLAUDINE_TEST_LIFECYCLE_HOLD",
+            failure_action.prefix.display().to_string(),
+        )];
         Self::new(
             workspace,
-            failure_action,
+            Barrier::Host(failure_action),
             ready,
             format!("--claude -y {}", sh_quote(&md_file.display().to_string())),
-            Vec::new(),
+            env,
         )
     }
 
     fn new(
         workspace: TempDir,
-        barrier: ShellBarrier,
+        barrier: Barrier,
         ready: PathBuf,
         args: String,
         mut env: Vec<(&'static str, String)>,
@@ -275,7 +342,9 @@ Prompt body
     ///
     /// ## Panics
     ///
-    /// When the window is not reached within the readiness bound.
+    /// When the window is not reached within the readiness bound, which is also
+    /// how a terminal-lifecycle scenario fails against a binary built without
+    /// `test-fixtures`.
     pub fn launch(&self, harness: &mut impl TerminalHarness) {
         let root = self.workspace.path().display().to_string();
         let bin_dir = self.workspace.path().join("bin").display().to_string();
@@ -367,17 +436,16 @@ Prompt body
 }
 
 impl Drop for PaneCompose {
-    /// The blocked shell belongs to no process group the test owns: the
-    /// orphan sits in the provider's group, and a force-exited wrapper leaves
-    /// its `failure` action behind in the pane's former foreground group. It
-    /// is ended here, before the `workspace` field that holds its release file
-    /// is dropped. A held teardown is released too, so a failed assertion does
-    /// not leave the wrapper parked in it.
+    /// A blocked orphan shell belongs to no process group the test owns (it
+    /// sits in the provider's group), so it is ended here, before the
+    /// `workspace` field that holds its release file is dropped. A lifecycle
+    /// or teardown hold is in the wrapper itself and is only released, so a
+    /// failed assertion does not leave the wrapper parked in it.
     fn drop(&mut self) {
         if self.teardown_hold.is_some() {
             let _ = fs::write(self.teardown_marker(".release"), b"");
         }
-        self.barrier.release_or_kill(Duration::from_secs(5));
+        self.barrier.release_on_drop();
     }
 }
 

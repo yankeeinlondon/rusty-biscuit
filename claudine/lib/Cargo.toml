@@ -118,8 +118,8 @@ shell-words = "1"
 strum = { version = "0.28", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
-# Terminal foreground checks and direct-child signals for lifecycle commands
-# in `composition/sequence/task/shell.rs`, and process checks in tests.
+# The `SIGINT` a foreground lifecycle command can end by, in
+# `composition/sequence/task/shell.rs`, and process checks in tests.
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
