@@ -14,7 +14,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{CliProcessFixture, init_git_repo};
+use super::CliProcessFixture;
 
 /// A caller repository: `cwd` is a git working tree's top level, so it is the
 /// mutation root of every run launched from it.
@@ -29,16 +29,29 @@ pub struct CallerTree {
     pub library: PathBuf,
 }
 
+/// The `.git/config` of a healthy non-bare repository.
+pub const HEALTHY_GIT_CONFIG: &str = "[core]\n\trepositoryformatversion = 0\n\tbare = false\n";
+
+/// A minimal non-bare repository written directly at `root`, with `config` as
+/// its `.git/config`: discovery needs no more, and no `git` is spawned (two
+/// `git init` runs were most of a fixture's own cost).
+pub fn write_git_dir(root: &Path, config: &str) {
+    let git = root.join(".git");
+    fs::create_dir_all(git.join("objects")).unwrap();
+    fs::create_dir_all(git.join("refs/heads")).unwrap();
+    fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    fs::write(git.join("config"), config).unwrap();
+}
+
 impl CallerTree {
     pub fn stage(name: &str) -> Self {
         let fixture = CliProcessFixture::named(name);
         fixture.seed_user_config();
-        fixture.initialize_repository();
+        write_git_dir(fixture.cwd(), HEALTHY_GIT_CONFIG);
         let outside = fixture.home().join("outside");
         fs::create_dir_all(&outside).unwrap();
         let library = fixture.home().join("library");
-        fs::create_dir_all(&library).unwrap();
-        assert!(init_git_repo(&library), "git init of the prompt library failed");
+        write_git_dir(&library, HEALTHY_GIT_CONFIG);
         assert!(!outside.starts_with(fixture.cwd()) && !library.starts_with(fixture.cwd()));
         Self { fixture, outside, library }
     }

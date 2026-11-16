@@ -56,6 +56,7 @@ fn catalog_snapshot(code: &str, message: &str, detail: serde_json::Value) -> Dia
         severity: spec.severity().as_str().to_string(),
         detail,
         message: message.to_string(),
+        full_message: None,
         cause: None,
         frontmatter_excerpt: None,
     }
@@ -139,6 +140,7 @@ fn an_unknown_code_degrades_instead_of_failing() {
         severity: "error".to_string(),
         detail: json!({ "anything": 1 }),
         message: "from a newer producer".to_string(),
+        full_message: None,
         cause: None,
         frontmatter_excerpt: None,
     };

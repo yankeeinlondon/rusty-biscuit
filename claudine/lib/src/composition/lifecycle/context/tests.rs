@@ -27,6 +27,7 @@ fn snapshot_with(
         severity: severity.to_string(),
         detail,
         message: String::new(),
+        full_message: None,
         cause: None,
         frontmatter_excerpt: None,
     }
@@ -67,6 +68,7 @@ fn error_info_to_value_has_kind_variant_msg() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
+        full_msg: None,
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
@@ -338,6 +340,7 @@ fn cap_detail_promotes_reset_at_and_retry_after_ms_to_top_level() {
         kind: "LifecycleAction",
         variant: "rate_limit".to_string(),
         msg: "slow down".to_string(),
+        full_msg: None,
         snapshot: Some(Box::new(snapshot_with(
             "cap.rate_limit",
             "cap",
@@ -372,6 +375,7 @@ fn null_detail_field_promotes_to_null() {
         kind: "LifecycleAction",
         variant: "x".to_string(),
         msg: "m".to_string(),
+        full_msg: None,
         snapshot: Some(Box::new(snapshot_with(
             "document.missing_frontmatter",
             "document",
@@ -497,6 +501,7 @@ fn the_catalog_supplies_err_and_timing_values() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
+        full_msg: None,
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
@@ -531,6 +536,7 @@ fn err_global_resolves_through_dm2_subtree() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
+        full_msg: None,
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
@@ -573,6 +579,7 @@ fn fm_namespace_reaches_literal_err_property_through_dm2() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
+        full_msg: None,
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
@@ -882,4 +889,37 @@ fn from_error_or_action_prefers_facets_and_falls_back_to_the_verb() {
     let value = untyped.to_value();
     assert_eq!(value["variant"], json!("materialize"));
     assert_eq!(value["kind"], json!("LifecycleAction"));
+}
+
+/// A refusal under a long root keeps its complete text for the command's
+/// report while `err.msg` stays concise; the complete text survives a
+/// snapshot restored into a live diagnostic.
+#[test]
+fn a_long_edit_refusal_keeps_its_complete_text_beside_the_concise_err_msg() {
+    let temp = std::env::temp_dir();
+    let root = temp.join("a-project-directory-with-a-fifty-character-name-xy");
+    let target = temp.join("an-outside-directory-with-a-fifty-character-name-x").join("refused-target-file.md");
+    let error = CompositionError::LifecycleEditFailed {
+        source_path: root.join("doc.md"),
+        property: "start[0].edit".to_string(),
+        target: target.clone(),
+        error: Box::new(darkmatter::editor::EditError::Containment(
+            darkmatter::effects::EffectError::OutsideMutationRoot { path: target.clone(), root: root.clone() },
+        )),
+    };
+
+    let info = LifecycleErrorInfo::from_composition_error(&error);
+
+    let full = info.actionable_msg();
+    assert!(full.contains(&target.display().to_string()), "names the whole target: {full}");
+    assert!(full.contains(&format!("(root: {})", root.display())), "names the whole root: {full}");
+    assert!(info.msg.chars().count() <= darkmatter::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS, "{}", info.msg);
+    assert_ne!(info.msg, full, "the fixture is long enough that `err.msg` is clamped");
+    assert_eq!(info.to_value()["msg"], json!(info.msg), "`err.msg` reads the concise text");
+    let snapshot = info.snapshot.as_deref().expect("a classified edit failure").clone();
+    assert_eq!(snapshot.message, info.msg);
+    assert_eq!(serde_json::to_value(&snapshot).unwrap()["message"], json!(info.msg), "only the concise text is serialized");
+    let restored = crate::diagnostics::RestoredDiagnostic::new(snapshot.clone());
+    assert_eq!(restored.to_string(), full, "a restored diagnostic renders the complete text");
+    assert_eq!(DiagnosticSnapshot::from_diagnostic(&restored), snapshot, "re-projection is still a fixed point");
 }

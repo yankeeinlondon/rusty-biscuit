@@ -1131,10 +1131,10 @@ fn build_and_run_loop(
     // working tree containing the launch directory, else that directory), not
     // the repository that happens to hold the prompt: a shared prompt library
     // (e.g. a git-tracked `~/.claudine`) still writes into the launch repo.
-    let lifecycle_mutation_root = loop_prepare_options
-        .file_resolution_context
-        .launch_magic_scope()
-        .local_root();
+    let lifecycle_mutation_root = claudine::invocation_context::lifecycle_mutation_root(
+        Some(&prep_context.invocation),
+        &loop_prepare_options.file_resolution_context,
+    )?;
     let effect_engine = darkmatter::effects::EffectEngine::builder()
         .mutation_root(lifecycle_mutation_root)
         .auto_rehash(false)
@@ -1969,7 +1969,10 @@ fn run_staged_single(
         &bootstrap,
         env_overrides,
         repo_root,
-        options.file_resolution_context.launch_magic_scope().local_root(),
+        claudine::invocation_context::lifecycle_mutation_root(
+            Some(&prep_context.invocation),
+            &options.file_resolution_context,
+        )?,
     );
     let term = wrap_terminal();
     let emitter = DefaultLifecycleEmitter;

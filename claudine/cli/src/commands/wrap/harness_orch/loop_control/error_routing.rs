@@ -72,7 +72,7 @@ pub(super) fn run_catch_protocol(
                     step.error.as_ref(),
                     Some(&timing),
                 );
-                guard.run_event_stack(step.signal, &failure_ctx)
+                run_event_stack_reported(guard, step.signal, &failure_ctx)
             }
         };
         assert!(protocol.record(step.signal, outcome));
@@ -585,13 +585,14 @@ pub(super) fn run_cancelled_prompt_cleanup(
             guard, signal, materialized, source_path, repo_root,
             term, effect_engine, Some(&err), loop_start,
         );
-        for info in cleanup.evaluation_error.iter().chain(cleanup.action_error.iter()) {
-            guard.emitter().emit_warn(&info.msg, term);
+        // `run_lifecycle_event` already warned about an action error.
+        for info in cleanup.evaluation_error.iter() {
+            guard.emitter().emit_warn(info.actionable_msg(), term);
         }
         if let Some(StackControl::Error { reason }) = &cleanup.control {
             let info = LifecycleErrorInfo::from_action_failure("error",
                 reason.clone().unwrap_or_else(|| "cancellation cleanup failed".into()));
-            guard.emitter().emit_warn(&info.msg, term);
+            guard.emitter().emit_warn(info.actionable_msg(), term);
         }
         if let Some(control) = &cleanup.control
             && let Some(action) = claudine::composition::lifecycle::policy::refused_recovery(
@@ -603,7 +604,7 @@ pub(super) fn run_cancelled_prompt_cleanup(
                 source_path: source_path.to_path_buf(), action: action.into(),
             };
             let info = LifecycleErrorInfo::from_composition_error(&error);
-            guard.emitter().emit_warn(&info.msg, term);
+            guard.emitter().emit_warn(info.actionable_msg(), term);
         }
     }
 }

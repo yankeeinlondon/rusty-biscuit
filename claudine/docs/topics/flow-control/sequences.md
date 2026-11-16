@@ -1099,8 +1099,12 @@ Review the current changes.
 
 A `side_effect` task resolves file-touching effects relative to the document
 that authored the task. An externalized `task:` or `group:` file therefore
-uses its own directory and repository, even when referenced from another
-repository.
+resolves relative paths from its own directory, even when referenced from
+another repository, while every write must still stay inside the working
+tree Claudine was launched in (see
+[Where file actions write](./lifecycle.md#where-file-actions-write)). A
+shared task file outside your project writes into it through an absolute
+path, never beside itself.
 
 ### Shell tasks
 

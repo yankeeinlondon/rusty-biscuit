@@ -299,6 +299,7 @@ fn an_unknown_code_and_detail_survive_the_err_star_projection() {
         kind: "LifecycleAction",
         variant: "when".to_string(),
         msg: snapshot.message.clone(),
+        full_msg: None,
         snapshot: Some(Box::new(snapshot)),
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,

@@ -6798,3 +6798,6 @@ mod referenced_documents;
 
 #[path = "tests/group_freshness.rs"]
 mod group_freshness;
+
+#[path = "tests/authoring_documents.rs"]
+mod authoring_documents;

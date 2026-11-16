@@ -348,6 +348,29 @@ home read also needs its `context_construction_guard.rs` allowance. Because
 `~/.claudine` fixtures run on Windows too: do not gate them `cfg(unix)` for the
 home.
 
+Every lifecycle `EffectEngine` in `cli/src` takes its mutation root from
+`claudine::invocation_context::lifecycle_mutation_root(invocation, context)`,
+never `launch_magic_scope().local_root()` directly: it refuses a retained
+failed launch discovery (`CompositionError::LaunchRepositoryUnreadable`,
+`io.read_failed`) so the launch-directory fallback is used only after a
+successful observation of no working tree. A direct wrapper's memory-file
+harness (empty lifecycle) passes `None`. Tests:
+`invocation_context::tests::lifecycle_mutation_root_*`,
+`cli/tests/l1/lifecycle_mutation_root.rs` (one row per host family).
+
+A lifecycle action failure that no error return carries is shown through
+`claudine::composition::lifecycle::report`, never an ad hoc `emit_warn`:
+`warn_tolerated_action_error` for a document event other than
+`initialize`/`start` and for every loop gate (`run_loop_gate`, shared by all
+four looping owners), `report_container_failure` for the root sequence's
+recorded failures (`RootRun::report_recorded`, skipping the error its producer
+already reported) and a step's `TaskOutcome.secondary_errors`. Its
+`actionable_text` is the one place the reported text is chosen: the complete
+`LifecycleErrorInfo::actionable_msg()`, never the clamped `err.msg`, which
+stays for speech and messaging (run, step, and setup errors read it too). Tests:
+`cli/tests/l1/lifecycle_refusal_reports.rs`,
+`lib/src/composition/looping/engine/tests/gate_action_errors.rs`.
+
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
 suppress lifecycle audio. Tests of literal shipped prompts should set child-only

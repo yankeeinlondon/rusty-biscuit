@@ -128,6 +128,9 @@ pub(super) fn emit_preflight_blocked_and_finalize(
         settings,
     };
     let blocked_outcome = guard.execute_event(LifecycleSignal::Blocked, &blocked_ctx);
+    claudine::composition::lifecycle::report::warn_tolerated_action_error(
+        emitter, term, LifecycleSignal::Blocked, &blocked_outcome,
+    );
     let original_early = blocked_outcome.evaluation_error.as_ref().map(|info| {
         crate::output::error_walker::emit_lifecycle_evaluation_error_early(
             source_path, "blocked", info, term,
@@ -155,6 +158,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
                 guard.run_event_stack(step.signal, &event_ctx)
             }
         };
+        claudine::composition::lifecycle::report::warn_tolerated_action_error(event_ctx.emitter, event_ctx.term, step.signal, &outcome);
         assert!(protocol.record(step.signal, outcome));
     }
     let result = protocol.finish().expect("preflight catch protocol completed");

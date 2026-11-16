@@ -282,7 +282,9 @@ pub(crate) fn execute_sequence(
     let context = invocation.capture_launch_context(&requirements);
     // Writes stay inside the caller's launch scope; relative targets still
     // resolve against the sequence source (`base_dir` below).
-    let engine = darkmatter::effects::EffectEngine::builder().mutation_root(file_resolution_context.launch_magic_scope().local_root()).build();
+    let engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(claudine::invocation_context::lifecycle_mutation_root(Some(&invocation), &file_resolution_context)?)
+        .build();
     let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
     let live = Mutex::new(frontmatter_view.clone());
     let lifecycle_context = LifecycleRuntimeContext { settings: &settings, messaging: &messaging, term: &term,

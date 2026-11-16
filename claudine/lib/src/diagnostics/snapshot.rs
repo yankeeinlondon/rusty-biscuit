@@ -50,6 +50,7 @@ pub use darkmatter::lifecycle::envelope::{
 };
 
 use super::{Diagnostic, code_spec, next_registered_cause, null_detail_for};
+use darkmatter::lifecycle::envelope::concise_and_full;
 use crate::harness::runtime::concise_message;
 
 /// Claudine's diagnostic catalog as the lifecycle envelope's
@@ -125,6 +126,7 @@ pub trait DiagnosticSnapshotExt: Sized {
 
 impl DiagnosticSnapshotExt for DiagnosticSnapshot {
     fn from_diagnostic(diagnostic: &(dyn Diagnostic + 'static)) -> Self {
+        let (message, full_message) = concise_and_full(&diagnostic.to_string());
         Self {
             schema_version: DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION,
             category: diagnostic.category().as_str().to_string(),
@@ -134,7 +136,8 @@ impl DiagnosticSnapshotExt for DiagnosticSnapshot {
             // Disambiguate from the `BlockError::severity` supertrait method.
             severity: Diagnostic::severity(diagnostic).as_str().to_string(),
             detail: diagnostic.detail(),
-            message: concise_message(&diagnostic.to_string()),
+            message,
+            full_message,
             cause: next_registered_cause(diagnostic).map(DiagnosticCause::from_diagnostic),
             frontmatter_excerpt: None,
         }
@@ -156,6 +159,7 @@ impl DiagnosticSnapshotExt for DiagnosticSnapshot {
             severity: spec.severity().as_str().to_string(),
             detail: null_detail_for(spec.code),
             message,
+            full_message: None,
             cause: None,
             frontmatter_excerpt: None,
         })

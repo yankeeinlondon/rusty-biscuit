@@ -74,11 +74,16 @@ impl TaskExecution<'_> {
         let runtime = Arc::new(RuntimeState::from_snapshot(before));
         let live = Mutex::new(self.stack.live_frontmatter_snapshot()
             .unwrap_or_else(|| self.stack.frontmatter.clone()));
-        // The group's events and legs resolve file targets in its own
-        // document's context; its reread (`prepare_nested_group`) resolves
-        // the reference from the calling task's, so reads `self.stack`.
-        let own_context = self.authoring_context(&group.origin_path);
+        // The group's events, gate, loop cap, and legs read its own document:
+        // its path and that document's context travel together. Its reread
+        // (`prepare_nested_group`) resolves the reference from the calling
+        // task's, so reads `self.stack`.
+        let own_context = match self.authoring_context(&group.origin_path) {
+            Ok(context) => context,
+            Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+        };
         let private_stack = StackExecutionContext {
+            source_path: &group.origin_path,
             file_resolution_context: &own_context,
             ..self.stack.with_private_cells(&runtime, Some(&live))
         };
@@ -90,7 +95,7 @@ impl TaskExecution<'_> {
         };
         let mut runner = ContainerRunner::new(LifecycleRunGuard::new(
             &group.lifecycle, &context, self.stack.emitter)).with_subject(SubjectKind::Group);
-        let mut frame = match self.open_loop(group.loop_config.as_deref(), LoopResultKind::Group, self.stack.frontmatter, &runtime) {
+        let mut frame = match execution.open_loop(group.loop_config.as_deref(), LoopResultKind::Group, self.stack.frontmatter, &runtime) {
             Ok(frame) => frame,
             Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
         };

@@ -13,14 +13,17 @@
 //! inside the directory that holds the sequence document.
 //!
 //! Outside any repository the boundary is the launch directory, even when the
-//! prompt lives inside a repository, and a failed discovery of the launch
-//! repository never widens the boundary to that repository's top.
+//! prompt lives inside a repository. A failed discovery of the launch
+//! repository is not "outside any repository": it never widens the boundary to
+//! that repository's top, and every lifecycle host stops the run with the
+//! discovery diagnostic before any file action.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::common;
-use common::{CliProcessFixture, init_git_repo, strip_ansi, write_executable};
+use common::mutation_paths::{HEALTHY_GIT_CONFIG, write_git_dir};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 #[cfg(windows)]
 const PROVIDER_SHIM: (&str, &str) = ("claude.cmd", "@echo off\r\nexit /b 0\r\n");
@@ -39,7 +42,7 @@ struct CrossRepo {
 impl CrossRepo {
     fn stage() -> Self {
         let staged = Self::stage_outside_a_repository();
-        staged.fixture.initialize_repository();
+        write_git_dir(staged.fixture.cwd(), HEALTHY_GIT_CONFIG);
         staged
     }
 
@@ -51,7 +54,7 @@ impl CrossRepo {
 
         let library = fixture.home().join("prompt-library");
         fs::create_dir_all(library.join("prompts")).unwrap();
-        assert!(init_git_repo(&library), "git init of the prompt library failed");
+        write_git_dir(&library, HEALTHY_GIT_CONFIG);
 
         let (shim_name, shim_body) = PROVIDER_SHIM;
         write_executable(&fixture.bin_dir().join(shim_name), shim_body);
@@ -197,25 +200,32 @@ fn a_sequence_in_a_subdirectory_writes_to_the_launch_root_from_initialize_and_a_
     assert!(!staged.fixture.cwd().join("sequences/events.log").exists());
 }
 
-/// A sequence from a foreign library writing beside itself is refused before
-/// anything is created, from its container `initialize` and from a task.
+/// A sequence from a foreign library writing beside itself from its
+/// container `initialize` is refused before anything is created; the run
+/// reports the container's own refusal, so no `failure` stack is needed to
+/// learn why it failed. One run per test, so the two hosts run in parallel.
 #[test]
-fn a_foreign_sequence_cannot_write_beside_itself_from_initialize_or_a_task() {
+fn a_foreign_sequence_cannot_write_beside_itself_from_initialize() {
     let staged = CrossRepo::stage();
     let sequence = staged.library.join("prompts").join("seq.md");
 
-    // A failed container event is otherwise silent; `failure` reports why.
-    let container = sequence_writing("events.log").replacen(
-        "---\n",
-        "---\nfailure:\n  - info: \"failure: {{ err.msg }}\"\n",
-        1,
-    );
-    let (status, output) = staged.sequence(&sequence, &container);
-    assert!(!status.success(), "the refused container write fails the run; output was:\n{output}");
-    let prose = output.replace('┃', " ").split_whitespace().collect::<String>();
-    assert!(prose.contains("outsidethemutationroot"), "output was:\n{output}");
-    assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the sequence");
+    let (status, output) = staged.sequence(&sequence, &sequence_writing("events.log"));
 
+    assert!(!status.success(), "the refused container write fails the run; output was:\n{output}");
+    let prose = prose(&output);
+    assert!(prose.contains("sequencefailed:refusingtowriteoutsidethemutationroot"), "output was:\n{output}");
+    assert!(prose.contains("events.log"), "names the target; output was:\n{output}");
+    assert!(prose.contains("(root:"), "names the root; output was:\n{output}");
+    assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the sequence");
+    assert!(!staged.fixture.cwd().join("events.log").exists(), "never root-joined in the caller");
+}
+
+/// A side-effect task of a foreign sequence writing beside the sequence is
+/// refused before anything is created.
+#[test]
+fn a_foreign_sequence_cannot_write_beside_itself_from_a_task() {
+    let staged = CrossRepo::stage();
+    let sequence = staged.library.join("prompts").join("seq.md");
     let task_only = "---\n\
          sequence:\n  \
            - name: first\n    \
@@ -224,10 +234,11 @@ fn a_foreign_sequence_cannot_write_beside_itself_from_initialize_or_a_task() {
                  - events.log\n        \
                  - task\n\
          ---\n";
+
     let (status, output) = staged.sequence(&sequence, task_only);
+
     assert!(!status.success(), "the refused task write fails the run; output was:\n{output}");
-    let prose = output.replace('┃', " ").split_whitespace().collect::<String>();
-    assert!(prose.contains("outsidethemutationroot"), "output was:\n{output}");
+    assert!(prose(&output).contains("outsidethemutationroot"), "output was:\n{output}");
     assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the sequence");
     assert!(!staged.fixture.cwd().join("events.log").exists(), "never root-joined in the caller");
 }
@@ -358,4 +369,88 @@ fn a_failed_launch_discovery_never_widens_the_boundary_to_the_repository_top() {
     let (status, stderr) = run();
     assert!(!status.success(), "the run must not succeed; stderr was:\n{stderr}");
     assert!(!target.exists(), "nothing written at the repository top; stderr was:\n{stderr}");
+}
+
+/// A launch repository whose discovery fails (`.git/config` cannot be
+/// parsed), and a prompt library in its own healthy repository.
+struct UnreadableLaunch {
+    fixture: CliProcessFixture,
+    library: PathBuf,
+}
+
+impl UnreadableLaunch {
+    fn stage() -> Self {
+        let fixture = CliProcessFixture::named("lifecycle-discovery-failure");
+        fixture.seed_user_config();
+        write_git_dir(fixture.cwd(), "[core\n garbage = = =\n");
+        let library = fixture.home().join("prompt-library");
+        write_git_dir(&library, HEALTHY_GIT_CONFIG);
+        let (shim_name, shim_body) = PROVIDER_SHIM;
+        write_executable(&fixture.bin_dir().join(shim_name), shim_body);
+        Self { fixture, library }
+    }
+
+    /// An absolute marker path below the launch directory, which the
+    /// launch-directory fallback would admit.
+    fn marker(&self, name: &str) -> PathBuf {
+        self.fixture.cwd().join("markers").join(name)
+    }
+
+    /// Run `claudine <command> --claude <library>/<file>` once; returns its
+    /// status and plain combined output.
+    fn run(&self, command: &str, file: &str, body: &str) -> (std::process::ExitStatus, String) {
+        let path = self.library.join(file);
+        fs::write(&path, body).unwrap();
+        let output = self
+            .fixture
+            .command()
+            .args([command, "--claude", path.to_str().unwrap()])
+            .output()
+            .expect("spawn claudine");
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (output.status, strip_ansi(&combined))
+    }
+}
+
+/// One host family per row: `(command, file, body)` where `body` names the
+/// markers `{first}` and `{second}` with absolute targets under the launch
+/// directory. Each run must fail with the discovery diagnostic before either
+/// marker is written.
+macro_rules! a_failed_launch_discovery_stops_the_run {
+    ($($name:ident: $command:literal, $file:literal, $body:literal;)+) => {$(
+        #[test]
+        fn $name() {
+            let staged = UnreadableLaunch::stage();
+            let (first, second) = (staged.marker("first.md"), staged.marker("second.md"));
+            // Single-quoted YAML so Windows backslashes are not read as escapes.
+            let body = $body
+                .replace("{first}", &first.display().to_string())
+                .replace("{second}", &second.display().to_string());
+            let (status, output) = staged.run($command, $file, &body);
+
+            assert!(!status.success(), "the run must fail; output was:\n{output}");
+            let prose = prose(&output);
+            assert!(prose.contains("lifecycleactionscannotrun"), "output was:\n{output}");
+            assert!(prose.contains("repositorydiscoveryatthelaunchdirectory"), "output was:\n{output}");
+            assert!(!first.exists(), "no file action ran; output was:\n{output}");
+            assert!(!second.exists(), "no file action ran; output was:\n{output}");
+        }
+    )+};
+}
+
+a_failed_launch_discovery_stops_the_run! {
+    compose_with_initialize_stops_before_the_staged_boot: "compose", "staged.md",
+        "---\ninitialize:\n  - ensure_file: '{first}'\nstart:\n  - ensure_file: '{second}'\n---\nBody\n";
+    compose_without_initialize_stops_before_start: "compose", "start.md",
+        "---\nstart:\n  - ensure_file: '{first}'\nfinalize:\n  - ensure_file: '{second}'\n---\nBody\n";
+    inline_compose_stops_before_initialize_and_start: "inline-compose", "inline.md",
+        "---\nprompt: Summarize.\ninitialize:\n  - ensure_file: '{first}'\nstart:\n  - ensure_file: '{second}'\n---\n";
+    a_looping_compose_stops_before_its_first_pass: "compose", "loop.md",
+        "---\nloop:\n  max: 1\n  until: 'loop.count >= 1'\ninitialize:\n  - ensure_file: '{first}'\nstart:\n  - ensure_file: '{second}'\n---\nBody\n";
+    a_sequence_stops_before_initialize_and_its_task: "sequence", "seq.md",
+        "---\ninitialize:\n  - ensure_file: '{first}'\nsequence:\n  - name: first\n    side_effect:\n      ensure_file: '{second}'\n---\n";
 }

@@ -169,6 +169,10 @@ mod lifecycle_literal_escapes;
 mod lifecycle_traces;
 mod lifecycle_message_drain;
 mod lifecycle_mutation_root;
+// Installs the `claudine-fake-editor` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod lifecycle_refusal_reports;
 mod lifecycle_mutation_lifetime;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;

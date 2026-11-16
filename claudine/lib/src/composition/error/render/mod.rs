@@ -462,6 +462,7 @@ impl Diagnostic for CompositionError {
             // a handler the write was a restoration.
             CompositionError::AtomicWriteFailed { .. }
             | CompositionError::InlineRollbackFailed { .. } => "io.write_failed",
+            CompositionError::LaunchRepositoryUnreadable { .. } => "io.read_failed",
             // The lifecycle-stack family shares one authoring-error code; the
             // `variant` facet still distinguishes them for finer handlers.
             CompositionError::LifecycleInvalid { .. }
@@ -674,6 +675,10 @@ impl Diagnostic for CompositionError {
             CompositionError::AtomicWriteFailed { path, .. }
             | CompositionError::InlineRollbackFailed { path, .. } => {
                 base["path"] = json!(biscuit_file::to_portable_string(path));
+            }
+            // `io.read_failed` declares `path`.
+            CompositionError::LaunchRepositoryUnreadable { launch_dir, .. } => {
+                base["path"] = json!(biscuit_file::to_portable_string(launch_dir));
             }
             // `document.invalid_frontmatter` declares `doc`, `property`,
             // `problems`.

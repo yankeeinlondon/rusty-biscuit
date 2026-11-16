@@ -537,6 +537,22 @@ pub enum CompositionError {
         source: std::io::Error,
     },
 
+    /// Repository discovery at the launch directory failed, so a lifecycle
+    /// run cannot know the caller's working tree and does not run. Only a
+    /// successful observation of no working tree lets the launch directory
+    /// bound lifecycle writes instead.
+    #[error(
+        "lifecycle actions cannot run: repository discovery at the launch directory {} failed: {source}",
+        launch_dir.display()
+    )]
+    LaunchRepositoryUnreadable {
+        /// The directory Claudine was launched from.
+        launch_dir: PathBuf,
+        /// The retained discovery failure.
+        #[source]
+        source: std::sync::Arc<sniff::SniffError>,
+    },
+
     /// The composition target file lacks required read/write permissions.
     ///
     /// Carries the unboxed [`std::io::Error`] the read+write open probe raised,
@@ -3673,7 +3689,7 @@ impl CompositionError {
             .as_ref()
             .and_then(|snapshot| snapshot.detail.get("message"))
             .and_then(Value::as_str)
-            .unwrap_or(&info.msg)
+            .unwrap_or(info.actionable_msg())
             .to_string();
         Self::LifecycleEvaluationError {
             source_path: source_path.into(),

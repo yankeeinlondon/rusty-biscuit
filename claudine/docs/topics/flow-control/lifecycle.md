@@ -262,6 +262,38 @@ Communications the first stack already emitted are not undone.
   relies on this.
 - From `blocked`, `failure` and `finalize` run as catch-only cleanup.
 
+### A failed action is always reported
+
+An action can fail after its values evaluated: a write refused because its
+target is outside the mutation root, a message that could not be sent, an
+editor that could not run. Where it fails decides what happens to the run,
+but Claudine always tells you which action failed and why; you do not need a
+`failure` stack that prints `err.msg`.
+
+| Where the action failed | The run | What is reported |
+|---|---|---|
+| `initialize`, `start` | fails; `failure` and `finalize` run as cleanup | the run's error |
+| `blocked` | already failing for the error that selected `blocked`, which the run reports; `failure` and `finalize` run as cleanup | a warning naming the event |
+| `success`, `failure`, `cancelled`, `finalize`, the `loop:` gate | outcome unchanged | a warning naming the event |
+
+```yaml
+finalize:
+  - ensure_file: /etc/notes.md   # outside the project
+```
+
+This run still exits `0`, and prints:
+
+```text
+⚠ `finalize` action failed: refusing to write outside the mutation root: /etc/notes.md (root: /work/project)
+```
+
+The report is the whole message, however long the target and root paths
+are; only `err.msg` is cut to its 240-character limit (see [`err.msg`](#errmsg)).
+
+`no_error: true` on the action silences both the failure and its report.
+Containers fail on a failed action in any event; see
+[Sequence and group containers](#sequence-and-group-containers).
+
 ### `finalize` is not an unconditional `finally`
 
 `finalize` closes a document's lifecycle once per loop iteration. It runs
@@ -1206,6 +1238,71 @@ success:
       body: "{{ payload }}"
 ```
 
+#### Where file actions write
+
+Every file action — the frontmatter writers, `ensure_file`, `ensure_dir`,
+`append_line`, `append_jsonl`, and [`edit`](#edit-actions) — follows one rule
+in every Claudine route: `compose`, `inline-compose`, the provider wrappers,
+`sequence`, groups, tasks, loops, and `prep`/`proxy` documents.
+
+- **One boundary for the whole run.** Writes must stay inside the working
+  tree you launched Claudine in: the top level of the Git repository (or
+  linked worktree) containing the launch directory, or that directory
+  outside a repository. It is captured when the command starts and stays the
+  same across sequence steps, group members, loop iterations, retries, and
+  resumed attempts. A provider's working directory never changes it.
+- **A repository Claudine cannot read stops the run.** "Outside a
+  repository" means Claudine looked and found none. When it finds a
+  repository at the launch directory but cannot read it (for example a
+  `.git/config` that Git refuses to parse), it cannot know the boundary, so
+  `compose`, `inline-compose`, and `sequence` stop before any lifecycle
+  action runs, exit non-zero, and name the launch directory and the cause:
+
+  ```text
+  lifecycle actions cannot run: repository discovery at the launch directory
+  /work/app/package failed: Git error during discover: Repository
+  configuration could not be loaded
+  ```
+
+  Repair the repository, or launch from a directory outside it, and run the
+  command again. A provider wrapper run that composes no document
+  (`claudine claude "fix the bug"`) is not affected.
+- **Relative paths start at the authoring document.** A path is read like
+  any [file reference](../file-referencing.md) from the file that wrote the
+  action: an existing file is the one a read would find (for `notes.md`, the
+  document's folder, then the repository root), and a missing one is created
+  where that read looks first, beside the document. A referenced sequence
+  file, group file, group catalog, or `kind: task` file is its own authoring
+  document, so the relative targets of its events, loop gate, and tasks
+  resolve beside that file; an inline group or task uses the document that
+  contains it.
+- **The target is checked before anything happens.** A target outside the
+  boundary is refused before a parent directory is created, a file is
+  loaded, or an editor starts. The check follows symlinks, so a link inside
+  the project that leads elsewhere is refused.
+
+A sequence kept in a shared library therefore cannot write beside itself
+when you run it from your project; give it an absolute path inside your
+project instead:
+
+```yaml
+# ~/shared/release.md (a sequence), run from ~/proj
+initialize:
+  - ensure_file: ["{{ ctx.cwd }}/release-notes.md", "# Notes"]   # writes ~/proj/release-notes.md
+  - append_line: ["log.md", "started"]                            # refused: ~/shared is outside ~/proj
+```
+
+Earlier releases created a missing relative target at the launch workspace
+root, except in a sequence file's own root `initialize`, which wrote beside
+the sequence file. Both now follow the rule above: a missing bare name is
+created beside the authoring document, so name a project-root file with an
+absolute path such as `{{ ctx.cwd }}/notes.md`. The full selection rules,
+with examples, are in Darkmatter's
+[Where file actions write](../../../../darkmatter/docs/topics/lifecycle/index.md#where-file-actions-write).
+
+The boundary limits lifecycle file actions only; it does not sandbox an
+approved `shell` command, the provider, or the editor.
+
 ### Expression-Function Actions
 
 Any Darkmatter read-only expression function can be invoked for its result. The result is logged in the lifecycle/status style.
@@ -1320,13 +1417,13 @@ flowchart TD
     G -- no --> X3["fail: saved bytes are kept"]
 ```
 
-- **The target.** A file that already exists is opened as it is. A missing
-  relative path is created inside the workspace Claudine was launched in, not
-  beside the prompt, and every target must stay inside that workspace, so an
-  absolute path elsewhere is refused. The one exception is a sequence file's
-  own root `initialize`, which writes inside the sequence file's directory,
-  as `ensure_file` and the other file actions there do. `@`-prefixed
-  references work as they do for other file actions; a URL is refused.
+- **The target.** The target is chosen as for every file action (see
+  [Where file actions write](#where-file-actions-write)). A file that already
+  exists is opened as it is; a missing relative path is created beside the
+  authoring document, and every target must stay inside the working tree
+  Claudine was launched in, so an absolute path elsewhere is refused.
+  Prefixed references such as `@` and `&` work as they do for other file
+  actions; a URL is refused without fetching anything.
 - **Your bytes are kept exactly.** The action never trims, composes, or
   rewrites the saved file, and never rolls it back or deletes a file it
   created, even when the action or the run fails afterward. A later
@@ -1535,6 +1632,8 @@ failure:
 The selected diagnostic's **concise** message: single-line, escape-free, and length-clamped (~240 characters), so a TTS route, a webhook, or a desktop notification can use it verbatim.
 
 It is deliberately **not** the multi-line rendered block — that block is for a terminal, and pushing it through a speech synthesizer or a Slack message is what the clamp exists to prevent. It is also not a classifier input: match on `err.code`, never on this text.
+
+The clamp applies to `err.msg` only. When Claudine reports a failure itself (the run's error, a step's failure line, an `action failed` warning), it shows the complete message, so a refusal naming a long target and mutation root keeps both paths whole.
 
 ```yaml
 failure:
@@ -2068,6 +2167,18 @@ stateDiagram-v2
     cancelled --> finalize
     finalize --> [*]: publish only on success
     skipped --> [*]: no finalize
+```
+
+A failed action in any of a container's events fails the container (its
+`loop:` gate excepted: there it warns and the loop continues, as for a
+document). The failure is reported once: a nested container's by the step
+that ran it, the root sequence's own as `sequence failed: …`. When a
+`failure` or `finalize` action fails after a child already failed, both
+failures are reported, and the child's is not repeated.
+
+```text
+⤫ step 1/1 failed: refusing to write outside the mutation root: /work/other/a.md (root: /work/project)
+⤫ sequence failed: refusing to write outside the mutation root: /work/other/b.md (root: /work/project)
 ```
 
 A `proxy` transfers the container's place to a target without any remaining

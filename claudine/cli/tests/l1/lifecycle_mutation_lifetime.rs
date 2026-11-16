@@ -305,10 +305,11 @@ fn every_pass_of_a_sequence_loop_keeps_each_documents_base() {
 
 // --- nested sequences and groups ------------------------------------------
 
-/// A referenced sequence and a referenced group, each in its own directory,
-/// write relative targets beside their own documents; an inline group and an
-/// inline sequence use the document that contains them. The referenced
-/// sequence reaches the caller's root through `../`.
+/// A referenced sequence, a referenced group, and a group selected from a
+/// catalog, each in its own directory, write relative targets beside their own
+/// documents, from their events and loop gate as well as their tasks; an
+/// inline group and an inline sequence use the document that contains them.
+/// The referenced sequence reaches the caller's root through `../`.
 #[test]
 fn referenced_containers_write_beside_themselves_and_inline_ones_beside_their_container() {
     let tree = CallerTree::stage("mutation-lifetime-nested");
@@ -329,9 +330,32 @@ fn referenced_containers_write_beside_themselves_and_inline_ones_beside_their_co
         tree.in_root("groups/bundle.yaml"),
         "kind: group\n\
          name: bundle\n\
+         initialize:\n  \
+           - append_line: [marker.log, \"group initialize\"]\n\
+         start:\n  \
+           - append_line: [marker.log, \"group start\"]\n\
+         success:\n  \
+           - append_line: [marker.log, \"group success\"]\n\
+         finalize:\n  \
+           - append_line: [marker.log, \"group finalize\"]\n\
+         loop:\n  \
+           until: \"loop.count >= 1\"\n  \
+           gate:\n    \
+             - append_line: [marker.log, \"group gate\"]\n\
          tasks:\n  \
            - name: leg\n    \
              side_effect: { append_line: [marker.log, \"group leg\"] }\n",
+    );
+    let catalog = tree.write(
+        tree.in_root("catalogs/catalog.yaml"),
+        "kind: group-catalog\n\
+         groups:\n  \
+           - name: selected\n    \
+             start:\n      \
+               - append_line: [marker.log, \"catalog start\"]\n    \
+             tasks:\n      \
+               - name: leg\n        \
+                 side_effect: { append_line: [marker.log, \"catalog leg\"] }\n",
     );
     let root = tree.write(
         tree.in_root("flows/root.md"),
@@ -354,7 +378,9 @@ fn referenced_containers_write_beside_themselves_and_inline_ones_beside_their_co
            - name: nested\n    \
              sequence: ../parts/nested.yaml\n  \
            - name: grouped\n    \
-             group: ../groups/bundle.yaml\n\
+             group: ../groups/bundle.yaml\n  \
+           - name: cataloged\n    \
+             group: selected@../catalogs/catalog.yaml\n\
          ---\n",
     );
 
@@ -363,8 +389,13 @@ fn referenced_containers_write_beside_themselves_and_inline_ones_beside_their_co
     assert_succeeded(status, &output);
     assert_written_beside(&root, MARKER, &["root initialize", "root task", "inline group leg", "inline sequence task"]);
     assert_written_beside(&nested, MARKER, &["nested initialize", "nested task"]);
-    assert_written_beside(&group, MARKER, &["group leg"]);
-    assert_only_beside(tree.root(), &[&root, &nested, &group], MARKER);
+    assert_written_beside(
+        &group,
+        MARKER,
+        &["group initialize", "group start", "group leg", "group success", "group finalize", "group gate"],
+    );
+    assert_written_beside(&catalog, MARKER, &["catalog start", "catalog leg"]);
+    assert_only_beside(tree.root(), &[&root, &nested, &group, &catalog], MARKER);
     assert!(tree.in_root("nested-reached-root.log").exists(), "`../` from the nested sequence stays inside the root");
     tree.assert_outside_untouched();
 }
@@ -409,6 +440,49 @@ fn a_foreign_referenced_sequence_is_bounded_by_the_callers_root() {
     assert_only_beside(tree.root(), &[&root], MARKER);
     assert_eq!(fs::read_to_string(&landed).unwrap().trim(), "foreign", "an absolute in-root target is allowed");
     assert_nothing_under(&tree.library, MARKER);
+}
+
+/// A referenced group from a foreign library runs inside the caller's
+/// boundary in its own tree: absolute in-root targets from its events and its
+/// leg are written, and nothing lands in the library.
+#[test]
+fn a_foreign_referenced_group_writes_absolute_in_root_targets() {
+    let tree = CallerTree::stage("mutation-lifetime-group-foreign");
+    let landed = tree.in_root("foreign-group-landed.log");
+    let target = yaml_path(&landed);
+    let foreign = tree.write(
+        tree.library.join("groups/foreign.yaml"),
+        &format!(
+            "kind: group\n\
+             name: foreign\n\
+             initialize:\n  \
+               - append_line: [{target}, \"initialize\"]\n\
+             finalize:\n  \
+               - append_line: [{target}, \"finalize\"]\n\
+             tasks:\n  \
+               - name: leg\n    \
+                 side_effect: {{ append_line: [{target}, \"leg\"] }}\n",
+        ),
+    );
+    let root = tree.write(
+        tree.in_root("flows/root.md"),
+        &format!(
+            "---\n\
+             sequence:\n  \
+               - name: foreign\n    \
+                 group: {}\n\
+             ---\n",
+            yaml_path(&foreign),
+        ),
+    );
+
+    let (status, output) = run(&tree, "sequence", &root);
+
+    assert_succeeded(status, &output);
+    let written = fs::read_to_string(&landed).unwrap();
+    assert_eq!(written.lines().collect::<Vec<_>>(), ["initialize", "leg", "finalize"]);
+    assert_nothing_under(&tree.library, "foreign-group-landed.log");
+    tree.assert_outside_untouched();
 }
 
 // --- parallel members -----------------------------------------------------

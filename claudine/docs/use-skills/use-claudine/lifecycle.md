@@ -97,8 +97,21 @@ failure:
 `claudine context --side-effects` lists every verb and its arguments
 (`edit` is a lifecycle action, not a catalog verb, so it is not listed).
 
-`edit` writes only inside the launch workspace and never picks an editor
-that cannot wait. A terminal editor needs a real terminal, so it fails
+File actions (`edit`, the frontmatter writers, `ensure_file`, `ensure_dir`,
+`append_line`, `append_jsonl`) write only inside the working tree Claudine
+was launched in (the repository or worktree top level, or the launch
+directory outside a repository), fixed for the whole run. A repository at
+the launch directory that cannot be read (a corrupt `.git/config`) stops
+`compose`, `inline-compose`, and `sequence` with an error before any
+lifecycle action runs. A relative path
+resolves like a read from the document that wrote the action: an existing
+file is the one a read finds, a missing one is created beside that document
+(a referenced sequence or group file is its own document). A shared prompt
+outside your project therefore writes into it through an absolute path such
+as `{{{ ctx.cwd }}}/notes.md`, never beside itself; a target outside the
+boundary, through a symlink too, is refused before anything is created.
+
+`edit` never picks an editor that cannot wait. A terminal editor needs a real terminal, so it fails
 without one and in a parallel group member, which may run only a GUI
 editor. No timeout closes an open editor; Ctrl-C or a failing sibling
 does.

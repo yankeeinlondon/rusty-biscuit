@@ -1388,6 +1388,15 @@ impl InvocationContext {
         }
     }
 
+    /// The retained failure of the launch-repository discovery, if it failed.
+    ///
+    /// Only the discovery itself counts: a failed package-topology probe of a
+    /// discovered repository leaves the working-tree boundary known, so it is
+    /// not reported here (it is still in [`RepositoryObservation::failure`]).
+    pub fn launch_discovery_failure(&self) -> Option<&Arc<sniff::SniffError>> {
+        self.inner.launch_repository.failure.as_ref()
+    }
+
     pub fn launch_context(&self) -> LaunchContext {
         LaunchContext::from_sniff_result(&self.inner.launch_result, &self.inner.launch_cwd)
     }
@@ -2300,6 +2309,42 @@ impl InvocationContext {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *consumers.entry(consumer.as_str().to_string()).or_default() += 1;
     }
+}
+
+/// The directory a lifecycle run's file actions are confined to.
+///
+/// Every lifecycle host builds its effect engine's mutation root through this
+/// one check. The root is the launch scope `context` carries: the caller's
+/// working-tree top or, only when discovery observed no working tree, the
+/// launch directory. A failed discovery is not an observation of "no working
+/// tree", so the run is refused instead of falling back to the launch
+/// directory.
+///
+/// ## Errors
+///
+/// [`CompositionError::LaunchRepositoryUnreadable`](crate::composition::CompositionError::LaunchRepositoryUnreadable)
+/// when `invocation` retains a
+/// failed launch-repository discovery
+/// ([`InvocationContext::launch_discovery_failure`]).
+///
+/// ## Notes
+///
+/// `None` is a caller that captured no invocation (a library or unit-test
+/// caller building its own context); there is no retained observation to
+/// check, so `context`'s scope is taken as given.
+pub fn lifecycle_mutation_root<'c>(
+    invocation: Option<&InvocationContext>,
+    context: &'c FileResolutionContext,
+) -> Result<&'c Path, crate::composition::CompositionError> {
+    if let Some(invocation) = invocation
+        && let Some(source) = invocation.launch_discovery_failure()
+    {
+        return Err(crate::composition::CompositionError::LaunchRepositoryUnreadable {
+            launch_dir: invocation.launch_cwd().to_path_buf(),
+            source: source.clone(),
+        });
+    }
+    Ok(context.launch_magic_scope().local_root())
 }
 
 fn observe_repository(

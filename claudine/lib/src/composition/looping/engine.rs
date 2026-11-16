@@ -170,7 +170,7 @@ where
             0,
             CompositionError::LifecycleInitializeFailed {
                 source_path: prompt_path.to_path_buf(),
-                reason: setup_error.msg.clone(),
+                reason: setup_error.actionable_msg().to_string(),
             },
         ));
     }
@@ -530,6 +530,9 @@ fn execute_loop_catch_protocol(
                 guard.run_event_stack(step.signal, &event_ctx)
             }
         };
+        crate::composition::lifecycle::report::warn_tolerated_action_error(
+            event_ctx.emitter, event_ctx.term, step.signal, &outcome,
+        );
         assert!(protocol.record(step.signal, outcome));
     }
     protocol.finish().expect("loop catch protocol completed")
@@ -555,9 +558,9 @@ pub(crate) enum LoopGateOutcome {
 /// ([`CompositionError::LifecycleLoopGateFailed`]), before the condition. An
 /// evaluation error in the gate (a crashed `when:` or interpolation) fails it
 /// too, as the typed evaluation error. An *unintentional* action error does
-/// not: `loop` is a terminal-phase event, so the gate proceeds to the
-/// condition. Recovery directives are refused here: a gate has no attempt to
-/// re-enter and no document to replace.
+/// not: `loop` is a terminal-phase event, so it is reported as a warning and
+/// the gate proceeds to the condition. Recovery directives are refused here: a
+/// gate has no attempt to re-enter and no document to replace.
 pub(crate) fn run_loop_gate(
     guard: &mut LifecycleRunGuard<'_>,
     gate_ctx: &StackExecutionContext<'_>,
@@ -592,6 +595,9 @@ pub(crate) fn run_loop_gate(
         ));
     }
 
+    crate::composition::lifecycle::report::warn_tolerated_action_error(
+        gate_ctx.emitter, gate_ctx.term, LifecycleSignal::Loop, &loop_outcome,
+    );
     let decision = LifecycleCatchProtocol::new(
         LifecycleSignal::Loop,
         LifecycleCatchState {

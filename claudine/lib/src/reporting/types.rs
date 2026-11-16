@@ -498,6 +498,7 @@ mod tests {
                 severity: "error".into(),
                 detail: serde_json::json!({ "path": "/logs/a.jsonl" }),
                 message: "could not read".into(),
+                full_message: None,
                 cause: Some(crate::diagnostics::DiagnosticCause {
                     category: "config".into(),
                     code: "config.invalid".into(),

@@ -109,6 +109,7 @@ fn claudine_lifecycle_try_keeps_binding_failure_fatal() {
         kind: "ClaudineError",
         variant: "Io".to_string(),
         msg: "it broke".to_string(),
+        full_msg: None,
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,

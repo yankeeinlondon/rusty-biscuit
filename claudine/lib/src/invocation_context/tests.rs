@@ -1766,3 +1766,62 @@ fn merge_conflicts_are_observed_from_the_index_eagerly_and_lazily() {
         serde_json::json!(["tracked.txt"])
     );
 }
+
+/// A minimal non-bare repository written directly, with `config` as its
+/// `.git/config`: enough for discovery, without spawning `git`.
+fn write_git_dir(root: &Path, config: &str) {
+    let git = root.join(".git");
+    fs::create_dir_all(git.join("objects")).unwrap();
+    fs::create_dir_all(git.join("refs/heads")).unwrap();
+    fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    fs::write(git.join("config"), config).unwrap();
+}
+
+const HEALTHY_GIT_CONFIG: &str = "[core]\n\trepositoryformatversion = 0\n\tbare = false\n";
+
+/// Lifecycle writes are bounded by a successful observation only: a healthy
+/// repository gives its top, an observed absence the launch directory, and a
+/// failed discovery refuses the run with the launch directory and the cause.
+#[test]
+fn lifecycle_mutation_root_refuses_a_failed_launch_discovery_and_only_that() {
+    let healthy = TempDir::new().unwrap();
+    write_git_dir(healthy.path(), HEALTHY_GIT_CONFIG);
+    let launch = healthy.path().join("package");
+    fs::create_dir_all(&launch).unwrap();
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &launch).unwrap();
+    let root = lifecycle_mutation_root(Some(&invocation), invocation.launch_file_resolution_context())
+        .expect("a healthy repository bounds lifecycle writes");
+    assert_eq!(canonical_key(root), canonical_key(healthy.path()), "the working-tree top");
+
+    let outside = TempDir::new().unwrap();
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), outside.path()).unwrap();
+    assert!(invocation.launch_repository().is_absent(), "fixture precondition: no enclosing repository");
+    let root = lifecycle_mutation_root(Some(&invocation), invocation.launch_file_resolution_context())
+        .expect("an observed absence falls back to the launch directory");
+    assert_eq!(canonical_key(root), canonical_key(outside.path()), "the launch directory");
+
+    let corrupt = TempDir::new().unwrap();
+    write_git_dir(corrupt.path(), "[core\n garbage = = =\n");
+    let launch = corrupt.path().join("package");
+    fs::create_dir_all(&launch).unwrap();
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &launch).unwrap();
+    let failure = invocation.launch_discovery_failure().expect("fixture precondition: discovery fails").to_string();
+    let error = lifecycle_mutation_root(Some(&invocation), invocation.launch_file_resolution_context())
+        .expect_err("a failed discovery is not an observed absence");
+    let crate::composition::CompositionError::LaunchRepositoryUnreadable { launch_dir, source } = &error else {
+        panic!("expected LaunchRepositoryUnreadable, got {error:?}");
+    };
+    assert_eq!(launch_dir, &launch);
+    assert_eq!(source.to_string(), failure);
+    let message = error.to_string();
+    assert!(message.contains(&launch.display().to_string()), "names the launch directory: {message}");
+    assert!(message.contains(&failure), "names the cause: {message}");
+    assert_eq!(crate::diagnostics::Diagnostic::code(&error), "io.read_failed");
+
+    // A caller without an invocation has no observation to check.
+    let context = invocation.launch_file_resolution_context();
+    assert_eq!(
+        lifecycle_mutation_root(None, context).unwrap(),
+        context.launch_magic_scope().local_root()
+    );
+}
