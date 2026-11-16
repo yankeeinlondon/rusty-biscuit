@@ -1,7 +1,7 @@
 ---
 kind: fix
 created: 2026-11-15
-status: draft-spec
+status: abandoned
 area: claudine
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -9,6 +9,12 @@ related:
 ---
 
 # Report a failed launch-repository discovery before lifecycle writes
+
+> **Abandoned.** The requirement was completed by
+> `2026-11-14-lifecycle-mutation-root` review iteration 1 (finding R1-F2):
+> every lifecycle host now refuses a run whose launch-repository discovery
+> failed, through one shared check, before any file action. The first
+> option below was taken; `InvocationContext::capture` is unchanged.
 
 ## Problem
 
