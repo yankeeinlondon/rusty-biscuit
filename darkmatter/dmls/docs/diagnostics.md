@@ -354,6 +354,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.directive.unclosed_block` | A `::block` / `::shell-block` / disclosure triple left unclosed. |
 | `dm.directive.unmatched_end` | A `::end-block` closer with no matching opener. |
 | `dm.directive.malformed_option` | An option key a directive family does not recognize. |
+| `dm.directive.invalid_option_value` | **Error.** A `::file` / `::url` `interpolate=` value composition rejects: anything but a boolean word (`true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any case) or an unquoted `null`. A quoted `"null"` is text and is rejected; a missing value is reported at the key, any other at the value. The editor and `md compose` share one validator, so they reject the same spellings. |
 | `dm.directive.malformed_disclosure` | A `::disclosure` triple left structurally malformed. |
 | `dm.transclusion.broken_path` | A `::file` / `::code` / `::toc-linking` target matched no file. |
 | `dm.transclusion.nullable_target` | **Warning.** A whole-value `::file`, `::code`, or `::url` expression is statically nullable and is not narrowed by an enclosing guard. |

@@ -144,7 +144,21 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   disclosures, …) — `::`-prefix name completion, per-family option-key/enum
   completion, semantics and resolved-target hover, block/region/disclosure
   folding, and `dm.directive.*` diagnostics (unknown directive, malformed
-  option, unclosed block, malformed disclosure).
+  option, invalid option value, unclosed block, malformed disclosure).
+- **`interpolate=` on `::file` / `::url`** — the key and its `true` / `false`
+  values complete (`::code` has no such option and flags it as unknown);
+  hover on the option explains it: with `false`, interpolation in this file
+  will not be interpolated but instead kept as literal text, an omitted or
+  `null` value means `true`, and every file the inclusion brings in inherits
+  `false` (a nested `interpolate=true` cannot turn it back on). A value
+  `md compose` would reject, such as `interpolate=banana` or a quoted
+  `"null"`, is an error at the value. The option belongs to one inclusion,
+  not to the included file: opening that file shows its expressions with
+  their usual highlighting, completion, and diagnostics.
+
+  ```md
+  ::file ../../topics/lifecycle/index.md interpolate=false
+  ```
 - **Collections** (`::map` / `::filter`) — source, option, and callback
   completion; hover on the source, callbacks, and the locals they bind; and
   the `dm.collection.*` diagnostics `md compose` reports, all read from

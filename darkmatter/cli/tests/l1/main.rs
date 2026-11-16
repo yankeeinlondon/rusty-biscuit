@@ -71,6 +71,7 @@ mod property_paths;
 mod compose_state_set;
 mod compose_terminal_detection;
 mod compose_transclusion;
+mod compose_file_interpolate;
 mod compose_file_predicates;
 mod compose_call_warnings;
 mod compose_member_warnings;

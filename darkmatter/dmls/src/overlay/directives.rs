@@ -10,9 +10,10 @@
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::directives_api::{
-    BlockScanError, DarkmatterBlock, DirectiveKind, ParsedDirective, scan_darkmatter_blocks,
-    scan_darkmatter_directives,
+    BlockScanError, DarkmatterBlock, DirectiveKind, DirectiveOption, ParsedDirective,
+    parse_interpolate_value, scan_darkmatter_blocks, scan_darkmatter_directives,
 };
+use darkmatter::markdown::span::SourceSpan;
 use darkmatter::markdown::render_tree::disclosure_scan::{DisclosureParse, scan_disclosures};
 
 /// One entry in the directive-name completion and hover catalog.
@@ -195,6 +196,57 @@ pub fn option_values(key: &str) -> Option<&'static [&'static str]> {
         "sort-order" => Some(&["asc", "desc"]),
         _ => None,
     }
+}
+
+/// Whether `kind` accepts the `interpolate=` option (`::file` and `::url`).
+pub fn accepts_interpolate(kind: DirectiveKind) -> bool {
+    matches!(kind, DirectiveKind::File | DirectiveKind::Url)
+}
+
+/// The `interpolate` option of `directive` whose key or value span contains
+/// `offset`, when the directive accepts the option.
+pub fn interpolate_option_at(directive: &ParsedDirective, offset: usize) -> Option<&DirectiveOption> {
+    if !accepts_interpolate(directive.kind) {
+        return None;
+    }
+    directive.options.iter().find(|option| {
+        option.key.value == "interpolate" && {
+            let end = option.value.as_ref().map_or(option.key.span.end, |value| value.span.end);
+            option.key.span.start <= offset && offset <= end
+        }
+    })
+}
+
+/// Each invalid `interpolate` option on a `::file` / `::url` line of
+/// `source`, with the span to report and the reason.
+///
+/// The reason comes from the library's [`parse_interpolate_value`], the
+/// validator composition uses, so the editor and `md compose` reject the same
+/// spellings. A missing value (`interpolate` or `interpolate=`) is reported at
+/// the key; any other invalid value at the value. Every occurrence is
+/// validated, as composition does; a repeated valid one is not a problem.
+pub fn invalid_interpolate_options(source: &str, directive: &ParsedDirective) -> Vec<(SourceSpan, String)> {
+    if !accepts_interpolate(directive.kind) {
+        return Vec::new();
+    }
+    directive
+        .options
+        .iter()
+        .filter(|option| option.key.value == "interpolate")
+        .filter_map(|option| {
+            let Some(value) = option.value.as_ref().filter(|value| !value.span.is_empty()) else {
+                return Some((
+                    option.key.span.clone(),
+                    "'interpolate=' requires a value: true or false".to_string(),
+                ));
+            };
+            let raw = source.get(value.span.clone()).unwrap_or_default();
+            let was_quoted = raw.starts_with(['\'', '"']);
+            parse_interpolate_value(&value.value, was_quoted)
+                .err()
+                .map(|reason| (value.span.clone(), reason))
+        })
+        .collect()
 }
 
 /// Whether `key` is accepted by `kind` (dotted `set.<name>` and `--flag` forms

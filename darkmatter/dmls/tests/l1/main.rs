@@ -24,6 +24,7 @@ mod recursive_call_check;
 mod recursive_schema_editor;
 mod expression_call_diagnostics;
 mod expression_scopes;
+mod file_interpolate_option;
 mod formatting_transaction;
 mod frontmatter_response_contracts;
 mod full_index_removal_guard;

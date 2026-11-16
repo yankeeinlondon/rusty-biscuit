@@ -267,9 +267,15 @@ fn parse_interpolate_option(
 
     let column = cursor.current_column();
     let was_quoted = matches!(cursor.current(), Some('\'') | Some('"'));
-    let decoded = cursor
-        .read_value(line)
-        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
+    // A line that ends at `interpolate=` goes to the shared validator as an
+    // empty value, so its reason is the one the editor reports.
+    let decoded = if cursor.current().is_none() {
+        String::new()
+    } else {
+        cursor
+            .read_value(line)
+            .map_err(|e| e.into_transclusion_error(ctx.clone()))?
+    };
 
     match crate::markdown::compose::directives_api::parse_interpolate_value(&decoded, was_quoted) {
         Ok(value) => {
@@ -950,7 +956,7 @@ mod tests {
         let (_, single, _) = interpolate_error("::file ./a.md interpolate=''");
         assert!(single.contains("requires a value"), "{single}");
         let (_, eol, caret) = interpolate_error("::file ./a.md interpolate=");
-        assert!(eol.contains("Expected value"), "{eol}");
+        assert!(eol.contains("requires a value"), "{eol}");
         assert_eq!(caret, Some(27));
     }
 
