@@ -14,6 +14,32 @@ skills_files_updated_during_phase_1:
   - .claude/skills/sniff/SKILL.md
 packages:
   - sniff
+  - darkmatter
+  - darkmatter-cli
+  - claudine
+  - claudine-cli
+  - sniff-detection-cli
+source_files_during_phase_2:
+  - darkmatter/lib/src/editor/launch.rs
+  - darkmatter/lib/src/editor/launch/tests.rs
+  - darkmatter/cli/tests/l1/editor_launcher.rs
+  - claudine/lib/Cargo.toml
+  - claudine/lib/src/composition/sequence/task/shell.rs
+  - claudine/lib/src/composition/sequence/task/shell/lifecycle_tests.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/interrupt_stops.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+  - claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs
+docs_updated_during_phase_2:
+  - sniff/docs/topics/process-trees.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/darkmatter/library-surfaces.md
+  - .claude/skills/os/windows.md
 decisions_for_review:
   - |-
     The "one handoff at a time" rule (plan rule 4) is enforced with a
@@ -52,23 +78,170 @@ decisions_for_review:
     public type exists from this phase. Phase 3 still owns the full example,
     the Mermaid flow, and the caller-table changes; it may rewrite this
     section freely.
+  - |-
+    Two lifecycle commands that want the terminal at the same moment in one
+    Claudine process (for example `start` shells in parallel group legs while
+    Claudine holds the terminal) no longer both run: the second fails before it
+    starts with a "another terminal foreground handoff is active" I/O error,
+    reported as that action's failure. This follows plan rule 4 (refuse, never
+    launch an interactive child in the background), but it is a visible change
+    for parallel, non-interactive lifecycle shells run from a terminal; before
+    this fix they all ran in Claudine's own group. Alternatives: wait for the
+    terminal (serializes those commands and changes group timing), or run the
+    second command owned but without the terminal (it is stopped by the kernel
+    if it reads the keyboard). Either is a change inside
+    run_owned_lifecycle_command in claudine/lib/src/composition/sequence/task/shell.rs.
+  - |-
+    The lifecycle runner's tests run without a terminal, so two test-only
+    switches were added to shell.rs (compiled only under cfg(test)): one makes
+    a command count as holding the terminal, the other makes the wait fail once
+    the command has started its background process. They let the library tests
+    drive the real runner through the keyboard-interrupt and wait-failure paths;
+    the real terminal path is proven separately by a PTY test. The alternative
+    is PTY-only tests, which cannot reach the wait-failure path at all.
+    Removing the switches means deleting the test_seams module and the tests
+    that set them.
+  - |-
+    An existing L1 test, set_shell_values::missing_and_interrupted_commands_fail_the_set,
+    marked an interrupt before `start` and expected the `start` set action to
+    run and fail. With plan rule 9's new Unix stop-on-interrupt for
+    initialize/start/loop, that action now never runs. I kept the test's point
+    (an interrupted `$(...)` is never a recoverable value) by running the same
+    set under `finalize`, a cleanup event that still runs after an interrupt,
+    and added a Unix-only assertion that `start` stops before the set. The
+    alternative was to leave start running its first action, which contradicts
+    the plan's rule.
+  - |-
+    Darkmatter's new PTY editor test opens its terminal with libc
+    (posix_openpt, setsid, TIOCSCTTY) instead of the xpty crate, which
+    darkmatter-cli only depends on for Windows. Using xpty would widen a
+    dependency to every OS and need a dependencies.md change; the libc helper
+    is about 40 lines in editor_launcher.rs. Switching means making xpty a
+    dev-dependency for all targets and replacing spawn_on_terminal.
+  - |-
+    A pre-existing problem outside this fix was found and left unfixed: a
+    `claudine compose` started as a background shell job is stopped by the
+    kernel (SIGTTOU) whenever its output goes to the terminal, even for a
+    document with no lifecycle shell. The likely cause is biscuit-terminal's
+    capability probe (`RawModeGuard::new` in
+    biscuit-terminal/lib/src/discovery/raw_mode.rs), which changes terminal
+    settings without checking that the process is in the foreground. The new
+    background-host L2 test therefore sends Claudine's stdout/stderr to a file
+    (stdin stays on the terminal), so it still proves the handoff stays
+    inactive and the tree is cleaned up. Fixing it here would widen this fix to
+    biscuit-terminal and its many dependents. If the reviewer wants it fixed now:
+    skip the probe when tcgetpgrp(fd) != getpgrp() in RawModeGuard::new, test
+    biscuit-terminal and its dependents, and drop the redirection in
+    level2_lifecycle_foreground_handoff_a_background_claudine_leaves_the_foreground_alone.
+  - |-
+    The test-only in-process hold that replaced the `trap '' INT` lifecycle
+    shell (plan rule 13) has two behaviors the plan did not name: it gives up
+    early when the directory holding its marker files has been deleted (so a
+    test that cleaned up its workspace cannot leave Claudine parked for 60 s),
+    and it does not hold at all if it cannot write `<prefix>.reached` (rather
+    than blocking silently or panicking). The hold sits on the `failure` event,
+    where Claudine holds the terminal after the provider exits, which keeps the
+    existing event-log expectations unchanged. Reverting either behavior is a
+    small change in the test_hold module of
+    claudine/lib/src/composition/lifecycle/effects.rs.
+  - |-
+    claudine's `just test-l3` recipe now builds with
+    `--features terminal-tests,test-fixtures` (it had `terminal-tests` only).
+    The L3 terminal-lifecycle tests share the fixture that now relies on the
+    `test-fixtures`-only hold, so without the feature they would wait for a
+    readiness file that never appears. CI's feature set for claudine-cli
+    already includes `test-fixtures`, so this aligns the local recipe with CI.
+    The alternative is gating the hold on a library feature tied to
+    `terminal-tests`, which the library does not have. L3 was compiled
+    (`cargo test -p claudine-cli --features terminal-tests,test-fixtures --test
+    level3 --no-run`) but not run, because L3 takes window focus.
+  - |-
+    The plan said not to touch dependency documentation, but
+    darkmatter/docs/dependencies.md still said `libc` supplies the editor's
+    terminal-foreground handoff in editor/launch.rs, which Phase 2 removed. I
+    corrected that one sentence (libc now supplies only the terminal checks in
+    surface.rs and probe.rs; the handoff comes from Sniff). No dependency was
+    added or removed. Reverting restores a false statement.
+  - |-
+    The caller skills (use-claudine lifecycle.md, use-darkmatter authoring.md)
+    got short written summaries instead of transcluding the canonical passages
+    as the plan preferred. `::file` transcludes whole files, and the canonical
+    passages sit in pages of 500 to 2,200 lines, so transclusion would have
+    pulled far too much into the skills. The risk is drift between the summary
+    and docs/. The alternative is splitting the canonical passage into its own
+    small file and transcluding it from both the topic page and the skill.
+  - |-
+    Some documentation statements were reasoned from code or platform docs and
+    have no test here: (1) .claude/skills/os/windows.md says a lifecycle
+    command started with CREATE_NEW_PROCESS_GROUP ignores CTRL_C_EVENT by
+    default, so Claudine's console handler takes the press (documented Windows
+    behavior, untested on native Windows here); (2) process-trees.md says a
+    handoff cannot be combined with `TreeConfig::session()`, because a new
+    session has no controlling terminal; (3) Claudine docs name `start` and
+    `loop` as the actions that stop after a foreground interrupt, although the
+    code also stops `initialize`, because shell actions cannot run in
+    `initialize`. Any of these can be softened or removed if the reviewer
+    prefers documenting only tested behavior.
+source_files_during_phase_3:
+  - sniff/cli/src/bin/foreground_handoff_fixture.rs
+  - sniff/cli/Cargo.toml
+  - sniff/cli/tests/level2/level2_foreground_handoff.rs
+  - sniff/cli/tests/level2/main.rs
+  - claudine/cli/tests/level2/level2_lifecycle_foreground_handoff.rs
+  - claudine/cli/tests/level2/main.rs
+  - claudine/cli/tests/common/terminal_interrupt.rs
+  - claudine/lib/src/composition/lifecycle/effects.rs
+  - claudine/lib/tests/l1/context_construction_guard.rs
+  - claudine/justfile
+docs_updated_during_phase_3:
+  - sniff/docs/topics/process-trees.md
+  - sniff/docs/sniff-library-architecture.md
+  - sniff/README.md
+  - sniff/lib/README.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/docs/topics/signal-handling.md
+  - claudine/docs/topics/testing.md
+  - claudine/docs/use-skills/use-claudine/lifecycle.md
+  - darkmatter/docs/topics/lifecycle/index.md
+  - darkmatter/docs/topics/lifecycle/error-handling.md
+  - darkmatter/docs/cli/edit.md
+  - darkmatter/docs/dependencies.md
+  - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/sniff/architecture.md
+  - .claude/skills/sniff/testing.md
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/darkmatter/lifecycle.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
 message_to_agent: |-
-  Phase 1 added sniff::process::ForegroundHandoff (sniff/lib/src/process/foreground.rs).
-  Usage order for Phase 2 consumers: TreeConfig::process_group().configure(&mut cmd);
-  let mut handoff = ForegroundHandoff::prepare(&mut cmd)?; (declare BEFORE the
-  ProcessTree local); spawn; ProcessTree::attach; wait/sample; terminate or
-  release; reap; then handoff.restore() before any output or further lifecycle
-  work. prepare() returns WouldBlock if another handoff is active in the same
-  process (a process-wide atomic claim, not a mutex; see decisions_for_review).
-  The guard is Send. The pre_exec hook rejects a command that is not in a fresh
-  group with EINVAL (ErrorKind::InvalidInput) at spawn time, and it must be
-  registered after TreeConfig::configure (configure's own setsid/pgroup setup
-  runs first). The process-trees.md caller table still lists the Claudine
-  "not owned" foreground exception; remove it when Phase 2 migrates Claudine
-  (Phase 3 owns the full doc rewrite). Windows: the build-win cross-check
-  compiled the sniff test archive but could not run tests because the rig's
-  cargo volume had 34.8 GiB free (50 GiB required); a local
-  x86_64-pc-windows-gnu `cargo check -p sniff --lib --tests` passes.
+  Phase 3 is done; all four Wave 3 tasks are checked. New evidence:
+  sniff-detection-cli L2 `level2_foreground_handoff` (5 modes through the
+  `foreground_handoff_fixture` bin, test-fixtures only) and claudine-cli L2
+  `level2_lifecycle_foreground_handoff` (8 tests: typed C-c, SIGINT to
+  claudine, success/nonzero controls, nested claudine, structured chain,
+  background host, redirected stdin). `level2_lifecycle_ctrl_c_tmux` was
+  failing 4/6 before Phase 3 (typed keys now reach the foreground shell);
+  it passes 6/6 after the terminal_interrupt.rs fixture switched to the
+  test-fixtures in-process hold in lifecycle/effects.rs
+  (CLAUDINE_TEST_LIFECYCLE_HOLD). claudine's `just test-l3` now enables
+  test-fixtures; do not run L3 (focus). Running claudine `just test-l2` with a
+  filter exits 1 because its claudine-gen leg matches 0 tests and the
+  tmux backend proof then fails for that leg; read the claudine-cli summary
+  and its backend-proof line instead, or run the legs separately. The
+  untracked claudine/docs/topics/config-files.md and
+  claudine/docs/topics/schemas/schema-triggers.md were not created by this
+  fix (they appeared mid-session, likely the author's own work); leave them
+  alone and keep them out of this fix's file lists. Phase 4 still owns: full
+  L1 for darkmatter and claudine, the darkmatter edit L2 filters, the
+  Windows cross-compiles (`just check-windows` does not enable
+  test-fixtures, so also cargo-check sniff-detection-cli with
+  --features test-fixtures for x86_64-pc-windows-gnu), Linux runtime
+  evidence, and closing the record. build-win storage preflight refused
+  runtime runs in Phases 1-2.
 ---
 
 # Implementation Log for 2026-11-14-foreground-tree-handoff (4 phases)
@@ -157,3 +330,290 @@ message_to_agent: |-
   `2026-11-14-shared-process-tree` changes, so the uncommitted tree is not
   this phase alone.)
 - Phase 1 tasks complete: both Wave 1 checkboxes are checked.
+
+## Phase 2
+
+- Started 2026-11-16 from a clean tree (Phase 1 committed as 5bf7e9bc1).
+- **Editors** (`darkmatter/lib/src/editor/launch.rs`): an owned terminal
+  editor with inherited stdin now prepares `sniff::process::ForegroundHandoff`
+  right after `TreeConfig::process_group().configure`; the guard is declared
+  before the tree. A prepare failure is `EditorError::Io { operation: "prepare
+  the terminal" }` (contention is `WouldBlock`). Spawn and attach failures
+  keep their existing cleanup, then restore. Every path restores explicitly
+  after the root is reaped through `with_restoration`: a restore failure turns
+  an otherwise successful edit into `EditorError::Io { operation: "restore the
+  terminal" }`; after any other failure (cancel, wait error, nonzero exit,
+  launch/attach failure) it is logged with `tracing::warn!` and the first
+  failure stands; `Drop` still retries. The private Unix/non-Unix `terminal`
+  modules (fd 0, `sigaction`, `TCSADRAIN`) are deleted. Unowned (`PLAIN`) and
+  GUI launches request no handoff; stream routing, release warning, 2 s grace
+  and polling are unchanged. Module and `run` rustdoc updated.
+- **Lifecycle shells** (`claudine/lib/src/composition/sequence/task/shell.rs`):
+  `holds_terminal_foreground` and `run_in_own_group` are deleted; the
+  `task/mod.rs` re-export is unchanged. `run_owned_lifecycle_command` always
+  configures the tree, prepares the handoff (held in its own frame so an
+  unwind drops the tree first), runs `run_lifecycle_tree` (spawn, attach,
+  20 ms poll with sampling, `terminate(WhenObserved)` on completion,
+  `terminate_gracefully` 250 ms on cancellation or wait error), restores, then
+  `settle_lifecycle_command`. With an active handoff a `SIGINT` end or exit
+  130 is a foreground interrupt: after cleanup and restore it marks
+  `crate::interrupt` unless a cancellation cause is already established, and
+  returns 130. Without the foreground `SIGINT` stays `-1` and 130 stays an
+  ordinary code. A restore failure fails only a command that exited 0 (the
+  caller maps it to `ShellRunError::Spawn`). `StackExecutionContext`
+  overrides `stops_on_interrupt` on Unix for initialize/start/loop. Callers
+  in `executor.rs` and `structured_shell.rs` are unchanged. The libc comment
+  in `claudine/lib/Cargo.toml` was updated (libc now supplies only `SIGINT`
+  there).
+- Plan rule 14 (use `start`, not `initialize`, for shell examples) applied:
+  the new PTY test and the corrected lifecycle doc paragraph use `start`;
+  the spec's illustrative `initialize: shell` snippet is left as written.
+- **Requirement → test mapping** (all L1):
+  - Editor restoration priority (F1, `darkmatter/lib/src/editor/launch/tests.rs`):
+    `a_restoration_failure_fails_an_otherwise_successful_edit`,
+    `an_earlier_failure_stays_primary_over_a_restoration_failure` (cancel,
+    nonzero, wait error), `a_successful_restoration_leaves_the_result_unchanged`.
+  - Editor real terminal (F2, a PTY session in
+    `darkmatter/cli/tests/l1/editor_launcher.rs`):
+    `an_owned_terminal_editor_takes_the_foreground_and_gives_it_back` runs
+    `terminal_helper` as session leader: contention → `prepare the terminal`
+    `WouldBlock`; the editor reads a line typed before it started (a
+    background group would be stopped), then `tcgetpgrp` shows the host back
+    in the foreground after success, nonzero exit (5) and cancellation.
+    Existing tests still cover nonzero/missing program, cancellation of the
+    whole tree, the SIGTERM grace, GUI cancel and the unowned launch; none
+    changed, and no L2 edit test file was touched.
+  - Lifecycle runner (`claudine/.../task/shell/lifecycle_tests.rs`):
+    `a_restoration_failure_fails_only_a_command_that_exited_zero`,
+    `a_foreground_interrupt_marks_the_run_interrupted`,
+    `an_established_worker_cancellation_keeps_the_interrupt_unmarked`,
+    `only_a_foreground_command_turns_sigint_or_130_into_an_interrupt`,
+    `a_command_is_not_started_once_cancellation_is_requested`,
+    `exact_bytes_completion_stops_what_the_command_left_running`
+    (SystemShellRunner and DocumentShellRunner, exit 0 and 3, background
+    `sleep` dead), `a_structured_chain_segment_owns_its_tree` (both runners,
+    two native segments), `worker_cancellation_while_the_command_runs_stops_its_tree`,
+    `a_failed_wait_stops_the_whole_tree`,
+    `without_the_foreground_sigint_and_130_are_ordinary_results`,
+    `a_foreground_keyboard_interrupt_cancels_the_run` (both runners, `kill -INT
+    $$` and `exit 130`, and a structured chain whose later segment never runs).
+  - Executor (`.../executor/tests/interrupt_stops.rs`, Unix):
+    `an_interrupted_start_command_stops_the_next_action_despite_no_error`,
+    `cleanup_events_run_whole_after_an_interrupt` (cancelled, finalize),
+    `only_normal_work_stops_on_an_interrupt` (every signal).
+  - Real terminal, end to end (F3 through the `claudine` binary on a PTY,
+    `claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`):
+    `level1_pty_lifecycle_shell_interrupted_in_the_foreground_cancels_the_run`
+    (start command leaves a background `sleep` and ends by SIGINT with
+    `no_error`: background dead, next start action skipped, cancelled (using
+    `stty`) and finalize ran, exit 130). Mutation check: forcing the
+    foreground flag off makes it fail ("a start action ran after the
+    interrupt"). The original `..._using_the_terminal_completes` regression
+    passes unchanged in behavior; only its module comment was rewritten.
+  - Typed `C-c`, host-directed SIGINT, nested Claudine and redirected-stdin
+    cases are Phase 3's tmux tests, as planned.
+- Changed existing test: `set_shell_values::missing_and_interrupted_commands_fail_the_set`
+  (see decisions_for_review).
+- No file-format reader changed, so the input-robustness matrix does not
+  apply.
+- Docs fixed in this phase because they described removed behavior:
+  `sniff/docs/topics/process-trees.md` caller table (exception row and its
+  paragraph replaced), the `shell` paragraph of
+  `claudine/docs/topics/flow-control/lifecycle.md`,
+  `.claude/skills/claudine/SKILL.md`, `.claude/skills/darkmatter/library-surfaces.md`,
+  `.claude/skills/os/windows.md` (named the deleted `terminal::Handoff`).
+  `.claude/skills/sniff/SKILL.md` now names the guard's two callers.
+  Search for `holds_terminal_foreground`, `run_in_own_group`,
+  `terminal::Handoff` in live source/docs/skills: no remaining hits.
+- Gates (macOS, quiet host):
+  - `just lint` in `darkmatter/`, `claudine/`, `sniff/`: clean (the
+    `__eh_frame` linker note is pre-existing).
+  - `cd sniff && just test`: 3646 passed, 34 skipped, none ≥ 5 s.
+  - `cd darkmatter && just test`: 17049 passed, 10 skipped, none ≥ 5 s.
+  - `cd claudine && just test`: 12261 passed, 15 skipped, none ≥ 5 s.
+  - Focused runs before the full gates: `just test editor_launcher`,
+    `just test editor::launch` (darkmatter); `just test lifecycle_tests
+    interrupt_stops executor::tests task::shell lifecycle_shell` (claudine,
+    325 passed after the set_shell_values change).
+  - Dependents of darkmatter/claudine (biscuit-icon-cli, biscuit-speaks-cli,
+    biscuit-terminal-cli, messenger, messenger-cli, playa-cli,
+    sniff-detection-cli, research): none uses the changed symbols;
+    `cargo check --tests` on all eight passes.
+  - Windows compile: `cargo check -p darkmatter -p darkmatter-cli -p claudine
+    -p claudine-cli --tests --target x86_64-pc-windows-gnu` (test-fixtures
+    features, sniff's check-windows flags) passes; a new unused-import warning
+    in `lifecycle_tests.rs` on Windows was fixed by moving the imports into
+    its Unix module. The remaining warnings there (`editor_launcher.rs`
+    `Duration`/`Instant`/`kill_pid`/`EDITOR_TERMINATE_GRACE`,
+    `editor_service.rs` `mut`) predate this phase.
+  - Linux runtime (build-linux via `just cross-check`): `darkmatter-cli
+    editor_launcher` 10/10, `claudine lifecycle_tests interrupt_stops
+    set_shell_values` 37/37, `claudine-cli level1_lifecycle_shell_terminal_pty`
+    2/2; all pass.
+  - Windows runtime: `just cross-check claudine --os windows lifecycle_tests
+    set_shell_values` was refused by the build-win storage preflight (34.7 GiB
+    free, 50 GiB required), the rig condition Phase 1 also hit; not a test
+    failure, `os_failing` not set. Native Windows behavior is unchanged by
+    design (the guard is inactive and `stops_on_interrupt` is Unix-only).
+- Gates were run, so `affected_scope.py` was not used to skip them.
+- Phase 2 tasks complete: both Wave 2 checkboxes are checked.
+
+## Phase 3
+
+- Started 2026-11-16 with Phase 2 uncommitted in the tree. The four Wave 3
+  tasks have separate file ownership, so they ran as four parallel
+  foreground subagents. Each verified only its own slice; the area gates
+  below ran once afterwards, with no subagent running.
+- **Exercise public guard** (sniff-detection-cli, F3 real controlling
+  terminal in a detached tmux pane):
+  - New `foreground_handoff_fixture` bin. It is declared in
+    `sniff/cli/Cargo.toml` with `required-features = ["test-fixtures"]` and
+    adds no dependency or feature.
+  - The fixture uses only the public `TreeConfig::process_group().configure`
+    → `ForegroundHandoff::prepare` → spawn → `ProcessTree::attach` → wait →
+    cleanup → `restore()`.
+  - Native Windows compiles a terminal-free control path.
+  - Tests in `sniff/cli/tests/level2/level2_foreground_handoff.rs`:
+    - `level2_foreground_handoff_child_reads_the_terminal_then_the_host_gets_it_back`
+      (`success`: the child reads a typed line with echo off)
+    - `level2_foreground_handoff_nonzero_exit_still_restores_the_terminal`
+      (exit 7 after `-icanon -echo`)
+    - `level2_foreground_handoff_failed_spawn_after_the_transfer_restores_the_terminal`
+      (`spawn-error`: an extra pre_exec hook fails after the transfer, and
+      the foreground had moved before `restore()`)
+    - `level2_foreground_handoff_refuses_a_child_without_its_own_group`
+      (`unconfigured`: `InvalidInput`, the foreground never moves)
+    - `level2_foreground_handoff_unwind_stops_the_tree_then_restores_the_terminal`
+      (the panic is caught outside the scope; the foreground is back before
+      the reap; the child died by signal 9; the grandchild is gone; Drop did
+      the restoration)
+  - Each test asserts the PGID/TPGID before and after, `stty -a` equality
+    (excluding `pendin`), and that the idle pane shell owns the foreground,
+    read with `ps` from outside the pane.
+  - Mutation check: replacing `restore()` with `mem::forget` and suppressing
+    the unwind drop failed 4/5. `unconfigured` correctly still passed.
+- **Prove foreground shells** (claudine-cli, F3 through the `claudine`
+  binary in tmux):
+  - New Unix-only `claudine/cli/tests/level2/level2_lifecycle_foreground_handoff.rs`,
+    with 8 tests named `level2_lifecycle_foreground_handoff_*`:
+    - `typed_ctrl_c_reaches_the_command_and_cancels_the_run`
+    - `sigint_to_claudine_cancels_the_foreground_command`
+    - `a_successful_command_returns_the_terminal_and_the_run_continues`
+    - `a_failing_command_returns_the_terminal_and_fails_the_run`
+    - `a_nested_claudine_hands_the_foreground_down_and_back`
+    - `a_structured_command_reads_the_typed_line`
+    - `a_background_claudine_leaves_the_foreground_alone`
+    - `a_command_reads_dev_tty_when_claudine_stdin_is_redirected`
+  - The C-c and SIGINT cases assert:
+    - the root and the INT/TERM-ignoring background child are dead;
+    - `events.log` is exactly `cancelled\nfinalize\n`;
+    - the later `no_error` start action and the provider never ran;
+    - exit 130, with `stty` and the host foreground restored.
+  - Ownership is read with `ps -o pgid= -o tpgid=` inside each command.
+  - Every pid has a SIGKILL reaper on drop; every wait is bounded.
+  - Mutation check: preparing the handoff on a dummy command failed 7/8.
+    The background-host case correctly still passed. `shell.rs` was
+    verified byte-identical afterwards.
+  - `level1_lifecycle_shell_terminal_pty.rs` needed no change (Phase 2 had
+    fixed its comment).
+  - Pre-existing defect found: a background `claudine` with terminal output
+    is stopped by SIGTTOU from biscuit-terminal's raw-mode probe. It is not
+    fixed here (see decisions_for_review), and the background-host test
+    redirects stdout/stderr around it.
+- **Preserve host escalation**:
+  - Before the change, `level2_lifecycle_ctrl_c_tmux` failed 4/6. Every
+    terminal-lifecycle scenario failed because typed keys now reach the
+    foreground `trap '' INT` shell, not Claudine.
+  - Added the rule-13 hold behind `#[cfg(feature = "test-fixtures")]` in
+    `ClaudineLifecycleEffects::info`, under the exact text
+    `terminal-lifecycle-test-hold` and `CLAUDINE_TEST_LIFECYCLE_HOLD=<prefix>`.
+    It emits the text first, writes `.reached`, then polls `.release` for at
+    most 60 s.
+  - `terminal_interrupt.rs` now has `Barrier::{Shell, Host}`. A host
+    barrier only writes its release file. `orphan_teardown` keeps the shell
+    barrier.
+  - The level2/level3 ctrl-c test files are unchanged. The env read is
+    listed in `context_construction_guard.rs`.
+  - Also fixed `claudine/justfile` `test-l3` to enable `test-fixtures` (see
+    decisions), and added the seam row to `claudine/docs/topics/testing.md`.
+  - After: 6/6 pass. L3 was compiled only (`--no-run`) and never run.
+    `cargo check -p claudine` (default features) is clean, so the default
+    build has no hold.
+- **Document shared behavior**:
+  - `process-trees.md` now has the full handoff section: a complete Rust
+    example, a Mermaid flow including the WouldBlock, setup-error and unwind
+    paths, inactive guards, contention, typed vs host-directed SIGINT,
+    error priority, and RAII limits. Its caller table was corrected:
+    Darkmatter hands off only to a terminal editor that inherits stdin, and
+    the Claudine trigger reads "cancellation" rather than Ctrl-C.
+  - Updated the architecture and README overview links.
+  - Claudine: lifecycle.md (valid `start:` example and caller rules),
+    signal-handling.md ("Ctrl+C while a lifecycle command holds the
+    terminal"), and sequences.md (task commands never take the terminal).
+  - Darkmatter: lifecycle/index.md, error-handling.md, cli/edit.md, and
+    dependencies.md (stale libc sentence).
+  - Skills: sniff SKILL/architecture/testing, claudine SKILL, darkmatter
+    lifecycle, os SKILL/windows.
+  - Caller skills: use-claudine lifecycle.md and use-darkmatter
+    authoring.md, published with `just publish-skills` in both areas.
+  - `holds_terminal_foreground` / `run_in_own_group` / the foreground
+    exception now appear only under `sniff/fixes/`.
+- Requirement → test mapping added this phase:
+
+  | Requirement | Test |
+  |---|---|
+  | Real transfer and restore through the public guard (success, nonzero, spawn error after transfer, unconfigured refusal, unwind) | sniff L2 ×5 above |
+  | Typed input reaches a lifecycle command | `…a_successful_command…`, `…structured_command_reads_the_typed_line`, `…dev_tty_when_claudine_stdin_is_redirected` |
+  | Typed C-c and host-directed SIGINT cancel the run, kill descendants, skip later `no_error` work, and run cancelled/finalize once with exit 130 | `…typed_ctrl_c…`, `…sigint_to_claudine…` |
+  | Nested restoration one level at a time | `…nested_claudine…` |
+  | A background host leaves the foreground untouched and still owns its tree | `…background_claudine…` |
+  | The host escalation ladder still works for in-process lifecycle work | `level2_lifecycle_ctrl_c_tmux` (6, unchanged assertions) |
+
+- Spec example correction (rule 14): every new fixture and doc example uses
+  `start:`, never `initialize: shell`.
+- No file-format reader changed, so the input-robustness matrix does not
+  apply.
+- Gates (macOS; load average 7–10 on a 16+ core host):
+  - `cd sniff && just test`: 3646 passed, 34 skipped, none at or above
+    5.0 s (`🐢 … none at or above 5.0s`).
+  - `cd sniff && just lint`: clean.
+  - `cargo clippy -p sniff-detection-cli --all-targets --features test-fixtures -- -D warnings`:
+    clean.
+  - `just check-tier-coverage sniff` and `just check-tier-coverage claudine`:
+    0 stranded.
+  - `just slow-tests fresh`: exit 0.
+  - `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2 level2_foreground_handoff`
+    (sniff): 5/5 passed, `backend-proof: tmux run=5 skip=0`.
+  - `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2 level2_lifecycle_foreground_handoff level2_lifecycle_ctrl_c_tmux`
+    (claudine): claudine-cli 14/14 passed, `tmux run=14 skip=0`. The recipe
+    exits 1 only because the filtered `claudine-gen` leg runs 0 tests and
+    its required-backend proof fails. That is an artifact of the filter, not
+    a test failure.
+  - Claudine targeted L1 (`just test effects context_construction_guard
+    level1_lifecycle_shell_terminal_pty lifecycle_tests interrupt_stops`):
+    40/40 passed, none slow. `cd claudine && just lint`: clean.
+- Dependent and scope cells:
+  - `affected_scope.py` over the working tree gives packages
+    `claudine, claudine-cli, darkmatter, darkmatter-cli, sniff-detection-cli, test-toolkit`
+    with `change_class` `package`, so the gates were not skippable.
+  - darkmatter is selected by the Markdown edits. Its documentation and
+    skill guard tests (`just test current_root_migration_guard
+    trigger_spelling_guard current_root_documentation_contract
+    ambient_ctx_capture schema_roots`) passed 51/51.
+  - test-toolkit is selected by the test-layout changes. `cd tools && just
+    test` passed 563/563, none slow.
+  - Full darkmatter and claudine L1 are Phase 4's scoped gates.
+- Cross-OS:
+  - The new tests are Unix-only. The fixture's Windows path and the hold
+    are portable.
+  - `cargo check -p sniff-detection-cli --features test-fixtures --bins
+    --tests --target x86_64-pc-windows-gnu` (check-windows environment)
+    passed.
+  - No native Windows runtime run was attempted: Phases 1–2 found build-win
+    refusing on storage, and the Windows-side change is a no-op. `os_failing`
+    is not set.
+- Unrelated worktree files: untracked `claudine/docs/topics/config-files.md`
+  and `claudine/docs/topics/schemas/schema-triggers.md` appeared during the
+  session. No agent of this fix created them. They were left untouched and
+  are not listed in this phase's frontmatter.
+- Phase 3 tasks complete: all four Wave 3 checkboxes are checked.

@@ -1,7 +1,7 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -15,6 +15,67 @@ skills_files_updated_during_phase_1:
 - .claude/skills/sniff/SKILL.md
 packages:
 - sniff
+- darkmatter
+- darkmatter-cli
+- claudine
+- claudine-cli
+- sniff-detection-cli
+source_files_during_phase_2:
+- darkmatter/lib/src/editor/launch.rs
+- darkmatter/lib/src/editor/launch/tests.rs
+- darkmatter/cli/tests/l1/editor_launcher.rs
+- claudine/lib/Cargo.toml
+- claudine/lib/src/composition/sequence/task/shell.rs
+- claudine/lib/src/composition/sequence/task/shell/lifecycle_tests.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/interrupt_stops.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+- claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs
+docs_updated_during_phase_2:
+- sniff/docs/topics/process-trees.md
+- claudine/docs/topics/flow-control/lifecycle.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/sniff/SKILL.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/os/windows.md
+source_files_during_phase_3:
+- sniff/cli/src/bin/foreground_handoff_fixture.rs
+- sniff/cli/Cargo.toml
+- sniff/cli/tests/level2/level2_foreground_handoff.rs
+- sniff/cli/tests/level2/main.rs
+- claudine/cli/tests/level2/level2_lifecycle_foreground_handoff.rs
+- claudine/cli/tests/level2/main.rs
+- claudine/cli/tests/common/terminal_interrupt.rs
+- claudine/lib/src/composition/lifecycle/effects.rs
+- claudine/lib/tests/l1/context_construction_guard.rs
+- claudine/justfile
+docs_updated_during_phase_3:
+- sniff/docs/topics/process-trees.md
+- sniff/docs/sniff-library-architecture.md
+- sniff/README.md
+- sniff/lib/README.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/signal-handling.md
+- claudine/docs/topics/testing.md
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/cli/edit.md
+- darkmatter/docs/dependencies.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/sniff/SKILL.md
+- .claude/skills/sniff/architecture.md
+- .claude/skills/sniff/testing.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/windows.md
 ---
 
 # Shared Terminal Foreground Handoff Implementation Plan
@@ -296,7 +357,7 @@ Wave 1 tasks are sequential because the tests exercise the new guard.
 
 ### Wave 2: Independent consumer changes
 
-- [ ] **Migrate editors**
+- [x] **Migrate editors**
   - Own only `darkmatter/lib/src/editor/launch.rs` and its L1 launcher tests in
     `darkmatter/cli/tests/l1/editor_launcher.rs` and `editor_support.rs`.
     Apply rules 2, 11, and 12; remove the private handoff implementation.
@@ -306,7 +367,7 @@ Wave 1 tasks are sequential because the tests exercise the new guard.
   - Check the function's rustdoc and inline comments alongside the change.
     Run the focused editor L1 tests through the Darkmatter recipe.
 
-- [ ] **Migrate lifecycle shells**
+- [x] **Migrate lifecycle shells**
   - Own `claudine/lib/src/composition/sequence/task/shell.rs`, its tests, and
     the Unix `LifecycleHost::stops_on_interrupt` override/tests in
     `composition/lifecycle/executor.rs`.
@@ -332,7 +393,7 @@ functions are absent, and each task's focused L1 tests pass independently.
 
 ### Wave 3: Independent tests and documentation
 
-- [ ] **Exercise public guard**
+- [x] **Exercise public guard**
   - Own `sniff/cli/src/bin/foreground_handoff_fixture.rs`, its explicit binary
     entry in `sniff/cli/Cargo.toml` under the existing `test-fixtures` feature,
     and a new `cli/tests/level2/level2_foreground_handoff.rs` module registered
@@ -361,7 +422,7 @@ functions are absent, and each task's focused L1 tests pass independently.
     This task owns no Claudine or Darkmatter files and runs concurrently with
     their terminal regressions and documentation.
 
-- [ ] **Prove foreground shells**
+- [x] **Prove foreground shells**
   - Own the new Unix-only
     `claudine/cli/tests/level2/level2_lifecycle_foreground_handoff.rs` and its
     registration in `level2/main.rs`. Use `TmuxHarness`,
@@ -394,7 +455,7 @@ functions are absent, and each task's focused L1 tests pass independently.
     behavioral assertion. Use portable `stty` comparisons that exclude the
     kernel's transient `pendin` bit, as the existing edit tests do.
 
-- [ ] **Preserve host escalation**
+- [x] **Preserve host escalation**
   - Own `claudine/lib/src/composition/lifecycle/effects.rs` and
     `claudine/cli/tests/common/terminal_interrupt.rs`. Implement the bounded
     test-only host barrier from rule 13, with no new feature or dependency.
@@ -406,7 +467,7 @@ functions are absent, and each task's focused L1 tests pass independently.
     callers; compile the latter without running focus-taking tests. Verify a
     default build contains no active environment-driven hold.
 
-- [ ] **Document shared behavior**
+- [x] **Document shared behavior**
   - Own documentation and skill changes. Extend
     `sniff/docs/topics/process-trees.md` with a complete minimal handoff
     example and a Mermaid flow showing prepare → spawn → attach → wait →
