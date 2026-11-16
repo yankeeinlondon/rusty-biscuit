@@ -1,37 +1,25 @@
-//! Bounded subprocess execution.
+//! Bounded subprocess execution and process-tree ownership.
 //!
 //! Every child process sniff spawns goes through `run_with_timeout`. It is the
 //! single place that owns the deadline, the pipe draining, and process-tree
 //! termination/reaping, so a wedged or verbose child can never wedge a detection.
 //!
-//! The one public item, [`configure_detached_child`], serves the opposite case:
-//! a caller's intentionally detached child that nothing waits on or bounds.
+//! The module's public items serve other crates' subprocesses:
 //!
-//! See `sniff/features/2026-07-16-performance/phases/_completed/06-remote-network-and-subprocess/spec.md`
-//! for the contract this module implements.
+//! - [`ProcessTree`] and its configuration ([`TreeConfig`], [`TreeIsolation`],
+//!   [`CleanupScan`], [`TreeTermination`]) own a spawned child and every
+//!   process it starts. `run_with_timeout` uses the same owner. The rules,
+//!   guarantees, and per-OS limits are in `sniff/docs/topics/process-trees.md`.
+//! - [`configure_detached_child`] serves the opposite case: a caller's
+//!   intentionally detached child that nothing waits on or bounds.
 //!
-//! ## What tree termination guarantees
+//! ## What a timed-out command can leave behind
 //!
-//! Windows containment is total: the child is assigned to a kill-on-close Job
-//! Object while still suspended, membership is inherited by every descendant,
-//! and the kernel enforces it. Nothing can escape.
-//!
-//! Unix has no equivalent primitive, so the guarantee is layered and the top
-//! layer is best-effort:
-//!
-//! 1. **Guaranteed** — every process in the child's process group dies, whether
-//!    or not it is still parented to the child. `kill(-pgid)` is atomic with
-//!    respect to forks: a process forked after the signal is sent inherits a
-//!    dead parent's group and is signaled too.
-//! 2. **Best-effort** — a descendant that calls `setsid()` leaves that group.
-//!    Sniff keeps such a process addressable by sampling the child's descendant
-//!    tree on a coarse interval while the child is alive, so its PID survives
-//!    the reparenting that follows the child's exit. PIDs are re-validated by
-//!    process start time before signaling, so a recycled PID is never hit.
-//!
-//! The unclosable gap is a descendant that both forks *and* calls `setsid()`
-//! entirely between two samples, whose parent then exits. Closing it portably
-//! would need Linux cgroups or `PR_SET_CHILD_SUBREAPER` (Linux-only, and
+//! On Windows the owner contains every descendant once it is attached. On
+//! Unix it reaches the process group and the descendants a sample recorded;
+//! a descendant that forks *and* calls `setsid()` entirely between two
+//! samples, whose parent then exits, escapes. Closing that gap portably would
+//! need Linux cgroups or `PR_SET_CHILD_SUBREAPER` (Linux-only, and
 //! process-global — not a library's to set), or a supervising process.
 //!
 //! Who reaches that gap depends on what is being run. Sniff's own *detection*
@@ -48,7 +36,7 @@
 //! `tests::a_descendant_that_detaches_between_samples_escapes_containment` is
 //! the executable record of this residual: it is the assertion that flips if a
 //! future change ever closes the gap. It manufactures the escape through
-//! `sample_hook`, a test-only callback on the sampler, so the window it
+//! `tree::sample_hook`, a test-only callback on the sampler, so the window it
 //! exploits is an interval boundary by construction and not by timing estimate.
 
 use std::ffi::OsStr;
@@ -58,6 +46,13 @@ use std::time::{Duration, Instant};
 use tracing::warn;
 
 use crate::performance::{self, counters};
+
+mod tree;
+
+pub use tree::{
+    CleanupScan, ProcessTree, TreeConfig, TreeIsolation, TreeTermination,
+    WINDOWS_CREATE_NEW_PROCESS_GROUP, WINDOWS_CREATE_NO_WINDOW,
+};
 
 /// Named per-probe deadlines.
 ///
@@ -105,68 +100,6 @@ pub(crate) mod timeouts {
 
 /// How often the deadline is checked while the child runs.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
-
-/// How long a child must live before sniff starts recording its descendants.
-///
-/// Sampling exists to keep a `setsid` descendant addressable after the direct
-/// child exits: once the kernel reparents it, nothing links it back to the child
-/// PID and nothing keeps it in the original process group. Deferring the first
-/// sample by a whole interval is what keeps the common case free — a probe that
-/// completes inside one interval never scans the process table at all.
-#[cfg_attr(target_os = "windows", allow(dead_code))]
-const DESCENDANT_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
-
-/// Test-only observation point, invoked after every completed descendant sample.
-///
-/// Sampling is the only thing standing between a `setsid` descendant and the
-/// containment gap this module documents, so a test that pins that gap has to
-/// know precisely when a sample finished. A hook installed here runs
-/// synchronously on the supervising thread, which means a test that *blocks*
-/// inside it holds the sampler still for exactly as long as it blocks — the
-/// escape it manufactures then lands strictly between two samples on any host
-/// at any load, with no timing estimate involved.
-///
-/// The slot is thread-local rather than global because [`ProcessTree::sample`]
-/// always runs on the thread that called [`run_command_with_timeout`]; an
-/// installed hook therefore cannot leak into a concurrently running test.
-#[cfg(all(unix, test))]
-mod sample_hook {
-    use std::cell::RefCell;
-
-    thread_local! {
-        static HOOK: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
-    }
-
-    /// Uninstalls the hook when dropped, so a panicking test cannot leave one
-    /// armed for whatever runs next on this thread.
-    pub(super) struct HookGuard(());
-
-    impl Drop for HookGuard {
-        fn drop(&mut self) {
-            HOOK.with(|slot| *slot.borrow_mut() = None);
-        }
-    }
-
-    pub(super) fn install(hook: impl FnMut() + 'static) -> HookGuard {
-        HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
-        HookGuard(())
-    }
-
-    pub(super) fn after_sample() {
-        // Moved out of the slot for the duration of the call so that a hook
-        // which touches the slot itself cannot trip a re-entrant borrow panic.
-        let Some(mut hook) = HOOK.with(|slot| slot.borrow_mut().take()) else {
-            return;
-        };
-        hook();
-        HOOK.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            if slot.is_none() {
-                *slot = Some(hook);
-            }
-        });
-    }
-}
 
 #[cfg(unix)]
 mod pipe_reader {
@@ -277,263 +210,6 @@ mod pipe_reader {
     }
 }
 
-#[cfg(unix)]
-mod process_tree {
-    use std::collections::HashMap;
-    use std::process::{Child, Command};
-
-    use std::os::unix::process::CommandExt;
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-
-    pub(super) struct ProcessTree {
-        process_group: libc::pid_t,
-        /// Descendants seen while the direct child was alive, each paired with
-        /// the start time identifying that incarnation. Retaining them is what
-        /// survives a `setsid` descendant being reparented away from the child:
-        /// after reparenting, neither the parent chain nor the process group
-        /// names it any more, so a snapshot taken at cleanup cannot find it.
-        observed: HashMap<Pid, u64>,
-        system: Option<System>,
-    }
-
-    pub(super) fn configure(command: &mut Command) {
-        command.process_group(0);
-    }
-
-    impl ProcessTree {
-        pub(super) fn attach(child: &Child) -> std::io::Result<Self> {
-            let process_group = libc::pid_t::try_from(child.id()).map_err(|_| {
-                std::io::Error::other("child process ID does not fit the platform pid_t")
-            })?;
-            Ok(Self {
-                process_group,
-                observed: HashMap::new(),
-                system: None,
-            })
-        }
-
-        /// Records the child's current descendant tree.
-        ///
-        /// Called on a coarse interval while the child runs, never on the path a
-        /// short-lived child takes.
-        pub(super) fn sample(&mut self) {
-            let roots = self.roots();
-            let system = self.system.get_or_insert_with(System::new);
-            refresh(system);
-            for (pid, start_time) in descendants(system, &roots) {
-                self.observed.insert(pid, start_time);
-            }
-            // Compiled out of every non-test build, so the production sampler
-            // is unchanged. See `super::sample_hook`.
-            #[cfg(test)]
-            super::sample_hook::after_sample();
-        }
-
-        /// Kills the supervised tree.
-        ///
-        /// `force_scan` requests a process-table scan even when nothing was ever
-        /// observed; callers set it on failure paths, where one scan is cheap
-        /// relative to a deadline that has already elapsed. On a clean exit with
-        /// no recorded descendants the scan is skipped entirely and only the
-        /// process group is signaled.
-        pub(super) fn terminate(&mut self, force_scan: bool) -> std::io::Result<()> {
-            if force_scan || !self.observed.is_empty() {
-                self.kill_recorded_and_current();
-            }
-
-            // SAFETY: `configure` creates a fresh process group whose ID is the
-            // direct child's PID. A negative PID addresses that group only.
-            let result = unsafe { libc::kill(-self.process_group, libc::SIGKILL) };
-            if result == 0 {
-                return Ok(());
-            }
-
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
-                Ok(())
-            } else {
-                Err(error)
-            }
-        }
-
-        fn roots(&self) -> Vec<Pid> {
-            let mut roots: Vec<Pid> = u32::try_from(self.process_group)
-                .map(|root| vec![Pid::from_u32(root)])
-                .unwrap_or_default();
-            roots.extend(self.observed.keys().copied());
-            roots
-        }
-
-        fn kill_recorded_and_current(&mut self) {
-            let roots = self.roots();
-            let system = self.system.get_or_insert_with(System::new);
-            refresh(system);
-
-            let mut targets: Vec<Pid> = descendants(system, &roots)
-                .into_iter()
-                .map(|(pid, _)| pid)
-                .collect();
-            for (pid, start_time) in &self.observed {
-                // A PID the kernel has since recycled belongs to an unrelated
-                // process. Matching the recorded start time is what keeps this
-                // from signaling it.
-                let same_incarnation = system
-                    .process(*pid)
-                    .is_some_and(|process| process.start_time() == *start_time);
-                if same_incarnation && !targets.contains(pid) {
-                    targets.push(*pid);
-                }
-            }
-
-            for target in targets.into_iter().rev() {
-                let Ok(target) = libc::pid_t::try_from(target.as_u32()) else {
-                    continue;
-                };
-                // SAFETY: each PID is a live process that this scan either found
-                // in the supervised tree or confirmed as the same incarnation
-                // recorded while the child was running.
-                let _ = unsafe { libc::kill(target, libc::SIGKILL) };
-            }
-
-            self.observed.clear();
-        }
-    }
-
-    fn refresh(system: &mut System) {
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-    }
-
-    /// Transitive closure of `roots` over the parent relation, deepest last.
-    fn descendants(system: &System, roots: &[Pid]) -> Vec<(Pid, u64)> {
-        let mut found: Vec<(Pid, u64)> = Vec::new();
-        loop {
-            let previous_len = found.len();
-            for (&pid, process) in system.processes() {
-                if roots.contains(&pid) || found.iter().any(|(seen, _)| *seen == pid) {
-                    continue;
-                }
-                let Some(parent) = process.parent() else {
-                    continue;
-                };
-                if roots.contains(&parent) || found.iter().any(|(seen, _)| *seen == parent) {
-                    found.push((pid, process.start_time()));
-                }
-            }
-            if found.len() == previous_len {
-                break;
-            }
-        }
-        found
-    }
-}
-
-#[cfg(target_os = "windows")]
-mod process_tree {
-    use std::os::windows::io::AsRawHandle;
-    use std::os::windows::process::CommandExt;
-    use std::process::{Child, Command};
-
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
-    };
-    use windows::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, TerminateJobObject,
-    };
-    use windows::Win32::System::Threading::{
-        CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
-    };
-    use windows::core::Owned;
-
-    pub(super) struct ProcessTree {
-        job: Owned<HANDLE>,
-    }
-
-    pub(super) fn configure(command: &mut Command) {
-        command.creation_flags(CREATE_SUSPENDED.0);
-    }
-
-    impl ProcessTree {
-        pub(super) fn attach(child: &Child) -> std::io::Result<Self> {
-            // The process is still suspended, so it cannot create a descendant
-            // before assignment to the job. Every owned raw handle is wrapped
-            // immediately and remains valid for each Win32 call below.
-            unsafe {
-                let job = Owned::new(
-                    CreateJobObjectW(None, windows::core::PCWSTR::null())
-                        .map_err(std::io::Error::other)?,
-                );
-                let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                SetInformationJobObject(
-                    *job,
-                    JobObjectExtendedLimitInformation,
-                    std::ptr::from_ref(&limits).cast(),
-                    std::mem::size_of_val(&limits) as u32,
-                )
-                .map_err(std::io::Error::other)?;
-
-                let process = HANDLE(child.as_raw_handle());
-                AssignProcessToJobObject(*job, process).map_err(std::io::Error::other)?;
-                resume_primary_thread(child.id())?;
-
-                Ok(Self { job })
-            }
-        }
-
-        /// Job Object membership is inherited and kernel-enforced, so Windows
-        /// needs no descendant sampling to keep an escaping process addressable.
-        pub(super) fn sample(&mut self) {}
-
-        pub(super) fn terminate(&mut self, _force_scan: bool) -> std::io::Result<()> {
-            // SAFETY: `job` is an owned, live Job Object handle. Termination is
-            // idempotent for the helper's cleanup paths.
-            unsafe { TerminateJobObject(*self.job, 1).map_err(std::io::Error::other) }
-        }
-    }
-
-    unsafe fn resume_primary_thread(process_id: u32) -> std::io::Result<()> {
-        // SAFETY: the snapshot and thread handles are owned for this scope. The
-        // child was created suspended and has exactly one initial thread before
-        // this function resumes it.
-        unsafe {
-            let snapshot = Owned::new(
-                CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0).map_err(std::io::Error::other)?,
-            );
-            let mut entry = THREADENTRY32 {
-                dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
-                ..Default::default()
-            };
-            Thread32First(*snapshot, &mut entry).map_err(std::io::Error::other)?;
-
-            loop {
-                if entry.th32OwnerProcessID == process_id {
-                    let thread = Owned::new(
-                        OpenThread(THREAD_SUSPEND_RESUME, false, entry.th32ThreadID)
-                            .map_err(std::io::Error::other)?,
-                    );
-                    if ResumeThread(*thread) == u32::MAX {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    return Ok(());
-                }
-                if Thread32Next(*snapshot, &mut entry).is_err() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "suspended child process has no thread",
-                    ));
-                }
-            }
-        }
-    }
-}
-
 /// Captured result of a completed child process.
 #[derive(Debug)]
 pub(crate) struct CapturedOutput {
@@ -605,11 +281,11 @@ impl From<ProcessError> for std::io::Error {
 /// buffer, because the child blocks in `write()` and so never exits for the loop
 /// to observe.
 ///
-/// Tree termination is total on Windows and best-effort on Unix; see the module
-/// documentation for exactly what each platform guarantees. A command that
+/// The child's process tree is owned by a [`ProcessTree`] and terminated before
+/// the readers are joined, on success as well as on timeout. A command that
 /// deliberately detaches — or a third-party installer that does so on its own —
-/// can outlive this boundary on Unix, so a `Timeout` is not proof that every
-/// process the command started has stopped.
+/// can outlive this boundary on Unix (see the module documentation), so a
+/// `Timeout` is not proof that every process the command started has stopped.
 pub(crate) fn run_with_timeout<S, A>(
     program: S,
     args: &[A],
@@ -634,9 +310,9 @@ where
 /// ## Notes
 ///
 /// This is the form the installation boundary uses to run third-party package
-/// managers and downloaded installer scripts. Tree termination for those is
-/// total on Windows and best-effort on Unix; see the module documentation for
-/// the exact residual.
+/// managers and downloaded installer scripts. On Unix a descendant they detach
+/// between two descendant samples can outlive the timeout; see the module
+/// documentation for the exact residual.
 pub(crate) fn run_command_with_timeout(
     command: &mut Command,
     timeout: Duration,
@@ -645,12 +321,12 @@ pub(crate) fn run_command_with_timeout(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    process_tree::configure(command);
+    TreeConfig::process_group().configure(command);
 
     let program = command.get_program().to_owned();
     let mut child = command.spawn().map_err(ProcessError::Spawn)?;
     performance::increment_counter(counters::PROC_SPAWNS, 1);
-    let mut process_tree = match process_tree::ProcessTree::attach(&child) {
+    let mut process_tree = match ProcessTree::attach(&child) {
         Ok(process_tree) => process_tree,
         Err(error) => {
             let _ = child.kill();
@@ -676,7 +352,7 @@ pub(crate) fn run_command_with_timeout(
                 .transpose()
         })
     {
-        let _ = process_tree.terminate(true);
+        log_cleanup_failure(process_tree.terminate(CleanupScan::Always), &program);
         let _ = child.wait();
         return Err(ProcessError::Spawn(error));
     }
@@ -684,7 +360,6 @@ pub(crate) fn run_command_with_timeout(
     let stderr_handle = stderr.map(|pipe| drain_control.spawn(pipe));
 
     let start = Instant::now();
-    let mut next_sample = DESCENDANT_SAMPLE_INTERVAL;
     let result = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
@@ -697,19 +372,17 @@ pub(crate) fn run_command_with_timeout(
                         timeout_ms = timeout.as_millis(),
                         "subprocess exceeded its deadline; terminating supervised processes"
                     );
-                    let _ = process_tree.terminate(true);
+                    log_cleanup_failure(process_tree.terminate(CleanupScan::Always), &program);
                     // Reap, so the killed child cannot linger as a zombie.
                     let _ = child.wait();
                     break Err(ProcessError::Timeout);
                 }
-                if elapsed >= next_sample {
-                    process_tree.sample();
-                    next_sample = elapsed + DESCENDANT_SAMPLE_INTERVAL;
-                }
+                // The owner decides when a sample is due; most calls are free.
+                process_tree.sample();
                 std::thread::sleep(POLL_INTERVAL);
             }
             Err(e) => {
-                let _ = process_tree.terminate(true);
+                log_cleanup_failure(process_tree.terminate(CleanupScan::Always), &program);
                 let _ = child.wait();
                 break Err(ProcessError::Spawn(e));
             }
@@ -719,9 +392,10 @@ pub(crate) fn run_command_with_timeout(
     // The direct child may exit while a descendant still owns an inherited pipe
     // handle, or while one it detached with `setsid` is still running. Terminate
     // the recorded and current descendants and the process group, or the Job
-    // Object, before joining readers. Failure paths already terminated, so this
-    // call scans only when the child was alive long enough to be sampled.
-    let _ = process_tree.terminate(false);
+    // Object, before joining readers. Failure paths already terminated and
+    // disarmed the owner, so this call is then a no-op; otherwise it scans only
+    // when the child was alive long enough to be sampled.
+    log_cleanup_failure(process_tree.terminate(CleanupScan::WhenObserved), &program);
     drain_control.finish();
 
     // Unix readers drain every byte already available, then stop at the bounded
@@ -742,6 +416,17 @@ pub(crate) fn run_command_with_timeout(
         stdout,
         stderr,
     })
+}
+
+/// Logs a failed tree cleanup. The command's own outcome is reported unchanged.
+fn log_cleanup_failure(result: std::io::Result<()>, program: &OsStr) {
+    if let Err(error) = result {
+        warn!(
+            error = %error,
+            program = %program.to_string_lossy(),
+            "could not terminate the subprocess's process tree"
+        );
+    }
 }
 
 /// Runs a command under a deadline and returns stdout only on a successful exit.
@@ -1026,7 +711,7 @@ mod tests {
             if unsafe { libc::getpgid(descendant_pid) } == descendant_pid {
                 // Outlive at least two descendant samples, so the escape is
                 // recorded while this process is still its parent.
-                std::thread::sleep(DESCENDANT_SAMPLE_INTERVAL * 3);
+                std::thread::sleep(tree::DESCENDANT_SAMPLE_INTERVAL * 3);
                 return;
             }
             std::thread::sleep(POLL_INTERVAL);
@@ -1204,7 +889,7 @@ mod tests {
         let hook_pid_file = pid_file.clone();
         let hook_reparent_file = reparent_file.clone();
         let mut released = false;
-        let _hook = sample_hook::install(move || {
+        let _hook = tree::sample_hook::install(move || {
             if released {
                 return;
             }
