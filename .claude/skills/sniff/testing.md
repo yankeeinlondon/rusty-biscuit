@@ -70,9 +70,8 @@ objects through an in-memory pack and its churn commits without restaging
 the tree (identical commit IDs, about 2 s instead of 6.5 s on Windows).
 
 On macOS the dominant L1 costs are per process, so a `LazyLock` cannot share
-them: the first CoreAudio call sets up the audio HAL, and that setup is
-serialized across processes (about 0.75 s each on Ken's Mac, so four tests
-started together each took about 4 s and, in the old suite, 6–9 s), and
+them: the first CoreAudio call sets up the audio HAL, which reads the main
+bundle and so lists the test executable's directory (see below), and
 `NetworkRequest::full()` (the `detect_network()` and `DetectionPlan`/`SniffConfig`
 default) issues a live WAN IP request bounded at 2 s per endpoint. A test that
 does not assert audio devices or the WAN address requests
@@ -87,7 +86,9 @@ config's skip flags. The full default path keeps exactly these live callers:
 `hardware::tests::test_detect_hardware_full_includes_gpu_on_macos`; add another
 only when it asserts what those calls return.
 On macOS the five CoreAudio callers among them (all but the network test) run
-one at a time in the `sniff-macos-coreaudio` nextest test group
-(`.config/nextest.toml`): started together, each waited out the others' HAL
-setup and took about 14 s; one at a time, each takes about 3 s. A new live
-audio caller joins that group's filter.
+one at a time in the `sniff-macos-coreaudio` nextest test group and get the
+`coretext-small-bundle` setup script (both in `.config/nextest.toml`). Most of
+the HAL setup is `CFBundleGetMainBundle` listing `target/debug/deps`
+(800,000+ entries): 3.1 s alone and 6 s in a package run without the script,
+0.6–0.9 s with it, which points the main bundle at `/usr/bin`. A new live audio
+caller joins both filters, which must stay equal.
