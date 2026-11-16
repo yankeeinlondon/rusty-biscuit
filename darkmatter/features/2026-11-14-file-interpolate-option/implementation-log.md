@@ -6,6 +6,7 @@ started_phase: "1"
 packages:
     - darkmatter
     - darkmatter-lsp
+    - darkmatter-cli
 source_files_during_phase_1:
     - darkmatter/lib/src/markdown/compose/directives_api.rs
     - darkmatter/lib/src/markdown/compose/parse_utils.rs
@@ -86,6 +87,26 @@ decisions_for_review:
       because it is read as its own document, not through an inclusion.
       Changing either is a one-argument edit at the `accepted_child_options`
       call sites in `reference/graph.rs`.
+    - |-
+      The editor's option hover appears on every `interpolate=` value
+      (true, false, null, or invalid), not only on `false`. The spec quotes
+      the sentence for `interpolate=false`; showing the same explanation
+      (which states what `false` does, the default, and inheritance) on any
+      value lets an author learn the option before typing `false`.
+      Alternatives: show it only for a value that resolves to false (a
+      `parse_interpolate_value` check in `interpolate_option_at`), or vary
+      the text by value (more strings to keep in sync). Either is confined
+      to `directive_hover` in `dmls/src/providers/dsl.rs` and one test.
+    - |-
+      A line that ends at `interpolate=` now fails composition with the
+      shared validator's reason ("'interpolate=' requires a value: true or
+      false") instead of the general directive reader's "Expected value,
+      found end of directive". The plan wanted the library and editor to
+      agree through one validator; without this they would report the
+      same location with different words. The caret column is unchanged.
+      Reverting means removing the empty-line branch in
+      `parse_interpolate_option` and restoring the old assertion in three
+      tests (parser, DMLS agreement, CLI `missing_value`).
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/interpolation/active_inputs.rs
     - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
@@ -115,21 +136,43 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/compose.md
+source_files_during_phase_4:
+    - darkmatter/dmls/src/overlay/directives.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/semantic_tokens.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/file_interpolate_option.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/compose_file_interpolate.rs
+    - darkmatter/cli/tests/fixtures/file_interpolate_publication/topics/examples.md
+    - darkmatter/cli/tests/fixtures/file_interpolate_publication/use-skills/use-example/SKILL.md
+docs_updated_during_phase_4:
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/hover.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - darkmatter/docs/transclusion/block-transclusion.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+    - darkmatter/docs/use-skills/use-dmls/features.md
+    - CLAUDE.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/compose.md
 message_to_agent: |-
-  Phase 3 folded the setting into the reference graph
-  (`reference/graph.rs::accepted_child_options` takes a `ProseInterpolation`;
-  `::file` children fold their directive, prologue/epilogue/`::toc-linking`
-  inherit). Preflight needed no code change. Phase 3 tests live in
-  `compose/tests/file_interpolate.rs` (preflight, cache, agreement) and
-  `reference/graph.rs` tests (graph); `compose/tests/preflight.rs` and
-  `caching.rs` are empty placeholders. For Phase 4's CLI fixtures: a link in
-  suppressed prose whose destination is `./{{name}}.md` makes `md compose`'s
-  reference check fail with `invalid-reference` (biscuit-file reads
-  `{{VAR}}` as an environment variable), and `./{{ name }}.md` with spaces
-  is not a link at all, so keep interpolation examples out of link
-  destinations in the publication fixture unless the test is about that
-  (see the log's decisions). `git diff` here uses an external diff tool;
-  pass `--no-ext-diff`.
+  Phase 5 was docs-only. Note for closing verification: the working tree
+  still holds Phase 4's uncommitted edits alongside Phase 5's (git status shows
+  both), so the scope calculator selects darkmatter packages from Phase 4's
+  source files. `just publish-skills` in `darkmatter/` was run and the installed
+  `~/.claude/skills/use-darkmatter/` and `use-dmls/` copies now carry the
+  `interpolate=false` guidance. No caller skill has a live (unfenced) `::file`
+  transclusion, so no `interpolate=false` was added to shipped skill sources.
 ---
 
 # Implementation Log for 2026-11-14-file-interpolate-option (6 phases)
@@ -493,3 +536,211 @@ control tests pass either way, by design.
 No path, process, or `cfg` code changed (one setting passed to an existing
 child-request derivation, plus tests over temp-dir fixtures). No cross-OS
 check was run.
+
+## Phase 4
+
+Implemented directly (no subagents): the DMLS work and the CLI tests were
+small and touched separate crates, so each was verified inline with
+targeted filters before the area gates ran once.
+
+### What changed
+
+- **DMLS** (`dmls/src/overlay/directives.rs`, `dmls/src/providers/dsl.rs`,
+  `dmls/src/diagnostics/codes.rs`):
+  - Completion needed no code: Phase 1 had already added `interpolate` to
+    `option_keys` (File/Url only) and `true`/`false` to `option_values`.
+    It is now covered by tests.
+  - Hover: `directive_hover` returns `INTERPOLATE_OPTION_HOVER` when the
+    cursor is on an `interpolate` option's key or value
+    (`directives::interpolate_option_at`), ranged over `key=value`. The
+    text carries the author's sentence verbatim, plus defaulting and
+    inheritance. `::code` never gets it.
+  - Diagnostic: new `dm.directive.invalid_option_value` (ERROR) from
+    `directives::invalid_interpolate_options`, called by
+    `malformed_option_diagnostics`. It validates every occurrence through
+    the library's `parse_interpolate_value`, takes `was_quoted` from the raw
+    value span, and puts a missing value at the key, any other at the value.
+- **Library** (`lib/src/markdown/compose/transclusion/parser.rs`): a line
+  ending at `interpolate=` is now sent to the shared validator as an empty
+  value. Before, the generic value reader failed first ("Expected value,
+  found end of directive"), so the editor and `md compose` gave different
+  reasons. Now both say "'interpolate=' requires a value: true or false".
+  The Phase 1 parser test's assertion was updated to match (same caret).
+- **CLI**: no code change. New tests in
+  `cli/tests/l1/compose_file_interpolate.rs` and a frozen fixture under
+  `cli/tests/fixtures/file_interpolate_publication/`, laid out like a real
+  caller skill: `use-skills/use-example/SKILL.md` transcludes
+  `../../topics/examples.md`, so the docs page is outside the skill
+  directory that `just publish-skills` composes file by file.
+- **Docs**: `dmls/docs/diagnostics.md` (code row), `dmls/docs/features.md`
+  (option bullet with example), `dmls/docs/hover.md` (DSL row).
+- **Skill**: `.claude/skills/darkmatter/dmls.md` (where the option's editor
+  support lives and the verbatim-sentence rule).
+
+### Finding: directive parse errors carry no line in the JSON envelope
+
+`md compose --output json` reports a `dm.directive.parse_failure` with
+`source.file` set to the including file (the nested `mid.md`, not the
+root), but `line`/`column` are null. The message still says "line 3". This
+is deliberate in `report_diagnostics.rs` ("the directive's line is in the
+current body, so only the file is authored"), and it applies to every
+directive parse failure, so it was left alone. The terminal rendering does
+show the line and column (`> 3 │ ::file …`, "Column 31"). The CLI tests
+assert the file from JSON and the line/caret from the terminal output.
+
+### Requirement → test mapping
+
+Boundaries: DMLS through `ProviderRegistry` over real files in a temp Git
+repository (F2 in-process, L1, `darkmatter-lsp` `l1` binary); CLI through
+the spawned `md` binary (F3, L1, `darkmatter-cli` `l1` binary); the
+semantic-token case is a unit test. Every new test runs under `just test`.
+
+| Plan item / spec row | Test |
+|---|---|
+| Rule 21: `interpolate` key offered on `::file`/`::url`, not `::code` | `file_interpolate_option::file_and_url_offer_the_interpolate_key_and_code_does_not` |
+| Rule 21: value completion `true`/`false` (and prefix filtering) | `file_interpolate_option::the_interpolate_value_completes_to_true_and_false` |
+| Rule 22: hover on key and value shows the ruled sentence, defaulting, inheritance, range over the option; the rest of the line keeps the directive hover | `file_interpolate_option::hovering_interpolate_false_explains_literal_prose_defaulting_and_inheritance` |
+| Rule 22: no option hover on `::code` | `file_interpolate_option::hovering_interpolate_on_code_gives_no_option_hover` |
+| Rule 23 / spec "library and editor agree": 12 spellings (true/false/null/`No`/`0`/quoted `"false"`/repeated valid; quoted `"null"`, `banana`, missing, `""`, invalid-then-valid). Each composed in process and diagnosed; flagged exactly when composition fails, once, at the value (key for missing), ERROR, same reason text | `file_interpolate_option::the_editor_flags_exactly_the_values_composition_rejects_at_the_option` |
+| `::code interpolate=` is an unknown option, not a value error | `file_interpolate_option::interpolate_on_code_is_an_unknown_option_not_a_bad_value` |
+| Rule 24: an open child's diagnostics, semantic tokens, and expression hover are identical alone, under a `false` parent, a normal parent, and both | `file_interpolate_option::an_open_child_is_analyzed_the_same_whichever_way_its_parents_include_it` |
+| Semantic tokens: `interpolate=false` tokens as property/string | `providers::semantic_tokens::tests::f2_interpolate_option_tokens_like_every_other_option` |
+| Rule 25 publication: colliding `name`, `{{ name }}`, `{{ undeclared }}`, `{{{ x }}}` survive verbatim under `compose --frontmatter --deny all`; parent prose still interpolates; no stderr | `compose_file_interpolate::a_published_skill_keeps_a_disabled_inclusions_examples_verbatim` |
+| Rule 25 guard kept: the same skill without the option fails publication (exit 1, names `undeclared`, empty stdout) | `compose_file_interpolate::without_the_option_publication_still_fails_on_an_undeclared_name` |
+| Rule 25 located errors, control: valid value through a nested inclusion composes, child prose literal | `compose_file_interpolate::a_valid_interpolate_value_composes_the_nested_child_literally` |
+| Rule 25 located errors, quoted `"null"` and missing value: JSON names the including (nested) file, `document` null, one `dm.directive.parse_failure`, message carries line and reason; terminal shows the directive line, column 31, the reason, and empty stdout | `compose_file_interpolate::{quoted_null,missing_value}::{json_names_the_including_file_and_composes_nothing,the_terminal_error_points_at_the_directive_line}` (macro, one `#[test]` per row) |
+| Rule 25 passive shipped-artifact check: every `.md` under `darkmatter/docs/use-skills/` parses with the composition parser; every `interpolate` on a `::file`/`::url` is a valid value | `compose_file_interpolate::shipped_caller_skill_sources_parse_with_their_interpolate_options` |
+
+The shipped sources have no active `interpolate=` today (their `::file`
+examples are in code fences). Phase 5 adds the option to them, and this
+test then checks those uses.
+
+Regression proof: the hover and diagnostic tests assert content only the
+new code produces (the ruled sentence, the new code). Without the
+publication option the control test shows the run fails, so the verbatim
+test depends on the option. The missing-value rows asserted
+"Expected value" before the parser change and "requires a value" after.
+
+Input robustness matrix: the option value is a directive grammar, not a
+configuration file, so the matrix does not apply. The value shapes are
+covered by the Phase 1 parser matrix and the 12-spelling agreement test
+above.
+
+### Gates
+
+- Targeted while working: `cargo nextest run -p darkmatter-lsp --test l1
+  -E 'test(file_interpolate_option)'` → 7 passed; `-p darkmatter-lsp --lib
+  -E 'test(f2_) | test(dsl::)'` → 35 passed; `-p darkmatter-cli --test l1
+  -E 'test(compose_file_interpolate)'` → 8 passed.
+- `just lint` (darkmatter area): clean, including the zed-dmls wasm check,
+  on the final tree.
+- `just test` (darkmatter area), final tree: 16865 passed, 10 skipped, 1
+  at or above 5 s:
+  `markdown::compose::shell_expansion::probe::tests::installed_shells::injection_shaped_names_never_execute`
+  at 5.1 s in the package run (load average about 111). It took 2.79 s
+  alone (load about 106), so it is cleared as load-sensitive. The earlier
+  full run on the tree before the parser change had none at or above 5 s.
+- `just check-tier-coverage darkmatter`: nothing stranded.
+- Gates were not skipped. The scope calculator selects
+  `darkmatter`, `darkmatter-cli`, `darkmatter-lsp`, `test-toolkit`
+  (`change_class: package`).
+
+### Dependents
+
+- `cargo check -p claudine -p claudine-cli --tests`: clean. The only
+  library change is the parser's reason for an empty `interpolate=`, which
+  no Claudine code reads.
+- `cargo nextest run -p test-toolkit` (selected by the calculator): 557
+  passed, 2 skipped. Three tests ran over 5 s:
+  `archive_path_guard::no_archive_executed_target_bakes_in_a_producer_path`
+  (6.2 s), `kache_host_contracts::report_resolves_the_worktree_base_by_the_wt_contract`
+  (6.0 s), and `kache_init_contracts::ensure_is_idempotent_on_a_second_run`
+  (5.3 s). Re-measured alone they took 7.2 s, 7.9 s, 12.4 s, and 5.9 s
+  (the last one twice), with the host load average at 63–92 from
+  outside this session. They test CI archive and kache scripts this phase
+  does not touch, so they are pre-existing, load-sensitive, and **not
+  cleared on this host**. They need re-measuring on a quiet host.
+
+### Cross-OS
+
+No path, process, or `cfg` code changed in shipped code. The new CLI test
+compares reported files with `biscuit_file::canonicalize_simplified` and
+normalizes CRLF when it reads the shipped skill sources. No cross-OS check
+was run; CI covers the other environments.
+
+## Phase 5
+
+Docs, skills, and publication only. I did this directly, with no subagents,
+because the edits were small and in separate files. No Rust source changed.
+
+### What changed
+
+- `darkmatter/docs/transclusion/block-transclusion.md`, "Options and
+  Conditionals": new entry 6, `interpolate`. It covers the fenced
+  literal-prose example from the spec, the value table, repeated and invalid
+  values (with the actual reason text), what stays literal (precedence over
+  `interpolate_code_blocks`), what still runs (frontmatter, directive inputs
+  with the spec's `::block` example, the parent's own options, and the other
+  stages that still change text), inheritance (no warning for a nested
+  `true`, no leak to parent or siblings), and the limit to this composition.
+- `darkmatter/docs/inline/interpolation.md`: new subsection "Reusing a
+  document that shows expressions" under Interpolation Literals. It presents
+  the option as the inclusion-side alternative to triple braces, says it
+  overrides `interpolate_code_blocks`, and links to the option entry.
+- Repo skill `.claude/skills/darkmatter/compose.md`: the pipeline's
+  Interpolation stage and the `ContextRequirements` passage about the
+  executable-span rule now state the exception and point to the existing
+  internals section. `expressions.md` was not changed, per Rule 27.
+- Caller skill `use-darkmatter/authoring.md`: a fenced
+  `::file … interpolate=false` example line and one bullet of guidance.
+  `SKILL.md` was not changed. `use-dmls/features.md`: one sub-bullet under
+  Transclusion.
+- `CLAUDE.md` Skill Audiences: the **planned** parenthetical is replaced with
+  guidance to include such passages with `interpolate=false` and check the
+  published text. The `--deny all` guard sentence and the separate
+  triple-brace guidance (next bullet) are kept.
+
+### Audit (Rule 29)
+
+I ran an awk scan that ignores fenced blocks, over every `*/docs/use-skills/*`
+`.md`, looking for lines that start with `::file`, `::code`, or `::url`. It
+found nothing outside a fence. A plain grep finds 13 such lines, all inside
+fences. The recorded outcome holds: no adoption edits are needed.
+
+### Publication (Rule 30)
+
+`just publish-skills` in `darkmatter/` published `use-darkmatter` and
+`use-dmls` under `--deny all`. Each skill printed a repeated, pre-existing
+notice that `.darkmatter-shell-whitelist` is ignored, which is unrelated to
+this work. The installed `~/.claude/skills/use-darkmatter/authoring.md`
+carries the fenced example line and the guidance bullet. The bullet's
+example, authored as `{{{ … }}}`, published as `{{ … }}`. The installed
+`use-dmls/features.md` carries the new sub-bullet.
+
+### Requirement → test mapping
+
+No behavior changed in this phase, so no tests were added. The shipped
+caller-skill sources are still checked by Phase 4's
+`compose_file_interpolate::shipped_caller_skill_sources_parse_with_their_interpolate_options`.
+It runs in the area's `just test`, and the new fenced example line does not
+change its result. The publication itself was proved by the
+`just publish-skills` run above.
+
+### Gates
+
+The scope calculator returned packages
+`[darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit]` with
+`change_class: package`. That is because Phase 4's source edits are still
+uncommitted in the tree. So the gates were run: `just lint` passed.
+`just test` passed: 16865 tests passed and 10 were skipped, in 1m40s.
+One test was slow:
+`darkmatter markdown::compose::shell_expansion::probe::tests::installed_shells::injection_shaped_names_never_execute`
+took 5.302s in the package run, at a load average of about 58–73 on 16
+cores. Measured alone it took 1.352s (load about 72). That clears it under
+the loaded-host allowance (over 5s but under 10s in the package run, 5s or
+less alone). It is load-sensitive, and this phase did not touch it.
+
+No dependent-package tests were run, because this phase changed no code. No
+cross-OS check was run: there is no OS-specific risk, since only docs,
+skills, and CLAUDE.md changed. No decisions were added for review: every
+choice in this phase was set by the plan's rules.

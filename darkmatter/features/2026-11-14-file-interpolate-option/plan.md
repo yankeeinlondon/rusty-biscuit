@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-14
 total_phases: 6
-phase: 4
+phase: 6
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1:
@@ -22,6 +22,7 @@ skills_files_updated_during_phase_1:
 packages:
 - darkmatter
 - darkmatter-lsp
+- darkmatter-cli
 source_files_during_phase_2:
 - darkmatter/lib/src/markdown/compose/interpolation/active_inputs.rs
 - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
@@ -50,6 +51,35 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/compose.md
+source_files_during_phase_4:
+- darkmatter/dmls/src/overlay/directives.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/file_interpolate_option.rs
+- darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/compose_file_interpolate.rs
+- darkmatter/cli/tests/fixtures/file_interpolate_publication/topics/examples.md
+- darkmatter/cli/tests/fixtures/file_interpolate_publication/use-skills/use-example/SKILL.md
+docs_updated_during_phase_4:
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/dmls/docs/hover.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+- darkmatter/docs/transclusion/block-transclusion.md
+- darkmatter/docs/inline/interpolation.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- darkmatter/docs/use-skills/use-dmls/features.md
+- CLAUDE.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/compose.md
 ---
 
@@ -657,13 +687,13 @@ fixture and the shipped-artifact passive check.
 
 **Wave 6** (two tasks, parallelizable):
 
-- [ ] DMLS option support
+- [x] DMLS option support
     - Completions (Rule 21), hover (Rule 22), diagnostic + code + doc row
       (Rule 23), included-file parity test (Rule 24); in-process tests
       following `dmls/tests/l1/value_hovers.rs` conventions; update the
       semantic-tokens test (`dmls/src/providers/semantic_tokens.rs:1261`
       pattern) with an `interpolate=` option token case
-- [ ] CLI verification tests
+- [x] CLI verification tests
     - The three Rule 25 tests, using `CliProcessFixture` and the frozen
       fixture under `cli/tests/fixtures/` (frozen files only; no reads of
       internal `prompts/`)
@@ -743,16 +773,16 @@ same change; the caller-skill transclusion audit is resolved (not deferred).
 
 **Wave 7** (three tasks, parallelizable — separate files):
 
-- [ ] Transclusion and interpolation docs
+- [x] Transclusion and interpolation docs
     - Rule 26's two pages
-- [ ] Skill sources
+- [x] Skill sources
     - Rule 27's repo-skill and caller-skill edits, plus the use-dmls line
-- [ ] CLAUDE.md rule
+- [x] CLAUDE.md rule
     - Rule 28's replacement, wording kept minimal
 
 **Wave 8** (depends on Wave 7):
 
-- [ ] Publication and audit
+- [x] Publication and audit
     - Re-run the Rule 29 audit grep; `just publish-skills` in `darkmatter/`;
       verify the installed `~/.claude/skills/use-darkmatter/` text mentions
       `interpolate=false` and that its examples survived publication
