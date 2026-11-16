@@ -1260,8 +1260,15 @@ impl<'a> TransclusionEngine<'a> {
                     options.context_authority(),
                 );
                 child_runtime.record_context_groups(child_context.capture_requirements());
-                let mut child_options =
-                    options.clone().derive(|options| options.with_request_context(child_context));
+                // This path does not go through `inherited_child_options`, so
+                // it folds the directive's `interpolate=` itself.
+                let prose_interpolation =
+                    effective_prose_interpolation(options.prose_interpolation, &directive_options);
+                let mut child_options = options.clone().derive(|options| {
+                    options
+                        .with_request_context(child_context)
+                        .with_prose_interpolation(prose_interpolation)
+                });
                 child_options.source = child_source;
                 child_options.source_opening = None;
                 // Recursive graph reuse for remote children: hand the child its
@@ -1630,8 +1637,15 @@ impl<'a> TransclusionEngine<'a> {
             crate::markdown::compose::OverrideOrigin::Authored => 0,
             crate::markdown::compose::OverrideOrigin::Data => 1,
         };
+        // `options_hash` covers the parent's setting; the child's folded one
+        // also depends on this directive's `interpolate=`, so a normal and an
+        // `interpolate=false` inclusion of one file never share a result.
+        let prose = match effective_prose_interpolation(options.prose_interpolation, directive_options) {
+            crate::markdown::compose::context::options::ProseInterpolation::Enabled => 0,
+            crate::markdown::compose::context::options::ProseInterpolation::DisabledByInclusion => 1,
+        };
         let cache_key = format!(
-            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}:{opening_hash:016x}:{overlay_origin}",
+            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}:{opening_hash:016x}:{overlay_origin}:{prose}",
             cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
             state_identity.state_hash,
             context_hash,
@@ -1885,6 +1899,23 @@ pub(crate) fn markdown_child_options(
     inherited_child_options(parent, parent_data, directive_options).with_accepted_source_file(path.to_path_buf(), opening)
 }
 
+/// The prose-interpolation setting a child composes under.
+///
+/// Disabled when the parent is disabled or the directive wrote
+/// `interpolate=false`: a nested `interpolate=true` never re-enables what an
+/// ancestor disabled, and the fold reaches only this inclusion's branch.
+pub(crate) fn effective_prose_interpolation(
+    parent: crate::markdown::compose::context::options::ProseInterpolation,
+    directive: &transclusion::BlockOptions,
+) -> crate::markdown::compose::context::options::ProseInterpolation {
+    use crate::markdown::compose::context::options::ProseInterpolation;
+    if parent == ProseInterpolation::DisabledByInclusion || !directive.interpolate {
+        ProseInterpolation::DisabledByInclusion
+    } else {
+        ProseInterpolation::Enabled
+    }
+}
+
 /// The inputs every nested child (a `::file` child or `as_markdown` content)
 /// inherits from the document that nests it, before the child's source is
 /// chosen.
@@ -1915,6 +1946,7 @@ pub(crate) fn inherited_child_options(
         transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
         _ => None,
     };
+    let prose_interpolation = effective_prose_interpolation(parent.prose_interpolation, directive_options);
     let mut child_options = parent.clone().derive(|options| {
         options
             .with_replace_parent_wins(matches!(
@@ -1922,6 +1954,7 @@ pub(crate) fn inherited_child_options(
                 transclusion::ReplaceOption::ParentWins
             ))
             .with_one_off_replace(one_off)
+            .with_prose_interpolation(prose_interpolation)
     });
     child_options.external_state = Some(Value::Object(inherited));
     child_options.inherited_origin = child_inherited_origin(directive_options);
@@ -1997,6 +2030,62 @@ mod tests {
         assert!(new_content.contains("###### Section"));
         assert!(new_content.contains("**Deep**"));
         assert_eq!(warnings.len(), 1);
+    }
+
+    mod prose_interpolation_fold {
+        use super::super::{effective_prose_interpolation, inherited_child_options};
+        use crate::markdown::compose::context::options::ProseInterpolation;
+        use crate::markdown::compose::transclusion::{BlockOptions, parse_directives};
+        use crate::markdown::compose::{ComposeOptions, SharedFrontmatter, test_request_in};
+
+        fn directive(line: &str) -> BlockOptions {
+            let ctx = biscuit_terminal::errors::SourceContext::new(
+                std::path::PathBuf::from("/parent.md"),
+                std::path::PathBuf::from("parent.md"),
+                std::sync::Arc::from(line),
+            );
+            parse_directives(line, ctx).expect("directive parses").remove(0).options
+        }
+
+        #[test]
+        fn disabled_iff_the_parent_is_disabled_or_the_directive_writes_false() {
+            use ProseInterpolation::{DisabledByInclusion, Enabled};
+            let plain = directive("::file ./a.md");
+            let off = directive("::file ./a.md interpolate=false");
+            let on = directive("::file ./a.md interpolate=true");
+            assert_eq!(effective_prose_interpolation(Enabled, &plain), Enabled);
+            assert_eq!(effective_prose_interpolation(Enabled, &on), Enabled);
+            assert_eq!(effective_prose_interpolation(Enabled, &off), DisabledByInclusion);
+            assert_eq!(effective_prose_interpolation(DisabledByInclusion, &plain), DisabledByInclusion);
+            // A nested `interpolate=true` never re-enables what an ancestor disabled.
+            assert_eq!(effective_prose_interpolation(DisabledByInclusion, &on), DisabledByInclusion);
+            assert_eq!(effective_prose_interpolation(DisabledByInclusion, &off), DisabledByInclusion);
+            // Prologue and epilogue children use the default options, so they inherit.
+            assert_eq!(effective_prose_interpolation(DisabledByInclusion, &BlockOptions::default()), DisabledByInclusion);
+            assert_eq!(effective_prose_interpolation(Enabled, &BlockOptions::default()), Enabled);
+        }
+
+        #[test]
+        fn the_single_child_derivation_folds_without_touching_the_parent() {
+            let root = tempfile::tempdir().expect("tempdir");
+            let context = biscuit_file::FileResolutionContext::from_snapshot(
+                root.path().to_path_buf(),
+                None,
+                std::collections::HashMap::new(),
+            );
+            let parent = test_request_in(ComposeOptions::new(), context);
+            let data = SharedFrontmatter::default();
+
+            let off = inherited_child_options(&parent, &data, &directive("::file ./a.md interpolate=false"));
+            assert_eq!(off.prose_interpolation, ProseInterpolation::DisabledByInclusion);
+            assert_eq!(parent.prose_interpolation, ProseInterpolation::Enabled, "never escapes to the parent");
+
+            let sibling = inherited_child_options(&parent, &data, &directive("::file ./b.md"));
+            assert_eq!(sibling.prose_interpolation, ProseInterpolation::Enabled, "never reaches a sibling");
+
+            let grandchild = inherited_child_options(&off, &data, &directive("::file ./c.md interpolate=true"));
+            assert_eq!(grandchild.prose_interpolation, ProseInterpolation::DisabledByInclusion);
+        }
     }
 
     /// Finding 35.2 regression coverage.

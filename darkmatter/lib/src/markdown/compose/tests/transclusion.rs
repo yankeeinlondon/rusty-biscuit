@@ -2463,3 +2463,79 @@ mod file_links_compose {
         assert_eq!(report.transclusions_applied, 2);
     }
 }
+
+/// Until prose suppression lands, `interpolate=false` is accepted and changes
+/// nothing about the composed result: both spellings compose the same bytes,
+/// with the same counts and warnings.
+#[test]
+fn interpolate_false_is_accepted_and_composes_like_the_plain_directive() {
+    let dir = tempfile::tempdir().unwrap();
+    let child = dir.path().join("child.md");
+    std::fs::write(&child, "# Child\n\nHello {{ name }}.\n").unwrap();
+
+    let compose = |directive: &str| {
+        let root = dir.path().join(format!("root-{}.md", directive.len()));
+        std::fs::write(&root, format!("---\nname: World\n---\n## Parent\n\n{directive}\n")).unwrap();
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(root);
+        md.compose_with(&crate::markdown::compose::test_request(options)).unwrap()
+    };
+
+    let (plain, plain_report) = compose("::file ./child.md");
+    let (off, off_report) = compose("::file ./child.md interpolate=false");
+
+    assert!(plain.content().contains("Hello World."), "{}", plain.content());
+    assert_eq!(plain.content(), off.content());
+    assert_eq!(plain_report.transclusions_applied, 1);
+    assert_eq!(off_report.transclusions_applied, 1);
+    let messages = |report: &ComposeReport| report.warnings.iter().map(|w| w.message.clone()).collect::<Vec<_>>();
+    assert_eq!(messages(&plain_report), messages(&off_report));
+    assert!(
+        !messages(&off_report).iter().any(|message| message.contains("interpolate")),
+        "a ::file never reports interpolate as unknown: {:?}",
+        messages(&off_report)
+    );
+}
+
+/// `::code` has no `interpolate` option: it stays an unknown option with the
+/// existing warning, and its value is never validated.
+#[test]
+fn interpolate_on_code_keeps_the_unknown_option_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root.md");
+    std::fs::write(dir.path().join("mod.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(&root, "::code ./mod.rs interpolate=banana\n").unwrap();
+
+    let md = Markdown::try_from(root.as_path()).unwrap();
+    let options = ComposeOptions::new().with_source_file(root);
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
+
+    assert!(composed.content().contains("fn main() {}"), "{}", composed.content());
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.message == "Unknown option 'interpolate' on ::code directive; ignoring"),
+        "{:?}",
+        report.warnings
+    );
+}
+
+/// An invalid `interpolate=` value is a located directive error that stops
+/// composition; the child is never composed.
+#[test]
+fn invalid_interpolate_value_fails_the_composition() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root.md");
+    std::fs::write(dir.path().join("child.md"), "# Child\n").unwrap();
+    std::fs::write(&root, "# Root\n\n::file ./child.md interpolate=\"null\"\n").unwrap();
+
+    let md = Markdown::try_from(root.as_path()).unwrap();
+    let options = ComposeOptions::new().with_source_file(root);
+    let error = md
+        .compose_with(&crate::markdown::compose::test_request(options))
+        .expect_err("an invalid interpolate value must fail the composition");
+    let rendered = error.to_string();
+    assert!(rendered.contains("interpolate"), "{rendered}");
+    assert!(rendered.contains("\"null\""), "{rendered}");
+}

@@ -227,6 +227,13 @@ fn parse_directive_line(
             continue;
         }
 
+        // `::code` has no `interpolate` option: there it falls through to the
+        // unknown-option warning below, unvalidated.
+        if key == "interpolate" && matches!(kind, DirectiveKind::File | DirectiveKind::Url) {
+            parse_interpolate_option(&mut cursor, &mut options, line, ctx)?;
+            continue;
+        }
+
         cursor.skip_ws();
         cursor
             .expect_char('=', line)
@@ -240,6 +247,42 @@ fn parse_directive_line(
     }
 
     Ok((kind, raw_target, options))
+}
+
+/// Parses an `interpolate=<value>` clause on `::file` or `::url`.
+///
+/// Each occurrence is validated as it is read, so an invalid earlier one
+/// errors even when a later one is valid; among valid ones the last wins.
+fn parse_interpolate_option(
+    cursor: &mut Cursor<'_>,
+    options: &mut BlockOptions,
+    line: usize,
+    ctx: &SourceContext,
+) -> Result<(), TransclusionError> {
+    cursor.skip_ws();
+    cursor
+        .expect_char('=', line)
+        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
+    cursor.skip_ws();
+
+    let column = cursor.current_column();
+    let was_quoted = matches!(cursor.current(), Some('\'') | Some('"'));
+    let decoded = cursor
+        .read_value(line)
+        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
+
+    match crate::markdown::compose::directives_api::parse_interpolate_value(&decoded, was_quoted) {
+        Ok(value) => {
+            options.interpolate = value.unwrap_or(true);
+            Ok(())
+        }
+        Err(message) => Err(TransclusionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
+            line,
+            message,
+            caret_col: Some(column),
+        }),
+    }
 }
 
 /// Parses a `set=<object>` or `set.NAME=<value>` clause.
@@ -804,5 +847,152 @@ mod tests {
             "expected ParseDirective, got {:?}",
             err
         );
+    }
+
+    /// The local `interpolate` value `content`'s single directive parses to.
+    fn interpolate_of(content: &str) -> bool {
+        let directives = parse_directives(content, dummy_ctx(content))
+            .unwrap_or_else(|err| panic!("{content:?} must parse: {err:?}"));
+        assert_eq!(directives.len(), 1, "{content:?}");
+        directives[0].options.interpolate
+    }
+
+    /// The located error `content`'s single directive line produces.
+    fn interpolate_error(content: &str) -> (usize, String, Option<usize>) {
+        match parse_directives(content, dummy_ctx(content)) {
+            Err(TransclusionError::ParseDirective { ctx, line, message, caret_col }) => {
+                assert_eq!(ctx.absolute, PathBuf::from("/test.md"), "{content:?}");
+                (line, message, caret_col)
+            }
+            other => panic!("{content:?} must be a located directive error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interpolate_absent_is_the_default_true_and_equals_explicit_true() {
+        assert!(interpolate_of("::file ./a.md\n"));
+        let absent = parse_directives("::file ./a.md\n", dummy_ctx("")).unwrap();
+        let explicit = parse_directives("::file ./a.md interpolate=true\n", dummy_ctx("")).unwrap();
+        let null = parse_directives("::file ./a.md interpolate=null\n", dummy_ctx("")).unwrap();
+        assert_eq!(absent[0].options, explicit[0].options);
+        assert_eq!(absent[0].options, null[0].options);
+        assert_eq!(BlockOptions::default(), absent[0].options);
+    }
+
+    #[test]
+    fn interpolate_unquoted_null_is_the_default() {
+        assert!(interpolate_of("::file ./a.md interpolate=null"));
+        assert!(interpolate_of("::url https://example.com/a.md interpolate=null"));
+    }
+
+    #[test]
+    fn interpolate_true_words_in_any_case_are_true() {
+        for word in ["true", "TRUE", "yes", "Yes", "on", "ON", "1"] {
+            assert!(interpolate_of(&format!("::file ./a.md interpolate={word}")), "{word}");
+        }
+        assert!(interpolate_of("::file ./a.md interpolate=' true '"));
+    }
+
+    #[test]
+    fn interpolate_false_words_in_any_case_are_false() {
+        for word in ["false", "False", "no", "NO", "off", "Off", "0"] {
+            assert!(!interpolate_of(&format!("::file ./a.md interpolate={word}")), "{word}");
+            assert!(!interpolate_of(&format!("::url https://example.com/a.md interpolate={word}")), "{word}");
+        }
+        assert!(!interpolate_of("::file ./a.md interpolate = false"));
+    }
+
+    #[test]
+    fn interpolate_quoted_boolean_words_convert_like_bare_ones() {
+        assert!(!interpolate_of(r#"::file ./a.md interpolate="false""#));
+        assert!(!interpolate_of("::file ./a.md interpolate='No'"));
+        assert!(interpolate_of(r#"::file ./a.md interpolate="yes""#));
+    }
+
+    #[test]
+    fn interpolate_false_leaves_every_other_option_untouched() {
+        let content = "::file ./a.md quotation=true interpolate=false when=env.CI exclude=Notes";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        let options = &directives[0].options;
+        assert!(!options.interpolate);
+        assert_eq!(options.quotation, Some(String::new()));
+        assert_eq!(options.when_expr.as_deref(), Some("env.CI"));
+        assert_eq!(options.exclude, vec!["Notes".to_string()]);
+        assert!(options.unknown_options.is_empty());
+        assert_eq!(directives[0].raw_target, "./a.md");
+    }
+
+    #[test]
+    fn interpolate_quoted_null_is_text_and_a_located_error() {
+        let content = r#"::file ./a.md interpolate="null""#;
+        let (line, message, caret_col) = interpolate_error(content);
+        assert_eq!(line, 1);
+        assert!(message.contains("interpolate"), "{message}");
+        assert!(message.contains("\"null\""), "{message}");
+        // The caret sits on the value: `::file ./a.md interpolate=` is 26 columns.
+        assert_eq!(caret_col, Some(27));
+    }
+
+    #[test]
+    fn interpolate_error_reports_the_directive_line_in_the_document() {
+        let content = "# Title\n\nBody.\n::file ./a.md interpolate=banana\n";
+        let (line, message, caret_col) = interpolate_error(content);
+        assert_eq!(line, 4);
+        assert!(message.contains("banana"), "{message}");
+        assert_eq!(caret_col, Some(27));
+    }
+
+    #[test]
+    fn interpolate_empty_values_are_located_errors() {
+        let (_, quoted, caret) = interpolate_error(r#"::file ./a.md interpolate="""#);
+        assert!(quoted.contains("requires a value"), "{quoted}");
+        assert_eq!(caret, Some(27));
+        let (_, single, _) = interpolate_error("::file ./a.md interpolate=''");
+        assert!(single.contains("requires a value"), "{single}");
+        let (_, eol, caret) = interpolate_error("::file ./a.md interpolate=");
+        assert!(eol.contains("Expected value"), "{eol}");
+        assert_eq!(caret, Some(27));
+    }
+
+    #[test]
+    fn interpolate_objects_arrays_and_other_text_are_located_errors() {
+        for value in ["{a:1}", "[1]", "banana", "True-ish", "2", "nil", "NULL"] {
+            let content = format!("::file ./a.md interpolate={value}");
+            let (line, message, caret_col) = interpolate_error(&content);
+            assert_eq!(line, 1, "{value}");
+            assert!(message.contains("must be true or false"), "{value}: {message}");
+            assert_eq!(caret_col, Some(27), "{value}");
+        }
+    }
+
+    #[test]
+    fn interpolate_repeated_last_valid_wins() {
+        assert!(!interpolate_of("::file ./a.md interpolate=true interpolate=false"));
+        assert!(interpolate_of("::file ./a.md interpolate=false interpolate=true"));
+        assert!(interpolate_of("::file ./a.md interpolate=false interpolate=null"));
+    }
+
+    #[test]
+    fn interpolate_every_repeated_occurrence_is_validated() {
+        let content = "::file ./a.md interpolate=banana interpolate=false";
+        let (_, message, caret_col) = interpolate_error(content);
+        assert!(message.contains("banana"), "{message}");
+        assert_eq!(caret_col, Some(27));
+        let content = "::file ./a.md interpolate=false interpolate=banana";
+        let (_, message, caret_col) = interpolate_error(content);
+        assert!(message.contains("banana"), "{message}");
+        assert_eq!(caret_col, Some(45));
+    }
+
+    #[test]
+    fn interpolate_on_code_is_an_unknown_option_and_never_validated() {
+        for value in ["false", "banana", "\"null\""] {
+            let content = format!("::code ./mod.rs interpolate={value}");
+            let directives = parse_directives(&content, dummy_ctx(&content))
+                .unwrap_or_else(|err| panic!("{content:?} must parse: {err:?}"));
+            let options = &directives[0].options;
+            assert_eq!(options.unknown_options, vec!["interpolate".to_string()], "{value}");
+            assert!(options.interpolate, "{value}: ::code keeps the default");
+        }
     }
 }

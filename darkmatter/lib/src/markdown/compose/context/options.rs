@@ -81,6 +81,20 @@ pub(crate) fn caller_origin(
     context.for_trusted_external_cwd(launch_area.unwrap_or_else(|| context.request_cwd()))
 }
 
+/// Whether a document's prose `{{ … }}` expressions are evaluated.
+///
+/// Only an `interpolate=false` transclusion folds a child to
+/// [`DisabledByInclusion`](Self::DisabledByInclusion), and every Markdown
+/// descendant of that inclusion inherits it; a root request is always
+/// [`Enabled`](Self::Enabled), and no frontmatter key or public builder can
+/// change it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ProseInterpolation {
+    #[default]
+    Enabled,
+    DisabledByInclusion,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum SourceDerivation {
     #[default]
@@ -450,6 +464,10 @@ pub struct ComposeOptions {
     /// Can also be set via frontmatter: `interpolate_code_blocks: true`.
     pub(crate) interpolate_code_blocks: bool,
 
+    /// Whether this document's prose interpolation is evaluated; folded per
+    /// child by `transclusion::effective_prose_interpolation`.
+    pub(crate) prose_interpolation: ProseInterpolation,
+
     // ── Schema ────────────────────────────────────────────────────
     /// Optional baseline schema merged with any document `$schema`
     /// before validation runs. When both baseline and document declare
@@ -747,6 +765,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
             .field("interpolate_code_blocks", &self.interpolate_code_blocks)
+            .field("prose_interpolation", &self.prose_interpolation)
             .field(
                 "baseline_schema",
                 if self.baseline_schema.is_some() {
@@ -1045,6 +1064,7 @@ impl ComposeOptions {
             replace_parent_wins: false,
             one_off_replace: None,
             interpolate_code_blocks: false,
+            prose_interpolation: ProseInterpolation::Enabled,
             shell_strip_ansi: true,
             portable_env: std::collections::BTreeSet::new(),
             absolute_fallback_warning: true,
@@ -2017,6 +2037,13 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_trigger_schemas(mut self, enabled: bool) -> Self {
         self.trigger_schemas = enabled;
+        self
+    }
+
+    /// Internal builder: sets whether prose interpolation is evaluated.
+    #[must_use]
+    pub(crate) fn with_prose_interpolation(mut self, setting: ProseInterpolation) -> Self {
+        self.prose_interpolation = setting;
         self
     }
 
@@ -3223,6 +3250,7 @@ impl ComposeOptions {
             replace_parent_wins,
             one_off_replace,
             interpolate_code_blocks,
+            prose_interpolation,
             baseline_schema,
             baseline_definitions,
             baseline_is_darkmatter_default,
@@ -3581,6 +3609,8 @@ impl ComposeOptions {
         }
         enc.field("interpolate_code_blocks");
         enc.bool(*interpolate_code_blocks);
+        enc.field("prose_interpolation");
+        enc.tag(prose_interpolation_tag(*prose_interpolation));
 
         enc.field("baseline_schema");
         match &baseline_canonical {
@@ -3815,6 +3845,10 @@ impl ComposeOptions {
         cenc.u64(indentation.spaces().unwrap_or(0) as u64);
         cenc.field("replace_parent_wins");
         cenc.bool(*replace_parent_wins);
+        // A child composed with its prose suppressed must never stand in for
+        // the same file composed normally.
+        cenc.field("prose_interpolation");
+        cenc.tag(prose_interpolation_tag(*prose_interpolation));
 
         cenc.field("one_off_replace");
         match one_off_replace {
@@ -4032,6 +4066,15 @@ fn schema_phase_tag(phase: Option<simplified_schema::SchemaPhase>) -> u8 {
         None => 0,
         Some(simplified_schema::SchemaPhase::Launch) => 1,
         Some(simplified_schema::SchemaPhase::Completion) => 2,
+    }
+}
+
+/// Stable identity tag for the prose-interpolation setting: `0` enabled,
+/// `1` disabled by an inclusion.
+fn prose_interpolation_tag(setting: ProseInterpolation) -> u8 {
+    match setting {
+        ProseInterpolation::Enabled => 0,
+        ProseInterpolation::DisabledByInclusion => 1,
     }
 }
 
@@ -4344,6 +4387,21 @@ mod tests {
     /// The compose-cache fingerprint of `options` under the neutral context.
     fn fp(options: &ComposeOptions) -> u64 {
         options.compose_cache_fingerprint(&neutral_context())
+    }
+
+    #[test]
+    fn prose_interpolation_is_in_both_identity_products() {
+        let enabled = ComposeOptions::new();
+        let disabled = ComposeOptions::new().with_prose_interpolation(ProseInterpolation::DisabledByInclusion);
+        assert_eq!(enabled.prose_interpolation, ProseInterpolation::Enabled, "a root request is enabled");
+        let enabled_ids = enabled.classify_options(&neutral_context());
+        let disabled_ids = disabled.classify_options(&neutral_context());
+        assert_ne!(enabled_ids.graph_value_fingerprint, disabled_ids.graph_value_fingerprint);
+        assert_ne!(enabled_ids.cache_value_fingerprint, disabled_ids.cache_value_fingerprint);
+        assert_ne!(fp(&enabled), fp(&disabled));
+        // Folding back to enabled restores the default identity.
+        let restored = disabled.with_prose_interpolation(ProseInterpolation::Enabled);
+        assert_eq!(fp(&enabled), fp(&restored));
     }
 
     #[test]

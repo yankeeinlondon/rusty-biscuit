@@ -99,7 +99,8 @@ impl<'a> Cursor<'a> {
         self.input[self.pos..].chars().next()
     }
 
-    fn current_column(&self) -> usize {
+    /// The 1-based character column of the cursor in its input slice.
+    pub(crate) fn current_column(&self) -> usize {
         self.input[..self.pos].chars().count() + 1
     }
 

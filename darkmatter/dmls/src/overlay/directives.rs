@@ -176,9 +176,12 @@ pub fn is_collection(kind: DirectiveKind) -> bool {
 /// option (empty slice → no validation).
 pub fn option_keys(kind: DirectiveKind) -> &'static [&'static str] {
     match kind {
-        DirectiveKind::File | DirectiveKind::Code | DirectiveKind::Url => {
-            &["when", "quotation", "disclosure", "replace", "exclude", "set"]
+        DirectiveKind::File | DirectiveKind::Url => {
+            &["when", "quotation", "disclosure", "replace", "exclude", "set", "interpolate"]
         }
+        // `::code` has no `interpolate` option, so the editor flags it as the
+        // library does.
+        DirectiveKind::Code => &["when", "quotation", "disclosure", "replace", "exclude", "set"],
         DirectiveKind::Block | DirectiveKind::ShellBlock => &["when"],
         DirectiveKind::Map | DirectiveKind::Filter => COLLECTION_OPTIONS,
         _ => &[],
@@ -188,7 +191,7 @@ pub fn option_keys(kind: DirectiveKind) -> &'static [&'static str] {
 /// Enum-like completion values for a boolean-valued option key.
 pub fn option_values(key: &str) -> Option<&'static [&'static str]> {
     match key {
-        "quotation" | "disclosure" | "replace" => Some(&["true", "false"]),
+        "quotation" | "disclosure" | "replace" | "interpolate" => Some(&["true", "false"]),
         "sort-order" => Some(&["asc", "desc"]),
         _ => None,
     }
@@ -265,6 +268,21 @@ mod tests {
         assert!(option_recognized(DirectiveKind::Shell, "anything"));
         // The collection grammar reports its own unknown options.
         assert!(option_recognized(DirectiveKind::Map, "bogus"));
+    }
+
+    #[test]
+    fn interpolate_is_an_option_of_file_and_url_but_not_code() {
+        assert!(option_recognized(DirectiveKind::File, "interpolate"));
+        assert!(option_recognized(DirectiveKind::Url, "interpolate"));
+        assert!(!option_recognized(DirectiveKind::Code, "interpolate"));
+        assert!(option_keys(DirectiveKind::File).contains(&"interpolate"));
+        assert!(!option_keys(DirectiveKind::Code).contains(&"interpolate"));
+        // `::code` keeps every other transclusion option.
+        for key in ["when", "quotation", "disclosure", "replace", "exclude", "set"] {
+            assert!(option_recognized(DirectiveKind::Code, key), "{key}");
+            assert!(option_recognized(DirectiveKind::Url, key), "{key}");
+        }
+        assert_eq!(option_values("interpolate"), Some(&["true", "false"][..]));
     }
 
     #[test]

@@ -887,6 +887,26 @@ strings to numbers.
 {{ has_local_skill("rust") }} // true when a skill directory exists in local roots only
 ```
 
+### `interpolate=` on `::file` / `::url` (internals)
+
+- One validator, `directives_api::parse_interpolate_value(decoded,
+  was_quoted)`, serves the parser and DMLS: unquoted `null` is the default,
+  boolean words go through `simplified_schema::numeric::parse_boolean_word`,
+  a quoted `"null"` and anything else is a located `ParseDirective` error.
+  `::code` never intercepts the key (unknown-option warning, unvalidated).
+- `BlockOptions.interpolate` stores the resolved local value (`true` for
+  absent/`null`/true words). `BlockOptions::default()` is hand-written so
+  prologue/epilogue children inherit rather than disable.
+- `ComposeOptions.prose_interpolation` (`ProseInterpolation`, crate-private,
+  never set by a root request) is folded only by
+  `transclusion::effective_prose_interpolation`, applied in
+  `inherited_child_options` and by hand on the remote `RemoteFile` child. It
+  is in both identity encoders; `parameters_identity` and the `compose:`
+  child cache key also carry it, so a normal and an `interpolate=false` use
+  of one file never share a composed result.
+- **Planned:** the folded setting does not yet suppress prose evaluation;
+  until it does, `interpolate=false` composes like the plain directive.
+
 ### Code Region Protection
 
 Inline code spans (single backticks) ARE interpolated — the common

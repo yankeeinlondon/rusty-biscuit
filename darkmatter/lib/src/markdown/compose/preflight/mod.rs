@@ -101,17 +101,31 @@ pub struct ScopedSite {
 }
 
 /// The identity of the explicit values a directive hands its child.
+///
+/// `0` for a directive with no `set` overlay and the default `interpolate`,
+/// so the common site keeps its historical identity.
 pub(crate) fn parameters_identity(options: &transclusion::BlockOptions) -> u64 {
     let overlay = super::cache::hashing::set_overlay_hash(options.set_object.as_ref(), &options.set_properties);
-    if overlay == 0 {
-        return 0;
-    }
-    let origin = match options.values_origin {
-        super::OverrideOrigin::Authored => 0u8,
-        super::OverrideOrigin::Data => 1u8,
+    let values = if overlay == 0 {
+        0
+    } else {
+        let origin = match options.values_origin {
+            super::OverrideOrigin::Authored => 0u8,
+            super::OverrideOrigin::Data => 1u8,
+        };
+        super::cache::hashing::combine_options_overlay_hash(overlay, u64::from(origin) + 1)
     };
-    super::cache::hashing::combine_options_overlay_hash(overlay, u64::from(origin) + 1)
+    if options.interpolate {
+        values
+    } else {
+        // A repeated site whose copy turns prose interpolation off hands its
+        // child different inputs than one that leaves it on.
+        super::cache::hashing::combine_options_overlay_hash(values, PROSE_DISABLED_PARAMETER)
+    }
 }
+
+/// The parameter-identity component of a directive's `interpolate=false`.
+const PROSE_DISABLED_PARAMETER: u64 = 0x7072_6f73_655f_6f66;
 
 /// Resolved target for a preflight graph edge.
 #[derive(Debug, Clone)]
@@ -1261,5 +1275,41 @@ flag: a
                 .is_none(),
             "an unrelated path must not match any child"
         );
+    }
+}
+
+#[cfg(test)]
+mod parameters_identity_tests {
+    use super::parameters_identity;
+    use crate::markdown::compose::transclusion::{BlockOptions, parse_directives};
+
+    fn options(line: &str) -> BlockOptions {
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("/parent.md"),
+            std::path::PathBuf::from("parent.md"),
+            std::sync::Arc::from(line),
+        );
+        parse_directives(line, ctx).expect("directive parses").remove(0).options
+    }
+
+    #[test]
+    fn the_default_site_keeps_its_zero_identity() {
+        assert_eq!(parameters_identity(&options("::file ./a.md")), 0);
+        assert_eq!(parameters_identity(&options("::file ./a.md interpolate=true")), 0);
+        assert_eq!(parameters_identity(&options("::file ./a.md interpolate=null")), 0);
+    }
+
+    #[test]
+    fn interpolate_false_is_a_different_child() {
+        let plain = parameters_identity(&options("::file ./a.md"));
+        let off = parameters_identity(&options("::file ./a.md interpolate=false"));
+        assert_ne!(plain, off);
+
+        let set = parameters_identity(&options("::file ./a.md set.x=1"));
+        let set_off = parameters_identity(&options("::file ./a.md set.x=1 interpolate=false"));
+        assert_ne!(set, 0);
+        assert_ne!(set, set_off);
+        assert_ne!(off, set_off);
+        assert_eq!(set_off, parameters_identity(&options("::file ./a.md interpolate=off set.x=1")));
     }
 }
