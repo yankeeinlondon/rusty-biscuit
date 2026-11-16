@@ -37,7 +37,7 @@ can read. [Flow Control](flow-control.md) explains the directives (`retry`,
 
 The lifecycle grammar (events, action lists, `when`/`then`/`else`, bundles)
 and the engine that fires events and routes failures belong to
-[Darkmatter](../../../../darkmatter/docs/topics/lifecycle/index.md). Darkmatter
+[Darkmatter](darkmatter/docs/topics/lifecycle/index.md). Darkmatter
 defines five document events: `initialize`, `composed`, `failed`, `cancelled`,
 and `finalize`. A program that runs documents is a **host**: it registers its
 own events and may rename two of Darkmatter's. Claudine:
@@ -288,7 +288,7 @@ This run still exits `0`, and prints:
 ```
 
 The report is the whole message, however long the target and root paths
-are; only `err.msg` is cut to its 240-character limit (see [`err.msg`](#errmsg)).
+are, and `err.msg` carries the same complete text (see [`err.msg`](#errmsg)).
 
 `no_error: true` on the action silences both the failure and its report.
 Containers fail on a failed action in any event; see
@@ -1599,7 +1599,7 @@ Every field below describes the **effective diagnostic** — the one error in th
 | `err.origin` | string | Who remediates: `provider`, `author`, `caller`, `environment`, or `internal`. |
 | `err.severity` | string | Operator-facing severity: `info`, `warning`, or `error`. Defaulted from `disposition` (`transient`/`throttled`/`needs_input` → `warning`, `correctable`/`unrecoverable` → `error`) and overridable per code. |
 | `err.detail.*` | typed | Per-instance payload — the fields that vary per occurrence (`err.detail.reference`, `err.detail.property`, `err.detail.reset_at`, …). Shape depends on `code`; an absent field reads as `null`. |
-| `err.msg` | string | Concise, notification-safe rendering of the selected error — see [below](#errmsg). |
+| `err.msg` | string | The complete, single-line, escape-free message of the selected error; never shortened — see [below](#errmsg). |
 | `err.cause.*` | typed | The next registered diagnostic below the selected one — see [below](#errcause). |
 
 #### A registered code always carries a detail object
@@ -1629,19 +1629,19 @@ failure:
 
 #### `err.msg`
 
-The selected diagnostic's **concise** message: single-line, escape-free, and length-clamped (~240 characters), so a TTS route, a webhook, or a desktop notification can use it verbatim.
+The selected diagnostic's complete message, normalized to one line: escape sequences are stripped and line breaks, tabs, and other control characters are folded into single spaces. It is **never shortened**, so a long explanation stays whole and can be long. The same text reaches the run's error, a step's failure line, an `action failed` warning, the diagnostic snapshot's `message`, and `err.msg`.
 
-It is deliberately **not** the multi-line rendered block — that block is for a terminal, and pushing it through a speech synthesizer or a Slack message is what the clamp exists to prevent. It is also not a classifier input: match on `err.code`, never on this text.
+It is deliberately **not** the multi-line rendered block — that block is for a terminal. It is also not a classifier input: match on `err.code`, never on this text.
 
-The clamp applies to `err.msg` only. When Claudine reports a failure itself (the run's error, a step's failure line, an `action failed` warning), it shows the complete message, so a refusal naming a long target and mutation root keeps both paths whole.
+A delivery channel with its own size limit (a speech engine, a chat message, a desktop notification) fits the text itself; Claudine submits the whole message, which is not a promise that a notification center or remote service displays all of it. To announce a failure briefly, write a fixed message or use `err.code`:
 
 ```yaml
 failure:
-  - say: "{{ err.msg }}"                          # safe: one clean line
-  - notify: "{{ err.code }}: {{ err.msg }}"
+  - say: "The run failed. Check the terminal for the full explanation."
+  - notify: "Run failed: {{ err.code }}"
 ```
 
-For a provider attempt failure, `err.msg` keeps the established `harness::failure_message` precedence (its headline, timeout, and stderr fallbacks, plus the `(attempt N)` suffix) rather than being replaced by a typed error's `Display`. Both producers pass through the same hygiene stage, so a typed error and a provider failure cannot reach a notification under different rules.
+For a provider attempt failure, `err.msg` keeps the established `harness::failure_message` precedence (the provider's explicit error, kept whole, then the guard, timeout, last-useful-stderr-line, and exit-code fallbacks, plus the `(attempt N)` suffix) rather than being replaced by a typed error's `Display`. Both producers pass through the same hygiene stage, so a typed error and a provider failure cannot reach a notification under different rules.
 
 #### `err.cause`
 
@@ -1668,8 +1668,8 @@ failure:
 `err.code == 'timeout.claudine_completion_delayed'` when Claudine reaches its
 cleanup deadline without a confirmed provider completion verdict. Its
 `err.detail` will retain available response data and the observed cleanup
-state, with explicit completeness flags. `err.msg` will remain a concise
-headline and will not include the response body.
+state, with explicit completeness flags. `err.msg` will remain the one-line
+selected message and will not include the response body.
 
 For example, a failure handler will be able to print an identified answer:
 

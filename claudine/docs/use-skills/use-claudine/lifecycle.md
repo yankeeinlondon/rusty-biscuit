@@ -151,6 +151,18 @@ when the document is parsed. Shell commands can't read `err`, `timing`, or
 
 `claudine errors` lists every `err.code`.
 
+`err.msg` is the complete explanation folded onto one escape-free line. It
+is never shortened, so it can be long. To announce a failure briefly, write a
+fixed message or use `err.code`; to decide what to do, match on `err.code`,
+never on the message text. A notification center or remote service may show
+only part of a long message.
+
+```yaml
+failure:
+  - say: "The run failed. Check the terminal for the full explanation."
+  - notify: "Run failed: {{ err.code }}"
+```
+
 ### A recovery pattern
 
 ```yaml

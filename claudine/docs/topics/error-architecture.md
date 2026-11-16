@@ -120,6 +120,10 @@ Two rules make it survive version skew in both directions:
 - **`detail` is an opaque value.** The catalog evolves additively, so a field
   added after a consumer shipped round-trips through it untouched.
 
+`message` (and `cause.message`) is the diagnostic's complete text, normalized
+to one escape-free line and never shortened; a channel with a size limit fits
+it at delivery.
+
 `cause` is a **one-level** projection: `DiagnosticCause` carries no cause of its
 own, so `cause.cause` is unrepresentable in v1 rather than merely undocumented.
 Widening to recursion later is additive if it is ever ratified.

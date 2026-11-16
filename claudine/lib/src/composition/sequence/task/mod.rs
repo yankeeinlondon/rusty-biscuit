@@ -129,7 +129,7 @@ impl TaskDiagnostic {
         }
     }
 
-    /// The concise message, as `err.msg` reads it.
+    /// The normalized, unshortened message, as `err.msg` reads it.
     pub fn message(&self) -> &str {
         &self.info.msg
     }

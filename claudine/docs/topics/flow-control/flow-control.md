@@ -30,7 +30,7 @@ The pieces:
 
 [Lifecycle — Writing an Event](lifecycle.md#writing-an-event) covers the whole grammar: lists, dictionaries, `when`/`then`/`else`, and nesting.
 
-## The directives
+## Flow Control Directives
 
 | Directive | What it does |
 |-----------|--------------|

@@ -138,9 +138,14 @@ fn a_relative_write_from_a_prompt_in_another_repo_is_refused_and_creates_nothing
     let prose = stderr.replace('┃', " ").split_whitespace().collect::<String>();
     assert!(prose.contains("outsidethemutationroot"), "stderr was:\n{stderr}");
     assert!(prose.contains("events.log"), "names the target; stderr was:\n{stderr}");
-    // The status line is length-clamped, so only the root's label survives
-    // here; the library tests pin the full root text.
+    // The status line carries the complete message, so the root survives to
+    // its last component. Only that component is compared: the root's full
+    // spelling (short names, prefixes) is the host's, and the library tests
+    // pin it.
+    let root_name = staged.fixture.cwd().file_name().unwrap().to_string_lossy().into_owned();
     assert!(prose.contains("(root:"), "names the root; stderr was:\n{stderr}");
+    assert!(prose.contains(&format!("{root_name})")), "keeps the root's end; stderr was:\n{stderr}");
+    assert!(!prose.contains('…'), "nothing is shortened; stderr was:\n{stderr}");
     assert!(!staged.library.join("prompts/events.log").exists(), "nothing beside the prompt");
     assert!(!staged.library.join("events.log").exists(), "nothing at the library root");
     assert!(!staged.fixture.cwd().join("events.log").exists(), "never root-joined in the caller");
