@@ -1,7 +1,7 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 4
+phase: 5
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -83,6 +83,84 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- claudine/cli/tests/l1/lifecycle_mutation_root.rs
+- claudine/lib/src/composition/lifecycle/context.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/non-interactive-sessions.md
+- claudine/docs/topics/error-architecture.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+source_code:
+- darkmatter/lib/src/lifecycle/envelope.rs
+- darkmatter/lib/src/lifecycle/envelope/tests.rs
+- darkmatter/lib/src/lifecycle/context.rs
+- darkmatter/lib/src/lifecycle/context/tests.rs
+- darkmatter/lib/src/lifecycle/cancellation.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/preflight/tests.rs
+- darkmatter/lib/src/lifecycle/run_guard.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/tests/l1/global_catalog.rs
+- darkmatter/lib/tests/l1/lifecycle_run_protocol.rs
+- darkmatter/lib/tests/l1/lifecycle_boundary/replay.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/tests/l1/compose_lifecycle_refusals.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+- claudine/cli/src/commands/wrap/sequence/container.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/lifecycle/context/tests.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs
+- claudine/lib/src/composition/lifecycle/report.rs
+- claudine/lib/src/composition/looping/engine.rs
+- claudine/lib/src/diagnostics/restored.rs
+- claudine/lib/src/diagnostics/restored/tests.rs
+- claudine/lib/src/diagnostics/snapshot.rs
+- claudine/lib/src/diagnostics/snapshot/tests.rs
+- claudine/lib/src/reporting/types.rs
+- claudine/lib/src/harness/runtime.rs
+- claudine/lib/src/harness/runtime/tests.rs
+- claudine/lib/src/stream/task_ledger.rs
+- claudine/lib/src/stream/task_ledger/tests.rs
+- claudine/lib/src/stream/logs/opencode/classify/mod.rs
+- claudine/lib/src/stream/logs/opencode/classify/asset.rs
+- claudine/lib/src/stream/logs/opencode/classify/tests.rs
+- claudine/lib/src/render/incomplete_subagents.rs
+- claudine/cli/tests/l1/lifecycle_refusal_reports.rs
+- claudine/cli/tests/l1/wrap_incomplete_subagents.rs
+- claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+- claudine/cli/tests/l1/characterization_error_routes.rs
+- claudine/cli/tests/common/incomplete_subagents.rs
+- claudine/cli/tests/level2/level2_incomplete_subagents_capture.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_data_output.rs
+- claudine/cli/tests/l1/lifecycle_mutation_root.rs
+- claudine/lib/src/composition/lifecycle/context.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+documentation:
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/topics/lifecycle/index.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/claudine/SKILL.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/non-interactive-sessions.md
+- claudine/docs/topics/error-architecture.md
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+completed_phase: 4
+implemented: true
 ---
 ---
 
@@ -443,7 +521,7 @@ note after the YAML example.
 
 ### Wave 1 tasks
 
-- [ ] **Darkmatter docs**
+- [x] **Darkmatter docs**
     - `darkmatter/docs/topics/lifecycle/error-handling.md:166-168`: replace
       "folded onto one line of at most 240 characters" with "folded onto one
       line; it is never shortened, so a long error stays whole. A channel that
@@ -460,7 +538,7 @@ note after the YAML example.
     - Rust docs on the `edit` failure that say "survive a cut": grep
       `darkmatter/lib/src` for `reason before` and `clamp` and reword; keep the
       reason-first order.
-- [ ] **Claudine docs**
+- [x] **Claudine docs**
     - `claudine/docs/topics/flow-control/lifecycle.md`: the `err.msg` table row
       (line 1490), the `#### err.msg` section (lines 1520-1531, including the
       "(~240 characters)" and "what the clamp exists to prevent" sentences, and
@@ -476,7 +554,7 @@ note after the YAML example.
     - `claudine/lib/src/composition/lifecycle/context.rs:105-116`,
       `claudine/lib/src/composition/sequence/task/mod.rs:132`: reword "concise"
       and "budget-reserved" to "normalized, not shortened".
-- [ ] **Claudine caller skill** (R19)
+- [x] **Claudine caller skill** (R19)
     - Edit `claudine/docs/use-skills/use-claudine/lifecycle.md`, then run
       `cd claudine && just publish-skills`. Confirm the installed
       `~/.claude/skills/use-claudine/lifecycle.md` contains the new paragraph.
@@ -485,7 +563,7 @@ note after the YAML example.
 
 ### Wave 2: contract audit and final validation
 
-- [ ] **Audit**
+- [x] **Audit**
     - `grep -rnE "CONCISE_MESSAGE_MAX_CHARS|clamp_chars|PRIOR_FAILURE_CLAUSE_MAX_CHARS|FAILURE_MESSAGE_MAX_CHARS|sanitize_message" --include='*.rs' darkmatter claudine`
       returns nothing.
     - `grep -rnE "notification-safe|budget-reserved|240-char|240 char|length-clamped|~240" --include='*.md' --include='*.rs' darkmatter claudine .claude`
@@ -496,7 +574,7 @@ note after the YAML example.
       the only allowed survivors are R15's two.
     - `grep -n "240\|clamp" ~/.claude/skills/use-claudine/*.md` finds no old
       promise (the published copy).
-- [ ] **Final validation**
+- [x] **Final validation**
     - `just test` and `just lint` in `darkmatter/` and `claudine/` pass. State in
       the final report that L2 and L3 were not run and why (the spec requires no
       live or focus-changing test).

@@ -35,6 +35,8 @@ reviewed_on: 2026-11-14
 review_iterations: 0
 needs_rulings: false
 required_rulings:
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Keep the whole error message; fit it at delivery

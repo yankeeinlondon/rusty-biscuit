@@ -72,15 +72,17 @@ decisions_for_review:
     Darkmatter change, so Phase 2 only has to do the work its own plan lists.
     Alternative: leave them to Phase 2, whose agent would then meet compile
     errors the plan does not explain.
-message_to_agent: |-
-  Phase 3 is done; both area suites and lints are green. Every Phase 3 test
-  file is finished, including the R17 comment edits in
-  claudine/cli/tests/common/incomplete_subagents.rs and the L2 capture test,
-  and the characterization_error_routes.rs module doc (it no longer says
-  "concise"). Phase 4 is docs, skills and the contract audit only. The
-  ManyLongNamedStops doc in wrap_incomplete_subagents.rs still mentions
-  "240 characters", deliberately: it describes the fixture's size, not a
-  limit. Keep it, or reword it if the audit grep flags it.
+  - |-
+    The contract audit found a stale comment in a Claudine CLI test
+    (lifecycle_mutation_root.rs) saying the status line is "length-clamped",
+    so only the root's label could be checked. I rewrote the comment and
+    made the test stricter: it now also checks that the mutation root's last
+    folder name, followed by ")", appears and that no ellipsis does. I did
+    not assert the whole root path, because how Windows spells that path
+    (short names, prefixes) may differ from what the test can compute, and
+    the Windows host could not run the test (full disk). Alternative: assert
+    the full path, which is stronger on macOS and Linux but may fail on
+    Windows. To change this, edit that one assertion.
 source_files_during_phase_2:
   - "claudine/lib/src/harness/runtime.rs"
   - "claudine/lib/src/harness/runtime/tests.rs"
@@ -112,6 +114,84 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - "claudine/cli/tests/l1/lifecycle_mutation_root.rs"
+  - "claudine/lib/src/composition/lifecycle/context.rs"
+  - "claudine/lib/src/composition/sequence/task/mod.rs"
+docs_updated_during_phase_4:
+  - "darkmatter/docs/topics/lifecycle/error-handling.md"
+  - "claudine/docs/topics/flow-control/lifecycle.md"
+  - "claudine/docs/topics/non-interactive-sessions.md"
+  - "claudine/docs/topics/error-architecture.md"
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - "claudine/docs/use-skills/use-claudine/lifecycle.md"
+source_code:
+  - "darkmatter/lib/src/lifecycle/envelope.rs"
+  - "darkmatter/lib/src/lifecycle/envelope/tests.rs"
+  - "darkmatter/lib/src/lifecycle/context.rs"
+  - "darkmatter/lib/src/lifecycle/context/tests.rs"
+  - "darkmatter/lib/src/lifecycle/cancellation.rs"
+  - "darkmatter/lib/src/lifecycle/md_host.rs"
+  - "darkmatter/lib/src/lifecycle/md_host/tests.rs"
+  - "darkmatter/lib/src/lifecycle/executor/tests.rs"
+  - "darkmatter/lib/src/lifecycle/preflight/tests.rs"
+  - "darkmatter/lib/src/lifecycle/run_guard.rs"
+  - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+  - "darkmatter/lib/tests/l1/global_catalog.rs"
+  - "darkmatter/lib/tests/l1/lifecycle_run_protocol.rs"
+  - "darkmatter/lib/tests/l1/lifecycle_boundary/replay.rs"
+  - "darkmatter/cli/src/commands/compose/lifecycle.rs"
+  - "darkmatter/cli/tests/l1/compose_lifecycle_refusals.rs"
+  - "claudine/cli/src/commands/wrap/composition/pipeline.rs"
+  - "claudine/cli/src/commands/wrap/harness_orch/loop_control.rs"
+  - "claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs"
+  - "claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs"
+  - "claudine/cli/src/commands/wrap/sequence/container.rs"
+  - "claudine/cli/src/commands/wrap/sequence/task_run.rs"
+  - "claudine/lib/src/composition/error/mod.rs"
+  - "claudine/lib/src/composition/lifecycle/context/tests.rs"
+  - "claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs"
+  - "claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs"
+  - "claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs"
+  - "claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs"
+  - "claudine/lib/src/composition/lifecycle/report.rs"
+  - "claudine/lib/src/composition/looping/engine.rs"
+  - "claudine/lib/src/diagnostics/restored.rs"
+  - "claudine/lib/src/diagnostics/restored/tests.rs"
+  - "claudine/lib/src/diagnostics/snapshot.rs"
+  - "claudine/lib/src/diagnostics/snapshot/tests.rs"
+  - "claudine/lib/src/reporting/types.rs"
+  - "claudine/lib/src/harness/runtime.rs"
+  - "claudine/lib/src/harness/runtime/tests.rs"
+  - "claudine/lib/src/stream/task_ledger.rs"
+  - "claudine/lib/src/stream/task_ledger/tests.rs"
+  - "claudine/lib/src/stream/logs/opencode/classify/mod.rs"
+  - "claudine/lib/src/stream/logs/opencode/classify/asset.rs"
+  - "claudine/lib/src/stream/logs/opencode/classify/tests.rs"
+  - "claudine/lib/src/render/incomplete_subagents.rs"
+  - "claudine/cli/tests/l1/lifecycle_refusal_reports.rs"
+  - "claudine/cli/tests/l1/wrap_incomplete_subagents.rs"
+  - "claudine/lib/src/composition/lifecycle/tests/audio_emission.rs"
+  - "claudine/cli/tests/l1/characterization_error_routes.rs"
+  - "claudine/cli/tests/common/incomplete_subagents.rs"
+  - "claudine/cli/tests/level2/level2_incomplete_subagents_capture.rs"
+  - "darkmatter/cli/tests/l1/compose_lifecycle.rs"
+  - "darkmatter/cli/tests/l1/compose_data_output.rs"
+  - "claudine/cli/tests/l1/lifecycle_mutation_root.rs"
+  - "claudine/lib/src/composition/lifecycle/context.rs"
+  - "claudine/lib/src/composition/sequence/task/mod.rs"
+documentation:
+  - "darkmatter/docs/topics/lifecycle/error-handling.md"
+  - "darkmatter/docs/topics/lifecycle/index.md"
+  - ".claude/skills/darkmatter/lifecycle.md"
+  - ".claude/skills/claudine/SKILL.md"
+  - "claudine/docs/topics/flow-control/lifecycle.md"
+  - "claudine/docs/topics/non-interactive-sessions.md"
+  - "claudine/docs/topics/error-architecture.md"
+  - "claudine/docs/use-skills/use-claudine/lifecycle.md"
+completed_phase: 4
+implemented: true
 ---
 ---
 
@@ -356,3 +436,124 @@ does not apply, because no reader of a file format or configuration changed.
 - I ran no L2/L3 tests, as the spec requires. I ran no cross-OS check: the
   changes are test-only string assertions over existing fixtures, with no
   paths or OS APIs.
+
+## Phase 4
+
+Docs, skills and the contract audit. No production behavior changed; the
+source edits are doc comments and one test assertion.
+
+### What changed
+
+- **Darkmatter docs.** Phase 1 had already rewritten the `edit` failure
+  paragraph, the `msg` field row in `error-handling.md`, and the repo skill
+  `.claude/skills/darkmatter/lifecycle.md`, so only the missing piece was
+  added: a `failed:` example with fixed notification text, and the sentence
+  that submitting the full message does not guarantee a remote service shows
+  all of it. A grep of `darkmatter/lib/src` and `darkmatter/cli/src` for
+  "cut", "reason first" and "clamp" found no remaining message-length wording
+  (the `clamp` hits are unrelated numeric clamps).
+- **Claudine docs.** `flow-control/lifecycle.md`: the `err.msg` table row, the
+  `#### err.msg` section (rewritten: complete, one line, never shortened;
+  delivery channels fit it; the example now uses fixed `say` text and
+  `err.code`, per the spec), the mutation-root report sentence that still
+  said `err.msg` is "cut to its 240-character limit", the cascade wording
+  (explicit error kept whole, then guard, timeout, last useful stderr line,
+  exit code; this matches `harness::failure_message`), and the planned
+  `ClaudineCompletionDelayed` note. `non-interactive-sessions.md`: the
+  incomplete-task paragraph no longer mentions a 240-character budget or a
+  reservation. `error-architecture.md`: one sentence that the snapshot's
+  `message` is complete and normalized.
+- **Rust doc comments.** `claudine/lib/src/composition/lifecycle/context.rs`
+  (`from_action_failure`: "budget-reserved" removed) and
+  `claudine/lib/src/composition/sequence/task/mod.rs` (`message()`: "concise"
+  becomes "normalized, unshortened").
+- **Caller skill.** `claudine/docs/use-skills/use-claudine/lifecycle.md` has a
+  new paragraph and YAML example, placed after the sentence
+  "`claudine errors` lists every `err.code`" rather than directly under the
+  table, because the paragraph after the table continues it. The prose
+  names `err.msg`/`err.code` without braces, and the example sits in a
+  fenced block, which composition leaves verbatim, so no triple-brace escape
+  was needed. `cd claudine && just publish-skills` ran; the installed
+  `~/.claude/skills/use-claudine/lifecycle.md` contains the paragraph and the
+  example with `{{ err.code }}` intact.
+
+### Contract audit
+
+- Deleted symbols grep (`CONCISE_MESSAGE_MAX_CHARS|clamp_chars|...|sanitize_message`
+  over `*.rs` in `darkmatter` and `claudine`): no matches.
+- Wording grep (`notification-safe|budget-reserved|240-char|240 char|length-clamped|~240`):
+  the remaining matches are tests and fixture docs that describe the *old* or
+  *removed* limit as history or fixture size (including `ManyLongNamedStops`,
+  kept as the Phase 3 agent suggested), Kimi research notes about Kimi's own
+  240-character description fallback (unrelated), and a `.claude/skills/claudine/timeline.md`
+  entry (historical). One live defect: `claudine/cli/tests/l1/lifecycle_mutation_root.rs:141`
+  said "The status line is length-clamped". Fixed: comment rewritten and the
+  test strengthened (see `decisions_for_review`).
+- `take(` / `chars().count() >` in `claudine/lib/src/stream/logs/opencode/`
+  and the Darkmatter shell executor: the only length bounds left are R15's
+  two (`bridge/format.rs:162` `truncate_for_inline`, and the executor's
+  200-character panic preview); the other matches are `Option::take`,
+  `mem::take`, and `take(1)` over directive actions.
+- Published caller skill: `grep -n "240\|clamp" ~/.claude/skills/use-claudine/*.md`
+  finds nothing.
+
+### Requirement-to-test mapping
+
+Phase 4 changes no behavior, so it adds no behavior test. Its documentation
+claims are backed by the Phase 1-3 tests listed above (complete `err.msg`,
+snapshot message, incomplete-task headline, delivery isolation). The one
+test edit, `claudine-cli` `lifecycle_mutation_root::a_relative_write_from_a_prompt_in_another_repo_is_refused_and_creates_nothing`,
+now asserts the refusal keeps the root's last component, with no ellipsis
+(L1, spawned `claudine` binary, F3). The input-robustness matrix does not
+apply: no reader of a file format or configuration changed.
+
+### Gates
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `packages: [claudine, claudine-cli, test-toolkit, darkmatter]`,
+  `change_class: package`, so the gates were not skipped. `test-toolkit`
+  comes only from its lint-only `archive-path-guard` companion, which scans
+  Rust source; `just archive-path-guard` in `tools/test-toolkit`: 2 passed.
+- `cd darkmatter && just test`: 17043 passed, 10 skipped, none at or above
+  5.0s (load average about 8 to 16). `just lint`: exit 0.
+- `cd claudine && just test`: 12247 passed, 15 skipped, none at or above 5.0s.
+  `just lint`: exit 0 (the only warnings are the existing macOS linker
+  `__eh_frame` notice).
+- After that run, the `lifecycle_mutation_root` assertion was narrowed for
+  Windows (see the decision). Rerun: the `lifecycle_mutation_root` module
+  (13 passed) and `claudine` `just lint` (exit 0).
+- `just slow-tests fresh`: exit 0.
+- Dependents: Darkmatter's dependents are `claudine` and `claudine-cli`,
+  covered above. Phase 4 changed no public symbol, so nothing downstream of
+  Claudine needed a run.
+- L2 and L3 were not run: the spec forbids live speech, notification, or
+  focus-changing tests, and no behavior in this phase needs a real terminal.
+
+### Cross-OS
+
+The edited assertion reads a path, so I tried
+`just cross-check claudine-cli --os windows <test name>`. Two findings:
+
+1. With a `-E 'test(...)'` filter the recipe fails with a shell
+   `syntax error near unexpected token '('`, both locally and in the
+   remote `_expected_manifest` step. The filter's parentheses are not
+   quoted when forwarded. A plain-name nextest filter avoids this.
+2. With a plain-name filter the Windows host built and archived the test,
+   then stopped at Cargo storage preflight: 36.9 GiB free of the 50 GiB
+   required; the automatic sweep freed 0 GiB. I did not override the storage
+   guard. No Windows result was produced, and the assertion was narrowed to
+   an OS-neutral form instead. `os_failing` is not set because no test failed.
+
+Also seen in the Windows build output, and not from this fix: `unused imports: Duration and Instant`
+at `claudine/cli/tests/l1/lifecycle_edit_action.rs:23` (Windows only).
+
+### Unrelated working-tree changes
+
+`claudine/cli/src/argv/rule4_help_hoist.rs`, `claudine/cli/tests/l1/argv_normalization.rs`,
+`claudine/docs/topics/argv-normalization.md`, `claudine/docs/topics/cli-pre-parsing.md`
+and `claudine/fixes/2026-11-14-output-flag-not-implemented/implementation-log.md`
+were already modified when this phase began. They belong to other work, were
+not touched, and are not listed in this phase's frontmatter. The Claudine
+suite above ran with them in the tree.
+
+Implementation complete, ready for review.
