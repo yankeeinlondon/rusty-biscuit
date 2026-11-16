@@ -117,7 +117,7 @@ impl Refusals {
 }
 
 /// Whether `flat` names the complete `root` after `(root:`: the report shows
-/// the full refusal, never the clamped `err.msg`.
+/// the full refusal.
 fn names_root(flat: &str, root: &str) -> bool {
     flat.contains(&format!("(root:{root})"))
 }
@@ -453,7 +453,7 @@ gate_cells! {
 /// A 50-character project name: the workspace, and so the mutation root, is
 /// the system temp directory plus this component, and the refused target sits
 /// in a 50-character directory beside the root, so every refusal is longer
-/// than the 240-character `err.msg` clamp.
+/// than 240 characters, where `err.msg` was once cut.
 const LONG_PROJECT: &str = "a-project-directory-with-a-fifty-character-name-xy";
 const LONG_OUTSIDE: &str = "an-outside-directory-with-a-fifty-character-name-x";
 
@@ -477,7 +477,7 @@ fn check_long_start_refusal(action: &str) -> String {
         target.display(),
         staged.root().display()
     );
-    assert!(refusal.chars().count() > 240, "the fixture exercises the clamp: {refusal}");
+    assert!(refusal.chars().count() > 240, "the fixture is longer than the old 240-character limit: {refusal}");
     text
 }
 

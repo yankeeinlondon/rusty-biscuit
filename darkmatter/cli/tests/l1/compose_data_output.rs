@@ -491,6 +491,19 @@ fn a_lifecycle_run_writes_only_the_envelope_to_stdout() {
     assert_eq!(codes(&report), ["dm.lifecycle.failure"]);
     assert_eq!(report["diagnostics"][0]["message"], "the gate refused");
     assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    // A long multi-line error reaches the envelope folded onto one line, whole.
+    let lines = ["the gate refused because", &"each check failed ".repeat(20), "LAST-WORD"];
+    let block = lines.iter().map(|line| format!("      {}\n", line.trim_end())).collect::<String>();
+    let long = fixture.write_file("cwd/long.md", &format!("---\ncomposed:\n  - error: |\n{block}---\nbody\n"));
+    let output = run_report(&fixture, &long);
+    assert_eq!(output.status.code(), Some(1));
+    let report = report_of(&output);
+    assert_eq!(codes(&report), ["dm.lifecycle.failure"]);
+    let expected = lines.map(str::trim_end).join(" ");
+    assert!(expected.chars().count() > 240, "the error must exceed the old limit");
+    assert_eq!(report["diagnostics"][0]["message"], expected.as_str());
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]

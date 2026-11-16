@@ -312,9 +312,8 @@ fn a_displaced_provider_failure_without_text_is_still_named() {
 #[test]
 fn the_composed_message_still_honors_the_concise_message_contract() {
     // The displaced text is arbitrary provider output: multi-line, escape
-    // bearing, and far past the 240-character budget. The composed headline
-    // must still be one clamped line, and must still name the displaced
-    // failure — the reservation exists so the task list is what gives way.
+    // bearing, and long. The composed headline must be one escape-free line
+    // that keeps the whole displaced failure and names every task.
     let mut ledger = TaskLedger::new();
     for index in 0..30 {
         let id = format!("task-{index}");
@@ -341,22 +340,21 @@ fn the_composed_message_still_honors_the_concise_message_contract() {
         "multi-line: {message:?}"
     );
     assert!(
-        message.chars().count() <= 240,
-        "{} chars: {message}",
-        message.chars().count()
-    );
-    assert!(
         message.starts_with("30 sub-agent tasks did not complete"),
         "{message}"
     );
-    assert!(message.contains("rate_limit"), "{message}");
-    assert!(message.contains("Too many requests"), "{message}");
-    // Non-vacuity: the list genuinely had to truncate, which is the direction
-    // the reservation guarantees.
     assert!(
-        !message.contains("a-very-long-sub-agent-task-name-number-29"),
+        message.contains(&format!(
+            "after provider failure rate_limit: Too many requests retry later {}; incomplete:",
+            "x".repeat(500)
+        )),
         "{message}"
     );
+    assert!(
+        message.contains("a-very-long-sub-agent-task-name-number-29"),
+        "{message}"
+    );
+    assert!(!message.contains('…'), "{message}");
     assert_eq!(summary.subagent_outcomes.len(), 30);
 }
 
@@ -372,10 +370,16 @@ fn the_headline_names_tasks_while_the_machine_list_stays_complete() {
     let incomplete = ledger.incomplete_outcomes();
     let message = incomplete_message(&incomplete);
     assert!(message.starts_with("40 sub-agent tasks did not complete:"), "{message}");
+    for index in 0..40 {
+        assert!(
+            message.contains(&format!("a-very-long-sub-agent-task-name-number-{index} (stopped)")),
+            "task {index} missing: {message}"
+        );
+    }
 
     let mut summary = StreamExecutionSummary::default();
     ledger.apply_to_summary(&mut summary);
-    // Whatever the headline does, every fact is retained.
+    assert_eq!(summary.error_message.as_deref(), Some(message.as_str()));
     assert_eq!(summary.subagent_outcomes.len(), 40);
 }
 
@@ -463,7 +467,7 @@ fn a_blank_error_kind_with_a_message_reads_as_message_only() {
 }
 
 #[test]
-fn a_long_message_only_failure_keeps_its_reservation_and_the_task_list_gives_way() {
+fn a_long_message_only_failure_keeps_the_clause_and_every_task() {
     let mut ledger = TaskLedger::new();
     for index in 0..30 {
         let id = format!("task-{index}");
@@ -489,25 +493,41 @@ fn a_long_message_only_failure_keeps_its_reservation_and_the_task_list_gives_way
         "multi-line: {message:?}"
     );
     assert!(
-        message.chars().count() <= 240,
-        "{} chars: {message}",
-        message.chars().count()
-    );
-    assert!(
-        message.starts_with("30 sub-agent tasks did not complete; after provider failure: Provider rejected the request"),
+        message.starts_with(&format!(
+            "30 sub-agent tasks did not complete; after provider failure: Provider rejected the request {}; incomplete: ",
+            "x".repeat(500)
+        )),
         "{message}"
     );
-    let clause_start = message.find("after provider failure").unwrap();
-    let clause_end = message.find("; incomplete:").expect("task list follows the clause");
-    let clause_chars = message[clause_start..clause_end].chars().count();
+    let positions: Vec<usize> = (0..30)
+        .map(|index| {
+            message
+                .find(&format!("a-very-long-sub-agent-task-name-number-{index} (stopped)"))
+                .unwrap_or_else(|| panic!("task {index} missing: {message}"))
+        })
+        .collect();
     assert!(
-        clause_chars <= PRIOR_FAILURE_CLAUSE_MAX_CHARS,
-        "clause of {clause_chars} chars exceeds its reservation: {message}"
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "tasks out of declaration order: {message}"
     );
-    // The truncation landed on the tail (task list), not on the clause.
-    assert!(
-        !message.contains("a-very-long-sub-agent-task-name-number-29"),
-        "{message}"
-    );
+    assert!(!message.contains('…'), "{message}");
     assert_eq!(summary.subagent_outcomes.len(), 30);
+}
+
+#[test]
+fn an_escape_only_displaced_message_leaves_no_dangling_clause() {
+    let mut ledger = TaskLedger::new();
+    ledger.record_terminal(Some("t1"), Some("alpha"), Some("stopped"));
+
+    let mut summary = StreamExecutionSummary {
+        is_error: true,
+        error_message: Some("\u{1b}[0m".into()),
+        ..Default::default()
+    };
+    ledger.apply_to_summary(&mut summary);
+
+    assert_eq!(
+        summary.error_message.as_deref(),
+        Some("1 sub-agent task did not complete: alpha (stopped)")
+    );
 }

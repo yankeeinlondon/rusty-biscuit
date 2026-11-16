@@ -65,19 +65,19 @@ fn snapshot_message_is_notification_safe() {
         snapshot.message
     );
     assert!(snapshot.message.contains("line one line two tabbed"));
-    assert!(snapshot.message.chars().count() <= 240);
 }
 
 #[test]
-fn snapshot_message_is_clamped_for_an_overlong_display() {
+fn snapshot_message_keeps_an_overlong_display_whole() {
+    let tail = format!("{}THE-END", "x".repeat(500));
     let err = CompositionError::SchemaLoad {
         source_path: std::path::PathBuf::from("p.md"),
-        message: "x".repeat(500),
+        message: tail.clone(),
     };
     let snapshot = DiagnosticSnapshot::from_diagnostic(&err);
 
-    assert_eq!(snapshot.message.chars().count(), 240);
-    assert!(snapshot.message.ends_with('…'));
+    assert!(snapshot.message.ends_with(&tail), "message was shortened: {:?}", snapshot.message);
+    assert!(!snapshot.message.contains('…'));
 }
 
 // -- one-level cause -------------------------------------------------------
@@ -256,6 +256,18 @@ fn from_code_projects_a_catalog_shaped_snapshot() {
     assert!(snapshot.cause.is_none(), "a label carries no typed cause");
 
     assert!(DiagnosticSnapshot::from_code("no.such_code", String::new()).is_none());
+}
+
+/// The label-only path normalizes the text it is given, like a typed
+/// diagnostic's `Display`, so a caller cannot slip a raw multi-line or
+/// escape-carrying message into `err.msg`.
+#[test]
+fn from_code_normalizes_its_message() {
+    let snapshot =
+        DiagnosticSnapshot::from_code("cap.rate_limit", "a\n\x1b[1mb\x1b[0m".to_string())
+            .expect("cap.rate_limit is a registered code");
+
+    assert_eq!(snapshot.message, "a b");
 }
 
 /// An unknown code and unknown detail keys from a newer producer survive the
@@ -504,4 +516,87 @@ fn a_record_serialized_without_a_cause_still_deserializes() {
         serde_json::from_value(json).expect("a payload without `cause` deserializes");
     assert!(restored.cause.is_none());
     assert_eq!(restored.code, snapshot.code);
+}
+
+// -- projection parity for long messages -------------------------------------
+
+/// A raw message longer than the old 240-character limit, with ANSI color,
+/// several lines, a tab, and a unique last word, and the text every producer
+/// must normalize it to.
+fn long_raw_and_normalized(ending: &str) -> (String, String) {
+    let body = "word ".repeat(60);
+    let raw = format!("\x1b[31mfirst line\x1b[0m\n{body}\n\tsecond line {ending}\n");
+    let normalized = format!("first line {} second line {ending}", body.trim_end());
+    assert!(normalized.chars().count() > 241, "the fixture must exceed the old limit");
+    (raw, normalized)
+}
+
+/// The snapshot's message survives a JSON round trip unchanged, cause included.
+fn assert_round_trips(snapshot: &DiagnosticSnapshot) {
+    let value = serde_json::to_value(snapshot).expect("snapshot serializes");
+    let restored: DiagnosticSnapshot =
+        serde_json::from_value(value).expect("snapshot deserializes");
+    assert_eq!(restored.message, snapshot.message);
+    assert_eq!(
+        restored.cause.as_ref().map(|cause| &cause.message),
+        snapshot.cause.as_ref().map(|cause| &cause.message)
+    );
+}
+
+/// Every route that projects a message (typed selection with a registered
+/// cause, a catalog code, a facet-less action failure, and a catalog miss)
+/// carries the complete normalized text, and `err.msg` equals the snapshot's.
+#[test]
+fn every_projection_route_keeps_the_complete_normalized_message() {
+    use crate::composition::{LifecycleErrorInfo, LifecycleErrorInfoExt};
+    use crate::reporting::IngestError;
+
+    // Typed selection: a semantic wrapper over a registered cause.
+    let (raw, normalized) = long_raw_and_normalized("TYPED-END");
+    let error = IngestError {
+        source_file: "/logs/a.jsonl".to_string(),
+        line_number: 0,
+        source: ClaudineError::ConfigValidation(raw),
+    };
+    let cause_text = format!("config validation error: {normalized}");
+    let snapshot = DiagnosticSnapshot::select(&error).expect("the wrapper is registered");
+    assert_eq!(snapshot.message, format!("failed to ingest /logs/a.jsonl: {cause_text}"));
+    let cause = snapshot.cause.as_ref().expect("the registered cause is projected");
+    assert_eq!(cause.message, cause_text);
+    assert_round_trips(&snapshot);
+    let info = LifecycleErrorInfo::from_error_or_action("ingest", &error);
+    assert_eq!(info.snapshot.as_deref(), Some(&snapshot));
+    assert_eq!(info.msg, snapshot.message);
+
+    // A catalog code.
+    let (raw, normalized) = long_raw_and_normalized("CODE-END");
+    let snapshot = DiagnosticSnapshot::from_code("cap.rate_limit", raw.clone())
+        .expect("cap.rate_limit is a registered code");
+    assert_eq!(snapshot.message, normalized);
+    assert_round_trips(&snapshot);
+    // The same text through the error-kind label route reaches `err.msg` whole.
+    let info = LifecycleErrorInfo::from_action_failure("rate_limit", raw);
+    let labeled = info.snapshot.as_deref().expect("rate_limit is a failure label");
+    assert_eq!(labeled.message, normalized);
+    assert_eq!(info.msg, labeled.message);
+
+    // A facet-less action failure: no snapshot, `err.msg` still complete.
+    let (raw, normalized) = long_raw_and_normalized("ACTION-END");
+    let info = LifecycleErrorInfo::from_action_failure("shell", raw);
+    assert!(info.snapshot.is_none(), "`shell` is not a failure label");
+    assert_eq!(info.msg, normalized);
+
+    // A catalog miss: an unregistered error falls back to its own prose.
+    #[derive(Debug)]
+    struct Prose(String);
+    impl std::fmt::Display for Prose {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+    impl std::error::Error for Prose {}
+    let (raw, normalized) = long_raw_and_normalized("MISS-END");
+    let info = LifecycleErrorInfo::from_error_or_action("shell", &Prose(raw));
+    assert!(info.snapshot.is_none(), "nothing in the chain is registered");
+    assert_eq!(info.msg, normalized);
 }

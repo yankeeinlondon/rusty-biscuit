@@ -364,10 +364,9 @@ A lifecycle action failure that no error return carries is shown through
 `initialize`/`start` and for every loop gate (`run_loop_gate`, shared by all
 four looping owners), `report_container_failure` for the root sequence's
 recorded failures (`RootRun::report_recorded`, skipping the error its producer
-already reported) and a step's `TaskOutcome.secondary_errors`. Its
-`actionable_text` is the one place the reported text is chosen: the complete
-`err.msg` (`LifecycleErrorInfo::msg`), which is never shortened (run, step,
-and setup errors read it too). Tests:
+already reported) and a step's `TaskOutcome.secondary_errors`. Both report
+the complete `err.msg` (`LifecycleErrorInfo::msg`), which is never shortened
+(run, step, and setup errors read it too). Tests:
 `cli/tests/l1/lifecycle_refusal_reports.rs`,
 `lib/src/composition/looping/engine/tests/gate_action_errors.rs`.
 

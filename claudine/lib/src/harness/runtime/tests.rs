@@ -33,7 +33,7 @@ struct Case {
 #[test]
 fn cascade_and_suffix_matrix() {
     let cases: &[Case] = &[
-        // Source 1: provider error_message, first non-empty line.
+        // Source 1: provider error_message, kept whole.
         Case {
             name: "provider error_message (rate limit)",
             build: || {
@@ -179,18 +179,36 @@ fn cascade_and_suffix_matrix() {
 }
 
 #[test]
-fn error_message_first_line_stripped_and_clamped() {
+fn an_explicit_error_keeps_every_line() {
     let mut o = outcome(ProcessTermination::Completed);
-    let long_tail = "x".repeat(300);
-    o.error_message = Some(format!("\x1b[31mBilling error\x1b[0m\n{long_tail}"));
-    assert_eq!(failure_message(&o, 1), "Billing error");
+    let long_line = "x".repeat(300);
+    o.error_message = Some(format!(
+        "\x1b[31mBilling error\x1b[0m\n{long_line}\nTHE-END"
+    ));
+    assert_eq!(
+        failure_message(&o, 1),
+        format!("Billing error {long_line} THE-END")
+    );
+}
 
-    o.error_message = Some(long_tail);
-    let rendered = failure_message(&o, 1);
-    // The `…` counts against the cap now, so the whole string fits within
-    // FAILURE_MESSAGE_MAX_CHARS rather than spilling one char past it.
-    assert_eq!(rendered.chars().count(), FAILURE_MESSAGE_MAX_CHARS);
-    assert!(rendered.ends_with('…'));
+#[test]
+fn an_escape_only_error_falls_through_to_stderr() {
+    let mut o = outcome(ProcessTermination::Completed);
+    o.error_message = Some("\x1b[31m\x1b[0m\n\t".into());
+    o.stderr_text = Some("warming\nreal failure".into());
+    assert_eq!(failure_message(&o, 1), "real failure");
+}
+
+#[test]
+fn a_blank_error_falls_through_to_the_exit_code_message() {
+    let mut o = outcome(ProcessTermination::Completed);
+    o.exit_code = 7;
+    o.error_message = Some("  \n\r\n ".into());
+    assert_eq!(failure_message(&o, 1), "agent exited with error code 7");
+    assert_eq!(
+        failure_message(&o, 2),
+        "agent exited with error code 7 (attempt 2)"
+    );
 }
 
 #[test]
@@ -220,24 +238,31 @@ fn guard_context_pattern_escapes_stripped() {
 }
 
 #[test]
-fn guard_context_pattern_over_cap_is_clamped() {
+fn a_long_guard_pattern_is_kept_whole() {
+    let pattern = "x".repeat(300);
     let mut o = outcome(ProcessTermination::Aborted);
     o.guard_context = Some(GuardContext {
-        pattern: Some("x".repeat(300)),
+        pattern: Some(pattern.clone()),
         ..GuardContext::default()
     });
-    let rendered = failure_message(&o, 1);
-    assert!(rendered.chars().count() <= FAILURE_MESSAGE_MAX_CHARS);
-    assert!(rendered.ends_with('…'));
+    assert_eq!(
+        failure_message(&o, 1),
+        format!("exit expression matched: {pattern}")
+    );
+    assert_eq!(
+        failure_message(&o, 2),
+        format!("exit expression matched: {pattern} (attempt 2)")
+    );
 }
 
 #[test]
-fn oversized_message_with_suffix_respects_cap_and_keeps_suffix() {
+fn a_long_message_keeps_its_whole_text_and_the_suffix() {
+    let message = "x".repeat(300);
     let mut o = outcome(ProcessTermination::Completed);
-    o.error_message = Some("x".repeat(300));
+    o.error_message = Some(message.clone());
     let rendered = failure_message(&o, 2);
-    assert!(rendered.chars().count() <= FAILURE_MESSAGE_MAX_CHARS);
-    assert!(rendered.ends_with("(attempt 2)"));
+    assert_eq!(rendered, format!("{message} (attempt 2)"));
+    assert!(!rendered.contains('…'));
 }
 
 #[test]
@@ -290,15 +315,17 @@ fn stderr_last_line_ansi_stripped() {
 }
 
 #[test]
-fn stderr_oversized_last_line_clamped_to_single_line() {
-    // Single-line + 240-char final length on a non-provider branch.
+fn a_long_last_stderr_line_is_kept_whole() {
+    // Only the last useful line is selected; it is never shortened.
+    let last_line = "x".repeat(300);
     let mut o = outcome(ProcessTermination::Completed);
     o.exit_code = 99;
-    o.stderr_text = Some(format!("warming up...\n{}", "x".repeat(300)));
-    let rendered = failure_message(&o, 1);
-    assert_eq!(rendered.lines().count(), 1);
-    assert!(rendered.chars().count() <= FAILURE_MESSAGE_MAX_CHARS);
-    assert!(rendered.ends_with('…'));
+    o.stderr_text = Some(format!("warming up...\n{last_line}\n"));
+    assert_eq!(failure_message(&o, 1), last_line);
+    assert_eq!(
+        failure_message(&o, 2),
+        format!("{last_line} (attempt 2)")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +442,7 @@ fn build_attempt_outcome_leaves_a_clean_summary_successful() {
 }
 
 #[test]
-fn the_incomplete_headline_is_clamped_while_the_facts_stay_complete() {
+fn the_incomplete_headline_names_every_task() {
     use crate::stream::task_ledger::TaskLedger;
 
     let mut ledger = TaskLedger::new();
@@ -433,20 +460,18 @@ fn the_incomplete_headline_is_clamped_while_the_facts_stay_complete() {
 
     let built = build_attempt_outcome(1, &summary, ProcessTermination::Completed);
     let headline = failure_message(&built, 1);
-    // The headline obeys the shared 240-character hygiene contract …
-    assert!(
-        headline.chars().count() <= 240,
-        "headline was {} chars: {headline}",
-        headline.chars().count()
-    );
     assert!(headline.starts_with("40 sub-agent tasks did not complete"), "{headline}");
-    // … and the truncation it forces never reaches the machine record.
+    assert!(
+        headline.contains("a-deliberately-long-sub-agent-task-name-39"),
+        "the last task must be named: {headline}"
+    );
+    assert!(!headline.contains('…'));
     assert_eq!(summary.subagent_outcomes.len(), 40);
     assert!(
         summary
             .subagent_outcomes
             .iter()
             .any(|fact| fact.task_id.as_deref() == Some("sa_39")),
-        "the last fact must survive the headline clamp"
+        "the last fact stays in the machine record"
     );
 }

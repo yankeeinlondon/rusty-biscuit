@@ -263,6 +263,37 @@ fn a_composed_error_runs_finalize_without_failed_and_exits_nonzero() {
 }
 
 #[test]
+fn a_long_composed_error_reaches_the_diagnostic_and_err_msg_whole() {
+    let fixture = CliProcessFixture::named("lifecycle-long-composed-error");
+    let text = format!("{}TAIL-MARKER", "long reason ".repeat(49));
+    assert!(text.chars().count() > 590, "the error must exceed the old 240-character limit");
+    let doc = fixture.write_file(
+        "cwd/doc.md",
+        &format!(
+            "---\ncomposed:\n  - error: \"{text}\"\nfinalize:\n  - info: \"event:finalize {{{{ err.msg }}}}\"\n---\nbody\n"
+        ),
+    );
+    let ran = compose(&fixture, &doc, &[]);
+    assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+    assert_eq!(events(&ran.stderr), ["finalize"], "{}", ran.stderr);
+
+    let finalize = ran
+        .stderr
+        .lines()
+        .find(|line| line.contains("event:finalize"))
+        .expect("finalize ran");
+    assert!(finalize.contains(&text), "err.msg was shortened: {finalize}");
+    assert!(!finalize.contains('…'), "{finalize}");
+    assert!(
+        ran.stderr
+            .lines()
+            .any(|line| !line.contains("event:finalize") && line.contains("TAIL-MARKER")),
+        "the terminal diagnostic lost the tail: {}",
+        ran.stderr
+    );
+}
+
+#[test]
 fn a_bare_error_in_composed_names_the_md_event() {
     let fixture = CliProcessFixture::named("lifecycle-bare-error");
     let doc = fixture.write_file(

@@ -116,6 +116,8 @@ pub trait DiagnosticSnapshotExt: Sized {
     /// reconstructable from a label, so every declared key is seeded `null` via
     /// [`null_detail_for`] — the object stays catalog-shaped rather than a
     /// top-level `null` (spec §D7). There is no typed cause to project.
+    /// `message` is normalized like a typed diagnostic's `Display`:
+    /// escape-free, one line, never shortened.
     ///
     /// ## Returns
     ///
@@ -155,7 +157,7 @@ impl DiagnosticSnapshotExt for DiagnosticSnapshot {
             origin: spec.origin.as_str().to_string(),
             severity: spec.severity().as_str().to_string(),
             detail: null_detail_for(spec.code),
-            message,
+            message: concise_message(&message),
             cause: None,
             frontmatter_excerpt: None,
         })

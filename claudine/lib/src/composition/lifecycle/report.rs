@@ -14,11 +14,6 @@ use super::LifecycleSignal;
 use super::context::LifecycleErrorInfo;
 use super::executor::LifecycleEventOutcome;
 
-/// The text a reported failure shows the author: the complete `err.msg`.
-fn actionable_text(error: &LifecycleErrorInfo) -> &str {
-    error.msg.as_str()
-}
-
 /// Warn about a document event's action error that the run's error does not
 /// carry.
 ///
@@ -40,7 +35,7 @@ pub fn warn_tolerated_action_error(
     }
     if let Some(error) = outcome.action_error.as_ref() {
         let event = signal.property_name();
-        emitter.emit_warn(&format!("`{event}` action failed: {}", actionable_text(error)), term);
+        emitter.emit_warn(&format!("`{event}` action failed: {}", error.msg), term);
     }
 }
 
@@ -54,5 +49,5 @@ pub fn report_container_failure(
     subject: &str,
     error: &LifecycleErrorInfo,
 ) {
-    emitter.emit_error(&format!("{subject} failed: {}", actionable_text(error)), term);
+    emitter.emit_error(&format!("{subject} failed: {}", error.msg), term);
 }

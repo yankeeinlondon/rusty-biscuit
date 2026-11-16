@@ -682,8 +682,8 @@ fn timing_from_instants_omits_total_ms_without_run_start() {
 
 /// `err.msg` feeds TTS, webhooks, and desktop notifications verbatim, so it is
 /// hygiened at the *constructor*, not at each producer. The nastiest input a
-/// producer can hand over — multi-line, escape-bearing, and far over the cap —
-/// must still come out usable.
+/// producer can hand over — multi-line, escape-bearing, and long — must come
+/// out as one escape-free line that keeps every word.
 #[test]
 fn err_msg_is_hygiened_for_a_hostile_action_failure() {
     let hostile = format!(
@@ -696,15 +696,14 @@ fn err_msg_is_hygiened_for_a_hostile_action_failure() {
     assert!(!msg.is_empty());
     assert!(!msg.contains('\u{1b}'), "escape bytes survived: {msg:?}");
     assert!(!msg.contains('\n') && !msg.contains('\r'), "not one line: {msg:?}");
-    assert!(msg.chars().count() <= 240, "over cap ({}): {msg:?}", msg.chars().count());
-    assert!(msg.contains("boom"), "headline lost: {msg:?}");
+    assert_eq!(msg, format!("boom second line third line {}", "x".repeat(500)));
 }
 
 /// The same hygiene contract, asserted over every constructor that can reach
 /// `err.msg` — a typed error of each registered kind plus the facet-less
 /// action-failure path.
 #[test]
-fn every_err_msg_producer_is_single_line_escape_free_and_capped() {
+fn every_err_msg_producer_is_single_line_and_escape_free() {
     let cases: Vec<(&str, LifecycleErrorInfo)> = vec![
         (
             "claudine",
@@ -747,18 +746,13 @@ fn every_err_msg_producer_is_single_line_escape_free_and_capped() {
             "`{name}` is multi-line: {:?}",
             info.msg
         );
-        assert!(
-            info.msg.chars().count() <= 240,
-            "`{name}` exceeds the cap: {:?}",
-            info.msg
-        );
     }
 }
 
 /// The provider attempt cascade keeps its ratified precedence and its
-/// budget-reserved `(attempt N)` suffix: the constructor's hygiene pass is
-/// idempotent over an already-hygiened `failure_message`, so re-running it
-/// cannot re-truncate or re-order the cascade's choice.
+/// `(attempt N)` suffix intact: the constructor's hygiene pass is idempotent
+/// over an already-hygiened `failure_message`, so re-running it cannot alter
+/// the cascade's choice.
 #[test]
 fn provider_failure_message_precedence_survives_the_constructor() {
     let outcome = crate::harness::AttemptOutcome {
