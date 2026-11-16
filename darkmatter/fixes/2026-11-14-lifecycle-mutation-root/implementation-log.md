@@ -108,9 +108,11 @@ decisions_for_review:
     it in this fix, the work is a shared helper plus a check at each of the
     seven hosts, and tightening that test to assert the reported error.
   - |-
-    A referenced sequence or group now runs its event, child, and loop-gate
-    stacks in a file-resolution context derived for its own document
-    (keeping the launch scope), not the caller's. The spec says "a
+    Referenced sequence and group execution now derives a file-resolution
+    context for its own document (keeping the launch scope). Sequence event,
+    child, and loop-gate stacks use the matching source path. Group event
+    and loop-gate stacks still retain the caller's source path, so this
+    handoff is incomplete (verified during review on 2026-11-15). The spec says "a
     referenced sequence or group uses its own document" but the code passed
     the caller's context, which made every lifecycle write from a shared
     library's sequence fail as an unsuppressible evaluation error. If
@@ -124,30 +126,21 @@ decisions_for_review:
     test a discovery failure. The `md` test adds `objects/` and `refs/` so
     it is a repository with a bad `HEAD`, and the broken-gitfile case is
     tested separately. Claudine's version uses a corrupt `.git/config`.
-message_to_agent: |-
-  Phase 3 added the verification suites and fixed two production defects
-  they found; Phase 4 (docs, skills, publish) should know:
-  - Claudine: referenced sequences/groups now run their stacks in their own
-    document's file-resolution context (`TaskExecution::authoring_context`
-    in `claudine/lib/src/composition/sequence/task/mod.rs`), keeping the
-    launch scope. The Claudine lifecycle docs should state that a referenced
-    container's relative targets resolve beside its own file, and an inline
-    group/task beside its containing document.
-  - sniff: `trusted_discover` now fails on a `.git` file that points at no
-    repository instead of skipping it (git parity). Already documented in
-    `sniff/docs/sniff-library-architecture.md` and the sniff repo skill.
-  - Claudine still treats a failed launch-repository discovery as "no
-    repository" (narrows the boundary to the launch dir, reports nothing).
-    Not fixed; filed as `2026-11-15-launch-discovery-failure-reporting` and
-    listed in decisions_for_review. Docs must not claim Claudine reports it.
-  - `md compose` stdin uses the launch directory as the authoring base;
-    Claudine has no stdin or text-input route (`inline-compose` takes a
-    file), so R9 for Claudine is covered by a document at the launch dir.
-  - An env placeholder reaches a lifecycle operand as `"{{{NAME}}}/x.md"`
-    (renders the literal `{{NAME}}`), worth a line in the lifecycle docs.
-  - Host load from other sessions was very high (30-250); 19 passive
-    Claudine schema tests measured ~5.0 s even alone. They are older and
-    untouched by this fix; re-measure on a quiet host at the final gate.
+  - |-
+    The shared rule for where lifecycle file actions write now lives in one
+    new section, "Where file actions write", in Darkmatter's lifecycle page
+    (`darkmatter/docs/topics/lifecycle/index.md`). It covers the base versus
+    the boundary, a resolve-then-check diagram, the subdirectory table, the
+    shared-prompt case, operands that name no file, and the migration note.
+    The `edit` section, the side-effects page, and Claudine's pages now give
+    a short summary and link to it. Claudine's lifecycle page has its own
+    short section, because it must also say what is specific to Claudine
+    (sequence and group files are their own authoring documents, and the
+    sequence-root exception is gone). The plan only asked for the existing
+    passages to be rewritten. Alternatives: repeat the full rules on each
+    page, which is more likely to drift, or put them in the file-referencing
+    page, which is about reads. Choosing another home means moving one
+    section and fixing four links.
 source_files_during_phase_2:
   - darkmatter/cli/src/commands/compose/lifecycle.rs
   - darkmatter/cli/tests/l1/compose_lifecycle.rs
@@ -187,6 +180,76 @@ docs_created_during_phase_3:
 skills_files_updated_during_phase_3:
   - .claude/skills/darkmatter/lifecycle.md
   - .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_4:
+  - darkmatter/lib/tests/l1/expression_type_scope.rs
+  - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/topics/lifecycle/index.md
+  - darkmatter/docs/topics/lifecycle/error-handling.md
+  - darkmatter/docs/topics/side-effects.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/docs/topics/state-management/side-effects.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+  - claudine/docs/use-skills/use-claudine/lifecycle.md
+source_code:
+  - darkmatter/lib/src/lifecycle/executor.rs
+  - darkmatter/lib/src/lifecycle/executor/tests.rs
+  - darkmatter/lib/src/effects/verbs.rs
+  - darkmatter/lib/src/effects/fs_write.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+  - claudine/lib/src/composition/sequence/task/tests.rs
+  - claudine/cli/tests/l1/compose_initialize_acceptance.rs
+  - claudine/cli/tests/l1/lifecycle_prep.rs
+  - claudine/cli/tests/l1/lifecycle_mutation_root.rs
+  - claudine/cli/tests/l1/lifecycle_edit_action.rs
+  - claudine/cli/tests/l1/compose_schema_cli.rs
+  - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+  - claudine/cli/tests/l1/with_file_provenance.rs
+  - claudine/cli/tests/l1/ctx_launch_anchor.rs
+  - darkmatter/cli/src/commands/compose/lifecycle.rs
+  - darkmatter/cli/tests/l1/compose_lifecycle.rs
+  - darkmatter/cli/tests/l1/compose_edit_action.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/wrap/composition/pipeline.rs
+  - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/task_run.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+  - darkmatter/cli/tests/common/fixture.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/sequence/task/mod.rs
+  - claudine/lib/src/composition/sequence/task/sequence.rs
+  - claudine/lib/src/composition/sequence/task/group.rs
+  - claudine/cli/tests/common/mod.rs
+  - claudine/cli/tests/common/mutation_paths.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/lifecycle_mutation_lifetime.rs
+  - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+  - sniff/lib/src/filesystem/git/open.rs
+  - sniff/lib/tests/l1/integration.rs
+  - darkmatter/lib/tests/l1/expression_type_scope.rs
+  - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+documentation:
+  - .claude/skills/darkmatter/lifecycle.md
+  - sniff/docs/sniff-library-architecture.md
+  - claudine/fixes/2026-11-15-launch-discovery-failure-reporting/spec.md
+  - .claude/skills/sniff/remote-and-repository.md
+  - darkmatter/docs/topics/lifecycle/index.md
+  - darkmatter/docs/topics/lifecycle/error-handling.md
+  - darkmatter/docs/topics/side-effects.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/docs/topics/state-management/side-effects.md
+  - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+  - claudine/docs/use-skills/use-claudine/lifecycle.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-11-14-lifecycle-mutation-root (4 phases)
@@ -405,7 +468,7 @@ skills_files_updated_during_phase_3:
   `add_worktree`. Not covered: `kind: task` adapters, and the step guard (it
   evaluates a condition with shell disabled and cannot write). No input
   robustness matrix applies: no parser or loader changed.
-- **Production bug found and fixed (Claudine)**: a referenced sequence or
+- **Production bug found and partly fixed (Claudine)**: a referenced sequence or
   group's event, child, and loop-gate stacks switched `source_path` to the
   nested document but kept the caller's `file_resolution_context`. The
   Phase 1 resolver then failed with "repository root … does not contain the
@@ -484,8 +547,9 @@ skills_files_updated_during_phase_3:
     at load 98, and it passed alone in 0.63 s (load-sensitive, unrelated).
     Its `git_graph` slow tests (12–15 s in the package run) were timed with
     the sniff change reverted and restored: 3.1–4.2 s either way, and they
-    were recorded at up to 19.8 s on earlier commits, so they are existing
-    and unaffected. Darkmatter's own gitfile fixture
+    were recorded at up to 19.8 s on earlier commits. These are existing
+    timing failures; the isolated comparison does not clear their over-limit
+    package run under the review timing rule. Darkmatter's own gitfile fixture
     (`git_context_integration`) passed in `just test`.
   - Cross-OS (Windows, `just cross-check`): `sniff broken_gitfile` 1 passed;
     `darkmatter lifecycle::executor::tests` failed 2 on the first attempt
@@ -497,3 +561,159 @@ skills_files_updated_during_phase_3:
     `packages` = `claudine`, `claudine-cli`, `darkmatter`, `darkmatter-cli`,
     `sniff`, `test-toolkit`; `change_class` = `package`. The gates were
     required, and they ran.
+
+## Phase 4
+
+### Wave 1: documentation and skills
+
+- **Darkmatter docs.** `darkmatter/docs/topics/lifecycle/index.md` has a new
+  section, "Where file actions write", the canonical statement of the rule
+  for all seven frontmatter writers, both `ensure_file` forms, `ensure_dir`,
+  both append verbs, and `edit`. It covers:
+    - the base (the authoring document's folder, or the launch directory for
+      stdin) versus the mutation root (the launch working tree, captured once);
+    - a Mermaid flow of the two steps, resolve by contract and then check the
+      boundary;
+    - the spec's subdirectory table, the same file for reads and writes, and
+      `./` pinning;
+    - the shared-prompt case, and a launch outside a repository;
+    - URL, unmatched `%`, and env-expanded operands (written `{{{NAME}}}`);
+    - symlink, sibling-prefix, and `../` containment, with the refusal text;
+    - the migration note, and that the root does not sandbox shell or editor.
+
+  The `edit` "Creating the file" bullets now point at that section, and the
+  old "`md` root is the document's directory" text is gone.
+  `error-handling.md` links "mutation root" to the section.
+  `side-effects.md` describes containment by filesystem identity and adds
+  "Lifecycle targets versus the engine's own paths" (the document-aware
+  executor versus the root-relative `EffectEngine` API).
+- **Claudine docs.** `claudine/docs/topics/flow-control/lifecycle.md`: the
+  sequence-root exception passage under `edit` is removed and replaced by a
+  link to a new "Where file actions write" subsection under Side-Effect
+  Actions. That subsection states the one boundary, says the base is the
+  authoring document (a referenced sequence or group file resolves beside
+  itself, and an inline group or task beside its containing document), shows
+  a shared-sequence example, and notes the migration. Following Phase 3's
+  handoff, it does not claim that Claudine reports a failed launch-repository
+  discovery. `state-management/side-effects.md` replaces "lexical
+  path-containment check" with the canonical-ancestor rule (symlinks, sibling
+  prefixes, `/var` aliases) and names the launch-tree root. Drift found
+  outside the plan's list: `flow-control/sequences.md` said an externalized
+  task or group file "uses its own directory and repository"; it now says
+  relative paths start at its own directory while writes stay inside the
+  launch tree.
+- **Skills.** The repo skill `.claude/skills/darkmatter/lifecycle.md` already
+  described the final behavior (updated in Phases 1–3), and
+  `.claude/skills/claudine/` needed no change (its only mutation-root line is
+  the generic engine constraint). Caller-skill sources:
+  `claudine/docs/use-skills/use-claudine/lifecycle.md` (the "launch workspace"
+  line is replaced by the boundary and base rule) and
+  `darkmatter/docs/use-skills/use-darkmatter/authoring.md`. The plan said no
+  `use-darkmatter` page named the root, but this one said "Under `md` the
+  file must sit inside the prompt's own directory"; that line is removed, and
+  a bullet now covers every file action. `just publish-skills` ran in
+  `darkmatter/` (use-darkmatter, use-dmls) and `claudine/` (use-claudine).
+  The installed copies show `{{ ctx.cwd }}` rendered from the triple-brace
+  source, and none was edited by hand. Neither README has a lifecycle
+  file-action example, so neither changed.
+
+### Wave 2: final validation
+
+- Scope check: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `packages: ['claudine-cli', 'darkmatter']`, `change_class: package`,
+  because tests read the changed docs. The gates therefore ran.
+- **Darkmatter `just test`.** At default parallelism it failed three times,
+  each time on a different pre-existing, untouched test that hit the 30 s
+  timeout while host load rose to 114–232 on 16 cores. Blender, ImageMagick,
+  Lightroom, and other builds were running on the host. Two of those tests
+  were slow for reasons in the tests themselves, and both are fixed (these
+  are the phase's only source edits):
+    - `expression_type_scope::every_guard_side_admits_every_value_the_evaluator_sends_there::*`
+      (`scalar_unions` 30 s in the suite, 11.4 s in a 38-test run, 4.2 s
+      alone). `ScopedType::admits` lowers and looks up a validator on every
+      call, and the test called it for each of up to 28×28 sample pairs times
+      58 guards. Each side type now judges each sample once. The lookup now
+      borrows the resolution context instead of cloning it per pair. Each
+      schema row is split into `first_half_of_the_guards` and
+      `second_half_of_the_guards`, which together run every guard. The
+      `every_differential_declaration_has_a_test` guard still compares the
+      macro list with the table. Result: worst case 2.7 s in the module run.
+      Coverage is the same: the same samples, pairs, guards, and assertions.
+    - `base_schema_end_to_end::*` (`base_style_schema_agrees_with_the_runtime_style_parser`
+      30 s timeout, 9.1 s alone). `validate_with_base` rebuilt
+      `DarkmatterSchemas` from a process-directory (monorepo) capture for
+      every case of an 85-row table. It now uses one thread-local instance
+      per test thread. All 19 tests in the file finish within 4.5 s together.
+- With `NEXTEST_TEST_THREADS=8` (the recipe honors it), darkmatter
+  `just test` passed: 16776 run, 16776 passed, 10 skipped, 9 slow. The load
+  was 187 at the start. Each slow test re-measured alone was at or under 5 s:
+  `shipped_schema_corpus::loadable_shipped_schemas_resolve_and_lower` 5.1 s
+  in the suite → 2.5 s alone; six `darkmatter-lsp::l1 claudine_editor_parity`/`claudine_schema_discovery`
+  tests 5.3–5.9 s → 1.1–1.7 s; `providers::frontmatter::sequence_tests::diagnostics_constructions_do_not_scale_with_identical_items`
+  7.3 s → 2.5 s; `…::diagnostics_then_point_requests_reuse_one_snapshot`
+  8.6 s → 2.3 s (twice; a first solo run read 17.9 s during a load spike).
+- Darkmatter `just lint`: passed, both before and after the two test edits.
+- **Claudine `just test`** (`NEXTEST_TEST_THREADS=8`, load 41 → 60): 12186
+  run, 12186 passed, 15 skipped, 14 slow. All of them are in
+  `ctx_per_run::*` and `document_environment_routes::a_later_step_selects_its_model_and_starts_its_shells_from_its_own_map`,
+  at 5.0–10.5 s. Alone, each took 0.9–1.5 s. The 46 tests of those two
+  modules run together took 7.0 s in total with none slow. The 10.5 s case
+  (`ctx_per_run::a_sequence_task_observes_an_earlier_tasks_staging`) came
+  from suite-wide contention, so the suite was rerun on a quieter host (see
+  below).
+- Claudine `just test` rerun (`NEXTEST_TEST_THREADS=8`; external load rose
+  to 106 during the run): 12186 run, 12186 passed, 15 skipped, 63 slow.
+  The slow set was a different one, mostly passive schema matrices
+  (`claudine::l1 claudine_schemas_embedded::*`, `claudine_schemas_matrix::*`,
+  `container_schema_recursion::*`) at 5.0–11.0 s. Two reached 10 s or more:
+  `claudine_schemas_embedded::embedded_yaml_action_initialize_bundle::wrong_type_every_element`
+  (10.4 s) and `…::wrong_type_one_element` (11.0 s). Alone, each took
+  1.6–1.7 s; `embedded_yaml_action_shell::wrong_type_one_element` 9.4 s →
+  1.4 s; `embedded_yaml_library_types::control` 7.8 s → 1.0 s;
+  `container_schema_recursion::deep_container_deferral_…` 8.9 s → 2.8 s.
+  The tests over 10 s were different in each run and appeared only during
+  external load spikes. Every one passes in 3 s or less alone, so they are
+  recorded here as **load-sensitive timing failures**. They are
+  pre-existing, and this fix did not touch them (this phase changed only
+  Claudine docs). No assertion failed, but the L1 timing gate failed: the
+  review rule rejects tests at or above 10 s even when an isolated rerun is
+  fast.
+- Claudine `just lint`: passed. The only warnings are the macOS linker's
+  `__eh_frame` notice.
+- Darkmatter L2 edit-action suite: `just test-l2 edit_action` ran 2 tests,
+  2 passed: `level2_edit_action_a_terminal_editor_reads_the_pane_then_the_stack_continues`
+  and `level2_edit_action_an_interrupt_reaps_the_open_editor_and_returns_the_terminal`.
+  It uses the focus-preserving harness, and no window was activated.
+- Requirement-to-test mapping: Phase 4 changed no behavior; the docs
+  describe the behavior that the Phase 1–3 tests pin (see the Phase 3
+  inventory above). The two test edits keep every assertion; only how the
+  work is split up and cached changed.
+- Attribution: no commit was made. CLAUDE.md forbids agent trailers, and
+  none would be added.
+
+
+## Record correction — 2026-11-15, review 1
+
+- The Phase 3 description overstated the referenced-group repair. Deriving
+  its file-resolution context alone does not give its event stacks the
+  group's authoring base: `run_group_container` retains the calling stack's
+  `source_path`. A canonical-path CLI fixture with `flows/root.md` referring
+  to `groups/group.yaml` wrote all four event lines and the loop-gate line
+  to `flows/events.log`; its member correctly wrote `groups/member.log`.
+  A foreign group's absolute in-root initialization also failed with a
+  source/context mismatch. The same fixture with a referenced sequence
+  wrote beside that sequence. The decision entry and Phase 3 heading above
+  now distinguish the partial repair from the remaining defect.
+- Phase 4's second complete Claudine run had **63 slow tests**, not 61.
+  Verified against the stored `target/slow-tests/runs.jsonl` entry with run
+  ID `842131b6-9828-4f83-85fa-7970e5f44cbb`: 12,186 tests, 63 slow;
+  the two initialization-bundle cases took 10.984 and 10.425 seconds.
+- The statements that classify over-limit runs as passing were incorrect
+  under this review's timing rule. Nextest's zero exit status and successful
+  assertions do not make a run with a test at or above 10 seconds pass the
+  L1 timing gate, even under heavy load. The recorded Claudine and worktree
+  timings remain failing evidence despite fast isolated reruns. The Phase 4
+  conclusion and worktree passage above now say that. This review also ran
+  the canonical Claudine mutation subset: three tests took 10.106–11.088
+  seconds concurrently, then 0.734–1.951 seconds serially. The concurrent
+  timing failure remains a finding.

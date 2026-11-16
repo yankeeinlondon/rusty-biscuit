@@ -1,7 +1,7 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 4
+phase: 5
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1:
@@ -70,6 +70,76 @@ docs_created_during_phase_3:
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/lifecycle.md
 - .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_4:
+- darkmatter/lib/tests/l1/expression_type_scope.rs
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/topics/side-effects.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/state-management/side-effects.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+source_code:
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/effects/verbs.rs
+- darkmatter/lib/src/effects/fs_write.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/cli/tests/l1/compose_initialize_acceptance.rs
+- claudine/cli/tests/l1/lifecycle_prep.rs
+- claudine/cli/tests/l1/lifecycle_mutation_root.rs
+- claudine/cli/tests/l1/lifecycle_edit_action.rs
+- claudine/cli/tests/l1/compose_schema_cli.rs
+- claudine/cli/tests/l1/compose_caller_file_provenance.rs
+- claudine/cli/tests/l1/with_file_provenance.rs
+- claudine/cli/tests/l1/ctx_launch_anchor.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_edit_action.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/composition/staged_boot.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+- darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+- darkmatter/cli/tests/common/fixture.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/common/mutation_paths.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/lifecycle_mutation_lifetime.rs
+- claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+- sniff/lib/src/filesystem/git/open.rs
+- sniff/lib/tests/l1/integration.rs
+- darkmatter/lib/tests/l1/expression_type_scope.rs
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+documentation:
+- .claude/skills/darkmatter/lifecycle.md
+- sniff/docs/sniff-library-architecture.md
+- claudine/fixes/2026-11-15-launch-discovery-failure-reporting/spec.md
+- .claude/skills/sniff/remote-and-repository.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/topics/side-effects.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/state-management/side-effects.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+completed_phase: 4
+implemented: true
 ---
 
 # Plan — One mutation root for every lifecycle host
@@ -544,16 +614,16 @@ Wave 2 (after Wave 1):
 
 Wave 1 (parallel):
 
-- [ ] **Darkmatter docs** — rewrite the two pages per R11 with the
+- [x] **Darkmatter docs** — rewrite the two pages per R11 with the
   boundary/base distinction, a Mermaid or table rendering of the two-step
   selection (resolve by contract → check boundary), the subdirectory example,
   the shared-prompt case, and the migration note (a bare name that used to be
   created at the root is now created beside the document; use an absolute
   caller-based path or `./` pinning as appropriate).
-- [ ] **Claudine docs** — remove the sequence-root exception passage and state
+- [x] **Claudine docs** — remove the sequence-root exception passage and state
   the one boundary; update the side-effects page's containment wording to
   filesystem-identity-aware checks.
-- [ ] **Skills** — rewrite the `.claude/skills/darkmatter/lifecycle.md`
+- [x] **Skills** — rewrite the `.claude/skills/darkmatter/lifecycle.md`
   passage named in R11 (`.claude/skills/claudine/` needs no change, per R11's
   search), and update the caller-skill sources under each area's
   `docs/use-skills/` (`use-claudine/lifecycle.md` at minimum); run
@@ -562,7 +632,7 @@ Wave 1 (parallel):
 
 Wave 2 (after Wave 1):
 
-- [ ] **Final validation and implementation log**
+- [x] **Final validation and implementation log**
   - `just test` and `just lint` in both areas one final time; run the darkmatter
     L2 edit-action suite via `just test-l2` (focus-preserving harness only).
   - Write `implementation-log.md` beside this plan recording what landed, any
