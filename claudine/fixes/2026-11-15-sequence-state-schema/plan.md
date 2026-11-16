@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-15
-phase: 6
+phase: 7
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -134,6 +134,88 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
 - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/schemas.md
+- claudine/docs/topics/execution-flow.md
+- claudine/docs/cli/sequence.md
+- claudine/docs/use-skills/use-claudine/sequences.md
+- claudine/schemas/README.md
+docs_created_during_phase_6:
+- claudine/fixes/2026-11-15-sequence-state-schema/implementation.md
+skills_files_updated_during_phase_6:
+- .claude/skills/claudine/SKILL.md
+source_code:
+- claudine/lib/src/composition/sequence/declarations.rs
+- claudine/lib/src/composition/sequence/declarations/tests.rs
+- claudine/lib/src/composition/sequence/formal.rs
+- claudine/lib/src/composition/sequence/grammar.rs
+- claudine/lib/src/composition/sequence/mod.rs
+- claudine/lib/src/composition/sequence/reserved.rs
+- claudine/lib/src/composition/sequence/source.rs
+- claudine/lib/src/composition/sequence/tests.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/lib/src/composition/sequence/task/group/branch.rs
+- claudine/lib/src/composition/runtime_state.rs
+- claudine/lib/src/composition/runtime_state/tests.rs
+- claudine/lib/src/composition/resolve.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/tests/l1/sequence_schema.rs
+- claudine/lib/generated/shipped.json
+- claudine/schemas/sequence.yaml
+- claudine/schemas/sequence-types.yaml
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/tests/l1/sequence_sources_cli.rs
+- claudine/cli/src/commands/wrap/sequence/phase1c.rs
+- claudine/cli/src/commands/wrap/sequence/tests.rs
+- claudine/cli/tests/l1/composition_seams.rs
+- claudine/lib/src/composition/error/render/sequence_loop.rs
+- claudine/lib/src/composition/error/tests.rs
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/service.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/src/composition/schema/translate.rs
+- claudine/lib/src/composition/sequence/document.rs
+- claudine/lib/src/composition/sequence/document/tests.rs
+- claudine/lib/src/composition/sequence/model.rs
+- claudine/lib/src/composition/sequence/normalize.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/shape.rs
+- claudine/lib/src/composition/sequence/preflight/inputs.rs
+- claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+- claudine/lib/src/composition/sequence/preflight/tests/scoped_graph.rs
+- claudine/lib/src/work_counters.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+- claudine/cli/src/commands/wrap/sequence/container.rs
+- claudine/lib/src/composition/sequence/task/tests/declaration_writes.rs
+- claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+- claudine/cli/tests/l1/sequence_referenced_state.rs
+- claudine/cli/tests/l1/sequence_frozen_graph.rs
+- claudine/cli/tests/l1/sequence_dry_run.rs
+- claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/complete.yaml
+- claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/plan.md
+- claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/spec.md
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/bin/fake_echo/main.rs
+- claudine/cli/Cargo.toml
+documentation:
+- .claude/skills/claudine/SKILL.md
+- claudine/docs/topics/frontmatter-properties.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/schemas.md
+- claudine/docs/topics/execution-flow.md
+- claudine/docs/cli/sequence.md
+- claudine/docs/use-skills/use-claudine/sequences.md
+- claudine/schemas/README.md
+- claudine/fixes/2026-11-15-sequence-state-schema/implementation.md
+completed_phase: 6
+implemented: true
 ---
 
 # Separate sequence document schemas from step-state schemas
@@ -831,7 +913,7 @@ validator and all cases for its loader, not a single isolated cell.
 
 ### Wave 11
 
-- [ ] **Current documentation**
+- [x] **Current documentation**
   - Update `docs/topics/flow-control/sequences.md`: the formal example uses
     `$state`; root `$schema` describes the document in both formats; show
     both keys together, immediate ownership, inline declarations, reserved
@@ -858,7 +940,7 @@ validator and all cases for its loader, not a single isolated cell.
 
 ### Wave 12
 
-- [ ] **Final verification**
+- [x] **Final verification**
   - Run from `claudine/`, sequentially: `just test`, `just lint`, then
     `just check-tier-coverage claudine`. The test recipe supplies Nextest,
     work counters, and the CLI test-fixture features. Do not run `cargo test`,

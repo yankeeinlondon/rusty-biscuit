@@ -76,7 +76,7 @@ decisions_for_review:
     - |-
         The passive `$state` view is just `$schema: <declaration>` in an empty in-memory frontmatter, resolved in the declaring file's context. Plan rule 8 also mentions including "the owner's sibling `types` definitions". Document frontmatter has no `types` key in Darkmatter (named types live in standalone schema documents and are imported with `Name@file`), so nothing was added. If a frontmatter-level `types` is wanted, it would have to be added in `PreparedSequenceSchema::prepare`, and Darkmatter would need to support it first.
     - |-
-        A referenced whole document's `template:` keeps the referring document's values as a *lowest* layer, below the document's own properties and the caller's setters. The spec says the referrer's properties never enter the referenced owner's values. Following it strictly breaks every shipped research fleet (`claudine/docs/research/*/_fleet.md`): their shared rosters (`_provider-tasks.yaml`, `_local-runner-tasks.yaml`) fill `prompt: "{{ research_prompt }}"` from the fleet, and until Phase 4 there is no other channel. The spec's intended channel, runtime `set` writes from `initialize` reaching root graph templates, arrives in Phase 4. Alternatives: (a) drop the layer now and break the fleets until they move to `initialize: set` after Phase 4; (b) keep this layer permanently as a documented feature. A document's own value always wins, so a directly invoked roster and a referenced one differ only for keys the roster leaves undefined. Removing the layer later means deleting the marked "Transitional" block in `sequence/source.rs::plan_referenced_sequence` and the test `document::tests::a_referrer_value_is_only_a_lowest_layer_under_a_referenced_documents_own`, after migrating the 22 fleets.
+        During Phase 2, referenced templates kept the referring document's values as a lowest layer to keep research fleets working before initialization writes were available. Iteration 3 verification correction (2026-11-15): this is historical, not current behavior. The first repair removed both fallback merges and moved all 22 fleets to initialization writes. Source inspection and the referenced-template, input-discovery, and research artifact tests in this review's 2,103-test sequence run verify that only the declaring owner's values, invocation inputs, and available runtime writes reach referenced templates.
     - |-
         An owner's values are prepared through `prepare_sequence_document_values` (one frontmatter compose) only when its `template:` has at least one string (expression) default *and* the caller supplied a captured compose context. Otherwise the template reads the authored values under the caller's setters, unconverted. This avoids a compose per sequence resolution when no template expression reads the values. Alternative: always prepare when a context is supplied, so `SequenceDocumentScope::values` is always the prepared form, at the cost of one extra frontmatter compose per owner. Reversing touches only the condition in `sequence/document.rs::owner_values`.
     - |-
@@ -98,7 +98,7 @@ decisions_for_review:
     - |-
         Discovery no longer fails on an owner's own preparation error other than a missing input (an invalid value, an `agent: []`, a removed spelling). It records the owner (`SequenceInputInventory::failed_owners`, opt-in through `InputDiscoveryOptions::leaving_verdicts`), and the CLI reports the error later, in the order it always had: the graph's structural errors and provider selection first. Then a strict rediscovery (`RootPlanRequest::recheck_owners`) raises a referenced owner's error, and Phase 1c's per-step probes raise the root's. An empty root is rechecked strictly too. Without this, 48 existing CLI tests changed which error they report. Alternative: let discovery fail first and update those tests to expect the schema verdict. That gives earlier but less specific errors (for example "`/sequence/0/group/tasks: []` has less than 1 item" instead of "`tasks` must declare at least one task"). Reversing means dropping `leaving_verdicts()` in `prepare_root_plan` and the recheck call in `wrap/sequence/mod.rs`.
     - |-
-        Discovery now fills a referenced document's `template:` from the referrer's values beneath the document's own, matching the transitional layer Phase 2 kept in `plan_referenced_sequence`. Without it, every shipped research fleet fails as soon as discovery runs. This keeps that transitional layer alive in a second place. Removing it later means deleting the block marked in `preflight/inputs.rs::walk_referenced` together with the one in `source.rs`.
+        During Phase 4, discovery duplicated Phase 2's transitional referrer fallback. Iteration 3 verification correction (2026-11-15): the earlier present-tense claim is no longer true. The first repair removed the block in `preflight/inputs.rs::walk_referenced` together with the one in `source.rs::plan_referenced_sequence`; the discovery and CLI owner-isolation cases passed in this review's sequence run.
     - |-
         Root `initialize` writes are layered above the caller's setters as caller-layer values for discovery, the root plan's templates, and the graph walk, including the values a shell command reads at approval. The spec asks for them in template preparation. Passing them to the graph's approval-time reads as well keeps approval reading what the command will read at its turn. Alternative: give them to discovery and the plan only. Reversing touches `RootPlanRequest::layers` in `phase1c.rs`.
     - |-
@@ -114,17 +114,13 @@ decisions_for_review:
     - |-
         A referenced or nested document's own authored file values (for example `spec: work/spec.md` under `file(eager)`) now resolve from that document's folder, using the context the graph derives (`InvocationContext::derive_source`). Setter values still resolve from the caller's recorded origin. When a library caller passes setters without recorded origins, `PrepareOptions::resolving_document_from` first records them against the caller's context, so changing the base never moves a setter. Alternative: change the base only when origins were recorded. That is simpler, but a library caller's setters would then resolve from the document's folder. Reversing touches `resolving_document_from` in `composition/prepare.rs`.
     - |-
-        Left unfixed, outside this fix's scope: a sequence task's `with:` value that is a relative file path is judged by the target prompt's `$schema` from the launch directory, not from the file that wrote the `with:`. The new CLI test `document_inputs::a_nested_documents_authored_file_value_resolves_from_its_own_folder` passes `absolute(spec)` to avoid this. If `with:` values should resolve from the file that wrote them, that is a separate fix, and the test can then pass `{{ spec }}`.
+        At the first review, passive approval judged a sequence task's relative `with:` file input from the launch directory and could reject a valid author-relative file, while runtime preparation used the authoring file correctly. Iteration 3 verification correction (2026-11-15): the statement that this was left unfixed is no longer current. The first repair carries the authored `with:` origin through approval and the step barrier. Relative, absolute, and competing-folder `with_file_provenance` cases passed in this review's 2,103-test sequence run. This is no longer deferred work.
     - |-
         A line-delimited (JSONL/NDJSON) record that holds `template` or `$state` is refused as a misplaced declaration (`SequenceDeclarationMisplaced` at `[i].<key>`), because a row cannot supply a declaration. The plan's matrix says line-delimited declarations "remain inactive data". The test `tests::loader_matrix::line_delimited_records_skip_blank_lines_and_name_a_trailing_invalid_record` asserts the refusal, which is what the code does today. Alternative: let such keys through as plain row data, which means special-casing the lenient normalizer.
     - |-
-        Windows coverage of templated `echo` rows comes from a new test-only `claudine-fake-echo` binary, installed as the fixture's `echo` by `CliProcessFixture::install_echo`. It runs on every OS, so Unix runs use it too, not `/bin/echo`. Alternatives: rewrite those rows to avoid a shell, or use the recorder binary and read its records. Rewriting a row as `side_effect: { set: { signed: "{{ seq.who }}" } }` turned up an unexplained difference: at a root-reference row (`sequence: lists/child.yaml`), `set` reads `seq.who` as `null`, while a shell command on the same row reads the template value. I did not investigate it; it may be a real gap in how side-effect values see a root-reference row's state. Reversing the binary choice touches `cli/Cargo.toml`, `cli/tests/bin/fake_echo/`, `install_echo`, and the two `run_sequence` helpers.
-message_to_agent: |-
-    Phase 5 added the coverage and fixed three defects; read "Defects found and fixed" under `## Phase 5` in this log. Things Phase 6 (docs) should know:
-    - New public function `reread_preflight_graph_with_invocation`: a root retry's approval walk reads nested rows as authored. `Loader::refresh` now applies at every depth of a nested reread. The repo skill's container preflight paragraph says both.
-    - Referenced and nested owners resolve their authored file values from their own folder, and setters from the caller's. `docs/topics/flow-control/sequences.md` ("What a referenced sequence reads") already has a paragraph on this. Keep it when you rewrite that page.
-    - The frozen reproduction is in `cli/tests/fixtures/frozen_prompts/sequence-state-schema/`. Its two `.md` files are registered in `lib/tests/l1/claudine_schema_shipped_corpus.rs`, because `every_shipped_document_has_one_test` requires every `.md` under `frozen_prompts/` to have a corpus test. A new `.md` fixture there needs a corpus row too.
-    - The plan's documentation task still owns the dry-run note text ("`<container>` checks its `$schema` at its turn (not evaluated in a dry run)") and the input-collection behavior; neither is documented yet.
+        Windows coverage of templated `echo` rows comes from a new test-only `claudine-fake-echo` binary, installed as the fixture's `echo` by `CliProcessFixture::install_echo`. It runs on every OS, so Unix runs use it too, not `/bin/echo`. Alternatives: rewrite those rows to avoid a shell, or use the recorder binary and read its records. Review correction (2026-11-15): the reported `set`/shell discrepancy was an incorrect reading of the side-effect result. A `set` side effect returns the prior values, so `{"signed":null}` does not mean it wrote null. Direct executions through the current CLI, followed by a shell reading `signed`, produced `signed=ada` for direct, root-reference, and nested-reference rows with `template: { who: ada }`. The runtime write correctly reads `seq.who`; no unresolved defect is established by the earlier probe. Reversing the binary choice touches `cli/Cargo.toml`, `cli/tests/bin/fake_echo/`, `install_echo`, and the two `run_sequence` helpers.
+    - |-
+        The caller skill (`use-claudine/sequences.md`) carries its own short summary of the sequence declarations instead of transcluding the canonical topic section, as the plan preferred. Darkmatter's `::file` can only include a whole file or exclude named headings, so including one section of the 1,500-line `sequences.md` would mean excluding every other heading by name, which breaks whenever a heading is added. The canonical section also has inline-code interpolation examples, which a transclusion would evaluate. Alternative: split the declarations section into its own topic file and transclude that file whole. Reversing means moving the "Sequence documents" section of `docs/topics/flow-control/sequences.md` into a new file, linking it from there, and replacing the caller-skill section with a `::file` directive (after rewriting its inline examples as fenced blocks).
 source_files_during_phase_3:
     - claudine/lib/src/composition/mod.rs
     - claudine/lib/src/composition/sequence/declarations.rs
@@ -193,6 +189,88 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/use-skills/use-claudine/sequences.md
+    - claudine/schemas/README.md
+docs_created_during_phase_6:
+    - claudine/fixes/2026-11-15-sequence-state-schema/implementation.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+source_code:
+    - claudine/lib/src/composition/sequence/declarations.rs
+    - claudine/lib/src/composition/sequence/declarations/tests.rs
+    - claudine/lib/src/composition/sequence/formal.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/group/branch.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - claudine/lib/generated/shipped.json
+    - claudine/schemas/sequence.yaml
+    - claudine/schemas/sequence-types.yaml
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/tests.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/lib/src/composition/error/render/sequence_loop.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/sequence/document.rs
+    - claudine/lib/src/composition/sequence/document/tests.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/scoped_graph.rs
+    - claudine/lib/src/work_counters.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/lib/src/composition/sequence/task/tests/declaration_writes.rs
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - claudine/cli/tests/l1/sequence_referenced_state.rs
+    - claudine/cli/tests/l1/sequence_frozen_graph.rs
+    - claudine/cli/tests/l1/sequence_dry_run.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/complete.yaml
+    - claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/spec.md
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/bin/fake_echo/main.rs
+    - claudine/cli/Cargo.toml
+documentation:
+    - .claude/skills/claudine/SKILL.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/use-skills/use-claudine/sequences.md
+    - claudine/schemas/README.md
+    - claudine/fixes/2026-11-15-sequence-state-schema/implementation.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-11-15-sequence-state-schema (6 phases)
@@ -456,13 +534,15 @@ those declarations.
   file) and for a whole referenced document (the target file). It is `None`
   for selections and dynamic sources. `normalize.rs` initializes it to
   `None`.
-- Transitional referrer layer: a whole referenced document's template still
-  reads the referrer's values, but only as the *lowest* layer, below the
+- Transitional referrer layer during Phase 2: a whole referenced document's template then
+  read the referrer's values, but only as the *lowest* layer, below the
   document's own values and the setters. Without it, all 22 shipped research
   fleets break (`research_sequence_artifacts` failed 4 tests): their shared
   rosters read `research_prompt` from the fleet, and the spec's intended
   channel (`initialize` `set` writes reaching root templates) is Phase 4's.
-  See `decisions_for_review`.
+  See `decisions_for_review`. Iteration 4 correction (2026-11-15): this layer
+  was removed in the first repair. The current source and passing referenced
+  template/discovery tests verify owner isolation; fleets now use runtime writes.
 - `cli/tests/l1/composition_seams.rs`: the R1 guard needed an allowlist entry
   for the new `compose_with` site `composition::prepare::prepare_values_on`.
   It is a stage of the sanctioned owner (frontmatter surface, shells disabled,
@@ -501,8 +581,11 @@ dirs, the captured `ComposeContext`, the real schema layer).
   own value over referrer, setter over own value, `file_exists` resolved
   beside the declaring file, `document_scope` is the target:
   `a_referenced_whole_document_fills_its_template_from_its_own_values`
-- The transitional referrer layer is lowest:
-  `a_referrer_value_is_only_a_lowest_layer_under_a_referenced_documents_own`
+- Iteration 4 correction (2026-11-15): the former lowest-referrer-layer test
+  was replaced by
+  `a_referenced_template_never_reads_a_value_only_its_referrer_defines`,
+  which passed in this review's sequence run. The current contract excludes
+  referring-document properties rather than assigning them low precedence.
 - Passive `$state`: a declared default is never written into the step:
   `state_validation_never_writes_into_the_step`
 - Offset and offset+operator selections ignore the selected file's
@@ -593,9 +676,11 @@ in `source_files_during_phase_3`.
 - A `template:` executable default is merged in before the item's executable
   is read: literal values directly, and expressions filled with
   `formal::fill_template_default`, a new one-key form of `apply_template`.
-- A root reference's rows are resolved from the invoking file's directory,
-  matching `walk_plan`, which runs them as root rows. A nested whole
-  document's rows are resolved from that document's own directory.
+- Iteration 4 correction (2026-11-15): the former statement that root-reference
+  rows resolve from the invoking file described the defect repaired by R1-F2.
+  Root and nested whole-document rows now resolve from their declaring file.
+  Verified in `Loader::walk_plan`, discovery, and the passing relative-reference
+  and `with_file_provenance` CLI tests.
 
 ### Wave 6 — Scoped graph (rules 8, 15, 17, 19)
 
@@ -796,12 +881,14 @@ covered by the root-reference test.
   root's failure is left to Phase 1c's per-step probes. Any other owner's,
   or an empty root's, is raised by `RootPlanRequest::recheck_owners`, a
   strict rediscovery right after provider selection.
-- Discovery now fills a referenced document's template from the referrer's
+- During Phase 4, discovery filled a referenced document's template from the referrer's
   values below the document's own values. Phase 2's transitional layer in
   `plan_referenced_sequence` already did this. Without it, every shipped
   research fleet failed (`prompt: must be a non-empty file reference, got
   null`), because discovery read `{{ research_prompt }}` from the roster's
-  own values only.
+  own values only. Iteration 4 correction (2026-11-15): both transitional
+  fallback merges were removed by the first repair; current discovery excludes
+  referrer properties. The owner-isolation and research artifact tests passed.
 - `build_preflight_graph_after_discovery` now takes the invocation's
   `CallerInputLayers` instead of bare setters. The `Loader` keeps them
   (`caller_layers`) and hands them to a referenced document's template, so a
@@ -828,8 +915,10 @@ Library, F2 (real files in temp dirs, in-process `TaskExecution`),
   pass 3 is refused): `each_loop_pass_judges_the_check_against_its_own_values`
 
 Library, `preflight/inputs/tests.rs`:
-- Referrer layer below the document's own values (both orders):
-  `a_referenced_template_reads_the_referrers_values_below_its_own`
+- Iteration 4 correction (2026-11-15): the former referrer-layer test was
+  replaced by
+  `a_referenced_template_never_selects_a_prompt_from_its_referrers_values`;
+  it passed and verifies that discovery never selects a prompt using that layer.
 - `leaving_verdicts` records instead of failing; strict discovery fails:
   `leaving_verdicts_records_a_failed_owner_instead_of_failing`
 
@@ -1178,9 +1267,10 @@ Windows rig (`build-win`, through `scripts/cross-check.sh`).
       `echo{EXE_SUFFIX}` in the fixture `bin`, which leads the child's `PATH`.
     - `sequence_referenced_state.rs` and `sequence_frozen_graph.rs` call it
       from `run_sequence`. On Windows, all 47 tests in those two files pass.
-    - I first tried a `side_effect: { set: … }` row instead. That read
-      `seq.who` as `null` at a root-reference row where the shell sees the
-      template value, so I backed it out (see decisions_for_review).
+    - I first tried a `side_effect: { set: … }` row instead and misread its
+      returned prior value as the newly written value. Review correction
+      (2026-11-15): a following shell confirms the write is `ada`, including
+      at a root-reference row; see the corrected decision above.
   - The 12 other failures are on Windows already, from commits before this
     fix: `implement_plan_commit_message::*` (7; an extra `git config` argv
     is recorded), `lifecycle_edit_action::a_sequence_container_runs_edit_in_its_start_and_finalize_around_its_children`
@@ -1216,3 +1306,151 @@ These runs supersede the gate results in the Wave 10 section above.
 - `just check-tier-coverage claudine`: 0 stranded.
 - Windows: `claudine` (lib) `document::tests` 13/13, and `claudine-cli`
   `sequence_referenced_state` + `sequence_frozen_graph` 47/47.
+
+## Phase 6
+
+Phase 6 is documentation and final verification. No source file changed. I
+did the work directly; no subagent ran.
+
+### Wave 11 — Current documentation
+
+Before writing, I checked each documented behavior against the built binary
+in an isolated `HOME` (a scratch directory, never the user's config): the
+non-TTY missing-input report (a `Document` entry for a root whose steps
+compose nothing, `Step N` headings for a root with composing steps), that a
+missing input or a `$state` failure after the root's `initialize` runs
+`blocked` and `finalize` but no `start`, the `$state` violation text, the
+inline `$schema` refusal and dry-run note, the three placement and
+setter-write messages, an unloadable `$state` on an empty list, and the new
+CLI example (`colors.yaml`, with the setter before and after the file).
+
+- `docs/topics/flow-control/sequences.md`: the old "Formal sequence
+  documents" section is replaced by "Sequence documents: `$schema`, `$state`,
+  and `template:`". It covers the key split in both formats with both keys
+  together, the explicit `$schema` → `$state` rename note, normalization
+  order and passive validation, the template's value layers, the
+  declaring-file context, declaration forms and load errors, immediate
+  ownership, inline container declarations and the turn-time `$schema` check,
+  where declarations may appear, reserved writes, exclusion from
+  composition, empty lists, data selections, a Mermaid flow from authored
+  file to frozen execution (syntax checks versus value checks, and what has
+  already run when each fails), and template freezing. The page also changed
+  in these places: the container grammar, "What a referenced sequence
+  reads" (the document's own `$schema`; at that phase, the transitional referrer
+  layer for `template:`), the reserved-keys list, the
+  preflight bullet, the dry-run table (the inline check note), and
+  "Requiring caller input" (the root's own inputs, which owners are
+  collected, collection after `initialize`, the non-TTY report, and what
+  never asks). Phase 5's declaring-folder paragraph is kept as it was.
+  Iteration 4 correction (2026-11-15): current docs exclude referrer properties
+  and describe initialization writes plus the equivalent dry-run caller setter;
+  source inspection and the passing research artifact tests verify that behavior.
+- `docs/topics/schemas.md`: the `sequence.yaml` row and a new "Sequence
+  declarations" subsection. A referenced file is judged by no trigger
+  schema, but its own `$schema`/`$state` still apply.
+- `schemas/README.md`: the `sequence.yaml` row and a declarations paragraph.
+- `docs/cli/sequence.md`: a new "Inputs and step types" subsection, and the
+  dry-run note.
+- `docs/topics/execution-flow.md`: the external-file shape now names
+  `$state`.
+- `docs/use-skills/use-claudine/sequences.md`: a new caller section, written
+  as a summary rather than a transclusion (see decisions_for_review).
+  `just publish-skills` ran from `claudine/`. In the installed copy the
+  `{{ … }}` examples stay inside their fence, and the key split is present.
+- `.claude/skills/claudine/SKILL.md`: the inline-check sentence now separates
+  a refusal at admission from one at a `start` reread, and links the new
+  user-doc section.
+- No current doc links to or names this fix.
+  `fixes/2026-11-15-sequence-state-schema/implementation.md` records the
+  changes, tests, limits, and departures (inventory-before-template ordering,
+  root empty-list validation, the referrer template layer, and report
+  headings). Its kind is `implementation-record`, following the precedent of
+  an earlier fix.
+
+### Wave 12 — Final verification
+
+- `just test` (claudine/): 12,285 passed, 0 failed, 15 skipped, exit 0, in
+  5 m 23 s. Load was 65–90 on 16 cores. Three tests were recorded slow, at
+  5.0–5.7 s, none at 10 s. Re-measured alone (`-j 1`, load 70 → 61):
+  - `lifecycle_message_drain::sequence_last_step_success_message_is_delivered_before_exit`:
+    2.85 s
+  - `lifecycle_prep::prep_dispatches_an_inline_prompt_before_resuming_its_caller`:
+    1.40 s
+  - `sequence_sources_cli::frozen_complete_reproduction::the_step_guard_reads_the_plan_derived_from_the_coerced_spec`:
+    2.33 s
+
+  All three are cleared as load-sensitive.
+- `just lint` (claudine/): exit 0.
+- `just check-tier-coverage claudine`: 0 stranded.
+- The frozen motivating case is covered by
+  `sequence_sources_cli::frozen_complete_reproduction::*`, which passed in
+  this run. It asserts 0 launches, and that the prepared `spec` and derived
+  `plan` reach the nested step. The live prompt was not run.
+- Artifact freshness (`shipped_artifacts::shipped_artifact_is_fresh`) and
+  disk/embedded parity (`claudine_schemas_embedded`, `claudine_schema_parity`)
+  passed in the same run.
+- Scope calculator, run over the uncommitted tree:
+  `packages: [claudine, claudine-cli, darkmatter]`, `change_class: package`.
+  The gates were therefore required, and they ran. Darkmatter reads
+  `claudine/schemas/README.md` in
+  `trigger_spelling_guard::no_active_file_spells_a_renamed_trigger_form`. I
+  ran `trigger_spelling_guard::` in darkmatter: 2 of 2 passed. Claudine's
+  dependents are the in-area crates, which `just test` covers.
+- Cross-OS: not run. This phase changed documentation only, so it has no OS
+  risk. This is macOS evidence only.
+- Plan tasks are all checked. Plan, log, and spec completion frontmatter are
+  set.
+
+## Review verification corrections — 2026-11-15
+
+At the first review, the implementation record's blanket claim that nested templates read prepared
+document values was too broad. With `reviewer: string(default(ada))` in the
+enclosing document schema, a root template reads `ada`, but the identical
+inline-container template reads null; a derived `reviewer: "{{ source }}"`
+remains literal text there. Direct CLI runs reproduced this in an inline
+sequence, group leg, external task file, and a referenced document's inline
+child. These code defects are recorded in review-1.md.
+
+At the first review, the claim that an inline check always precedes its `initialize` needed a
+qualification: admission used the preflight check. When an earlier task edited
+that declaration to reject the current value, direct CLI runs emit the
+container's `initialize` marker before the `start` reread rejects it. This was
+verified for inline sequences, group legs, external task files, and inline
+children of referenced documents. The implementation record now states this
+limit; review-1.md reports the underlying code defect.
+
+Iteration 2 verification correction (2026-11-15): those two paragraphs describe
+the implementation before the first repair, not its current behavior. Nested
+templates now use prepared owner values, and inline admission rereads the
+current check before initialization. The library's `template_owner_values_tests`
+matrix and `task::tests::stale_admission` tests, plus the corresponding CLI
+template-fill and tightened-check tests, passed in the iteration 2 sequence
+run (2,069 tests, none at or above five seconds). The implementation record
+was corrected in place to describe these repairs and the removed referrer
+fallback. At iteration 2, a separate shell-binding defect remained; see review-2.md.
+
+Iteration 3 verification correction (2026-11-15): the previous unqualified
+statement that the shell-binding defect remains is no longer current. The
+derived first-position rows, lifecycle shells, shell-valued writes, and inline
+membership controls now pass on their original routes in this review's
+`just test sequence` run (2,103 passed; none at or above five seconds).
+At iteration 3, the repair-added provider-dependency restoration was only partially correct:
+two-link dependencies can be lost and unrelated owners' same-named
+dependencies can be imported, as independently observed through the graph
+result and local-stub CLI runs. Review 3 records those defects; the original
+shell-output issue itself is fixed.
+
+Iteration 4 verification correction (2026-11-15): the preceding dependency
+failures describe the implementation before the third repair. Predictions now
+retain complete authored dependency closures in their evaluating scopes; the
+global name-based restoration list has been removed. Source inspection,
+all 58 `provider_dependencies_tests` cases, and both `derived_provider_reads`
+CLI reproductions verify that multi-link reads defer correctly and unrelated
+owners' properties do not defer a static provider. These passed within
+`just test sequence` (2,163 passed, none at or above five seconds).
+
+The side-effect correction above is verified independently of its printed
+return value: `template: { who: ada }`, followed by a task setting
+`signed: "{{ seq.who }}"` and a later shell reading `signed`, prints
+`signed=ada`. The library's `TaskExecution::run_side_effect` serializes runtime
+set *prior* values, which explains the misleading null in the original probe.

@@ -27,8 +27,11 @@ human_review: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-15
-review_iterations: 0
+review_iterations: 4
+completed: true
 needs_rulings: false
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # A sequence document's `$schema` describes the document; `$state` types its steps
