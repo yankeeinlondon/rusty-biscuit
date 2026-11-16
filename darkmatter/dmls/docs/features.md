@@ -152,9 +152,11 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   `null` value means `true`, and every file the inclusion brings in inherits
   `false` (a nested `interpolate=true` cannot turn it back on). A value
   `md compose` would reject, such as `interpolate=banana` or a quoted
-  `"null"`, is an error at the value. The option belongs to one inclusion,
-  not to the included file: opening that file shows its expressions with
-  their usual highlighting, completion, and diagnostics.
+  `"null"`, is an error at the value; an expression value such as
+  `interpolate={{ flag }}` is left to composition, which evaluates it. The
+  option belongs to one inclusion, not to the included file: opening that
+  file shows its expressions with their usual highlighting, completion, and
+  diagnostics.
 
   ```md
   ::file ../../topics/lifecycle/index.md interpolate=false

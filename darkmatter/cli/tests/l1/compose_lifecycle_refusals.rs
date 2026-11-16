@@ -2,11 +2,10 @@
 //! and mutation root, in its terminal and its JSON output alike, however long
 //! the paths are.
 //!
-//! The concise `err.msg` is clamped to 240 characters; the command's own
-//! failure output is not. Each run launches from a 50-character project
-//! directory under the fixture's temp workspace and writes to a target in a
-//! 50-character directory beside it, so the refusal is always longer than the
-//! clamp. The `edit` rows install the fake editor as `code`; a refused target
+//! Messages were once cut to 240 characters. Each run launches from a
+//! 50-character project directory under the fixture's temp workspace and
+//! writes to a target in a 50-character directory beside it, so the refusal is
+//! always longer than that old limit. The `edit` rows install the fake editor as `code`; a refused target
 //! never reaches it.
 
 use std::path::PathBuf;
@@ -76,7 +75,7 @@ impl LongRoot {
     }
 
     /// `text` names the whole target and root, the refusal is longer than
-    /// the 240-character clamp, and nothing ran or was written.
+    /// the old 240-character limit, and nothing ran or was written.
     fn assert_full_refusal(&self, text: &str) {
         let flat = prose(text);
         let target = prose(&self.target.display().to_string());
@@ -84,7 +83,7 @@ impl LongRoot {
         assert_eq!(flat.matches("outsidethemutationroot").count(), 1, "one refusal; output was:\n{text}");
         assert!(flat.contains(&format!("{target}(root:{root})")), "names the whole target and root; output was:\n{text}");
         let refusal = format!("refusing to write outside the mutation root: {} (root: {})", self.target.display(), self.root.display());
-        assert!(refusal.chars().count() > 240, "the fixture exercises the clamp: {refusal}");
+        assert!(refusal.chars().count() > 240, "the fixture exceeds the old limit: {refusal}");
         assert!(!self.target.exists(), "the refused target was written");
         assert!(!self.record.exists(), "the editor never runs for a refused target");
     }

@@ -245,6 +245,10 @@ impl RemoteUrlCatalog {
 ///
 /// Uses [`FileReference`] classification to find URL targets and maps them to
 /// the appropriate [`RemoteUrlConsumer`] based on directive kind.
+///
+/// A target that still holds a `{{ … }}` expression does not classify as a
+/// URL, so it is never prefetched; the transclusion stage registers the URL
+/// it evaluates to.
 pub fn discover_remote_urls_from_directives(
     directives: &[BlockDirective],
     source: &ComposeSource,
@@ -627,6 +631,20 @@ mod tests {
         let results = discover_remote_urls_from_directives(&directives, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::TransclusionFile);
+    }
+
+    #[test]
+    fn skip_targets_that_are_still_templates() {
+        let directives = vec![
+            make_directive(DirectiveKind::File, "https://example.com/{{ item }}.md", 1),
+            make_directive(DirectiveKind::Url, "https://{{ host }}/doc.md", 2),
+            make_directive(DirectiveKind::Code, "https://example.com/{{ name }}.rs", 3),
+            make_directive(DirectiveKind::File, "https://example.com/{{item}}.md", 4),
+            make_directive(DirectiveKind::File, "https://example.com/plain.md", 5),
+        ];
+        let results = discover_remote_urls_from_directives(&directives, &file_source());
+        let urls: Vec<&str> = results.iter().map(|entry| entry.url.as_str()).collect();
+        assert_eq!(urls, ["https://example.com/plain.md"]);
     }
 
     #[test]

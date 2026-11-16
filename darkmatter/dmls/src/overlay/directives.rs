@@ -13,6 +13,7 @@ use darkmatter::markdown::compose::directives_api::{
     BlockScanError, DarkmatterBlock, DirectiveKind, DirectiveOption, ParsedDirective,
     parse_interpolate_value, scan_darkmatter_blocks, scan_darkmatter_directives,
 };
+use darkmatter::markdown::compose::expression::ExpressionFinder;
 use darkmatter::markdown::span::SourceSpan;
 use darkmatter::markdown::render_tree::disclosure_scan::{DisclosureParse, scan_disclosures};
 
@@ -225,6 +226,10 @@ pub fn interpolate_option_at(directive: &ParsedDirective, offset: usize) -> Opti
 /// spellings. A missing value (`interpolate` or `interpolate=`) is reported at
 /// the key; any other invalid value at the value. Every occurrence is
 /// validated, as composition does; a repeated valid one is not a problem.
+///
+/// A value holding a `{{ … }}` expression (found by the scanner body
+/// interpolation uses) is not judged: composition evaluates it before the
+/// option is parsed, and only its result can be validated.
 pub fn invalid_interpolate_options(source: &str, directive: &ParsedDirective) -> Vec<(SourceSpan, String)> {
     if !accepts_interpolate(directive.kind) {
         return Vec::new();
@@ -240,6 +245,9 @@ pub fn invalid_interpolate_options(source: &str, directive: &ParsedDirective) ->
                     "'interpolate=' requires a value: true or false".to_string(),
                 ));
             };
+            if !ExpressionFinder::find_all_plain(&value.value).is_empty() {
+                return None;
+            }
             let raw = source.get(value.span.clone()).unwrap_or_default();
             let was_quoted = raw.starts_with(['\'', '"']);
             parse_interpolate_value(&value.value, was_quoted)

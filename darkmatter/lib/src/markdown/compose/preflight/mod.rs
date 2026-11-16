@@ -102,8 +102,8 @@ pub struct ScopedSite {
 
 /// The identity of the explicit values a directive hands its child.
 ///
-/// `0` for a directive with no `set` overlay and the default `interpolate`,
-/// so the common site keeps its historical identity.
+/// `0` for a directive with no `set` overlay, no `replace=` option, and the
+/// default `interpolate`, so the common site keeps its historical identity.
 pub(crate) fn parameters_identity(options: &transclusion::BlockOptions) -> u64 {
     let overlay = super::cache::hashing::set_overlay_hash(options.set_object.as_ref(), &options.set_properties);
     let values = if overlay == 0 {
@@ -115,6 +115,17 @@ pub(crate) fn parameters_identity(options: &transclusion::BlockOptions) -> u64 {
         };
         super::cache::hashing::combine_options_overlay_hash(overlay, u64::from(origin) + 1)
     };
+    // A copy's `replace=` option is part of what its child composes with.
+    let values = match &options.replace {
+        transclusion::ReplaceOption::InheritDefault => values,
+        transclusion::ReplaceOption::ParentWins => {
+            super::cache::hashing::combine_options_overlay_hash(values, REPLACE_PARENT_WINS_PARAMETER)
+        }
+        transclusion::ReplaceOption::OneOff(map) => super::cache::hashing::combine_options_overlay_hash(
+            values,
+            biscuit_hash::xx_hash(&format!("replace\0{}", serde_json::to_string(map).unwrap_or_default())),
+        ),
+    };
     if options.interpolate {
         values
     } else {
@@ -123,6 +134,9 @@ pub(crate) fn parameters_identity(options: &transclusion::BlockOptions) -> u64 {
         super::cache::hashing::combine_options_overlay_hash(values, PROSE_DISABLED_PARAMETER)
     }
 }
+
+/// The parameter-identity component of a directive's `replace=true`.
+const REPLACE_PARENT_WINS_PARAMETER: u64 = 0x7265_706c_5f70_7769;
 
 /// The parameter-identity component of a directive's `interpolate=false`.
 const PROSE_DISABLED_PARAMETER: u64 = 0x7072_6f73_655f_6f66;
@@ -1311,5 +1325,20 @@ mod parameters_identity_tests {
         assert_ne!(set, set_off);
         assert_ne!(off, set_off);
         assert_eq!(set_off, parameters_identity(&options("::file ./a.md interpolate=off set.x=1")));
+    }
+
+    #[test]
+    fn each_replace_option_is_a_different_child() {
+        let identities = [
+            parameters_identity(&options("::file ./a.md")),
+            parameters_identity(&options("::file ./a.md replace=true")),
+            parameters_identity(&options(r#"::file ./a.md replace='{"W":"one"}'"#)),
+            parameters_identity(&options(r#"::file ./a.md replace='{"W":"two"}'"#)),
+            parameters_identity(&options(r#"::file ./a.md replace='{"W":"one"}' interpolate=false"#)),
+        ];
+        for (index, identity) in identities.iter().enumerate() {
+            assert!(!identities[index + 1..].contains(identity), "{identities:?}");
+        }
+        assert_eq!(parameters_identity(&options("::file ./a.md replace=false")), 0, "the default mode keeps zero");
     }
 }

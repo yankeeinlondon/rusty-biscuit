@@ -195,7 +195,6 @@ fn err_declares_exactly_the_runtime_fields() {
         severity: "error".into(),
         detail: serde_json::json!({}),
         message: "example".into(),
-        full_message: None,
         cause: None,
         frontmatter_excerpt: None,
     };

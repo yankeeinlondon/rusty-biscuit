@@ -142,6 +142,7 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
               - base merge: the base merging of the parent and child key/values is unchanged
               - one-off: the serialized JSON/JSON5 key/value is processed independently and _before_ the normal merge process
               - inheritance: if the child receiving this one-off change uses transclusion itself -- and thereby passes along it's own `replace` key/value to it's child then the key/value will consist of ONLY the base merge and not the one off key/value.
+    - The option belongs to one inclusion, and every path that reads the child applies it. A remote child (`::file https://…` or `::url`) takes it like a local one. The reference check of `md compose` reads the child's links after the replacement, and the shell approval walk approves its commands after it. Including one file twice with different options gives each copy its own result. For example, with a child containing `[Link](./WORD.md)` and `::shell echo WORD`, `::file ./child.md replace='{"WORD":"one"}'` needs only `one.md` to exist and approves `echo one`; a second `::file ./child.md replace='{"WORD":"two"}'` composes `two` and approves `echo two`.
 
 2. `quotation`
 
@@ -207,6 +208,8 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
 
     The overlay is applied **before** any of the child's pre-op pipeline stages run, so child interpolation (`{{ name }}`), page blocks (`::block when="role == 'admin'"`), replace rules, and shell directives all see the overridden values. The overlay does **not** propagate to grandchildren — only the direct child sees it.
 
+    A remote child (`::file https://…` or `::url`) receives the overlay the same way. Everything that reads a child before composing it reads it with the overlay applied: the reference check of `md compose` validates the links of the branch the overlay selects, and the shell approval walk approves the commands with the overridden values. For example, `::file ./child.md set.word="supplied"` over a child that links `./supplied.md` only when `word == 'supplied'` needs only `supplied.md` to exist. Including one child twice with different `set` values approves each copy's commands and checks each copy's own links: when only the second copy selects a link to a missing file, the run fails on that link. A grandchild the child includes (through `::file`, `prologue:`, or `epilogue:`) does not get the overlay written over its own frontmatter, but it does inherit the child's resolved values, overridden ones included, as defaults its own frontmatter can override. The reference check prepares it the same way, and judges the child's `when=` conditions against the child's resolved frontmatter: with `::file ./parent.md set.word="supplied"` and a `parent.md` that includes `leaf.md`, a link that `leaf.md` keeps only when `word == 'supplied'` is checked, and its missing target fails the run.
+
     **Error handling:**
 
     - `set=42` (non-object JSON5) raises `InvalidFrontmatterAssignment`. Use `--allow invalid-frontmatter-assignment` to downgrade to a warning; sibling valid set clauses still apply.
@@ -241,6 +244,8 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
     | `interpolate=` with no value, `"null"`, or any other text | error at the option |
 
     Repeating the option is allowed; the last value wins, but every occurrence must be valid. An invalid value stops the composition with an error that names the including file and the directive's line, for example `'interpolate=' requires a value: true or false`.
+
+    The value may be an expression, such as `interpolate={{ flag }}` with `flag: false` in the including file's frontmatter. Like every option value it is evaluated first, and its result is then read with the words above, so a result such as `banana` is the same error at the directive's line. The editor cannot know the result, so it does not flag an expression-valued option.
 
     **What stays literal.** With `interpolate=false`, the child's body prose (paragraphs, headings, lists, table cells, inline code, link text and destinations) is not interpolated: its `{{ … }}` spans are never parsed or evaluated, so they read no properties or files and report no expression problems, even when malformed. Fenced and indented code stay literal even if the child sets `interpolate_code_blocks: true`; this option wins.
 

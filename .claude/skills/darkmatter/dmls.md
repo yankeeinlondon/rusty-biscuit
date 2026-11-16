@@ -687,7 +687,9 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   before the directive hover when the cursor is on the option; and
   `invalid_interpolate_options` reports `dm.directive.invalid_option_value`
   through the library's `parse_interpolate_value` (quoting read from the
-  raw value span; a missing value at the key). The setting belongs to one
+  raw value span; a missing value at the key; a value holding an
+  expression, found by `ExpressionFinder::find_all_plain` as for directive
+  targets, is skipped because composition evaluates it first). The setting belongs to one
   inclusion, so nothing changes how an open child is analyzed
   (`tests/l1/file_interpolate_option.rs` pins that).
 - Recursive named types: every DMLS walk of a `PropertyDef` opens a

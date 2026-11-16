@@ -19,6 +19,7 @@ use crate::markdown::compose::body_origin::BodyOrigin;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::context::options::ProseInterpolation;
+use crate::markdown::compose::site_scope::{SiteHook, SiteLookup};
 use crate::markdown::compose::toc_linking;
 use biscuit_terminal::errors::SourceContext;
 
@@ -47,6 +48,16 @@ struct ReferenceAnalysisRuntime {
     /// failed one reported, in order, for a build that fails before a report
     /// can carry them.
     earlier_warnings: Vec<ComposeWarning>,
+    /// The distinct prepared copies of each source built so far, by source
+    /// id, in build order: what [`prepared_copy_id`](Self::prepared_copy_id)
+    /// compares a new copy with.
+    prepared_copies: std::collections::HashMap<NodeId, Vec<PreparedCopy>>,
+}
+
+/// What a node's consumers read of one prepared copy of a document.
+struct PreparedCopy {
+    references: ReferenceSet,
+    insertions: Vec<ReferenceInsertion>,
 }
 
 fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
@@ -61,6 +72,36 @@ impl ReferenceAnalysisRuntime {
     /// Load a markdown document, using the shared cache.
     fn load_markdown(&self, path: &std::path::Path) -> Option<Markdown> {
         self.cache.load_markdown(path).ok()
+    }
+
+    /// The node id of a prepared copy of the source `source_id` names.
+    ///
+    /// Each inclusion prepares its child under its own values, and a child
+    /// insertion selects its copy by this id, so copies whose references or
+    /// insertions differ must not share one; an equal copy reuses the id of
+    /// the copy it equals. Source identity (`source_id`) stays the key for
+    /// raw loads, dependency freshness, cycle detection, and heading slugs.
+    fn prepared_copy_id(
+        &mut self,
+        source_id: NodeId,
+        references: &ReferenceSet,
+        insertions: &[ReferenceInsertion],
+    ) -> NodeId {
+        let copies = self.prepared_copies.entry(source_id.clone()).or_default();
+        let ordinal = match copies
+            .iter()
+            .position(|copy| copy.references == *references && copy.insertions == insertions)
+        {
+            Some(index) => index,
+            None => {
+                copies.push(PreparedCopy { references: references.clone(), insertions: insertions.to_vec() });
+                copies.len() - 1
+            }
+        };
+        match ordinal {
+            0 => source_id,
+            later => NodeId(format!("{source_id} ({})", later + 1)),
+        }
     }
 }
 
@@ -97,6 +138,7 @@ fn build_graph_inner(
         cache: make_cache(options),
         trigger_warnings: Vec::new(),
         earlier_warnings: Vec::new(),
+        prepared_copies: std::collections::HashMap::new(),
     };
 
     // Seed the runtime with the root node so child documents that
@@ -413,10 +455,15 @@ fn authored_directive_line(locator: Option<&AuthoredLocator<'_>>, span: &std::op
     locator.and_then(|locator| locator.body_location(span)).map(|location| location.line)
 }
 
+/// The options for a document the graph prepares that composition never
+/// includes as a child (a `::toc-linking` target, whose headings are read
+/// raw, or a fragment target outside the graph): the source and prose setting
+/// change, no parent state is inherited, and no inclusion's `replace=` option
+/// (one-off map or parent-wins mode) applies. Inclusion children use
+/// [`inclusion_child_options`].
+///
 /// `opening` is the reference that resolved to `path`, when the caller has it
 /// (see [`SourceOpening`](crate::markdown::compose::context::options::SourceOpening)).
-/// `prose` is the child's folded prose-interpolation setting, the one
-/// composition gives it, so preparation suppresses the same prose.
 fn accepted_child_options(
     options: &ReferenceGraphOptions,
     path: &std::path::Path,
@@ -428,8 +475,33 @@ fn accepted_child_options(
             .compose
             .clone()
             .with_accepted_source_file(path, opening)
-            .derive(|compose| compose.with_prose_interpolation(prose)),
+            .derive(|compose| {
+                compose
+                    .with_prose_interpolation(prose)
+                    .with_one_off_replace(None)
+                    .with_replace_parent_wins(false)
+            }),
     )
+}
+
+/// The options an inclusion child (a body `::file`, `prologue:`, or
+/// `epilogue:` target) is prepared with: the ones composition gives it
+/// ([`markdown_child_options`](crate::markdown::compose::transclusion::markdown_child_options)),
+/// with the parent's effective state (`parent_data`) as inherited data.
+fn inclusion_child_options(
+    options: &ReferenceGraphOptions,
+    parent_data: &crate::markdown::compose::SharedFrontmatter,
+    directive_options: &crate::markdown::compose::transclusion::BlockOptions,
+    path: &std::path::Path,
+    opening: Option<crate::markdown::compose::context::options::SourceOpening>,
+) -> ReferenceGraphOptions {
+    ReferenceGraphOptions::from_compose_options(crate::markdown::compose::transclusion::markdown_child_options(
+        &options.compose,
+        parent_data,
+        directive_options,
+        path,
+        opening,
+    ))
 }
 
 /// Build a single graph node for a document.
@@ -451,15 +523,15 @@ fn build_node(
     dependencies: &mut ReferenceDependencyManifest,
     prepared_headings: &mut PreparedHeadingSnapshot,
 ) -> MarkdownResult<(ReferenceGraphNode, Vec<ReferenceGraphNode>)> {
-    let node_id = source_to_id(source);
-
     // Always run InlinePre preparation (rec #2): page blocks, interpolation,
     // shell expansion, and text replacement can affect references even in
     // leaf documents with no transclusions.
     let PreparedReferenceContent {
         content: prepared_content,
+        document: prepared_document,
         body_data,
         body_origin,
+        scopes,
         warnings,
         passive_warnings,
     } = prepare_content(md, options).map_err(|failure| {
@@ -523,40 +595,38 @@ fn build_node(
     let mut all_descendant_nodes: Vec<ReferenceGraphNode> = Vec::new();
     let mut insertion_order = 0;
 
-    // Build effective state for evaluating `when=` conditions.
-    // Uses the document's frontmatter merged with any external state from
-    // options, plus runtime context (including environment variables).
-    let effective_state = {
-        let fm: serde_json::Map<String, serde_json::Value> = md
-            .frontmatter()
-            .as_map()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let mut builder = EffectiveStateBuilder::new()
-            .with_frontmatter(fm)
-            .with_context(options.compose.context().clone());
-        if let Some(ref ext) = options.compose.external_state {
-            builder = builder.with_external_state(ext.clone());
-        }
-        builder.build().unwrap_or_else(|_| {
-            // Context merge failure during reference analysis: fall back to
-            // a state without user ctx so reference extraction can proceed.
-            EffectiveStateBuilder::new()
-                .with_context(options.compose.context().clone())
-                .build()
-                .expect("empty frontmatter has no user ctx")
-        })
-    };
+    // The state composition's transclusion stage builds from the resolved
+    // frontmatter: `when=` conditions read it, and every inclusion child
+    // inherits it as data.
+    let effective_state = crate::markdown::compose::pipeline::document_state_builder(
+        &prepared_document,
+        &options.compose,
+    )
+    .build()
+    .unwrap_or_else(|_| {
+        // Context merge failure during reference analysis: fall back to
+        // a state without user ctx so reference extraction can proceed.
+        EffectiveStateBuilder::new()
+            .with_context(options.compose.context().clone())
+            .build()
+            .expect("empty frontmatter has no user ctx")
+    });
+    // Less the parent's `$schema`, as pre-flight discovery hands it on: the
+    // parent already coerced these values, and re-judging them would resolve
+    // its relative file values from the child's directory.
+    let mut child_data = effective_state.data().clone();
+    child_data.remove("$schema");
 
     // Validation evaluates the same `when=` conditions compose will, against
     // the request's one repository observation: fixed at request creation, or
     // by the root pipeline entry `prepare_content` already ran above.
     let when_options = options.compose.clone();
-    let when_lookup = ResolvingLookup::new(
+    let document_lookup = ResolvingLookup::new(
         &effective_state,
         when_options.local_expression_resolution_context(),
     );
+    // A directive in a repeated body reads the frame of its copy.
+    let when_lookup = SiteLookup::new(&document_lookup, &scopes, None);
 
     // Block directives
     if let Ok(directives) = crate::markdown::compose::transclusion::parse_directives_in(
@@ -568,6 +638,7 @@ fn build_node(
         for directive in &directives {
             // Evaluate `when=` condition — skip directive entirely if false.
             if let Some(ref when_expr) = directive.options.when_expr {
+                when_lookup.enter(directive.span.start);
                 let condition_met = conditions::evaluate_condition(
                     when_expr,
                     &when_lookup,
@@ -630,18 +701,25 @@ fn build_node(
                                 child_source.clone(),
                                 ReferenceDocumentIdentity::capture(&child_md),
                             );
+                            // The child is prepared with the directive's `set`
+                            // values, as composition runs it, so its branches
+                            // select the references composition keeps.
+                            let mut child_md = child_md;
+                            crate::markdown::compose::transclusion::apply_directive_set_overlay(
+                                &mut child_md,
+                                &directive.options,
+                            );
+                            let child_options = inclusion_child_options(
+                                options,
+                                &child_data,
+                                &directive.options,
+                                &child_path,
+                                crate::markdown::compose::transclusion::source_opening(&directive.raw_target, &child_path),
+                            );
                             let (child_node, mut descendants) = build_node(
                                 &child_md,
                                 &child_source,
-                                &accepted_child_options(
-                                    options,
-                                    &child_path,
-                                    crate::markdown::compose::transclusion::source_opening(&directive.raw_target, &child_path),
-                                    crate::markdown::compose::transclusion::effective_prose_interpolation(
-                                        options.compose.prose_interpolation,
-                                        &directive.options,
-                                    ),
-                                ),
+                                &child_options,
                                 runtime,
                                 extract_references,
                                 dependencies,
@@ -726,13 +804,14 @@ fn build_node(
                 // node (composed view). Tagged so the model builder only
                 // includes them when follow=true.
                 if extract_references {
-                    for mut record in
-                        generate_toc_link_references(&display_target, &path, directive, source, runtime)
-                    {
+                    let (records, raw_slugs) =
+                        generate_toc_link_references(&display_target, &path, directive, source, runtime);
+                    for mut record in records {
                         record
                             .attributes
                             .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
                         record.origin = placed_in_body(record.origin, locator, &headings);
+                        prepared_headings.record_toc_reference(&record, std::sync::Arc::clone(&raw_slugs));
                         local_references.records.push(record);
                     }
                 }
@@ -876,8 +955,9 @@ fn build_node(
         }
     }
 
-    // Frontmatter prologue/epilogue
-    if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map(), ctx.clone()) {
+    // Frontmatter prologue/epilogue, read from the prepared frontmatter as
+    // composition reads them.
+    if let Ok(fm_refs) = parse_frontmatter_refs(prepared_document.frontmatter().as_map(), ctx.clone()) {
         let value_location = |key: &str, idx: usize, expected: &str| {
             let in_list = md.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
             locator.and_then(|locator| locator.frontmatter_location(key, in_list.then_some(idx), expected))
@@ -939,11 +1019,12 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            &accepted_child_options(
+                            &inclusion_child_options(
                                 options,
+                                &child_data,
+                                &crate::markdown::compose::transclusion::BlockOptions::default(),
                                 &child_path,
                                 crate::markdown::compose::transclusion::source_opening(prologue, &child_path),
-                                options.compose.prose_interpolation,
                             ),
                             runtime,
                             extract_references,
@@ -1030,11 +1111,12 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            &accepted_child_options(
+                            &inclusion_child_options(
                                 options,
+                                &child_data,
+                                &crate::markdown::compose::transclusion::BlockOptions::default(),
                                 &child_path,
                                 crate::markdown::compose::transclusion::source_opening(epilogue, &child_path),
-                                options.compose.prose_interpolation,
                             ),
                             runtime,
                             extract_references,
@@ -1076,6 +1158,7 @@ fn build_node(
             .sort_by_key(|r| (r.origin.line, r.origin.span.start));
     }
 
+    let node_id = runtime.prepared_copy_id(source_to_id(source), &local_references, &child_insertions);
     let main_node = ReferenceGraphNode {
         node_id,
         source: source.clone(),
@@ -1146,13 +1229,19 @@ pub(super) fn prepare_content_for_validation(
     prepare_content(md, &node_options).map(|prepared| prepared.content).map_err(|failure| failure.error)
 }
 
-/// A document's body after InlinePre preparation.
+/// A document after InlinePre preparation.
 struct PreparedReferenceContent {
     content: String,
+    /// The prepared document, whose frontmatter is resolved as composition
+    /// resolves it: the graph's own conditions and its children's inherited
+    /// state are read from it, never from the authored frontmatter.
+    document: Markdown,
     /// Which bytes of `content` are data.
     body_data: Option<crate::markdown::compose::body_origin::DataRanges>,
     /// Where each byte of `content` came from.
     body_origin: Option<BodyOrigin>,
+    /// The item frame of each `::map` / `::filter` copy in `content`.
+    scopes: crate::markdown::compose::body_origin::ScopeRanges,
     warnings: Vec<ComposeWarning>,
     /// How many of `warnings` the document's passive checks found.
     passive_warnings: usize,
@@ -1170,27 +1259,30 @@ fn prepare_content(
 ) -> Result<PreparedReferenceContent, Box<crate::markdown::compose::ComposeFailure>> {
     // Restricted, never widened: an operation the request disabled (the
     // passive `md compose` reference check's `ShellExpansion`) stays off.
-    // A `::map` / `::filter` body is repeated per item at composition and read
-    // through the frame of each copy. This preparation never executes it: a
-    // second run of the callbacks would precede the real one, and a shell
-    // command in a repeated body has no single value to run with. So shell
-    // expansion is left to the composition that owns the copies.
+    // A `::map` / `::filter` body is expanded as composition expands it, one
+    // copy per retained item, so each copy's directive inputs and links read
+    // their item's frame; condition-blind discovery would instead take every
+    // `::block` gate and every filtered-out item, and report references
+    // composition never produces. Shell expansion is left out of such a
+    // document, so the check never runs a command a copy repeats.
     let repeats_bodies = md.content().contains("::map") || md.content().contains("::filter");
     let inline_pre_options = options.compose.clone().derive(|compose| {
+        let expands_bodies = repeats_bodies && compose.is_enabled(ComposeOperation::CollectionBlocks);
         let enabled: Vec<ComposeOperation> = [
             // A schema and a condition judge the resolved values.
             ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::TextReplacement,
             ComposeOperation::PageBlocks,
+            ComposeOperation::CollectionBlocks,
             ComposeOperation::Interpolation,
             ComposeOperation::ShellExpansion,
         ]
         .into_iter()
         .filter(|operation| compose.is_enabled(*operation))
-        .filter(|operation| {
-            !(repeats_bodies
-                && compose.is_enabled(ComposeOperation::CollectionBlocks)
-                && *operation == ComposeOperation::ShellExpansion)
+        .filter(|operation| match operation {
+            ComposeOperation::CollectionBlocks => expands_bodies,
+            ComposeOperation::ShellExpansion => !expands_bodies,
+            _ => true,
         })
         .collect();
         compose.only(&enabled)
@@ -1209,8 +1301,10 @@ fn prepare_content(
     };
     Ok(PreparedReferenceContent {
         content: result.content().to_string(),
+        document: result,
         body_data: report.body_data,
         body_origin: report.body_origin,
+        scopes: report.body_sites.scopes,
         warnings: report.warnings,
         passive_warnings: report.passive_warnings,
     })
@@ -1269,26 +1363,35 @@ fn resolve_toc_linking_target(
         .flatten()
 }
 
+/// The hyperlinks a `::toc-linking` directive generates, one per raw
+/// heading of `path` its levels select, and every raw heading slug of
+/// `path`.
+///
+/// Like composition, this reads the target's raw source: no replacement,
+/// interpolation, or conditional block of the target applies. Fragment
+/// validation checks these anchors against the returned slugs, not the
+/// target's prepared headings.
 fn generate_toc_link_references(
     display_target: &str,
     path: &std::path::Path,
     directive: &toc_linking::TocLinkingDirective,
     source: &ComposeSource,
     runtime: &ReferenceAnalysisRuntime,
-) -> Vec<ReferenceRecord> {
+) -> (Vec<ReferenceRecord>, std::sync::Arc<[String]>) {
     // 35.4: route the TOC-heading read through the run's shared cache instead
     // of a second `Markdown::try_from` on the same file. The target is also
     // loaded (cached) by the follow-mode traversal below, so a single owner
     // serves both graph-discovery and composition reads. A load failure
     // reproduces the previous empty-result behavior.
     let Some(target_md) = runtime.load_markdown(path) else {
-        return Vec::new();
+        return (Vec::new(), std::sync::Arc::from([]));
     };
 
     let toc = target_md.toc();
     let headings = toc.all_headings();
+    let raw_slugs: std::sync::Arc<[String]> = headings.iter().map(|h| h.slug.to_lowercase()).collect();
 
-    headings
+    let records = headings
         .iter()
         .filter(|h| directive.options.levels.includes(h.level))
         .enumerate()
@@ -1309,7 +1412,8 @@ fn generate_toc_link_references(
                 attributes: serde_json::Map::new(),
             }
         })
-        .collect()
+        .collect();
+    (records, raw_slugs)
 }
 
 #[cfg(test)]
@@ -1646,6 +1750,43 @@ mod tests {
         ids.extend(graph.nodes().iter().map(|n| n.node_id.as_ref()));
         let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
         assert_eq!(ids.len(), unique.len(), "all node IDs should be unique");
+    }
+
+    /// Copies of one file prepared under different values are distinct
+    /// nodes, each insertion selects its own, and an equal copy keeps the
+    /// first copy's id; Mermaid and DOT draw an edge to each distinct copy.
+    #[test]
+    fn differing_copies_of_one_file_are_distinct_nodes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("leaf.md"), "[Link](./{{ word }}.md)\n").unwrap();
+        let root = dir.path().join("root.md");
+        std::fs::write(
+            &root,
+            "::file ./leaf.md set.word=\"a\"\n\n::file ./leaf.md set.word=\"b\"\n\n::file ./leaf.md set.word=\"a\"\n",
+        )
+        .unwrap();
+        let graph = build_reference_graph(&Markdown::try_from(root.as_path()).unwrap(), &graph_options_at(dir.path())).unwrap();
+
+        let ids: Vec<&str> = graph.root().child_insertions.iter().map(|ins| ins.child_node_id.as_ref()).collect();
+        let leaf = source_to_id(&ComposeSource::File(dir.path().join("leaf.md")));
+        let second = format!("{leaf} (2)");
+        assert_eq!(ids, [leaf.as_ref(), second.as_str(), leaf.as_ref()]);
+        let links: Vec<String> = ids
+            .iter()
+            .map(|id| graph.node_by_id(id).unwrap().local_references.hyperlinks()[0].target.raw().unwrap().to_string())
+            .collect();
+        assert_eq!(links, ["./a.md", "./b.md", "./a.md"]);
+
+        let distinct_targets = |diagram: &str, arrow: &str| {
+            let targets: std::collections::HashSet<String> =
+                diagram.lines().filter_map(|line| line.split_once(arrow)).map(|(_, to)| to.to_string()).collect();
+            targets.len()
+        };
+        let mermaid = graph.to_mermaid();
+        assert_eq!(distinct_targets(&mermaid, " --> "), 2, "{mermaid}");
+        assert!(mermaid.contains("leaf.md (2)<br/>1 refs"), "{mermaid}");
+        let dot = graph.to_dot();
+        assert_eq!(distinct_targets(&dot, " -> "), 2, "{dot}");
     }
 
     #[test]

@@ -42,7 +42,7 @@ any value only composition can judge, and `md compose` reports it.
 
 | Option | What it does |
 |---|---|
-| `--fragments` | also check that a `#heading` fragment names a real heading |
+| `--fragments` | also check that a `#heading` fragment names a real heading; a link `::toc-linking` generated is checked against the source headings it was built from (see [Reference Validation](../inline/link-validation.md#scope)) |
 | `--remote` | also check remote URLs over the network; without it, a remote URL is listed as not verified |
 | `--timeout <SECONDS>` | how long a remote check may take (default: 10) |
 | `--fail-fast` | stop at the first broken reference |
@@ -99,6 +99,11 @@ flowchart TD
 `--graph` names the diagram's notation, and `--output` still chooses the output:
 `markdown` wraps the diagram in a fenced code block, and a data output is
 `{ "graph": { "format": "dot", "source": "digraph ..." } }` alone.
+
+A file included more than once is one box when every inclusion prepares the same
+references, and one box per distinct result otherwise: a second copy that, for
+example, a different `set.word=` value gave other links is labeled `leaf.md (2)`,
+and its inclusion's arrow points at that box.
 
 ## HTML and CSS references
 

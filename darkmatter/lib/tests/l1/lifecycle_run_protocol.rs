@@ -46,7 +46,6 @@ fn coded(code: &str, message: &str) -> LifecycleErrorInfo {
         severity: "error".to_string(),
         detail: json!({}),
         message: message.to_string(),
-        full_message: None,
         cause: None,
         frontmatter_excerpt: None,
     };

@@ -9,9 +9,17 @@
 //! A post-build heading edit therefore cannot leak into a fresh one-step
 //! report, and the checked prebuilt path only reaches the snapshot after
 //! descendant verification has proven disk content identical to it.
+//!
+//! It also keeps, per generated `::toc-linking` reference, the raw heading
+//! slugs of the target the anchor was built from: the generator, like
+//! composition, links raw headings, so those anchors are checked against the
+//! raw set while every other link keeps the prepared one.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use super::types::ReferenceRecord;
 
 use crate::markdown::normalize::HeadingLevel;
 
@@ -80,12 +88,57 @@ struct PreparedDocumentHeadings {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PreparedHeadingSnapshot {
     documents: HashMap<PathBuf, PreparedDocumentHeadings>,
+    /// The raw heading slugs of each `::toc-linking` reference's target,
+    /// keyed by the generated reference's id and target. Copies of one
+    /// holder share reference ids, and each copy's directive can resolve to
+    /// another target.
+    toc_references: HashMap<(String, String), Arc<[String]>>,
 }
 
 impl PreparedHeadingSnapshot {
     /// Records the prepared headings for one file-sourced node.
+    ///
+    /// A file included more than once is prepared once per inclusion, and
+    /// each copy can inherit other values: its slugs accumulate, so a heading
+    /// any copy composes is a fragment target. `headings` keeps the first
+    /// copy's, whose offsets describe that copy's prepared body.
     pub(crate) fn record(&mut self, path: &Path, slugs: Vec<String>, headings: Vec<PreparedHeading>) {
-        self.documents.insert(heading_slug_key(path), PreparedDocumentHeadings { slugs, headings });
+        match self.documents.entry(heading_slug_key(path)) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                let kept = &mut entry.get_mut().slugs;
+                for slug in slugs {
+                    if !kept.contains(&slug) {
+                        kept.push(slug);
+                    }
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(PreparedDocumentHeadings { slugs, headings });
+            }
+        }
+    }
+
+    /// Records the raw heading slugs of the target a `::toc-linking`
+    /// reference was generated from.
+    ///
+    /// The generator links raw headings, which the target's own replacement,
+    /// interpolation, or conditional blocks can change or remove in its
+    /// prepared copy, so the prepared slugs cannot judge these anchors.
+    pub(crate) fn record_toc_reference(&mut self, record: &ReferenceRecord, slugs: Arc<[String]>) {
+        let target = record.target.raw().unwrap_or_default().to_string();
+        self.toc_references.insert((record.id.clone(), target), slugs);
+    }
+
+    /// Returns the raw heading slugs `record` must be checked against when it
+    /// is a generated `::toc-linking` reference, else `None`: every other
+    /// reference, including an authored link to the same target, is checked
+    /// against prepared headings.
+    pub(crate) fn toc_slugs_for(&self, record: &ReferenceRecord) -> Option<&[String]> {
+        if !record.attributes.contains_key("toc_synthesized") {
+            return None;
+        }
+        let key = (record.id.clone(), record.target.raw().unwrap_or_default().to_string());
+        self.toc_references.get(&key).map(|slugs| &**slugs)
     }
 
     /// Returns the recorded prepared slugs for `path`, if any.

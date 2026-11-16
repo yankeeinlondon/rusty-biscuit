@@ -10,10 +10,10 @@ use crate::markdown::compose::ComposeSource;
 use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::reference::types::{
     NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceInsertionContext, ReferenceKind,
-    ReferenceRecord, ReferenceSyntax, ReferenceTarget,
+    ReferenceRecord, ReferenceSyntax, ReferenceTarget, ReferenceTrailStep,
 };
 use crate::markdown::reference::validate::{
-    ReferenceIssueCode, ReferenceSeverity, ReferenceValidationReport,
+    ReferenceIssue, ReferenceIssueCode, ReferenceSeverity, ReferenceValidationReport,
 };
 
 // ── View model types ────────────────────────────────────────────────
@@ -196,15 +196,33 @@ pub fn build_file_tree_model(
         node_map.insert(node.node_id.as_ref(), node);
     }
 
-    let root = build_node_model(graph.root(), &node_map, &issue_map, follow);
+    let root = build_node_model(graph.root(), &node_map, &issue_map, &mut Vec::new(), follow);
     FileTreeModel { root }
 }
 
-/// Build a HashMap of reference_id → validation info for fast lookup.
-fn build_issue_map(
-    report: &ReferenceValidationReport,
-) -> HashMap<String, FileTreeReferenceValidation> {
-    let mut map = HashMap::new();
+/// Validation labels by reference id, each with the issue it came from.
+///
+/// Every copy of a document included more than once carries the same
+/// reference ids, and copies a `::map` or `::filter` repeats from one
+/// directive line share their inclusion trail too, so a label belongs only to
+/// the reference its issue describes ([`ReferenceIssue::describes`]).
+#[derive(Default)]
+struct IssueMap<'a>(HashMap<&'a str, Vec<(&'a ReferenceIssue, FileTreeReferenceValidation)>>);
+
+impl IssueMap<'_> {
+    /// The label of `record` in the copy reached through `trail`: its first issue.
+    fn get(&self, record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> Option<&FileTreeReferenceValidation> {
+        self.0
+            .get(record.id.as_str())?
+            .iter()
+            .find(|(issue, _)| issue.describes(record, trail))
+            .map(|(_, validation)| validation)
+    }
+}
+
+/// Build the validation labels of every issue for fast lookup.
+fn build_issue_map(report: &ReferenceValidationReport) -> IssueMap<'_> {
+    let mut map = IssueMap::default();
     for issue in &report.issues {
         let suffix = match issue.code {
             ReferenceIssueCode::MissingLocalTarget => Some("[missing]".to_string()),
@@ -214,21 +232,25 @@ fn build_issue_map(
             ReferenceIssueCode::MissingFragmentTarget => Some("[missing fragment]".to_string()),
             _ => Some("[issue]".to_string()),
         };
-        map.entry(issue.reference_id.clone())
-            .or_insert(FileTreeReferenceValidation {
+        map.0.entry(issue.reference_id.as_str()).or_default().push((
+            issue,
+            FileTreeReferenceValidation {
                 is_valid: false,
                 suffix,
                 severity: issue.severity,
-            });
+            },
+        ));
     }
     map
 }
 
-/// Recursively build a view model node from a graph node.
+/// Recursively build a view model node from a graph node reached through
+/// the inclusion `trail`.
 fn build_node_model(
     node: &ReferenceGraphNode,
     node_map: &HashMap<&str, &ReferenceGraphNode>,
-    issue_map: &HashMap<String, FileTreeReferenceValidation>,
+    issue_map: &IssueMap<'_>,
+    trail: &mut Vec<ReferenceTrailStep>,
     follow: bool,
 ) -> FileTreeNode {
     let file_label = extract_file_label(&node.source);
@@ -253,7 +275,7 @@ fn build_node_model(
         match classify_reference_group(record) {
             Some(group_kind) => {
                 let display_target = record.target.raw().unwrap_or("").to_string();
-                let validation = issue_map.get(&record.id).cloned();
+                let validation = issue_map.get(record, trail).cloned();
                 group_map
                     .entry(group_kind)
                     .or_default()
@@ -332,7 +354,7 @@ fn build_node_model(
 
         let child_node_id = insertion.map(|ins| ins.child_node_id.clone());
 
-        let validation = issue_map.get(&record.id).cloned();
+        let validation = issue_map.get(record, trail).cloned();
 
         transclusions.push(FileTreeTransclusionEdge {
             kind: trans_kind,
@@ -350,12 +372,18 @@ fn build_node_model(
             && let Some(ref cid) = child_node_id
             && let Some(child_graph_node) = node_map.get(cid.as_ref())
         {
+            trail.push(ReferenceTrailStep {
+                file: node.source.clone(),
+                line: insertion.and_then(|ins| ins.authored_directive_line),
+            });
             children.push(build_node_model(
                 child_graph_node,
                 node_map,
                 issue_map,
+                trail,
                 follow,
             ));
+            trail.pop();
         }
     }
 
@@ -363,7 +391,7 @@ fn build_node_model(
     let mut node_issues = 0;
     let mut has_errors = false;
     for record in &node.local_references.records {
-        if let Some(v) = issue_map.get(&record.id) {
+        if let Some(v) = issue_map.get(record, trail) {
             node_issues += 1;
             if v.severity == ReferenceSeverity::Error {
                 has_errors = true;

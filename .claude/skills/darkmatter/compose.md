@@ -901,13 +901,57 @@ strings to numbers.
   prologue/epilogue children inherit rather than disable.
 - `ComposeOptions.prose_interpolation` (`ProseInterpolation`, crate-private,
   never set by a root request) is folded only by
-  `transclusion::effective_prose_interpolation`, applied in
-  `inherited_child_options`, by hand on the remote `RemoteFile` child, and in
-  the reference graph's `accepted_child_options` (a `::file` child folds its
-  directive; prologue, epilogue, and `::toc-linking` children inherit; a
-  fragment target outside the graph is `Enabled`). The preflight walk needs
-  no fold of its own: it derives children through `inherited_child_options`. It
-  is in both identity encoders; `parameters_identity` and the `compose:`
+  `transclusion::effective_prose_interpolation`, inside
+  `engine::directive_child_request`, which also applies the directive's
+  `replace=` one-off map and parent-wins mode. Every included child's request
+  comes from it: `inherited_child_options`/`markdown_child_options` (local
+  `::file`, prologue/epilogue, `as_markdown`) and `remote_child_options`
+  (remote `::file`/`::url` and remote prologue/epilogue), on the execution,
+  preflight, and reference-graph paths alike. The graph builds `::file`,
+  prologue, and epilogue children with `markdown_child_options` and the
+  parent's prepared effective state, and evaluates `when=` from the prepared
+  (resolved) frontmatter; only `::toc-linking` targets and fragment targets
+  outside the graph use `accepted_child_options`, which inherits no state and
+  clears the inclusion's replacement inputs. A child path that bypasses these
+  helpers disagrees with composition. A `::toc-linking` target's prepared
+  headings are never the authority for the anchors it generates: like
+  composition, `graph.rs::generate_toc_link_references` links raw headings,
+  and records those slugs per generated reference id and target (copies of
+  one holder share ids; `PreparedHeadingSnapshot::record_toc_reference`);
+  fragment validation
+  checks those references against them (`toc_slugs_for`), while authored
+  links (including literal prologue/epilogue links, which also carry
+  `toc_synthesized`) keep the prepared headings. Both identities hash the actual child
+  request: the composed-child cache key in `render_markdown_transclusion`
+  combines `cache::hashing::options_hash` of the child request with the
+  parent's (so a self-inclusion never waits on its own in-flight entry), and
+  the preflight `visited` dedup (`collect.rs::visited_key`) takes the child
+  request's `compose_cache_fingerprint()` and adds the starting-frontmatter digest and the
+  `InheritedDiscovery` digest, so one child reached under two settings,
+  value sets, or replacement maps is walked under each, and an ancestor
+  marker (`\0walking`) ends a self-inclusion whose values change on every
+  level.
+- Every inclusion prepares its own graph node, and `NodeId` names a prepared
+  copy, not a file: `ReferenceAnalysisRuntime::prepared_copy_id` gives a copy
+  whose references or insertions differ from every earlier copy of the file
+  `{path} (n)`, and an equal copy the first equal copy's id. Insertions select
+  children by that id (flattening, followed JSON, file tree, Mermaid/DOT); the
+  file tree attaches an issue's label only to the record it describes
+  (`ReferenceIssue::describes`: reference id, `included_via` trail, and
+  target), because `::map`/`::filter` copies from one directive line share
+  both id and trail.
+  Source identity (`source_to_id`, canonical path) stays the key for raw
+  loads, the dependency manifest, cycle detection, and prepared heading
+  slugs. Never select a prepared child by its source.
+- A directive's `set` overlay is applied by one function,
+  `transclusion::apply_directive_set_overlay`, on every path that loads an
+  included child: local and remote (`RemoteFile`) execution, the preflight
+  walk's local and remote branches, and the reference graph's `::file`
+  child. Every path also records the overlay's data leaves from
+  `child_inherited_origin(..).frontmatter_data` (a remote or graph child
+  replaces the parent's, which describe the parent). Prologue/epilogue and
+  `as_markdown` children have no directive `set`; `::toc-linking` accepts
+  none; the graph never fetches a remote child. It is in both identity encoders; `parameters_identity` and the `compose:`
   child cache key also carry it, so a normal and an `interpolate=false` use
   of one file never share a composed result.
 - Suppression reads one classifier,
@@ -1628,14 +1672,20 @@ darkmatter/lib/src/
 - **Discovery boundary.** Passive `analyze_collection_blocks` runs no handlers
   or I/O. `analyze_collection_blocks_report` returns the same first defect
   with the recovered sources authored before it; the call precheck feeds
-  those into its authored-order prefix, so a static rejection keeps them. Preflight (`preflight/collect.rs`, with `reference/graph.rs` for
-  reference validation) enumerates sources and
-  evaluates only the dependency slice for targets; selection, sort and
-  prefix are never evaluated. Child edges are keyed by authored site,
+  those into its authored-order prefix, so a static rejection keeps them. Preflight (`preflight/collect.rs`)
+  enumerates sources condition-blind (a discovery budget: every gate and
+  item) and evaluates only the dependency slice for targets; selection,
+  sort and prefix are never evaluated. Child edges are keyed by authored site,
   iteration path and explicit-parameter identity; a graph-backed request
   never late-approves a new target. Local-dependent shell holes are
-  `Deferred` and `TemplateRequired`. `reference/graph.rs` must not run the
-  normal `CollectionBlocks` operation (double execution).
+  `Deferred` and `TemplateRequired`. Reference preparation
+  (`reference/graph.rs::prepare_content`) is the opposite: it runs the
+  ordinary `CollectionBlocks` traversal (gates, selection, sort, prefix,
+  on its own root run's budget) so each copy it checks is one composition
+  keeps, never with `ShellExpansion`, and `build_node` judges a copy's
+  `when=` through `SiteLookup` over the prepared `ScopeRanges`. A
+  condition-blind expansion there would check filtered-out items and every
+  `::block` gate, and report references composition never produces.
 - **Diagnostics.** `dm.collection.*`, `dm.expression.invalid_callback`,
   `dm.iteration.{visit,expansion}_limit`; located diagnostics carry `span` and
   `iteration_path`. Recovery: `with_allow_untyped_{map,filter}_variables`.

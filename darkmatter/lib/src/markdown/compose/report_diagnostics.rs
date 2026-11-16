@@ -273,15 +273,11 @@ fn config_problem_source(problem: &crate::config::load::ConfigProblem) -> Diagno
 
 /// The diagnostics of a failed lifecycle event: its Darkmatter cause's
 /// ([`error_diagnostics`]) when it has one, otherwise one
-/// [`LIFECYCLE_FAILURE_CODE`] record with the failure's complete message
-/// ([`LifecycleErrorInfo::actionable_msg`]), never the clamped `err.msg`, so a
-/// containment refusal keeps its whole target and mutation root.
-///
-/// [`LifecycleErrorInfo::actionable_msg`]: crate::lifecycle::LifecycleErrorInfo::actionable_msg
+/// [`LIFECYCLE_FAILURE_CODE`] record carrying the failure's complete `err.msg`.
 pub fn lifecycle_failure_diagnostics(failure: &crate::lifecycle::LifecycleErrorInfo) -> Vec<Diagnostic> {
     match &failure.cause {
         Some(cause) => error_diagnostics(cause),
-        None => vec![unlocated(LIFECYCLE_FAILURE_CODE, Severity::Error, failure.actionable_msg().to_string())],
+        None => vec![unlocated(LIFECYCLE_FAILURE_CODE, Severity::Error, failure.msg.clone())],
     }
 }
 

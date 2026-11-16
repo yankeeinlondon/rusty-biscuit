@@ -273,12 +273,81 @@ fn the_editor_flags_exactly_the_values_composition_rejects_at_the_option() {
     }
 }
 
+/// Expression-valued spellings, each evaluated by composition before the
+/// option is validated; `{fixed}` becomes the literal `true` or `false`.
+const EXPRESSION_SPELLINGS: &[&str] = &[
+    "interpolate={{ flag }}",
+    "interpolate={{flag}}",
+    "interpolate=\"{{ flag }}\"",
+    "interpolate=\"{{ fixed }}\"",
+];
+
+fn invalid_values(diagnostics: &[Diagnostic]) -> Vec<&Diagnostic> {
+    diagnostics.iter().filter(|d| code_of(d) == Some(INVALID_VALUE)).collect()
+}
+
+/// The editor cannot know an expression's result, so it never judges an
+/// expression-valued option, while composition evaluates and accepts it.
+#[test]
+fn an_expression_valued_option_is_not_judged_before_composition_evaluates_it() {
+    let editor = Editor::new();
+    for flag in ["false", "true"] {
+        for spelling in EXPRESSION_SPELLINGS {
+            let options = spelling.replace("fixed", flag);
+            let front = format!("---\nflag: {flag}\n---\n");
+            let file_text = format!("{front}::file ./child.md {options}\n");
+            let composed = editor.composes(&file_text);
+            assert!(composed.is_ok(), "composition of `{options}` with flag {flag}: {composed:?}");
+
+            for line in [format!("::file ./child.md {options}"), format!("::url https://example.com/a.md {options}")] {
+                let diagnostics = editor.diagnostics(&format!("{front}{line}\n"));
+                assert!(invalid_values(&diagnostics).is_empty(), "`{line}` (flag {flag}): {diagnostics:#?}");
+                assert!(!diagnostics.iter().any(|d| code_of(d) == Some(UNKNOWN_OPTION)), "`{line}`: {diagnostics:#?}");
+            }
+        }
+    }
+}
+
+/// An expression whose result is not a boolean word fails composition at
+/// the directive; the editor, which never evaluates it, stays silent.
+#[test]
+fn an_expression_with_a_non_boolean_result_fails_only_in_composition() {
+    let editor = Editor::new();
+    let text = "Intro.\n\n::file ./child.md interpolate={{ \"banana\" }}\n";
+    let error = editor.composes(text).expect_err("composition rejects the result");
+    assert!(error.contains("not banana"), "{error}");
+    let diagnostics = editor.diagnostics(text);
+    assert!(invalid_values(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+/// `::url` judges literal values exactly as `::file` does.
+#[test]
+fn url_flags_the_same_literal_values_as_file() {
+    let editor = Editor::new();
+    for spelling in SPELLINGS {
+        let file = invalid_values(&editor.diagnostics(&format!("::file ./child.md {}\n", spelling.options)))
+            .into_iter()
+            .map(|d| d.message.clone())
+            .collect::<Vec<_>>();
+        let url = invalid_values(&editor.diagnostics(&format!("::url https://example.com/a.md {}\n", spelling.options)))
+            .into_iter()
+            .map(|d| d.message.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(url, file, "`{}`", spelling.options);
+        assert_eq!(url.is_empty(), spelling.accepted, "`{}`: {url:?}", spelling.options);
+    }
+}
+
 #[test]
 fn interpolate_on_code_is_an_unknown_option_not_a_bad_value() {
     let editor = Editor::new();
-    let diagnostics = editor.diagnostics("::code ./child.md interpolate=banana\n");
-    assert!(diagnostics.iter().any(|d| code_of(d) == Some(UNKNOWN_OPTION)), "{diagnostics:#?}");
-    assert!(!diagnostics.iter().any(|d| code_of(d) == Some(INVALID_VALUE)), "{diagnostics:#?}");
+    let literal = std::iter::once("interpolate=banana".to_string()).chain(["interpolate=false".to_string()]);
+    let expressions = EXPRESSION_SPELLINGS.iter().map(|spelling| spelling.replace("fixed", "false"));
+    for options in literal.chain(expressions) {
+        let diagnostics = editor.diagnostics(&format!("---\nflag: false\n---\n::code ./child.md {options}\n"));
+        assert!(diagnostics.iter().any(|d| code_of(d) == Some(UNKNOWN_OPTION)), "`{options}`: {diagnostics:#?}");
+        assert!(invalid_values(&diagnostics).is_empty(), "`{options}`: {diagnostics:#?}");
+    }
 }
 
 // ── An open included file keeps its own treatment ───────────────────────────

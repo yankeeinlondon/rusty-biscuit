@@ -83,7 +83,8 @@ DMLS checks everything in this layer without running any of it.
   - broken targets are flagged, and **transclusion cycles** are detected and
     reported with the chain of files.
   - `interpolate=` on `::file`/`::url` completes `true`/`false`, hover
-    explains it, and a value composition would reject is flagged at the option.
+    explains it, and a literal value composition would reject is flagged at
+    the option (an expression value is left to composition).
 - **`::toc-linking`** targets get links and broken-path checks. A fallback
   chain `"a.md | b.md | false"` is read the way composition reads it.
 - **`{{{ expressions }}}`:**

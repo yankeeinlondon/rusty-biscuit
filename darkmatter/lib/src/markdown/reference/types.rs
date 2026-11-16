@@ -16,8 +16,12 @@ use std::path::PathBuf;
 
 /// Unique identifier for a node in the reference graph.
 ///
-/// Wraps a string identifier to provide type safety and prevent accidental
-/// confusion with other string types.
+/// Identifies one prepared copy of a document, not just its file: a document
+/// included more than once is prepared once per inclusion, and copies that
+/// differ (other inherited values, `set` or `replace` options) are distinct
+/// nodes. The first distinct copy of a file has its canonical path (or URL);
+/// a later one that differs from every earlier copy appends its ordinal,
+/// `{path} (2)`. Copies with identical results share an id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NodeId(pub String);
 
@@ -257,7 +261,7 @@ pub struct AuthoredReferenceLocation {
 /// preparation stage applied. The file-tree model matches insertions in that
 /// frame. Prologue and epilogue records have no place in it and keep the
 /// sentinel lines `0` and `usize::MAX`. Report a position from `authored`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReferenceOrigin {
     /// The compose source (file, URL, or unknown).
     pub source: ComposeSource,
@@ -282,7 +286,7 @@ pub struct ReferenceOrigin {
 // ── Record ──────────────────────────────────────────────────────────
 
 /// A single reference with full provenance.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReferenceRecord {
     /// Stable unique identifier (`{source_hash:016x}:{line}:{span_start}`).
     pub id: String,
@@ -342,7 +346,7 @@ fn simple_hash(bytes: &[u8]) -> u64 {
 // ── Collection ──────────────────────────────────────────────────────
 
 /// A collection of reference records.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ReferenceSet {
     /// The reference records.
     pub records: Vec<ReferenceRecord>,
@@ -411,7 +415,7 @@ impl<'a> IntoIterator for &'a ReferenceSet {
 
 /// Contextual metadata about where a transclusion directive appears
 /// within the parent document's section structure.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct ReferenceInsertionContext {
     /// The syntactic form of the directive that triggered insertion.
     pub directive_kind: Option<ReferenceSyntax>,
@@ -442,9 +446,9 @@ pub struct ReferenceReportDocument {
 }
 
 /// Records a child document insertion within a graph node.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReferenceInsertion {
-    /// ID of the child node in the graph.
+    /// ID of the prepared copy of the child this insertion produced.
     pub child_node_id: NodeId,
     /// Line of the directive that triggers insertion, in the prepared body
     /// (`0` for a prologue and `usize::MAX` for an epilogue).
@@ -745,7 +749,7 @@ impl ReferenceGraph {
         ReferenceGraphView { graph: self, follow }
     }
 
-    /// Finds a node by its ID.
+    /// Finds a node by its ID: one prepared copy (see [`NodeId`]).
     pub fn node_by_id(&self, id: &str) -> Option<&ReferenceGraphNode> {
         if self.root.node_id.as_ref() == id {
             return Some(&self.root);
