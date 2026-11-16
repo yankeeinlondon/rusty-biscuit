@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-14
 total_phases: 6
-phase: 6
+phase: 7
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1:
@@ -81,6 +81,57 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+- darkmatter/lib/src/markdown/compose/directives_api.rs
+- darkmatter/lib/src/markdown/compose/parse_utils.rs
+- darkmatter/lib/src/markdown/compose/transclusion/types.rs
+- darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+- darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+- darkmatter/lib/src/markdown/compose/preflight/mod.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/interpolation/active_inputs.rs
+- darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/tests/mod.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+- darkmatter/lib/src/markdown/compose/tests/file_interpolate.rs
+- darkmatter/lib/src/markdown/reference/graph.rs
+- darkmatter/dmls/src/overlay/directives.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/file_interpolate_option.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/compose_file_interpolate.rs
+- darkmatter/cli/tests/fixtures/file_interpolate_publication/topics/examples.md
+- darkmatter/cli/tests/fixtures/file_interpolate_publication/use-skills/use-example/SKILL.md
+documentation:
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/docs/transclusion/block-transclusion.md
+- darkmatter/docs/inline/interpolation.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- darkmatter/docs/use-skills/use-dmls/features.md
+- CLAUDE.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: `::file interpolate=false` — transclude prose without evaluating it
@@ -802,7 +853,7 @@ same change; the caller-skill transclusion audit is resolved (not deferred).
 
 **Wave 9**:
 
-- [ ] Full area verification
+- [x] Full area verification
     - `just test`, `just lint`, and a clean typecheck for the darkmatter
       package area (lib, cli, dmls); the spec scopes verification to L1 —
       no terminal, focused window, or browser is used
@@ -812,7 +863,7 @@ same change; the caller-skill transclusion audit is resolved (not deferred).
       `effective_prose_interpolation`, the classifier module docs): `///`
       docs state the contract, no HOW-narration; drift in touched inline
       comments fixed in the same change
-- [ ] Handoff artifacts
+- [x] Handoff artifacts
     - Create `darkmatter/features/2026-11-14-file-interpolate-option/implementation-log.md`
       recording what was built, any departure from the spec (none expected)
       and the Phase 5 audit outcome

@@ -107,6 +107,14 @@ decisions_for_review:
       Reverting means removing the empty-line branch in
       `parse_interpolate_option` and restoring the old assertion in three
       tests (parser, DMLS agreement, CLI `missing_value`).
+    - |-
+      The plan's closing step said to set the spec's `status` to
+      `implemented` and `implemented_by` to an opencode agent name. I set
+      `implemented: true` and `implemented_by: claude/opus` as the run's
+      instructions require, and left `status` at its current
+      `human-in-the-loop`, because the pipeline manages that field and the
+      run's instructions did not ask for it. Setting `status: implemented`
+      is a one-line frontmatter edit on the spec.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/interpolation/active_inputs.rs
     - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
@@ -165,14 +173,57 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/compose.md
-message_to_agent: |-
-  Phase 5 was docs-only. Note for closing verification: the working tree
-  still holds Phase 4's uncommitted edits alongside Phase 5's (git status shows
-  both), so the scope calculator selects darkmatter packages from Phase 4's
-  source files. `just publish-skills` in `darkmatter/` was run and the installed
-  `~/.claude/skills/use-darkmatter/` and `use-dmls/` copies now carry the
-  `interpolate=false` guidance. No caller skill has a live (unfenced) `::file`
-  transclusion, so no `interpolate=false` was added to shipped skill sources.
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+- darkmatter/lib/src/markdown/compose/directives_api.rs
+- darkmatter/lib/src/markdown/compose/parse_utils.rs
+- darkmatter/lib/src/markdown/compose/transclusion/types.rs
+- darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+- darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+- darkmatter/lib/src/markdown/compose/preflight/mod.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/interpolation/active_inputs.rs
+- darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/tests/mod.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+- darkmatter/lib/src/markdown/compose/tests/file_interpolate.rs
+- darkmatter/lib/src/markdown/reference/graph.rs
+- darkmatter/dmls/src/overlay/directives.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/file_interpolate_option.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/compose_file_interpolate.rs
+- darkmatter/cli/tests/fixtures/file_interpolate_publication/topics/examples.md
+- darkmatter/cli/tests/fixtures/file_interpolate_publication/use-skills/use-example/SKILL.md
+documentation:
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/docs/transclusion/block-transclusion.md
+- darkmatter/docs/inline/interpolation.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- darkmatter/docs/use-skills/use-dmls/features.md
+- CLAUDE.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-11-14-file-interpolate-option (6 phases)
@@ -452,8 +503,24 @@ plus tests, all small enough to verify inline with targeted filters.
     was prepared under the folded setting).
 - `compose/transclusion/mod.rs`: re-exports `effective_prose_interpolation`
   crate-wide for the graph.
-- Preflight: no code change (Rule 18 holds: the walk derives children through
-  `inherited_child_options`; Phase 2 already masked its `authored_expressions`).
+- Preflight: no code change. Local-file children derive through
+  `inherited_child_options`; remote directive children clone the parent's
+  request without folding the directive's `interpolate` value. Phase 2 masked
+  `authored_expressions`, but that masking depends on receiving the folded
+  setting.
+
+**Review correction, 2026-11-15:** The original entry incorrectly said the
+child derivation made preflight agree with execution for every inclusion.
+Through the public `Markdown::compose_preflight` and `compose_with` APIs,
+a loopback HTTP child containing `Sample {{ length() }}.` was preserved by
+composition with either `::file URL interpolate=false` or
+`::url URL interpolate=false`, while preflight rejected `length()` for its
+missing argument. A prose `as_markdown("::shell echo sample")` also added
+`echo sample` to remote preflight's approval set, and prose `current.os` /
+`ping('10.1.2.3')` added a deferred context key and an ICMP probe. Equivalent
+local inclusions and remote inclusions below an already-disabled local
+ancestor stayed suppressed. These checks used temporary in-process L1 probes
+beside the existing remote tests; the probes were removed after review.
 - Skill: `.claude/skills/darkmatter/compose.md` names the graph fold and why
   the walk needs none.
 
@@ -744,3 +811,86 @@ No dependent-package tests were run, because this phase changed no code. No
 cross-OS check was run: there is no OS-specific risk, since only docs,
 skills, and CLAUDE.md changed. No decisions were added for review: every
 choice in this phase was set by the plan's rules.
+
+## Phase 6
+
+Closing verification and handoff. I did this directly, with no subagents.
+No source, docs, or skill file changed. The working tree was clean at the
+start because Phases 1–5 were committed (the Phase 5 note about uncommitted
+Phase 4 edits no longer applied).
+
+### Comment-discipline pass
+
+I reviewed the `///`/`//!` docs of every symbol the plan names
+(`BlockOptions.interpolate` and its hand-written `Default`,
+`ProseInterpolation`, `prose_enabled`, `with_prose_interpolation`,
+`prose_interpolation_tag`, `parse_interpolate_value`, `active_input_ranges`,
+`intersects_active`, `mask_prose`, `effective_prose_interpolation`, and the
+`active_inputs` module docs). I also reviewed every inline `//` comment
+that the three feature commits (`0aee6f8f8`, `6e7304159`, `005983a9f`) added
+to `darkmatter/lib/src` and `darkmatter/dmls/src`. Each states a contract,
+an invariant, or the reason for a surprising choice. None narrates the
+implementation, and none has drifted from the code. No edits were needed.
+
+### Gates (darkmatter area)
+
+- `just lint`: passed, including the zed-dmls wasm32-wasip2 check.
+- `just test`: exit 0, with 16865 passed and 10 skipped in 1m50s. One test
+  was slow: `darkmatter::l1
+  glob_implementation_guard::file_references_have_one_glob_implementation`
+  took 6.236s in the package run, at a load average of 59 at the start and
+  167 at the end on 16 cores. Measured alone it took 1.325s (load about
+  166). Under the loaded-host allowance (under 10s in the package run, 5s or
+  less alone), that clears it. It is load-sensitive, and this feature does
+  not touch it.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Scope calculator: see the closing entry below.
+
+### Dependents
+
+- `cargo check -p claudine -p claudine-cli -p research --tests`: clean.
+- Targeted Claudine run (`-E 'test(transclu) | test(file_directive) |
+  test(::file)'`, claudine and claudine-cli): 62 passed and 1 failed. The
+  failure was `claudine-cli::l1
+  document_environment_routes::a_prompt_task_and_its_transclusion_read_their_legs_map`.
+  Earlier phases blamed this on uncommitted Claudine work, which is no longer
+  in the tree, so I checked it again. I reverse-applied all three feature
+  commits' `darkmatter/lib/src` changes and ran the test alone. It still
+  failed, so it is **pre-existing and independent of this feature**. I then
+  restored the source with `git checkout -- darkmatter/lib/src` and confirmed
+  the tree was clean again. It belongs to Claudine, not this feature.
+
+### Cross-OS
+
+No cross-OS check was run. The feature changes string parsing, identity
+hashing, and text classification, with no path, process, or `cfg` code.
+
+### Requirement → test mapping
+
+This phase changed no behavior, so it added no tests. The mapping from
+earlier phases (the traceability table in the plan, and the Phase 1–4
+sections above) is unchanged, and the full `just test` run above covers it.
+
+### Handoff
+
+- The plan's two Phase 6 tasks are ticked, and no `- [ ]` remains.
+- Plan and log: `completed_phase: 6`, `implemented: true`, `source_code`
+  and `documentation` list every file from all phases, and the
+  `*_during_phase_6` lists are empty. I removed `message_to_agent` because
+  no phase follows.
+- Spec: `implemented: true` and `implemented_by: "claude/opus"`. I left
+  `status` alone (see `decisions_for_review`).
+- No departure from the spec beyond the decisions already recorded in
+  `decisions_for_review`. The Phase 5 audit found nothing to adopt.
+- Terminal state: implementation complete, ready for review.
+
+### Closing scope check and final gate
+
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs
+python3 scripts/ci/affected_scope.py`, run after every edit in this phase,
+gave `packages: [darkmatter, darkmatter-cli]` and `change_class: package`.
+That is because tests in those packages read the changed planning files.
+I edited the plan, log, and spec after the first gate run, so I ran
+`just test` again on the final tree. It passed 16865 tests and skipped 10
+in 77s, with **no test at or above 5.0s** (load about 61–67). The first
+run's `just lint` still stands, because no Rust source changed after it.
