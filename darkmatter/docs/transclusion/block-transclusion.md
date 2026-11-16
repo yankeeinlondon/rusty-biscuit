@@ -212,6 +212,58 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
     - `set=42` (non-object JSON5) raises `InvalidFrontmatterAssignment`. Use `--allow invalid-frontmatter-assignment` to downgrade to a warning; sibling valid set clauses still apply.
     - `set.name="Bob" set.name="Mary"` raises `InvalidReassignedFrontmatterProperty`. Use `--allow reassigned-frontmatter-property` to downgrade to a warning; the rightmost assignment wins.
 
+6. `interpolate`
+
+    Use `interpolate=false` to bring a document's prose in **as written**: its `{{ … }}` expressions are kept as literal text instead of being evaluated. This is how you reuse a documentation page whose examples show expressions, for example in a caller skill that transcludes a passage of the package's `docs/`. `::file` and `::url` accept the option; `::code` content is already literal, so it does not.
+
+    ```md
+    ::file ../../topics/lifecycle/index.md interpolate=false
+    ```
+
+    Given this child, and a parent whose frontmatter has a `name` property:
+
+    ```md
+    Use `{{ name }}` to read a property.
+    An unknown name looks like {{ undeclared }}.
+    Write {{{ x }}} for an interpolation literal.
+    ```
+
+    all three lines come out exactly as they appear above. The first is not replaced by the parent's `name`, the second produces no undeclared-name warning (so it composes under `--deny all`), and the triple braces stay triple.
+
+    **Values.** The value is a boolean, read with the usual boolean words, case-insensitive:
+
+    | Written on the directive | Prose interpolation |
+    |---|---|
+    | option omitted, or `interpolate=null` | on (the default) |
+    | `true`, `yes`, `on`, `1` | on |
+    | `false`, `no`, `off`, `0` | off |
+    | a quoted word, such as `interpolate="false"` | the same as unquoted |
+    | `interpolate=` with no value, `"null"`, or any other text | error at the option |
+
+    Repeating the option is allowed; the last value wins, but every occurrence must be valid. An invalid value stops the composition with an error that names the including file and the directive's line, for example `'interpolate=' requires a value: true or false`.
+
+    **What stays literal.** With `interpolate=false`, the child's body prose (paragraphs, headings, lists, table cells, inline code, link text and destinations) is not interpolated: its `{{ … }}` spans are never parsed or evaluated, so they read no properties or files and report no expression problems, even when malformed. Fenced and indented code stay literal even if the child sets `interpolate_code_blocks: true`; this option wins.
+
+    **What still runs.** The option only covers prose:
+
+    - The child's **frontmatter** is interpolated, validated, and shell-expanded exactly as before.
+    - **Directive inputs** in the child keep evaluating: `when=` conditions, expressions in file targets and option values, `::map`/`::filter` sources, and `::shell` arguments and `::shell-block` bodies. Prose inside a selected or repeated block stays literal:
+
+        ```md
+        ::block when="show_example"
+        Example: {{ name }}
+        ::file {{ detail_file }} set.name="{{ name }}"
+        ::end-block
+        ```
+
+        Here the condition, the nested target, and the `set.name` value evaluate; the line `Example: {{ name }}` is kept as written.
+    - The including directive's own options (`set=`, `replace=`, `exclude=`, `when=`, `quotation=`, `disclosure=`) belong to the parent and evaluate as usual.
+    - Text replacement, section exclusion, link resolution, heading adjustment, wrapping, and cleanup still apply, so a `replace` rule or a rewritten relative link can still change the included text. The option does not make a document safe to run: its directives and frontmatter can still perform approved effects.
+
+    **Inheritance.** Once an inclusion turns prose interpolation off, every Markdown document it includes inherits that: nested `::file` and `::url` includes, frontmatter prologue/epilogue includes, and documents composed by an expression. A nested `interpolate=true` cannot turn it back on, and is accepted without a warning. The setting never reaches the parent or siblings, so the same file can be included once normally and once with `interpolate=false` and each copy keeps its own result.
+
+    **Only for this composition.** The setting belongs to the inclusion, not to the file, and nothing is written into the output to remember it. If you save the composed result and compose that file again, its literal `{{ … }}` text is interpolated by the normal rules.
+
 And then finally the maybe most powerful option/key is `when` which provides _conditional_ transclusion.
 
 #### Conditional Transclusion

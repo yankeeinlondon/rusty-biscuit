@@ -238,11 +238,10 @@ Update alongside code changes:
       (`::file ../../topics/lifecycle/index.md`). A transcluded passage is
       composed too: its inline `{{ … }}` examples are evaluated (against the
       skill's own frontmatter, if a name matches), while fenced examples and
-      `::code` content stay verbatim. Transclude only passages whose
-      examples are fenced, and check the published text (a `::file`
-      option to leave a passage's prose uninterpolated, `interpolate=false`,
-      is **planned**). Publication runs with `--deny all`, so an undeclared
-      name fails it
+      `::code` content stay verbatim. When a transcluded passage's prose
+      shows expressions that must survive publication, include it with
+      `::file … interpolate=false`, and check the published text.
+      Publication runs with `--deny all`, so an undeclared name fails it
     - they are composed, so an interpolation shown as an example is written
       `{{{ … }}}` (it publishes as `{{ … }}`); show a triple-brace literal
       itself in a fenced code block in the body (frontmatter strings are

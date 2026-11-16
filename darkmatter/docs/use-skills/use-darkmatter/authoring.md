@@ -184,6 +184,7 @@ Internal-only text. Blocks nest.
 ::code ./snippet.rs                      <!-- fenced code block; language from the extension -->
 ::code ./demo.rs disclosure=true
 ::file https://example.com/x.md          <!-- needs --allow host=example.com -->
+::file ../../topics/guide.md interpolate=false  <!-- child prose kept as written -->
 ```
 
 - A child sees the parent's frontmatter. Its own keys win, and `set=` or
@@ -196,6 +197,13 @@ Internal-only text. Blocks nest.
   `disclosure=true|"summary"` (wraps it in a disclosure block), and
   `replace=true|false|{…}`. Every option needs `=value`: a bare
   `quotation` is a parse error.
+- `interpolate=false` (on `::file` and `::url`) keeps the child's prose as
+  written: its `{{{ … }}}` examples are not evaluated, warn about nothing, and
+  stay as typed, triple braces included, even if a name matches your
+  frontmatter. Use it to transclude a docs page that shows expressions. The
+  child's frontmatter and directive inputs (`when=`, targets, option values,
+  `::shell`) still evaluate, and every document it includes inherits the
+  setting. A value other than a boolean word or unquoted `null` is an error.
 - A target may use any file-reference form: `./`, bare, `&`, `^`, `@`, `~`,
   `{{{VAR}}}`, an absolute path, or `https://`.
 

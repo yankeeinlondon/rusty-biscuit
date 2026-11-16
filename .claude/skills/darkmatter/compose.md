@@ -71,7 +71,7 @@ setter's value keeps `dm.schema.*`, names the setter, and has no position.
 4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
 5. **Text Replacement** - `replace:` frontmatter replaces literal strings
 6. **Page Blocks** - `::block`/`::end-block` conditional regions
-7. **Interpolation** - `{{ variable }}` expressions expand to values
+7. **Interpolation** - `{{ variable }}` expressions expand to values; under an inclusion with an effective `interpolate=false` only active directive inputs evaluate and prose stays literal (see [`interpolate=` on `::file` / `::url`](#interpolate-on-file--url-internals))
 8. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
 9. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
 
@@ -219,7 +219,9 @@ content fragment. `for_document` scans every frontmatter string at any depth
 interpolation-literal masking and date/time aliases. The body follows body
 interpolation's executable-span rule: a mention inside a fenced or indented
 code block demands nothing unless the document sets
-`interpolate_code_blocks: true`. `all`, `contains`, `iter`, and `union` support
+`interpolate_code_blocks: true`. Exception: under an effective
+`interpolate=false` inclusion only active directive inputs demand anything
+(`for_document_with`, see "`interpolate=` on `::file` / `::url`"). `all`, `contains`, `iter`, and `union` support
 explicit orchestration without exposing the population modules. Date/time is
 always present in a requirements set.
 
