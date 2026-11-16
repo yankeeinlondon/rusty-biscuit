@@ -86,3 +86,8 @@ config's skip flags. The full default path keeps exactly these live callers:
 `hardware::audio` detection tests, and
 `hardware::tests::test_detect_hardware_full_includes_gpu_on_macos`; add another
 only when it asserts what those calls return.
+On macOS the five CoreAudio callers among them (all but the network test) run
+one at a time in the `sniff-macos-coreaudio` nextest test group
+(`.config/nextest.toml`): started together, each waited out the others' HAL
+setup and took about 14 s; one at a time, each takes about 3 s. A new live
+audio caller joins that group's filter.

@@ -84,6 +84,12 @@ schematic-fresh-output = { max-threads = 1 }
 # the developer's desktop. Parallel L2 runs them one at a time so at most one
 # window is open, while the rest of the tier keeps its parallel workers.
 apple-terminal-l2 = { max-threads = 1 }
+# Sniff's live CoreAudio callers on macOS. The first CoreAudio call in a
+# process sets up the audio HAL, and macOS serializes that setup across
+# processes: five of these started together each waited for all the others
+# (about 14s each, against about 3s alone). One at a time, each pays only its
+# own setup.
+sniff-macos-coreaudio = { max-threads = 1 }
 
 [profile.default]
 # Direct local nextest invocations also leave capacity for other host work.
@@ -186,6 +192,12 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.default.overrides]]
 filter = 'test(/(^|::)level2_apple_terminal_/)'
 test-group = 'apple-terminal-l2'
+
+# The full list of live audio callers is kept in `.claude/skills/sniff/testing.md`.
+[[profile.default.overrides]]
+platform = { host = "cfg(target_os = \"macos\")" }
+filter = 'package(sniff) & (test(=hardware::audio::tests::detect_audio_devices_on_macos) | test(=hardware::audio::tests::detect_audio_devices_returns_vec) | test(=hardware::tests::test_detect_hardware_full_includes_gpu_on_macos) | test(=tests::test_detect_returns_result) | test(=integration::test_detect_completes_in_reasonable_time))'
+test-group = 'sniff-macos-coreaudio'
 
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
 # (helper + crashpad processes that inherit the test's stdout) is the slowest

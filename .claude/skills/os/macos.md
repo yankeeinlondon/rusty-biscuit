@@ -109,9 +109,9 @@ takes `git` from `PATH` pays on every call.
   group without the signal and survives. Repeat the group kill until it fails.
   A group that holds only zombies returns `EPERM` on macOS but `0` on Linux.
   So "repeat until it fails" ends on macOS and spins forever on Linux. This is
-  why Claudine's `ProcessTree` drop
-  (`claudine/lib/src/composition/sequence/task/shell.rs`) repeats the kill only
-  off Linux, with a time limit.
+  why the shared owner in `sniff/lib/src/process/tree/unix.rs` repeats the
+  kill only off Linux, with a time limit
+  ([process trees](../../../sniff/docs/topics/process-trees.md)).
 - The surviving child keeps whatever the group inherited. If it holds a
   test's stderr, nextest reports `LEAK-FAIL` after the test passed, even
   though every pid the test watched was reaped.
@@ -412,7 +412,8 @@ no longer watches files, so its user docs no longer describe fseventsd.
   serial time each here (seven third-party HAL plug-ins): 1 process 1.1 s,
   6 together 4.6 s each, with under 0.2 s of CPU apiece. Tests that enumerate
   audio devices slow down by their count, not core count; keep them few
-  (sniff's `testing.md`).
+  and in the `sniff-macos-coreaudio` nextest group, which runs them one at a
+  time (sniff's `testing.md`).
 - **CoreText's first font enumeration lists the executable's directory.**
   `CTFontCollection` (fontique's system-font scan, so every Mermaid
   measurement in `biscuit-visualized`) registers the main bundle's fonts, and
