@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-15
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -32,6 +32,51 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
+- .claude/skills/claudine/SKILL.md
+source_files_during_phase_2:
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/phase1c.rs
+- claudine/cli/src/commands/wrap/sequence/tests.rs
+- claudine/cli/tests/l1/composition_seams.rs
+- claudine/cli/tests/l1/sequence_sources_cli.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/error/render/sequence_loop.rs
+- claudine/lib/src/composition/error/tests.rs
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/service.rs
+- claudine/lib/src/composition/resolve.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/src/composition/schema/translate.rs
+- claudine/lib/src/composition/sequence/document.rs
+- claudine/lib/src/composition/sequence/document/tests.rs
+- claudine/lib/src/composition/sequence/formal.rs
+- claudine/lib/src/composition/sequence/mod.rs
+- claudine/lib/src/composition/sequence/model.rs
+- claudine/lib/src/composition/sequence/normalize.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/source.rs
+- claudine/lib/src/composition/sequence/tests.rs
+docs_updated_during_phase_2:
+- claudine/docs/topics/frontmatter-properties.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/sequence/declarations.rs
+- claudine/lib/src/composition/sequence/formal.rs
+- claudine/lib/src/composition/sequence/source.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/shape.rs
+- claudine/lib/src/composition/sequence/preflight/inputs.rs
+- claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+- claudine/lib/src/composition/sequence/preflight/tests/scoped_graph.rs
+- claudine/lib/src/work_counters.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
 - .claude/skills/claudine/SKILL.md
 packages:
 - claudine
@@ -442,7 +487,7 @@ independent tasks below, not concurrent execution of shared Cargo gates.
 
 ### Wave 3
 
-- [ ] **Composition views**
+- [x] **Composition views**
   - Implement rules 3, 4, and 10 in `sequence/document.rs`, `resolve.rs`, and
     the canonical preparation entry points in `prepare.rs`/`prepare/service.rs`.
     Introduce `SequenceDocumentScope` and the passive
@@ -462,7 +507,7 @@ independent tasks below, not concurrent execution of shared Cargo gates.
     `file(eager)` conversion before a derived property reads it. Own these
     files exclusively during this wave.
 
-- [ ] **Input subjects**
+- [x] **Input subjects**
   - In parallel, implement rule 14 in the error types/renderer, public exports,
     and existing error/Phase 1c test helpers. Preserve existing step rendering
     and add document rendering without inventing a numeric step zero.
@@ -474,7 +519,7 @@ independent tasks below, not concurrent execution of shared Cargo gates.
 
 ### Wave 4
 
-- [ ] **Owner normalization**
+- [x] **Owner normalization**
   - Apply rules 9, 10, 15, and 16 to `formal.rs`, `source.rs`,
     `sequence/{mod,model,expr}.rs`, and the library exports. Extend
     `SequenceSourceOptions` with builders for caller layers and captured
@@ -501,7 +546,7 @@ independent tasks below, not concurrent execution of shared Cargo gates.
 
 ### Wave 5
 
-- [ ] **Input inventory**
+- [x] **Input inventory**
   - Implement rules 12 and 13's library responsibilities in
     `sequence/preflight/mod.rs` and a new `preflight/inputs.rs`. Introduce
     `SequenceInputInventory`, sharing `Loader`'s reference/cycle and
@@ -521,7 +566,7 @@ independent tasks below, not concurrent execution of shared Cargo gates.
 
 ### Wave 6
 
-- [ ] **Scoped graph**
+- [x] **Scoped graph**
   - Wire owner preparation and formal normalization into
     `Loader::{walk_plan,seed_steps,load_sequence,load_sequence_children}`.
     Root whole-document source metadata must reach graph input validation;
