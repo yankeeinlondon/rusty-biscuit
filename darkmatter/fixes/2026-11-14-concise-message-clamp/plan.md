@@ -1,7 +1,7 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 3
+phase: 4
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -71,6 +71,18 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
 - .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+- claudine/lib/src/diagnostics/snapshot/tests.rs
+- claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+- claudine/cli/tests/l1/characterization_error_routes.rs
+- claudine/cli/tests/common/incomplete_subagents.rs
+- claudine/cli/tests/level2/level2_incomplete_subagents_capture.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_data_output.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 ---
 
@@ -347,7 +359,7 @@ not on truncation. The words "truncated" (L2 line 106) and "240-character"
 
 ### Wave 1 tasks
 
-- [ ] **Projection parity** (`claudine/lib/src/diagnostics/snapshot/tests.rs`)
+- [x] **Projection parity** (`claudine/lib/src/diagnostics/snapshot/tests.rs`)
     - One test builds each of: a typed selected diagnostic with a registered
       one-level cause (via `DiagnosticSnapshot::select`), a code-based snapshot
       (`from_code`), a facet-less action failure
@@ -370,7 +382,7 @@ not on truncation. The words "truncated" (L2 line 106) and "240-character"
       second fixture: a long multi-line `error:`; assert stdout is exactly one
       JSON document, `report["diagnostics"][0]["message"]` equals the normalized
       full text, and stderr is empty.
-- [ ] **Claudine command paths** (`claudine/cli/tests/l1/wrap_incomplete_subagents.rs`,
+- [x] **Claudine command paths** (`claudine/cli/tests/l1/wrap_incomplete_subagents.rs`,
   `characterization_error_routes.rs`)
     - Rewrite `display_truncation_never_reaches_the_machine_record` (line 299) as
       `the_headline_and_the_machine_record_both_name_every_task`: delete the
@@ -385,7 +397,7 @@ not on truncation. The words "truncated" (L2 line 106) and "240-character"
       unique ending, and a `finalize` stack that appends `{{ err.msg }}` to the
       events file via the existing `append_line` pattern; assert the recorded
       line ends with the unique ending.
-- [ ] **Delivery isolation**
+- [x] **Delivery isolation**
   (`claudine/lib/src/composition/lifecycle/tests/audio_emission.rs`,
   `.../executor/tests/event_time_interpolation.rs`)
     - In `audio_emission.rs`, model on
@@ -398,7 +410,7 @@ not on truncation. The words "truncated" (L2 line 106) and "240-character"
       full text and `info.msg` is unchanged afterward (no mutation by delivery).
     - Update the comment at `context/tests.rs:759` ("budget-reserved") to say the
       suffix survives intact.
-- [ ] **Validate Phase 3**
+- [x] **Validate Phase 3**
     - `cd darkmatter && just test`, `cd claudine && just test`, and `just lint`
       in both. The L1 CLI tests run under `just test`; L2 stays unrun.
 

@@ -73,25 +73,14 @@ decisions_for_review:
     Alternative: leave them to Phase 2, whose agent would then meet compile
     errors the plan does not explain.
 message_to_agent: |-
-  Phase 2 is done and both area suites are green. Two Phase 3 items landed early
-  because Phase 2 made their tests red or their comments wrong:
-  (1) claudine/cli/tests/l1/wrap_incomplete_subagents.rs: the test is already
-  renamed the_headline_and_the_machine_record_both_name_every_task and asserts
-  every long_task_name in order in failure-msg=, the session_end facts and the
-  terminal diagnostic; the ManyLongNamedStops doc is updated. Still yours in
-  that task: the characterization_error_routes.rs:26 comment and the new
-  500-character initialize/finalize err.msg test.
-  (2) claudine/lib/src/composition/lifecycle/context/tests.rs: the
-  "budget-reserved" comment (old line 759) is already reworded, and the two
-  <= 240 assertions there were removed (the hostile action-failure test now
-  asserts the exact complete text).
-  Still with an old-limit assertion but passing (its message is short):
-  executor/tests/event_time_interpolation.rs ~line 556-560 (your Delivery
-  isolation task). Also fixed in Phase 2: the doc on
-  claudine/lib/src/render/incomplete_subagents.rs (no longer says the headline
-  is clamped) and the lifecycle_refusal_reports.rs comments Phase 1 flagged.
-  report.rs::actionable_text was inlined (both reporters read error.msg), and
-  .claude/skills/claudine/SKILL.md was updated to match.
+  Phase 3 is done; both area suites and lints are green. Every Phase 3 test
+  file is finished, including the R17 comment edits in
+  claudine/cli/tests/common/incomplete_subagents.rs and the L2 capture test,
+  and the characterization_error_routes.rs module doc (it no longer says
+  "concise"). Phase 4 is docs, skills and the contract audit only. The
+  ManyLongNamedStops doc in wrap_incomplete_subagents.rs still mentions
+  "240 characters", deliberately: it describes the fixture's size, not a
+  limit. Keep it, or reword it if the audit grep flags it.
 source_files_during_phase_2:
   - "claudine/lib/src/harness/runtime.rs"
   - "claudine/lib/src/harness/runtime/tests.rs"
@@ -111,6 +100,18 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - ".claude/skills/claudine/SKILL.md"
+source_files_during_phase_3:
+  - "claudine/lib/src/diagnostics/snapshot/tests.rs"
+  - "claudine/lib/src/composition/lifecycle/tests/audio_emission.rs"
+  - "claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs"
+  - "claudine/cli/tests/l1/characterization_error_routes.rs"
+  - "claudine/cli/tests/common/incomplete_subagents.rs"
+  - "claudine/cli/tests/level2/level2_incomplete_subagents_capture.rs"
+  - "darkmatter/cli/tests/l1/compose_lifecycle.rs"
+  - "darkmatter/cli/tests/l1/compose_data_output.rs"
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 ---
 
@@ -272,3 +273,86 @@ length changed, not how any field is parsed.
 - The working tree also shows the author's moves of
   `2026-11-14-lifecycle-mutation-root` into `_completed` and a deleted Claudine
   spec. They are not part of this phase and I left them untouched.
+
+## Phase 3
+
+All Phase 3 work is test-only, plus three comment edits. No production code
+changed. I did it in one session without subagents, because the four task
+groups were small and serial runs kept host load down.
+
+- **Projection parity** (`claudine/lib/src/diagnostics/snapshot/tests.rs`):
+  `every_projection_route_keeps_the_complete_normalized_message` runs one
+  ANSI-colored, multi-line, tabbed message of more than 241 characters, each
+  with a unique last word, through four routes:
+  - typed selection via `DiagnosticSnapshot::select` over a semantic
+    `IngestError` that wraps a registered `ClaudineError::ConfigValidation`
+    cause;
+  - `from_code("cap.rate_limit", …)` and the matching `from_action_failure("rate_limit", …)`
+    label route;
+  - a facet-less `from_action_failure("shell", …)`;
+  - a catalog miss through `from_error_or_action` with an unregistered prose
+    error.
+
+  It asserts the exact normalized text, `snapshot.cause.message` complete,
+  `info.msg == snapshot.message`, and a `to_value`/`from_value` round trip
+  of the message and cause.
+- **md compose command paths**: `compose_lifecycle::a_long_composed_error_reaches_the_diagnostic_and_err_msg_whole`
+  sends a 600-character `error:` ending in `TAIL-MARKER`. The finalize line
+  holds the whole text, and a separate stderr diagnostic line holds the tail.
+  `compose_data_output::a_lifecycle_run_writes_only_the_envelope_to_stdout`
+  gained a long multi-line YAML block-scalar leg: stdout is exactly one JSON
+  document, `diagnostics[0].message` equals the lines joined with spaces, and
+  stderr is empty.
+- **Claudine command paths**: Phase 2 had already rewritten
+  `wrap_incomplete_subagents.rs`. I added
+  `characterization_error_routes::an_initialize_error_reaches_finalize_err_msg_whole`:
+  a 503-character `initialize` `error:`, with finalize appending
+  `{{ err.msg }}` to `events.log`. It asserts that the single recorded line
+  equals the full reason. I also updated the module doc's `err.msg` bullet
+  ("concise message projection" is gone; it names this test as the one
+  length property pinned). R17's comment edits are in
+  `tests/common/incomplete_subagents.rs` and
+  `level2/level2_incomplete_subagents_capture.rs`; the L2 test was not run.
+- **Delivery isolation**: `audio_emission::executor_publishes_a_long_speech_text_whole`
+  (a 1,006-character `say` reaches the recording emitter unchanged). In
+  `event_time_interpolation.rs`, the `<= 240` assertion and its "~240-char
+  cap" comment became a retention assertion (`msg` still names
+  `no_such_function`). The sibling test
+  `a_long_err_msg_reaches_speech_whole_and_unchanged` runs a 615-character
+  `err.msg` through `say` and then `message`: both receive the full text, and
+  `err` equals its clone after the event. The `context/tests.rs`
+  "budget-reserved" comment had already been reworded in Phase 2.
+- R16: Messenger was not touched or tested.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+|---|---|
+| snapshot, cause, and `err.msg` carry complete normalized text on every projection route; JSON round trip | `claudine` `diagnostics::snapshot::tests::every_projection_route_keeps_the_complete_normalized_message` |
+| `md compose` terminal diagnostic and finalize `err.msg` keep a 600-character error | `darkmatter-cli` `compose_lifecycle::a_long_composed_error_reaches_the_diagnostic_and_err_msg_whole` |
+| `md compose` data envelope carries the full folded multi-line message; one JSON doc; empty stderr | `darkmatter-cli` `compose_data_output::a_lifecycle_run_writes_only_the_envelope_to_stdout` |
+| `claudine compose` initialize error reaches finalize `err.msg` whole | `claudine-cli` `characterization_error_routes::an_initialize_error_reaches_finalize_err_msg_whole` |
+| incomplete-task headline and machine record name every task | `claudine-cli` `wrap_incomplete_subagents::the_headline_and_the_machine_record_both_name_every_task` (Phase 2) |
+| speech emitter receives long text unshortened | `claudine` `composition::lifecycle::tests::audio_emission::executor_publishes_a_long_speech_text_whole` |
+| delivery does not shorten or mutate `err.msg` | `claudine` `...::event_time_interpolation::a_long_err_msg_reaches_speech_whole_and_unchanged` |
+
+The tests cross the CLI boundary: the `md` and `claudine` binaries are spawned
+with filesystem fixtures, and stdout/stderr and an events file are asserted
+(L1, F3). They also cover the in-process crate API (F1/F2). No live speech,
+notification, or focus-changing backend is used. The input-robustness matrix
+does not apply, because no reader of a file format or configuration changed.
+
+### Gates
+
+- Targeted: the seven tests above pass. I measured one fixture wrong
+  (596 < 600 characters), so the first run failed its own precondition
+  assertion; I fixed the repeat count.
+- `cd darkmatter && just test`: 17043 passed, 10 skipped, 0 at or above 5.0s.
+  `just lint`: exit 0.
+- `cd claudine && just test`: 12247 passed, 15 skipped, none at or above 5.0s.
+  `just lint`: exit 0.
+- Dependents: `claudine` and `claudine-cli` are the dependents of Darkmatter,
+  and both ran in the area suite above.
+- I ran no L2/L3 tests, as the spec requires. I ran no cross-OS check: the
+  changes are test-only string assertions over existing fixtures, with no
+  paths or OS APIs.
