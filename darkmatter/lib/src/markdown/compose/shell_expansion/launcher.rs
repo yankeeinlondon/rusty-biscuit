@@ -69,8 +69,9 @@ const EOF_GRACE: Duration = Duration::from_millis(100);
 /// ## Returns
 ///
 /// The exit status and the last [`STDOUT_TAIL_LIMIT`] bytes of stdout, or
-/// `None` when the shell could not be spawned or did not exit within
-/// `timeout`.
+/// `None` when the shell could not be spawned, its process tree could not be
+/// owned (the shell is then killed before it runs on Windows), or it did not
+/// exit within `timeout`.
 pub(super) fn run_shell_query(command: &mut Command, timeout: Duration) -> Option<(ExitStatus, Vec<u8>)> {
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     // A session, not just a process group: only a new session removes the

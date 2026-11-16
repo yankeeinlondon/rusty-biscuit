@@ -1320,7 +1320,9 @@ impl<'a> StackExecutor<'a> {
     /// failures that `no_error` never suppresses. Every other failure
     /// (resolution, eligibility, preparation, the editor itself, a host with
     /// no editor) is a dispatch failure, reported to the host as
-    /// [`LifecycleRunFailure::EditFailed`] for it to classify.
+    /// [`LifecycleRunFailure::EditFailed`] for it to classify. A warning the
+    /// editor service returns goes to the host's warning channel whatever the
+    /// result; it never turns a successful edit into a failure.
     ///
     /// The cancellation probe is [`cancellation::cause_with`], not
     /// `requested_with`: terminal events run inside a cleanup scope, where

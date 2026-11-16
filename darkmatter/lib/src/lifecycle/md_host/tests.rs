@@ -511,9 +511,10 @@ fn a_late_interrupt_flag_is_seen_and_a_missing_one_gives_up() {
 
 // ── Long containment refusals ────────────────────────────────────────────
 
-/// A 50-character project directory: with the system temp prefix it makes a
-/// refusal naming both the target and the root longer than the 240-character
-/// limit messages were once cut to, on every host.
+/// A 50-character project directory: with the long nested target name below,
+/// a refusal naming both the target and the root is longer than the
+/// 240-character limit messages were once cut to, on every host, including a
+/// short Linux temp prefix such as `/tmp/.tmpXXXXXX`.
 const LONG_PROJECT: &str = "a-project-directory-with-a-fifty-character-name-xy";
 const LONG_OUTSIDE: &str = "an-outside-directory-with-a-fifty-character-name-x";
 
@@ -534,7 +535,7 @@ impl EditorService for NeverEditor {
 fn refused_under_a_long_root(action: impl Fn(&str) -> Value) -> (LifecycleErrorInfo, String, String) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join(LONG_PROJECT);
-    let target = temp.path().join(LONG_OUTSIDE).join("nested-target-directory").join("refused-target-file.md");
+    let target = temp.path().join(LONG_OUTSIDE).join("nested-target-directory-named-long-enough-for-a-short-temp-path").join("refused-target-file.md");
     std::fs::create_dir_all(&root).unwrap();
     let document = root.join("doc.md");
     std::fs::write(&document, "---\ncount: 1\n---\nBody\n").unwrap();
