@@ -181,8 +181,11 @@ impl BoundOperands {
             root: schema,
             seen: HashSet::new(),
             patterns: HashMap::new(),
+            marks: HashMap::new(),
             sites: Vec::new(),
+            site_index: HashMap::new(),
             actions: Vec::new(),
+            action_index: HashMap::new(),
         };
         walker.walk(schema, instance, &mut Vec::new(), 0);
         untyped_bodies(instance, &mut walker.actions);
@@ -593,9 +596,16 @@ struct Walker<'s> {
     /// Each `patternProperties` pattern, compiled once; `None` when it does
     /// not compile, so it matches no key here (the validator reports it).
     patterns: HashMap<&'s str, Option<fancy_regex::Regex>>,
+    /// [`Self::marks`] of each schema node, which depends on the node alone:
+    /// a node judges every item of a long list.
+    marks: HashMap<usize, Option<(String, Vec<OperandForm>)>>,
     sites: Vec<Site>,
+    /// The index in `sites` of each recorded path.
+    site_index: HashMap<Vec<PathSegment>, usize>,
     /// Every action dictionary, once each.
     actions: Vec<ActionMap>,
+    /// The index in `actions` of each recorded path.
+    action_index: HashMap<Vec<PathSegment>, usize>,
 }
 
 /// An action dictionary of the instance.
@@ -624,10 +634,11 @@ impl<'s> Walker<'s> {
             return;
         }
         if let Some((verb, forms)) = self.marks(schema) {
-            match self.sites.iter_mut().find(|site| {
+            let known = self.site_index.get(path.as_slice()).copied();
+            if known.is_some() {
                 crate::note_work!(OperandSiteComparison);
-                site.path == *path
-            }) {
+            }
+            match known.map(|index| &mut self.sites[index]) {
                 Some(site) if site.verb == verb => {
                     for form in forms {
                         if !site.forms.contains(&form) {
@@ -637,11 +648,14 @@ impl<'s> Walker<'s> {
                 }
                 // Two verbs typing one value: neither registration decides.
                 Some(site) => site.forms.clear(),
-                None => self.sites.push(Site {
-                    path: path.clone(),
-                    verb,
-                    forms,
-                }),
+                None => {
+                    self.site_index.insert(path.clone(), self.sites.len());
+                    self.sites.push(Site {
+                        path: path.clone(),
+                        verb,
+                        forms,
+                    });
+                }
             }
             return;
         }
@@ -717,30 +731,39 @@ impl<'s> Walker<'s> {
             return;
         };
         let verbs = properties.keys().filter(|key| !matches!(key.as_str(), "when" | "then" | "else" | "no_error")).cloned();
-        match self.actions.iter_mut().find(|known| known.path == path) {
+        match self.action_index.get(path).map(|&index| &mut self.actions[index]) {
             Some(known) => {
                 if position == ActionMapPosition::Item {
                     known.position = position;
                 }
                 known.verbs.extend(verbs);
             }
-            None => self.actions.push(ActionMap {
-                path: path.to_vec(),
-                position,
-                verbs: verbs.collect(),
-                untyped: false,
-            }),
+            None => {
+                self.action_index.insert(path.to_vec(), self.actions.len());
+                self.actions.push(ActionMap {
+                    path: path.to_vec(),
+                    position,
+                    verbs: verbs.collect(),
+                    untyped: false,
+                });
+            }
         }
     }
 
     /// The verb and spellings marked on `schema` itself or on the
     /// alternatives it is made of, never below a value descent.
-    fn marks(&self, schema: &'s Value) -> Option<(String, Vec<OperandForm>)> {
+    fn marks(&mut self, schema: &'s Value) -> Option<(String, Vec<OperandForm>)> {
+        let key = std::ptr::from_ref(schema) as usize;
+        if let Some(known) = self.marks.get(&key) {
+            return known.clone();
+        }
         crate::note_work!(OperandMarksComputation);
         let mut found: Option<(String, Vec<OperandForm>)> = None;
         let mut ambiguous = false;
         self.collect_marks(schema, 0, &mut found, &mut ambiguous);
-        if ambiguous { None } else { found }
+        let marks = if ambiguous { None } else { found };
+        self.marks.insert(key, marks.clone());
+        marks
     }
 
     fn collect_marks(

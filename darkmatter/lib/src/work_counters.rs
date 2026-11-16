@@ -47,9 +47,10 @@ pub enum Work {
     /// A link visited while a scope join collects ancestor addresses or
     /// walks a branch back to the shared history.
     ScopeJoinAncestorVisit,
-    /// An earlier operand site compared by path while recording a new one.
+    /// An earlier operand site found by path while recording a site there.
     OperandSiteComparison,
-    /// A schema node's operand markers collected.
+    /// A schema node's operand markers collected (once per node and
+    /// validation).
     OperandMarksComputation,
     /// A schema node visited while collecting operand markers.
     OperandMarksNodeVisit,

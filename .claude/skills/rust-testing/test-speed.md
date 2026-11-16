@@ -176,3 +176,29 @@ when the schema checks files), resolving a document's own `$schema`, and
 merging its layers. In a Time Profiler sample of that Claudine run (debug),
 the validator compile was about 17% of the process (about 150 ms) and
 decoding the prepared bundle section about 15%.
+
+### 9. Every process-spawning test 3–10× slower on a loaded host
+
+When tests spread across a whole family each take about 1 s alone and 6–15 s
+in a full run on a host loaded far above its core count, no single test is
+waiting: each process is CPU-bound in unoptimized code, and the host's load
+divides the CPU among them. Splitting tests or cutting fixture spawns trims
+the edges; what fixes the family is less CPU per process. Profile one process
+without root (`xcrun xctrace record --template 'Time Profiler' --launch --
+<binary> <args>`, then `xcrun xctrace export --xpath` the `time-profile`
+table) and attribute samples to the nearest workspace crate:
+
+- **Generic code compiled at opt-level 0.** `core`, `hashbrown`, and `alloc`
+  frames monomorphized into a workspace crate run at that crate's
+  opt-level. Simplified Schema's preparation was about 90% of a refused
+  `claudine sequence` and of a schema-matrix cell. The workspace
+  `Cargo.toml` sets `opt-level = 3` for it (and its YAML parser, and the SVG
+  stack `GitGraph::plan` uses) under `[profile.test.package.*]`: 0.43 → 0.15 s
+  of CPU per `claudine sequence`, 1.6 → 0.6 s per matrix cell, 1.7 → 0.7 s
+  per graph-layout test. It costs a few seconds when that crate is rebuilt.
+  `opt-level = 1` gained under a quarter of that; measure before settling.
+- **Work repeated per item.** A walk that recomputes a pure per-schema-node
+  answer for every instance value, or finds earlier entries by a linear
+  scan, grows with the document: Darkmatter's operand walker took 3.2 s of
+  CPU on a 200-item lifecycle document until it memoized each node's markers
+  and indexed sites by path (1.0 s).
