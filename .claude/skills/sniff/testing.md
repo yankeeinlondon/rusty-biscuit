@@ -7,6 +7,14 @@ audits. The package-area recipes and the clippy caveat are in
 The CLI's `test-fixtures` feature is L2-only. Ordinary local L1 leaves it off;
 `just test-l2` and CI's reusable all-tier build enable it.
 
+Real controlling-terminal evidence for `process::ForegroundHandoff` lives in
+`cli/tests/level2/level2_foreground_handoff.rs`, which drives the
+`foreground_handoff_fixture` helper binary (`test-fixtures` only) through each
+mode in its own detached tmux pane. Foreground ownership is read with `ps -o
+pgid= -o tpgid=` from outside the pane, because a `ps` run by the pane's own
+interactive shell becomes the foreground job itself. The scripted-syscall unit
+tests in `lib/src/process/foreground/tests.rs` cannot prove a transfer.
+
 Test-suite audits and performance evidence for this area run through the
 shared `tools/test-audit` tool with
 `sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json`, which keeps the

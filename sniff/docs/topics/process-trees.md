@@ -80,7 +80,7 @@ Rules for these steps:
 
   | Constructor | Unix effect | Use it when |
   | --- | --- | --- |
-  | `TreeConfig::process_group()` | the child leads a new process group and keeps your session and terminal | the command may use your terminal (an editor, a shell task) |
+  | `TreeConfig::process_group()` | the child leads a new process group and keeps your session and terminal | the command may use your terminal (an editor, a shell task); pair it with a [`ForegroundHandoff`](#handing-the-terminal-to-an-interactive-child) when it reads the keyboard |
   | `TreeConfig::session()` | the child leads a new session, and so a new group, with no controlling terminal | the command must never touch your terminal (a login-shell query) |
 
 - **Pass Windows creation flags through the config**, for example
@@ -88,9 +88,11 @@ Rules for these steps:
   `Command::creation_flags` *replaces* the previous value, so calling it after
   `configure` would silently drop the flag the owner needs. The flags are
   ignored on Unix.
-- **Register your own `pre_exec` hooks after `configure`.** A hook that hands
-  the terminal to the child (for example `tcsetpgrp`) then runs after the
-  child already has its new group.
+- **Register your own `pre_exec` hooks after `configure`.** A hook then runs
+  after the child already has its new group. To give the child the terminal,
+  do not write a `tcsetpgrp` hook of your own: use
+  [`ForegroundHandoff`](#handing-the-terminal-to-an-interactive-child), which
+  also restores the terminal afterwards.
 
 On Windows, `configure` adds `CREATE_SUSPENDED`. `attach` creates a Job
 Object that kills its members when it is closed, assigns the suspended child
@@ -234,46 +236,214 @@ closes the last handle; on Unix nothing cleans up in that case.
 
 ## Handing the terminal to an interactive child
 
-On Unix an owned child leads its own process group, and a terminal reads
-input only from its *foreground* group. A child in a new group that reads the
-keyboard is stopped by the terminal, and a typed Ctrl-C goes to your process
-instead of to the child. `sniff::process::ForegroundHandoff` gives the child's
-group the terminal's foreground for as long as it runs, then puts your group
-and your terminal settings back. It holds terminal state only; the tree keeps
-containment, termination, and release.
+An owned child on Unix leads a process group of its own. That is what lets
+the owner stop the whole tree, but it collides with how a terminal shares
+itself between processes, so an interactive command (an editor, a prompt, a
+nested agent session) needs one more step: `sniff::process::ForegroundHandoff`.
+
+### Why a fresh group cannot use the terminal by itself
+
+Three terms explain the problem:
+
+- A **controlling terminal** is the terminal a session of processes is
+  attached to. A process reaches its own through `/dev/tty`, whatever its
+  stdin, stdout, and stderr point at.
+- The terminal has exactly one **foreground process group**. Only that group
+  may read the keyboard, and only that group receives the signals the keyboard
+  generates, such as `SIGINT` from Ctrl-C.
+- Every other group of the session is a **background group**. If one reads
+  the terminal, the kernel stops it with `SIGTTIN`.
+
+A child configured with `TreeConfig::process_group()` starts in a new,
+background group. Without a handoff it is stopped the first time it reads a
+key, and a Ctrl-C you type goes to your process instead of to it. A
+`ForegroundHandoff` makes the child's group the foreground group for as long
+as the child runs, then gives the terminal back: your group as the foreground
+group, and the terminal settings (`termios`: echo, line editing, raw mode)
+exactly as you had them, because an editor that crashes in raw mode would
+otherwise leave them broken. The handoff holds terminal state only; the tree
+keeps containment, termination, and release.
+
+### A complete launch
 
 ```rust
+use std::io;
+use std::process::{Command, ExitStatus};
+use std::time::Duration;
+
 use sniff::process::{CleanupScan, ForegroundHandoff, ProcessTree, TreeConfig};
 
-TreeConfig::process_group().configure(&mut command);         // 1. fresh group
-let mut handoff = ForegroundHandoff::prepare(&mut command)?; // 2. before spawn
-let mut child = command.spawn()?;                            // 3. spawn once…
-let mut tree = ProcessTree::attach(&child)?;                 //    …attach at once
-let status = child.wait()?;                                  // 4. your wait loop
-tree.terminate(CleanupScan::WhenObserved)?;                  //    finish or release
-handoff.restore()?;                                          // 5. before more output
+/// Runs an interactive command as an owned tree that holds the terminal.
+fn run_interactive(command: &mut Command) -> io::Result<ExitStatus> {
+    TreeConfig::process_group().configure(command); // 1. a fresh group
+    // 2. Before spawning. Declared here, outside `run_owned`, so the guard
+    //    outlives the tree: on unwind the tree is stopped first.
+    let mut handoff = ForegroundHandoff::prepare(command)?;
+    let outcome = run_owned(command);
+    let restored = handoff.restore(); // 5. before any output of your own
+    match outcome {
+        Ok(status) if status.success() => restored.map(|()| status),
+        other => {
+            if let Err(error) = restored {
+                tracing::warn!(%error, "could not restore the terminal");
+            }
+            other
+        }
+    }
+}
+
+fn run_owned(command: &mut Command) -> io::Result<ExitStatus> {
+    let mut child = command.spawn()?; // 3. spawn once…
+    let mut tree = match ProcessTree::attach(&child) {
+        Ok(tree) => tree, //               …and attach at once
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    let status = loop {
+        // 4. your wait loop (see "Sampling and immediate cleanup")
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        tree.sample();
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    if let Err(error) = tree.terminate(CleanupScan::WhenObserved) {
+        tracing::warn!(%error, "could not stop the command's background processes");
+    }
+    Ok(status)
+}
 ```
 
+To let the descendants outlive the command, call `tree.release()` in place of
+`terminate`, exactly as without a handoff. Timeouts and cancellation work as
+described in [Sampling and immediate cleanup](#sampling-and-immediate-cleanup)
+and [Graceful cleanup](#graceful-cleanup).
+
+```mermaid
+flowchart TD
+    A[Configure a fresh process group] --> B[ForegroundHandoff::prepare]
+    B -->|WouldBlock or a terminal error| X[Return the error; nothing was spawned]
+    B --> C{Controlling terminal, and you are its foreground group?}
+    C -->|No| D[Inactive guard: nothing changes]
+    C -->|Yes| E[Active guard: your group and settings recorded]
+    D --> F[Spawn once]
+    E --> F
+    F -->|active: the child takes the foreground before its program starts| G{Spawn and attach succeed?}
+    F -->|inactive| G
+    G -->|No| H[Kill and reap the child]
+    H --> R
+    G -->|Yes| I[Wait and sample]
+    I --> J[Terminate or release the tree; reap the child]
+    J --> R[restore: your group, then your settings]
+    R --> K[Report the outcome; print diagnostics]
+    I -. panic unwinds .-> U[Tree Drop stops the tree]
+    U -.-> V[Guard Drop restores once and logs a failure]
+```
+
+### Rules
+
 - **Order matters.** Prepare after configuring the fresh group and before
-  spawning; the child takes the foreground itself, before it executes its
-  program, so its first read cannot race the transfer. A command that was not
-  configured for a fresh group fails to spawn with `InvalidInput`.
-- **Declare the handoff before the tree.** Rust drops locals in reverse
-  order, so when a panic unwinds your function the tree is cleaned up first
-  and the terminal restored afterwards.
-- **Inactive guards change nothing.** With no controlling terminal, or when
-  your process is not in the terminal's foreground group (a background job),
-  `is_active()` is `false` and the launch proceeds without a transfer. Native
-  Windows has no foreground group, so its guard is always inactive.
-- **One handoff at a time per process.** A terminal has a single foreground
-  group, so `prepare` returns `WouldBlock` while another active handoff exists
-  in your process, rather than leaving a second interactive child in the
-  background.
-- **Restoration is explicit and repeatable.** `restore` puts back the
-  foreground group and then the settings, attempting both even if the first
-  fails, and returns the first error. A guard dropped before a successful
-  restore tries once more and logs a failure. Nothing runs after
-  `std::process::exit` or an abort.
+  spawning. The child takes the foreground itself, in the moment between
+  starting and executing its program, so its first read cannot race the
+  transfer. A command not configured to lead a fresh group fails to spawn
+  with `InvalidInput`; `TreeConfig::session()` does not work either, because a
+  new session has no controlling terminal to take.
+- **Spawn once, while the guard lives.** A prepared command spawned a second
+  time, or after its guard is dropped, moves the foreground to a group the
+  guard no longer restores from.
+- **Declare the guard before the tree.** Rust drops locals in reverse order,
+  so when a panic unwinds your function the tree's armed cleanup runs first
+  and the terminal is restored afterwards. The guard never waits on a process:
+  reaping stays with you.
+- **Restore explicitly, before your own output.** Call `restore()` once the
+  tree is finished or released and the child is reaped, and before you print
+  diagnostics, run callbacks, or start the next command. Until then your
+  process is in the background, and writing a prompt or reading a key would
+  be stopped by the terminal.
+
+### Inactive guards
+
+`prepare` changes nothing, and returns a guard whose `is_active()` is
+`false`, in two cases:
+
+- **No controlling terminal**: a CI runner, a daemon, a process started by
+  `setsid`.
+- **Your process is a background job**: started with `&`, or suspended and
+  resumed with `bg`. A background job must not take the terminal from the
+  group that has it.
+
+An inactive guard launches the command unchanged, and `restore()` returns
+`Ok(())` without touching anything. Redirecting stdin does not make the guard
+inactive: the handoff opens `/dev/tty`, not stdin. Whether to hand the
+terminal to a child whose stdin is a file or a pipe is your choice;
+Darkmatter, for example, prepares a handoff only for an editor that inherits
+stdin.
+
+`/dev/tty` is opened without acquiring a controlling terminal (`O_NOCTTY`)
+and closed in the child when it executes its program, so the child never
+inherits the descriptor.
+
+**Native Windows** has no foreground group. Its guard is always inactive, and
+console and Job Object behavior are exactly as without a handoff: a terminal
+child shares your console, and a Ctrl-C typed there reaches both of you.
+WSL2 is Linux and takes the Unix path.
+
+### One handoff at a time
+
+A terminal has one foreground group, so a process can hand it to only one
+child at a time. While an active guard exists, another `prepare` anywhere in
+the same process returns `io::ErrorKind::WouldBlock` with the message
+"another terminal foreground handoff is active in this process", before
+anything is spawned. The claim is released when the first guard is
+restored, or dropped (including during a panic). An inactive guard claims
+nothing.
+
+### Who receives Ctrl-C
+
+While the child holds the foreground, the keyboard belongs to it:
+
+- **A typed Ctrl-C goes to the child's group, not to your process.** Your
+  `SIGINT` handler does not run. You learn of the interrupt only from the
+  child's exit status: it died of `SIGINT`, or, if it is a shell that lost
+  its own child to `SIGINT`, it exited with `130` (`128 + SIGINT`).
+- **A command that ignores `SIGINT` keeps the terminal** until it exits.
+  Pressing Ctrl-C again does not reach your process.
+- **A signal sent to your process directly still reaches it**, for example
+  `kill -INT <your pid>`. Use that, or your own cancellation path, to stop
+  a child that will not exit.
+
+Once the terminal is restored, Ctrl-C reaches your process again.
+
+### Restoration
+
+`restore()` puts back your foreground group and then your terminal settings.
+
+- **It attempts both** even when the first fails, and returns the first
+  error.
+- **Settings are applied immediately** (`TCSANOW`), without waiting for
+  pending output to drain, since a stopped or wedged reader may never drain
+  it.
+- **It blocks `SIGTTOU` on the calling thread only** while it works. Your
+  process is still in the background at that point, and the kernel would
+  otherwise stop it for changing the terminal. The process-wide signal
+  disposition is never changed, so other threads and your own handlers are
+  unaffected.
+- **It is idempotent.** After a successful restore, or for an inactive guard,
+  it returns `Ok(())` and changes nothing. After a failure the guard stays
+  armed.
+- **`Drop` is the backstop.** A guard dropped before a successful restore
+  tries once more, reports a failure through `tracing`, and never panics.
+  Like the tree's `Drop`, it does not run after an abort, a force-exit, or
+  `std::process::exit`, which leave the terminal as the child had it.
+
+**Error priority.** The command's own result comes first. A failure earlier
+in the launch (spawning, attaching, waiting) is the error you report, and a
+restoration failure after it is logged. A restoration failure after a
+command that otherwise succeeded fails the launch: a terminal left in the
+child's hands or in raw mode is not a success.
 
 ## Handling errors
 
@@ -332,14 +502,14 @@ the command finishes:
 | --- | --- | --- | --- | --- |
 | Sniff detection probes and program installation | process group | none | `terminate(WhenObserved)` | timeout or wait error: `terminate(Always)` |
 | Darkmatter login-shell queries | session | `CREATE_NO_WINDOW` | `terminate(WhenObserved)` | timeout or wait error: `terminate(Always)` |
-| Darkmatter editor (tree ownership on) | process group, then the terminal is handed to the editor | none (shares the console) | `release()`; a Windows failure becomes a warning and the edit still succeeds | cancellation or wait error: `terminate_gracefully` with a 2 s grace |
-| Claudine sequence shell tasks and isolated lifecycle commands | process group | `CREATE_NEW_PROCESS_GROUP` | `terminate(WhenObserved)` | timeout, Ctrl-C, sibling failure, or runaway output: `terminate_gracefully` with a 250 ms grace |
-| Claudine lifecycle commands sharing your terminal (Unix only) | **not owned** | — | — | the direct child only |
+| Darkmatter editor (tree ownership on) | process group, plus a handoff for a terminal editor that inherits stdin | none (shares the console) | `release()`; a Windows failure becomes a warning and the edit still succeeds | cancellation or wait error: `terminate_gracefully` with a 2 s grace |
+| Claudine sequence shell tasks | process group | `CREATE_NEW_PROCESS_GROUP` | `terminate(WhenObserved)` | timeout, Ctrl-C, sibling failure, or runaway output: `terminate_gracefully` with a 250 ms grace |
+| Claudine lifecycle commands | process group, plus a handoff for every command | `CREATE_NEW_PROCESS_GROUP` | `terminate(WhenObserved)` | cancellation (an interrupt Claudine receives, or a sibling failure): `terminate_gracefully` with a 250 ms grace |
 
-The last row is a deliberate exception. When Claudine runs a lifecycle command
-in the foreground of your terminal on Unix, the command must stay in
-Claudine's process group: a new group is not the terminal's foreground group,
-so the command would be stopped by the terminal the first time it read input.
-Until a terminal handoff is added for that path, cancelling such a command
-stops only the direct child. On Windows these commands are owned like every
-other lifecycle command.
+Both callers that hand over the terminal restore it before reporting
+anything, and follow the [error priority](#restoration) above. A Claudine
+lifecycle command that holds the terminal receives a typed Ctrl-C itself;
+when it ends by `SIGINT` (or exits 130), Claudine treats the run as
+interrupted once the tree is stopped and the terminal is restored. Without
+the foreground, a `SIGINT` end is an ordinary signal exit and 130 an ordinary
+exit code.

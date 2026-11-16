@@ -307,14 +307,18 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
     and the edit still succeeds with a warning. Cancellation terminates the
     Job (no grace period). See
     [process trees](../../../sniff/docs/topics/process-trees.md).
-  - *Shared console.* There is no foreground handoff (`terminal::Handoff`
-    is uninhabited off Unix): a terminal editor shares the host's console
+  - *Shared console.* There is no foreground handoff
+    (`sniff::process::ForegroundHandoff` is always inactive off Unix): a terminal editor shares the host's console
     and is not given its own process group. A Ctrl-C the console turns into
     `CTRL_C_EVENT` reaches the host too, so `md compose`'s `ctrlc` handler
     (or Claudine's console handler) records an interrupt and the launcher's
     20 ms poll terminates the Job, cancelling the run. On Unix the same
     press reaches only the editor. An editor that turns off processed input
-    reads Ctrl-C as a key and nobody is interrupted.
+    reads Ctrl-C as a key and nobody is interrupted. Claudine's lifecycle
+    shells get the same inactive guard; they start with
+    `CREATE_NEW_PROCESS_GROUP`, whose group ignores `CTRL_C_EVENT` by
+    default, so a typed Ctrl-C is handled by Claudine's console handler
+    rather than by the command.
   - *`.cmd` shims.* The resolver looks the configured token up with Sniff's
     `find_program` (the `which` crate, honoring `PATHEXT`), so `EDITOR=code`
     becomes the full `...\bin\code.cmd` path and `Editor::identify` strips

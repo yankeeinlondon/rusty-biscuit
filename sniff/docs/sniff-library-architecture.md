@@ -651,6 +651,14 @@ What the owner guarantees and where it stops, on each OS, is described in
 attached; on Unix a descendant that forks *and* `setsid()`s entirely between two descendant samples
 (`DESCENDANT_SAMPLE_INTERVAL`, 250 ms), whose parent then exits, can escape.
 
+The public `sniff::process::ForegroundHandoff` (`process/foreground.rs`) serves other crates' owned
+*interactive* children. On Unix an owned child leads a background process group, which the terminal
+stops when it reads the keyboard; the handoff makes that group the terminal's foreground group from
+the child's `pre_exec` hook and restores the caller's group and `termios` afterwards. It holds
+terminal state only, never a process, and Sniff's own probes do not use it. Its rules (ordering,
+inactive guards, one active handoff per process, restoration and error priority) are in
+[Process trees](./topics/process-trees.md#handing-the-terminal-to-an-interactive-child).
+
 Whether a caller reaches that residual depends on what it runs. Sniff's *detection* probes are a
 fixed, in-tree set of well-known commands, none of which daemonize. The *installation* boundary is
 different: it executes third-party package managers (Brew, npm, pip, Cargo, Go) and downloaded
