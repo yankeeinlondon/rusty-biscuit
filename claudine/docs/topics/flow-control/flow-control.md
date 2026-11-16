@@ -56,25 +56,30 @@ Let's evaluate this example:
     - but in our example, we were able to employ a deterministic check and determine that in fact the task was not completed
     - by _resuming_ (versus retrying or just failing to complete the work) we are able to have the agent pickup the follow on prompt with all context already cached
 
-> **Note:** had we placed the `warn` action _after_ the `resume` the `warn` action would have never been called because flow control directives -- _with the notable exception of `prep`_ -- do not exhibit "re-entry" (e.g., actions _after_ a flow control event are never executed because the execution flow has been diverted). If you are using the [DMLS](darkmatter/docs/dmls.md) LSP you will be warned when a document has this type of "dead code".
+> **Note:** had we placed the `warn` action _after_ the `resume` the `warn` action would have never been called because flow control directives -- _with the notable exception of `prep`_ -- do not exhibit "re-entry" (e.g., actions _after_ a flow control event are never executed because the execution flow has been diverted). If you are using the [DMLS](darkmatter/dmls/README.md) LSP you will be warned when a document has this type of "dead code".
 
 So at a high level, we can think of the typical _flow_ for the `build-release-notes.md` prompt as:
 
 ```mermaid
 flowchart LR
-    initialize --> start --> success --> finalize
+    compose[/compose/]
+    agent[/agent loop/]
+    initialize --> compose --> start --> agent --> success --> finalize
 
-    start --> failure
+    agent --> failure
     failure --> finalize
 ```
 
-However, by adding the flow control event, we've allowed for a variant flow on the "happy path":
+However, by adding the flow control event, we've allowed for a variant flow on the "happy path" during the **success** lifecycle event:
 
 ```mermaid
 flowchart LR
-    initialize --> start --> success 
-    
-    success --> file_exists[[file]]
+    compose[/compose/]
+    agent[/agent loop/]
+    initialize --> compose --> start --> agent --> success --> file
+    file@{ shape: diamond, label: "file exists" }
+    file --> |yes| finalize
+    file --> |no| start
 ```
 
 ## Flow Control Directives
