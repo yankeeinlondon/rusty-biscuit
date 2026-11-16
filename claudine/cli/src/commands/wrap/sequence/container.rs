@@ -19,6 +19,11 @@ pub(super) struct RootRun<'a> {
     pub(super) approved: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     /// The task graph the first attempt discovered, which every retry runs.
     pub(super) graph: Option<claudine::composition::PreflightGraph>,
+    /// The plan the first attempt filled, which every retry runs.
+    pub(super) plan: Option<claudine::composition::SequencePlan>,
+    /// The caller's setters plus the values the first attempt collected,
+    /// which every retry composes under without asking again.
+    pub(super) collected_overrides: Option<Option<serde_json::Value>>,
     pub(super) pending: Option<ContainerEventDecision>,
     pub(super) child_error: Option<LifecycleErrorInfo>,
     pub(super) proxy_location: Option<claudine::composition::ActionLocation>,
@@ -40,7 +45,7 @@ impl<'a> RootRun<'a> {
         prewarm: claudine::composition::lifecycle::prewarm::PrewarmHandle,
     ) -> Self {
         Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)).with_subject(SubjectKind::RootSequence),
-            stack, runtime, started: false, approved: None, graph: None, pending: None, child_error: None, proxy_location: None,
+            stack, runtime, started: false, approved: None, graph: None, plan: None, collected_overrides: None, pending: None, child_error: None, proxy_location: None,
             frame, checkpoint: None, prewarm }
     }
 

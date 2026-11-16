@@ -6798,3 +6798,9 @@ mod referenced_documents;
 
 #[path = "tests/group_freshness.rs"]
 mod group_freshness;
+
+#[path = "tests/inline_check.rs"]
+mod inline_check;
+
+#[path = "tests/declaration_writes.rs"]
+mod declaration_writes;

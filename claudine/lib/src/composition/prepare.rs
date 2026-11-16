@@ -255,6 +255,26 @@ impl PrepareOptions {
         self.schema_caller_records()
     }
 
+    /// Resolve the document's own authored values through `document`, the
+    /// declaring document's context, while every caller value keeps the
+    /// origin it was supplied under.
+    ///
+    /// Without captured records, a setter's origin is derived from the
+    /// context these options held until now, so it is fixed here, before
+    /// that context is replaced.
+    #[must_use]
+    pub(crate) fn resolving_document_from(mut self, document: biscuit_file::FileResolutionContext) -> Self {
+        if self.caller_input_records.is_empty() {
+            self.caller_input_records = darkmatter::markdown::compose::caller_input_records_for_overrides(
+                self.set_overrides.as_ref(),
+                &self.file_resolution_context,
+                self.file_ref_fallback_dir.as_deref(),
+            );
+        }
+        self.file_resolution_context = document;
+        self
+    }
+
     /// Options that prepare against `file_resolution_context`, with every
     /// other setting empty.
     pub fn new(file_resolution_context: biscuit_file::FileResolutionContext) -> Self {

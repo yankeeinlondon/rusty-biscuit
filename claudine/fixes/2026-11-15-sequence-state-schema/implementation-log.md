@@ -93,15 +93,38 @@ decisions_for_review:
         An authored executable reference containing `{{ … }}` (for example `prompt: "{{ plan }}"`) is pending only while its owner is missing an input. Once the inputs are supplied, it is read as the literal file name it always was, and fails as not found, exactly as the graph does. Only `template:` defaults are interpolated. Alternative: interpolate authored executable references in both the inventory and the graph. That would be a new feature beyond this fix.
     - |-
         Discovery judges declaration shape and placement but does not resolve `$state` or an inline `$schema` reference. An unloadable one fails at the graph build that follows, before approval. This avoids preparing every declaration twice. Alternative: prepare them in discovery too, through the shared `NestedSources` cache. Doing so means calling `NestedSources::prepared_schema` in `inputs.rs::walk_executable`.
+    - |-
+        The root document's own missing inputs are not collected by the new discovery pass when nothing else is missing, no reference waits on them, and the plan has steps. Phase 1c reports (or asks for) them per step, as it always did, so the existing "Step 1 / Step 2" report is unchanged. Discovery reports them as a `Document` entry only for an empty root or alongside another owner's missing inputs. A consequence: outside a terminal, a run missing both a nested document's input and a root input first reports the document entries (root included), and step-level gaps appear only once those are supplied. Alternative: always report the root as a `Document` entry, which changes every existing sequence missing-input report from step headings to one document heading. Reversing touches the `root only` branch in `phase1c.rs::prepare_root_plan` and the CLI tests asserting step headings.
+    - |-
+        Discovery no longer fails on an owner's own preparation error other than a missing input (an invalid value, an `agent: []`, a removed spelling). It records the owner (`SequenceInputInventory::failed_owners`, opt-in through `InputDiscoveryOptions::leaving_verdicts`), and the CLI reports the error later, in the order it always had: the graph's structural errors and provider selection first. Then a strict rediscovery (`RootPlanRequest::recheck_owners`) raises a referenced owner's error, and Phase 1c's per-step probes raise the root's. An empty root is rechecked strictly too. Without this, 48 existing CLI tests changed which error they report. Alternative: let discovery fail first and update those tests to expect the schema verdict. That gives earlier but less specific errors (for example "`/sequence/0/group/tasks: []` has less than 1 item" instead of "`tasks` must declare at least one task"). Reversing means dropping `leaving_verdicts()` in `prepare_root_plan` and the recheck call in `wrap/sequence/mod.rs`.
+    - |-
+        Discovery now fills a referenced document's `template:` from the referrer's values beneath the document's own, matching the transitional layer Phase 2 kept in `plan_referenced_sequence`. Without it, every shipped research fleet fails as soon as discovery runs. This keeps that transitional layer alive in a second place. Removing it later means deleting the block marked in `preflight/inputs.rs::walk_referenced` together with the one in `source.rs`.
+    - |-
+        Root `initialize` writes are layered above the caller's setters as caller-layer values for discovery, the root plan's templates, and the graph walk, including the values a shell command reads at approval. The spec asks for them in template preparation. Passing them to the graph's approval-time reads as well keeps approval reading what the command will read at its turn. Alternative: give them to discovery and the plan only. Reversing touches `RootPlanRequest::layers` in `phase1c.rs`.
+    - |-
+        The plan is no longer built before `initialize`. Before it runs, the CLI judges only the root's declarations and the grammar of each inline root item. A root `sequence: child.yaml` is now loaded (and its errors reported) after `initialize`, at preflight, and so is a `$( … )` source's shell. Before, both happened before `initialize`. `initialize` is shell-free and runs before preflight, so nothing it does can depend on that. Alternative: also build a throwaway structural plan before `initialize`. That runs a shell source twice, and fails on a template reading a missing input before collection can report it. Reversing means restoring the `resolve_sequence_plan_with` call in `commands/sequence.rs`.
+    - |-
+        An inline container's `$schema` check judges the task's state (the enclosing effective values), then the caller's setters, then the runtime writes so far. It does not include the lexical `seq`/`loop`/`group` roots as properties. A schema types document properties, and adding those roots as instance keys would make a closed `$schema` fail on them. Alternative: add the roots under their names. That would let a check constrain them, at the cost of a closed schema refusing them. Reversing touches `check_inline_container` in `task/sequence.rs`.
+    - |-
+        The inline check also runs at every container `start` reread (the first pass after `initialize`, each retry, each loop pass), against the check as reread and the values of that moment. A refusal there blocks the container (its `blocked`/`failure` path runs), unlike admission's unstarted failure. The plan names "retry/pass refresh boundaries". Checking the first `start` too keeps the rule simple, and the values only differ from admission by what `initialize` wrote. Alternative: skip the first pass's `start`. Reversing touches the `start` arm of `run_sequence_attempts`.
+    - |-
+        A retry of the root reuses the first attempt's collected values (`RootRun::collected_overrides`) as well as its plan, so a retry never prompts again. Before this phase a root retry re-ran Phase 1c with the original setters and could ask again. Alternative: re-ask on retry. Reversing touches the first `match` arm in `execute_sequence_inner`.
+    - |-
+        A root retry now finds commands with `reread_preflight_graph_with_invocation`. Its walk reads nested containers the way a nested reread does: their declarations are judged again, and their rows are read as authored, with no template fill and no `$state`. Before, the retry walk planned nested references afresh, so a `$state` added on disk between attempts failed rows the first attempt had already planned. Consequence: a declaration made malformed between attempts still fails the retry, as it already did for a nested reread. Alternative: skip declaration judging on a retry walk and only discover commands. Reversing touches `reread_preflight_graph_with_invocation` in `sequence/preflight/mod.rs` and its call in the retry arm of `wrap/sequence/mod.rs::execute_sequence_inner`.
+    - |-
+        A referenced or nested document's own authored file values (for example `spec: work/spec.md` under `file(eager)`) now resolve from that document's folder, using the context the graph derives (`InvocationContext::derive_source`). Setter values still resolve from the caller's recorded origin. When a library caller passes setters without recorded origins, `PrepareOptions::resolving_document_from` first records them against the caller's context, so changing the base never moves a setter. Alternative: change the base only when origins were recorded. That is simpler, but a library caller's setters would then resolve from the document's folder. Reversing touches `resolving_document_from` in `composition/prepare.rs`.
+    - |-
+        Left unfixed, outside this fix's scope: a sequence task's `with:` value that is a relative file path is judged by the target prompt's `$schema` from the launch directory, not from the file that wrote the `with:`. The new CLI test `document_inputs::a_nested_documents_authored_file_value_resolves_from_its_own_folder` passes `absolute(spec)` to avoid this. If `with:` values should resolve from the file that wrote them, that is a separate fix, and the test can then pass `{{ spec }}`.
+    - |-
+        A line-delimited (JSONL/NDJSON) record that holds `template` or `$state` is refused as a misplaced declaration (`SequenceDeclarationMisplaced` at `[i].<key>`), because a row cannot supply a declaration. The plan's matrix says line-delimited declarations "remain inactive data". The test `tests::loader_matrix::line_delimited_records_skip_blank_lines_and_name_a_trailing_invalid_record` asserts the refusal, which is what the code does today. Alternative: let such keys through as plain row data, which means special-casing the lenient normalizer.
+    - |-
+        Windows coverage of templated `echo` rows comes from a new test-only `claudine-fake-echo` binary, installed as the fixture's `echo` by `CliProcessFixture::install_echo`. It runs on every OS, so Unix runs use it too, not `/bin/echo`. Alternatives: rewrite those rows to avoid a shell, or use the recorder binary and read its records. Rewriting a row as `side_effect: { set: { signed: "{{ seq.who }}" } }` turned up an unexplained difference: at a root-reference row (`sequence: lists/child.yaml`), `set` reads `seq.who` as `null`, while a shell command on the same row reads the template value. I did not investigate it; it may be a real gap in how side-effect values see a root-reference row's state. Reversing the binary choice touches `cli/Cargo.toml`, `cli/tests/bin/fake_echo/`, `install_echo`, and the two `run_sequence` helpers.
 message_to_agent: |-
-    Phase 3 landed the library side of input discovery and the owner-scoped graph. Use these:
-    - `composition::discover_sequence_inputs(source, InputDiscoveryOptions::new(&resolution, &context).with_caller_layers(&layers).with_invocation(&invocation, &source_context))` returns `SequenceInputInventory`. Each `owners[i].missing` is already a `SequenceMissingSubject::Document` entry, and `missing_error()` is the combined report. `prompts` lists prompt contexts (path, `with:`, owner) for Phase 1c to probe. `pending` lists template references whose owner is missing an input: they resolve after collection, so rerun discovery when an input is supplied (rule 13's loop).
-    - Then build the graph with `build_preflight_graph_after_discovery(…, &inventory)`, which reuses discovery's parses.
-    - The graph is not wired into the CLI yet. `commands/sequence.rs`/`wrap/sequence/mod.rs` still call `build_preflight_graph_with_invocation`, and Phase 1c still loops twice over root steps. That is Wave 7.
-    - `PreflightSequence::inline_schema` is the prepared inline check (`PreparedSequenceSchema::validate`). Rule 17's execution check before `run_sequence` opens its guard is not implemented. Raise `SequenceContainerSchemaViolation` from it. `prepare_nested_sequence` already returns the reread container's current check, for the retry/pass boundary.
-    - The `Loader` builds a nested reference's caller layers from `caller_setters` against the referring file's context, so their recorded origins are not the caller's own. Pass the real `CallerInputLayers` when you wire the CLI.
-    - Graph root rows are located `tasks[i]`, and the inventory uses `sequence[i]` (see decisions_for_review).
-    - Authored `file(eager)` values in a referenced document resolve from the request context, not the document's directory. Setters convert correctly. See the Phase 3 observations in the log.
+    Phase 5 added the coverage and fixed three defects; read "Defects found and fixed" under `## Phase 5` in this log. Things Phase 6 (docs) should know:
+    - New public function `reread_preflight_graph_with_invocation`: a root retry's approval walk reads nested rows as authored. `Loader::refresh` now applies at every depth of a nested reread. The repo skill's container preflight paragraph says both.
+    - Referenced and nested owners resolve their authored file values from their own folder, and setters from the caller's. `docs/topics/flow-control/sequences.md` ("What a referenced sequence reads") already has a paragraph on this. Keep it when you rewrite that page.
+    - The frozen reproduction is in `cli/tests/fixtures/frozen_prompts/sequence-state-schema/`. Its two `.md` files are registered in `lib/tests/l1/claudine_schema_shipped_corpus.rs`, because `every_shipped_document_has_one_test` requires every `.md` under `frozen_prompts/` to have a corpus test. A new `.md` fixture there needs a corpus row too.
+    - The plan's documentation task still owns the dry-run note text ("`<container>` checks its `$schema` at its turn (not evaluated in a dry run)") and the input-collection behavior; neither is documented yet.
 source_files_during_phase_3:
     - claudine/lib/src/composition/mod.rs
     - claudine/lib/src/composition/sequence/declarations.rs
@@ -116,6 +139,59 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/document.rs
+    - claudine/lib/src/composition/sequence/document/tests.rs
+    - claudine/lib/src/composition/sequence/declarations/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/scoped_graph.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+    - claudine/lib/src/composition/sequence/task/tests/declaration_writes.rs
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/sequence_referenced_state.rs
+    - claudine/cli/tests/l1/sequence_frozen_graph.rs
+    - claudine/cli/tests/l1/sequence_dry_run.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/complete.yaml
+    - claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/spec.md
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/bin/fake_echo/main.rs
+    - claudine/cli/Cargo.toml
+docs_updated_during_phase_5:
+    - claudine/docs/topics/flow-control/sequences.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
 ---
 
@@ -650,3 +726,493 @@ covered by the root-reference test.
 - Docs: no `docs/` page changed in this phase. The plan gives the topic pages
   for nested declarations and input collection to Phase 6, and the
   user-visible collection behavior is not wired into the CLI until Phase 4.
+
+## Phase 4
+
+### Wave 7 — Container admission (rules 17–19, library)
+
+- `TaskExecution::run_validated` now starts with
+  `check_inline_container` (`task/sequence.rs`) for a `sequence:` task. Both
+  `run_guarded` (nested children, group legs) and `run_admitted` (root steps,
+  through `task_run.rs::run_step_task`) reach it, after the `when:` guard and
+  before `run_sequence` replaces the lexical scope or opens the guard. A
+  refusal is an unstarted failed `TaskOutcome` carrying
+  `SequenceContainerSchemaViolation`: no `initialize`, no child, no
+  `finalize`, no mutation, no output. The enclosing container routes it as
+  any failed task. `task_run.rs` needed no change.
+- The instance judged is the task's state (`self.state.data()`, the
+  enclosing effective values), then the caller's setters, then every runtime
+  write so far. It is passed by value to `PreparedSequenceSchema::validate`,
+  whose converted copy is dropped.
+- A dry run emits one note (`` `tasks[0].sequence[0]` checks its `$schema` at
+  its turn (not evaluated in a dry run) ``) through the existing dry-run note
+  path and judges nothing.
+- At each `start` reread (first pass, retry, each loop pass),
+  `prepare_nested_sequence`'s returned container is checked again with its
+  current `$schema` against the current values. A failure there is treated
+  like a failed reread: the container is `blocked`.
+- `run_container_proxy` runs the same check before `run_sequence` for an
+  approved sequence target.
+- Runtime and `with:` declaration-write refusal, and the sequence-scoped
+  runtime constructors, already landed in Phase 1 (`set_batch` checks the
+  whole batch before it commits). Nothing was left to do there.
+
+### Wave 7 — CLI preparation (rules 11, 13, 16)
+
+- `commands/sequence.rs::run_sequence_inner` no longer builds the plan.
+  Before `initialize` it judges the root's declarations (`formal_keys`) and
+  the grammar of every inline root item (`validate_task_grammar`), and
+  allocates the invocation token (`normalize::allocate_sequence_id`, new).
+  Invalid optionals are dropped from the *authored* source first, then the
+  composition view is projected from it. Both go to `execute_sequence` as
+  `wrap::sequence::RootSequence { sequence_id, authored, shell_runner }`.
+- `execute_sequence` binds `seq` with that token for `initialize`. On the
+  first attempt, `execute_sequence_inner` calls
+  `phase1c::prepare_root_plan`, then
+  `build_preflight_graph_after_discovery`. The plan is re-stamped with the
+  token (`SequencePlan::with_sequence_id`, new). `RootRun` keeps the plan and
+  the collected setters (`plan`, `collected_overrides`), so a retry runs the
+  first plan and never asks again.
+- `prepare_root_plan` loop:
+  1. `discover_sequence_inputs` under the caller's layers plus the writes
+     `initialize` made (above the setters), with `leaving_verdicts()`.
+  2. With nothing missing, fill the plan (captured context, the same layers)
+     and return.
+  3. When only the root is missing inputs, no reference is pending, and the
+     plan builds with at least one step, return too: Phase 1c reports the
+     root's inputs per step, as before.
+  4. Otherwise collect, or return the combined report. A pass that would ask
+     nothing new returns the report.
+- Phase 1c's two-attempt loop is replaced by the same progress-bounded rule.
+  `asked` (one `CollectionKey` per `(name, type_label, description)`) is
+  shared with discovery, so no property is asked twice.
+- `leaving_verdicts()` (new `InputDiscoveryOptions` builder) records owners
+  whose own preparation failed for a reason other than a missing input in
+  `SequenceInputInventory::failed_owners`, instead of failing discovery.
+  Without it, the order of errors changed: 48 existing CLI tests failed,
+  because the owner verdict reported a schema problem before the graph
+  (`` `tasks` must declare at least one task ``, `when: ""`), provider
+  selection (`agent: []`), or Phase 1c (removed-grammar paths) could. The
+  root's failure is left to Phase 1c's per-step probes. Any other owner's,
+  or an empty root's, is raised by `RootPlanRequest::recheck_owners`, a
+  strict rediscovery right after provider selection.
+- Discovery now fills a referenced document's template from the referrer's
+  values below the document's own values. Phase 2's transitional layer in
+  `plan_referenced_sequence` already did this. Without it, every shipped
+  research fleet failed (`prompt: must be a non-empty file reference, got
+  null`), because discovery read `{{ research_prompt }}` from the roster's
+  own values only.
+- `build_preflight_graph_after_discovery` now takes the invocation's
+  `CallerInputLayers` instead of bare setters. The `Loader` keeps them
+  (`caller_layers`) and hands them to a referenced document's template, so a
+  caller's file value keeps the caller's recorded origin (Phase 3's
+  handoff note).
+
+### Requirement → test mapping (Phase 4)
+
+Library, F2 (real files in temp dirs, in-process `TaskExecution`),
+`task/tests/inline_check.rs`:
+- An earlier `set` satisfies the check: `an_earlier_set_satisfies_the_check`
+- A setter satisfies it: `a_caller_setter_satisfies_the_check`
+- A missing value refuses before `initialize`/children/`finalize`, the
+  ancestor's `failure` fires, and nothing is written:
+  `a_missing_value_refuses_the_container_before_it_opens_and_the_ancestor_handles_it`
+- A wrong type is refused with its property:
+  `a_wrong_typed_value_is_refused_with_its_property`
+- A false guard skips the check: `a_false_guard_skips_the_check`
+- Converted (`"3"` under `number`) and defaulted copies are never committed:
+  `a_defaulted_or_converted_validation_copy_never_changes_the_enclosing_values`
+- Dry run names the check without judging it:
+  `a_dry_run_names_the_check_without_judging_it`
+- Loop pass boundary rejudges with the pass's values (passes 1 and 2 run,
+  pass 3 is refused): `each_loop_pass_judges_the_check_against_its_own_values`
+
+Library, `preflight/inputs/tests.rs`:
+- Referrer layer below the document's own values (both orders):
+  `a_referenced_template_reads_the_referrers_values_below_its_own`
+- `leaving_verdicts` records instead of failing; strict discovery fails:
+  `leaving_verdicts_records_a_failed_owner_instead_of_failing`
+
+CLI wiring, F3 (spawned `claudine` through `CliProcessFixture`, portable, no
+shell stubs), `sequence_sources_cli.rs::document_inputs`:
+- A nested referenced document's missing input is a `Document` entry with
+  its container path, not a step:
+  `a_nested_referenced_documents_missing_input_is_reported_as_that_document`
+- Setter order independence (before/after the file):
+  `a_setter_before_or_after_the_file_supplies_a_nested_documents_input`
+- Empty root list and empty root-referenced document still require inputs:
+  `an_empty_root_list_still_requires_its_inputs`,
+  `an_empty_root_referenced_document_still_requires_its_inputs`
+- Collection starts nothing (no root `start` action):
+  `collecting_a_missing_input_starts_nothing`
+- A required `$state` field is a state violation, not an input:
+  `a_required_state_field_is_a_state_violation_not_a_missing_input`
+- An inline check is never an input; preview names it; a run refuses the
+  container before its `start`:
+  `an_inline_check_is_never_an_input_and_refuses_its_container_at_its_turn`
+- `initialize` writes reach the root template (before this phase it read
+  `nobody`): `a_root_template_reads_what_initialize_wrote`
+- A malformed declaration behind a false guard fails before `initialize`:
+  `a_malformed_declaration_fails_before_initialize`
+
+Interactive collection (the progress-bounded loop under a TTY) has no new
+PTY test in this phase. The loop shares `collect_or_report` with the
+existing Phase 1c path. Phase 5's CLI regressions own the frozen
+reproduction and the interactive cases.
+
+Input Robustness Matrix: this phase adds no field validator or loader. The
+inline check reuses Phase 1's prepared declaration. Its instance shapes
+(missing, wrong type, converted, defaulted) are the library rows above.
+
+### Focused runs (Phase 4)
+
+- Library `composition::sequence` filter: 697 passed (two over 5 s at load
+  60–90 from other sessions; both re-measured in the gate run below).
+- CLI `sequence|schema|phase|preflight` filter: 1351 tests, 48 failed on the
+  first run, all from the ordering and fleet issues above, then 1359 passed
+  after the fixes. `sequence_task_providers::empty_hint_nested_sequence_list_fails_its_body_step_before_any_task_launches`
+  took 5.77 s in a 470-test run, and 2.48 s alone at load 87.
+
+### Gates (Phase 4)
+
+- Scope calculator (`git status … | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [claudine, claudine-cli, test-toolkit, darkmatter]`,
+  `change_class: package`, so the gates ran.
+- `just lint` (claudine/): passes.
+- `just test` (claudine/): 12,232 passed, 0 failed, exit 0. 43 were
+  recorded at or above 5 s, the slowest at 9.23 s, so none reached 10 s. Load
+  stayed between 90 and 140 on 16 cores, from other sessions. I re-measured
+  all 43 with `-j 2` as load fell from 121 to 39. All 7 CLI tests finished at
+  or under 2.92 s. Four lib `claudine_schemas` tests (untouched by this
+  phase) stayed at 5.3–6.7 s there. Each took 2.0–4.4 s alone (`-j 1`, load
+  32–37). All 43 are cleared.
+- `just check-tier-coverage claudine`: 0 stranded.
+- Dependents: only in-area crates (`claudine-contract`, `claudine-cli`) depend
+  on `claudine`, and `just test` covers both.
+- Cross-OS: no cross-check was run. The change adds no path handling, no
+  platform branch, and no process spawn. The new CLI tests use only portable
+  effects (`append_line`, dry-run rendering), with no shell stubs. CI's
+  nightly runs cover Windows and WSL2.
+- Docs: no `docs/` page changed. The plan gives the topic pages for input
+  collection and inline checks to Phase 6. The repo skill's container
+  preflight paragraph now describes the CLI wiring.
+
+## Phase 5
+
+Phase 5 is coverage. Two subagents worked in parallel: Library coverage
+(library test modules only) and CLI regressions (CLI test files and the frozen
+fixture). The CLI agent stopped before it reported. A second CLI agent
+reviewed and finished its work. Library coverage found two real defects, and
+both are fixed in this phase (see "Defects found and fixed").
+
+### Wave 9 — Library coverage
+
+All new tests are in existing library test modules under
+`lib/src/composition/sequence/`. The one new submodule,
+`task/tests/declaration_writes.rs`, is registered in `task/tests.rs`. No new
+test binary was added. Short names below: `S` = `claudine::composition::sequence`,
+`T` = `S::tests`, `D` = `S::declarations::tests`, `Doc` = `S::document::tests`,
+`G` = `S::preflight::scoped_graph_tests`, `I` = `S::preflight::inputs::tests`,
+`K` = `S::task::tests`.
+
+Matrix accounting, row by row:
+
+- **Declaration placement and presence.** Covered by existing tests:
+  `D::{root_declarations_beside_a_non_list_source_are_misplaced, task_declarations_beside_a_non_list_are_misplaced, inline_containers_accept_their_own_declarations}`.
+- **Schema declaration, full matrix (new).** `D::every_state_form_resolves_from_the_declaring_document`.
+  - Accepted: `{}`, a map, a file reference, an imported `Name@file` type,
+    `file(eager)`, and a union of a map and a reference.
+  - Refused with the schema layer's cause and the owner path: an unloadable
+    reference, a missing import file, a missing named type, and a union with
+    a bad arm, reported at the failing arm (`$state[0]`, `$state[2]`).
+  - Caller, declaring document, schema files, and eager file are each in
+    their own directory.
+  - Empty union, empty string, and null were already covered by
+    `D::declaration_shapes_are_judged_by_presence_on_an_empty_list`.
+- **Other declaration homes, one positive and one invalid case each.**
+  - Inline `$state`/`$schema` (new): `G::inline_declarations_resolve_from_their_declaring_file`.
+  - Referenced `$state`: existing `D::a_state_reference_resolves_in_the_declaring_documents_context`
+    plus new `D::a_referenced_documents_unloadable_state_is_owned_by_that_document`.
+- **Template map.**
+  - Absent, `{}`, scalar/array/null whole templates, and reserved keys on
+    zero rows were already covered.
+  - New: `T::robustness_matrix::template_values_are_copied_as_data_and_only_top_level_strings_render`
+    covers null, `""`, array, and object values, which are copied as data;
+    only top-level strings render.
+- **Sequence source and list.**
+  - Existing: `T::empty_list_returns_empty_plan` and `T::no_sequence_key_returns_none`
+    (the `Ok(None)` case).
+  - New, in `T::robustness_matrix`: `a_null_or_wrong_typed_sequence_field_fails`;
+    `strict_lists_refuse_each_non_step_item_by_index` (null, number, bool,
+    and array items, one among valid items and as the whole list);
+    `lenient_data_lists_coerce_scalars_but_never_drop_an_item`.
+- **State field validated by `$state` (new).** `D::the_state_validator_judges_every_field_shape_passively`.
+  - Refused: absent, explicit null, wrong whole type, mixed invalid
+    elements, and all elements invalid.
+  - Accepted: `""`, `[]`, `{}`, and `"3"` for a number. The returned plan
+    keeps the value as authored.
+  - Per-route controls already existed:
+    `Doc::markdown_and_yaml_lists_are_filled_and_typed_alike` and
+    `G::each_state_contract_judges_only_its_immediate_rows` (inline, group
+    leg, task file).
+- **Document input values.**
+  - New: `Doc::absent_and_null_document_inputs_follow_the_canonical_rules`.
+    A default fills both absent and null, a supplied value is coerced, and a
+    required null is classified as missing.
+  - New: `Doc::authored_file_values_keep_their_text_and_setters_are_converted_from_the_caller`
+    and `Doc::a_referrers_property_never_satisfies_a_referenced_documents_input`.
+  - Declaring-file resolution: `I::a_referenced_owners_authored_file_value_keeps_its_text_and_a_setter_its_origin`
+    puts the file only beside the declaring document, and the setter's file
+    only beside the caller. `I::a_referenced_owners_authored_file_value_is_not_found_beside_the_caller`
+    is its negative control. Both rely on defect 1's fix.
+- **Inline check values.** Phase 4's `K::inline_check::*` tests, plus new
+  `K::inline_check::an_explicit_null_is_refused_and_an_admitted_empty_value_passes`.
+- **Declaration write routes.**
+  - New: `K::declaration_writes::a_with_key_naming_a_declaration_fails_before_the_provider_runs`.
+  - New: `K::declaration_writes::a_set_batch_naming_a_declaration_publishes_none_of_its_writes`
+    (the batch is atomic; a control batch commits).
+  - Setters, template keys, and authored inline options were covered in
+    earlier phases.
+- **YAML loader (new, in `T::loader_matrix`).**
+  - `both_yaml_loaders_refuse_duplicates_trailing_syntax_and_a_second_document`:
+    a duplicate key at the root and at nested declaration depth, invalid
+    trailing syntax, and a second document, plus a control.
+  - `a_bare_yaml_key_is_an_explicit_null_on_every_route`: direct and
+    referenced, each with a control.
+  - `a_referenced_yaml_documents_duplicate_key_fails_the_resolver`.
+- **JSON family.**
+  - Root and nested duplicate keys were already covered by
+    `T::json_duplicate_keys::*`.
+  - New: `T::loader_matrix::the_json_family_refuses_trailing_garbage_and_accepts_comments_and_trailing_commas`,
+    run under both `.json` and `.json5`.
+- **JSONL (new).** `T::loader_matrix::line_delimited_records_skip_blank_lines_and_name_a_trailing_invalid_record`:
+  blank lines are accepted, a trailing bad record is named by its line, and
+  a file of records owns no declarations.
+- **Markdown frontmatter.** New: `T::loader_matrix::markdown_frontmatter_nulls_and_duplicates_reach_the_resolver`.
+  Declaration protection was already covered by
+  `Doc::both_formats_compose_without_their_declarations_*`.
+- **Ownership.**
+  - Already covered in `Doc::*`, `G::*`, and `T::*`: Markdown/YAML
+    equivalence, immediate container-row state, inline non-inheritance, item
+    shadowing, setter precedence, and nested, group-leg, and task-file owners.
+  - New: `G::a_parents_declarations_stop_at_a_referenced_child`.
+- **Work counters (new).** `G::counted::a_referenced_owner_resolves_one_contract_and_a_reread_regenerates_nothing`:
+  - 20 root rows and 20 child rows prepare one contract each;
+  - three rereads prepare and parse nothing;
+  - a template changed on disk never refills frozen rows.
+- **Renames.** `T::formal_documents::templates_apply_before_generated_fields_and_satisfy_the_state_declaration`
+  and `T::formal_documents::a_state_violation_reports_the_step_and_property`.
+  No old row-schema names remain.
+
+### Wave 9 — CLI regressions
+
+All CLI tests are F3: they spawn `claudine` through `CliProcessFixture`, with
+portable launch counting (`claudine-fake-goose` + `PROVIDER_MARKER`) and
+`append_line` effects. None uses a shell stub. Paths are under
+`cli/tests/l1/`.
+
+- **Frozen `complete.yaml` reproduction.** Fixture files are
+  `cli/tests/fixtures/frozen_prompts/sequence-state-schema/{complete.yaml,plan.md,spec.md}`.
+  Each `#[test]` includes them by literal path with `include_str!`. The
+  tests are in `sequence_sources_cli.rs::frozen_complete_reproduction`:
+  - `a_setter_after_the_file_is_judged_as_a_document_input_and_reaches_the_nested_step`:
+    the caller's directory differs from the sequence's. `spec` and the
+    derived `plan` are absolute paths under the caller's `work/feature/`,
+    and both reach the nested `plan.md`, with 0 launches.
+  - `a_setter_before_the_file_is_judged_the_same_way`: argument order does
+    not change the result.
+  - `a_missing_spec_is_reported_as_a_missing_input_without_composing`: a
+    non-TTY run exits nonzero with a typed report naming `` `spec`: file ``,
+    and launches nothing.
+  - `the_step_guard_reads_the_plan_derived_from_the_coerced_spec`: one
+    launch while the plan is absent, then skipped once it exists.
+- **The three formal tests** in `sequence_sources_cli.rs` use `$state`. The
+  direct and referenced ones now assert that a composed `blue/5` reaches the
+  step before they assert the located violation.
+- **Route wiring.** `sequence_sources_cli.rs::declaration_routes::*` (6
+  tests) is a control plus invalid cases for the Markdown-frontmatter and
+  YAML loaders, each with a located diagnostic and 0 launches.
+- **Referenced-document inputs**, in `sequence_referenced_state.rs`:
+  - `a_root_reference_fills_its_template_from_its_own_input_value`
+  - `a_setter_outranks_a_root_references_own_input_value`
+  - `a_nested_reference_reads_its_own_input_value_and_no_referrer_property`
+  - `a_setter_outranks_a_nested_references_own_input_value`
+  - `a_root_references_missing_input_joins_the_roots_in_one_report_and_runs_no_event`
+  - `a_nested_references_missing_input_joins_the_roots_in_one_report_and_runs_no_event`
+- **Declaring-folder wiring**, for defect 1:
+  `sequence_sources_cli.rs::document_inputs::a_nested_documents_authored_file_value_resolves_from_its_own_folder`.
+- **Frozen graph**, in `sequence_frozen_graph.rs`:
+  - Rereads after a declaration edit: `a_reread_root_state_declaration_never_retypes_a_referenced_documents_rows`,
+    `a_reread_state_declaration_never_retypes_the_roots_inline_container`,
+    `…_an_inline_container_inside_a_referenced_document`, and
+    `…_a_group_legs_inline_container`.
+  - Root retry after a declaration edit:
+    `a_root_retry_after_a_state_declaration_edit_runs_the_untyped_rows`,
+    for defect 2.
+  - `a_template_keeps_its_planned_value_across_loop_passes`
+  - `a_retry_that_changes_a_document_input_keeps_the_planned_ids_and_template_state`
+  - `a_retry_after_a_failed_inline_check_runs_the_frozen_graph`
+  - `a_failed_inline_check_never_reopens_command_approval`: `echo
+    forbidden` is refused even with `--yolo`.
+- **Dry run.** `sequence_dry_run.rs::a_dry_run_names_an_inline_check_that_a_runtime_write_satisfies`
+  covers a write from `initialize` and one from an earlier task's `set`.
+
+Interactive (PTY) collection still has no new test. `sequence_overlay_pty.rs`
+and the L2 suite own terminal sessions. The non-TTY report and the
+progress-bounded loop share `collect_or_report`.
+
+### Defects found and fixed
+
+1. **A referenced or nested owner's authored file values resolved from the
+   caller's folder** (Phase 3 recorded this as an observation). Discovery's
+   `Discovery::push_owner`/`options_for` and `document.rs::owner_values`
+   built their `PrepareOptions` from the caller's file-resolution context.
+   They now derive the owning document's context the way the graph does,
+   through `Loader::source_context_for`, which calls
+   `InvocationContext::derive_source`.
+   - The new `PrepareOptions::resolving_document_from` swaps that context in
+     after `CallerInputLayers::apply_to`, so setters still convert from the
+     caller's recorded origin.
+   - `SequenceSourceOptions::with_invocation` carries the invocation to
+     `owner_values`. `phase1c::RootPlanRequest::plan` and the preflight
+     `Loader` pass it.
+   - An earlier attempt with `FileResolutionContext::for_source` failed on
+     `/var` vs `/private/var`; `derive_source` does not have that problem.
+   - `docs/topics/flow-control/sequences.md` ("What a referenced sequence
+     reads") now says where relative file values resolve from.
+2. **A root retry re-planned nested references under the declarations now
+   on disk.** The retry's approval-check rebuild used
+   `build_preflight_graph_with_invocation`, whose walk plans nested
+   references fresh, so a `$state` added to `child.yaml` failed the frozen
+   rows before the first attempt's graph ran. The new
+   `reread_preflight_graph_with_invocation` (`preflight/mod.rs`) walks with
+   `refresh = true`, as nested and group rereads already do: declarations
+   are judged again, and rows are read as authored for command discovery
+   only. The CLI retry arm in `wrap/sequence/mod.rs` calls it. The
+   approval refusal still holds
+   (`a_failed_inline_check_never_reopens_command_approval`).
+
+3. **A nested reread re-typed containers below its top level.** The
+   `refresh` flag was passed only to the container being reread, so an
+   inline container inside a referenced document, or inside a group leg,
+   was planned again with its current `$state`/`template:`. `Loader` now
+   carries a `refresh` field, set by `prepare_nested_sequence` and
+   `prepare_nested_group`, and every container the walk loads, at any
+   depth, uses it. The first CLI agent made this change, and the edit is
+   not in its (missing) report. I found it on disk with its skill sentence
+   and the tests `sequence_frozen_graph.rs::a_reread_state_declaration_never_retypes_*_an_inline_container_inside_a_referenced_document`
+   and `…_a_group_legs_inline_container`, which pass. The retry fix (2)
+   uses the same field.
+
+### Robustness smell audit
+
+`rg 'serde\(default\)|filter_map|unwrap_or_default\(\)|\.ok\(\)|Option<'`
+over `declarations.rs`, `formal.rs`, `source.rs`, `document.rs`,
+`preflight/inputs.rs`, and `task/sequence.rs` found no `serde(default)` and
+no `.ok()`. No hit is a defect:
+
+- The `Option<&Value>` declaration fields come from `map.get`, so a present
+  null stays `Some(Null)` and is refused by the shape check.
+- `declarations.rs` returns `None` for an open `{}` schema.
+- `source.rs`'s `unwrap_or_default()` applies to a data document's
+  frontmatter text, which does not exist.
+- `inputs.rs`'s `filter_map` collects missing-input entries and drops no data.
+- `document.rs` returns `None` when a document has no `$schema`.
+- The `task/sequence.rs` hits are runtime plumbing, plus a `filter_map` that
+  skips body steps, which have no task.
+
+### Wave 10 — Regression checkpoint and gates (Phase 5)
+
+- Focused runs, in order:
+  - The library's `composition::sequence` filter: 722, then 776 after the
+    owner-context fix.
+  - The CLI's source/schema/referenced-state/frozen-graph/dry-run/loop
+    filter: 152 passed after the retry fix. The retry test failed before it.
+  - Schema parity and freshness (`claudine_schema_parity`,
+    `shipped_artifacts`, `claudine_schemas_embedded`, `sequence_schema`,
+    `container_schema_recursion`): 479 passed.
+- First `just test`: one failure. `claudine_schema_shipped_corpus::every_shipped_document_has_one_test`
+  requires every `.md` under `frozen_prompts/` to have a corpus test, and
+  the new fixture's `plan.md` and `spec.md` had none. I added
+  `frozen_cli_sequence_state_schema_{plan,spec}`. The plan step's required
+  inputs are absent when it is judged on its own, so it is `Invalid` with
+  exactly those two problems.
+- Second `just test`: one failure. `context_construction_guard::production_source_builds_contexts_only_through_the_builder`
+  refused the new `Option<&FileResolutionContext>` parameter on
+  `Discovery::options_for`. I restored that function's signature and moved
+  the document-context swap into `push_owner`'s closure.
+- Third `just test` (claudine/): 12,285 passed, 0 failed, exit 0, at load
+  150–190 on 16 cores from other sessions. 17 tests were recorded at
+  5.0–7.3 s, so none reached 10 s. Re-measured alone (`-j 1`, load 170 → 93),
+  all 17 took 1.3–2.7 s and are cleared. Three of them are new this phase:
+  `sequence_dry_run::a_dry_run_names_an_inline_check_that_a_runtime_write_satisfies`
+  (7.2 s in the package run, 1.75 s alone) and the two
+  `sequence_referenced_state::*_missing_input_joins_the_roots_in_one_report_and_runs_no_event`
+  tests (6.4 s, 1.6 s alone). All three are load-sensitive.
+- `just lint` (claudine/): passes.
+- `just check-tier-coverage claudine` (repository root): 0 stranded.
+- Scope calculator: `packages: [claudine, claudine-cli, test-toolkit, darkmatter]`,
+  `change_class: package`, so the gates ran. The working tree still holds
+  Phase 4's uncommitted files.
+- Dependents: only in-area crates (`claudine-contract`, `claudine-cli`)
+  depend on `claudine`, and `just test` covers both.
+
+### Cross-OS check (Phase 5)
+
+Defect 1 changes which folder a file value resolves from, so I ran the
+Windows rig (`build-win`, through `scripts/cross-check.sh`).
+
+- `claudine` (lib), full L1: 6,734 of 6,735 passed. The one failure,
+  `document::tests::document_values_are_converted_before_a_derived_property_reads_them`
+  (Phase 2), wrote a Windows path into a double-quoted YAML scalar, where
+  `\U…` is read as an escape. It now uses a single-quoted scalar, and all 13
+  `document::tests` pass on Windows.
+- `claudine-cli`, full L1: 4,051 of 4,074 passed, 23 failed.
+  - 10 new tests failed. Their rows run the templated command `shell: "echo
+    {{ … }}"`. A template command runs its program directly, never through
+    a shell, and on Windows `echo` is a `cmd` builtin with no program
+    behind it.
+    - The fix is a test-only `claudine-fake-echo` binary
+      (`cli/tests/bin/fake_echo/main.rs`, declared in `cli/Cargo.toml` under
+      `test-fixtures`). `CliProcessFixture::install_echo` installs it as
+      `echo{EXE_SUFFIX}` in the fixture `bin`, which leads the child's `PATH`.
+    - `sequence_referenced_state.rs` and `sequence_frozen_graph.rs` call it
+      from `run_sequence`. On Windows, all 47 tests in those two files pass.
+    - I first tried a `side_effect: { set: … }` row instead. That read
+      `seq.who` as `null` at a root-reference row where the shell sees the
+      template value, so I backed it out (see decisions_for_review).
+  - The 12 other failures are on Windows already, from commits before this
+    fix: `implement_plan_commit_message::*` (7; an extra `git config` argv
+    is recorded), `lifecycle_edit_action::a_sequence_container_runs_edit_in_its_start_and_finalize_around_its_children`
+    (it runs the Unix `test` command), and `runaway_guard::tests::*` (4;
+    they read the build host's real `~/.claudine/config.yaml`). None of
+    their files changed in this fix, and this phase does not change them.
+- I did not set `os_failing`: every Windows failure this phase caused is
+  fixed and verified on the rig.
+
+### Final gates (Phase 5, after the Windows fixes)
+
+These runs supersede the gate results in the Wave 10 section above.
+
+- `just lint` (claudine/): passes.
+- `just test` (claudine/), first run after the Windows fixes: 12,285
+  passed, 0 failed. Load was about 100, and 60 tests were recorded slow.
+  Four existing tests crossed 10 s (`agent_text_is_data::inline_agent_values_are_stored_as_data_and_read_back_exactly`
+  12.6 s, `shipped_artifacts::the_checked_in_artifact_round_trips_to_uncached_preparation_in_order`
+  11.0 s, `agent_text_is_data::inline_agent_added_frontmatter_survives_a_second_run`
+  10.4 s, and `container_schema_recursion::deep_container_deferral_does_not_hide_literal_or_shape_errors_in_either_phase`
+  10.1 s). With `-j 2`, all 60 finished under 4 s.
+- Rerun at lower starting load: `just test` (claudine/) passed 12,285
+  tests, 0 failed, exit 0. Load was 43 at the start and 120 at the end. 18
+  tests were recorded at 5.0–9.18 s, none at 10 s. Re-measured alone
+  (`-j 1`, load 98 → 45), all 18 took 1.1–3.3 s and are cleared. Three are
+  new this phase:
+  - `sequence_dry_run::a_dry_run_names_an_inline_check_that_a_runtime_write_satisfies`
+    (6.0 s in the run, 2.0 s alone)
+  - `sequence_sources_cli::frozen_complete_reproduction::the_step_guard_reads_the_plan_derived_from_the_coerced_spec`
+    (7.0 s, 2.4 s alone)
+  - `preflight::inputs::tests::supplying_every_owners_inputs_clears_the_report`
+    (5.6 s, 1.1 s alone)
+- `just check-tier-coverage claudine`: 0 stranded.
+- Windows: `claudine` (lib) `document::tests` 13/13, and `claudine-cli`
+  `sequence_referenced_state` + `sequence_frozen_graph` 47/47.

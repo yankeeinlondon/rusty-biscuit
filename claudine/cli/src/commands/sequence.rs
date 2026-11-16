@@ -163,7 +163,7 @@ fn resolve_sequence_source(
 /// This is the success path, so it is a notice rather than a warning — but it
 /// goes to stderr like every other status line, leaving stdout clean for the
 /// (empty) run.
-fn emit_empty_sequence_notice(path: &std::path::Path) {
+pub(crate) fn emit_empty_sequence_notice(path: &std::path::Path) {
     use biscuit_terminal::prelude::TerminalRenderable;
 
     crate::log::message(
@@ -378,28 +378,20 @@ fn run_sequence_inner(
         shared.yolo,
     );
     let shell_runner = |command: &str| expand_shell_source(command, &shell_options);
-    let source_options = composition::SequenceSourceOptions::new(&file_resolution_context)
-        .with_shell_runner(&shell_runner);
 
-    let plan = composition::resolve_sequence_plan_with(&source, source_options)?.ok_or_else(
-        || {
-            eyre!(
-                "file '{}' does not define a `sequence` frontmatter property",
-                file
-            )
-        },
-    )?;
-
-    // The plan now owns the document's `$state`/`template:` and its inline
-    // containers' declarations; from here down `source` is only ever
-    // composed, and there those are not frontmatter. Every later re-read
-    // sheds them too (`reload_composition_source`).
-    let source = composition::without_formal_sequence_keys(&source);
-
-    // Empty containers still enter their lifecycle and produce an empty result.
-    if plan.steps.is_empty() {
-        emit_empty_sequence_notice(&source.resolved_path);
+    // The root's declarations and every item of an inline root list are
+    // judged now, before `initialize`; the plan itself is filled at preflight
+    // (`wrap::sequence::prepare_root_plan`), once every owning document's
+    // inputs are collected and `initialize` has made its writes.
+    composition::sequence::formal::formal_keys(&document_root, &source.resolved_path)?;
+    if let Some(serde_json::Value::Array(items)) = document_root.get("sequence") {
+        for (index, item) in items.iter().enumerate() {
+            if let serde_json::Value::Object(map) = item {
+                composition::sequence::grammar::validate_task_grammar(map, &source.resolved_path, &format!("sequence[{index}]"))?;
+            }
+        }
     }
+    let sequence_id = composition::sequence::normalize::allocate_sequence_id(&source.resolved_path);
 
     let caller_input_records =
         super::compose::caller_input_records(
@@ -409,20 +401,17 @@ fn run_sequence_inner(
         );
 
     // Schema-aware doc-level scrub: drop invalid optional values only.
-    // Required-value validation is deferred to per-step pre-validation
-    // (`wrap::sequence::run_phase_1c_attempt`) so a missing required
-    // property is aggregated across ALL failing steps and surfaced as
-    // `SequenceMissingProperties` — not short-circuited here with a
-    // single-document `MissingProperties` error. Interactive collection
-    // for missing required values is driven by
-    // `wrap::sequence::run_phase_1c_with_schema` against the
-    // deduplicated cross-step set.
+    // Missing required values are not reported here with a single-document
+    // `MissingProperties` error: preflight aggregates them across every
+    // owning document (`wrap::sequence::prepare_root_plan`) and every root
+    // step (`wrap::sequence::run_phase_1c_with_schema`) into one
+    // `SequenceMissingProperties` report, or collects them interactively.
     // The top-level source was resolved from launch context above. Capture that
     // directory before `chdir` as stable `file_ref_fallback_dir` diagnostic
     // metadata; document-authored values resolve source-relative, then against
     // the repository, never through launch as another candidate.
     let launch_area_fallback = Some(invocation.launch_cwd().to_path_buf());
-    let (source, set_overrides, dropped_optionals) =
+    let (authored_source, set_overrides, dropped_optionals) =
         composition::drop_invalid_optionals(
             source,
             set_overrides,
@@ -431,13 +420,23 @@ fn run_sequence_inner(
             invocation.trigger_findings(),
         );
     emit_dropped_optional_warnings(&dropped_optionals);
+    // Composition reads the document without its `$state`/`template:` and its
+    // inline containers' declarations; the plan is filled from the document
+    // as authored. Every later re-read sheds them too
+    // (`reload_composition_source`).
+    let source = composition::without_formal_sequence_keys(&authored_source);
+    let root_sequence = super::wrap::sequence::RootSequence {
+        sequence_id,
+        authored: authored_source,
+        shell_runner: &shell_runner,
+    };
     super::compose::emit_trigger_warnings(invocation.trigger_findings(), shared.silent);
 
     let execution_options = SequenceExecutionOptions { fail_fast_override: None };
 
     super::wrap::sequence::execute_sequence(
         &source,
-        plan,
+        &root_sequence,
         &shared,
         set_overrides,
         caller_input_records,

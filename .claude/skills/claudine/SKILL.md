@@ -463,7 +463,9 @@ primitive tasks; terminal event placeholders require templates. The graph's
 clones share settled authorization; a reread graph is settled only against the
 original invocation's approval, never by prompting. Root retries pass the same
 closed membership into graph approval; rebuilding the graph cannot reopen approval,
-and the retry runs the first attempt's graph (`RootRun::graph`). Nested preparation
+and the retry runs the first attempt's graph (`RootRun::graph`); its approval walk is
+`reread_preflight_graph_with_invocation` (`refresh = true`: nested rows read as
+authored, so a `$state` edited on disk never retypes frozen rows). Nested preparation
 (`prepare_nested_sequence`/`prepare_nested_group`) rereads container events and
 `variables` but keeps the frozen node's children and order; an unchanged source
 is parsed once per invocation (`PreflightGraph::nested_sources`, compared by text), and so is each referenced
@@ -514,13 +516,37 @@ by file and property, invalidated by declaration or schema-file bytes
 (`Work::SequenceSchemaPrepare`). A nested reread (`prepare_nested_sequence`,
 `load_sequence_with(…, refresh = true)`) rejudges declarations, the check, and
 events, discovers commands from the reread rows as authored (no template, no
-`$state`), and keeps the frozen plan and steps. Document inputs are found
+`$state`), and keeps the frozen plan and steps. `Loader::refresh` carries that
+reading to every container the reread loads, at any depth, and
+`prepare_nested_group` sets it too, so an edited `$state` deep in a reread
+file never retypes frozen rows (`cli/tests/l1/sequence_frozen_graph.rs`). Document inputs are found
 before the graph by `preflight/inputs.rs::discover_sequence_inputs`
 (`SequenceInputInventory`: owners root/root-reference/nested with their
 `Document` missing entries and prepared values, prompts, inline containers,
 template references left pending by a missing input), which reuses the
-`Loader`'s reference and cycle machinery; `build_preflight_graph_after_discovery`
-reuses its parses. Graph root rows are still located `tasks[i]`; the inventory
+`Loader`'s reference and cycle machinery; a non-root owner (and `owner_values`
+with `SequenceSourceOptions::with_invocation`) prepares under its own derived
+context (`Loader::source_context_for`, swapped in by
+`PrepareOptions::resolving_document_from`), so its authored file values resolve
+from its folder while setters keep the caller's origin; `build_preflight_graph_after_discovery`
+reuses its parses (and takes the real `CallerInputLayers`). The CLI builds no
+plan before `initialize`: `commands/sequence.rs` judges root declarations and
+inline item grammar, allocates the token (`normalize::allocate_sequence_id`),
+and hands `RootSequence` to `execute_sequence`; the first attempt's
+`phase1c::prepare_root_plan` discovers (setters plus `initialize` writes),
+collects with a shared `asked` set (progress-bounded, Phase 1c too), fills
+the plan (`with_sequence_id`), and `RootRun::{plan, collected_overrides}`
+keep it for retries. Discovery runs `leaving_verdicts()`: an owner's own
+non-missing preparation failure is recorded (`failed_owners`), not raised, so
+graph, provider, and Phase 1c errors keep their order; the root's is left to
+Phase 1c, any other's (or an empty root's) is raised by `recheck_owners`
+after provider selection. The root's own missing inputs are left to Phase 1c
+(step headings) unless another owner is missing, a reference is pending, or
+the root is empty. An inline container's `$schema` is judged in
+`TaskExecution::run_validated` (`task/sequence.rs::check_inline_container`;
+state + setters + runtime writes) after `when:` and before the run opens, and
+again at each `start` reread; a refusal is an unstarted failure, a dry run
+only names it. Graph root rows are still located `tasks[i]`; the inventory
 uses the authored `sequence[i]`. Every value route refuses a
 declaration write through `reserved::declaration_written_by` (root of a
 dotted path): setters (`commands/sequence.rs`), `with:`, template keys, and

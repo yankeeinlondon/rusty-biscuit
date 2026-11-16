@@ -84,6 +84,13 @@ impl TaskExecution<'_> {
                     self.stack.group.is_some(), self.graph.nested_sources(),
                 ).and_then(|(fresh, graph)| {
                     self.verify_nested_graph(&graph)?;
+                    // Each entry judges the check as it reads now (a reread
+                    // may have changed it) against the values of this entry;
+                    // the first one already passed admission before
+                    // `initialize`, and a preview names the check once.
+                    if !self.prompt.is_dry_run() {
+                        self.check_inline_container(&fresh, Some(runtime))?;
+                    }
                     Ok(fresh)
                 }) {
                     Ok(fresh) => {
@@ -410,6 +417,50 @@ impl TaskExecution<'_> {
     ///
     /// The view is decoded once per call and shared by every event and child
     /// that reads it, so a child never copies the document's own steps.
+    /// Judge `sequence`'s inline `$schema` check, when it declares one,
+    /// against the values visible at its turn: the enclosing values, the
+    /// caller's setters, and every runtime write so far.
+    ///
+    /// The check is passive: the converted or defaulted copy it judges is
+    /// discarded, and nothing it reads is changed. A dry run only names the
+    /// check, because the writes it would read are not made in a preview.
+    ///
+    /// ## Errors
+    ///
+    /// [`CompositionError::SequenceContainerSchemaViolation`] for the first
+    /// problem.
+    pub(super) fn check_inline_container(
+        &self, sequence: &PreflightSequence, runtime: Option<&RuntimeState>,
+    ) -> Result<(), CompositionError> {
+        let Some(check) = &sequence.inline_schema else { return Ok(()) };
+        let container = check.property().strip_suffix(".$schema").unwrap_or(check.property());
+        if self.prompt.is_dry_run() {
+            self.dry_run_note(&format!("`{container}` checks its `$schema` at its turn (not evaluated in a dry run)"));
+            return Ok(());
+        }
+        let mut snapshot: Map<String, Value> = self.state.data().iter()
+            .map(|(key, value)| (key.clone(), value.clone())).collect();
+        if let Some(Value::Object(setters)) = self.user_setters {
+            snapshot.extend(setters.clone());
+        }
+        if let Some(runtime) = runtime {
+            snapshot.extend(runtime.mutations());
+        }
+        let Some(report) = check.validate(&Value::Object(snapshot)) else { return Ok(()) };
+        match report.problems.first() {
+            None => Ok(()),
+            Some(problem) => Err(CompositionError::SequenceContainerSchemaViolation {
+                source_path: check.source_path().to_path_buf(),
+                container: container.to_string(),
+                property: match &problem.property {
+                    Some(name) if problem.path.is_empty() => name.clone(),
+                    _ => problem.path.clone(),
+                },
+                message: problem.message.clone(),
+            }),
+        }
+    }
+
     fn sequence_frontmatter(&self, sequence: &PreflightSequence) -> Option<SharedFrontmatter> {
         let mut base: Map<String, Value> = sequence.frontmatter.as_ref()?.iter()
             .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
@@ -475,7 +526,11 @@ impl TaskExecution<'_> {
                 task.origin_path = sequence.origin_path.clone();
                 task.origin_dir = sequence.origin_path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
                 task.authored = Default::default();
-                return Ok(TaskExecution { task: &task, runtime: Some(runtime), ..*self }.run_sequence(sequence));
+                // A proxy enters its container through the same admission as
+                // a task's turn, never around it.
+                let execution = TaskExecution { task: &task, runtime: Some(runtime), ..*self };
+                execution.check_inline_container(sequence, Some(runtime))?;
+                return Ok(execution.run_sequence(sequence));
             }
             if self.graph.prompt_document(&path).is_none() {
                 return Err(CompositionError::SequenceTaskUnsupported {

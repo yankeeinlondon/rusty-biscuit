@@ -211,6 +211,44 @@ mod counted {
         assert_eq!(snapshot().since(&before).get(Work::SequenceSchemaPrepare), 0, "an unchanged check is reused");
     }
 
+    /// A referenced document's `$state` is one contract for all of its rows,
+    /// and so is a root's; an unchanged reread prepares nothing, parses
+    /// nothing, and neither refills the template nor regenerates a row, even
+    /// after the document's template changed on disk.
+    #[test]
+    fn a_referenced_owner_resolves_one_contract_and_a_reread_regenerates_nothing() {
+        let dir = TempDir::new().unwrap();
+        let rows: String = (0..20).map(|index| format!("  - name: row{index}\n    rank: {index}\n    shell: echo {index}\n")).collect();
+        let child = |tag: &str| format!("kind: sequence\n$state:\n  rank: number(required)\ntemplate:\n  tag: {tag}\nsequence:\n{rows}");
+        write(dir.path(), "child.yaml", &child("v1"));
+        let path = write(dir.path(), "seq.md", &format!(
+            "---\n$state:\n  rank: number(required)\nsequence:\n  - name: nested\n    rank: 0\n    sequence: child.yaml\n{}---\nBody.\n",
+            (1..20).map(|index| format!("  - name: root{index}\n    rank: {index}\n    shell: echo root{index}\n")).collect::<String>(),
+        ));
+        let before = snapshot();
+        let source = crate::composition::resolve_fixture_source(&path).unwrap();
+        let resolution = crate::test_support::context_for(&source.resolved_path);
+        let plan = resolve_sequence_plan(&source, &resolution).unwrap().unwrap();
+        assert_eq!(snapshot().since(&before).get(Work::SequenceSchemaPrepare), 1, "the root's 20 rows share one contract");
+        let before = snapshot();
+        let graph = build_preflight_graph(&plan, &source, &resolution).unwrap();
+        assert_eq!(snapshot().since(&before).get(Work::SequenceSchemaPrepare), 1, "the child's 20 rows share one contract");
+
+        let frozen = root_container(&graph, 0).clone();
+        assert_eq!(states(&frozen).len(), 20);
+        let before = snapshot();
+        for _ in 0..3 {
+            assert_eq!(states(&reread(&graph, &frozen).unwrap()), states(&frozen));
+        }
+        let work = snapshot().since(&before);
+        assert_eq!(work.get(Work::SequenceSchemaPrepare), 0, "an unchanged contract is reused");
+        assert_eq!(work.get(Work::ReferencedDocumentParse), 0, "an unchanged document is not parsed again");
+
+        write(dir.path(), "child.yaml", &child("v2"));
+        let fresh = reread(&graph, &frozen).unwrap();
+        assert!(states(&fresh).iter().all(|row| row["tag"] == json!("v1")), "rows are never refilled");
+    }
+
     /// A check whose referenced schema file changed is prepared again, and
     /// the reread container carries the new contract.
     #[test]
@@ -251,4 +289,77 @@ fn a_referenced_document_fills_its_rows_from_its_own_prepared_values() {
     let filled = states(root_container(&graph, 0))[0]["where"].as_str().unwrap().to_string();
     let filled = Path::new(&filled);
     assert!(filled.is_absolute() && filled.ends_with("nested/work/spec.md"), "{}", filled.display());
+}
+
+/// An inline container's `$state` and `$schema` resolve references from
+/// their declaring file, not the caller's directory, and an unloadable one
+/// fails the graph at that container with the schema layer's cause. The
+/// declaring file, the caller, and the schema files are in three folders.
+#[test]
+fn inline_declarations_resolve_from_their_declaring_file() {
+    let dir = TempDir::new().unwrap();
+    for folder in ["caller/deep", "decl", "schemas"] {
+        fs::create_dir_all(dir.path().join(folder)).unwrap();
+    }
+    write(&dir.path().join("schemas"), "types.yaml", "kind: schema\ntypes:\n  shade: \"enum(red, blue)\"\n");
+    write(&dir.path().join("schemas"), "check.schema.yaml", "kind: schema\n$schema:\n  ready: boolean(required)\n");
+    let caller = dir.path().join("caller/deep");
+    let graph_of = |state: &str, check: &str| {
+        let path = write(&dir.path().join("decl"), "seq.md", &format!(
+            "---\nsequence:\n  - name: outer\n    $state: {state}\n    $schema: {check}\n    sequence:\n      - name: one\n        color: red\n        shell: echo one\n---\nBody.\n"
+        ));
+        let source = crate::composition::resolve_fixture_source(&path)?;
+        let resolution = crate::test_support::context_at(&caller);
+        let plan = resolve_sequence_plan(&source, &resolution)?.expect("a sequence");
+        build_preflight_graph(&plan, &source, &resolution)
+    };
+
+    let graph = graph_of("{ color: shade(required)@../schemas/types.yaml }", "../schemas/check.schema.yaml").unwrap();
+    let check = root_container(&graph, 0).inline_schema.as_ref().expect("prepared");
+    assert!(check.validate(&json!({})).is_some_and(|report| !report.problems.is_empty()), "the check file's contract applies");
+    assert!(graph_of("{ color: shade(required)@../schemas/types.yaml }", "{}").is_ok(), "an open check");
+
+    for (state, check, property, named) in [
+        ("{ color: tint@../schemas/types.yaml }", "{}", "tasks[0].$state", "tint"),
+        ("{}", "./check.schema.yaml", "tasks[0].$schema", "check.schema.yaml"),
+    ] {
+        let error = graph_of(state, check).unwrap_err();
+        let CompositionError::SequenceDeclarationLoad { property: found, source_path, source } = &error else {
+            panic!("{state} / {check}: expected SequenceDeclarationLoad, got {error:?}");
+        };
+        assert_eq!(found, property);
+        assert!(source_path.ends_with("decl/seq.md"), "{}", source_path.display());
+        assert!(source.to_string().contains(named), "{source}");
+    }
+
+    // The container's `$state` judges its row with the imported type.
+    let path = write(&dir.path().join("decl"), "bad.md", "---\nsequence:\n  - name: outer\n    $state: { color: shade(required)@../schemas/types.yaml }\n    sequence:\n      - name: one\n        color: green\n        shell: echo one\n---\nBody.\n");
+    let source = crate::composition::resolve_fixture_source(&path).unwrap();
+    let resolution = crate::test_support::context_at(&caller);
+    let plan = resolve_sequence_plan(&source, &resolution).unwrap().unwrap();
+    assert!(matches!(
+        build_preflight_graph(&plan, &source, &resolution).unwrap_err(),
+        CompositionError::SequenceStateSchemaViolation { ref property, ref source_path, .. }
+            if property == "/color" && source_path.ends_with("decl/bad.md")
+    ));
+}
+
+/// A parent's `$state` and `template` stop at a referenced child: they judge
+/// and fill the container row, never the child document's rows.
+#[test]
+fn a_parents_declarations_stop_at_a_referenced_child() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "child.yaml", "kind: sequence\nsequence:\n  - name: one\n    shell: echo one\n");
+    let parent = |row: &str| write(dir.path(), "seq.md", &format!(
+        "---\n$state:\n  color: string(required)\ntemplate:\n  tone: root\nsequence:\n  - name: nested\n{row}    sequence: child.yaml\n---\nBody.\n"
+    ));
+    let (graph, plan) = build(&parent("    color: blue\n")).unwrap();
+    assert_eq!(plan.steps[0].state.extra.get("tone"), Some(&json!("root")), "the container row is the parent's");
+    let rows = states(root_container(&graph, 0));
+    assert!(rows[0].get("tone").is_none() && rows[0].get("color").is_none(), "{rows:?}");
+
+    assert!(matches!(
+        build(&parent("")).unwrap_err(),
+        CompositionError::SequenceStateSchemaViolation { index: 0, ref property, .. } if property == "color"
+    ));
 }

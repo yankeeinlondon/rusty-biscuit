@@ -475,6 +475,30 @@ fn frozen_cli_make_it_markdown() {
     });
 }
 
+// The nested step of the frozen `complete.yaml` reproduction: both inputs
+// arrive from the sequence at launch, so passively they are absent.
+#[test]
+fn frozen_cli_sequence_state_schema_plan() {
+    assert_shipped(&Shipped {
+        label: "cli/tests/fixtures/frozen_prompts/sequence-state-schema/plan.md",
+        text: include_str!("../../../cli/tests/fixtures/frozen_prompts/sequence-state-schema/plan.md"),
+        selects: NONE,
+        schema: Invalid(&[("", "\"spec\" is a required property"), ("", "\"plan\" is a required property")]),
+        parser: ACCEPTS,
+    });
+}
+
+#[test]
+fn frozen_cli_sequence_state_schema_spec() {
+    assert_shipped(&Shipped {
+        label: "cli/tests/fixtures/frozen_prompts/sequence-state-schema/spec.md",
+        text: include_str!("../../../cli/tests/fixtures/frozen_prompts/sequence-state-schema/spec.md"),
+        selects: NONE,
+        schema: Valid,
+        parser: ACCEPTS,
+    });
+}
+
 // ── Research fleets and row prompts ────────────────────────────────────────
 // A fleet coordinator references its roster and names its row prompt; the
 // ones that also set `agent` and `model` select Claudine's trigger too. A row

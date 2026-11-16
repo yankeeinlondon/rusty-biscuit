@@ -127,6 +127,11 @@ pub struct SequenceInputInventory {
     pub inline_containers: Vec<InlineContainer>,
     /// References left pending by an owner's missing inputs.
     pub pending: Vec<PendingReference>,
+    /// Indices in [`Self::owners`] of the owners whose own preparation failed
+    /// for a reason other than a missing input, under
+    /// [`InputDiscoveryOptions::leaving_verdicts`]; their values were then
+    /// read as authored.
+    pub failed_owners: Vec<usize>,
     /// The parses discovery made, which the graph walk that follows reuses
     /// ([`super::build_preflight_graph_after_discovery`]).
     pub(crate) sources: super::NestedSources,
@@ -158,6 +163,7 @@ pub struct InputDiscoveryOptions<'a> {
     compose_context: &'a ComposeContext,
     caller_layers: Option<&'a CallerInputLayers>,
     invocation: Option<(&'a InvocationContext, &'a SourceContext)>,
+    leave_verdicts: bool,
 }
 
 impl<'a> InputDiscoveryOptions<'a> {
@@ -168,7 +174,7 @@ impl<'a> InputDiscoveryOptions<'a> {
         file_resolution_context: &'a biscuit_file::FileResolutionContext,
         compose_context: &'a ComposeContext,
     ) -> Self {
-        Self { file_resolution_context, compose_context, caller_layers: None, invocation: None }
+        Self { file_resolution_context, compose_context, caller_layers: None, invocation: None, leave_verdicts: false }
     }
 
     /// Resolve every reference from the repository context of the document
@@ -177,6 +183,18 @@ impl<'a> InputDiscoveryOptions<'a> {
     #[must_use]
     pub fn with_invocation(mut self, invocation: &'a InvocationContext, source_context: &'a SourceContext) -> Self {
         self.invocation = Some((invocation, source_context));
+        self
+    }
+
+    /// Record a failure of an owner's own preparation, other than a missing
+    /// input, instead of failing discovery
+    /// ([`SequenceInputInventory::failed_owners`]), reading that owner's
+    /// values as authored. A caller that reports other checks first (the
+    /// graph's structure, provider selection) discovers again without this
+    /// to report the failure in its turn.
+    #[must_use]
+    pub fn leaving_verdicts(mut self) -> Self {
+        self.leave_verdicts = true;
         self
     }
 
@@ -269,6 +287,8 @@ enum Executable {
 }
 
 impl Discovery<'_> {
+    /// The options an owner is prepared under, resolving from the caller's
+    /// context; [`Self::push_owner`] swaps in a non-root owner's own.
     fn options_for(&self, defer: bool) -> PrepareOptions {
         let mut prepare = PrepareOptions::new(self.options.file_resolution_context.clone());
         if let Some(layers) = self.options.caller_layers {
@@ -280,13 +300,28 @@ impl Discovery<'_> {
     }
 
     /// Prepare `source`'s values and record it as an owner.
+    ///
+    /// A nested or referenced owner's authored values resolve from its own
+    /// document, through the context the graph derives for it
+    /// ([`Loader::source_context_for`]); the root's from the caller's context,
+    /// which is its own.
     fn push_owner(
         &mut self, source: &ResolvedCompositionSource, role: InputOwnerRole,
         referenced_from: Option<PathBuf>, property: String,
     ) -> Result<usize, CompositionError> {
-        let prepare = |defer| super::super::document::prepare_sequence_document_values(
-            source, self.options_for(defer), CompositionMode::ChainedDocument,
-        );
+        let document = match role {
+            InputOwnerRole::Root => None,
+            InputOwnerRole::RootReference | InputOwnerRole::Nested => self.loader.source_context_for(&source.resolved_path)
+                .map(|context| context.file_resolution_context().clone()),
+        };
+        let prepare = |defer| {
+            // The caller's values keep their recorded origins either way.
+            let mut options = self.options_for(defer);
+            if let Some(document) = &document {
+                options = options.resolving_document_from(document.clone());
+            }
+            super::super::document::prepare_sequence_document_values(source, options, CompositionMode::ChainedDocument)
+        };
         let (values, missing) = match prepare(false) {
             Ok(prepared) => (prepared.values, None),
             Err(CompositionError::MissingProperties { source_path, missing, frontmatter_description, pointer_paths }) => {
@@ -298,6 +333,13 @@ impl Discovery<'_> {
                     source_path, missing, frontmatter_description, pointer_paths,
                 };
                 (values, Some(entry))
+            }
+            Err(_) if self.options.leave_verdicts => {
+                self.inventory.failed_owners.push(self.inventory.owners.len());
+                let authored = source.markdown.frontmatter().as_map().iter()
+                    .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
+                    .collect();
+                (authored, None)
             }
             Err(other) => return Err(other),
         };
@@ -529,9 +571,15 @@ impl Discovery<'_> {
             grammar::validate_sequence_root(root, path)?;
             let keys = formal::formal_keys(root, path)?;
             let source = source_resolution::whole_document_source(path, root, &document.orders)?;
+            let referrer = Arc::clone(&self.inventory.owners[owner].values);
             let owner = self.push_owner(&source, role, Some(origin.to_path_buf()), property.to_string())?;
             let items = super::super::data::expect_list(&root["sequence"], Some("sequence"))?;
-            let scope = Scope { owner, template: keys.template, values: Arc::clone(&self.inventory.owners[owner].values) };
+            // The template reads the referrer's values below the document's
+            // own, as the plan does (the transitional layer in
+            // `source::plan_referenced_sequence`), so both fill it alike.
+            let mut values = (*referrer).clone();
+            values.extend(self.inventory.owners[owner].values.iter().map(|(key, value)| (key.clone(), value.clone())));
+            let scope = Scope { owner, template: keys.template, values: Arc::new(values) };
             return self.walk_owner_list(&items, path, &rows_origin, "sequence", &scope);
         }
         // A selection is the enclosing owner's data: its rows are read the

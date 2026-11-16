@@ -277,6 +277,19 @@ pub struct SequencePlan {
     pub document_scope: Option<std::sync::Arc<super::document::SequenceDocumentScope>>,
 }
 
+impl SequencePlan {
+    /// This plan carrying the invocation token `sequence_id`, in the plan and
+    /// in every step's state.
+    #[must_use]
+    pub fn with_sequence_id(mut self, sequence_id: &str) -> Self {
+        self.sequence_id = sequence_id.to_string();
+        for step in &mut self.steps {
+            step.state.sequence_id = sequence_id.to_string();
+        }
+        self
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Overlay
 // ---------------------------------------------------------------------------

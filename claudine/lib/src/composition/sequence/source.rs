@@ -141,7 +141,7 @@ pub(crate) fn plan_referenced_sequence(
             root.iter().map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect(),
         );
         let keys = formal::formal_keys(root, path)?;
-        let own = super::document::owner_values(&authored, &keys, options, || {
+        let own = super::document::owner_values(&authored, &keys, options, Some(path), || {
             whole_document_source(path, root, &orders).map(std::borrow::Cow::Owned)
         })?;
         // Transitional: the referrer's values sit *below* the document's own

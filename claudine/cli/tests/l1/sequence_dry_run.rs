@@ -171,3 +171,30 @@ fn dry_run_shell_still_renders_side_effect_tasks() {
     assert!(run.stdout.contains("flag=original"), "stdout:\n{}\nstderr:\n{}", run.stdout, run.stderr);
     assert!(!run.stdout.contains("flag=changed"), "stdout:\n{}", run.stdout);
 }
+
+/// An inline container's `$schema` requiring a value that only a runtime
+/// write supplies (an earlier task's `set`, or `initialize`'s) is not judged
+/// by a dry run, which neither runs the write nor fails: it names the check.
+/// A real run then admits the container with the written value.
+#[test]
+fn a_dry_run_names_an_inline_check_that_a_runtime_write_satisfies() {
+    const CONTAINER: &str = "  - name: review\n    $schema: { reviewer: string(required) }\n    sequence: [{ name: sign, side_effect: { append_line: [signed.log, \"{{ reviewer }}\"] } }]\n";
+    for (writer, label) in [
+        (format!("sequence:\n  - {{ name: mark, side_effect: {{ set: {{ reviewer: ada }} }} }}\n{CONTAINER}"), "tasks[1]"),
+        (format!("initialize: [{{ set: {{ reviewer: ada }} }}]\nsequence:\n{CONTAINER}"), "tasks[0]"),
+    ] {
+        let fixture = CliProcessFixture::named("sequence-dry-run-inline-check");
+        fs::write(fixture.cwd().join("seq.md"), format!("---\n{writer}---\n")).unwrap();
+
+        let preview = run(&fixture, &["--dry-run"]);
+        assert!(preview.status.success(), "{writer}\nstderr:\n{}", preview.stderr);
+        assert!(prose(&preview.stderr).contains(&format!("`{label}` checks its `$schema` at its turn (not evaluated in a dry run)")),
+            "{writer}\nstderr:\n{}", preview.stderr);
+        assert!(!preview.stderr.contains("failed its `$schema` check"), "{writer}\nstderr:\n{}", preview.stderr);
+        assert!(!fixture.cwd().join("signed.log").exists(), "{writer}");
+
+        let real = run(&fixture, &["--silent"]);
+        assert!(real.status.success(), "{writer}\nstderr:\n{}", real.stderr);
+        assert_eq!(fs::read_to_string(fixture.cwd().join("signed.log")).unwrap().trim(), "ada", "{writer}");
+    }
+}

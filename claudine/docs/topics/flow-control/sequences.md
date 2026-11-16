@@ -91,6 +91,12 @@ declares reads as `null` inside the referenced sequence. To pass a value down,
 write it at run time with `set`, or supply it with `--set`. A `set` inside the
 referenced sequence is a runtime write, so the caller sees it afterward.
 
+A relative file value is resolved from the folder of the file that wrote it.
+If `nested/child.yaml` declares `spec: file(required;eager)` and writes
+`spec: work/spec.md`, Claudine looks for `nested/work/spec.md`, wherever the
+root that references it lives. A setter such as `spec=notes/spec.md` is
+resolved from the directory the caller supplied it in.
+
 This applies when the reference names a whole sequence document: a Markdown
 file with `sequence:`, or a `kind: sequence` YAML, JSON, or JSON5 file,
 including one reached through a group leg or an external `task:` file. A

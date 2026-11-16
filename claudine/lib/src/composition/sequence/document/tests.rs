@@ -178,7 +178,7 @@ fn document_values_are_converted_before_a_derived_property_reads_them() {
     write(&caller, "work/spec.md", "# spec\n");
     let marker = dir.path().join("ran");
     let yaml = format!(
-        "kind: sequence\n$schema:\n  spec: file(required;eager) -> the spec\nplan: \"{{{{ dirname(spec) + '/plan.md' }}}}\"\nprobe: \"$(touch {})\"\nsequence: []\n",
+        "kind: sequence\n$schema:\n  spec: file(required;eager) -> the spec\nplan: \"{{{{ dirname(spec) + '/plan.md' }}}}\"\nprobe: '$(touch {})'\nsequence: []\n",
         marker.display()
     );
     for path in both_formats(&dir.path().join("docs"), "complete", &yaml) {
@@ -393,3 +393,87 @@ fn a_referrer_value_is_only_a_lowest_layer_under_a_referenced_documents_own() {
     assert_eq!(plan.steps[0].state.extra["topic"], json!("./topic.md"));
     assert_eq!(plan.steps[0].state.extra["shared"], json!("roster"));
 }
+
+/// A document input's absent and `null` forms are told apart through the
+/// prepared values: a default fills either, a supplied value is coerced by
+/// its declared type, and a required input written as `null` is classified
+/// as missing exactly as an absent one, in both formats.
+#[test]
+fn absent_and_null_document_inputs_follow_the_canonical_rules() {
+    let dir = TempDir::new().unwrap();
+    let schema = "kind: sequence\n$schema:\n  level: string(default(high))\n  count: number\n  spec: string(required)\n";
+    for (authored, setters, level, count) in [
+        ("", json!({ "spec": "s", "count": "3" }), "high", Some(json!(3))),
+        ("level: null\n", json!({ "spec": "s" }), "high", None),
+        ("level: low\ncount: 2\n", json!({ "spec": "s" }), "low", Some(json!(2))),
+    ] {
+        for path in both_formats(dir.path(), "inputs", &format!("{schema}{authored}sequence: []\n")) {
+            let prepared = prepare_sequence_document_values(&load(&path), prepare_options(dir.path(), setters.clone()), CompositionMode::ChainedDocument)
+                .unwrap_or_else(|error| panic!("{}: {authored}: {error:?}", path.display()));
+            assert_eq!(prepared.values["level"], json!(level), "{}: {authored}", path.display());
+            assert_eq!(prepared.values.get("count").cloned(), count, "{}: {authored}", path.display());
+        }
+    }
+    for authored in ["", "spec: null\n"] {
+        for path in both_formats(dir.path(), "required", &format!("{schema}{authored}sequence: []\n")) {
+            let error = prepare_sequence_document_values(&load(&path), prepare_options(dir.path(), json!({})), CompositionMode::ChainedDocument)
+                .unwrap_err();
+            assert!(
+                matches!(&error, CompositionError::MissingProperties { missing, .. } if missing.iter().any(|property| property.name == "spec")),
+                "{}: {authored:?}: {error:?}",
+                path.display()
+            );
+        }
+    }
+}
+
+/// An owner's template reads an authored `file(eager)` value as its
+/// document-relative text, and the same input supplied by a setter as the
+/// value converted from the caller's folder: each keeps its own origin.
+#[test]
+fn authored_file_values_keep_their_text_and_setters_are_converted_from_the_caller() {
+    let dir = TempDir::new().unwrap();
+    let caller = dir.path().join("caller");
+    write(&caller, "elsewhere/spec.md", "# supplied by the caller\n");
+    write(dir.path(), "lists/work/spec.md", "# declared beside the list\n");
+    write(
+        dir.path(),
+        "lists/child.yaml",
+        "kind: sequence\n$schema:\n  spec: file(eager)\nspec: work/spec.md\ntemplate:\n  where: \"{{ spec }}\"\nsequence:\n  - one\n",
+    );
+    let referrer = write(dir.path(), "run/run.yaml", "kind: sequence\nsequence: ../lists/child.yaml\n");
+    let plan = plan_with(&referrer, &caller, json!({})).unwrap();
+    assert_eq!(plan.steps[0].state.extra["where"], json!("work/spec.md"));
+    let plan = plan_with(&referrer, &caller, json!({ "spec": "elsewhere/spec.md" })).unwrap();
+    let filled = plan.steps[0].state.extra["where"].as_str().unwrap().to_string();
+    assert_eq!(
+        biscuit_file::canonicalize_simplified(Path::new(&filled)).unwrap(),
+        biscuit_file::canonicalize_simplified(&caller.join("elsewhere/spec.md")).unwrap(),
+        "a setter's converted value fills the template"
+    );
+}
+
+/// A referring document's properties never enter a referenced document's
+/// schema instance: a required input only the referrer defines is still
+/// missing for the referenced document.
+#[test]
+fn a_referrers_property_never_satisfies_a_referenced_documents_input() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "lists/child.yaml", "kind: sequence\n$schema:\n  spec: string(required)\nsequence:\n  - one\n");
+    let referrer = write(dir.path(), "run.yaml", "kind: sequence\nspec: from-referrer\nsequence:\n  - name: nested\n    sequence: lists/child.yaml\n");
+    let source = load(&referrer);
+    let resolution = crate::test_support::context_for(&referrer);
+    let layers = CallerInputLayers::from_caller_overrides(Some(json!({})), resolution.clone());
+    let context = darkmatter::markdown::compose::ComposeContext::capture_for_content(dir.path(), "");
+    let inventory = crate::composition::sequence::preflight::discover_sequence_inputs(
+        &source,
+        crate::composition::sequence::preflight::InputDiscoveryOptions::new(&resolution, &context).with_caller_layers(&layers),
+    )
+    .unwrap();
+    let child = &inventory.owners[1];
+    assert!(child.path.ends_with("lists/child.yaml"));
+    let missing: Vec<&str> = child.missing.iter().flat_map(|entry| entry.missing.iter().map(|property| property.name.as_str())).collect();
+    assert_eq!(missing, ["spec"], "the referrer's `spec` is not the child's");
+    assert!(inventory.owners[0].missing.is_none(), "the referrer itself needs nothing");
+}
+

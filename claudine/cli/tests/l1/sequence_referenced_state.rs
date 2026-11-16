@@ -8,13 +8,18 @@ use std::fs;
 
 use crate::common::{CliProcessFixture, strip_ansi};
 
-/// Writes each `(name, contents)` file into a private workspace, runs `root`
-/// as a sequence with `extra` arguments, and returns stdout, stderr, and the
-/// exit code.
+/// Writes each `(name, contents)` file (creating its folders) into a private
+/// workspace, runs `root` as a sequence with `extra` arguments, and returns
+/// stdout, stderr, and the exit code.
 fn run_sequence(root: &str, files: &[(&str, &str)], extra: &[&str]) -> (String, String, i32) {
     let fixture = CliProcessFixture::named("sequence-referenced-state");
+    // Rows run a templated `echo`, which Windows has no program for.
+    #[cfg(feature = "test-fixtures")]
+    fixture.install_echo();
     for (name, contents) in files {
-        fs::write(fixture.cwd().join(name), contents).unwrap();
+        let path = fixture.cwd().join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
     }
     let output = fixture.command().args(["sequence", "--goose", "--yolo", "--silent"]).args(extra)
         .arg(fixture.cwd().join(root)).assert().get_output().clone();
@@ -224,4 +229,88 @@ fn referenced_sequence_shell_is_discovered_with_its_own_property() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(read_argv_records(&records).unwrap(), [vec!["child-value".to_string()]]);
     assert!(!fixture.audio_spool().exists());
+}
+
+// ============================================================================
+// A referenced document's `$schema` inputs
+// ============================================================================
+//
+// A referenced YAML sequence's root `$schema` declares that document's inputs.
+// Its own value satisfies them, an invocation setter outranks that value, and
+// the referring document's properties never stand in for them. The two
+// reference routes are separate implementation paths: a root
+// `sequence: child.yaml` keeps its rows as the root's rows (they run under
+// the root's events), and fills its `template:` from the child's values; a
+// nested `{ sequence: child.yaml }` task runs the child as its own document.
+// Missing-input reports of a nested reference and of an empty root reference
+// are proven by `sequence_sources_cli.rs::document_inputs`.
+
+/// A child declaring `reviewer` as an input with its own value, whose
+/// template copies it into each row.
+const SCHEMA_CHILD: &str = "kind: sequence\n$schema:\n  reviewer: string(required) -> who signs off\nreviewer: own-value\ntemplate:\n  who: \"{{ reviewer }}\"\nstart: [{ stdout: \"{{ reviewer }} [{{ root_only }}]\" }]\nsequence:\n  - { name: sign, shell: \"echo {{ seq.who }}\" }\n";
+
+/// The referring roots. Each declares a property the child never declares.
+const ROOT_REFERENCE: &str = "---\nroot_only: root-value\nsuccess: [{ stdout: \"{{ seq.outputs }}\" }]\nsequence: lists/child.yaml\n---\n";
+const NESTED_REFERENCE: &str = "---\nroot_only: root-value\nsequence: [{ name: child, sequence: lists/child.yaml }]\n---\n";
+
+referenced_state!(a_root_reference_fills_its_template_from_its_own_input_value,
+    root: "root.md",
+    files: [("root.md", ROOT_REFERENCE), ("lists/child.yaml", SCHEMA_CHILD)],
+    expected: r#"["own-value"]"#);
+
+referenced_state!(a_setter_outranks_a_root_references_own_input_value,
+    root: "root.md",
+    files: [("root.md", ROOT_REFERENCE), ("lists/child.yaml", SCHEMA_CHILD)],
+    args: ["reviewer=setter-value"],
+    expected: r#"["setter-value"]"#);
+
+// The child's `start` reads its own input and, as `[]`, the referring
+// document's `root_only`, which never reaches it.
+referenced_state!(a_nested_reference_reads_its_own_input_value_and_no_referrer_property,
+    root: "root.md",
+    files: [("root.md", NESTED_REFERENCE), ("lists/child.yaml", SCHEMA_CHILD)],
+    expected: "own-value []");
+
+referenced_state!(a_setter_outranks_a_nested_references_own_input_value,
+    root: "root.md",
+    files: [("root.md", NESTED_REFERENCE), ("lists/child.yaml", SCHEMA_CHILD)],
+    args: ["reviewer=setter-value"],
+    expected: "setter-value []");
+
+/// A child whose input has no value, with an `append_line` in each of its
+/// events so a run of any of them leaves `lists/events.log`.
+const MISSING_CHILD: &str = "kind: sequence\n$schema:\n  reviewer: string(required) -> who signs off\ninitialize: [{ append_line: [events.log, child-initialize] }]\nstart: [{ append_line: [events.log, child-start] }]\nsequence:\n  - { name: sign, shell: \"echo {{ reviewer }}\" }\n";
+
+/// Runs `root` (which also lacks its own `topic`) without setters and asserts
+/// the one combined report names both owning documents, the child at
+/// `property`, and both inputs, with no event of either document run.
+fn assert_combined_report(root: &str, property: &str) {
+    let root_doc = format!("---\n$schema:\n  topic: string(required) -> what is reviewed\nstart: [{{ append_line: [events.log, root-start] }}]\n{root}---\n");
+    let fixture = CliProcessFixture::named("sequence-referenced-inputs");
+    fs::create_dir_all(fixture.cwd().join("lists")).unwrap();
+    fs::write(fixture.cwd().join("root.md"), root_doc).unwrap();
+    fs::write(fixture.cwd().join("lists/child.yaml"), MISSING_CHILD).unwrap();
+
+    let output = fixture.command().args(["sequence", "--goose", "--yolo"])
+        .arg(fixture.cwd().join("root.md")).assert().failure().get_output().clone();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("Missing required schema properties in 2 documents of the sequence"), "{flat}");
+    assert!(flat.contains("root.md - `topic`: string — what is reviewed"), "{flat}");
+    assert!(flat.contains(&format!("child.yaml (`{property}`) - `reviewer`: string — who signs off")), "{flat}");
+    for log in ["events.log", "lists/events.log"] {
+        assert!(!fixture.cwd().join(log).exists(), "collection ran a lifecycle event ({log}): {flat}");
+    }
+    assert!(!fixture.audio_spool().exists());
+}
+
+#[test]
+fn a_root_references_missing_input_joins_the_roots_in_one_report_and_runs_no_event() {
+    assert_combined_report("sequence: lists/child.yaml\n", "sequence");
+}
+
+#[test]
+fn a_nested_references_missing_input_joins_the_roots_in_one_report_and_runs_no_event() {
+    assert_combined_report("sequence: [{ name: review, sequence: lists/child.yaml }]\n", "sequence[0].sequence");
 }

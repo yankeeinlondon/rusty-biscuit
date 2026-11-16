@@ -317,6 +317,14 @@ fn generate_ids<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
     ids
 }
 
+/// Allocate an invocation token for the sequence `source_path` before its
+/// plan exists, so its root `initialize` and its plan share one `seq.run_id`
+/// ([`SequencePlan::with_sequence_id`]).
+#[must_use]
+pub fn allocate_sequence_id(source_path: &Path) -> String {
+    generate_sequence_id(source_path, &[])
+}
+
 /// Generate the lowercase xxHash invocation token from a canonical payload:
 /// the resolved source path, the ordered state ids, a high-resolution UTC
 /// timestamp, the process id, and the process-local monotonic counter.

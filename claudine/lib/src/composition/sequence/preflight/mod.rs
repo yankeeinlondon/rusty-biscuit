@@ -534,9 +534,37 @@ pub fn build_preflight_graph_with_invocation(
     Ok(loader.finish())
 }
 
+/// [`build_preflight_graph_with_invocation`] for a root retry's approval
+/// check: the retry runs the first attempt's graph, so this walk only finds
+/// commands. Nested containers are read as a nested reread reads them (their
+/// declarations judged again, their rows as authored: no template fill, no
+/// `$state`), so a declaration edited on disk since the first attempt never
+/// retypes rows the first attempt planned.
+///
+/// ## Errors
+///
+/// As [`build_preflight_graph`].
+pub fn reread_preflight_graph_with_invocation(
+    plan: &SequencePlan,
+    source: &ResolvedCompositionSource,
+    context: ComposeContext,
+    invocation: &InvocationContext,
+    source_context: &SourceContext,
+    caller_setters: Option<&Value>,
+) -> Result<PreflightGraph, CompositionError> {
+    let mut loader = Loader::new_with_invocation(source, context, invocation, source_context.clone());
+    loader.caller_setters = caller_setters.and_then(Value::as_object).cloned().unwrap_or_default();
+    loader.refresh = true;
+    loader.walk_plan(plan)?;
+    Ok(loader.finish())
+}
+
 /// [`build_preflight_graph_with_invocation`] after input discovery: the walk
 /// reuses every parse `inventory`'s discovery made of a file whose bytes are
 /// unchanged, so a referenced document is parsed once for both passes.
+///
+/// `caller_layers` are the invocation's caller inputs (setters with their
+/// recorded origins), the same ones discovery prepared owners under.
 ///
 /// ## Errors
 ///
@@ -547,12 +575,14 @@ pub fn build_preflight_graph_after_discovery(
     context: ComposeContext,
     invocation: &InvocationContext,
     source_context: &SourceContext,
-    caller_setters: Option<&Value>,
+    caller_layers: Option<&crate::composition::CallerInputLayers>,
     inventory: &SequenceInputInventory,
 ) -> Result<PreflightGraph, CompositionError> {
     let mut loader = Loader::new_with_invocation(source, context, invocation, source_context.clone());
     loader.graph.nested_sources = inventory.sources.clone();
-    loader.caller_setters = caller_setters.and_then(Value::as_object).cloned().unwrap_or_default();
+    loader.caller_setters = caller_layers.and_then(|layers| layers.set_overrides.as_ref())
+        .and_then(Value::as_object).cloned().unwrap_or_default();
+    loader.caller_layers = caller_layers.cloned();
     loader.walk_plan(plan)?;
     Ok(loader.finish())
 }
@@ -800,6 +830,7 @@ pub(crate) fn prepare_nested_sequence(
     loader.step_frontmatter = state.data().clone();
     crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
     loader.caller_setters = supplied;
+    loader.refresh = true;
     loader.ancestry.push((canonical(&task.origin_path), None));
     let mut sequence = loader.load_sequence_with(
         value, raw_task, &task.origin_path, &task.label, &task.diagnostic.task_property,
@@ -833,6 +864,7 @@ pub(crate) fn prepare_nested_group(
     loader.graph.nested_sources = sources.clone();
     loader.step_frontmatter = state.data().clone();
     crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
+    loader.refresh = true;
     loader.ancestry.push((canonical(&task.origin_path), None));
     let mut group = loader.load_group(
         value, &task.origin_path, &task.label, &property_child(&task.diagnostic.task_property, "group"),
@@ -895,6 +927,10 @@ struct Loader<'a> {
     /// writes so far, which a referenced sequence document reads above its
     /// own properties.
     caller_setters: Map<String, Value>,
+    /// The invocation's caller inputs with their recorded origins, when the
+    /// caller supplied them: a referenced document's template then reads a
+    /// caller's file value from the caller's own context, not the referrer's.
+    caller_layers: Option<crate::composition::CallerInputLayers>,
     /// Keys an inline container event of the graph may write, collected as
     /// the walk reads them; [`Self::finish`] adds every retained stack's.
     written_keys: HashSet<String>,
@@ -906,6 +942,11 @@ struct Loader<'a> {
     /// a group takes the slice its own load appended as its
     /// [`PreflightGroup::sources`].
     capture_log: Vec<PathBuf>,
+    /// Whether this walk is a nested reread. Its caller keeps the frozen
+    /// children of the whole subtree, so every container the walk loads, at
+    /// any depth, reads its rows as authored: a changed `$state` or
+    /// `template:` never retypes or refills a frozen row.
+    refresh: bool,
 }
 
 /// Where in the sequence a task being loaded sits.
@@ -941,9 +982,11 @@ impl<'a> Loader<'a> {
             prompt_reference_index: HashMap::new(),
             source_schema: None,
             caller_setters: Map::new(),
+            caller_layers: None,
             written_keys: HashSet::new(),
             guard_override: None,
             capture_log: Vec::new(),
+            refresh: false,
         }
     }
 
@@ -972,9 +1015,11 @@ impl<'a> Loader<'a> {
             prompt_reference_index: HashMap::new(),
             source_schema: None,
             caller_setters: Map::new(),
+            caller_layers: None,
             written_keys: HashSet::new(),
             guard_override: None,
             capture_log: Vec::new(),
+            refresh: false,
         }
     }
 
@@ -1267,7 +1312,8 @@ impl<'a> Loader<'a> {
         label: &str, property: &str, authored: &AuthoredOrder,
         state: &EffectiveState, placement: Placement,
     ) -> Result<PreflightSequence, CompositionError> {
-        self.load_sequence_with(value, options, origin, label, property, authored, state, placement, false)
+        let refresh = self.refresh;
+        self.load_sequence_with(value, options, origin, label, property, authored, state, placement, refresh)
     }
 
     /// Load a nested `sequence:` task. With `refresh` (a nested reread), the
@@ -1345,13 +1391,14 @@ impl<'a> Loader<'a> {
                         // A whole referenced document's `template:` reads its
                         // own values under the invocation's supplied ones,
                         // never the referrer's frontmatter.
-                        let supplied = (!self.caller_setters.is_empty()).then(|| crate::composition::CallerInputLayers::from_caller_overrides(
+                        let supplied = self.caller_layers.clone().or_else(|| (!self.caller_setters.is_empty()).then(|| crate::composition::CallerInputLayers::from_caller_overrides(
                             Some(Value::Object(self.caller_setters.clone())), resolution.clone(),
-                        ));
+                        )));
                         // With the walk's captured context, a template
                         // expression reads the document's prepared values.
                         let mut options = super::SequenceSourceOptions::new(&resolution).with_compose_context(&self.context);
                         if let Some(supplied) = &supplied { options = options.with_caller_layers(supplied); }
+                        if let Some(invocation) = self.invocation { options = options.with_invocation(invocation); }
                         source_resolution::plan_referenced_sequence(
                             &reference, &path, &document.value, Arc::clone(&document.orders),
                             origin, &self.step_frontmatter, true, &options,

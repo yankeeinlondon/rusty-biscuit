@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-15
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -81,6 +81,59 @@ skills_files_updated_during_phase_3:
 packages:
 - claudine
 - claudine-cli
+source_files_during_phase_4:
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+- claudine/lib/src/composition/sequence/model.rs
+- claudine/lib/src/composition/sequence/normalize.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/inputs.rs
+- claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/phase1c.rs
+- claudine/cli/src/commands/wrap/sequence/container.rs
+- claudine/cli/tests/l1/sequence_sources_cli.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/sequence/mod.rs
+- claudine/lib/src/composition/sequence/source.rs
+- claudine/lib/src/composition/sequence/document.rs
+- claudine/lib/src/composition/sequence/document/tests.rs
+- claudine/lib/src/composition/sequence/declarations/tests.rs
+- claudine/lib/src/composition/sequence/tests.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/inputs.rs
+- claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+- claudine/lib/src/composition/sequence/preflight/tests/scoped_graph.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/lib/src/composition/sequence/task/tests/inline_check.rs
+- claudine/lib/src/composition/sequence/task/tests/declaration_writes.rs
+- claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/phase1c.rs
+- claudine/cli/tests/l1/sequence_sources_cli.rs
+- claudine/cli/tests/l1/sequence_referenced_state.rs
+- claudine/cli/tests/l1/sequence_frozen_graph.rs
+- claudine/cli/tests/l1/sequence_dry_run.rs
+- claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/complete.yaml
+- claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/plan.md
+- claudine/cli/tests/fixtures/frozen_prompts/sequence-state-schema/spec.md
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/bin/fake_echo/main.rs
+- claudine/cli/Cargo.toml
+docs_updated_during_phase_5:
+- claudine/docs/topics/flow-control/sequences.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/claudine/SKILL.md
 ---
 
 # Separate sequence document schemas from step-state schemas
@@ -590,7 +643,7 @@ independent tasks below, not concurrent execution of shared Cargo gates.
 
 ### Wave 7
 
-- [ ] **CLI preparation**
+- [x] **CLI preparation**
   - Reorder `commands/sequence.rs::run_sequence_inner` and
     `wrap/sequence/mod.rs::{execute_sequence,execute_sequence_inner}` so
     argument ownership/setter parsing still reads the authored root schema,
@@ -616,7 +669,7 @@ independent tasks below, not concurrent execution of shared Cargo gates.
     Add sequence-context declaration-setter checks after all setter forms
     merge, leaving unrelated composition commands' setter behavior intact.
 
-- [ ] **Container admission**
+- [x] **Container admission**
   - In parallel, implement rules 17–19 in
     `sequence/task/{mod,sequence,group}.rs`. Both `run_guarded` and the root's
     `run_admitted` route must reach the same inline-check admission code.
@@ -643,7 +696,7 @@ independent tasks below, not concurrent execution of shared Cargo gates.
 
 ### Wave 8
 
-- [ ] **Boundary checkpoint**
+- [x] **Boundary checkpoint**
   - Integrate both tasks, update `task_run.rs` admission wiring, and run focused
     library admission tests and CLI schema/source tests sequentially.
   - Prove: an earlier `set` satisfies an inline check; a missing value refuses
@@ -723,7 +776,7 @@ validator and all cases for its loader, not a single isolated cell.
 
 ### Wave 9
 
-- [ ] **Library coverage**
+- [x] **Library coverage**
   - Extend `sequence/tests.rs`, `sequence/preflight/tests.rs`,
     `sequence/task/tests.rs`, and its existing `tests/referenced_documents.rs`
     module with the detailed matrices above. Reuse fixture builders; do not
@@ -741,7 +794,7 @@ validator and all cases for its loader, not a single isolated cell.
     refill templates/regenerate state. Keep existing payload-size ceilings.
   - Own library behavior-test modules only; CLI coverage owns subprocess files.
 
-- [ ] **CLI regressions**
+- [x] **CLI regressions**
   - In parallel, freeze a minimal valid version of the motivating YAML plus
     its tiny prompt/schema/spec files in
     `cli/tests/fixtures/frozen_prompts/sequence-state-schema/`. Include it by
@@ -765,7 +818,7 @@ validator and all cases for its loader, not a single isolated cell.
 
 ### Wave 10
 
-- [ ] **Regression checkpoint**
+- [x] **Regression checkpoint**
   - Run focused library, CLI source/schema, referenced-state, frozen-graph,
     and loop/admission filters sequentially. Run the schema parity/freshness
     filters after both tasks are integrated.

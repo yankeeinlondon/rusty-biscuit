@@ -598,22 +598,25 @@ fn a_referenced_formal_document_applies_template_before_generated_fields() {
     assert_eq!(composed_steps(&workspace, &doc, &[]), ["blue(5)/1"]);
 }
 
+/// A referenced formal document's root `$state` types its step state: a
+/// conforming step composes the referring document's body with the typed
+/// value, and one edit to the value is a located step-state violation.
 #[test]
 fn a_referenced_formal_documents_state_declaration_validates_the_step_state() {
+    const FORMAL: &str = "kind: sequence\nsequence:\n  - name: blue\n    rank: 5\n$state:\n  rank: number(required)\n";
     let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(
-        &workspace,
-        "formal.yaml",
-        "kind: sequence\nsequence:\n  - name: blue\n    rank: not-a-number\n$state:\n  rank: number(required)\n",
-    );
-    let doc = source_doc(&workspace, "ref.md", "formal.yaml");
+    write(&workspace, "formal.yaml", FORMAL);
+    let doc = write(&workspace, "ref.md", "---\nsequence: formal.yaml\n---\nStep {{ seq.name }}/{{ seq.rank }}.\n");
+    assert_eq!(composed_steps(&workspace, &doc, &[]), ["blue/5"]);
 
-    let (_, stderr) = dry_run(&workspace, &doc, &[], false);
+    write(&workspace, "formal.yaml", &FORMAL.replace("rank: 5", "rank: not-a-number"));
+    let (stdout, stderr) = dry_run(&workspace, &doc, &[], false);
     let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         flat.contains("sequence step 0 (`blue`) failed schema validation at `/rank`"),
         "the violation must name the step index, its id, and the failing property; stderr:\n{flat}"
     );
+    assert!(!stdout.contains("Step blue"), "no step composed: {stdout}");
 }
 
 /// The whole formal-document contract in one fixture, reached both ways.
@@ -672,23 +675,24 @@ fn a_formal_document_normalizes_identically_through_both_entry_paths() {
 /// The counterpart to
 /// [`a_referenced_formal_documents_state_declaration_validates_the_step_state`]: a
 /// directly invoked document's root `$state` types the step state the same
-/// way; its root `$schema` would describe the document instead.
+/// way: a conforming step composes the document's `prompt` with the typed
+/// value. Its root `$schema` would describe the document instead.
 #[test]
 fn a_directly_invoked_documents_state_declaration_validates_the_step_state() {
+    const FORMAL: &str = "kind: sequence\nprompt: \"Step {{ seq.name }}/{{ seq.rank }}.\"\nsequence:\n  - name: blue\n    rank: 5\n$state:\n  rank: number(required)\n";
     let workspace = CliProcessFixture::named("sequence-sources-cli");
-    let doc = write(
-        &workspace,
-        "formal.yaml",
-        "kind: sequence\nprompt: \"Handle {{ seq.name }}\"\nsequence:\n  - name: blue\n    rank: not-a-number\n$state:\n  rank: number(required)\n",
-    );
+    let doc = write(&workspace, "formal.yaml", FORMAL);
+    assert_eq!(composed_steps(&workspace, &doc, &[]), ["blue/5"]);
 
-    let (_, stderr) = dry_run(&workspace, &doc, &[], false);
+    write(&workspace, "formal.yaml", &FORMAL.replace("rank: 5", "rank: not-a-number"));
+    let (stdout, stderr) = dry_run(&workspace, &doc, &[], false);
     let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         flat.contains("sequence step 0 (`blue`) failed schema validation at `/rank`"),
         "the direct mode must report the same step-state violation the referenced mode does; \
          stderr:\n{flat}"
     );
+    assert!(!stdout.contains("Step blue"), "no step composed: {stdout}");
 }
 
 /// A setter supplies a value, never the sequence's plan: a `template=`
@@ -890,4 +894,431 @@ fn shipped_runner_sequence_renders_lexical_rows_through_the_cli() {
     assert_eq!(run_ids.len(), 1);
     assert_eq!(run_ids.first().unwrap().len(), 16);
     assert!(!fixture.audio_spool().exists());
+}
+
+// ============================================================================
+// Document inputs and inline checks at the invocation boundary
+// ============================================================================
+
+/// Every owning document's required inputs join the one collection pass
+/// before the graph is frozen, and an inline container's `$schema` and a
+/// `$state` never do. Detailed shapes live in the library
+/// (`preflight::inputs::tests`, `task::tests::inline_check`); these prove the
+/// CLI wiring.
+mod document_inputs {
+    use super::*;
+
+    fn flat(text: &str) -> String {
+        text.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn run(workspace: &CliProcessFixture, args: &[&str], expect_success: bool) -> String {
+        let assert = workspace.command().args(args).assert();
+        let assert = if expect_success { assert.success() } else { assert.failure() };
+        let output = assert.get_output().clone();
+        flat(&strip_ansi(&String::from_utf8_lossy(&output.stderr)))
+    }
+
+    const CHILD: &str = "kind: sequence\n$schema:\n  reviewer: string(required) -> who signs off\nsequence:\n  - name: sign\n    shell: echo signed by {{ reviewer }}\n";
+
+    #[test]
+    fn a_nested_referenced_documents_missing_input_is_reported_as_that_document() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "nested/child.yaml", CHILD);
+        let root = write(&workspace, "flow.yaml", "kind: sequence\nsequence:\n  - name: review\n    sequence: ./nested/child.yaml\n");
+
+        let stderr = run(&workspace, &["sequence", "--dry-run", root.to_str().unwrap()], false);
+        assert!(stderr.contains("missing properties"), "{stderr}");
+        assert!(stderr.contains("Document") && stderr.contains("child.yaml"), "{stderr}");
+        assert!(stderr.contains("sequence[0].sequence"), "the container path names the reference: {stderr}");
+        assert!(stderr.contains("reviewer"), "{stderr}");
+        assert!(!stderr.contains("Step 1"), "a document input is not a step's: {stderr}");
+    }
+
+    /// A schema-aware setter belongs to the sequence wherever it sits.
+    #[test]
+    fn a_setter_before_or_after_the_file_supplies_a_nested_documents_input() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "nested/child.yaml", CHILD);
+        let root = write(&workspace, "flow.yaml", "kind: sequence\nsequence:\n  - name: review\n    sequence: ./nested/child.yaml\n");
+        let file = root.to_str().unwrap();
+        for args in [
+            vec!["sequence", "--dry-run", "--yolo", file, "reviewer=ada"],
+            vec!["sequence", "--dry-run", "--yolo", "reviewer=ada", file],
+        ] {
+            let stderr = run(&workspace, &args, true);
+            assert!(stderr.contains("echo signed by ada"), "{args:?}: {stderr}");
+        }
+    }
+
+    #[test]
+    fn an_empty_root_list_still_requires_its_inputs() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let root = write(&workspace, "empty.yaml", "kind: sequence\n$schema:\n  reviewer: string(required)\nsequence: []\n");
+        let file = root.to_str().unwrap();
+
+        let stderr = run(&workspace, &["sequence", "--dry-run", file], false);
+        assert!(stderr.contains("missing properties") && stderr.contains("Document"), "{stderr}");
+        assert!(stderr.contains("reviewer"), "{stderr}");
+        run(&workspace, &["sequence", "--dry-run", file, "reviewer=ada"], true);
+    }
+
+    #[test]
+    fn an_empty_root_referenced_document_still_requires_its_inputs() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "lists/empty.yaml", "kind: sequence\n$schema:\n  reviewer: string(required)\nsequence: []\n");
+        let root = write(&workspace, "flow.yaml", "kind: sequence\nsequence: ./lists/empty.yaml\n");
+
+        let stderr = run(&workspace, &["sequence", "--dry-run", root.to_str().unwrap()], false);
+        assert!(stderr.contains("missing properties") && stderr.contains("empty.yaml"), "{stderr}");
+        assert!(stderr.contains("reviewer"), "{stderr}");
+    }
+
+    /// The report comes before the root starts: no event action or task runs.
+    #[test]
+    fn collecting_a_missing_input_starts_nothing() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "nested/child.yaml", CHILD);
+        let root = write(
+            &workspace,
+            "flow.yaml",
+            "kind: sequence\nstart:\n  - append_line: ['events.log', 'root-start']\nsequence:\n  - name: review\n    sequence: ./nested/child.yaml\n",
+        );
+
+        let stderr = run(&workspace, &["sequence", root.to_str().unwrap()], false);
+        assert!(stderr.contains("missing properties"), "{stderr}");
+        assert!(!workspace.cwd().join("events.log").exists(), "nothing started: {stderr}");
+    }
+
+    /// A required `$state` field types step data; it is never asked for.
+    #[test]
+    fn a_required_state_field_is_a_state_violation_not_a_missing_input() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let root = write(
+            &workspace,
+            "flow.yaml",
+            "kind: sequence\n$state:\n  color: string(required)\nsequence:\n  - name: blue\n    shell: echo blue\n",
+        );
+
+        let stderr = run(&workspace, &["sequence", "--dry-run", root.to_str().unwrap()], false);
+        assert!(stderr.contains("sequence step 0 (`blue`) failed schema validation at `color`"), "{stderr}");
+        assert!(!stderr.contains("missing properties"), "{stderr}");
+    }
+
+    /// An inline container's `$schema` is checked at its turn: a preview
+    /// names it, and a run refuses the container, never asking for input.
+    #[test]
+    fn an_inline_check_is_never_an_input_and_refuses_its_container_at_its_turn() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let root = write(
+            &workspace,
+            "flow.yaml",
+            "kind: sequence\nsequence:\n  - name: review\n    $schema:\n      reviewer: string(required)\n    start:\n      - append_line: ['events.log', 'review-start']\n    sequence:\n      - name: sign\n        shell: echo signed\n",
+        );
+        let file = root.to_str().unwrap();
+
+        let preview = run(&workspace, &["sequence", "--dry-run", "--yolo", file], true);
+        assert!(preview.contains("checks its `$schema` at its turn"), "{preview}");
+
+        let stderr = run(&workspace, &["sequence", "--yolo", file], false);
+        assert!(stderr.contains("failed its `$schema` check at `reviewer`"), "{stderr}");
+        assert!(!stderr.contains("missing properties"), "{stderr}");
+        assert!(!workspace.cwd().join("events.log").exists(), "the refused container never started: {stderr}");
+    }
+
+    /// The plan is filled after the root's `initialize`, so a template reads
+    /// a value `initialize` wrote, through the same `seq.run_id` its events
+    /// saw.
+    #[test]
+    fn a_root_template_reads_what_initialize_wrote() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let root = write(
+            &workspace,
+            "flow.yaml",
+            "kind: sequence\nwho: nobody\ninitialize:\n  - set:\n      who: ada\ntemplate:\n  desc: \"signed by {{ who }}\"\nsequence:\n  - name: sign\n    side_effect:\n      append_line: ['events.log', '{{ seq.desc }}']\n",
+        );
+
+        run(&workspace, &["sequence", "--yolo", root.to_str().unwrap()], true);
+        let events = fs::read_to_string(workspace.cwd().join("events.log")).unwrap();
+        assert_eq!(events.trim(), "signed by ada");
+    }
+
+    /// A malformed declaration fails before the root's `initialize` runs.
+    #[test]
+    fn a_malformed_declaration_fails_before_initialize() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let root = write(
+            &workspace,
+            "flow.yaml",
+            "kind: sequence\ninitialize:\n  - append_line: ['events.log', 'initialized']\nsequence:\n  - name: review\n    when: \"false\"\n    $state: 42\n    sequence:\n      - name: sign\n        shell: echo signed\n",
+        );
+
+        let stderr = run(&workspace, &["sequence", root.to_str().unwrap()], false);
+        assert!(stderr.contains("$state"), "{stderr}");
+        assert!(!workspace.cwd().join("events.log").exists(), "initialize never ran: {stderr}");
+    }
+
+    /// A referenced document's authored `file(eager)` value resolves from
+    /// that document's folder, not the invoking document's.
+    #[test]
+    fn a_nested_documents_authored_file_value_resolves_from_its_own_folder() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "nested/work/spec.md", "the nested spec text\n");
+        write(&workspace, "nested/step.md", "---\n$schema:\n  spec: file(required;eager)\n---\n::file {{ spec }}\n");
+        write(
+            &workspace,
+            "nested/child.yaml",
+            "kind: sequence\n$schema:\n  spec: file(required;eager)\nspec: work/spec.md\nsequence:\n  - name: read\n    prompt: ./step.md\n    with:\n      spec: \"{{ absolute(spec) }}\"\n",
+        );
+        let root = write(&workspace, "caller/flow.yaml", "kind: sequence\nsequence:\n  - name: review\n    sequence: ../nested/child.yaml\n");
+        assert!(!workspace.cwd().join("caller/work/spec.md").exists());
+
+        let (stdout, stderr) = dry_run(&workspace, &root, &["--yolo"], true);
+        assert!(stdout.contains("the nested spec text"), "stdout: {stdout}\nstderr: {stderr}");
+    }
+}
+
+// ============================================================================
+// The frozen `complete.yaml` reproduction
+// ============================================================================
+
+/// A YAML sequence's root `$schema` describes the document: the caller's
+/// `spec` is a document input, coerced as an eager file from the caller's
+/// directory, and the derived `plan` reaches the nested planning step.
+///
+/// The frozen files live under
+/// `tests/fixtures/frozen_prompts/sequence-state-schema/`; each test includes
+/// them by literal path, so no test reads the live `prompts/` tree. The
+/// sequence and its prompt sit in `flow/`, the spec in `work/feature/`, and
+/// the caller runs from the workspace root, so a value resolved from the
+/// sequence's directory cannot pass. The provider is the compiled
+/// `claudine-fake-goose` in marker mode, so these run on every OS.
+#[cfg(feature = "test-fixtures")]
+mod frozen_complete_reproduction {
+    use super::*;
+
+    /// The caller-relative spec path every setter supplies.
+    const SPEC_ARG: &str = "spec=work/feature/spec.md";
+
+    struct Reproduction {
+        workspace: CliProcessFixture,
+        marker: std::path::PathBuf,
+    }
+
+    impl Reproduction {
+        /// Lays out the frozen files and installs the marker provider.
+        fn new(complete: &str, plan: &str, spec: &str) -> Self {
+            let workspace = CliProcessFixture::named("sequence-frozen-complete");
+            write(&workspace, "flow/complete.yaml", complete);
+            write(&workspace, "flow/plan.md", plan);
+            write(&workspace, "work/feature/spec.md", spec);
+            fs::copy(
+                biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+                workspace.bin_dir().join(format!("goose{}", std::env::consts::EXE_SUFFIX)),
+            )
+            .expect("the fake provider is built with `test-fixtures`");
+            let marker = workspace.cwd().join("provider-launched.txt");
+            Self { workspace, marker }
+        }
+
+        /// Runs `claudine sequence --goose` with `args` from the workspace
+        /// root, returning the output with ANSI stripped.
+        fn run(&self, args: &[&str]) -> (std::process::ExitStatus, String, String) {
+            let output = self
+                .workspace
+                .command()
+                .env("PROVIDER_MARKER", &self.marker)
+                .args(["sequence", "--goose"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(!self.workspace.audio_spool().exists());
+            (
+                output.status,
+                strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+                strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+            )
+        }
+
+        fn launches(&self) -> usize {
+            fs::read_to_string(&self.marker).map_or(0, |log| log.lines().count())
+        }
+    }
+
+    /// The bracketed value the composed `plan.md` rendered after `label`,
+    /// with separators normalized so the assertion holds on Windows.
+    fn rendered(stdout: &str, label: &str) -> String {
+        let line = stdout
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(label))
+            .unwrap_or_else(|| panic!("`{label}` was not composed; stdout:\n{stdout}"));
+        line.trim().trim_start_matches('[').trim_end_matches(']').replace('\\', "/")
+    }
+
+    /// The composed nested prompt received the coerced `spec` and the `plan`
+    /// derived from it: both absolute and under the caller's `work/feature/`.
+    fn assert_composed_from_the_caller_spec(stdout: &str, stderr: &str) {
+        let plan = rendered(stdout, "Plan target:");
+        let spec = rendered(stdout, "Spec source:");
+        for (name, value, file) in [("plan", &plan, "plan.md"), ("spec", &spec, "spec.md")] {
+            assert!(
+                Path::new(value).is_absolute() && value.ends_with(&format!("/work/feature/{file}")),
+                "`{name}` must resolve from the caller's directory, got `{value}`; stderr:\n{stderr}"
+            );
+            assert!(!value.contains("/flow/"), "`{name}` resolved from the sequence's directory: `{value}`");
+        }
+        // `plan` is derived from the coerced, absolute `spec`, never the raw setter.
+        assert_eq!(plan.trim_end_matches("plan.md"), spec.trim_end_matches("spec.md"));
+    }
+
+    #[test]
+    fn a_setter_after_the_file_is_judged_as_a_document_input_and_reaches_the_nested_step() {
+        let repro = Reproduction::new(
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/complete.yaml"),
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/plan.md"),
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/spec.md"),
+        );
+
+        let (status, stdout, stderr) = repro.run(&["flow/complete.yaml", SPEC_ARG, "--dry-run"]);
+
+        assert!(status.success(), "stderr:\n{stderr}");
+        assert!(!stderr.contains("failed schema validation"), "the document schema judged a step: {stderr}");
+        assert_composed_from_the_caller_spec(&stdout, &stderr);
+        assert_eq!(repro.launches(), 0, "a dry run launches nothing; stderr:\n{stderr}");
+    }
+
+    /// The golden rule: a setter means the same before or after the file.
+    #[test]
+    fn a_setter_before_the_file_is_judged_the_same_way() {
+        let repro = Reproduction::new(
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/complete.yaml"),
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/plan.md"),
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/spec.md"),
+        );
+
+        let (status, stdout, stderr) = repro.run(&[SPEC_ARG, "flow/complete.yaml", "--dry-run"]);
+
+        assert!(status.success(), "stderr:\n{stderr}");
+        assert_composed_from_the_caller_spec(&stdout, &stderr);
+        assert_eq!(repro.launches(), 0, "stderr:\n{stderr}");
+    }
+
+    /// Without the setter a non-interactive run reports `spec` as a missing
+    /// input of the sequence, composes nothing, and launches nothing.
+    #[test]
+    fn a_missing_spec_is_reported_as_a_missing_input_without_composing() {
+        let repro = Reproduction::new(
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/complete.yaml"),
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/plan.md"),
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/spec.md"),
+        );
+
+        let (status, stdout, stderr) = repro.run(&["flow/complete.yaml", "--dry-run"]);
+
+        assert!(!status.success(), "stdout:\n{stdout}");
+        let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(flat.contains("sequence missing properties"), "{flat}");
+        assert!(flat.contains("`spec`: file — the specification to complete"), "{flat}");
+        assert!(!flat.contains("failed schema validation"), "not a step-state verdict: {flat}");
+        assert!(!stdout.contains("Plan target"), "no prompt was composed: {stdout}");
+        assert_eq!(repro.launches(), 0, "{flat}");
+    }
+
+    /// Outside a dry run, the step's guard reads the derived `plan`: the step
+    /// launches once while the plan is absent beside the spec, and is skipped
+    /// once the plan exists there.
+    #[test]
+    fn the_step_guard_reads_the_plan_derived_from_the_coerced_spec() {
+        let repro = Reproduction::new(
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/complete.yaml"),
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/plan.md"),
+            include_str!("../fixtures/frozen_prompts/sequence-state-schema/spec.md"),
+        );
+
+        let (status, _, stderr) = repro.run(&["--silent", "flow/complete.yaml", SPEC_ARG]);
+        assert!(status.success(), "stderr:\n{stderr}");
+        assert_eq!(repro.launches(), 1, "the plan is absent, so the step runs; stderr:\n{stderr}");
+
+        write(&repro.workspace, "work/feature/plan.md", "planned\n");
+        let (status, _, stderr) = repro.run(&["--silent", "flow/complete.yaml", SPEC_ARG]);
+        assert!(status.success(), "stderr:\n{stderr}");
+        assert_eq!(repro.launches(), 1, "the plan exists beside the spec, so the step is skipped; stderr:\n{stderr}");
+    }
+}
+
+// ============================================================================
+// Declaration wiring through each CLI loader
+// ============================================================================
+
+/// `$state` and `template:` reach the declaration judge through both loaders
+/// the CLI invokes directly: Markdown frontmatter and YAML. Each loader has a
+/// dry-run control whose step composes with its template-filled, typed state,
+/// and invalid edits that fail a real run with the file and declaration
+/// named, launching nothing. Every declaration and
+/// loader shape is the library's (`composition::sequence::tests`); these
+/// prove the route only. The provider is the compiled `claudine-fake-goose`
+/// in marker mode, so these run on every OS.
+#[cfg(feature = "test-fixtures")]
+mod declaration_routes {
+    use super::*;
+
+    const MARKDOWN: &str = "---\n$state:\n  rank: number(required)\ntemplate:\n  desc: \"{{ name }}-{{ rank }}\"\nsequence:\n  - { name: blue, rank: 5 }\n---\nStep {{ seq.desc }}.\n";
+    const YAML: &str = "kind: sequence\nprompt: \"Step {{ seq.desc }}.\"\n$state:\n  rank: number(required)\ntemplate:\n  desc: \"{{ name }}-{{ rank }}\"\nsequence:\n  - { name: blue, rank: 5 }\n";
+
+    /// Runs `file` (holding `contents`) as a sequence with `flags`, returning
+    /// whether it succeeded, its stdout, its flattened stderr, and the
+    /// provider launch count.
+    fn launch(file: &str, contents: &str, flags: &[&str]) -> (bool, String, String, usize) {
+        let workspace = CliProcessFixture::named("sequence-declaration-routes");
+        let path = write(&workspace, file, contents);
+        fs::copy(
+            biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+            workspace.bin_dir().join(format!("goose{}", std::env::consts::EXE_SUFFIX)),
+        )
+        .expect("the fake provider is built with `test-fixtures`");
+        let marker = workspace.cwd().join("provider-launched.txt");
+        let output = workspace.command().env("PROVIDER_MARKER", &marker)
+            .args(["sequence", "--goose"]).args(flags).arg(&path).output().unwrap();
+        assert!(!workspace.audio_spool().exists());
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        let flat = stderr.replace('\u{2503}', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+        (output.status.success(), strip_ansi(&String::from_utf8_lossy(&output.stdout)), flat,
+         fs::read_to_string(&marker).map_or(0, |log| log.lines().count()))
+    }
+
+    macro_rules! route {
+        ($name:ident, $file:literal, $contents:expr, composes) => {
+            #[test]
+            fn $name() {
+                let (success, stdout, stderr, launches) = launch($file, &$contents, &["--dry-run"]);
+                assert!(success, "{stderr}");
+                assert!(stdout.lines().any(|line| line.trim() == "Step blue-5."), "stdout:\n{stdout}\nstderr: {stderr}");
+                assert_eq!(launches, 0, "{stderr}");
+            }
+        };
+        ($name:ident, $file:literal, $contents:expr, refuses: [$($needle:expr),+ $(,)?]) => {
+            #[test]
+            fn $name() {
+                let (success, _, stderr, launches) = launch($file, &$contents, &[]);
+                assert!(!success, "{stderr}");
+                $(assert!(stderr.contains($needle), "expected `{}` in: {stderr}", $needle);)+
+                assert_eq!(launches, 0, "{stderr}");
+            }
+        };
+    }
+
+    route!(a_markdown_sequences_declarations_compose_its_step, "flow.md", MARKDOWN, composes);
+    route!(a_markdown_state_of_the_wrong_shape_is_refused_with_its_file, "flow.md",
+        MARKDOWN.replace("$state:\n  rank: number(required)\n", "$state: 42\n"),
+        refuses: ["invalid sequence declaration `$state`", "flow.md", "must be a schema mapping"]);
+    route!(a_markdown_state_written_as_null_is_refused_not_ignored, "flow.md",
+        MARKDOWN.replace("$state:\n  rank: number(required)\n", "$state:\n"),
+        refuses: ["invalid sequence declaration `$state`", "flow.md", "must not be null"]);
+    route!(a_yaml_sequences_declarations_compose_its_step, "flow.yaml", YAML, composes);
+    route!(a_yaml_template_of_the_wrong_shape_is_refused_with_its_file, "flow.yaml",
+        YAML.replace("template:\n  desc: \"{{ name }}-{{ rank }}\"\n", "template: [desc]\n"),
+        refuses: ["invalid sequence declaration `template`", "flow.yaml", "must be an object, got array"]);
+    route!(a_yaml_duplicate_declaration_key_is_refused_with_its_file, "flow.yaml",
+        YAML.replace("sequence:\n", "$state:\n  rank: string\nsequence:\n"),
+        refuses: ["flow.yaml", "duplicate entry with key \"$state\""]);
 }

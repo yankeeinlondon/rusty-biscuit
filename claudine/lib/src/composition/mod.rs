@@ -173,7 +173,7 @@ pub use sequence::preflight::{
     PreflightStep, PreflightTask, PreparedShellSite, PromptDocument, PromptReference,
     ShellSiteKind, SiteMode, TaskPosition, build_preflight_graph,
     build_preflight_graph_with_context, build_preflight_graph_with_invocation,
-    build_preflight_graph_after_discovery, discover_sequence_inputs, InlineContainer, InputDiscoveryOptions,
+    build_preflight_graph_after_discovery, reread_preflight_graph_with_invocation, discover_sequence_inputs, InlineContainer, InputDiscoveryOptions,
     InputOwner, InputOwnerRole, InputPrompt, PendingReference, SequenceInputInventory,
     reject_non_sequence_kind, resolve_task_late_values, sequence_deferred_roots,
 };

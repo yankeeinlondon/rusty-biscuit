@@ -86,13 +86,17 @@ pub struct SequenceSourceOptions<'a> {
     compose_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
     /// The invocation's caller inputs: setters with their recorded origins.
     caller_layers: Option<&'a super::types::CallerInputLayers>,
+    /// The invocation, which derives a referenced document's own
+    /// file-resolution context for its owner values. Without it they resolve
+    /// through [`Self::file_resolution_context`].
+    invocation: Option<&'a crate::invocation_context::InvocationContext>,
 }
 
 impl<'a> SequenceSourceOptions<'a> {
     /// Options resolving through `file_resolution_context`, with no shell
     /// runner, no captured context, and no caller input.
     pub fn new(file_resolution_context: &'a biscuit_file::FileResolutionContext) -> Self {
-        Self { shell_runner: None, file_resolution_context, compose_context: None, caller_layers: None }
+        Self { shell_runner: None, file_resolution_context, compose_context: None, caller_layers: None, invocation: None }
     }
 
     /// Expand `$( … )` sources through `runner`.
@@ -114,6 +118,15 @@ impl<'a> SequenceSourceOptions<'a> {
     #[must_use]
     pub fn with_caller_layers(mut self, layers: &'a super::types::CallerInputLayers) -> Self {
         self.caller_layers = Some(layers);
+        self
+    }
+
+    /// Resolve a referenced document's authored owner values from its own
+    /// folder, through the context `invocation` derives for it, as the graph
+    /// walk does. The caller's values keep their recorded origins.
+    #[must_use]
+    pub fn with_invocation(mut self, invocation: &'a crate::invocation_context::InvocationContext) -> Self {
+        self.invocation = Some(invocation);
         self
     }
 
@@ -182,7 +195,7 @@ pub fn resolve_sequence_plan_with(
         SequenceSourceSpec::Inline(items) => {
             let authored = Arc::new(frontmatter.clone());
             let keys = formal::formal_keys(&authored, &source.resolved_path)?;
-            let values = Arc::new(document::owner_values(&authored, &keys, &options, || {
+            let values = Arc::new(document::owner_values(&authored, &keys, &options, None, || {
                 Ok(std::borrow::Cow::Borrowed(source))
             })?);
             let mut plan = formal::normalize_formal_plan(

@@ -315,3 +315,184 @@ fn step_state_cannot_author_a_declaration_key() {
     let error = direct(&dir, "", "[{ name: a, shell: x, \"$state\": {} }]").unwrap_err();
     assert_eq!(misplaced(&error).0, "sequence[0].$state");
 }
+
+// -- The `$state` declaration matrix ----------------------------------------
+
+/// The caller, the declaring document, its schema files, and an eager file
+/// in four directories, so no reference can resolve from the wrong base by
+/// accident: `../schemas/…` from the caller's directory names a folder that
+/// does not exist.
+struct Homes {
+    _dir: TempDir,
+    caller: PathBuf,
+    declaring: PathBuf,
+}
+
+fn homes() -> Homes {
+    let dir = TempDir::new().unwrap();
+    let caller = dir.path().join("caller/deep");
+    fs::create_dir_all(&caller).unwrap();
+    let declaring = dir.path().join("decl");
+    fs::create_dir_all(&declaring).unwrap();
+    let schemas = dir.path().join("schemas");
+    fs::create_dir_all(&schemas).unwrap();
+    fs::write(schemas.join("state.schema.yaml"), "kind: schema\n$schema:\n  rank: number(required)\n").unwrap();
+    fs::write(schemas.join("types.yaml"), "kind: schema\ntypes:\n  shade: \"enum(red, blue)\"\n").unwrap();
+    fs::create_dir_all(dir.path().join("eager")).unwrap();
+    fs::write(dir.path().join("eager/brief.md"), "# brief\n").unwrap();
+    Homes { _dir: dir, caller, declaring }
+}
+
+impl Homes {
+    /// Resolve `decl/s.yaml` (`$state: <state>` over `rows`) for a request
+    /// launched in the caller's directory.
+    fn resolve(&self, state: &str, rows: &str) -> Result<Option<SequencePlan>, CompositionError> {
+        let path = self.declaring.join("s.yaml");
+        fs::write(&path, format!("kind: sequence\n$state: {state}\nsequence: {rows}\n")).unwrap();
+        let source = ResolvedCompositionSource {
+            original_ref: path.display().to_string(),
+            resolved_path: path.clone(),
+            original_text: fs::read_to_string(&path).unwrap(),
+            markdown: crate::composition::resolve::load_yaml_document(&path)?,
+        };
+        resolve_sequence_plan(&source, &crate::test_support::context_at(&self.caller))
+    }
+}
+
+/// The schema layer's error behind a declaration load failure.
+fn schema_cause(error: &CompositionError) -> &simplified_schema::SchemaError {
+    let cause = std::error::Error::source(error).expect("a typed cause");
+    cause
+        .downcast_ref::<simplified_schema::SchemaError>()
+        .or_else(|| cause.downcast_ref::<Box<simplified_schema::SchemaError>>().map(AsRef::as_ref))
+        .unwrap_or_else(|| panic!("not a schema error: {cause}"))
+}
+
+/// Every accepted `$state` form resolves from the declaring document's
+/// directory and judges the rows; each rejected form fails at its owner with
+/// the schema layer's own cause or the failing arm's location. One edit from
+/// a passing row turns each control into its negative.
+#[test]
+fn every_state_form_resolves_from_the_declaring_document() {
+    let homes = homes();
+    let good = "[{ name: a, rank: 1, color: red, brief: ../eager/brief.md }]";
+    for state in [
+        "{}",
+        "{ rank: number(required) }",
+        "../schemas/state.schema.yaml",
+        "{ color: shade(required)@../schemas/types.yaml }",
+        "{ brief: file(required;eager) }",
+        "[{ rank: number(required) }, ../schemas/state.schema.yaml]",
+    ] {
+        let plan = homes.resolve(state, good).unwrap_or_else(|error| panic!("{state}: {error:?}")).unwrap();
+        assert_eq!(plan.steps.len(), 1, "{state}");
+        // Accepted forms constrain: a row breaking the declared type fails.
+        if state != "{}" && !state.starts_with('[') {
+            let bad = good.replace("rank: 1", "rank: x").replace("color: red", "color: green").replace("../eager/brief.md", "./brief.md");
+            assert!(
+                matches!(homes.resolve(state, &bad), Err(CompositionError::SequenceStateSchemaViolation { .. })),
+                "{state} judged the row"
+            );
+        }
+    }
+
+    // Unloadable forms keep their owner and the schema layer's cause.
+    for state in [
+        "./state.schema.yaml",
+        "{ color: shade@../schemas/missing.yaml }",
+        "{ color: tint@../schemas/types.yaml }",
+        "[{ rank: number }, ../schemas/missing.yaml]",
+    ] {
+        let error = homes.resolve(state, "[]").unwrap_err();
+        match &error {
+            CompositionError::SequenceDeclarationLoad { property, source_path, .. } => {
+                assert_eq!(property, "$state", "{state}");
+                assert!(source_path.ends_with("decl/s.yaml"), "{state}: {}", source_path.display());
+            }
+            other => panic!("{state}: expected SequenceDeclarationLoad, got {other:?}"),
+        }
+        let cause = schema_cause(&error).to_string();
+        let named = if state.contains("tint") { "tint" } else if state.contains("missing") { "missing.yaml" } else { "state.schema.yaml" };
+        assert!(cause.contains(named), "{state}: {cause}");
+    }
+
+    // A union whose arms are all malformed names the first failing arm.
+    for (state, property) in [("[\"\", 3]", "$state[0]"), ("[3, {}]", "$state[0]"), ("[{}, ../schemas/state.schema.yaml, null]", "$state[2]")] {
+        let error = homes.resolve(state, "[]").unwrap_err();
+        assert_eq!(shape(&error).0, property, "{state}");
+    }
+}
+
+/// A referenced document's `$state` resolves beside that document, never
+/// beside its referrer: a schema file only the referrer's folder holds is a
+/// load error owned by the referenced document.
+#[test]
+fn a_referenced_documents_unloadable_state_is_owned_by_that_document() {
+    let dir = TempDir::new().unwrap();
+    write(&dir, "state.schema.yaml", "kind: schema\n$schema:\n  rank: number\n");
+    write(&dir, "sub/child.yaml", "kind: sequence\n$state: ./state.schema.yaml\nsequence: [{ name: a, rank: 3 }]\n");
+    let referrer = write(&dir, "ref.md", "---\nsequence: sub/child.yaml\n---\nBody\n");
+    let error = resolve_file(&referrer).unwrap_err();
+    let CompositionError::SequenceDeclarationLoad { property, source_path, .. } = &error else {
+        panic!("expected SequenceDeclarationLoad, got {error:?}");
+    };
+    assert_eq!(property, "$state");
+    assert!(source_path.ends_with("sub/child.yaml"), "{}", source_path.display());
+    assert!(schema_cause(&error).to_string().contains("state.schema.yaml"), "{error}");
+}
+
+/// The one step-state validator, over each shape a field can take. The
+/// control row passes; each case is that row with one field edited.
+/// Conversion the declared type permits is accepted, and the plan keeps the
+/// authored value.
+#[test]
+fn the_state_validator_judges_every_field_shape_passively() {
+    let dir = TempDir::new().unwrap();
+    let state = "$state:\n  color: string(required)\n  rank: number(required)\n  tags: string[]\n  meta: \"{ note: string }\"\n";
+    let control = json!({ "name": "a", "color": "red", "rank": 1, "tags": ["x"], "meta": { "note": "n" } });
+    let resolve = |row: &serde_json::Value| direct(&dir, state, &format!("[{row}]"));
+    resolve(&control).unwrap().unwrap();
+
+    let edited = |field: &str, value: Option<serde_json::Value>| {
+        let mut row = control.clone();
+        match value {
+            Some(value) => row[field] = value,
+            None => {
+                row.as_object_mut().unwrap().remove(field);
+            }
+        }
+        row
+    };
+    // Allowed empties and permitted conversion.
+    for (field, value) in [
+        ("color", json!("")),
+        ("tags", json!([])),
+        ("meta", json!({})),
+        ("rank", json!("3")),
+    ] {
+        let plan = resolve(&edited(field, Some(value.clone()))).unwrap_or_else(|error| panic!("{field}={value}: {error:?}")).unwrap();
+        assert_eq!(plan.steps[0].state.extra[field], value, "{field}: the plan keeps the authored value");
+    }
+    // Absent, explicit null, whole-field wrong type, mixed and entirely
+    // invalid elements.
+    for (field, value, property) in [
+        ("color", None, "color"),
+        ("rank", None, "rank"),
+        ("color", Some(json!(null)), "/color"),
+        ("rank", Some(json!(null)), "/rank"),
+        ("color", Some(json!(["red"])), "/color"),
+        ("rank", Some(json!("high")), "/rank"),
+        ("tags", Some(json!("x")), "/tags"),
+        ("meta", Some(json!([])), "/meta"),
+        ("tags", Some(json!(["x", {}])), "/tags/1"),
+        ("tags", Some(json!([{}, []])), "/tags/0"),
+    ] {
+        let row = edited(field, value.clone());
+        match resolve(&row).unwrap_err() {
+            CompositionError::SequenceStateSchemaViolation { index, property: found, .. } => {
+                assert_eq!((index, found.as_str()), (0, property), "{field}={value:?}");
+            }
+            other => panic!("{field}={value:?}: expected a state violation, got {other:?}"),
+        }
+    }
+}

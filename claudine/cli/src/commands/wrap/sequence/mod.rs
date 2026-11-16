@@ -37,7 +37,8 @@ mod task_run;
 use jit::StepComposeContext;
 #[cfg(test)]
 use phase1c::find_first_unsupported;
-use phase1c::run_phase_1c_with_schema;
+use phase1c::{RootPlanRequest, prepare_root_plan, run_phase_1c_with_schema};
+pub(crate) use phase1c::RootSequence;
 use resolve::apply_user_set_to_hints;
 
 /// Exit code emitted when Ctrl+C is observed during a sequence run.
@@ -248,7 +249,7 @@ fn emit_missing_include_note(document: &std::path::Path) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_sequence(
     source: &ResolvedCompositionSource,
-    plan: SequencePlan,
+    root_sequence: &RootSequence<'_>,
     shared: &SharedComposeArgs,
     user_set_overrides: Option<serde_json::Value>,
     caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
@@ -266,7 +267,7 @@ pub(crate) fn execute_sequence(
     use claudine::composition::lifecycle::runtime::ContainerEventDecision;
     use claudine::composition::lifecycle::context::LifecycleErrorInfo;
     let runtime = Arc::new(composition::RuntimeState::new_sequence());
-    let seq = SequenceBinding::container(&plan.sequence_id, Vec::new()).to_value();
+    let seq = SequenceBinding::container(&root_sequence.sequence_id, Vec::new()).to_value();
     runtime.set_sequence_binding(seq.clone());
     let mut frontmatter: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter().map(|(k,v)| (k.clone(),v.clone())).collect();
     if let Some(values) = user_set_overrides.as_ref().and_then(serde_json::Value::as_object) {
@@ -327,7 +328,7 @@ pub(crate) fn execute_sequence(
     }
     let mut startup_timings = startup_timings;
     loop {
-        let outcome = execute_sequence_inner(source, plan.clone(), shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
+        let outcome = execute_sequence_inner(source, root_sequence, shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
         if shared.dry_run { return outcome; }
         let (signal, error) = match &outcome {
             Ok(130) => {
@@ -390,7 +391,7 @@ fn root_loop_frame(
 #[allow(clippy::too_many_arguments)]
 fn execute_sequence_inner(
     source: &ResolvedCompositionSource,
-    plan: SequencePlan,
+    root_sequence: &RootSequence<'_>,
     shared: &SharedComposeArgs,
     user_set_overrides: Option<serde_json::Value>,
     caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
@@ -437,28 +438,6 @@ fn execute_sequence_inner(
     } else {
         None
     };
-
-    let effective_fail_fast = execution_options
-        .fail_fast_override
-        .unwrap_or(plan.document_fail_fast);
-
-    // `--step-timeout` / `--stall-timeout` apply to every step in the
-    // sequence. Early validation happens in the CLI entry point; the raw
-    // string is resolved per-step by the composition executor.
-    let _ = shared.step_timeout_secs()?;
-    let _ = shared.stall_timeout_secs()?;
-
-    let total_steps = plan.steps.len();
-
-    if !silent {
-        let term = log::terminal();
-        let status = Status::from_prose(format!(
-            "<b>Sequence:</b> <yellow>{}</yellow> step(s)",
-            total_steps
-        ))
-        .state(StatusState::Info);
-        log::message(&status.render(&term));
-    }
 
     // Persistent interrupt tracker for the duration of the sequence run. Every
     // step boundary and every running shell task polls this flag, so it needs a
@@ -531,14 +510,79 @@ fn execute_sequence_inner(
     prep_context.invocation.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::Preflight,
     );
-    let graph = composition::build_preflight_graph_with_invocation(
-        &plan,
-        source,
-        graph_context.clone(),
-        &prep_context.invocation,
-        &prep_context.source_context,
-        user_set_overrides.as_ref(),
-    )?;
+    // The plan is filled once, on the first attempt, after the root's
+    // `initialize` (whose writes its templates may read) and after every
+    // owning document's inputs are collected; a retry runs the same plan and
+    // the values collected for it.
+    let mut asked = std::collections::HashSet::new();
+    let root_plan_request = RootPlanRequest {
+        root: root_sequence,
+        runtime_writes: root.runtime.mutations().into_iter().collect(),
+        caller_input_records: &caller_input_records,
+        launch: prep_context.invocation.launch_file_resolution_context(),
+        compose_context: &graph_context,
+        invocation: &prep_context.invocation,
+        source_context: &prep_context.source_context,
+        file_resolution_context: &file_resolution_context,
+        launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
+        silent,
+    };
+    let (plan, graph, user_set_overrides, recheck_owners) = match (&root.plan, &root.collected_overrides) {
+        (Some(plan), Some(overrides)) => {
+            let graph = composition::reread_preflight_graph_with_invocation(
+                plan,
+                source,
+                graph_context.clone(),
+                &prep_context.invocation,
+                &prep_context.source_context,
+                overrides.as_ref(),
+            )?;
+            (plan.clone(), graph, overrides.clone(), None)
+        }
+        _ => {
+            let prepared = prepare_root_plan(&root_plan_request, user_set_overrides, &mut asked)?;
+            let graph = composition::build_preflight_graph_after_discovery(
+                &prepared.plan,
+                source,
+                graph_context.clone(),
+                &prep_context.invocation,
+                &prep_context.source_context,
+                Some(&prepared.layers),
+                &prepared.inventory,
+            )?;
+            // Empty containers still enter their lifecycle and produce an
+            // empty result.
+            if prepared.plan.steps.is_empty() {
+                crate::commands::sequence::emit_empty_sequence_notice(&source.resolved_path);
+            }
+            root.plan = Some(prepared.plan.clone());
+            let recheck = prepared.recheck_owners.then(|| prepared.layers.clone());
+            (prepared.plan, graph, prepared.overrides, recheck)
+        }
+    };
+    let effective_fail_fast = execution_options
+        .fail_fast_override
+        .unwrap_or(plan.document_fail_fast);
+
+    // `--step-timeout` / `--stall-timeout` apply to every step in the
+    // sequence. Early validation happens in the CLI entry point; the raw
+    // string is resolved per-step by the composition executor.
+    let _ = shared.step_timeout_secs()?;
+    let _ = shared.stall_timeout_secs()?;
+
+    let total_steps = plan.steps.len();
+
+    if !silent {
+        let term = log::terminal();
+        let status = Status::from_prose(format!(
+            "<b>Sequence:</b> <yellow>{}</yellow> step(s)",
+            total_steps
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
+    }
+
+
     // A referenced prompt document composes only at its own turn, so its
     // single-pass lifecycle literals are checked here, before any approval
     // prompt or step can run.
@@ -672,6 +716,11 @@ fn execute_sequence_inner(
             return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
         }
     }
+    // An owning document's own preparation failure is reported after the
+    // graph's structure and provider selection, which report first.
+    if let Some(layers) = &recheck_owners {
+        root_plan_request.recheck_owners(layers)?;
+    }
     if !silent && (shared.dry_run || verbose > 0) {
         emit_provider_plan(&selections);
     }
@@ -743,6 +792,7 @@ fn execute_sequence_inner(
         preflight_approved,
         &interrupted,
         silent,
+        &mut asked,
     )?
     else {
         if let Some(mut acc) = perf_accumulator {
@@ -788,7 +838,10 @@ fn execute_sequence_inner(
         shared,
         compose: &compose_ctx,
         approved: validated.approved_commands,
-        user_set_overrides: validated.resolved_overrides,
+        user_set_overrides: {
+            root.collected_overrides = Some(validated.resolved_overrides.clone());
+            validated.resolved_overrides
+        },
         interrupted: &interrupted,
         effective_fail_fast,
         silent,

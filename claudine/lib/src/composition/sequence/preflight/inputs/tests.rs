@@ -289,3 +289,108 @@ mod counted {
         assert_eq!(snapshot().since(&before).get(Work::ReferencedDocumentParse), 1, "child.yaml is parsed once for both walks");
     }
 }
+
+/// A referenced document's `template:` reads its referrer's values below its
+/// own, as the plan does, so a shared roster parameterized by its referrer
+/// resolves its rows in discovery too.
+#[test]
+fn a_referenced_template_reads_the_referrers_values_below_its_own() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "fleet/research.md", "---\ntitle: r\n---\nResearch.\n");
+    write(dir.path(), "fleet/own.md", "---\ntitle: o\n---\nOwn.\n");
+    write(dir.path(), "roster.yaml", "kind: sequence\ntemplate:\n  prompt: \"{{ research_prompt }}\"\nsequence:\n  - name: one\n");
+    write(dir.path(), "own.yaml", "kind: sequence\nresearch_prompt: ./own.md\ntemplate:\n  prompt: \"{{ research_prompt }}\"\nsequence:\n  - name: one\n");
+    for (roster, expected) in [("../roster.yaml", "research.md"), ("../own.yaml", "own.md")] {
+        let root = write(
+            dir.path(),
+            "fleet/_fleet.md",
+            &format!("---\nsequence: \"{roster}\"\nresearch_prompt: ./research.md\n---\n"),
+        );
+        let inventory = discover(&root, dir.path(), json!({})).unwrap();
+        let prompts: Vec<_> = inventory.prompts.iter().map(|prompt| prompt.path.file_name().unwrap().to_owned()).collect();
+        assert_eq!(prompts, vec![std::ffi::OsString::from(expected)], "{roster}");
+    }
+}
+
+/// Under `leaving_verdicts`, an owner whose own preparation fails for a
+/// reason other than a missing input is recorded instead of failing
+/// discovery; without it, the same discovery fails.
+#[test]
+fn leaving_verdicts_records_a_failed_owner_instead_of_failing() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "typed.yaml", "kind: sequence\n$schema:\n  count: number(required)\nsequence: []\n");
+    let root = write(dir.path(), "root.yaml", "kind: sequence\nsequence:\n  - name: typed\n    sequence: typed.yaml\n");
+    let resolution = crate::test_support::context_at(dir.path());
+    let layers = CallerInputLayers::from_caller_overrides(Some(json!({"count": "many"})), resolution.clone());
+    let context = ComposeContext::capture_for_content(dir.path(), "");
+    let options = InputDiscoveryOptions::new(&resolution, &context).with_caller_layers(&layers);
+
+    let inventory = discover_sequence_inputs(&load(&root), options.leaving_verdicts()).unwrap();
+    assert_eq!(inventory.failed_owners, vec![1]);
+    assert_eq!(inventory.owners[1].role, InputOwnerRole::Nested);
+    assert!(inventory.owners[1].missing.is_none());
+    assert!(inventory.missing_error().is_none());
+    assert!(matches!(discover_sequence_inputs(&load(&root), options), Err(CompositionError::SchemaValidation { .. })));
+}
+
+/// Discover `path`'s inputs as the CLI does: through an invocation launched
+/// in `caller_dir`, with `setters` supplied from there.
+fn discover_invoked(path: &Path, caller_dir: &Path, setters: Value) -> Result<SequenceInputInventory, CompositionError> {
+    let source = load(path);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), caller_dir).unwrap();
+    let source_context = invocation.derive_source(&source.resolved_path).unwrap();
+    let resolution = crate::test_support::context_at(caller_dir);
+    let layers = CallerInputLayers::from_caller_overrides(Some(setters), resolution.clone());
+    let context = ComposeContext::capture_for_content(caller_dir, "");
+    let options = InputDiscoveryOptions::new(&resolution, &context)
+        .with_caller_layers(&layers)
+        .with_invocation(&invocation, &source_context);
+    discover_sequence_inputs(&source, options)
+}
+
+/// A referenced owner's authored `file(eager)` value resolves from its own
+/// document's folder, never the caller's, and keeps its authored text; a
+/// setter for the same input is converted from the caller's folder.
+#[test]
+fn a_referenced_owners_authored_file_value_keeps_its_text_and_a_setter_its_origin() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "nested/child.yaml", "kind: sequence\n$schema:\n  spec: file(required;eager)\nspec: work/spec.md\nsequence: []\n");
+    let root = write(dir.path(), "root/root.yaml", "kind: sequence\nsequence:\n  - name: nested\n    sequence: ../nested/child.yaml\n");
+    let caller = dir.path().join("caller");
+    write(dir.path(), "nested/work/spec.md", "# beside the declaring document\n");
+
+    let inventory = discover_invoked(&root, &caller, json!({})).unwrap();
+    assert!(inventory.missing_error().is_none());
+    assert_eq!(inventory.owners[1].values["spec"], json!("work/spec.md"), "the authored text is kept");
+
+    write(&caller, "elsewhere/spec.md", "# supplied by the caller\n");
+    let inventory = discover_invoked(&root, &caller, json!({ "spec": "elsewhere/spec.md" })).unwrap();
+    let supplied = Path::new(inventory.owners[1].values["spec"].as_str().unwrap()).to_path_buf();
+    assert_eq!(
+        biscuit_file::canonicalize_simplified(&supplied).unwrap(),
+        biscuit_file::canonicalize_simplified(&caller.join("elsewhere/spec.md")).unwrap(),
+        "a setter resolves from the caller"
+    );
+}
+
+/// The negative control: an authored `file(eager)` value whose file exists
+/// only beside the caller is refused at the declaring document, from that
+/// document's folder.
+#[test]
+fn a_referenced_owners_authored_file_value_is_not_found_beside_the_caller() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "nested/child.yaml", "kind: sequence\n$schema:\n  spec: file(required;eager)\nspec: work/spec.md\nsequence: []\n");
+    let root = write(dir.path(), "root/root.yaml", "kind: sequence\nsequence:\n  - name: nested\n    sequence: ../nested/child.yaml\n");
+    let caller = dir.path().join("caller");
+    write(&caller, "work/spec.md", "# beside the caller\n");
+
+    let error = discover_invoked(&root, &caller, json!({})).unwrap_err();
+    let message = error.to_string();
+    assert!(
+        matches!(&error, CompositionError::SchemaValidation { source_path, problems, .. }
+            if source_path.ends_with("nested/child.yaml") && problems == &["/spec"]),
+        "{error:?}"
+    );
+    let declaring = biscuit_file::canonicalize_simplified(&dir.path().join("nested")).unwrap();
+    assert!(message.ends_with(&format!("while resolving from `{}`", declaring.display())), "{message}");
+}

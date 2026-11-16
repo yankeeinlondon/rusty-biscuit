@@ -16,7 +16,7 @@
 //! a root `sequence: child.yaml` is judged by `child.yaml`, never by the
 //! invoking file that merely names it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::{Map, Value};
@@ -128,13 +128,20 @@ pub fn prepare_sequence_document_values(
 /// from `source`, which is only loaded then. Otherwise they are `authored`
 /// under the caller's setters, by top-level key.
 ///
+/// `referenced` is the path of a referenced owner (`None` for the invoked
+/// document). With an invocation in `options`, a referenced owner's authored
+/// values resolve from its own folder, through the context the invocation
+/// derives for it; the caller's setters keep their recorded origins.
+///
 /// ## Errors
 ///
-/// `source`'s load error and the preparation's composition errors.
+/// `source`'s load error, a referenced owner's context that cannot be built,
+/// and the preparation's composition errors.
 pub(crate) fn owner_values<'s>(
     authored: &Map<String, Value>,
     keys: &super::formal::FormalKeys<'_>,
     options: &super::SequenceSourceOptions<'_>,
+    referenced: Option<&Path>,
     source: impl FnOnce() -> Result<std::borrow::Cow<'s, ResolvedCompositionSource>, CompositionError>,
 ) -> Result<Map<String, Value>, CompositionError> {
     if let Some(context) = options.compose_context
@@ -143,6 +150,9 @@ pub(crate) fn owner_values<'s>(
         let mut prepare = PrepareOptions::new(options.file_resolution_context.clone());
         if let Some(layers) = options.caller_layers {
             prepare = layers.apply_to(prepare);
+        }
+        if let (Some(invocation), Some(path)) = (options.invocation, referenced) {
+            prepare = prepare.resolving_document_from(owner_resolution(invocation, path)?);
         }
         prepare.prepared_context = Some(context.clone());
         prepare.defer_schema_verdict = true;
@@ -154,6 +164,23 @@ pub(crate) fn owner_values<'s>(
         values.extend(setters.iter().map(|(key, value)| (key.clone(), value.clone())));
     }
     Ok(values)
+}
+
+/// The file-resolution context of the referenced owner at `path`, derived as
+/// the graph walk derives each origin document's.
+fn owner_resolution(
+    invocation: &crate::invocation_context::InvocationContext,
+    path: &Path,
+) -> Result<biscuit_file::FileResolutionContext, CompositionError> {
+    use crate::invocation_context::InvocationContextError;
+    let path = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
+    match invocation.derive_source(&path) {
+        Ok(context) => Ok(context.file_resolution_context().clone()),
+        Err(InvocationContextError::ResolutionContext(error)) => Err(CompositionError::ResolutionContext(error)),
+        Err(InvocationContextError::SourceWithoutParent(path)) => Err(CompositionError::SequenceInvalid(
+            format!("referenced sequence document '{}' has no parent directory", path.display()),
+        )),
+    }
 }
 
 #[cfg(test)]

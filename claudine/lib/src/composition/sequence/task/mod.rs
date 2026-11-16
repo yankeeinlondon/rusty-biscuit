@@ -576,6 +576,15 @@ impl TaskExecution<'_> {
     }
 
     fn run_validated(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
+        // An inline container's `$schema` is judged once its guard admitted
+        // it and before its run opens: a refusal starts nothing, not even its
+        // `initialize`, and the enclosing container handles a failed task.
+        if let PreflightAction::Sequence(sequence) = &self.task.action
+            && let Err(error) = self.check_inline_container(sequence, self.runtime.map(std::sync::Arc::as_ref))
+        {
+            return self.unstarted_outcome(TaskStatus::Failed,
+                Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error)));
+        }
         let started = Instant::now();
         let mutations_before = self.mutation_snapshot();
 
