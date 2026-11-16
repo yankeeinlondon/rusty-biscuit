@@ -23,8 +23,10 @@
 //!   these — that is the entire point of the feature. A test that pinned them
 //!   would fail by design and teach the next phase to weaken this baseline.
 //! - **`err.msg` content.** D10 lists "the documented `err.msg` change to the
-//!   effective diagnostic's concise message projection" as an *intended*
-//!   change. `inventory.md` records the current values instead.
+//!   effective diagnostic's message projection" as an *intended* change.
+//!   `inventory.md` records the current values instead. The one `err.msg`
+//!   property pinned here is length: the complete normalized message reaches
+//!   `finalize` (`an_initialize_error_reaches_finalize_err_msg_whole`).
 //!
 //! The distinction matters: this suite's job is to prove the migration was
 //! behavior-neutral where it claims to be, not to freeze the behavior it claims
@@ -229,6 +231,38 @@ Body
         "the failure must be surfaced exactly once; stderr:\n{}",
         outcome.stderr_plain
     );
+}
+
+/// A long `initialize` error reaches `finalize`'s `err.msg` complete: the
+/// projection normalizes the text onto one line but never shortens it.
+#[test]
+fn an_initialize_error_reaches_finalize_err_msg_whole() {
+    let reason = format!("{}INIT-TAIL-END", "refused for a reason ".repeat(23));
+    assert!(reason.chars().count() > 490, "the error must exceed the old 240-character limit");
+    let outcome = run_route(
+        &format!(
+            r#"---
+title: characterize a long initialize error
+initialize:
+  - {{error: "{reason}"}}
+finalize:
+  - {{append_line: ["events.log", "{{{{ err.msg }}}}"]}}
+---
+Body
+"#
+        ),
+        0,
+        &[],
+    );
+
+    assert_eq!(outcome.exit_code, Some(1), "stderr:\n{}", outcome.stderr_plain);
+    assert_eq!(
+        outcome.events,
+        vec![reason.clone()],
+        "finalize must record the complete err.msg once; stderr:\n{}",
+        outcome.stderr_plain
+    );
+    assert!(outcome.events[0].ends_with("INIT-TAIL-END"));
 }
 
 // --- Route 2: terminal/recovery proxy resolution failure ------------------

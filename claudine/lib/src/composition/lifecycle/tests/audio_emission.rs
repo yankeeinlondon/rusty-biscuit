@@ -337,6 +337,16 @@ fn executor_publishes_an_effect_then_speech_in_stack_order() {
     assert_eq!(outcome, executor::LifecycleEventOutcome::default());
 }
 
+/// The executor hands speech to the emitter unshortened; fitting it to a
+/// voice is the speech backend's job.
+#[test]
+fn executor_publishes_a_long_speech_text_whole() {
+    let text = format!("{}SPEECH-END", "a long sentence ".repeat(62));
+    assert!(text.chars().count() >= 1_000);
+    let (actions, _) = execute(json!({ "success": [{ "say": text }] }), LifecycleSignal::Success);
+    assert_eq!(actions, [speech(&text)]);
+}
+
 #[test]
 fn executor_publishes_speech_then_an_effect_in_stack_order() {
     let (actions, outcome) = execute(
