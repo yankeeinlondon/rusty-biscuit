@@ -280,6 +280,98 @@ fn root_with_changed_start_is_not_a_traversal_root() {
     assert!(host.pid_kills().is_empty(), "kills: {:?}", host.pid_kills());
 }
 
+// ---- graceful shutdown scans ------------------------------------------
+
+/// The table after the root exited from `SIGTERM` and was reaped, and the
+/// helper (200, start 2), which ignored it, was reparented: to init, or to a
+/// parent the table does not name.
+fn helper_reparented(parent: Option<u32>, start_time: u64) -> Vec<Observed> {
+    vec![entry(200, parent, start_time)]
+}
+
+#[test]
+fn graceful_scan_retains_a_helper_reparented_before_the_hard_stop() {
+    for parent in [Some(1), None] {
+        let host = FakeHost::new(vec![entry(ROOT, Some(1), 1)]);
+        let mut core = owner(&host);
+        host.advance(DESCENDANT_SAMPLE_INTERVAL);
+        core.sample();
+
+        // The helper started after the last sample; only the shutdown scan
+        // links it to the tree.
+        host.set_table(vec![entry(ROOT, Some(1), 1), entry(200, Some(ROOT), 2)]);
+        core.request_exit(true);
+        assert_eq!(host.pid_kills(), vec![(200, libc::SIGTERM)]);
+
+        host.set_table(helper_reparented(parent, 2));
+        core.terminate(CleanupScan::Always).unwrap();
+        assert_eq!(
+            host.pid_kills(),
+            vec![(200, libc::SIGTERM), (200, libc::SIGKILL)],
+            "parent {parent:?}"
+        );
+    }
+}
+
+#[test]
+fn graceful_scan_does_not_kill_a_recycled_helper_pid() {
+    let host = FakeHost::new(vec![entry(ROOT, Some(1), 1)]);
+    let mut core = owner(&host);
+    host.advance(DESCENDANT_SAMPLE_INTERVAL);
+    core.sample();
+
+    host.set_table(vec![entry(ROOT, Some(1), 1), entry(200, Some(ROOT), 2)]);
+    core.request_exit(true);
+
+    // The helper exited and PID 200 now names an unrelated process.
+    host.set_table(helper_reparented(Some(1), 99));
+    core.terminate(CleanupScan::Always).unwrap();
+    assert_eq!(host.pid_kills(), vec![(200, libc::SIGTERM)]);
+}
+
+#[test]
+fn graceful_scan_learns_an_unreaped_root_that_was_never_sampled() {
+    let host = FakeHost::new(vec![entry(ROOT, Some(1), 1), entry(200, Some(ROOT), 2)]);
+    let mut core = owner(&host);
+
+    core.request_exit(true);
+    assert_eq!(core.root_start, Some(1));
+    assert_eq!(host.pid_kills(), vec![(200, libc::SIGTERM)]);
+
+    host.set_table(helper_reparented(Some(1), 2));
+    core.terminate(CleanupScan::Always).unwrap();
+    assert_eq!(host.pid_kills(), vec![(200, libc::SIGTERM), (200, libc::SIGKILL)]);
+}
+
+#[test]
+fn graceful_scan_does_not_trust_a_root_it_cannot_prove_unreaped() {
+    let host = FakeHost::new(vec![entry(ROOT, Some(1), 1), entry(200, Some(ROOT), 2)]);
+    let mut core = owner(&host);
+
+    core.request_exit(false);
+    assert_eq!(core.root_start, None);
+    host.set_table(helper_reparented(Some(1), 2));
+    core.terminate(CleanupScan::Always).unwrap();
+    assert!(host.pid_kills().is_empty(), "kills: {:?}", host.pid_kills());
+}
+
+#[test]
+fn failed_cleanup_keeps_scanned_identities_for_the_drop() {
+    let host = FakeHost::new(vec![entry(ROOT, Some(1), 1)]);
+    host.answer_group_kills([Err(io::Error::from_raw_os_error(libc::EACCES))]);
+    let mut core = owner(&host);
+    host.advance(DESCENDANT_SAMPLE_INTERVAL);
+    core.sample();
+
+    host.set_table(vec![entry(ROOT, Some(1), 1), entry(200, Some(ROOT), 2)]);
+    core.terminate(CleanupScan::Always).unwrap_err();
+    assert!(core.observed.contains_key(&200));
+
+    host.set_table(helper_reparented(Some(1), 2));
+    drop(core);
+    assert_eq!(host.pid_kills(), vec![(200, libc::SIGKILL), (200, libc::SIGKILL)]);
+}
+
 // ---- disarming, failure, release --------------------------------------
 
 #[test]
@@ -635,4 +727,93 @@ fn release_leaves_a_member_running() {
         !gone_within(survivor.0.unwrap(), Duration::from_millis(200)),
         "a released tree's member keeps running"
     );
+}
+
+/// Names the helper fixture's PID file; read by the fixture below.
+const HELPER_PID_FILE: &str = "SNIFF_TREE_HELPER_PID_FILE";
+
+/// Starts its own session, ignores `SIGTERM`, then publishes its PID.
+#[test]
+#[ignore = "subprocess fixture invoked by the process-tree tests"]
+fn detached_helper_ignoring_sigterm() {
+    let pid_file = std::path::PathBuf::from(
+        std::env::var_os(HELPER_PID_FILE).expect("the test provides a PID file"),
+    );
+    // SAFETY: this fixture is a fresh child of `sh`, not a group leader, and
+    // `signal` with `SIG_IGN` installs no handler code.
+    unsafe {
+        assert_ne!(libc::setsid(), -1, "setsid: {}", io::Error::last_os_error());
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+    // Renamed into place so the reader never parses a partial PID.
+    let partial = pid_file.with_extension("partial");
+    std::fs::write(&partial, std::process::id().to_string()).unwrap();
+    std::fs::rename(&partial, &pid_file).unwrap();
+    std::thread::sleep(Duration::from_secs(30));
+}
+
+/// Spawns a root that waits for `go`, then starts
+/// [`detached_helper_ignoring_sigterm`] and keeps running until signaled.
+fn spawn_root_of_detached_helper(go: &std::path::Path, pid_file: &std::path::Path) -> ChildGuard {
+    let mut command = Command::new("sh");
+    command
+        .args([
+            "-c",
+            "while [ ! -e \"$1\" ]; do sleep 0.01; done; \
+             \"$2\" \"$3\" --exact --ignored --nocapture & \
+             while :; do sleep 1; done",
+            "root",
+        ])
+        .arg(go)
+        .arg(std::env::current_exe().expect("the test executable resolves"))
+        .arg("process::tree::unix::tests::detached_helper_ignoring_sigterm")
+        .env(HELPER_PID_FILE, pid_file)
+        // The helper outlives the root briefly; it must not hold the test's
+        // output pipes open.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    TreeConfig::process_group().configure(&mut command);
+    ChildGuard(Some(command.spawn().expect("sh should spawn")))
+}
+
+/// Graceful cleanup must hard-stop a detached helper that ignores `SIGTERM`,
+/// whether or not a sample ran before it started.
+fn assert_graceful_cleanup_stops_detached_helper(sample_first: bool) {
+    let scratch = tempfile::tempdir().unwrap();
+    let go = scratch.path().join("go");
+    let pid_file = scratch.path().join("helper");
+    if !sample_first {
+        std::fs::write(&go, "").unwrap();
+    }
+    let mut child = spawn_root_of_detached_helper(&go, &pid_file);
+    let mut tree = ProcessTree::attach(child.get()).unwrap();
+    if sample_first {
+        // The sampler's own schedule: the first sample is due one interval
+        // after attachment. It records the root before the helper exists.
+        std::thread::sleep(DESCENDANT_SAMPLE_INTERVAL);
+        tree.sample();
+        std::fs::write(&go, "").unwrap();
+    }
+    let helper = PidGuard(Some(wait_for_pid(&pid_file)));
+
+    let termination = tree.terminate_gracefully(Duration::from_secs(2), child.get());
+    child.0 = None;
+
+    termination.cleanup.expect("the sweep succeeds");
+    termination.status.expect("the root is waited for");
+    assert!(
+        gone_within(helper.0.unwrap(), Duration::from_secs(3)),
+        "the detached helper ignoring SIGTERM survived graceful cleanup"
+    );
+}
+
+#[test]
+fn graceful_cleanup_stops_a_detached_helper_first_seen_by_its_scan() {
+    assert_graceful_cleanup_stops_detached_helper(false);
+}
+
+#[test]
+fn graceful_cleanup_stops_a_detached_helper_started_after_the_last_sample() {
+    assert_graceful_cleanup_stops_detached_helper(true);
 }

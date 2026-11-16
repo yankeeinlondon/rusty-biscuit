@@ -180,10 +180,14 @@ if let Err(error) = termination.cleanup {
 let status = termination.status?; // the direct child's exit status
 ```
 
-On Unix, `terminate_gracefully` sends `SIGTERM` to the group and the recorded
-descendants, gives the direct child up to the grace period to exit, then
-hard-stops whatever is left, even if the direct child exited first and a
-descendant ignored `SIGTERM`. Finally it waits for the direct child. Windows
+On Unix, `terminate_gracefully` first scans the process table once and
+records every descendant still linked to the direct child, as a sample would
+(the scan also learns the direct child's identity if no sample has run yet).
+It then sends `SIGTERM` to the group and the recorded descendants, gives the
+direct child up to the grace period to exit, and hard-stops whatever is left,
+even if the direct child exited first and a descendant that ignored `SIGTERM`
+had left the group and was reparented when the child exited. Finally it waits
+for the direct child. Windows
 has no graceful signal for a whole tree, so it terminates the Job at once and
 ignores the grace period. If the hard stop fails, the direct child is killed
 before it is waited for.
@@ -228,6 +232,49 @@ the direct child yourself.
 On Windows the Job still terminates its members when the operating system
 closes the last handle; on Unix nothing cleans up in that case.
 
+## Handing the terminal to an interactive child
+
+On Unix an owned child leads its own process group, and a terminal reads
+input only from its *foreground* group. A child in a new group that reads the
+keyboard is stopped by the terminal, and a typed Ctrl-C goes to your process
+instead of to the child. `sniff::process::ForegroundHandoff` gives the child's
+group the terminal's foreground for as long as it runs, then puts your group
+and your terminal settings back. It holds terminal state only; the tree keeps
+containment, termination, and release.
+
+```rust
+use sniff::process::{CleanupScan, ForegroundHandoff, ProcessTree, TreeConfig};
+
+TreeConfig::process_group().configure(&mut command);         // 1. fresh group
+let mut handoff = ForegroundHandoff::prepare(&mut command)?; // 2. before spawn
+let mut child = command.spawn()?;                            // 3. spawn once…
+let mut tree = ProcessTree::attach(&child)?;                 //    …attach at once
+let status = child.wait()?;                                  // 4. your wait loop
+tree.terminate(CleanupScan::WhenObserved)?;                  //    finish or release
+handoff.restore()?;                                          // 5. before more output
+```
+
+- **Order matters.** Prepare after configuring the fresh group and before
+  spawning; the child takes the foreground itself, before it executes its
+  program, so its first read cannot race the transfer. A command that was not
+  configured for a fresh group fails to spawn with `InvalidInput`.
+- **Declare the handoff before the tree.** Rust drops locals in reverse
+  order, so when a panic unwinds your function the tree is cleaned up first
+  and the terminal restored afterwards.
+- **Inactive guards change nothing.** With no controlling terminal, or when
+  your process is not in the terminal's foreground group (a background job),
+  `is_active()` is `false` and the launch proceeds without a transfer. Native
+  Windows has no foreground group, so its guard is always inactive.
+- **One handoff at a time per process.** A terminal has a single foreground
+  group, so `prepare` returns `WouldBlock` while another active handoff exists
+  in your process, rather than leaving a second interactive child in the
+  background.
+- **Restoration is explicit and repeatable.** `restore` puts back the
+  foreground group and then the settings, attempting both even if the first
+  fails, and returns the first error. A guard dropped before a successful
+  restore tries once more and logs a failure. Nothing runs after
+  `std::process::exit` or an abort.
+
 ## Handling errors
 
 Cleanup is secondary to the outcome you are reporting. Log a cleanup error,
@@ -252,7 +299,8 @@ spawn failure: kill and wait for the child, then return the error.
 - Cleanup reaches the members of the owned process group plus every recorded
   descendant, even one that later left the group.
 - A descendant that forks, leaves the group, and is reparented after its
-  parent exits, all **between two samples**, was never recorded and escapes.
+  parent exits, all **between two samples** (or between the last sample and
+  the cleanup scan), was never recorded and escapes.
   Closing that gap needs a Linux cgroup, a process-global subreaper, or a
   supervising process, none of which this library sets up.
 - Recorded descendants and the original root are checked against their

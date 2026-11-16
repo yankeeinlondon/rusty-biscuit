@@ -1,7 +1,7 @@
 ---
 kind: fix
 created: 2026-11-14
-status: finalized-spec
+status: implemented
 area: sniff
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -32,8 +32,11 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-14
-review_iterations: 0
+review_iterations: 3
+completed: true
 needs_rulings: false
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # One shared process tree, with race-free Windows assignment

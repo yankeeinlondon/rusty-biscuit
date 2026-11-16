@@ -3,9 +3,9 @@
 //! The child leads its own process group (or session), so its PID is the
 //! group ID and a signal to the negative PID reaches every member still in
 //! the group. A descendant that calls `setsid` or `setpgid` leaves the group;
-//! it stays addressable only if a sample recorded it while it was still
-//! linked to the tree by parentage. One that forks, leaves the group, and is
-//! reparented entirely between two samples escapes.
+//! it stays addressable only if a sample or a cleanup scan recorded it while
+//! it was still linked to the tree by parentage. One that forks, leaves the
+//! group, and is reparented entirely between two such scans escapes.
 //!
 //! Signaling a group is not atomic with a concurrent `fork` on every Unix:
 //! macOS can let a child forked while the signal goes out join the group
@@ -167,13 +167,16 @@ pub(super) struct Core<H: Host = SystemHost> {
     host: H,
     /// The direct child's PID, which is also the group ID.
     root: u32,
-    /// The root's start time, learned from the first sample. `None` until
-    /// then, and the root is then never used to find descendants by
-    /// parentage: after it is reaped its PID could name another process.
+    /// The root's start time, learned from the first sample or from the
+    /// graceful shutdown scan, both of which run while the root is known to be
+    /// unreaped. `None` until then, and the root is then never used to find
+    /// descendants by parentage: after it is reaped its PID could name another
+    /// process.
     root_start: Option<u64>,
-    /// Descendants recorded while linked to the tree, with the start time that
-    /// identifies each incarnation. Retaining them is what keeps a `setsid`
-    /// descendant addressable after it is reparented away from the tree.
+    /// Descendants recorded while linked to the tree, by a sample or a cleanup
+    /// scan, with the start time that identifies each incarnation. Retaining
+    /// them is what keeps a `setsid` descendant addressable after it is
+    /// reparented away from the tree.
     observed: HashMap<u32, u64>,
     next_sample: Instant,
     armed: bool,
@@ -239,17 +242,21 @@ impl<H: Host> Core<H> {
             return Ok(());
         }
         if scan == CleanupScan::Always || !self.observed.is_empty() {
-            let targets = self.scan_targets();
+            // The caller may already have reaped the root, so its PID is not
+            // trusted to name it here.
+            let targets = self.scan_targets(false);
             // Deepest first, so a parent cannot replace a killed child.
             for target in targets.into_iter().rev() {
                 let _ = self.host.kill_pid(target, libc::SIGKILL);
             }
-            self.observed.clear();
         }
         let pgid = i32::try_from(self.root).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidInput, "root PID does not fit pid_t")
         })?;
         kill_group_hard(&mut self.host, pgid)?;
+        // Forgotten only now: a failed cleanup leaves the owner armed, and its
+        // retry (or drop) still needs every identity this scan found.
+        self.observed.clear();
         self.armed = false;
         Ok(())
     }
@@ -261,9 +268,12 @@ impl<H: Host> Core<H> {
     ) -> TreeTermination {
         let mut status = None;
         if self.armed {
+            // `Ok(None)` for the attached child proves the root is unreaped.
+            let is_root = child.id() == self.root;
             match child.try_wait() {
                 Ok(Some(exited)) => status = Some(Ok(exited)),
-                Ok(None) | Err(_) => status = self.ask_to_exit(grace, child),
+                Ok(None) => status = self.ask_to_exit(grace, child, is_root),
+                Err(_) => status = self.ask_to_exit(grace, child, false),
             }
         }
 
@@ -287,21 +297,15 @@ impl<H: Host> Core<H> {
         TreeTermination { status, cleanup }
     }
 
-    /// Sends `SIGTERM` to the group and the validated recorded descendants,
-    /// then gives the root up to `grace` to exit. Returns the root's status if
-    /// it exited in time.
+    /// Runs [`Core::request_exit`], then gives the root up to `grace` to
+    /// exit. Returns the root's status if it exited in time.
     fn ask_to_exit(
         &mut self,
         grace: Duration,
         child: &mut Child,
+        root_unreaped: bool,
     ) -> Option<io::Result<std::process::ExitStatus>> {
-        let targets = self.scan_targets();
-        if let Ok(pgid) = i32::try_from(self.root) {
-            let _ = self.host.kill_group(pgid, libc::SIGTERM);
-        }
-        for target in targets {
-            let _ = self.host.kill_pid(target, libc::SIGTERM);
-        }
+        self.request_exit(root_unreaped);
         let deadline = self.host.now() + grace;
         loop {
             match child.try_wait() {
@@ -309,6 +313,20 @@ impl<H: Host> Core<H> {
                 Ok(None) if self.host.now() < deadline => std::thread::sleep(GRACE_POLL),
                 Ok(None) | Err(_) => return None,
             }
+        }
+    }
+
+    /// Sends `SIGTERM` to the group and to every validated descendant one scan
+    /// finds. The scan retains what it finds before anything is signaled, so
+    /// the hard stop that follows still reaches a descendant that ignores
+    /// `SIGTERM` and is reparented when the root exits.
+    fn request_exit(&mut self, root_unreaped: bool) {
+        let targets = self.scan_targets(root_unreaped);
+        if let Ok(pgid) = i32::try_from(self.root) {
+            let _ = self.host.kill_group(pgid, libc::SIGTERM);
+        }
+        for target in targets {
+            let _ = self.host.kill_pid(target, libc::SIGTERM);
         }
     }
 
@@ -321,12 +339,22 @@ impl<H: Host> Core<H> {
     /// One refresh, then every live process this owner may signal: the
     /// descendants of the validated roots plus the validated recorded PIDs.
     /// Parents precede their descendants.
-    fn scan_targets(&mut self) -> Vec<u32> {
+    ///
+    /// Every descendant found is recorded with its start time, so a later
+    /// scan reaches it after it is reparented away from the tree. When
+    /// `root_unreaped` holds, the PID cannot name anything but the root, so
+    /// an unlearned root identity is learned from this table, as a sample
+    /// would; a descendant reparented before any scan stays unreachable.
+    fn scan_targets(&mut self, root_unreaped: bool) -> Vec<u32> {
         self.host.refresh();
         let table = Table::new(self.host.snapshot());
+        if root_unreaped && self.root_start.is_none() {
+            self.root_start = table.start_of(self.root);
+        }
         let roots = self.validated_roots(&table);
         let mut targets: Vec<u32> = roots.iter().copied().filter(|pid| *pid != self.root).collect();
-        for (pid, _) in table.descendants(&roots) {
+        for (pid, start_time) in table.descendants(&roots) {
+            self.observed.insert(pid, start_time);
             if !targets.contains(&pid) {
                 targets.push(pid);
             }

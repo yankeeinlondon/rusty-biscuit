@@ -1,7 +1,7 @@
 ---
 created: 2026-11-14
 total_phases: 4
-phase: 4
+phase: 5
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -63,6 +63,66 @@ skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/lifecycle.md
 - .claude/skills/darkmatter/library-surfaces.md
 - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+- sniff/lib/src/process.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/launcher.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/tests/l1/lifecycle_edit_action.rs
+- .config/nextest.toml
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/macos.md
+- .claude/skills/sniff/testing.md
+source_code:
+- sniff/lib/src/process.rs
+- sniff/lib/src/process/tree.rs
+- sniff/lib/src/process/tree/unix.rs
+- sniff/lib/src/process/tree/unix/tests.rs
+- sniff/lib/src/process/tree/windows.rs
+- sniff/lib/src/process/tree/windows/tests.rs
+- sniff/lib/src/programs/install/options.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/launcher.rs
+- darkmatter/lib/src/editor/launch.rs
+- darkmatter/lib/src/editor/mod.rs
+- darkmatter/lib/src/editor/service.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/src/lib.rs
+- darkmatter/lib/src/process_tree.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/tests/l1/lifecycle_edit_action.rs
+- claudine/lib/src/composition/sequence/task/shell.rs
+- claudine/lib/src/composition/sequence/task/shell/tests.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/Cargo.toml
+- .config/nextest.toml
+documentation:
+- darkmatter/docs/dependencies.md
+- sniff/docs/topics/process-trees.md
+- sniff/docs/sniff-library-architecture.md
+- sniff/lib/README.md
+- sniff/README.md
+- sniff/cli/README.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/inline/shell-expansion.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/flow-control/sequences.md
+- .claude/skills/sniff/testing.md
+- .claude/skills/sniff/architecture.md
+- .claude/skills/sniff/SKILL.md
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/windows.md
+- .claude/skills/os/macos.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/claudine/SKILL.md
+completed_phase: 4
+implemented: true
 ---
 
 # Plan: one shared process tree, race-free on Windows
@@ -104,36 +164,38 @@ The work, in dependency order:
 
 **Done means all of the following are true:**
 
-- [ ] `sniff::process` exposes the owner; `darkmatter/lib/src/process_tree.rs`
+- [x] `sniff::process` exposes the owner; `darkmatter/lib/src/process_tree.rs`
   is gone; Claudine's `ProcessTree`, `resume_main_thread`, `as_handle`,
   `isolate_process_tree`, and `GROUP_REAP_LIMIT` are gone; Sniff's nested
   `process_tree` modules are replaced by the public implementation.
-- [ ] On Windows every owned child is created `CREATE_SUSPENDED` (combined with
+- [x] On Windows every owned child is created `CREATE_SUSPENDED` (combined with
   the caller's own flags in one place), assigned to a kill-on-close,
   non-breakaway, non-inheritable Job, and resumed only after assignment
   succeeds; every handle is owned and closed once.
-- [ ] A short successful probe performs zero process-table scans; the first
+- [x] A short successful probe performs zero process-table scans; the first
   sample is due 250 ms after attachment and later samples no more often than
   that; Windows sampling does nothing.
-- [ ] Recorded Unix descendants and the original root are identity-checked by
+- [x] Recorded Unix descendants and the original root are identity-checked by
   start time before they are used as traversal roots and before signaling.
-- [ ] Immediate, graceful, `release`, and armed-`Drop` behave as the contract
+- [x] Immediate, graceful, `release`, and armed-`Drop` behave as the contract
   table in the specification says, including disarm-after-success, and a
   Windows `release` failure leaves cleanup armed.
-- [ ] The editor still survives a completed wait on a GUI client; a `release`
+- [x] The editor still survives a completed wait on a GUI client; a `release`
   failure produces a warning (the edit still succeeds); lifecycle `edit`
   warnings reach `LifecycleEffects::warn`.
-- [ ] Claudine keeps its grace duration, cancellation checks, runaway cap,
+- [x] Claudine keeps its grace duration, cancellation checks, runaway cap,
   error categories, and teardown-before-reader-settlement order; the Unix
   foreground-terminal lifecycle path keeps direct-child-only cancellation and
   is documented as the one exception.
-- [ ] `just test` and `just lint` pass in `sniff`, `darkmatter`, `claudine`;
+- [x] `just test` and `just lint` pass in `sniff`, `darkmatter`, `claudine`;
   the terminal tests pass through `just test-l2`; Sniff builds with no
-  features and Darkmatter builds with `sniff`'s `remote` feature.
-- [ ] `sniff/docs/topics/process-trees.md` exists, is linked from every place
+  features and Darkmatter builds with `sniff`'s `remote` feature. (Phase 4:
+  two Claudine L2 tests in `level2_initialize_generated_transclusion` fail
+  for a reason unrelated to process trees; see the implementation log.)
+- [x] `sniff/docs/topics/process-trees.md` exists, is linked from every place
   the specification lists, and a search for the stale claims (Phase 4) finds
   none in current docs, skills, or source comments.
-- [ ] `sniff/fixes/2026-11-14-shared-process-tree/implementation-log.md`
+- [x] `sniff/fixes/2026-11-14-shared-process-tree/implementation-log.md`
   records the evidence obtained per OS and every OS evidence gap.
 
 Out of scope, unchanged by this plan: Claudine CLI provider-session
@@ -928,23 +990,23 @@ implementation log, not in the spec.
 
 ### Wave 9 (parallel)
 
-- [ ] **4.1 Package test and lint runs** — Rule 29 for `sniff`, `darkmatter`,
+- [x] **4.1 Package test and lint runs** — Rule 29 for `sniff`, `darkmatter`,
   `claudine`; fix failures in the owning task's files (do not weaken a test).
-- [ ] **4.2 Delegation and stale-claim searches** — Rule 30 plus the Phase 3
+- [x] **4.2 Delegation and stale-claim searches** — Rule 30 plus the Phase 3
   search repeated over the final tree; fix any hit.
-- [ ] **4.3 Comment-drift pass** — for every function whose behavior changed
+- [x] **4.3 Comment-drift pass** — for every function whose behavior changed
   (`run_command_with_timeout`, `run_shell_query`, `LaunchPlan::run`,
   `run_process`, `run_owned_lifecycle_command`, `dispatch_edit`), read its
   `///` and inline `//` comments against the new code; per `CLAUDE.md` assume
   the code is right, fix the comment, and list each drift fixed in the
   implementation log.
-- [ ] **4.4 Windows and WSL2 evidence** — Rule 31. Includes executing the
+- [x] **4.4 Windows and WSL2 evidence** — Rule 31. Includes executing the
   Phase 1.5 Windows tests and the `windows`-feature compile of
   `darkmatter` and `claudine` after the feature trims (Rules 23, 25).
 
 ### Wave 10 (close-out, after Wave 9)
 
-- [ ] **4.5 Implementation log and status** — create
+- [x] **4.5 Implementation log and status** — create
   `sniff/fixes/2026-11-14-shared-process-tree/implementation-log.md` with: the
   commands run and results per package, evidence per OS (Rule 31 outcomes),
   the drift fixes (4.3), and the departures from the spec (none planned; list

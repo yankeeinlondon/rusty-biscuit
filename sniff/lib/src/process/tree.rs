@@ -252,9 +252,11 @@ impl ProcessTree {
     /// Asks the tree to exit, then hard-stops whatever is left and waits for
     /// the direct child.
     ///
-    /// On Unix, `SIGTERM` goes to the group and recorded descendants, the
-    /// direct child gets up to `grace` to exit, and then the remaining members
-    /// are killed, even when the child exited first. Windows has no graceful
+    /// On Unix, one scan records the current descendants, `SIGTERM` goes to
+    /// the group and every recorded descendant, the direct child gets up to
+    /// `grace` to exit, and then the remaining members are killed, even when
+    /// the child exited first and a descendant that ignored `SIGTERM` was
+    /// reparented away from it. Windows has no graceful
     /// signal for a tree, so it terminates the Job at once and ignores
     /// `grace`. If the hard stop fails, the direct child is killed before it
     /// is waited for.

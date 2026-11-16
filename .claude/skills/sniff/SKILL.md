@@ -21,6 +21,11 @@ and runtime path; it does not cross into native Windows detectors.
   output that is not being drained.
 - Other crates own a child's whole process tree with `sniff::process::ProcessTree`
   ([process trees](../../../sniff/docs/topics/process-trees.md)).
+  An interactive owned child also takes the terminal's foreground through
+  `sniff::process::ForegroundHandoff` (`process/foreground.rs`; prepare after
+  group configuration and before spawn, declare it before the tree, restore
+  after reaping). Its tests script the parent-side syscalls through the
+  private `TerminalOps` adapter and never touch the ambient terminal.
 - Windows audio detection uses PowerShell CIM, not `wmic`.
 - `current_user_id()` returns the effective Unix UID or Windows process-token
   SID without subprocess, registry, environment-variable, or network fallback.

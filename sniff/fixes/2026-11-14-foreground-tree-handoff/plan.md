@@ -1,9 +1,20 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+- sniff/lib/src/process.rs
+- sniff/lib/src/process/foreground.rs
+- sniff/lib/src/process/foreground/tests.rs
+docs_updated_during_phase_1:
+- sniff/docs/topics/process-trees.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/sniff/SKILL.md
+packages:
+- sniff
 ---
 
 # Shared Terminal Foreground Handoff Implementation Plan
@@ -250,7 +261,7 @@ This plan authorizes no commits, pushes, spec lifecycle moves, or GUI focus.
 
 ### Wave 1: Shared implementation
 
-- [ ] **Implement handoff**
+- [x] **Implement handoff**
   - Add the public guard and private Unix implementation using rules 1–7.
     Keep the platform code in `process/foreground.rs`, with a sibling
     `process/foreground/tests.rs` module for scripted parent-side syscall
@@ -263,7 +274,7 @@ This plan authorizes no commits, pushes, spec lifecycle moves, or GUI focus.
   - Build the library with default features and `remote`; the guard must not
     introduce network dependencies or work into launches that do not request it.
 
-- [ ] **Prove guard lifecycle**
+- [x] **Prove guard lifecycle**
   - After the implementation task, add focused tests in the sibling module.
     Use a private scripted parent-side syscall adapter to exercise the actual
     guard, including partial preparation failure, background/no-terminal

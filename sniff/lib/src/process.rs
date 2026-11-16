@@ -10,6 +10,10 @@
 //!   [`CleanupScan`], [`TreeTermination`]) own a spawned child and every
 //!   process it starts. `run_with_timeout` uses the same owner. The rules,
 //!   guarantees, and per-OS limits are in `sniff/docs/topics/process-trees.md`.
+//! - [`ForegroundHandoff`] gives an owned interactive child the controlling
+//!   terminal's foreground and restores the caller's foreground and terminal
+//!   settings afterwards. It holds terminal state only; the tree it is used
+//!   beside keeps containment, termination, and release.
 //! - [`configure_detached_child`] serves the opposite case: a caller's
 //!   intentionally detached child that nothing waits on or bounds.
 //!
@@ -47,8 +51,10 @@ use tracing::warn;
 
 use crate::performance::{self, counters};
 
+mod foreground;
 mod tree;
 
+pub use foreground::ForegroundHandoff;
 pub use tree::{
     CleanupScan, ProcessTree, TreeConfig, TreeIsolation, TreeTermination,
     WINDOWS_CREATE_NEW_PROCESS_GROUP, WINDOWS_CREATE_NO_WINDOW,
@@ -228,7 +234,9 @@ impl CapturedOutput {
 /// Why a bounded child failed to produce output.
 #[derive(Debug)]
 pub(crate) enum ProcessError {
-    /// The executable could not be spawned (missing, not executable, ...).
+    /// The executable could not be spawned (missing, not executable, ...), or
+    /// its process tree could not be owned, in which case the child was killed
+    /// and reaped before it ran (Windows) or before its output was read.
     Spawn(std::io::Error),
     /// The child exceeded its deadline and was killed.
     Timeout,
@@ -270,8 +278,10 @@ impl From<ProcessError> for std::io::Error {
 ///
 /// ## Errors
 ///
-/// [`ProcessError::Spawn`] if the child could not start, [`ProcessError::Timeout`]
-/// if it exceeded `timeout` (in which case it has been killed and reaped).
+/// [`ProcessError::Spawn`] if the child could not start or its process tree
+/// could not be owned (the child has then been killed and reaped),
+/// [`ProcessError::Timeout`] if it exceeded `timeout` (in which case it has been
+/// killed and reaped).
 ///
 /// ## Notes
 ///
