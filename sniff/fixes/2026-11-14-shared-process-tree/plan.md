@@ -1,9 +1,21 @@
 ---
 created: 2026-11-14
 total_phases: 4
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1:
+- sniff/lib/src/process.rs
+- sniff/lib/src/process/tree.rs
+- sniff/lib/src/process/tree/unix.rs
+- sniff/lib/src/process/tree/unix/tests.rs
+- sniff/lib/src/process/tree/windows.rs
+- sniff/lib/src/process/tree/windows/tests.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+- sniff
 ---
 
 # Plan: one shared process tree, race-free on Windows
@@ -366,7 +378,7 @@ needs no `reqwest`, so a no-feature build stays free of HTTP.
 
 ### Wave 1 (parallel: Tasks 1.1 and 1.2 touch disjoint files)
 
-- [ ] **1.1 Public API and Unix core**
+- [x] **1.1 Public API and Unix core**
   - Create `process/tree.rs` (public items of Rule 2, `combined_creation_flags`,
     rustdoc with the `## Examples` required by Rule 19 below, `cfg`
     wiring) and `process/tree/unix.rs` (Rules 4–10).
@@ -385,7 +397,7 @@ needs no `reqwest`, so a no-feature build stays free of HTTP.
     Windows module file does not exist until Task 1.2, so gate the `mod windows`
     declaration with `#[cfg(windows)]` and land both tasks in one change set.
 
-- [ ] **1.2 Windows core**
+- [x] **1.2 Windows core**
   - Create `process/tree/windows.rs` implementing Rules 11–12 and the `hooks`
     test seam.
   - Move the Toolhelp thread lookup here from `process.rs:501-534`, using
@@ -398,7 +410,7 @@ needs no `reqwest`, so a no-feature build stays free of HTTP.
 
 ### Wave 2 (parallel: Tasks 1.3, 1.4, 1.5 touch different files)
 
-- [ ] **1.3 Migrate Sniff's helper**
+- [x] **1.3 Migrate Sniff's helper**
   - Finish Rule 14 in `process.rs`; update the module-level docs and the docs
     of `run_with_timeout`/`run_command_with_timeout` per Phase 3 task 3.2's
     list of stale claims (rewrite lines 1–52 and the `## Notes` blocks at
@@ -411,7 +423,7 @@ needs no `reqwest`, so a no-feature build stays free of HTTP.
     (`configure_detached_child` contract is unchanged).
   - Pass `just test` for the existing `process::tests`.
 
-- [ ] **1.4 Unix owner tests** (`process/tree/unix/tests.rs`)
+- [x] **1.4 Unix owner tests** (`process/tree/unix/tests.rs`)
   - With `FakeHost`: `no_scan_at_attach`; `first_sample_waits_one_interval`;
     `samples_are_no_more_frequent_than_the_interval`;
     `cleanup_scan_policy` (three cases: `WhenObserved` with nothing observed →
@@ -452,7 +464,7 @@ needs no `reqwest`, so a no-feature build stays free of HTTP.
   - Risk: tests that share a group with the test runner must always `configure`
     their command, otherwise `terminate` would signal the runner's group.
 
-- [ ] **1.5 Windows owner tests** (`process/tree/windows/tests.rs`,
+- [x] **1.5 Windows owner tests** (`process/tree/windows/tests.rs`,
   plus cross-platform `combined_creation_flags` tests in `tree.rs`)
   - Cross-platform: `0 → 0x4`, `WINDOWS_CREATE_NO_WINDOW → 0x0800_0004`,
     `WINDOWS_CREATE_NEW_PROCESS_GROUP → 0x204`, and that suspension is never
@@ -481,7 +493,7 @@ needs no `reqwest`, so a no-feature build stays free of HTTP.
 
 ### Wave 3 (validation checkpoint)
 
-- [ ] **1.6 Phase 1 checkpoint**
+- [x] **1.6 Phase 1 checkpoint**
   - From `sniff/`: `just test` and `just lint` pass; `cargo check -p sniff
     --all-targets` passes with no features; `cargo check -p sniff --all-targets
     --features remote` passes.
