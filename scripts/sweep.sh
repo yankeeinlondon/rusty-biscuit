@@ -2,12 +2,12 @@
 # Prune Cargo target/ directories, which cargo never garbage-collects.
 #
 # Four escalating passes per root, most-targeted first:
-#   1. incremental caches over SWEEP_INCREMENTAL_MAX_GIB (default 15)
+#   1. combined incremental caches per target over SWEEP_INCREMENTAL_MAX_GIB (default 15)
 #   2. artifacts from uninstalled toolchains
 #   3. artifacts untouched for more than SWEEP_TIME_DAYS (default 14)
-#   4. LOW-SPACE BACKSTOP: when the target filesystem has less than
-#      SWEEP_MIN_FREE_GIB free (default 100), cap each target/ at
-#      SWEEP_MAX_SIZE (default 120GB), oldest first
+#   4. cap each target/ at SWEEP_HARD_MAX_SIZE (default 200GB), oldest first;
+#      below SWEEP_MIN_FREE_GIB free (default 100), use the tighter
+#      SWEEP_MAX_SIZE (default 120GB) instead
 #
 # Then one pass over the whole host:
 #   5. out-of-tree target dirs untouched for more than SWEEP_ORPHAN_DAYS,
@@ -25,6 +25,7 @@ set -euo pipefail
 
 time_days="${SWEEP_TIME_DAYS:-14}"
 max_size="${SWEEP_MAX_SIZE:-120GB}"
+hard_max_size="${SWEEP_HARD_MAX_SIZE:-200GB}"
 min_free_gib="${SWEEP_MIN_FREE_GIB:-100}"
 incremental_max_kb=$(( ${SWEEP_INCREMENTAL_MAX_GIB:-15} * 1024 * 1024 ))
 
@@ -59,38 +60,39 @@ for root in "${roots[@]}"; do
     # Incremental caches are capped by size because the --time pass below
     # structurally cannot reach them: every build re-touches the incremental
     # directory of each crate it compiles, so these artifacts are perpetually
-    # fresh no matter how stale the work behind them is. Removing one costs a
+    # fresh no matter how stale the work behind them is. Removing them costs a
     # single non-incremental rebuild of the workspace crates; dependency
     # artifacts under deps/ are untouched. cargo-sweep does not cover this.
     find "$root" -type d -name target -prune 2>/dev/null \
         | while IFS= read -r target; do
-            find "$target" -type d -name incremental -prune 2>/dev/null
-        done \
-        | while IFS= read -r inc; do
-            size_kb=$(du -sk "$inc" 2>/dev/null | awk '{print $1}')
+            incremental_dirs=()
+            while IFS= read -r -d '' inc; do
+                incremental_dirs+=("$inc")
+            done < <(find "$target" -type d \( -name incremental -o -name incremental.kache-auto \) -prune -print0 2>/dev/null)
+            (( ${#incremental_dirs[@]} > 0 )) || continue
+            size_kb=$(du -skc "${incremental_dirs[@]}" 2>/dev/null | awk 'END {print $1}')
             [[ -n "${size_kb:-}" ]] || continue
             if (( size_kb > incremental_max_kb )); then
-                awk -v k="$size_kb" -v c="$incremental_max_kb" -v p="$inc" 'BEGIN {
-                    printf "[incremental] %.1f GiB > %.1f GiB cap -- removing %s\n",
+                awk -v k="$size_kb" -v c="$incremental_max_kb" -v p="$target" 'BEGIN {
+                    printf "[incremental] %.1f GiB > %.1f GiB combined cap -- removing incremental caches under %s\n",
                            k / 1048576, c / 1048576, p
                 }'
-                rm -rf "$inc"
+                rm -rf "${incremental_dirs[@]}"
             fi
         done
 
     cargo sweep -r --installed "$root"
     cargo sweep -r --time "$time_days" "$root"
 
-    # Artifact mtimes describe when rustc produced a file, not when Cargo last
-    # reused it. An unconditional oldest-first cap therefore evicts healthy,
-    # reusable dependencies from an active worktree and turns the next local
-    # test into a cold build. Reserve that tradeoff for actual capacity pressure.
+    # Bound target growth even on roomy volumes; reserve the tighter cap for
+    # disk pressure because eviction can discard reusable dependencies.
     free_kb="$(df -Pk "$root" 2>/dev/null | awk 'END { print $4 }')"
     if [[ "$free_kb" =~ ^[0-9]+$ ]] && (( free_kb >= min_free_kb )); then
         awk -v f="$free_kb" -v m="$min_free_kb" 'BEGIN {
-            printf "[capacity] %.1f GiB free >= %.1f GiB floor -- skipping maxsize backstop\n",
+            printf "[capacity] %.1f GiB free >= %.1f GiB floor -- applying unconditional cap\n",
                    f / 1048576, m / 1048576
         }'
+        cargo sweep -r --maxsize "$hard_max_size" "$root"
     else
         if [[ ! "$free_kb" =~ ^[0-9]+$ ]]; then
             echo "[capacity] free space unavailable -- applying maxsize backstop" >&2
