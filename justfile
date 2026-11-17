@@ -1796,8 +1796,8 @@ _ensure-cargo-sweep:
     fi
 
 # prune Cargo target/ dirs, which cargo never garbage-collects. Passes:
-# uninstalled toolchains, untouched >14d, then a 120GB cap only when the target
-# filesystem has less than 100 GiB free, then out-of-tree target dirs under
+# combined incremental caches >15 GiB, uninstalled toolchains, untouched >14d,
+# then a 200GB cap (120GB below 100 GiB free), then out-of-tree target dirs under
 # ~/.cache left behind by --target-dir builds (docs/kache-strategy.md).
 # Constrained Windows hosts use the native 80GB policy below. Roots default to
 # this repo; override with paths.
