@@ -14,8 +14,9 @@
 //! the run. These prove what needs a shell with job control and a typed key:
 //! the command reads a line typed into the pane, a typed Ctrl-C reaches the
 //! command and not Claudine, nested runs hand the foreground down and back one
-//! level at a time, a background `claudine` leaves the shell's foreground
-//! alone, and afterwards the shell owns the terminal with its settings intact.
+//! level at a time, a background `claudine` runs to completion (its output on
+//! the terminal or not) and leaves the shell's foreground alone, and
+//! afterwards the shell owns the terminal with its settings intact.
 //! Unix only: native Windows shares the console and has no foreground group.
 
 #![cfg(unix)]
@@ -61,7 +62,8 @@ impl Drop for Reaper {
 
 /// A pane running an interactive `sh` whose home and working directory are a
 /// fresh workspace holding `doc.md` and the given scripts, and whose `PATH`
-/// starts with a `bin` holding `claudine` and a fake `goose`.
+/// starts with a `bin` holding `claudine` and a fake `goose` that records its
+/// process group and the terminal's foreground group in `provider.fg`.
 struct Pane {
     harness: TmuxHarness,
     _reaper: Reaper,
@@ -82,7 +84,10 @@ impl Pane {
         }
         std::os::unix::fs::symlink(common::claudine_bin(), bin.join("claudine"))
             .expect("link claudine");
-        write_executable(&bin.join("goose"), "#!/bin/sh\n: > provider-ran\nexit 0\n");
+        write_executable(
+            &bin.join("goose"),
+            "#!/bin/sh\nps -o pgid= -o tpgid= -p $$ > provider.fg\n: > provider-ran\nexit 0\n",
+        );
 
         let path = format!("PATH={}:/usr/bin:/bin", bin.display());
         let home = format!("HOME={}", cwd.display());
@@ -438,32 +443,70 @@ fn level2_lifecycle_foreground_handoff_a_structured_command_reads_the_typed_line
     pane.assert_shell_owns_the_terminal(&transcript, "0");
 }
 
-#[test]
-fn level2_lifecycle_foreground_handoff_a_background_claudine_leaves_the_foreground_alone() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let step = "#!/bin/sh\nps -o pgid= -o tpgid= -p $$ > command.fg\nsleep 60 &\necho $! > bg.pid\n";
-    let mut pane = Pane::open(
-        "---\ntitle: t\nstart:\n  - shell: \"./step.sh\"\n---\nBody.\n",
-        &[("step.sh", step)],
-    );
-    // The shell waits in the foreground while claudine runs as its job (`%1`,
-    // since an interactive shell history-expands `$!`). Claudine's output goes
-    // to a file: with stdout or stderr on the terminal, biscuit-terminal's
-    // capability probe puts the terminal in raw mode, and a background job
-    // doing that is stopped by `SIGTTOU` before any lifecycle command runs.
-    // stdin stays the terminal, so the command still has it as its own.
-    pane.start_compose("--yolo", " > claudine.log 2>&1 & wait %1");
+const BACKGROUND_STEP: &str =
+    "#!/bin/sh\nps -o pgid= -o tpgid= -p $$ > command.fg\nsleep 60 &\necho $! > bg.pid\n";
+const BACKGROUND_DOCUMENT: &str = "---\ntitle: t\nstart:\n  - shell: \"./step.sh\"\n---\nBody.\n";
+
+/// Runs `document` with claudine as the shell's background job while the
+/// shell waits in the foreground (`%1`, since an interactive shell
+/// history-expands `$!`), with `redirect` applied to claudine's output; stdin
+/// stays the terminal. Background claudine must skip its terminal capability
+/// probes rather than be stopped by `SIGTTOU` for changing the terminal's
+/// settings, whether or not its output reaches the terminal. Asserts it
+/// completed, the lifecycle command (when the document has one) and the
+/// provider ran without taking the foreground, and the shell owns the
+/// terminal with its settings unchanged.
+fn assert_background_run(document: &str, redirect: &str) {
+    let has_step = document.contains("./step.sh");
+    let scripts: &[(&str, &str)] = if has_step { &[("step.sh", BACKGROUND_STEP)] } else { &[] };
+    let mut pane = Pane::open(document, scripts);
+    pane.start_compose("--yolo", &format!("{redirect} & wait %1"));
     let transcript = pane.wait_for_pane("backhome");
-    let log = pane.cwd().join("claudine.log");
-    let log = std::fs::read_to_string(log).unwrap_or_default();
+    let log = std::fs::read_to_string(pane.cwd().join("claudine.log")).unwrap_or_default();
     assert_eq!(pane.read("status").trim(), "0", "claudine succeeded:\n{transcript}\n{log}");
 
     let (shell_group, _) = ps_groups(pane.pid("shell.pid"));
-    let (command, foreground) = pane.groups("command.fg");
-    assert_eq!(foreground, shell_group, "the shell kept the foreground:\n{transcript}");
-    assert_ne!(command, foreground, "the command ran in the background:\n{transcript}");
-    wait_dead(pane.pid("bg.pid"), "the command's background child");
+    if has_step {
+        let (command, foreground) = pane.groups("command.fg");
+        assert_eq!(foreground, shell_group, "the shell kept the foreground:\n{transcript}");
+        assert_ne!(command, foreground, "the command ran in the background:\n{transcript}");
+        wait_dead(pane.pid("bg.pid"), "the command's background child");
+    }
+    let (provider, foreground) = pane.groups("provider.fg");
+    assert_eq!(foreground, shell_group, "the shell kept the foreground during the provider:\n{transcript}");
+    assert_ne!(provider, foreground, "the provider ran in the background:\n{transcript}");
     pane.assert_shell_owns_the_terminal(&transcript, "0");
+}
+
+/// Control: with no output on the terminal the probes were never at risk.
+#[test]
+fn level2_lifecycle_foreground_handoff_a_background_claudine_leaves_the_foreground_alone() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    assert_background_run(BACKGROUND_DOCUMENT, " > claudine.log 2>&1");
+}
+
+#[test]
+fn level2_lifecycle_foreground_handoff_a_background_claudine_with_terminal_output_completes() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    assert_background_run(BACKGROUND_DOCUMENT, "");
+}
+
+#[test]
+fn level2_lifecycle_foreground_handoff_a_background_claudine_with_stdout_redirected_completes() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    assert_background_run(BACKGROUND_DOCUMENT, " > claudine.log");
+}
+
+#[test]
+fn level2_lifecycle_foreground_handoff_a_background_claudine_with_stderr_redirected_completes() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    assert_background_run(BACKGROUND_DOCUMENT, " 2> claudine.log");
+}
+
+#[test]
+fn level2_lifecycle_foreground_handoff_a_background_claudine_without_lifecycle_actions_completes() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    assert_background_run("---\ntitle: t\n---\nBody.\n", "");
 }
 
 #[test]

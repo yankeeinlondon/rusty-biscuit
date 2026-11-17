@@ -340,7 +340,10 @@ Every live query (OSC 10/11/12, the graphics probe, CSI 14 t, DSR `CSI 6 n`)
 goes through one engine, `discovery::tty_query`: a shared loop (deadline,
 silence budget, `MAX_RESPONSE_BYTES`, caller-chosen DA1 sentinel so a wrapped
 request gets a wrapped sentinel) over a platform `QueryPort`: `/dev/tty` in
-raw mode via `select(2)` on Unix (typed keys read are discarded), the console
+raw mode via `select(2)` on Unix (typed keys read are discarded; refused,
+with no I/O, unless the caller's group is the terminal's foreground group,
+checked by `RawModeGuard::new`, so a background job is never stopped by
+`SIGTTOU`/`SIGTTIN`), the console
 handles (`CONIN$`/`CONOUT$`) on native Windows (modes restored). Two entry
 points: `round_trip` for single-purpose queries (cursor, CSI 14 t, standalone
 OSC), which memoizes a request answered only by DA1 so it is never re-sent;

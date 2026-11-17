@@ -303,6 +303,18 @@ only the way the terminal is reached differs.
 The request goes to the controlling terminal rather than stdout, so it reaches
 the terminal even when stdout is captured.
 
+On Unix a query is sent only when the process is in the terminal's foreground
+process group. A background job (`program &` from an interactive shell) that
+changed the terminal's modes would be stopped by `SIGTTOU`, and one that read
+the terminal by `SIGTTIN`. Such a process, or one whose foreground group cannot
+be read, sends nothing and leaves the terminal's settings alone; every query
+falls back as it does for a terminal that cannot be opened. So the job runs
+to completion whether or not its output reaches the terminal:
+
+```sh
+some-cli report.md &   # runs to completion; sends no terminal queries
+```
+
 On native Windows the console backend writes the request and its DA1
 sentinel, reads with the same deadline and silence budget, and restores the
 console modes when it is done. It serves every part of the startup exchange,
