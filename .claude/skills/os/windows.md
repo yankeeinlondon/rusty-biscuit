@@ -221,6 +221,14 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   The hosted `windows-latest` image disables real-time monitoring, so this
   host is slower than CI per process. Never change the host's Defender
   settings; cut processes and fresh files.
+- **A test process pays about 0.8 ms for its first open of each existing
+  file** on `build-win` (B: checkout), and pays it again in every new
+  process even when nothing changed: opening the ~9,800 scoped files of the
+  repository took 7.9 s, and reading all 172 MB again in the same process
+  0.6 s. `git grep --threads 1` over the same tracked files took about 2 s
+  and 16 threads in the test barely helped (7.3 s). A whole-repository scan
+  should let Git rule out clean tracked files and open only the rest
+  (`darkmatter/lib/tests/l1/current_root_migration_guard.rs`: 7.3 s → 1.1 s).
 - **A freshly copied executable costs about 0.3 s on its first run** on
   `build-win-native` (Defender scans it; later runs take about 10 ms). A hard
   link to a file that has already run costs about 20 ms. A test fixture that

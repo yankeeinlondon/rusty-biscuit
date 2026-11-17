@@ -396,8 +396,8 @@ zed-verify:
         echo "error: packaged extension id is not dmls" >&2
         exit 1
     }
-    grep -Eq '^languages[[:space:]]*=[[:space:]]*\[[[:space:]]*"Markdown"[[:space:]]*\][[:space:]]*$' "$verify_root/extension.toml" || {
-        echo "error: packaged extension does not declare Markdown" >&2
+    grep -Eq '^languages[[:space:]]*=[[:space:]]*\[[[:space:]]*"Markdown"[[:space:]]*,[[:space:]]*"YAML"[[:space:]]*\][[:space:]]*$' "$verify_root/extension.toml" || {
+        echo "error: packaged extension does not declare exactly Markdown and YAML" >&2
         exit 1
     }
     awk '{ sub(/^\.\//, ""); if ($0 == "extension.wasm") found = 1 } END { exit !found }' "$verify_root/archive-entries.txt" || {

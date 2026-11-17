@@ -177,12 +177,23 @@ fn shipped_fleet_graphs_resolve_per_row_prompt_lifecycles() {
         if !path.is_file() { continue; }
         count += 1;
         let markdown = darkmatter::markdown::Markdown::try_from(path.as_path()).unwrap();
-        assert!(!markdown.frontmatter().as_map().contains_key("initialize"), "row hooks must live on the prompt");
+        // The shared roster sees no property of the fleet, so the fleet's one
+        // root hook writes the topic prompt the roster's template reads; row
+        // hooks live on the prompt.
+        let initialize = markdown.frontmatter().as_map().get("initialize").cloned();
+        let writes = initialize.as_ref().and_then(|stack| stack.as_array()).and_then(|stack| match stack.as_slice() {
+            [only] => only.get("set").filter(|writes| writes.as_object().is_some_and(|map| map.len() == 1 && map.contains_key("research_prompt"))).cloned(),
+            _ => None,
+        });
+        let writes = writes.unwrap_or_else(|| panic!("{}: `initialize` must be one `set` of `research_prompt`: {initialize:?}", path.display()));
+        let layers = claudine::composition::CallerInputLayers::from_caller_overrides(Some(writes), resolution.clone());
         let source = claudine::composition::ResolvedCompositionSource {
             original_ref: path.display().to_string(), resolved_path: path.clone(),
             original_text: markdown.as_string(), markdown,
         };
-        let plan = claudine::composition::resolve_sequence_plan(&source, &resolution).unwrap().unwrap();
+        let plan = claudine::composition::resolve_sequence_plan_with(
+            &source, claudine::composition::SequenceSourceOptions::new(&resolution).with_caller_layers(&layers),
+        ).unwrap().unwrap();
         let graph = claudine::composition::sequence::preflight::build_preflight_graph_with_context(
             &plan, &source, context.clone(), &resolution,
         ).unwrap_or_else(|error| panic!("{}: {error}", path.display()));

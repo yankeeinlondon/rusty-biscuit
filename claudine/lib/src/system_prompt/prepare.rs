@@ -1,6 +1,6 @@
 use biscuit_file::serde_yaml_ng;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource, RequestSnapshot};
+use darkmatter::markdown::compose::{ComposeContext, ComposeSource, RequestSnapshot};
 use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use tracing::{info_span, warn};
 
@@ -135,7 +135,7 @@ fn compose_prompt_markdown(
     // primary and appendix requirements. Transcluded prompt fragments grow it
     // from the launch evidence that produced it.
     let invocation = &shared_ctx.invocation;
-    let options = ComposeOptions::new_with_context(shared_ctx.runtime.clone())
+    let options = crate::composition::compose_options_with_context(shared_ctx.runtime.clone())
         .with_context_authority(invocation.compose_context_authority())
         .with_shell_child_environment(invocation.env_baseline().shell_child_environment());
     let options = match source_path(source) {

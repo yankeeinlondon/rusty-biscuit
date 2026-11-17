@@ -165,6 +165,42 @@ pub fn resolution_failure_row(
     ))
 }
 
+/// The repair a schema problem about a value a schema default supplied
+/// calls for ([`simplified_schema::ValidationProblem::default`]): no
+/// frontmatter text holds that value, so the author repairs the default
+/// where the schema file declares it, or sets the property so the default
+/// is never used. Plain text (no markup).
+///
+/// ## Examples
+///
+/// ```
+/// use simplified_schema::{AppliedDefault, PropertyPath, SchemaOrigin};
+/// use darkmatter::markdown::errors::schema_default_repair;
+///
+/// let applied = AppliedDefault {
+///     path: PropertyPath::parse("doc").unwrap(),
+///     value: "./missing.md".into(),
+///     pointer: "/properties/doc/default".into(),
+///     origin: Some(SchemaOrigin::referenced_file("types.yaml")),
+/// };
+/// assert_eq!(
+///     schema_default_repair(&applied),
+///     "Repair the schema default at schema location `/properties/doc/default` in `types.yaml`, \
+///      or set `doc` in the frontmatter so the default is not used.",
+/// );
+/// ```
+pub fn schema_default_repair(applied: &simplified_schema::AppliedDefault) -> String {
+    let file = applied.origin.as_ref().and_then(simplified_schema::SchemaOrigin::file);
+    let declared = match file {
+        Some(file) => format!("`{}` in `{}`", applied.pointer, file.display()),
+        None => format!("`{}`", applied.pointer),
+    };
+    format!(
+        "Repair the schema default at schema location {declared}, or set `{}` in the frontmatter so the default is not used.",
+        applied.path
+    )
+}
+
 pub use simplified_schema::errors::{with_glob_hint, with_hint_line};
 
 /// Prose markup for a [`StatusBlock::hint`] whose text spans rows, such as a
@@ -384,6 +420,7 @@ mod tests {
         let err = TocLinkingError::InvalidCleanupService {
             service: "bogus".into(),
             line: 4,
+            document: None,
         };
         let out = render(&err);
         assert!(out.contains("invalid cleanup service"));

@@ -71,7 +71,7 @@ impl TaskExecution<'_> {
         use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
 
         let before = self.runtime.map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        let runtime = Arc::new(RuntimeState::from_snapshot(before));
+        let runtime = Arc::new(RuntimeState::from_sequence_snapshot(before));
         let live = Mutex::new(self.stack.live_frontmatter_snapshot()
             .unwrap_or_else(|| self.stack.frontmatter.clone()));
         // The group's events, gate, loop cap, and legs read its own document:
@@ -135,7 +135,7 @@ impl TaskExecution<'_> {
                     } else {
                         let (fresh, graph) = super::super::preflight::prepare_nested_group(
                             self.task, group, &state, context, self.stack.file_resolution_context,
-                            self.graph.nested_sources(),
+                            self.graph.nested_sources(), self.document,
                         )?;
                         self.verify_nested_graph(&graph)?;
                         fresh

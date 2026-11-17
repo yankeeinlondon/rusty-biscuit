@@ -1085,6 +1085,15 @@ mod corpus {
                 ))),
             ),
             (
+                "CompositionError::InlinePromptDirectiveFailed",
+                Box::new(CompositionError::InlinePromptDirectiveFailed {
+                    source_path: PathBuf::from("run.md"),
+                    property: "prompt".to_string(),
+                    message: "`::shell-block` is never closed with `::end-block`".to_string(),
+                    command: None,
+                }),
+            ),
+            (
                 "CompositionError::PreFlightFailed",
                 Box::new(CompositionError::PreFlightFailed("preflight".to_string())),
             ),
@@ -1094,6 +1103,7 @@ mod corpus {
                     command: "rm -rf /".to_string(),
                     source_file: PathBuf::from("run.md"),
                     line: 4,
+                    property: None,
                     failure: ShellApprovalFailure::Blacklisted("destructive".to_string()),
                 }),
             ),

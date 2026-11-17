@@ -286,7 +286,7 @@ impl Prepared {
     /// [`crate::defaults::prepare_defaults`]).
     pub fn validate_strict<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
         let prepared = self.complete(Cow::Borrowed(value))?;
-        self.judge(prepared).map(|success| ValidationSuccess { value: Cow::Borrowed(value), ..success })
+        self.judge(prepared, value).map(|success| ValidationSuccess { value: Cow::Borrowed(value), ..success })
     }
 
     /// Applies defaults, then converts what the conversion engine permits
@@ -322,7 +322,7 @@ impl Prepared {
             Cow::Borrowed(_) => None,
         };
         let Some(converted) = converted else {
-            return self.judge(before);
+            return self.judge(before, value);
         };
         let after = self.complete(Cow::Owned(converted))?;
         let mut defaults = before.defaults;
@@ -331,7 +331,7 @@ impl Prepared {
                 defaults.push(late);
             }
         }
-        self.judge(DefaultPreparation { candidate: after.candidate, defaults })
+        self.judge(DefaultPreparation { candidate: after.candidate, defaults }, value)
     }
 
     /// `instance` with its defaults applied.
@@ -340,12 +340,15 @@ impl Prepared {
             .map_err(|error| ValidationFailure::Unprepared { error: Arc::new(error) })
     }
 
-    /// Accepts the completed candidate when it has no problems.
-    fn judge<'input>(&self, prepared: DefaultPreparation<'input>) -> Result<ValidationSuccess<'input>, ValidationFailure> {
+    /// Accepts the completed candidate when it has no problems; `written` is
+    /// the value before its defaults were applied.
+    fn judge<'input>(&self, prepared: DefaultPreparation<'input>, written: &Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
         if self.validators.accepts(&prepared.candidate) {
             return Ok(self.accepted(prepared.candidate, prepared.defaults));
         }
-        let problems = self.problems(&prepared.candidate);
+        // A problem about an inserted value is attributed to its default.
+        let mut problems = self.problems(&prepared.candidate);
+        defaults::attribute_problems(&mut problems, &defaults::filling_missing(&prepared.defaults, written));
         if problems.is_empty() {
             Ok(self.accepted(prepared.candidate, prepared.defaults))
         } else {

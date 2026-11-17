@@ -128,6 +128,40 @@ impl GitRepo {
             })
         })
     }
+
+    /// Capture the tree of the commit whose full hex id is `commit_id`,
+    /// whatever `HEAD` names: the same read-only view as
+    /// [`Self::committed_tree`], pinned to a commit the caller chose (a pull
+    /// request's base and head, for example).
+    ///
+    /// Only a full object id is accepted, never a ref name, an abbreviation,
+    /// or a revision expression, so the view cannot move under the caller
+    /// and no revision parsing runs.
+    ///
+    /// ## Errors
+    ///
+    /// [`SniffError::Git`] tagged `"committed tree at"` when `commit_id` is
+    /// not a full hex object id, or the object is absent, is not a commit,
+    /// or its root tree is missing or corrupt.
+    pub fn committed_tree_at(&self, commit_id: &str) -> Result<CommittedTreeSnapshot> {
+        let id = gix::ObjectId::from_hex(commit_id.as_bytes())
+            .map_err(|error| SniffError::git("committed tree at", error))?;
+        self.with_gix(|repo| {
+            let commit = repo
+                .find_commit(id)
+                .map_err(|error| SniffError::git("committed tree at", error))?;
+            let tree = commit
+                .tree_id()
+                .map_err(|error| SniffError::git("committed tree at", error))?
+                .detach();
+            repo.find_tree(tree)
+                .map_err(|error| SniffError::git("committed tree at", error))?;
+            Ok(CommittedTreeSnapshot {
+                objects: repo.clone().into_sync(),
+                pinned: Some(Pinned { commit: id, tree }),
+            })
+        })
+    }
 }
 
 impl CommittedTreeSnapshot {

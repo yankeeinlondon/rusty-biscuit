@@ -22,8 +22,11 @@ relations gate also runs the generator over the document.
 | `docs/research/_provider-tasks.yaml`, `_local-runner-tasks.yaml` | Formal task projections of canonical rosters, with per-row prompt execution; parity tests enforce identical row data/order |
 | `docs/research/<topic>/<slug>.md` | One research document per provider |
 
-A fleet's root lifecycle belongs to its container. Keep row-dependent hooks
-on `_research.md`, where `seq` holds the current provider or runner. A failed
+A fleet's root lifecycle belongs to its container. Its one root hook is the
+`initialize` `set` of `research_prompt`, which the shared roster's
+`template:` reads (a referenced roster never reads the fleet's properties).
+Keep row-dependent hooks on `_research.md`, where `seq` holds the current
+provider or runner. A failed
 row stops the sequence; rerun after correcting it to skip current research.
 
 ## Running research
@@ -126,6 +129,7 @@ Each of these cost a failed run.
 | Trap | Rule |
 | --- | --- |
 | A dry run composes prompts and fires no lifecycle event | Prove a prompt with a real run. For events alone, use a copy of the prompt with a one-line task |
+| A fleet dry run makes no `initialize` write, so the roster's `prompt` is `null` | Preview with the value as a setter: `claudine sequence docs/research/<topic>/_fleet.md --dry-run research_prompt=@claudine/docs/research/<topic>/_research.md` |
 | A lifecycle command may not take its executable from interpolation | Use `has_binary(name)`, or a literal executable with interpolated arguments |
 | `err.message` is not a field | Use `err.msg` |
 | A lifecycle write outside the repository is dropped without a message, with every later action in its list | Keep test documents inside the repository, such as under `target/` |

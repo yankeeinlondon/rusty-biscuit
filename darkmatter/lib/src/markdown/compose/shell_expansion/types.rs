@@ -18,11 +18,14 @@ use crate::markdown::types::MarkdownResult;
 pub enum ShellCommandOrigin {
     /// Body `::shell` directive at the given 1-indexed line.
     Body { line: usize },
-    /// Frontmatter property with a `$(...)` shell expression.
+    /// Frontmatter property with a `$(...)` shell expression, or a command
+    /// written in a property's text that a host composes as a body (Claudine's
+    /// inline `prompt`).
     ///
     /// `line` is the 1-indexed file line of the frontmatter key when it can be
     /// resolved from the source context; it is `None` when the source context
-    /// does not include frontmatter (e.g. in-memory or body-only contexts).
+    /// does not include frontmatter (e.g. in-memory or body-only contexts), or
+    /// when no line of the property's text is proven to be the command's.
     Frontmatter { key: String, line: Option<usize> },
     /// Command inside a `::shell-block` / `::end-block` region.
     ///
@@ -880,6 +883,30 @@ impl ShellExpansionError {
             | Self::UnevaluatedDependencyShape { origin, .. }
             | Self::Timeout { origin, .. }
             | Self::ExecutionFailed { origin, .. } => Some(origin),
+            Self::PolicyIo { .. } | Self::Config(_) | Self::Preflight(_) => None,
+        }
+    }
+
+    /// The [`context`](Self::context) and [`origin`](Self::origin) together,
+    /// for a host that composed text it generated and must report the
+    /// failure against the file the text was authored in.
+    pub fn location_mut(&mut self) -> Option<(&mut SourceContext, &mut ShellCommandOrigin)> {
+        match self {
+            Self::ParseDirective { ctx, origin, .. }
+            | Self::ExpressionEvaluation { ctx, origin, .. }
+            | Self::CommandNotFound { ctx, origin, .. }
+            | Self::Blacklisted { ctx, origin, .. }
+            | Self::ApprovalRequired { ctx, origin, .. }
+            | Self::Denied { ctx, origin, .. }
+            | Self::NotPreApproved { ctx, origin, .. }
+            | Self::MissingValue { ctx, origin, .. }
+            | Self::TemplateGrammar { ctx, origin, .. }
+            | Self::TemplateValueRejected { ctx, origin, .. }
+            | Self::TemplateTarget { ctx, origin, .. }
+            | Self::DynamicCommandShape { ctx, origin, .. }
+            | Self::UnevaluatedDependencyShape { ctx, origin, .. }
+            | Self::Timeout { ctx, origin, .. }
+            | Self::ExecutionFailed { ctx, origin, .. } => Some((ctx, origin)),
             Self::PolicyIo { .. } | Self::Config(_) | Self::Preflight(_) => None,
         }
     }
@@ -2683,6 +2710,31 @@ mod tests {
             source: std::io::Error::other("unreadable"),
         };
         assert_eq!(unscoped.origin(), None);
+    }
+
+    #[test]
+    fn location_mut_relocates_a_failure_and_is_none_for_unscoped_failures() {
+        let mut located = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(test_source_context()),
+            command: "false".to_string(),
+            code: 1,
+            stdout: String::new(),
+            stderr: String::new(),
+            origin: ShellCommandOrigin::Body { line: 10 },
+        };
+        let property = ShellCommandOrigin::Frontmatter { key: "prompt".to_string(), line: None };
+        let (ctx, origin) = located.location_mut().expect("a located failure");
+        *ctx = full_file_source_context();
+        *origin = property.clone();
+
+        assert_eq!(located.origin(), Some(&property));
+        assert_eq!(located.context(), Some(&full_file_source_context()));
+
+        let mut unscoped = ShellExpansionError::PolicyIo {
+            path: std::path::PathBuf::from("/policy.toml"),
+            source: std::io::Error::other("unreadable"),
+        };
+        assert!(unscoped.location_mut().is_none());
     }
 
     fn test_source_context() -> SourceContext {

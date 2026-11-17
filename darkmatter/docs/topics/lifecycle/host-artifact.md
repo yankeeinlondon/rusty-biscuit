@@ -55,6 +55,66 @@ The first host catalog in the document's schema roots whose artifact is
 usable decides the document's host. A catalog file name in an earlier root
 shadows the same name in a later one, as it does for globals.
 
+Discovery in the schema roots is the fallback for a host that is **not
+registered**. A registered host's documents get their lifecycle from the
+artifact its registration names instead, wherever the document lives (see
+below).
+
+## Shipping it with a host registration
+
+A host makes its documents typed outside its own package area by
+[registering](../host-registration.md) a `darkmatter-host` manifest. The
+manifest's `globals` names the host's global catalog and its `lifecycle`
+names this artifact, both as local files beside the manifest:
+
+```yaml
+# ~/.acme/darkmatter-host.yaml
+kind: darkmatter-host
+format_version: 1
+host: acme
+# …
+globals: ./schemas/globals.yaml
+lifecycle: ./schemas/globals.lifecycle.json
+```
+
+The loader holds the artifact to the same rules as above, and two more: the
+artifact's recorded host must equal the manifest's `host`, and a stale,
+missing, or refused artifact refuses the **whole** registration with a
+`dm.host.registration` warning (no partial lifecycle, globals, or triggers
+are used). See
+[How a registration loads](../host-registration.md#how-a-registration-loads).
+
+Claudine publishes its manifest itself on every launch, from the catalog and
+artifact compiled into its binary, so the files the manifest names always
+match the running release:
+
+- Every release's files go into an **immutable revision directory** named
+  after the host version and a BLAKE3 digest of the files' contents
+  (`~/.claudine/darkmatter-host/0.1.0-<digest>/schemas/`). The directory is
+  written under a staging name and renamed into place whole, and a directory
+  with a final name is never written to again.
+- The **stable manifest**, `~/.claudine/darkmatter-host.yaml`, names one
+  revision. It is replaced atomically and **last**, only after the revision's
+  files read back byte for byte, so a reader never pairs a new trigger with
+  an old catalog or artifact.
+- An existing revision whose files differ from the expected bytes is left
+  alone and the release is published under the next suffixed name
+  (`<version>-<digest>-2`). Old revisions are kept for readers still holding
+  an older manifest.
+- When the manifest already names a revision that verifies, nothing is
+  written.
+
+```mermaid
+flowchart TD
+    L[Claudine launch] --> C{manifest names a revision<br/>whose files match?}
+    C -- yes --> N[write nothing]
+    C -- no --> S[write the revision into<br/>a staging directory]
+    S --> R[rename it into place,<br/>or reuse an identical one]
+    R --> V{every file reads back<br/>byte for byte?}
+    V -- no --> F[fail: the old manifest<br/>and revisions stay in force]
+    V -- yes --> M[replace the stable manifest<br/>atomically, last]
+```
+
 ## What the artifact records
 
 | Field | What it carries |
@@ -171,6 +231,8 @@ ignores contributes no guarded surface.
 ## See Also
 
 - [Lifecycle](index.md) — events, hosts, and registration
+- [Host Registration](../host-registration.md) — the manifest that names
+  this artifact, and how a registered host is chosen for a document
 - [Host Expression Functions](../host-functions.md) — the facts artifact, the
   same design for host functions
-- [DMLS diagnostics](../../dmls/docs/diagnostics.md)
+- [DMLS diagnostics](../../../dmls/docs/diagnostics.md)

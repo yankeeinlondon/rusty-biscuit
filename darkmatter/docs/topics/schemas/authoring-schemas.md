@@ -719,11 +719,13 @@ Your job is to review the specification file "{{spec}}".
 
 - we also specify that `spec` should be evaluated _eagerly_ (the default is _lazy_ evaluation)
 - even though a filepath is a derivative of a string type it holds additional semantic meaning to define it as a **file** type
-- 
 
 This meaning becomes even more pronounced when we add the `eager` constraint:
 
-- by default all properties are `lazy` which means that the page can be _composed_ without
+- by default a `file` is _lazy_: the value only has to parse as a file reference, so the page can be composed with a path to a file the run has not created yet
+- `file(eager)` also requires the file to exist when the document is validated, so `spec` must point at a real file
+- after a successful composition, `md compose` rewrites an eager file value to its resolved path; a document that fails validation is never rewritten
+- see [`eager`](../../../../simplified-schema/docs/topics/global-type-constraints.md#eager) for when a host checks an eager value
 
 ### External Grammar Files
 

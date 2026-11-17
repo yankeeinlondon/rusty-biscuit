@@ -51,7 +51,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
 - `RepositoryContexts` (shared `Arc`, on `ServerState.contexts`) caches one
   `build_resolution_context` result per repository root (key from
   `biscuit_file::find_git_root`; a document in no repository keys its folder),
-  failures included. `for_document(path)` derives with `for_source`;
+  failures included. `for_document(path)` derives with `for_source`; a path
+  whose folder does not exist yet keys its nearest existing ancestor (not
+  cached under the absent folder);
   `for_untitled(roots)` needs exactly one repository across the folders.
 - Every provider resolves through `DocumentContext.resolution`
   (`ctx.file_context()` is `Result<&FileResolutionContext, &ContextFailure>`,
@@ -326,7 +328,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   The workspace registration also watches `**/*.yaml|yml` and the discovery
   inputs (`.gitignore`, `.ignore`, `.dmls.toml`: re-list). Schema-location
   watches (`schema_watch_registration` over `watch::WatchedFolder`s from
-  `OverlayState::trigger_watch_folders`: `<parent>` + `<folder>/*` for a
+  `OverlayState::trigger_watch_folders` and `host_watch_folders`: `<parent>` + `<folder>/*` for a
   present folder; nearest existing ancestor + `<rel>` and `<rel>/*` for one
   absent at preparation, its `absent_base` recorded then so syncing reads
   nothing and a folder appearing changes the set) are re-synced after every
@@ -577,11 +579,55 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `branch_scope`. Lifecycle/task `when` guards do not narrow the hover of
   frontmatter actions (call diagnostics in lifecycle stacks are narrowed;
   task bodies are not); see `dmls/docs/hover.md`.
+- **Host selection.** `overlay/hosts.rs`: `HostRegistrations` (in
+  `OverlayCache`, keyed by home + repository root + tree root + env) loads
+  each configuration's `RegisteredHosts` passively (`load_passively` →
+  `RegisteredHosts::load`), prepared by `prepare_need`/`prepare_hosts` with
+  the registry's begin/run/install pattern; `registry_demand` reports a
+  Markdown document with frontmatter whose configuration is stale, and
+  `prepare_workspace_probe` prepares every workspace scope's (so a
+  frontmatter-less document, which never waits, finds them). An install
+  whose profiles (manifest + revision), warnings, and load error equal the
+  previous one keeps its `version`; `generation()` advances with each new
+  version and the router refreshes every open document when it moves
+  (`publish_trigger_transitions`). Deps are BLAKE3 hashes (`content_hash`,
+  taken from `ConfigSnapshot::dependencies` except the `RepositoryHead`
+  revision, read otherwise) of the config files present or absent, every
+  `profile.dependencies()` path, a refused entry's probed manifest
+  candidates and their members' candidates
+  (`config::registration::manifest_member_candidates`), and the repository's
+  `HEAD` plus the branch ref it names (`slot_jobs::head_files`, watched by
+  path through the slot registration, never by folder);
+  `invalidate_trigger_inputs`/`invalidate_all_trigger_registries` also
+  invalidate it (`invalidate_host_inputs`, `invalidate_all_hosts`,
+  `host_watch_folders`, `host_head_paths`, `host_dependencies`,
+  `host_registration_diagnostics`, `host_config_notices` are the direct
+  API). `OverlayCache::schema_for` folds the version into the
+  schema key (so `AnalysisIdentity::schema_key`), passes the hosts to
+  `schema::assemble` (`with_registered_hosts`), and computes
+  `HostView::select` once, cached on `CachedSchema` and carried as
+  `DocumentOverlay::host`. Every provider reads `DocumentContext::host_view()`
+  (`LifecycleHost::for_document`, `dsl::host_catalogs`,
+  `dsl::enter_host_functions`); a document without an overlay view gets
+  `DocumentContext::host`, which the router fills from
+  `OverlayState::unframed_host` (the same `HostView::select` over an empty
+  frontmatter under the installed hosts, cached per path; `md` while none
+  are installed and for YAML). `HostView::unregistered` is only the fallback
+  of a `DocumentContext` built outside a server (`host: None`). Selection
+  warnings and `dm.lifecycle.unknown_host` are published on the document by
+  `diagnostics/frontmatter.rs::host_diagnostics`; configuration-level ones
+  (`HostRegistrations::diagnostics`) on the file each names by
+  `router.rs::publish_registration_files` (merged into an open file's
+  refresh and `closed_file_diagnostics`). The router shows
+  `host_config_notices` (`dm.config.missing` once per session,
+  `dm.config.migration` once per file) as `window/showMessage`
+  (`Router::show_config_notices`). Tests:
+  `tests/l1/registered_host_views.rs` (host fixtures by `#[path]`),
+  `tests/l1/host_registration_watches.rs`.
 - Lifecycle stacks: `overlay/event_views.rs::LifecycleHost::for_document`
-  selects the document's host: the first host catalog whose
-  `<stem>.lifecycle.json` loads
-  (`schemas::catalog::host_lifecycle_profiles` →
-  `lifecycle::host_profile::HostLifecycleProfile`; Claudine's
+  reads the selected view's lifecycle: a registered profile's, a legacy
+  catalog's first usable `<stem>.lifecycle.json`
+  (`lifecycle::host_profile::HostLifecycleProfile`; Claudine's
   `claudine/schemas/globals.lifecycle.json`), else `md_host`. Its registry's
   `resolve_key` (never a hand list) maps a root key to a `StackEvent`
   (event plus registry) and gives every `{{ … }}` span, `when` condition, and
@@ -591,13 +637,11 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `lifecycle_call_checks`, with the host's registry, for stack spans and
   expression-typed stack values alike. Without a usable artifact the stacks
   are md's and `dm.lifecycle.incomplete_analysis` names each catalog's
-  reason. Discovery is lazy and stops at the first usable profile. A
-  combined diagnostics pass (`ProviderRegistry::diagnostics`) discovers the
-  host once, in its own panic boundary, and hands it to providers whose
-  `reads_lifecycle_host()` is true via `diagnostics_with_host`; a discovery
-  panic is logged as each such provider's panic and drops their diagnostics.
-  Standalone `diagnostics(ctx)`, hover, and completion discover for
-  themselves. DMLS never depends on a host crate; `md_host::` appears only in
+  reason. A combined diagnostics pass (`ProviderRegistry::diagnostics`)
+  reads the host once, in its own panic boundary, and hands it to providers
+  whose `reads_lifecycle_host()` is true via `diagnostics_with_host`; a panic
+  there is logged as each such provider's panic and drops their diagnostics.
+  Standalone `diagnostics(ctx)`, hover, and completion read the same view. DMLS never depends on a host crate; `md_host::` appears only in
   `event_views.rs` (the fallback and its tests). Completion offers only the
   globals the event may read; `err` where the event has none is
   `dm.expression.unavailable_global` (the view's reason, never `fm.err`).

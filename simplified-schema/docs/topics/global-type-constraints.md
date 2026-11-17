@@ -31,7 +31,46 @@ In exported JSON Schema, a required property is listed in its object's
 
 ## `eager`
 
+`eager` says **when** a supplied value is checked, not whether it must be
+supplied. A host that runs a document in phases (Claudine validates a prompt
+just before it launches the agent, and again when the run completes) checks
+an `eager` value at launch; anything else is checked when the run completes,
+so an actor inside the run can still produce it.
 
+```yaml
+$schema:
+  spec: file(required; eager)   # must exist before the agent starts
+  notes: file(eager)            # optional; checked at launch when supplied
+  summary: string(required)     # may be written by the run itself
+```
+
+| Declaration | At launch | At completion |
+| --- | --- | --- |
+| `eager` | optional; a supplied value is checked | optional |
+| `required` | optional | required |
+| `required; eager` | required | required |
+
+Validation without a phase (`validate_strict`, `validate_soft`) ignores
+`eager` for presence: `required` alone decides. `eager` adds nothing to exported JSON Schema except on `file`.
+
+On `file`, `eager` also changes what a value must be. A plain `file` is
+**lazy**: it only has to parse as a file reference. `file(eager)` must also
+resolve to a file that exists, which needs a file context (see
+[Host Capabilities](./host-capabilities.md)). It lowers to the
+`darkmatter-file` format instead of `darkmatter-file-reference`.
+
+Checking an eager value never changes it. The validation methods return the
+value as written (soft validation only converts types and inserts
+defaults). Darkmatter rewrites present `file(eager)` values to resolved
+paths only after a composition has passed validation; a document with
+validation problems is never rewritten. A `default(...)` is checked against
+its definition without file access, so a `file` default is judged by syntax
+there; once it stands in for an absent value it is judged like any other
+value.
+
+The full timing rules, including unions, nested objects, and `null`, are in
+[Universal Constraints](./language/types.md#universal-constraints); `file`
+resolution is in [Files](./language/types.md#files).
 
 ## `default(value)`
 
@@ -77,3 +116,24 @@ explicitly when the data must also pass an external validator.
 
 
 ## `suggest(v1,v2,v3,...)`
+
+`suggest(...)` lists values an editor offers when completing a property. It
+is **advisory**: a value outside the list is still valid if the type accepts
+it. Use `enum(...)` when only the listed values are allowed.
+
+```yaml
+$schema:
+  color: string(suggest(red, green, "blue gray"))
+  port: number(integer; suggest(80, 443))
+  tags: string(suggest(alpha, beta))[]   # candidates for each item
+```
+
+- Only `string`, `number`, and `alphanumeric` (and their lists) accept it.
+- A property may carry one `suggest(...)`, across all arms of a property
+  union, and it needs at least one candidate.
+- Candidates of a `string` are always strings (`12` is the text `"12"`);
+  candidates of a `number` must be plain decimals (`3`, `-0.5`, not `1e3`).
+
+Exported JSON Schema carries the list as the `x-darkmatter-suggest`
+annotation, which validators ignore. The parsing rules are in
+[Advisory Suggestions](./language/types.md#advisory-suggestions-suggest).

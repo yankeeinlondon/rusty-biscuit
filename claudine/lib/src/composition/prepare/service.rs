@@ -122,6 +122,10 @@ pub fn prepare_document_selecting(
         schema,
         mut options,
     } = request;
+    // A sequence document's own step declarations are never composition
+    // frontmatter, whoever calls this entry (`without_formal_sequence_keys`).
+    let view = crate::composition::resolve::composition_view(source);
+    let source = &*view;
 
     // A deferred read withholds the verdict at both layers that can reach one:
     // Darkmatter's compose-time stage (via the option) and this crate's
@@ -202,5 +206,6 @@ pub fn prepare_bootstrap(
         entry.label()
     );
     options.defer_schema_verdict = true;
-    super::compose_bootstrap(entry, mode, source, options)
+    let source = crate::composition::resolve::composition_view(source);
+    super::compose_bootstrap(entry, mode, &source, options)
 }

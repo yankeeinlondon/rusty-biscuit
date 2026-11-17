@@ -121,8 +121,9 @@ required-features = ["terminal-tests"]
 # `#[path]` and spells both files in its test; the entry-point parity runner
 # and the formatting parity test do the same with darkmatter's shared matrices,
 # the union-item editor suite with darkmatter's union fixtures, the
-# content-policy baseline suite with darkmatter's content-policy fixtures, and
-# the frontmatter diagnostic position-parity tests with darkmatter's position
+# content-policy baseline suite with darkmatter's content-policy fixtures, the
+# registered-host view suite with darkmatter's host fixtures, and the
+# frontmatter diagnostic position-parity tests with darkmatter's position
 # fixtures.
 source-inputs = [
   "darkmatter/cli/tests/common/context_guard.rs",
@@ -132,6 +133,7 @@ source-inputs = [
   "darkmatter/lib/tests/common/type_scope_cases.rs",
   "darkmatter/lib/tests/common/type_scope_guard.rs",
   "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
+  "darkmatter/lib/tests/host_fixtures/mod.rs",
   "darkmatter/lib/tests/position_fixtures/mod.rs",
   "darkmatter/lib/tests/union_fixtures/mod.rs",
 ]

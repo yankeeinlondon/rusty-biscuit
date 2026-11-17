@@ -398,13 +398,14 @@ pub fn evaluate_task_guard(task: &PreflightTask, context: &StackExecutionContext
 }
 
 /// The values a root sequence step's guard reads before the step composes:
-/// the document's authored frontmatter as stored text, under `overrides`
-/// (caller setters, runtime writes, and the reserved overlay).
-pub fn step_guard_frontmatter(
-    authored: &darkmatter::markdown::FrontmatterMap,
+/// the authored frontmatter of the document that declares the step's row,
+/// as stored text, under `overrides` (caller setters, runtime writes, and the
+/// reserved overlay).
+pub fn step_guard_frontmatter<'a>(
+    authored: impl IntoIterator<Item = (&'a String, &'a Value)>,
     overrides: &Map<String, Value>,
 ) -> Map<String, Value> {
-    let mut state: Map<String, Value> = authored.iter()
+    let mut state: Map<String, Value> = authored.into_iter()
         .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
     state.extend(overrides.iter().map(|(key, value)| (key.clone(), value.clone())));
     state
@@ -586,6 +587,16 @@ impl TaskExecution<'_> {
     }
 
     fn run_validated(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
+        // An inline container's `$schema`, as its file reads now, is judged
+        // once its guard admitted it and before its run opens: a refusal
+        // starts nothing, not even its `initialize`, and the enclosing
+        // container handles a failed task.
+        if let PreflightAction::Sequence(sequence) = &self.task.action
+            && let Err(error) = self.admit_inline_container(sequence, self.runtime.map(std::sync::Arc::as_ref))
+        {
+            return self.unstarted_outcome(TaskStatus::Failed,
+                Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error)));
+        }
         let started = Instant::now();
         let mutations_before = self.mutation_snapshot();
 
@@ -1460,7 +1471,7 @@ impl TaskExecution<'_> {
     fn evaluate_with(&self) -> Result<Map<String, Value>, CompositionError> {
         let mut evaluated = Map::new();
         for (key, value) in &self.task.with {
-            if reserved::is_reserved_state_key(key) {
+            if reserved::is_reserved_state_key(key) || reserved::is_declaration_write(key) {
                 return Err(CompositionError::SequenceTaskWithReserved {
                     task: self.label(),
                     key: key.clone(),

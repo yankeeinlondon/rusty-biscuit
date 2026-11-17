@@ -155,6 +155,18 @@ pub fn validate_and_approve_command_parts(
     source_file: Option<&Path>,
     source_line: Option<usize>,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
+    let origin = ShellCommandOrigin::Body { line: source_line.unwrap_or(0) };
+    validate_and_approve_command_at(parts, options, source_file, origin)
+}
+
+/// [`validate_and_approve_command_parts`] for a command whose approval prompt
+/// shows `origin`, such as a frontmatter property rather than a body line.
+pub(crate) fn validate_and_approve_command_at(
+    parts: &[String],
+    options: &ShellApprovalOptions,
+    source_file: Option<&Path>,
+    origin: ShellCommandOrigin,
+) -> Result<ApprovedRuntimeCommand, HarnessError> {
     // The display form is the exact key, so a quoted or empty argument reads
     // as the bytes it approves (`git commit -m ""`), not as a bare join.
     let raw = match parts.split_first() {
@@ -165,7 +177,7 @@ pub fn validate_and_approve_command_parts(
         "harness_shell_validate",
         command = %raw,
         ?source_file,
-        source_line
+        %origin
     )
     .entered();
 
@@ -211,9 +223,7 @@ pub fn validate_and_approve_command_parts(
     };
     let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
         source: display_source(source_file),
-        origin: ShellCommandOrigin::Body {
-            line: source_line.unwrap_or(0),
-        },
+        origin,
         raw_command: raw.clone(),
         executable: executable.to_string(),
         args: args.clone(),

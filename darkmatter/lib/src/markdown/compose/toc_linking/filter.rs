@@ -69,6 +69,7 @@ fn compile_globs(
                     pattern: g.pattern.clone(),
                     line,
                     message: e.to_string(),
+                    document: None,
                 })
         })
         .collect()

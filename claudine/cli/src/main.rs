@@ -63,6 +63,22 @@ fn inject_caller_arguments(cli: &mut Cli, arguments: claudine::composition::Argu
 /// Check if the Claudine config file exists and is valid. If not (missing or
 /// old-format that was backed up), run the initialization process so a
 /// config is available for the command about to run.
+/// Republishes Claudine's host revision under the launch home when it is
+/// missing or stale ([`claudine::composition::registration::publish`]). A
+/// failure is a warning: the last complete revision stays published, and
+/// `~/.darkmatter.yaml` is never written here.
+fn refresh_host_registration() {
+    let Some(home) = request::snapshot().home() else {
+        return;
+    };
+    let revision = claudine::composition::registration::HostRevision::claudine();
+    if let Err(error) = claudine::composition::registration::publish(home, revision) {
+        log::warn(&format!(
+            "Claudine's Darkmatter host registration was not refreshed, so the last published revision stays in use: {error}"
+        ));
+    }
+}
+
 async fn ensure_config_exists() -> Result<()> {
     // A legacy `config.json` counts: the load below converts it.
     if !claudine::dispatch::loader::user_config_exists() {
@@ -541,6 +557,16 @@ async fn dispatch(
                 path.display()
             ));
         }
+    }
+
+    // Keep Claudine's Darkmatter host registration current: an upgraded
+    // binary republishes its revision on its next substantive launch. A
+    // hook, `steer`, completion, and `uninstall` stay passive.
+    if !matches!(
+        cli.command,
+        Some(Commands::Handle(_) | Commands::Steer(_) | Commands::Completions(_) | Commands::Complete(_) | Commands::Uninstall(_))
+    ) {
+        refresh_host_registration();
     }
 
     let perf_enabled = perf_bootstrap.enabled;

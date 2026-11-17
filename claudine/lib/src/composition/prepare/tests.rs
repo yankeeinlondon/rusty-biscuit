@@ -1471,7 +1471,7 @@ fn sequence_lifecycle_shell_snapshot_survives_later_preparation() {
     options.deferred_shell_roots = DeferredShellRoots::new(["seq"]).with_placeholders_template_required();
     options.document_shell_values = Some(DocumentShellValues::default());
     options.sequence_binding = Some(json!({"outputs": ["barrier value"]}));
-    validate_document_shell_late_values(&source, &options).unwrap();
+    validate_document_shell_late_values(&source, &options, CompositionMode::ChainedDocument).unwrap();
     options.sequence_binding = Some(json!({"outputs": ["changed late"]}));
     options.set_overrides = Some(json!({"label": "current value"}));
     let prepared = prepare_sequence_probe(&source, options, CompositionMode::ChainedDocument).unwrap();
@@ -1522,7 +1522,7 @@ fn assert_sequence_lifecycle_byte_grammar(event: &str, long: bool) {
         let source = make_source(&dir, &[("tool", json!("tool")), ("out", json!("dist")), (event, stack)], "Prompt.");
         let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
         options.deferred_shell_roots = DeferredShellRoots::new(["seq", "loop", "group"]);
-        let audited = validate_document_shell_late_values(&source, &options).unwrap();
+        let audited = validate_document_shell_late_values(&source, &options, CompositionMode::ChainedDocument).unwrap();
         let prepared = prepare_sequence_probe(&source, options.clone(), CompositionMode::ChainedDocument).unwrap();
         for lifecycle in [&audited, &prepared.lifecycle] {
             let mut commands = Vec::new();
@@ -1538,7 +1538,7 @@ fn assert_sequence_lifecycle_byte_grammar(event: &str, long: bool) {
             assert_eq!(commands, vec![expected.to_string()], "audit and JIT preserve the exact bytes");
         }
         options.deferred_shell_roots = options.deferred_shell_roots.with_placeholders_template_required();
-        let error = validate_document_shell_late_values(&source, &options).unwrap_err();
+        let error = validate_document_shell_late_values(&source, &options, CompositionMode::ChainedDocument).unwrap_err();
         assert!(error.to_string().contains("invalid shell template grammar"), "{error}");
     }
 }
@@ -1573,7 +1573,7 @@ fn sequence_lifecycle_byte_grammar_keeps_late_and_forbidden_reads() {
             ("start", json!([{"shell": command}]))], "Prompt.");
         let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
         options.deferred_shell_roots = DeferredShellRoots::new(["seq", "loop", "group"]);
-        let error = validate_document_shell_late_values(&source, &options).unwrap_err();
+        let error = validate_document_shell_late_values(&source, &options, CompositionMode::ChainedDocument).unwrap_err();
         let text = error.to_string();
         if command.contains("err.msg") || command.contains("current.branch") {
             assert!(!text.contains("invalid shell template grammar"), "forbidden reads retain their earlier typed diagnosis: {error}");
@@ -1836,4 +1836,674 @@ fn inline_preparation_of_a_column_zero_baseline_composes_and_writes_guardrails()
     assert!(dir.path().join("ran").is_dir(), "the frontmatter command ran");
     assert!(dir.path().join(".claudine/inline-compose.md").exists());
     assert_eq!(fs::read_to_string(&source.resolved_path).unwrap(), document);
+}
+
+/// An inline document whose `prompt` runs `::shell echo from-the-prompt` and
+/// whose body (which an inline run never composes) runs `echo from-the-body`.
+fn inline_shell_source(dir: &TempDir) -> ResolvedCompositionSource {
+    make_source(
+        dir,
+        &[("prompt", json!("Update the body.\n\n::shell echo from-the-prompt\n"))],
+        "# Body\n\n::shell echo from-the-body\n",
+    )
+}
+
+/// Pre-flight discovery for an inline run walks the `prompt` it composes, so
+/// the permitted prompt command is approved and then runs; the body's command,
+/// which no rule covers and no handler could approve, is never asked about.
+#[test]
+fn inline_shell_preflight_approves_the_prompt_that_inline_composition_runs() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let source = inline_shell_source(&dir);
+    let approval = crate::harness::ShellApprovalOptions {
+        permissions: crate::harness::shell::test_support::user_permissions(home.path(), &["exact echo from-the-prompt"]),
+        ..Default::default()
+    };
+    let mut options = PrepareOptions {
+        source_repo_root: Some(dir.path().to_path_buf()),
+        ..PrepareOptions::new(crate::test_support::context_at(dir.path()))
+    };
+
+    let approved = approve_document_shell(&source, &options, &approval, CompositionMode::InlineFrontmatterPrompt)
+        .expect("the body's command is not part of an inline run")
+        .approved_commands;
+    assert!(approved.contains_exact("echo from-the-prompt"), "{approved:?}");
+    assert!(!approved.contains_exact("echo from-the-body"), "{approved:?}");
+
+    options.pre_approved_commands = Some(approved);
+    let prepared = prepare_inline(&source, options).unwrap();
+    assert!(prepared.prompt.contains("from-the-prompt"), "{}", prepared.prompt);
+    assert!(!prepared.prompt.contains("from-the-body"), "{}", prepared.prompt);
+}
+
+/// An unpermitted `prompt` command with no approval handler is the ordinary
+/// approval refusal at pre-flight, never a "not pre-approved" execution error.
+#[test]
+fn inline_shell_preflight_refuses_an_unpermitted_prompt_command_without_a_handler() {
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let source = inline_shell_source(&dir);
+    let approval = crate::harness::ShellApprovalOptions {
+        permissions: crate::harness::shell::test_support::user_permissions(home.path(), &["exact echo from-the-body"]),
+        ..Default::default()
+    };
+    let options = PrepareOptions::new(crate::test_support::context_at(dir.path()));
+
+    let error = approve_document_shell(&source, &options, &approval, CompositionMode::InlineFrontmatterPrompt)
+        .expect_err("the prompt's command is not permitted");
+    let CompositionError::ShellApprovalUnavailable { command, failure, .. } = error else {
+        panic!("expected a no-handler approval failure, got {error:?}");
+    };
+    assert_eq!(command, "echo from-the-prompt");
+    assert!(matches!(failure, crate::composition::error::ShellApprovalFailure::NoHandler), "{failure:?}");
+}
+
+/// A sequence's passive late-value check walks the text its mode composes:
+/// for an inline document, the `prompt`'s command whose program is a late
+/// value is refused and the same command in the body is never read.
+#[test]
+fn inline_late_value_check_walks_the_prompt_not_the_body() {
+    use darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots;
+    let dir = TempDir::new().unwrap();
+    let late = "::shell {{ last(seq.outputs) }} probe\n";
+    let check = |prompt: &str, body: &str, mode: CompositionMode| {
+        let source = make_source(&dir, &[("prompt", json!(prompt))], body);
+        let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+        options.deferred_shell_roots = DeferredShellRoots::new(["seq"]).with_placeholders_template_required();
+        validate_document_shell_late_values(&source, &options, mode).map(|_| ())
+    };
+
+    let error = check(&format!("Update.\n\n{late}"), "# Body\n", CompositionMode::InlineFrontmatterPrompt)
+        .expect_err("the prompt's late program is refused");
+    assert!(error.to_string().contains("cannot be the program word"), "{error}");
+    check("Update.\n", &format!("# Body\n\n{late}"), CompositionMode::InlineFrontmatterPrompt)
+        .expect("an inline run never composes its body");
+    // The control: the same body is walked when the document is the prompt.
+    check("Update.\n", &format!("# Body\n\n{late}"), CompositionMode::ChainedDocument)
+        .expect_err("a chained run composes its body");
+}
+
+/// The approval refusal `approve_document_shell` returns for `text` with no
+/// rule and no handler, as `(source file, line, property)`.
+fn refused_location(dir: &TempDir, name: &str, text: &str, mode: CompositionMode) -> (std::path::PathBuf, usize, Option<String>, String) {
+    let file = dir.path().join(name);
+    fs::write(&file, text).unwrap();
+    let source = ResolvedCompositionSource {
+        original_ref: file.to_str().unwrap().to_string(),
+        resolved_path: file,
+        original_text: text.to_string(),
+        markdown: text.to_string().into(),
+    };
+    let home = TempDir::new().unwrap();
+    let approval = crate::harness::ShellApprovalOptions {
+        permissions: crate::harness::shell::test_support::user_permissions(home.path(), &[]),
+        ..Default::default()
+    };
+    let options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+    let error = approve_document_shell(&source, &options, &approval, mode).expect_err("no rule permits the command");
+    let message = error.to_string();
+    match error {
+        CompositionError::ShellApprovalUnavailable { source_file, line, property, .. } => (source_file, line, property, message),
+        other => panic!("expected an approval refusal, got {other:?}"),
+    }
+}
+
+fn same_file(left: &std::path::Path, right: &std::path::Path) -> bool {
+    biscuit_file::canonicalize_simplified(left).unwrap() == biscuit_file::canonicalize_simplified(right).unwrap()
+}
+
+/// An inline run composes its `prompt` as a generated body; a refusal of one
+/// of its commands names the real file and its `prompt` property, never a
+/// line of the generated document (which counts the frontmatter first).
+#[test]
+fn inline_shell_preflight_names_the_prompt_property_not_a_generated_line() {
+    let dir = TempDir::new().unwrap();
+    let shapes = [
+        ("multi-line", "---\nagent: goose\nprompt: |\n  Update the body.\n\n  ::shell echo unpermitted\n---\n# Body\n"),
+        ("single-line", "---\nagent: goose\nprompt: '::shell echo unpermitted'\n---\n# Body\n"),
+        (
+            "shell-block",
+            "---\nagent: goose\nprompt: |\n  Update.\n  ::shell-block\n  echo unpermitted\n  ::end-block\n---\n# Body\n",
+        ),
+        (
+            "initialized",
+            "---\nagent: goose\ninitialize:\n  - {stdout: initialized}\nprompt: |\n  Update the body.\n\n  ::shell echo unpermitted\n---\n# Body\n",
+        ),
+        (
+            "loop",
+            "---\nagent: goose\nloop: {until: 'false', max: 1}\nprompt: |\n  Update the body.\n\n  ::shell echo unpermitted\n---\n# Body\n",
+        ),
+        (
+            "interpolated",
+            "---\nagent: goose\nword: taken\nprompt: |\n  Update {{ word }}.\n\n  ::shell echo unpermitted\n---\n# Body\n",
+        ),
+        (
+            "bad block option",
+            "---\nagent: goose\nprompt: |\n  Update.\n  ::shell-block timeout=bad\n  echo unpermitted\n  ::end-block\n---\n# Body\n",
+        ),
+    ];
+    for (shape, text) in shapes {
+        let (source_file, line, property, message) =
+            refused_location(&dir, "doc.md", text, CompositionMode::InlineFrontmatterPrompt);
+
+        assert!(same_file(&source_file, &dir.path().join("doc.md")), "{shape}: {source_file:?}");
+        assert_eq!(line, 0, "{shape}: no generated line is published");
+        assert_eq!(property.as_deref(), Some("prompt"), "{shape}");
+        assert!(message.contains("doc.md (frontmatter `prompt`)"), "{shape}: {message}");
+    }
+}
+
+/// The controls: a chained body keeps its line, a transcluded child keeps
+/// its own file and line, and a frontmatter `$(...)` value keeps its line.
+#[test]
+fn inline_shell_preflight_keeps_body_child_and_frontmatter_origins() {
+    let dir = TempDir::new().unwrap();
+
+    let (file, line, property, _) = refused_location(
+        &dir,
+        "chained.md",
+        "---\nagent: goose\n---\n# Body\n\n::shell echo unpermitted\n",
+        CompositionMode::ChainedDocument,
+    );
+    assert!(same_file(&file, &dir.path().join("chained.md")), "{file:?}");
+    assert_eq!((line, property), (6, None), "a chained body's line is the file's");
+
+    fs::write(dir.path().join("child.md"), "# Child\n\n::shell echo unpermitted\n").unwrap();
+    let (file, line, property, _) = refused_location(
+        &dir,
+        "parent.md",
+        "---\nagent: goose\nprompt: |\n  Update the body.\n\n  ::file ./child.md\n---\n# Body\n",
+        CompositionMode::InlineFrontmatterPrompt,
+    );
+    assert!(same_file(&file, &dir.path().join("child.md")), "{file:?}");
+    assert_eq!((line, property), (3, None), "a child's line is its own");
+
+    let (file, line, property, _) = refused_location(
+        &dir,
+        "value.md",
+        "---\nagent: goose\nvalue: $(echo unpermitted)\nprompt: Update the body.\n---\n# Body\n",
+        CompositionMode::InlineFrontmatterPrompt,
+    );
+    assert!(same_file(&file, &dir.path().join("value.md")), "{file:?}");
+    assert_eq!((line, property.as_deref()), (3, Some("value")), "a frontmatter value keeps its line");
+}
+
+/// The shell failure an inline run's composition returns names the real file
+/// with its authored text and the `prompt` property; nothing in it is the
+/// generated document's (no `unknown` source, no generated line or excerpt).
+#[test]
+fn inline_shell_execution_failure_names_the_prompt_of_the_real_file() {
+    let dir = TempDir::new().unwrap();
+    // `mkdir` of an existing directory fails under `sh` and `cmd` alike.
+    fs::create_dir(dir.path().join("taken")).unwrap();
+    let text = "---\nagent: goose\nprompt: |\n  Update the body.\n\n  ::shell mkdir taken\n---\n# Body\n";
+    let source = raw_source(&dir, text);
+    let mut approved = darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new();
+    approved.insert_exact("mkdir taken");
+    let options = PrepareOptions {
+        pre_approved_commands: Some(approved),
+        ..repo_options(&dir)
+    };
+
+    let error = prepare_inline(&source, options).expect_err("the permitted command fails");
+
+    let CompositionError::ShellExpansionFailed { error, .. } = &error else {
+        panic!("expected a shell failure, got {error:?}");
+    };
+    assert!(matches!(**error, darkmatter::markdown::compose::ShellExpansionError::ExecutionFailed { .. }), "{error:?}");
+    assert_eq!(
+        error.origin(),
+        Some(&darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter { key: "prompt".to_string(), line: None })
+    );
+    let ctx = error.context().unwrap();
+    assert!(same_file(&ctx.absolute, &source.resolved_path), "{:?}", ctx.absolute);
+    assert_eq!(&*ctx.content, text, "the context is the authored file, not generated text");
+}
+
+/// The control: a transcluded child's failing command keeps the child's file
+/// and line.
+#[test]
+fn inline_shell_execution_failure_in_a_child_keeps_the_child_origin() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir(dir.path().join("taken")).unwrap();
+    fs::write(dir.path().join("child.md"), "# Child\n\n::shell mkdir taken\n").unwrap();
+    let source = raw_source(&dir, "---\nagent: goose\nprompt: |\n  Update the body.\n\n  ::file ./child.md\n---\n# Body\n");
+    let mut approved = darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new();
+    approved.insert_exact("mkdir taken");
+    let options = PrepareOptions {
+        pre_approved_commands: Some(approved),
+        ..repo_options(&dir)
+    };
+
+    let error = prepare_inline(&source, options).expect_err("the child's command fails");
+
+    let CompositionError::ShellExpansionFailed { error: shell, .. } = &error else {
+        panic!("expected a shell failure, got {error:?}");
+    };
+    assert_eq!(shell.origin(), Some(&darkmatter::markdown::compose::ShellCommandOrigin::Body { line: 3 }), "{shell:?}");
+    assert!(same_file(&shell.context().unwrap().absolute, &dir.path().join("child.md")), "{shell:?}");
+}
+
+/// The passive late-value check returns the same prompt origin and real
+/// source an inline failure does; the chained control keeps its body line.
+#[test]
+fn inline_late_value_failure_names_the_prompt_of_the_real_file() {
+    use darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots;
+    use darkmatter::markdown::compose::ShellCommandOrigin;
+    let dir = TempDir::new().unwrap();
+    let late = "::shell {{ last(seq.outputs) }} probe\n";
+    let check = |text: &str, mode: CompositionMode| {
+        let source = raw_source(&dir, text);
+        let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+        options.deferred_shell_roots = DeferredShellRoots::new(["seq"]).with_placeholders_template_required();
+        match validate_document_shell_late_values(&source, &options, mode).expect_err("the late program is refused") {
+            CompositionError::ShellExpansionFailed { error, .. } => (source, error),
+            other => panic!("expected a shell failure, got {other:?}"),
+        }
+    };
+
+    let text = format!("---\nprompt: |\n  Update.\n\n  {late}---\n# Body\n");
+    let (source, error) = check(&text, CompositionMode::InlineFrontmatterPrompt);
+    assert_eq!(error.origin(), Some(&ShellCommandOrigin::Frontmatter { key: "prompt".to_string(), line: None }));
+    let ctx = error.context().unwrap();
+    assert!(same_file(&ctx.absolute, &source.resolved_path), "{:?}", ctx.absolute);
+    assert_eq!(&*ctx.content, text.as_str());
+
+    let (_, error) = check(&format!("---\nagent: goose\n---\n# Body\n\n{late}"), CompositionMode::ChainedDocument);
+    assert_eq!(error.origin(), Some(&ShellCommandOrigin::Body { line: 6 }), "a chained body keeps its line");
+}
+
+/// The interactive approval prompt for an inline run's `prompt` command shows
+/// the real file and the `prompt` property, not a generated line.
+#[test]
+fn inline_shell_preflight_prompts_with_the_prompt_property() {
+    use darkmatter::markdown::compose::shell_expansion::types::{
+        ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
+    };
+    use darkmatter::markdown::compose::{ComposeSource, ShellCommandOrigin};
+    struct Recording(std::sync::Mutex<Vec<ShellApprovalRequest>>);
+    impl ShellApprovalHandler for Recording {
+        fn approve(&self, request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            self.0.lock().unwrap().push(request);
+            Ok(ShellApprovalDecision::AllowOnce)
+        }
+    }
+    let dir = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let source = raw_source(&dir, "---\nagent: goose\nprompt: |\n  Update the body.\n\n  ::shell echo unpermitted\n---\n# Body\n");
+    let handler = std::sync::Arc::new(Recording(std::sync::Mutex::new(Vec::new())));
+    let approval = crate::harness::ShellApprovalOptions {
+        permissions: crate::harness::shell::test_support::user_permissions(home.path(), &[]),
+        approval_handler: Some(handler.clone()),
+        ..Default::default()
+    };
+    let options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+
+    approve_document_shell(&source, &options, &approval, CompositionMode::InlineFrontmatterPrompt).unwrap();
+
+    let requests = handler.0.lock().unwrap();
+    let [request] = requests.as_slice() else {
+        panic!("one prompt: {requests:?}");
+    };
+    assert_eq!(request.origin, ShellCommandOrigin::Frontmatter { key: "prompt".to_string(), line: None });
+    let ComposeSource::File(file) = &request.source else {
+        panic!("a file source: {:?}", request.source);
+    };
+    assert!(same_file(file, &source.resolved_path), "{file:?}");
+}
+
+/// A warning the generated `prompt` body reports carries no line (its line
+/// counts the generated document); a transcluded child's warning keeps its own.
+#[test]
+fn inline_prompt_warnings_carry_no_generated_line() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("grandchild.md"), "Grandchild\n").unwrap();
+    fs::write(dir.path().join("child.md"), "# Child\n\n::file ./grandchild.md bogus=child\n").unwrap();
+    let source = raw_source(
+        &dir,
+        "---\nagent: goose\nprompt: |\n  Update the body.\n\n  ::file ./child.md bogus=root\n---\n# Body\n",
+    );
+
+    let prepared = prepare_inline(&source, repo_options(&dir)).unwrap();
+
+    let unknown: Vec<_> = prepared.warnings.iter().filter(|warning| warning.message.contains("Unknown option")).collect();
+    let [root, child] = unknown.as_slice() else {
+        panic!("one warning per directive: {:?}", prepared.warnings);
+    };
+    let (root, child) = if root.document().is_some_and(|document| same_file(document, &dir.path().join("child.md"))) {
+        (child, root)
+    } else {
+        (root, child)
+    };
+    assert_eq!(root.line_number, None, "{root:?}");
+    assert_eq!(child.line_number, Some(3), "{child:?}");
+}
+
+/// The error an inline run of a document with `prompt` (indented into the
+/// frontmatter) returns, with `mkdir taken` approved and `taken` existing, so
+/// that command fails under `sh` and `cmd` alike.
+fn inline_failure(dir: &TempDir, frontmatter: &str, prompt: &str) -> (ResolvedCompositionSource, CompositionError) {
+    fs::create_dir_all(dir.path().join("taken")).unwrap();
+    let indented: String = prompt.lines().map(|line| format!("  {line}\n")).collect();
+    let text = format!("---\nagent: goose\n{frontmatter}prompt: |\n{indented}---\n# Body\n");
+    let source = raw_source(dir, &text);
+    let mut approved = darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new();
+    approved.insert_exact("mkdir taken");
+    let options = PrepareOptions {
+        pre_approved_commands: Some(approved),
+        ..repo_options(dir)
+    };
+    let error = prepare_inline(&source, options).expect_err("the prompt fails");
+    (source, error)
+}
+
+/// A shell failure published at the source's `prompt`: the real file with
+/// its authored text, and no generated line or excerpt.
+fn assert_shell_failure_at_prompt(shell: &darkmatter::markdown::compose::ShellExpansionError, source: &ResolvedCompositionSource) {
+    use darkmatter::markdown::compose::ShellCommandOrigin;
+    assert_eq!(
+        shell.origin(),
+        Some(&ShellCommandOrigin::Frontmatter { key: "prompt".to_string(), line: None }),
+        "{shell:?}"
+    );
+    let ctx = shell.context().expect("a located failure");
+    assert!(same_file(&ctx.absolute, &source.resolved_path), "{ctx:?}");
+    assert_eq!(&*ctx.content, source.original_text.as_str(), "the authored file, not generated text");
+}
+
+/// Everything `error` publishes names the real file and its `prompt`
+/// property, and no position or text of the generated body.
+fn assert_published_at_prompt(case: &str, error: &CompositionError, source: &ResolvedCompositionSource) {
+    match error {
+        CompositionError::ShellExpansionFailed { error: shell, .. } => assert_shell_failure_at_prompt(shell, source),
+        CompositionError::InlinePromptDirectiveFailed { source_path, property, message, command } => {
+            assert!(same_file(source_path, &source.resolved_path), "{case}: {source_path:?}");
+            assert_eq!(property, "prompt", "{case}");
+            assert!(!message.contains("line"), "{case}: no generated line in {message:?}");
+            if let Some(command) = command {
+                assert_shell_failure_at_prompt(command, source);
+            }
+        }
+        CompositionError::ComposeFailed(MarkdownError::InIteration(failure)) => {
+            assert!(failure.location.is_none(), "{case}: no generated site: {failure:?}");
+            let MarkdownError::ShellExpansion(shell) = failure.error.as_ref() else {
+                panic!("{case}: expected a command's failure in the copy, got {failure:?}");
+            };
+            assert_shell_failure_at_prompt(shell, source);
+        }
+        other => panic!("{case}: expected a failure at the prompt, got {other:?}"),
+    }
+    let display = error.to_string();
+    for generated in ["unknown", "line ", "<prompt of"] {
+        assert!(!display.contains(generated), "{case}: {generated:?} in {display}");
+    }
+}
+
+/// A failure of an inline run's `prompt` is published at the source's
+/// `prompt` property after earlier stages rewrote the generated body
+/// (interpolation, a removed `::block`, an interpolated command), and for
+/// every `::shell-block` error: its command's failure, a bad option, and an
+/// unclosed block. None publishes a generated line, excerpt, or `unknown`.
+#[test]
+fn inline_shell_failures_after_rewrites_and_in_blocks_name_the_prompt() {
+    let block = "::shell-block\nmkdir taken\n::end-block\n";
+    let cases: [(&str, &str, String); 8] = [
+        ("unrelated frontmatter interpolation", "title: '{{ 1 + 1 }}'\n", "Update.\n\n::shell mkdir taken\n".to_string()),
+        ("body interpolation before", "word: taken\n", "Update {{ word }}.\n\n::shell mkdir taken\n".to_string()),
+        ("removed block before", "", "::block when=true\nKept.\n::end-block\n\n::shell mkdir taken\n".to_string()),
+        ("interpolated command", "word: taken\n", "Update.\n\n::shell mkdir {{ word }}\n".to_string()),
+        ("block command", "", format!("Update.\n{block}")),
+        ("block after interpolation", "word: taken\n", format!("Update {{{{ word }}}}.\n{block}")),
+        ("bad block option", "", "Update.\n::shell-block timeout=bad\nmkdir taken\n::end-block\n".to_string()),
+        ("unclosed block", "", "Update.\n::shell-block\nmkdir taken\n".to_string()),
+    ];
+    for (case, frontmatter, prompt) in cases {
+        let dir = TempDir::new().unwrap();
+        let (source, error) = inline_failure(&dir, frontmatter, &prompt);
+        assert_published_at_prompt(case, &error, &source);
+    }
+}
+
+/// The block-command case keeps the command's failure as its cause, and the
+/// option and unclosed cases name what is wrong.
+#[test]
+fn inline_shell_block_failures_keep_their_cause_and_reason() {
+    use darkmatter::markdown::compose::ShellExpansionError;
+    let dir = TempDir::new().unwrap();
+    let (_, error) = inline_failure(&dir, "", "Update.\n::shell-block\nmkdir taken\n::end-block\n");
+    let CompositionError::InlinePromptDirectiveFailed { command: Some(command), .. } = &error else {
+        panic!("expected a block command failure, got {error:?}");
+    };
+    assert!(matches!(**command, ShellExpansionError::ExecutionFailed { .. }), "{command:?}");
+    assert_eq!(crate::diagnostics::Diagnostic::code(&error), "composition.failed", "the code a chained block failure has");
+
+    let dir = TempDir::new().unwrap();
+    let (_, error) = inline_failure(&dir, "", "Update.\n::shell-block timeout=bad\nmkdir taken\n::end-block\n");
+    assert!(error.to_string().contains("Invalid timeout value 'bad'"), "{error}");
+
+    let dir = TempDir::new().unwrap();
+    let (_, error) = inline_failure(&dir, "", "Update.\n::shell-block\nmkdir taken\n");
+    assert!(error.to_string().contains("`::shell-block` is never closed"), "{error}");
+}
+
+/// The rest of the directive sweep: page-block pairing and `when=` errors and
+/// a transclusion `when=` error of the generated body are published at the
+/// `prompt` too; a local child's keep the child's file and line.
+#[test]
+fn inline_directive_failures_name_the_prompt_and_a_childs_keep_its_own() {
+    let cases = [
+        ("unmatched end", "Update.\n::end-block\n"),
+        ("unclosed page block", "::block when=true\nKept.\n"),
+        ("page-block condition", "::block when=\"1 +\"\nKept.\n::end-block\n"),
+        ("transclusion condition", "::file ./x.md when=\"1 +\"\n"),
+    ];
+    for (case, prompt) in cases {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("x.md"), "x\n").unwrap();
+        let (source, error) = inline_failure(&dir, "", prompt);
+        assert_published_at_prompt(case, &error, &source);
+    }
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("child.md"), "# Child\n\n::shell-block timeout=bad\nmkdir taken\n::end-block\n").unwrap();
+    let (_, error) = inline_failure(&dir, "", "Update.\n\n::file ./child.md\n");
+    let CompositionError::ComposeFailed(MarkdownError::ShellBlock(block)) = &error else {
+        panic!("expected the child's own block error, got {error:?}");
+    };
+    let darkmatter::markdown::compose::ShellBlockError::Parse { line, source_file, .. } = block.as_ref() else {
+        panic!("expected a parse error, got {block:?}");
+    };
+    assert!(source_file.as_deref().is_some_and(|file| same_file(file, &dir.path().join("child.md"))), "{source_file:?}");
+    assert_eq!(*line, 3, "the child's own line");
+}
+
+/// `::map` / `::filter` failures and block-pairing errors of an inline run's
+/// `prompt` are published at the source's `prompt` property, before and
+/// after an earlier interpolation rewrote the generated body: a source that
+/// is not a collection (found by the call check), a callback or nested gate
+/// failing in a copy (found by the executor), a command failing in a copy, a
+/// crossed close, and an unmatched collection closer. None publishes a
+/// generated line, excerpt, `unknown`, or Darkmatter's `document` placeholder.
+#[test]
+fn inline_collection_and_pairing_failures_name_the_prompt() {
+    let map_scalar = "::map word \"w => w\"\n- item\n::end-map\n";
+    let map_shell = "::map items \"i => i\"\n::shell mkdir taken\n::end-map\n";
+    let crossed = "::map items \"i => i\"\n::block when=true\nx\n::end-map\n::end-block\n";
+    let fm = "$schema:\n  word: string\n  items: string[]\nword: taken\nitems: [a, b]\n";
+    let cases: [(&str, String); 10] = [
+        ("map over an undeclared source", "Update.\n\n::map other \"o => o\"\n- item\n::end-map\n".to_string()),
+        ("map over a scalar", format!("Update.\n\n{map_scalar}")),
+        ("map over a scalar after interpolation", format!("Update {{{{ word }}}}.\n\n{map_scalar}")),
+        ("filter over a scalar", "Update.\n\n::filter word \"w => true\"\n- item\n::end-filter\n".to_string()),
+        ("command in a repeated copy", format!("Update.\n\n{map_shell}")),
+        ("command in a repeated copy after interpolation", format!("Update {{{{ word }}}}.\n\n{map_shell}")),
+        (
+            "callback failing in a copy",
+            "Update.\n\n::map items \"i => frontmatter('./missing.md', 'title')\"\n- {{ i }}\n::end-map\n".to_string(),
+        ),
+        (
+            "nested gate failing in a copy",
+            "Update.\n\n::map items \"i => i\"\n::map items \"j => j\" when=\"frontmatter('./missing.md', 'title') == 'x'\"\n- {{ j }}\n::end-map\n::end-map\n".to_string(),
+        ),
+        ("crossed close", format!("Update.\n\n{crossed}")),
+        ("unmatched collection closer", "Update.\n\n::end-map\n".to_string()),
+    ];
+    for (case, prompt) in cases {
+        let dir = TempDir::new().unwrap();
+        let (source, error) = inline_failure(&dir, fm, &prompt);
+        assert_published_at_prompt(case, &error, &source);
+        let debug = format!("{error:?}");
+        for generated in ["<prompt of", "\"document\""] {
+            assert!(!debug.contains(generated), "{case}: {generated:?} in {debug}");
+        }
+    }
+}
+
+/// A local child's collection failure keeps the child's file and line.
+#[test]
+fn inline_prompt_keeps_a_local_childs_collection_failure_its_own() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("child.md"), "---\nword: taken\n---\n# Child\n\n::map word \"w => w\"\nx\n::end-map\n").unwrap();
+    let (_, error) = inline_failure(&dir, "", "Update.\n\n::file ./child.md\n");
+    let CompositionError::ComposeFailed(MarkdownError::Collection(collection)) = &error else {
+        panic!("expected the child's own collection error, got {error:?}");
+    };
+    let site = collection.site().expect("a located failure");
+    let darkmatter::markdown::SourceRef::OnDiskSpan { context, span } = site.source.as_ref() else {
+        panic!("expected an authored span, got {site:?}");
+    };
+    assert!(same_file(&context.absolute, &dir.path().join("child.md")), "{context:?}");
+    assert_eq!(span.line(), 6, "the child's own line");
+}
+
+/// `::toc-linking` and `::file-links` failures of an inline run's `prompt`
+/// are published at the source's `prompt` property, before and after an
+/// earlier interpolation rewrote the generated body: a bad heading level and
+/// cleanup service, an unresolved target, and a bad `--depth`. None
+/// publishes a generated line, `unknown`, or the generated document's
+/// identity.
+#[test]
+fn inline_toc_and_file_links_failures_name_the_prompt() {
+    let directives = [
+        "::toc-linking ./x.md level=h9\n",
+        "::toc-linking ./x.md cleanup=bogus\n",
+        "::toc-linking ./missing.md\n",
+        "::file-links --dir . --depth x\n",
+    ];
+    for directive in directives {
+        for lead in ["Update.", "Update {{ word }}."] {
+            let dir = TempDir::new().unwrap();
+            fs::write(dir.path().join("x.md"), "# X\n\n## Section\n").unwrap();
+            let (source, error) = inline_failure(&dir, "word: taken\n", &format!("{lead}\n\n{directive}"));
+            let case = format!("{lead} {directive:?}");
+            assert_published_at_prompt(&case, &error, &source);
+            let debug = format!("{error:?}");
+            assert!(!debug.contains("<prompt of"), "{case}: {debug}");
+        }
+    }
+}
+
+/// An inline document in `dir` whose `prompt` is `prompt`, with `word: taken`.
+fn inline_prompt_source(dir: &TempDir, prompt: &str) -> ResolvedCompositionSource {
+    let indented: String = prompt.lines().map(|line| format!("  {line}\n")).collect();
+    raw_source(dir, &format!("---\nagent: goose\nword: taken\nprompt: |\n{indented}---\n# Body\n"))
+}
+
+/// The tolerated `::toc-linking` and `::file-links` failures of an inline
+/// run's `prompt` (a bad glob, a missing `--dir` target, a glob matching
+/// nothing) are warnings that name no generated line, in their text or their
+/// line; a local child's say the child's own line and name the child.
+#[test]
+fn inline_tolerated_toc_and_file_links_warnings_carry_no_generated_line() {
+    let directives = [
+        "::toc-linking ./x.md filter=\"[a\"\n",
+        "::file-links --dir ./nope\n",
+        "::file-links ./none/*.md\n",
+    ];
+    for directive in directives {
+        for lead in ["Update.", "Update {{ word }}."] {
+            let dir = TempDir::new().unwrap();
+            fs::write(dir.path().join("x.md"), "# X\n\n## Section\n").unwrap();
+            let source = inline_prompt_source(&dir, &format!("{lead}\n\n{directive}"));
+            let prepared = prepare_inline(&source, repo_options(&dir)).expect("the failure is tolerated");
+            let case = format!("{lead} {directive:?}");
+            let [warning] = prepared.warnings.as_slice() else {
+                panic!("{case}: one warning: {:?}", prepared.warnings);
+            };
+            assert!(!warning.message.contains("line"), "{case}: {warning:?}");
+            assert_eq!(warning.line_number, None, "{case}: {warning:?}");
+        }
+    }
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("child.md"), "# Child\n\nText.\n\n::file-links --dir ./nope\n").unwrap();
+    let source = inline_prompt_source(&dir, "Update.\n\n::file ./child.md\n");
+    let prepared = prepare_inline(&source, repo_options(&dir)).expect("the child's failure is tolerated");
+    let [warning] = prepared.warnings.as_slice() else {
+        panic!("one warning: {:?}", prepared.warnings);
+    };
+    assert!(warning.message.contains("line 5"), "the child's own line: {warning:?}");
+    assert!(warning.document().is_some_and(|document| same_file(document, &dir.path().join("child.md"))), "{warning:?}");
+}
+
+/// A local child's `::toc-linking` failure keeps the child's file and line.
+#[test]
+fn inline_prompt_keeps_a_local_childs_toc_failure_its_own() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("x.md"), "# X\n").unwrap();
+    fs::write(dir.path().join("child.md"), "# Child\n\nText.\n\n::toc-linking ./x.md level=h9\n").unwrap();
+    let (_, error) = inline_failure(&dir, "", "Update.\n\n::file ./child.md\n");
+    let CompositionError::ComposeFailed(MarkdownError::TocLinking(
+        darkmatter::markdown::compose::TocLinkingError::InvalidLevel { document, line, .. },
+    )) = &error
+    else {
+        panic!("expected the child's own failure, got {error:?}");
+    };
+    assert!(document.as_deref().is_some_and(|file| same_file(file, &dir.path().join("child.md"))), "{error:?}");
+    assert_eq!(*line, 5, "the child's own line");
+}
+
+/// A real child never carries the source file's path in an inline run, so
+/// recognizing the generated body by that path cannot capture a child: an
+/// inline `prompt` that transcludes its own source is a transclusion cycle
+/// (the generated document enters the ancestry as the source file) before
+/// the child's `::shell-block`, `::shell`, or option warning runs, and the
+/// pre-flight walk, which has already visited the source, offers none of
+/// the child's commands for approval.
+#[test]
+fn inline_prompt_transcluding_its_own_source_is_a_cycle() {
+    use darkmatter::markdown::compose::TransclusionError;
+    let dir = TempDir::new().unwrap();
+    let text = "---\nagent: goose\nprompt: |\n  Update.\n\n  ::file ./inline.md\n---\n# Body\n\n::shell-block\nmkdir ran\n::end-block\n\n::shell echo unpermitted\n\n::file ./nope.md bogus=x\n";
+    let source = raw_source(&dir, text);
+    let mut approved = darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new();
+    approved.insert_exact("mkdir ran");
+    approved.insert_exact("echo unpermitted");
+    let options = PrepareOptions {
+        pre_approved_commands: Some(approved),
+        ..repo_options(&dir)
+    };
+
+    let error = prepare_inline(&source, options).expect_err("the self-transclusion is refused");
+    let CompositionError::ComposeFailed(MarkdownError::Transclusion(transclusion)) = &error else {
+        panic!("expected a transclusion cycle, got {error:?}");
+    };
+    let TransclusionError::CycleDetected { chain } = transclusion.as_ref() else {
+        panic!("expected a transclusion cycle, got {transclusion:?}");
+    };
+    assert_eq!(chain.len(), 2, "{chain:?}");
+    assert!(chain.iter().all(|(file, _)| same_file(file, &source.resolved_path)), "{chain:?}");
+    assert!(!dir.path().join("ran").exists(), "the child's block never ran");
+
+    let home = TempDir::new().unwrap();
+    let approval = crate::harness::ShellApprovalOptions {
+        permissions: crate::harness::shell::test_support::user_permissions(home.path(), &[]),
+        ..Default::default()
+    };
+    let options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+    let approved = approve_document_shell(&source, &options, &approval, CompositionMode::InlineFrontmatterPrompt)
+        .expect("no site is discovered, so none is refused")
+        .approved_commands;
+    assert!(!approved.contains_exact("mkdir ran") && !approved.contains_exact("echo unpermitted"), "{approved:?}");
 }

@@ -324,22 +324,25 @@ fn crossed(line: usize, closer: &str, open: &OpenRegion) -> BlockPairError {
 }
 
 /// Errors that can occur while scanning region pairs.
+///
+/// The message is position-free: every line is a field, and each consumer
+/// reports [`Self::line`] and [`Self::note`] beside it. A host composing
+/// generated text can then publish the reason without a line that is not a
+/// position in any file.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum BlockPairError {
     /// `::end-block` appeared without a matching opener.
-    #[error("Unmatched ::end-block at line {line}")]
+    #[error("Unmatched ::end-block")]
     UnmatchedEnd { line: usize },
 
     /// `::end-map` / `::end-filter` appeared with no open region.
-    #[error("Unmatched {closer} at line {line}")]
+    #[error("Unmatched {closer}")]
     UnmatchedCollectionEnd { line: usize, closer: &'static str },
 
     /// A closer met the wrong region on top of the stack: a different kind, or
     /// the same kind in a different container path. `line` is the closer;
     /// `open_line` is the still-open inner region.
-    #[error(
-        "'{closer}' at line {line} does not close the open region '{open_text}' from line {open_line}"
-    )]
+    #[error("'{closer}' does not close the open region '{open_text}'")]
     CrossedClose {
         line: usize,
         closer: String,
@@ -348,7 +351,7 @@ pub(crate) enum BlockPairError {
     },
 
     /// EOF reached with an unclosed region; `line` anchors the opener.
-    #[error("Unterminated block starting at line {line} (file ends at line {file_ends_at_line})")]
+    #[error("Unterminated block '{opening_text}'")]
     UnterminatedBlock {
         line: usize,
         opening_text: String,
@@ -356,11 +359,11 @@ pub(crate) enum BlockPairError {
     },
 
     /// `::end-block` had trailing non-whitespace content.
-    #[error("Unexpected content after ::end-block at line {line}: '{content}'")]
+    #[error("Unexpected content after ::end-block: '{content}'")]
     TrailingContent { line: usize, content: String },
 
     /// `::end-map` / `::end-filter` had trailing non-whitespace content.
-    #[error("Unexpected content after {closer} at line {line}: '{content}'")]
+    #[error("Unexpected content after {closer}: '{content}'")]
     TrailingCollectionContent {
         line: usize,
         closer: &'static str,
@@ -368,7 +371,7 @@ pub(crate) enum BlockPairError {
     },
 
     /// A `::map` / `::filter` opener appeared inside a shell-block command body.
-    #[error("'{directive}' at line {line} is not allowed inside the shell block opened at line {shell_line}")]
+    #[error("'{directive}' is not allowed inside a shell block")]
     CollectionInShellBody {
         line: usize,
         directive: String,
@@ -390,11 +393,55 @@ impl BlockPairError {
             | BlockPairError::CollectionInShellBody { line, .. } => *line,
         }
     }
+
+    /// The other line the reason refers to, counted like [`Self::line`]: where
+    /// the region a crossed closer misses was opened, where the shell block
+    /// holding a `::map` was opened, or where the file ends for an unclosed
+    /// region. Consumers render it beside the reason, so a host that drops
+    /// generated lines drops it with [`Self::line`].
+    pub(crate) fn note(&self) -> Option<String> {
+        match self {
+            BlockPairError::CrossedClose { open_line: line, .. }
+            | BlockPairError::CollectionInShellBody { shell_line: line, .. } => Some(format!("opened at line {line}")),
+            BlockPairError::UnterminatedBlock { file_ends_at_line, .. } => {
+                Some(format!("file ends at line {file_ends_at_line}"))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// ` (note)`, or nothing, for an error's `Display`.
+pub(crate) fn note_suffix(note: &Option<String>) -> String {
+    note.as_deref().map(|note| format!(" ({note})")).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every scanner reason is position-free; the line it is reported at and
+    /// the other line it refers to are fields ([`BlockPairError::line`],
+    /// [`BlockPairError::note`]), which each consumer shows beside it.
+    #[test]
+    fn reasons_are_position_free_and_their_line_is_a_field() {
+        let cases = [
+            ("x\n::end-block\n", 2, None),
+            ("x\n::end-map\n", 2, None),
+            ("::map a\n::filter b\n::end-map\n::end-filter\n", 3, Some("opened at line 2")),
+            ("x\n::block when=\"true\"\nbody\n", 2, Some("file ends at line 4")),
+            ("::block when=\"true\"\n::end-block junk\n", 2, None),
+            ("::map a\n::end-map junk\n", 2, None),
+            ("::shell-block\n::map a\n::end-map\n::end-block\n", 2, Some("opened at line 1")),
+        ];
+        for (content, line, note) in cases {
+            let error = scan_block_pairs(content).unwrap_err();
+            assert_eq!(error.line(), line, "{content:?}: {error:?}");
+            assert_eq!(error.note().as_deref(), note, "{content:?}: {error:?}");
+            let reason = error.to_string();
+            assert!(!reason.contains("line") && !reason.contains(&line.to_string()), "{content:?}: {reason}");
+        }
+    }
 
     #[test]
     fn single_shell_block() {

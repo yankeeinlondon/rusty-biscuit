@@ -52,8 +52,26 @@ the problems stay in each file's record, and only a problem with the invocation
 itself is a run diagnostic. `-vv` timings are absent from data. A validated record whose
 verdict relied on a `default(...)`, filling a missing or `null` value of a required or
 optional property, lists each one in `defaults`, as
-`{ "path": "greeting", "value": "hello" }`; the key is absent when there are none. The
-file itself is never changed.
+`{ "path": "greeting", "value": "hello", "schema_location": "/properties/greeting/default" }`
+(`schema_location` is the JSON Pointer of the `default` keyword in the lowered
+schema, and a `schema_file` is added when a schema file declares the default: a
+referenced schema file, a trigger file, or the file a `Name@file` import read the
+type from); the key is absent when there are none. The file itself is never changed.
+
+A default is still checked with the rest of the value. When it fails a check that
+needs the file system, such as `doc: file(required; eager; default(./note.md))` with
+no `note.md`, the problem is the default's, not the document's: its record carries
+the same `default` object, its `line` and `column` are `null`, and its message ends
+by naming the default's schema location (and schema file). The formatted output
+adds a `hint:` line under the problem saying the same: repair the default where
+the schema declares it, or write the property in the document.
+
+```json
+{ "kind": "invalid", "property": null, "path": "/doc", "line": null, "column": null,
+  "message": "no existing file matched reference `./note.md` while resolving from `/work` (the value is the schema default at schema location `/properties/doc/default`)",
+  "default": { "path": "doc", "value": "./note.md", "schema_location": "/properties/doc/default" },
+  "arm_index": null, "description": null }
+```
 
 ```json
 {
@@ -192,8 +210,10 @@ with a warning or a failure wraps it, as `{ "outcome", "diagnostics", "value" }`
 ## `md schema triggers`
 
 Explains schema-trigger discovery for a document: the roots searched, in order,
-envelopes shadowed by a nearer root, triggers skipped as invalid, and which triggers
-matched. See [Schema Triggers](../topics/schemas/schema-triggers.md).
+envelopes shadowed by a nearer root, triggers skipped as invalid, the registered
+host that identifies the document, and which triggers matched. See
+[Schema Triggers](../topics/schemas/schema-triggers.md) and
+[Host Registration](../topics/host-registration.md).
 
 ```text
 $ md schema triggers notes.md
@@ -208,8 +228,24 @@ Shadowed envelopes:
 - none
 Skipped invalid triggers:
 - none
+Registered host:
+- none
 Triggers:
 - none
+```
+
+When a [registered host](../topics/host-registration.md) identifies the document,
+the "Registered host" section names it, its version, the manifest it was loaded
+from, and its content revision, then lists each of the host's triggers in manifest
+order. Those triggers layer below the schema roots' triggers:
+
+```text
+Registered host:
+- acme 1.2.0 (manifest /Users/me/.acme/darkmatter-host.yaml, revision 5b1c…)
+- /Users/me/.acme/schemas/widget.yaml — matched
+  - condition 1 — matched
+- /Users/me/.acme/schemas/gadget.yaml — not matched
+  - condition 1 — defeated: `gadget` is required but absent
 ```
 
 A trigger whose payload holds `{{ … }}` slots is listed with
@@ -225,7 +261,9 @@ Triggers:
 
 A document outside every repository fails with status 1. A data output has `file`,
 `roots`, `shadowed`, `skipped`, `triggers`, `outcome`, and `diagnostics` on every
-run; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).
+run, and `registered` (`host`, `version`, `manifest`, `revision`, and the host's
+`triggers`), which is `null` when no single registered host identifies the
+document; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).
 
 ## `md schema about`
 

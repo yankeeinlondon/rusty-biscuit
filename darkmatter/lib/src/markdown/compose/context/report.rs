@@ -882,6 +882,7 @@ impl ComposeWarning {
             reference_details: None,
             data_location: None,
             grants_needed: None,
+            schema_default: None,
         };
         Self {
             stage: "schema_validation".to_string(),
@@ -944,6 +945,7 @@ impl ComposeWarning {
             reference_details: None,
             data_location: None,
             grants_needed: None,
+            schema_default: None,
         };
         Self {
             stage: "link_titles".to_string(),
@@ -1096,6 +1098,12 @@ impl ComposeWarning {
         self.document = document.or(self.document);
         self.location = Some(WarningLocation { line: span.line(), column: Some(span.column()), span: Some(span.range()) });
         self
+    }
+
+    /// The file the warning is about: the document that reported it, unless
+    /// the producer named another; `None` before a report attributes it.
+    pub fn document(&self) -> Option<&std::path::Path> {
+        self.document.as_deref()
     }
 
     /// Names `document` as this warning's file unless it already names one.

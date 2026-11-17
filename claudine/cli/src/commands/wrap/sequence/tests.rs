@@ -9,10 +9,9 @@ fn step(
     n: usize,
     path: &str,
     props: Vec<MissingProperty>,
-) -> SequenceMissingPropertiesStep {
-    SequenceMissingPropertiesStep {
-        step: n,
-        step_name: format!("step-{n}"),
+) -> SequenceMissingPropertiesEntry {
+    SequenceMissingPropertiesEntry {
+        subject: claudine::composition::SequenceMissingSubject::Step { number: n, name: format!("step-{n}") },
         source_path: PathBuf::from(path),
         missing: props,
         frontmatter_description: None,

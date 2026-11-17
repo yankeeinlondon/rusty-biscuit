@@ -14,6 +14,7 @@ pub mod bench;
 pub mod capabilities;
 pub mod clock;
 pub mod config;
+pub mod config_contracts;
 pub mod context;
 pub mod corpus;
 pub mod diagnostics;

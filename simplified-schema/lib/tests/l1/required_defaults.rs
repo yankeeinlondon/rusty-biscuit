@@ -24,8 +24,28 @@ fn schema(text: &str) -> SimplifiedSchema {
     SimplifiedSchema::try_from(text).expect("schema text")
 }
 
-fn applied(path: &str, value: Value) -> AppliedDefault {
-    AppliedDefault { path: PropertyPath::parse(path).expect("path"), value }
+/// The default at `path`, declared at `pointer` in the lowered schema, as
+/// this crate reports it (no host-supplied origin).
+fn applied(path: &str, value: Value, pointer: &str) -> AppliedDefault {
+    AppliedDefault { path: PropertyPath::parse(path).expect("path"), value, pointer: pointer.to_string(), origin: None }
+}
+
+/// A default at `path` holding `value`, wherever the schema declares it:
+/// it equals any [`AppliedDefault`] with that path and value.
+#[derive(Debug)]
+struct Placed {
+    path: PropertyPath,
+    value: Value,
+}
+
+impl PartialEq<Placed> for AppliedDefault {
+    fn eq(&self, other: &Placed) -> bool {
+        self.path == other.path && self.value == other.value
+    }
+}
+
+fn placed(path: &str, value: Value) -> Placed {
+    Placed { path: PropertyPath::parse(path).expect("path"), value }
 }
 
 /// The paths of `defaults`, canonically spelled.
@@ -99,7 +119,7 @@ mod strict_and_soft {
 
         let success = borrowed(retries.validate_strict(&input), &input);
 
-        assert_eq!(success.defaults, [applied("retries", json!(3))]);
+        assert_eq!(success.defaults, [applied("retries", json!(3), "/properties/retries/default")]);
         assert_eq!(input, json!({ "name": "Ada" }), "the input is never changed");
     }
 
@@ -111,7 +131,7 @@ mod strict_and_soft {
         let (value, defaults) = owned(retries.validate_soft(&input));
 
         assert_eq!(value, json!({ "name": "Ada", "retries": 3 }));
-        assert_eq!(defaults, [applied("retries", json!(3))]);
+        assert_eq!(defaults, [applied("retries", json!(3), "/properties/retries/default")]);
     }
 
     #[test]
@@ -153,10 +173,10 @@ mod strict_and_soft {
         let input = json!({ "name": "Ada", "retries": null });
 
         let strict = borrowed(retries.validate_strict(&input), &input);
-        assert_eq!(strict.defaults, [applied("retries", json!(3))]);
+        assert_eq!(strict.defaults, [placed("retries", json!(3))]);
         let (value, defaults) = owned(retries.validate_soft(&input));
         assert_eq!(value, json!({ "name": "Ada", "retries": 3 }));
-        assert_eq!(defaults, [applied("retries", json!(3))]);
+        assert_eq!(defaults, [placed("retries", json!(3))]);
     }
 
     #[test]
@@ -179,10 +199,10 @@ mod strict_and_soft {
         let input = json!({});
 
         let strict = borrowed(nullable.validate_strict(&input), &input);
-        assert_eq!(strict.defaults, [applied("note", json!("x"))]);
+        assert_eq!(strict.defaults, [placed("note", json!("x"))]);
         let (value, defaults) = owned(nullable.validate_soft(&input));
         assert_eq!(value, json!({ "note": "x" }));
-        assert_eq!(defaults, [applied("note", json!("x"))]);
+        assert_eq!(defaults, [placed("note", json!("x"))]);
     }
 
     #[test]
@@ -384,7 +404,7 @@ mod slots {
 
         let success = borrowed(resolved.validate_strict(&input), &input);
 
-        assert_eq!(success.defaults, [applied("n", json!(7))]);
+        assert_eq!(success.defaults, [applied("n", json!(7), "/properties/n/default")]);
     }
 }
 
@@ -411,10 +431,10 @@ mod presence_table {
             }
             Outcome::Defaulted => {
                 let strict = borrowed(row.validate_strict(&input), &input);
-                assert_eq!(strict.defaults, [applied("n", json!(3))], "{declaration} {input}");
+                assert_eq!(strict.defaults, [placed("n", json!(3))], "{declaration} {input}");
                 let (value, defaults) = owned(row.validate_soft(&input));
                 assert_eq!(value, json!({ "n": 3 }), "{declaration} {input}");
-                assert_eq!(defaults, [applied("n", json!(3))]);
+                assert_eq!(defaults, [placed("n", json!(3))]);
             }
             Outcome::Problem(at, code) => {
                 assert_eq!(invalid_codes(row.validate_strict(&input)), [(at.to_string(), code)], "{declaration} {input}");
@@ -483,7 +503,7 @@ mod raw_schemas {
 
         for input in [json!({}), json!({ "n": null })] {
             let strict = borrowed(optional.validate_strict(&input), &input);
-            assert_eq!(strict.defaults, [applied("n", json!(3))], "{input}");
+            assert_eq!(strict.defaults, [placed("n", json!(3))], "{input}");
             assert_eq!(owned(optional.validate_soft(&input)).0, json!({ "n": 3 }), "{input}");
         }
     }
@@ -502,7 +522,7 @@ mod raw_schemas {
         let required = raw(json!({ "n": { "type": "number", "default": 3 } }), &["n"]);
         let input = json!({});
 
-        assert_eq!(borrowed(required.validate_strict(&input), &input).defaults, [applied("n", json!(3))]);
+        assert_eq!(borrowed(required.validate_strict(&input), &input).defaults, [placed("n", json!(3))]);
         let exported = required.to_json_schema().expect("exports");
         assert_eq!(exported["required"], json!(["n"]), "the authored required array is kept");
         assert_eq!(exported["properties"]["n"], json!({ "type": "number", "default": 3 }), "no wrapper is added");
@@ -670,10 +690,10 @@ mod null_and_falsey {
         let nullable = schema("$schema:\n  n: unknown(required; default(null))\n");
         let missing = json!({});
 
-        assert_eq!(borrowed(nullable.validate_strict(&missing), &missing).defaults, [applied("n", Value::Null)]);
+        assert_eq!(borrowed(nullable.validate_strict(&missing), &missing).defaults, [placed("n", Value::Null)]);
         let (value, defaults) = owned(nullable.validate_soft(&missing));
         assert_eq!(value, json!({ "n": null }));
-        assert_eq!(defaults, [applied("n", Value::Null)]);
+        assert_eq!(defaults, [placed("n", Value::Null)]);
 
         let written = json!({ "n": null });
         assert!(borrowed(nullable.validate_soft(&written), &written).defaults.is_empty(), "a written null is kept as is");
@@ -769,7 +789,7 @@ mod parents {
         let input = json!({ "cfg": null });
 
         let strict = borrowed(cfg.validate_strict(&input), &input);
-        assert_eq!(strict.defaults, [applied("cfg", json!({})), applied("cfg.on", json!(true))]);
+        assert_eq!(strict.defaults, [placed("cfg", json!({})), placed("cfg.on", json!(true))]);
         let (value, _) = owned(cfg.validate_soft(&input));
         assert_eq!(value, json!({ "cfg": { "on": true } }));
     }
@@ -842,7 +862,7 @@ mod unions {
 
         let success = borrowed(same.validate_strict(&input), &input);
 
-        assert_eq!(success.defaults, [applied("a", json!(1))]);
+        assert_eq!(success.defaults, [applied("a", json!(1), "/anyOf/0/properties/a/default")]);
     }
 
     #[test]
@@ -896,7 +916,7 @@ mod unions {
         let either = schema("$schema:\n  - timeout: number(default(3))\n  - timeout: string\n");
 
         let missing = json!({});
-        assert_eq!(borrowed(either.validate_strict(&missing), &missing).defaults, [applied("timeout", json!(3))]);
+        assert_eq!(borrowed(either.validate_strict(&missing), &missing).defaults, [placed("timeout", json!(3))]);
         let written = json!({ "timeout": "soon" });
         assert!(borrowed(either.validate_strict(&written), &written).defaults.is_empty(), "already valid, still prepared");
     }
@@ -911,7 +931,7 @@ mod unions {
         );
         let input = json!({ "x": {} });
 
-        assert_eq!(borrowed(either.validate_strict(&input), &input).defaults, [applied("x.o", json!({}))]);
+        assert_eq!(borrowed(either.validate_strict(&input), &input).defaults, [placed("x.o", json!({}))]);
         let (value, _) = owned(either.validate_soft(&input));
         assert_eq!(value, json!({ "x": { "o": {} } }));
     }
@@ -945,7 +965,7 @@ mod unions {
         let exclusive = schema("$schema:\n  - timeout: number(default(3))\n    retries: null\n  - retries: number\n    timeout: null\n");
 
         let defaulted = json!({});
-        assert_eq!(borrowed(exclusive.validate_strict(&defaulted), &defaulted).defaults, [applied("timeout", json!(3))]);
+        assert_eq!(borrowed(exclusive.validate_strict(&defaulted), &defaulted).defaults, [placed("timeout", json!(3))]);
         let retries = json!({ "retries": 5 });
         let result = exclusive.validate_strict(&retries);
         assert!(matches!(result, Err(ValidationFailure::InvalidData { .. })), "the exclusion still judges the completed value: {result:?}");
@@ -972,7 +992,7 @@ mod unions {
         let closed = schema(&raw.to_string());
 
         let open_arm = json!({ "mode": "a" });
-        assert_eq!(borrowed(closed.validate_strict(&open_arm), &open_arm).defaults, [applied("extra", json!("x"))]);
+        assert_eq!(borrowed(closed.validate_strict(&open_arm), &open_arm).defaults, [placed("extra", json!("x"))]);
         let closed_arm = json!({ "mode": "b" });
         let result = closed.validate_strict(&closed_arm);
         assert!(matches!(result, Err(ValidationFailure::InvalidData { .. })), "the default is not dropped: {result:?}");
@@ -1021,7 +1041,7 @@ mod unions {
 
         let success = borrowed(rooted.validate_strict(&input), &input);
 
-        assert_eq!(success.defaults, [applied("name", json!("anonymous"))]);
+        assert_eq!(success.defaults, [applied("name", json!("anonymous"), "/properties/name/default")]);
     }
 
     #[test]
@@ -1162,7 +1182,174 @@ fn a_plain_validator_still_rejects_an_absent_defaulted_required_property() {
     let input = json!({});
 
     assert!(!plain.is_valid(&input), "JSON Schema's `default` fills nothing");
-    assert_eq!(borrowed(retries.validate_strict(&input), &input).defaults, [applied("retries", json!(3))]);
+    assert_eq!(borrowed(retries.validate_strict(&input), &input).defaults, [placed("retries", json!(3))]);
+}
+
+/// An existing object value is completed under every schema JSON Schema
+/// applies to it: its literal property, each `patternProperties` entry whose
+/// pattern matches its key, or `additionalProperties` when neither covers
+/// the key. Each row keeps the child contract and input fixed and changes
+/// only the container that selects the child.
+mod object_children {
+    use super::*;
+
+    const CHILD: &str = "\"{ retries: number(required; default(3)) }\"";
+
+    /// A schema whose root object selects `CHILD` through `selector`, with
+    /// any `extra` lines after it.
+    fn selected(selector: &str, extra: &str) -> SimplifiedSchema {
+        schema(&format!("$schema:\n  \"{selector}\": {CHILD}\n{extra}"))
+    }
+
+    /// Strict accepts `input` borrowed and reports the one default at
+    /// `path`, declared at `pointer`; soft inserts it.
+    #[track_caller]
+    fn completes(subject: &SimplifiedSchema, input: &Value, path: &str, pointer: &str, completed: &Value) {
+        let success = borrowed(subject.validate_strict(input), input);
+        assert_eq!(success.defaults, [applied(path, json!(3), pointer)]);
+
+        let (value, defaults) = owned(subject.validate_soft(input));
+        assert_eq!(&value, completed);
+        assert_eq!(defaults, [applied(path, json!(3), pointer)]);
+    }
+
+    macro_rules! completes_under {
+        ($($name:ident: $subject:expr, $input:expr, $path:expr, $pointer:expr, $completed:expr;)+) => {$(
+            #[test]
+            fn $name() {
+                completes(&$subject, &$input, $path, $pointer, &$completed);
+            }
+        )+};
+    }
+
+    completes_under! {
+        a_prefix_pattern_key: selected("<starting::x->", ""), json!({ "x-build": {} }),
+            "x-build.retries", r"/patternProperties/^x\-/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+        a_suffix_pattern_key: selected("<ending::-build>", ""), json!({ "x-build": {} }),
+            "x-build.retries", r"/patternProperties/\-build$/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+        a_regex_pattern_key: selected("<pattern::^x-.*$>", ""), json!({ "x-build": {} }),
+            "x-build.retries", "/patternProperties/^x-.*$/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+        a_catch_all_key_beside_an_unrelated_pattern: selected("<string>", "  \"<starting::other->\": string\n"),
+            json!({ "x-build": {} }), "x-build.retries", "/additionalProperties/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+        a_literal_key: selected("x-build", ""), json!({ "x-build": {} }),
+            "x-build.retries", "/properties/x-build/anyOf/1/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+        a_catch_all_key_without_patterns: selected("<string>", ""), json!({ "x-build": {} }),
+            "x-build.retries", "/additionalProperties/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+        a_literal_key_beside_an_unrelated_pattern: selected("x-build", "  \"<starting::other->\": string\n"),
+            json!({ "x-build": {} }), "x-build.retries", "/properties/x-build/anyOf/1/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+        an_array_item: schema(&format!("$schema:\n  entries: {}\n", CHILD.replace("}\"", "}[]\""))),
+            json!({ "entries": [{}] }), "entries.0.retries", "/properties/entries/anyOf/1/items/properties/retries/default",
+            json!({ "entries": [{ "retries": 3 }] });
+        a_tuple_item: schema(r#"{ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+            "properties": { "entries": { "type": "array", "prefixItems": [
+                { "type": "object", "properties": { "retries": { "type": "number", "default": 3 } }, "required": ["retries"] }
+            ] } } }"#),
+            json!({ "entries": [{}] }), "entries.0.retries", "/properties/entries/prefixItems/0/properties/retries/default",
+            json!({ "entries": [{ "retries": 3 }] });
+        a_local_reference: schema(r##"{ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+            "$defs": { "Job": { "type": "object", "properties": { "retries": { "type": "number", "default": 3 } }, "required": ["retries"] } },
+            "properties": { "x-build": { "$ref": "#/$defs/Job" } } }"##),
+            json!({ "x-build": {} }), "x-build.retries", "/$defs/Job/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+        an_all_of_member: schema(r#"{ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+            "properties": { "x-build": { "allOf": [
+                { "type": "object", "properties": { "retries": { "type": "number", "default": 3 } }, "required": ["retries"] }
+            ] } } }"#),
+            json!({ "x-build": {} }), "x-build.retries", "/properties/x-build/allOf/0/properties/retries/default",
+            json!({ "x-build": { "retries": 3 } });
+    }
+
+    #[test]
+    fn an_explicit_value_under_a_pattern_key_is_kept() {
+        let prefixed = selected("<starting::x->", "");
+        let input = json!({ "x-build": { "retries": 5 } });
+
+        assert!(borrowed(prefixed.validate_strict(&input), &input).defaults.is_empty());
+        assert!(borrowed(prefixed.validate_soft(&input), &input).defaults.is_empty());
+    }
+
+    #[test]
+    fn a_value_breaking_the_pattern_child_contract_is_still_invalid() {
+        let prefixed = selected("<starting::x->", "");
+        let input = json!({ "x-build": { "retries": "many" } });
+
+        let result = prefixed.validate_strict(&input);
+
+        assert!(matches!(result, Err(ValidationFailure::InvalidData { .. })), "{result:?}");
+    }
+
+    #[test]
+    fn a_key_a_literal_and_a_pattern_both_cover_takes_both_schemas_defaults() {
+        let both = schema(
+            r#"{ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+            "properties": { "x-build": { "type": "object",
+                "properties": { "retries": { "type": "number", "default": 3 } }, "required": ["retries"] } },
+            "patternProperties": { "^x-": { "type": "object",
+                "properties": { "timeout": { "type": "number", "default": 60 } }, "required": ["timeout"] } } }"#,
+        );
+        let input = json!({ "x-build": {} });
+
+        let (value, defaults) = owned(both.validate_soft(&input));
+
+        assert_eq!(value, json!({ "x-build": { "retries": 3, "timeout": 60 } }));
+        assert_eq!(paths(&defaults), ["x-build.retries", "x-build.timeout"]);
+        assert_eq!(defaults[1].pointer, "/patternProperties/^x-/properties/timeout/default");
+    }
+
+    #[test]
+    fn every_pattern_a_key_matches_applies() {
+        let two = schema(
+            r#"{ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+            "patternProperties": {
+                "^x-": { "type": "object", "properties": { "retries": { "type": "number", "default": 3 } }, "required": ["retries"] },
+                "-build$": { "type": "object", "properties": { "timeout": { "type": "number", "default": 60 } }, "required": ["timeout"] } } }"#,
+        );
+        let input = json!({ "x-build": {}, "x-test": {} });
+
+        let (value, defaults) = owned(two.validate_soft(&input));
+
+        assert_eq!(value, json!({ "x-build": { "retries": 3, "timeout": 60 }, "x-test": { "retries": 3 } }));
+        assert_eq!(paths(&defaults), ["x-build.retries", "x-build.timeout", "x-test.retries"]);
+    }
+
+    #[test]
+    fn the_catch_all_does_not_judge_a_key_a_pattern_covers() {
+        let mixed = selected("<string>", "  \"<starting::other->\": \"{ n: number }\"\n");
+        let input = json!({ "other-job": {}, "x-build": {} });
+
+        let (value, defaults) = owned(mixed.validate_soft(&input));
+
+        assert_eq!(value, json!({ "other-job": {}, "x-build": { "retries": 3 } }));
+        assert_eq!(paths(&defaults), ["x-build.retries"]);
+    }
+
+    /// The walk never meets such a pattern on its own: the schema's
+    /// validator refuses it first, with the same error the walk would give.
+    #[test]
+    fn a_pattern_that_does_not_compile_is_a_schema_error() {
+        let broken = schema(
+            r#"{ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+            "patternProperties": { "(": { "type": "object", "properties": { "n": { "type": "number", "default": 1 } }, "required": ["n"] } } }"#,
+        );
+
+        let input = json!({ "(": {} });
+
+        let result = broken.validate_strict(&input);
+
+        match result {
+            Err(ValidationFailure::Unprepared { error }) => {
+                assert!(matches!(error.as_ref(), SchemaError::BuildValidator { .. }), "{error:?}");
+            }
+            other => panic!("expected the schema refused, got {other:?}"),
+        }
+    }
 }
 
 #[test]
@@ -1174,4 +1361,161 @@ fn exported_json_schema_keeps_the_required_assertion() {
     let required: Vec<&str> = exported["required"].as_array().expect("required").iter().filter_map(Value::as_str).collect();
     assert!(required.contains(&"retries"), "{required:?}");
     assert_eq!(exported["properties"]["retries"]["default"], json!(3), "the default stays an annotation");
+}
+
+/// A check the structural default check cannot run (an eager file's
+/// existence) still judges the completed value; its problem belongs to the
+/// schema default, never to an authored position.
+#[cfg(feature = "file")]
+mod eager_file_defaults {
+    use std::path::Path;
+
+    use simplified_schema::{SchemaSource, ValidationProblem};
+
+    use super::*;
+
+    const EAGER_DEFAULT: &str = "$schema:\n  doc: file(required; eager; default(./note.md))\n";
+
+    /// The schema `text`, written to `schema.yaml` in `dir` and bound to a
+    /// context there, so its file values resolve from `dir`.
+    fn bound(dir: &Path, text: &str) -> SimplifiedSchema {
+        let path = dir.join("schema.yaml");
+        std::fs::write(&path, text).expect("schema written");
+        SimplifiedSchema::try_from_yaml(SchemaSource::from(path.as_path()).bound(biscuit_file::FileResolutionContext::new(dir)))
+            .expect("schema file")
+    }
+
+    #[track_caller]
+    fn invalid(result: Result<ValidationSuccess<'_>, ValidationFailure>) -> Vec<ValidationProblem> {
+        match result {
+            Err(ValidationFailure::InvalidData { problems }) => problems,
+            other => panic!("expected invalid data, got {other:?}"),
+        }
+    }
+
+    #[track_caller]
+    fn assert_attributed_to_the_default(problems: &[ValidationProblem]) {
+        let [problem] = problems else { panic!("one problem expected, got {problems:?}") };
+        assert_eq!(problem.code, ValidationProblemCode::InvalidFileReference);
+        assert_eq!(problem.path, "/doc");
+        let default = problem.default.as_ref().expect("the problem names its default");
+        assert_eq!(default.path.to_string(), "doc");
+        assert_eq!(default.pointer, "/properties/doc/default");
+        assert_eq!(default.value, json!("./note.md"));
+        assert!(problem.message.contains("schema default at schema location `/properties/doc/default`"), "{}", problem.message);
+        assert_eq!((problem.line, problem.column), (None, None), "no authored text holds a default");
+    }
+
+    #[test]
+    fn strict_attributes_a_missing_eager_default_target_to_the_default() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let eager = bound(dir.path(), EAGER_DEFAULT);
+
+        let problems = invalid(eager.validate_strict(&json!({})));
+
+        assert_attributed_to_the_default(&problems);
+    }
+
+    #[test]
+    fn soft_attributes_a_missing_eager_default_target_to_the_default() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let eager = bound(dir.path(), EAGER_DEFAULT);
+
+        let problems = invalid(eager.validate_soft(&json!({})));
+
+        assert_attributed_to_the_default(&problems);
+    }
+
+    #[test]
+    fn an_eager_default_whose_target_exists_is_accepted_and_reported() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("note.md"), "note\n").expect("target written");
+        let eager = bound(dir.path(), EAGER_DEFAULT);
+        let input = json!({});
+
+        let success = borrowed(eager.validate_strict(&input), &input);
+        let (value, defaults) = owned(eager.validate_soft(&input));
+
+        assert_eq!(success.defaults, [applied("doc", json!("./note.md"), "/properties/doc/default")]);
+        assert_eq!(value, json!({ "doc": "./note.md" }));
+        assert_eq!(paths(&defaults), ["doc"]);
+    }
+
+    #[test]
+    fn a_lazy_file_default_is_accepted_whether_or_not_its_target_exists() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let lazy = bound(dir.path(), "$schema:\n  doc: file(required; default(./note.md))\n");
+        let input = json!({});
+
+        assert_eq!(paths(&borrowed(lazy.validate_strict(&input), &input).defaults), ["doc"]);
+        assert_eq!(owned(lazy.validate_soft(&input)).1.len(), 1);
+        std::fs::write(dir.path().join("note.md"), "note\n").expect("target written");
+        assert_eq!(paths(&borrowed(lazy.validate_strict(&input), &input).defaults), ["doc"]);
+    }
+
+    #[test]
+    fn a_nested_eager_default_is_attributed_inside_its_present_parent() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let nested = bound(dir.path(), "$schema:\n  meta:\n    doc: file(required; eager; default(./note.md))\n");
+
+        let problems = invalid(nested.validate_strict(&json!({ "meta": {} })));
+
+        let [problem] = problems.as_slice() else { panic!("one problem expected, got {problems:?}") };
+        assert_eq!(problem.path, "/meta/doc");
+        let default = problem.default.as_ref().expect("attributed");
+        // An optional parent lowers to `null | object`; the pointer names the
+        // object arm that declares the default.
+        assert_eq!(default.pointer, "/properties/meta/anyOf/1/properties/doc/default");
+    }
+
+    #[test]
+    fn an_authored_missing_eager_file_stays_an_ordinary_problem() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let eager = bound(dir.path(), EAGER_DEFAULT);
+
+        let problems = invalid(eager.validate_strict(&json!({ "doc": "./absent.md" })));
+
+        let [problem] = problems.as_slice() else { panic!("one problem expected, got {problems:?}") };
+        assert_eq!(problem.path, "/doc");
+        assert!(problem.default.is_none(), "an authored value is not a default's");
+        assert!(!problem.message.contains("schema default"), "{}", problem.message);
+    }
+
+    /// Expansion inlines a `Name@file` type without a trace of its file;
+    /// resolution records the file declaring each default the type brings
+    /// in, so a problem with it names the file to repair. A default the
+    /// schema declares itself, or one inside a list's items, is not listed.
+    #[test]
+    fn resolution_records_the_file_declaring_each_imported_default() {
+        use simplified_schema::resolve::{DefaultFiles, resolve_yaml_schema};
+        use simplified_schema::embedded::ShippedSources;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let types = dir.path().join("types.yaml");
+        std::fs::write(
+            &types,
+            "kind: schema\ntypes:\n  Leaf: string(required; default(a))\n  Thing:\n    leaf: Leaf\n    own: number(required; default(1))\n",
+        )
+        .expect("types written");
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "$schema:\n  doc: Thing@./types.yaml\n  mine: string(required; default(m))\n",
+        )
+        .expect("schema written");
+        let types = simplified_schema::resolve::canonical_path(&types);
+        let resolve = |yaml: &str| {
+            let declaration: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("test YAML parses");
+            let context = biscuit_file::FileResolutionContext::new(dir.path());
+            resolve_yaml_schema(&declaration, dir.path(), &context, ShippedSources::NONE).expect("schema resolves")
+        };
+        let key = |path: &[&str]| path.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let expected: DefaultFiles =
+            [(key(&["doc", "leaf"]), types.clone()), (key(&["doc", "own"]), types.clone())].into_iter().collect();
+
+        let inline = resolve("doc: Thing@./types.yaml\nlocal: string(required; default(x))\nitems: Thing[]@./types.yaml\n");
+        let referenced = resolve("./schema.yaml");
+
+        assert_eq!(inline.default_files, expected);
+        assert_eq!(referenced.default_files, expected, "the referenced file's own `mine` default is its origin's");
+    }
 }

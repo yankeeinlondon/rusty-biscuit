@@ -59,6 +59,8 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # validation plus darkmatter's test-only effect counters. A dev-dependency
 # never enters the send path's normal dependency graph.
 darkmatter = { path = "../../darkmatter/lib", features = ["effects-instrumentation"] }
+# `tests/research_corpus.rs` names `LoadedYamlDocument` from its owner.
+simplified-schema = { path = "../../simplified-schema/lib" }
 # `tests/research_refresh.rs`: checks that a stopped run's descendants are gone.
 sysinfo = "0.38.2"
 

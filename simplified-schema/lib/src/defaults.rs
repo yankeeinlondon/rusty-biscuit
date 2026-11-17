@@ -86,7 +86,7 @@ use serde_json::Value;
 use crate::coerce::NestedTemplates;
 use crate::coercion::TextPattern;
 use crate::validate::{SchemaIdentity, ValidatorCache};
-use crate::{PropertyPath, SchemaError, scope, simplified};
+use crate::{JsonPointer, PropertyPath, SchemaError, SchemaOrigin, ValidationProblem, scope, simplified};
 
 /// A default that preparation placed in the value.
 #[derive(Debug, Clone, PartialEq)]
@@ -95,6 +95,71 @@ pub struct AppliedDefault {
     pub path: PropertyPath,
     /// The property's resolved default.
     pub value: Value,
+    /// JSON Pointer of the `default` keyword in the lowered JSON Schema, as
+    /// [`SchemaError::InvalidDefault`] names it (`/properties/doc/default`).
+    /// Where several schemas select the property with one equal default,
+    /// the first declaration's.
+    pub pointer: String,
+    /// Where the default is declared, when a host knows it: Darkmatter
+    /// names the file a `Name@file` import read it from
+    /// ([`crate::resolve::ResolvedSchema::default_files`]), else the layer
+    /// that declared its top-level property. `None` from this crate, whose
+    /// caller holds the whole schema's source.
+    pub origin: Option<SchemaOrigin>,
+}
+
+impl AppliedDefault {
+    /// Whether the value at `instance_path` is this default or lies inside
+    /// it.
+    pub fn holds(&self, instance_path: &JsonPointer) -> bool {
+        instance_path.segments().starts_with(self.path.segments())
+    }
+}
+
+/// Attributes each of `problems` about a value one of `defaults` inserted
+/// to that default (the deepest one holding it): the problem records the
+/// default in [`ValidationProblem::default`], its message names the
+/// default's schema location (and schema file, when known), and any line
+/// or column is cleared, since no authored text holds the value.
+///
+/// A problem already attributed is left alone, so a host may call this
+/// again over the same problems.
+///
+/// Pass only the defaults that filled a missing key ([`filling_missing`]):
+/// one that replaced a written `null` sits under a key the author wrote,
+/// so a problem with it keeps that key's position.
+pub fn attribute_problems(problems: &mut [ValidationProblem], defaults: &[AppliedDefault]) {
+    if defaults.is_empty() {
+        return;
+    }
+    for problem in problems.iter_mut().filter(|problem| problem.default.is_none()) {
+        let Some(applied) = defaults
+            .iter()
+            .filter(|applied| applied.holds(&problem.instance_path))
+            .max_by_key(|applied| applied.path.segments().len())
+        else {
+            continue;
+        };
+        let file = applied.origin.as_ref().and_then(SchemaOrigin::file);
+        problem.message = match file {
+            Some(file) => format!(
+                "{} (the value is the schema default at schema location `{}` in `{}`)",
+                problem.message,
+                applied.pointer,
+                file.display()
+            ),
+            None => format!("{} (the value is the schema default at schema location `{}`)", problem.message, applied.pointer),
+        };
+        problem.line = None;
+        problem.column = None;
+        problem.default = Some(applied.clone());
+    }
+}
+
+/// The defaults of `defaults` whose key `written` (the value before any
+/// default was applied) does not hold: the ones no authored text holds.
+pub fn filling_missing(defaults: &[AppliedDefault], written: &Value) -> Vec<AppliedDefault> {
+    defaults.iter().filter(|applied| applied.path.resolve(written).value().is_none()).cloned().collect()
 }
 
 /// The value to judge once missing and `null` properties hold their
@@ -929,6 +994,8 @@ enum Step {
 struct Insertion {
     steps: Vec<Step>,
     value: Value,
+    /// The `default` keyword's pointer.
+    pointer: String,
 }
 
 struct Fill<'a> {
@@ -1088,7 +1155,7 @@ impl<'a> Fill<'a> {
             return Err(SchemaError::RecursiveDefault { path: Some(path), reference: active.pointer.clone() });
         }
         self.check(selection, &declared, key, path)?;
-        self.out.push(Insertion { steps: steps.clone(), value: first.value.clone() });
+        self.out.push(Insertion { steps: steps.clone(), value: first.value.clone(), pointer: first.pointer.clone() });
         let children = selection.children();
         if !children.is_empty() {
             let depth = self.active.len();
@@ -1246,7 +1313,14 @@ fn finish(instance: Cow<'_, Value>, insertions: Vec<Insertion>) -> DefaultPrepar
     let candidate = apply(instance.into_owned(), &insertions);
     let defaults = insertions
         .into_iter()
-        .filter_map(|insertion| Some(AppliedDefault { path: property_path(&insertion.steps)?, value: insertion.value }))
+        .filter_map(|insertion| {
+            Some(AppliedDefault {
+                path: property_path(&insertion.steps)?,
+                value: insertion.value,
+                pointer: insertion.pointer,
+                origin: None,
+            })
+        })
         .collect();
     DefaultPreparation { candidate: Cow::Owned(candidate), defaults }
 }
@@ -1442,8 +1516,11 @@ mod tests {
 
     #[test]
     fn an_insertion_below_a_missing_parent_is_dropped() {
-        let insertion =
-            Insertion { steps: vec![Step::Key("gone".into()), Step::Key("a".into())], value: json!(1) };
+        let insertion = Insertion {
+            steps: vec![Step::Key("gone".into()), Step::Key("a".into())],
+            value: json!(1),
+            pointer: "/properties/gone/properties/a/default".into(),
+        };
 
         let value = apply(json!({ "kept": true }), &[insertion]);
 

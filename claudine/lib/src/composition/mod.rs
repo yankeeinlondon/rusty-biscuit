@@ -38,6 +38,7 @@ pub mod mismatch;
 pub mod preflight;
 mod prepare;
 pub mod provider_tail;
+pub mod registration;
 pub mod ownership;
 mod reserved;
 mod resolve;
@@ -78,7 +79,7 @@ pub use error::{
     DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
     LifecycleEvaluationReason, LoopExpressionCause, MarkdownLoadCause, MissingProperty,
     SequenceExpressionCause,
-    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, SequenceShellCause,
+    SequenceLoadCause, SequenceMissingPropertiesEntry, SequenceMissingSubject, SequenceSelectionFailure, SequenceShellCause,
     ShellApprovalFailure, TextFormat,
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
@@ -143,7 +144,7 @@ pub use resolve::{
     derive_request_context_for_source,
     enrich_composition_source_load_error_in_context,
     is_yaml_source, load_yaml_document, prompt_magic_fallback_roots, prompt_magic_roots,
-    reload_composition_source,
+    reload_authored_source, reload_composition_source,
     resolve_composition_source, resolve_composition_source_in_context, validate_file_permissions,
     with_prompt_magic_roots, without_formal_sequence_keys,
 };
@@ -173,6 +174,8 @@ pub use sequence::preflight::{
     PreflightStep, PreflightTask, PreparedShellSite, PromptDocument, PromptReference,
     ShellSiteKind, SiteMode, TaskPosition, build_preflight_graph,
     build_preflight_graph_with_context, build_preflight_graph_with_invocation,
+    build_preflight_graph_after_discovery, reread_preflight_graph_with_invocation, discover_sequence_inputs, InlineContainer, InputDiscoveryOptions,
+    InputOwner, InputOwnerRole, InputPrompt, PendingReference, SequenceInputInventory,
     reject_non_sequence_kind, resolve_task_late_values, sequence_deferred_roots,
 };
 pub use sequence::task::{
@@ -204,6 +207,21 @@ pub use types::{
 // through this one function, which the lifecycle executor's `set` shell values
 // also use.
 pub use darkmatter::lifecycle::executor::compose_request;
+
+/// The `ComposeOptions` every Claudine composition of a document starts from.
+///
+/// Remote transclusion (`::file`/`::code` URL targets and `prologue`/
+/// `epilogue` URLs) is switched on, as `md compose` switches it on: whether a
+/// URL is fetched is decided by the request's captured `network` permission
+/// (deny unless every layer allows), which also governs read-side URL
+/// functions. Left off, those targets fail even under `network: allow`. A
+/// caller may still turn it, or any operation, off for one preparation.
+#[must_use]
+pub fn compose_options_with_context(
+    context: darkmatter::markdown::compose::ComposeContext,
+) -> darkmatter::markdown::compose::ComposeOptions {
+    darkmatter::markdown::compose::ComposeOptions::new_with_context(context).with_allow_remote_transclusion(true)
+}
 
 /// `options` with `invocation`'s Darkmatter configuration for `context`,
 /// when neither the options nor their captured `ctx` supply one already (a

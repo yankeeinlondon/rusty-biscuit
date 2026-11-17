@@ -64,6 +64,14 @@ name = "claudine-fake-editor"
 path = "tests/bin/fake_editor/main.rs"
 required-features = ["test-fixtures"]
 
+# Test-only native `echo` for sequence tests that read a templated `echo`'s
+# output: a template command is never run through a shell, so Windows has no
+# `echo` program; gated like the others.
+[[bin]]
+name = "claudine-fake-echo"
+path = "tests/bin/fake_echo/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.

@@ -277,7 +277,7 @@ files ahead of time, and the answers you give during one run. Nothing a
 repository, a document folder, or a workspace setting holds can approve a
 read on its own; a repository's `file-read` entries count only as far as
 the configuration's rules let them (see
-[Permissions](../configuration.md#permissions)).
+[Permissions](../permissions.md)).
 
 Every read a slot makes is checked before it happens:
 
@@ -354,8 +354,8 @@ flowchart TD
    defaults apply: files with a common data or text extension (`txt`, `md`,
    `json`, `yaml`, `csv`, …) beside the reading document (user scope) or
    anywhere in its repository (repository scope). See
-   [Defaults](../configuration.md#defaults) and
-   [How the scopes combine](../configuration.md#how-the-scopes-combine).
+   [Defaults and overrides](../permissions.md#defaults-and-overrides) and
+   [How the scopes combine](../permissions.md#how-the-scopes-combine).
 4. **Otherwise the approval handler is asked** (see
    [Prompts](#prompts)). With no handler (a data output, `md graph`,
    `md validate refs`, the editor) the read fails with

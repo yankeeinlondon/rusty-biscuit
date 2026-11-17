@@ -368,6 +368,16 @@ impl CliProcessFixture {
         &self.bin_dir
     }
 
+    /// Install `claudine-fake-echo` as the fixture's `echo`, for a sequence
+    /// whose templated `shell: "echo {{ … }}"` must run on Windows too, where
+    /// `echo` is a `cmd` builtin and template commands never run in a shell.
+    #[cfg(feature = "test-fixtures")]
+    pub fn install_echo(&self) {
+        let target = self.bin_dir.join(format!("echo{}", std::env::consts::EXE_SUFFIX));
+        std::fs::copy(biscuit_test_harness::bin_exe!("claudine-fake-echo"), &target)
+            .unwrap_or_else(|error| panic!("install fake echo at {}: {error}", target.display()));
+    }
+
     pub fn initialize_repository(&self) {
         assert!(
             init_git_repo(&self.cwd),

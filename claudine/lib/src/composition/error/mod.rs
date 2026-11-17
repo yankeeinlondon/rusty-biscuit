@@ -83,11 +83,11 @@ impl ShellApprovalFailure {
     /// failures carried inside `PreFlightFailed(String)` before the approval
     /// family was typed — the text is a user-visible surface, and typing the
     /// error is not a licence to reword it.
-    fn message(&self, command: &str, source_file: &Path, line: usize) -> String {
-        let location = if line > 0 {
-            format!("{}:{line}", biscuit_file::to_portable_string(source_file))
-        } else {
-            biscuit_file::to_portable_string(source_file)
+    fn message(&self, command: &str, source_file: &Path, line: usize, property: Option<&str>) -> String {
+        let location = match (line, property) {
+            (1.., _) => format!("{}:{line}", biscuit_file::to_portable_string(source_file)),
+            (0, Some(property)) => format!("{} (frontmatter `{property}`)", biscuit_file::to_portable_string(source_file)),
+            (0, None) => biscuit_file::to_portable_string(source_file),
         };
         match self {
             ShellApprovalFailure::Blacklisted(reason) => {
@@ -103,6 +103,14 @@ impl ShellApprovalFailure {
                  configuration."
             ),
         }
+    }
+}
+
+/// Where [`CompositionError::ShellCommandDenied`] says the command was written.
+fn denied_location(source_file: &Path, line: usize, property: Option<&str>) -> String {
+    match (line, property) {
+        (0, Some(property)) => format!("{}, frontmatter `{property}`", source_file.display()),
+        _ => format!("{}, line {line}", source_file.display()),
     }
 }
 
@@ -269,6 +277,29 @@ pub enum CompositionError {
         /// The underlying structured shell expansion error.
         #[source]
         error: Box<ShellExpansionError>,
+    },
+
+    /// A block or transclusion directive of the body an inline run generates
+    /// from a frontmatter property (its `prompt`) failed, and Darkmatter
+    /// located the failure only in that generated body.
+    ///
+    /// The generated body's lines and text are not the file's, and nothing
+    /// proves which line of the YAML holds the directive, so this names the
+    /// file and the property alone: `message` carries no position. A failing
+    /// `::shell-block` command's own failure is `command`, reported at the
+    /// same property. Its code is the `composition.failed` a `ComposeFailed`
+    /// of the same directive has.
+    #[error("compose failed: {} (frontmatter `{property}`): {message}", biscuit_file::to_portable_string(source_path))]
+    InlinePromptDirectiveFailed {
+        /// The source file the property was authored in.
+        source_path: PathBuf,
+        /// The frontmatter property whose text was composed.
+        property: String,
+        /// Darkmatter's reason, without the generated body's position.
+        message: String,
+        /// A failing block command's shell failure, at `property`.
+        #[source]
+        command: Option<Box<ShellExpansionError>>,
     },
 
     /// No installed providers can run composition.
@@ -658,7 +689,7 @@ pub enum CompositionError {
     /// blacklist hit from a missing handler, so no surface needs its own code.
     ///
     /// [`PreFlightFailed`]: CompositionError::PreFlightFailed
-    #[error("pre-flight shell approval failed: {}", failure.message(command, source_file, *line))]
+    #[error("pre-flight shell approval failed: {}", failure.message(command, source_file, *line, property.as_deref()))]
     ShellApprovalUnavailable {
         /// The authored command that could not be approved.
         command: String,
@@ -666,6 +697,10 @@ pub enum CompositionError {
         source_file: PathBuf,
         /// 1-based line of the command; `0` when the source carries no line.
         line: usize,
+        /// The frontmatter property the command was written in: a `$(...)`
+        /// value, or an inline run's `prompt`, whose commands have no proven
+        /// line. `None` for a body or lifecycle command.
+        property: Option<String>,
         /// Why approval could not be obtained.
         failure: ShellApprovalFailure,
     },
@@ -673,12 +708,15 @@ pub enum CompositionError {
     /// The user denied a shell command during pre-flight approval.
     #[error(
         "Aborted: shell command '{command}' was denied during pre-flight approval \
-         (source: {source_file}, line {line}). No provider session was started."
+         (source: {}). No provider session was started.",
+        denied_location(source_file, *line, property.as_deref())
     )]
     ShellCommandDenied {
         command: String,
         source_file: PathBuf,
         line: usize,
+        /// As [`CompositionError::ShellApprovalUnavailable`]'s `property`.
+        property: Option<String>,
     },
 
     /// A lifecycle frontmatter property has an invalid value.
@@ -1962,15 +2000,90 @@ pub enum CompositionError {
         index: usize,
     },
 
-    /// A step's normalized state failed the sequence document's `$schema`.
+    /// A step's normalized state failed its owner's `$state` schema.
+    ///
+    /// `index` is zero-based within the owning list, so `source_path` and
+    /// `container` (the list's authored path: `sequence`, or
+    /// `sequence[1].sequence` for a nested container) are what tell two
+    /// owners' step 0 apart.
     #[error(
-        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message}"
+        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message} \
+         (`$state` of `{container}` in {source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     SequenceStateSchemaViolation {
         /// Zero-based step index.
         index: usize,
         /// The step's generated id.
         id: String,
+        /// The failing property path.
+        property: String,
+        /// The validation message.
+        message: String,
+        /// The file declaring the `$state` (and the list it types).
+        source_path: PathBuf,
+        /// The authored path of the typed list in `source_path`.
+        container: String,
+    },
+
+    /// A sequence declaration (`$schema`, `$state`, or `template`) written
+    /// where no inline list owns it, or supplied through a value route.
+    #[error(
+        "`{property}` is not accepted here ({source_path}): {hint}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationMisplaced {
+        /// The file holding the declaration, or the document a value route
+        /// targeted.
+        source_path: PathBuf,
+        /// The authored path of the declaration (`sequence[0].$state`).
+        property: String,
+        /// Where the declaration belongs instead.
+        hint: String,
+    },
+
+    /// A sequence declaration has a shape its key never accepts (a `null`
+    /// `$state`, an empty union, a non-mapping `template`, …).
+    #[error(
+        "invalid sequence declaration `{property}` ({source_path}): {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationShape {
+        /// The file holding the declaration.
+        source_path: PathBuf,
+        /// The authored path of the declaration.
+        property: String,
+        /// What is wrong with it.
+        message: String,
+    },
+
+    /// A well-shaped schema declaration failed to parse or resolve (an
+    /// unparsable type string, a missing referenced file, a bad import).
+    #[error(
+        "sequence declaration `{property}` ({source_path}) could not be loaded: {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationLoad {
+        /// The file holding the declaration.
+        source_path: PathBuf,
+        /// The authored path of the declaration.
+        property: String,
+        /// The schema layer's typed failure.
+        #[source]
+        source: Box<simplified_schema::SchemaError>,
+    },
+
+    /// The values an inline sequence container sees at its turn failed its
+    /// own `$schema` check, so the container never opened.
+    #[error(
+        "sequence container `{container}` ({source_path}) failed its `$schema` check at `{property}`: {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceContainerSchemaViolation {
+        /// The file declaring the container.
+        source_path: PathBuf,
+        /// The container task's authored path (`sequence[1]`).
+        container: String,
         /// The failing property path.
         property: String,
         /// The validation message.
@@ -2362,7 +2475,8 @@ pub enum CompositionError {
     /// one of the executor-owned `seq`, `group`, and `loop` views.
     #[error(
         "`with.{key}` in {task} targets a reserved key; generated step fields and \
-         `seq`, `group`, and `loop` are executor-owned"
+         `seq`, `group`, and `loop` are executor-owned, and the sequence declarations \
+         `$state` and `template` are not values"
     )]
     SequenceTaskWithReserved {
         /// A label locating the task.
@@ -2408,18 +2522,18 @@ pub enum CompositionError {
         failure_count: usize,
     },
 
-    /// One or more sequence steps have missing required schema properties
-    /// and Interactive Mode is not allowed.
+    /// One or more sequence steps or sequence documents have missing
+    /// required schema properties and Interactive Mode is not allowed.
     ///
     /// Aggregated so the user can fix the full sequence in a single edit
-    /// pass instead of discovering each step's gaps one at a time.
+    /// pass instead of discovering each owner's gaps one at a time.
     #[error(
-        "sequence schema validation failed for {failure_count} step(s); missing required properties"
+        "sequence schema validation failed for {failure_count} step(s) or document(s); missing required properties"
     )]
     SequenceMissingProperties {
-        /// Per-step missing-property records in execution order.
-        failures: Vec<SequenceMissingPropertiesStep>,
-        /// Number of steps that reported missing properties.
+        /// Missing-property records in discovery order.
+        failures: Vec<SequenceMissingPropertiesEntry>,
+        /// Number of entries that reported missing properties.
         failure_count: usize,
     },
 
@@ -3512,17 +3626,38 @@ pub struct TaskTimeoutContext {
     pub raw: String,
 }
 
-/// Per-step missing-property record for [`CompositionError::SequenceMissingProperties`].
+/// Who owes the missing properties of one
+/// [`CompositionError::SequenceMissingProperties`] entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SequenceMissingSubject {
+    /// A root step's prompt document.
+    Step {
+        /// 1-based step number.
+        number: usize,
+        /// Display name of the step.
+        name: String,
+    },
+    /// A sequence document that owns a step list: the invoked root, or a
+    /// whole document a `sequence:` references. It may have no steps at all,
+    /// so it is never given a step number.
+    Document {
+        /// The container property path of the reference that reached it
+        /// (`sequence[1].sequence`); empty for the invoked root.
+        property: String,
+    },
+}
+
+/// One owner's missing-property record for
+/// [`CompositionError::SequenceMissingProperties`].
 ///
-/// Carries the same fields as a single-step [`CompositionError::MissingProperties`]
-/// so the CLI can render each step's report without having to re-validate.
+/// Carries the same fields as a single-document
+/// [`CompositionError::MissingProperties`] so the CLI can render each report
+/// without having to re-validate.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SequenceMissingPropertiesStep {
-    /// 1-based step number.
-    pub step: usize,
-    /// Display name of the step.
-    pub step_name: String,
-    /// The prompt file whose schema declared the missing properties.
+pub struct SequenceMissingPropertiesEntry {
+    /// The step or sequence document the properties are missing from.
+    pub subject: SequenceMissingSubject,
+    /// The file whose schema declared the missing properties.
     pub source_path: PathBuf,
     /// Missing properties in declaration order.
     pub missing: Vec<MissingProperty>,
@@ -3985,6 +4120,9 @@ impl CompositionError {
                 }
                 _ => None,
             },
+            CompositionError::InlinePromptDirectiveFailed { property, .. } => {
+                Some(FrontmatterHighlight::Property(property.clone()))
+            }
             _ => None,
         }
     }

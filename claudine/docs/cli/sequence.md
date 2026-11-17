@@ -85,6 +85,37 @@ The `research` step has no executable, so it composes this document's body.
 shell command. The step fields, the ways to supply a list (`sources`), and
 groups are covered in [Sequences](../topics/flow-control/sequences.md).
 
+### Inputs and step types
+
+A sequence file's `$schema` describes the file itself, in YAML as in
+Markdown: its required properties are inputs you supply as setters. `$state`
+types each step, and `template:` fills every step:
+
+```yaml
+# colors.yaml
+kind: sequence
+$schema:
+    reviewer: string(required) -> who signs off
+$state:
+    color: string(required)
+template:
+    desc: "{{ color }} for {{ reviewer }}"
+sequence:
+    - { name: blue, color: blue, shell: "echo {{ seq.desc }}" }
+```
+
+```sh
+claudine sequence colors.yaml reviewer=ada
+claudine sequence reviewer=ada colors.yaml   # the same run
+```
+
+Without `reviewer`, a terminal asks for it once, together with every other
+missing input of the sequence's documents and steps; anything else fails
+with one report listing them all and starts no step. A setter may not name
+`$state` or `template`. See
+[Sequences → Sequence documents](../topics/flow-control/sequences.md#sequence-documents-schema-state-and-template)
+and [Requiring caller input](../topics/flow-control/sequences.md#requiring-caller-input).
+
 ## Choosing providers
 
 Every task that launches a provider (a `prompt:` task, or a step that runs
@@ -157,7 +188,9 @@ launches, even when its `when:` is false:
 
 A hint that reads the provider it selects (`agent: "{{ env.AGENT }}"`, or
 `env.MODEL` for `model`) is rejected the same way, unless something above it
-decides that key. Provider and model are decided separately:
+decides that key. That includes a read through another value: with
+`who: "{{ ctx.agent }}"` in the sequence, a task's
+`with: { agent: "{{ who }}" }` is rejected before any task starts. Provider and model are decided separately:
 
 | Hint | Made irrelevant by |
 | :--- | :--- |
@@ -194,6 +227,30 @@ pick: codex
 agent: "{{ pick }}"   # decided at launch if any lifecycle `set` writes `pick`
 model: big            # predicted as written, unless `agent` is decided at launch
 ```
+
+A hint is followed through every value it reads, in the place that value
+is evaluated, however many derived values lie between it and the write. A
+task's `with:` values read the enclosing sequence's properties, so here
+the reader's `agent` is decided at launch: `choice` reads `mid`, which reads
+`pick`, which the writer's `success` sets.
+
+```yaml
+# seq.yaml
+pick: claude
+mid: "{{ pick }}"
+choice: "{{ mid }}"
+sequence:
+  - { name: writer, prompt: writes.md }   # success: [{ set: { pick: goose } }]
+  - { name: reader, prompt: plain.md, with: { agent: "{{ choice }}" } }
+```
+
+A prompt's own properties are its own. A prompt whose frontmatter says
+`choice: claude` and `agent: "{{ choice }}"` is predicted as `claude` even
+when the sequence, or any other document in the run, has a `choice` that
+reads a written key; if Claude is not installed, the run fails before the
+writer starts. A prompt hint that reads a `with:` key (`agent: "{{ who }}"`
+with `with: { who: "{{ choice }}" }`) follows that key into the sequence's
+properties, where `with:` is evaluated.
 
 A graph of only `shell:` and `side_effect:` tasks needs no
 provider at all.
@@ -343,12 +400,15 @@ Each step's provider session gets these variables:
 `--dry-run` runs the full preflight and then composes every step against the
 starting state, without launching a provider. It runs no lifecycle event and
 no `prep` target, previews each loop body once with pass 1's `loop` values,
-and shows each task guard instead of evaluating it. `shell:` and
+and shows each task guard, and each inline container's `$schema` check,
+instead of evaluating it. Missing inputs, document `$schema` values, and
+`$state` are still judged. `shell:` and
 `side_effect:` tasks are rendered, not run:
 
 ```text
 ℹ rendered (dry-run): would run `git add .`
 ℹ rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}`
+ℹ `tasks[1]` checks its `$schema` at its turn (not evaluated in a dry run)
 ```
 
 Before the steps, a preview lists each provider-launching task and its

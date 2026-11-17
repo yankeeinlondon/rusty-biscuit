@@ -3,23 +3,43 @@
 use crate::markdown::compose::parse_utils::CursorError;
 use crate::markdown::normalize::HeadingLevel;
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::ops::Range;
 use thiserror::Error;
 
 /// Errors that can occur during TOC linking.
+///
+/// Every variant with a `line` also names its `document`: the file of the
+/// document whose body holds the directive, or the context identity of a
+/// document with no file ([`Markdown::with_context_identity`](crate::markdown::Markdown::with_context_identity)).
+/// `line` counts that body, so a host that composes text it generated tells its
+/// own failures (`document` is its identity) from a transcluded child's, and
+/// publishes [`Self::reason`] instead.
 #[derive(Error, Debug)]
 pub enum TocLinkingError {
     /// Failed to parse a `::toc-linking` directive.
     #[error("Failed to parse toc-linking directive at line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
+    ParseDirective {
+        line: usize,
+        message: String,
+        document: Option<PathBuf>,
+    },
 
     /// An unknown cleanup service was specified.
     #[error("Invalid cleanup service '{service}' at line {line}")]
-    InvalidCleanupService { service: String, line: usize },
+    InvalidCleanupService {
+        service: String,
+        line: usize,
+        document: Option<PathBuf>,
+    },
 
     /// A heading level outside 1-6 was specified.
     #[error("Invalid heading level '{level}' at line {line}")]
-    InvalidLevel { level: String, line: usize },
+    InvalidLevel {
+        level: String,
+        line: usize,
+        document: Option<PathBuf>,
+    },
 
     /// No target in the chain resolved to a file and the chain does not end
     /// in `| false`. `failure` is the class of the first (authored) target's
@@ -32,6 +52,7 @@ pub enum TocLinkingError {
         line: usize,
         failure: Option<biscuit_file::ResolutionFailure>,
         glob_hint: Option<&'static str>,
+        document: Option<PathBuf>,
     },
 
     /// A glob pattern failed to compile.
@@ -40,6 +61,7 @@ pub enum TocLinkingError {
         pattern: String,
         line: usize,
         message: String,
+        document: Option<PathBuf>,
     },
 
     /// I/O error reading a referenced file.
@@ -55,6 +77,50 @@ impl TocLinkingError {
             _ => None,
         }
     }
+
+    /// The document whose body holds the directive (see [`TocLinkingError`]);
+    /// `None` for an I/O error, or a document with neither file nor identity.
+    pub fn document(&self) -> Option<&Path> {
+        match self {
+            Self::ParseDirective { document, .. }
+            | Self::InvalidCleanupService { document, .. }
+            | Self::InvalidLevel { document, .. }
+            | Self::Unresolved { document, .. }
+            | Self::InvalidGlob { document, .. } => document.as_deref(),
+            Self::Io(_) => None,
+        }
+    }
+
+    /// This error with `document` named; an I/O error is unchanged.
+    #[must_use]
+    pub fn with_document(mut self, named: Option<PathBuf>) -> Self {
+        match &mut self {
+            Self::ParseDirective { document, .. }
+            | Self::InvalidCleanupService { document, .. }
+            | Self::InvalidLevel { document, .. }
+            | Self::Unresolved { document, .. }
+            | Self::InvalidGlob { document, .. } => *document = named,
+            Self::Io(_) => {}
+        }
+        self
+    }
+
+    /// The failure without its line.
+    pub fn reason(&self) -> String {
+        match self {
+            Self::ParseDirective { message, .. } => format!("invalid `::toc-linking` directive: {message}"),
+            Self::InvalidCleanupService { service, .. } => format!("invalid `::toc-linking` cleanup service '{service}'"),
+            Self::InvalidLevel { level, .. } => format!("invalid `::toc-linking` heading level '{level}'"),
+            Self::Unresolved { path, glob_hint, .. } => crate::markdown::errors::with_hint_line(
+                format!("`::toc-linking` could not resolve '{path}'"),
+                *glob_hint,
+            ),
+            Self::InvalidGlob { pattern, message, .. } => {
+                format!("invalid `::toc-linking` glob pattern '{pattern}': {message}")
+            }
+            Self::Io(source) => source.to_string(),
+        }
+    }
 }
 
 impl From<CursorError> for TocLinkingError {
@@ -62,6 +128,7 @@ impl From<CursorError> for TocLinkingError {
         TocLinkingError::ParseDirective {
             line: e.line,
             message: e.message,
+            document: None,
         }
     }
 }
@@ -77,7 +144,7 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            TocLinkingError::ParseDirective { line, message } => StatusBlock::new(StatusState::Error)
+            TocLinkingError::ParseDirective { line, message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "TocLinkingError",
                     "directive parse failed",
@@ -87,7 +154,7 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                 )).with_line_breaks(LineBreaks::Hard))
                 .hint("Syntax: <cyan>::toc-linking ./doc.md levels=2,3 cleanup=number,capitalize</cyan>."),
 
-            TocLinkingError::InvalidCleanupService { service, line } => {
+            TocLinkingError::InvalidCleanupService { service, line, .. } => {
                 let valid = CleanupService::all()
                     .iter()
                     .map(|service| {
@@ -110,14 +177,14 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                     .hint("Pass a comma-separated list of valid service names to <cyan>cleanup=</cyan>.")
             }
 
-            TocLinkingError::InvalidLevel { level, line } => StatusBlock::new(StatusState::Error)
+            TocLinkingError::InvalidLevel { level, line, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TocLinkingError", "invalid heading level"))
                 .body(Prose::new(format!(
                     "<dim>Level:</dim> <cyan>{level}</cyan>\n<dim>Line:</dim> {line}"
                 )).with_line_breaks(LineBreaks::Hard))
                 .hint("Heading levels must be integers between <cyan>1</cyan> and <cyan>6</cyan>."),
 
-            TocLinkingError::Unresolved { path, line, failure, glob_hint } => StatusBlock::new(StatusState::Error)
+            TocLinkingError::Unresolved { path, line, failure, glob_hint, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TocLinkingError", "file reference failure"))
                 .body(Prose::new(
                     [
@@ -137,7 +204,7 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                 ).with_line_breaks(LineBreaks::Hard))
                 .hint("Add a <cyan>| fallback.md</cyan> option or end the chain with <cyan>| false</cyan> to allow missing files."),
 
-            TocLinkingError::InvalidGlob { pattern, line, message } => StatusBlock::new(StatusState::Error)
+            TocLinkingError::InvalidGlob { pattern, line, message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TocLinkingError", "invalid glob pattern"))
                 .body(Prose::new(format!(
                     "<dim>Pattern:</dim> <cyan>{pattern}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
@@ -214,6 +281,7 @@ impl CleanupService {
             _ => Err(TocLinkingError::InvalidCleanupService {
                 service: s.to_string(),
                 line,
+                document: None,
             }),
         }
     }

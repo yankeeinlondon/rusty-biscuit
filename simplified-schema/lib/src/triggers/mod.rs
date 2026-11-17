@@ -37,6 +37,7 @@ pub mod discovery;
 pub mod envelope;
 pub mod finding;
 pub mod grammar;
+pub mod identify;
 pub mod lint;
 pub mod matcher;
 pub mod prepared;
@@ -61,6 +62,7 @@ pub use grammar::{
     COMBINATOR_KEYS, PATH_KEY, MatchConditions, MatchExpr, PathGlobs, is_match_safe_constraint,
     parse_match_conditions,
 };
+pub use identify::{IDENTIFY_TOO_BROAD_CODE, IdentifyTooBroad, IdentifyingTrigger, admit_identifying_trigger, identifies};
 pub use matcher::{PathSubject, first_defeat, matches};
 /// Code of the warning for a schema trigger automatic discovery skipped
 /// because its envelope or payload failed to load.

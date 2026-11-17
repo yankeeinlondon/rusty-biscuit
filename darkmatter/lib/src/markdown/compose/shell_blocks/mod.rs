@@ -118,8 +118,27 @@ pub(crate) fn run_shell_blocks_stage(
 /// With `templates`, a command whose authored text holds a placeholder may
 /// also run as a template (see [`prepare_site`]), including when the values
 /// interpolated into the block keep its text from parsing as commands.
+///
+/// Every error names the composed document's file (none for a document
+/// without one), so a caller can tell the document's own block failures from
+/// a transcluded child's.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_shell_blocks_stage_in(
+    content: &str,
+    data: Option<&DataRanges>,
+    templates: Option<&BlockTemplates<'_>>,
+    options: &crate::markdown::compose::ComposeRequest,
+    runtime: &mut ShellExpansionRuntime,
+    ctx: &biscuit_terminal::errors::SourceContext,
+    line_offset: usize,
+    first: Option<bool>,
+) -> Result<(String, ComposeReport, Vec<TextEdit>), ShellBlockError> {
+    run_shell_blocks(content, data, templates, options, runtime, ctx, line_offset, first)
+        .map_err(|error| error.with_source_file(source_file_from_options(options)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_shell_blocks(
     content: &str,
     data: Option<&DataRanges>,
     templates: Option<&BlockTemplates<'_>>,
@@ -133,13 +152,13 @@ pub(crate) fn run_shell_blocks_stage_in(
 
     // Scan for block pairs (both page and shell)
     let pairs = super::block_pairs::scan_block_pairs_in(content, data).map_err(|e| {
-        // Extract line number from BlockPairError
         let line = e.line();
         ShellBlockError::Parse {
             line,
             message: e.to_string(),
             excerpt: SourceExcerpt::default(),
             source_file: source_file.clone(),
+            note: e.note(),
         }
     })?;
 
@@ -431,6 +450,7 @@ pub(crate) fn reject_data_shaped_commands(
         ),
         excerpt: SourceExcerpt::from_text(body_text, line, body_start_line, 2),
         source_file: source_file.clone(),
+        note: None,
     };
     let (masked_groups, _) = body::group_logical_commands(masked_body, body_start_line);
     let spans_match = masked_groups.len() == commands.len()
@@ -833,6 +853,23 @@ mod tests {
                 assert_eq!(source_file, Some(std::path::PathBuf::from("/tmp/test.md")));
             }
             other => panic!("Expected Command error, got: {other:?}"),
+        }
+    }
+
+    /// Every block error names the composed file, an option or pairing
+    /// failure as well as a command's, so a caller can tell the document's
+    /// own errors from a transcluded child's.
+    #[test]
+    fn every_block_error_names_the_source_file() {
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let options = options.with_source_file("/tmp/test.md");
+        for content in ["::shell-block timeout=bad\ntrue\n::end-block\n", "::shell-block\ntrue\n"] {
+            let mut runtime = ShellExpansionRuntime::new();
+            let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap_err();
+            let (ShellBlockError::Parse { source_file, .. }
+            | ShellBlockError::Unterminated { source_file, .. }
+            | ShellBlockError::Command { source_file, .. }) = &err;
+            assert_eq!(source_file.as_deref(), Some(std::path::Path::new("/tmp/test.md")), "{content:?}: {err:?}");
         }
     }
 

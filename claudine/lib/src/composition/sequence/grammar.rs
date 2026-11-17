@@ -477,6 +477,7 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
             replacement: "container events belong on an inline `sequence:` list or inside a `group:` object; put referenced sequence events in its target document".into(),
         });
     }
+    super::declarations::task_declarations(map, origin, property)?;
     validate_container_events(map, origin)?;
     task_when(map, origin, property)?;
     task_with(map, origin, property)?;
@@ -615,6 +616,7 @@ pub(crate) fn group_object_grammar(group: &serde_json::Map<String, Value>, origi
             hint: "`when` is a task key; put it beside `group:` on the task that runs the group".into(),
         });
     }
+    super::declarations::reject_group_declarations(group, origin, property)?;
     container_loop(group, LoopOwner::Group, &LoopLocation { source_path: origin.to_path_buf(), property: child_property(property, "loop") }).map(drop)
 }
 
@@ -623,15 +625,17 @@ pub(crate) fn group_object_grammar(group: &serde_json::Map<String, Value>, origi
 /// grammar rather than to the lifecycle parser.
 ///
 /// `when:` is rejected: the document body is not a step, so it has nothing to
-/// guard. `loop:` is a sequence loop, validated by the loop parser
+/// guard. `$state` and `template` are judged for placement and shape
+/// ([`super::declarations::root_declarations`]) whatever the list holds, an
+/// empty one included. `loop:` is a sequence loop, validated by the loop parser
 /// (`container_loop`). Run this before the root's lifecycle events are
 /// parsed, so a malformed root loop gets the loop parser's diagnostic rather
 /// than a lifecycle one.
 ///
 /// ## Errors
 ///
-/// [`CompositionError::WhenMisplaced`] for a root `when`, and the loop
-/// parser's errors for a root `loop`.
+/// [`CompositionError::WhenMisplaced`] for a root `when`, the declaration
+/// placement and shape errors, and the loop parser's errors for a root `loop`.
 pub fn validate_sequence_root(root: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
     if root.contains_key("when") {
         return Err(CompositionError::WhenMisplaced {
@@ -639,6 +643,7 @@ pub fn validate_sequence_root(root: &serde_json::Map<String, Value>, origin: &st
             hint: "a sequence document's body is not a step, so its root takes no guard; `when` is a task key, written beside a step's executable".into(),
         });
     }
+    super::declarations::root_declarations(root, origin)?;
     container_loop(root, LoopOwner::Sequence, &LoopLocation::document_root(origin)).map(drop)
 }
 

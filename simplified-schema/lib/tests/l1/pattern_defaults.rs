@@ -19,8 +19,15 @@ fn schema(text: &str) -> SimplifiedSchema {
     SimplifiedSchema::try_from(text).expect("schema text")
 }
 
+/// The default placed at `path`. These cases are about which values are
+/// filled; the `default` keyword's pointer is covered in `required_defaults`,
+/// so [`borrowed`] and [`owned`] report defaults without it.
 fn applied(path: &str, value: Value) -> AppliedDefault {
-    AppliedDefault { path: PropertyPath::parse(path).expect("path"), value }
+    AppliedDefault { path: PropertyPath::parse(path).expect("path"), value, pointer: String::new(), origin: None }
+}
+
+fn without_pointers(defaults: Vec<AppliedDefault>) -> Vec<AppliedDefault> {
+    defaults.into_iter().map(|applied| AppliedDefault { pointer: String::new(), ..applied }).collect()
 }
 
 #[track_caller]
@@ -28,7 +35,7 @@ fn borrowed<'a>(result: Result<ValidationSuccess<'a>, ValidationFailure>, input:
     match result {
         Ok(success @ ValidationSuccess { value: Cow::Borrowed(_), .. }) => {
             assert!(std::ptr::eq(success.value.as_ref(), input), "strict returns the caller's own input");
-            success.defaults
+            without_pointers(success.defaults)
         }
         other => panic!("expected the input accepted borrowed, got {other:?}"),
     }
@@ -37,7 +44,7 @@ fn borrowed<'a>(result: Result<ValidationSuccess<'a>, ValidationFailure>, input:
 #[track_caller]
 fn owned(result: Result<ValidationSuccess<'_>, ValidationFailure>) -> (Value, Vec<AppliedDefault>) {
     match result {
-        Ok(success @ ValidationSuccess { value: Cow::Owned(_), .. }) => (success.value.into_owned(), success.defaults),
+        Ok(success @ ValidationSuccess { value: Cow::Owned(_), .. }) => (success.value.into_owned(), without_pointers(success.defaults)),
         other => panic!("expected an owned completed copy, got {other:?}"),
     }
 }

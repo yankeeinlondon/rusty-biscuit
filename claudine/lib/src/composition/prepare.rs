@@ -255,6 +255,26 @@ impl PrepareOptions {
         self.schema_caller_records()
     }
 
+    /// Resolve the document's own authored values through `document`, the
+    /// declaring document's context, while every caller value keeps the
+    /// origin it was supplied under.
+    ///
+    /// Without captured records, a setter's origin is derived from the
+    /// context these options held until now, so it is fixed here, before
+    /// that context is replaced.
+    #[must_use]
+    pub(crate) fn resolving_document_from(mut self, document: biscuit_file::FileResolutionContext) -> Self {
+        if self.caller_input_records.is_empty() {
+            self.caller_input_records = darkmatter::markdown::compose::caller_input_records_for_overrides(
+                self.set_overrides.as_ref(),
+                &self.file_resolution_context,
+                self.file_ref_fallback_dir.as_deref(),
+            );
+        }
+        self.file_resolution_context = document;
+        self
+    }
+
     /// Options that prepare against `file_resolution_context`, with every
     /// other setting empty.
     pub fn new(file_resolution_context: biscuit_file::FileResolutionContext) -> Self {
@@ -451,7 +471,7 @@ fn canonical_compose_options(
     let source_path = source.resolved_path.as_path();
     let loop_document = is_loop_document(source);
     let mut compose_opts = bind_agent_workspace(
-        ComposeOptions::new_with_context(ctx.clone())
+        super::compose_options_with_context(ctx.clone())
             .with_context_authority(authority)
             .with_current_provider(current_provider)
             .with_host_globals(super::lifecycle::bindings::composition_host_globals(
@@ -618,28 +638,35 @@ fn inline_prompt_text(
 /// A discovery-walk failure is **not** a denial: there are no commands to
 /// approve, and the preparation that follows surfaces the authoritative typed
 /// error (e.g. a styled `TransclusionError`), so it returns an empty set rather
-/// than preempting with a coarser one.
+/// than preempting with a coarser one. An inline run's directive failure,
+/// which discovery reports at the `prompt` property, is one too.
 pub fn preflight_document_shell(
     source: &ResolvedCompositionSource,
     options: &PrepareOptions,
     approval_options: &crate::harness::ShellApprovalOptions,
+    mode: CompositionMode,
 ) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, CompositionError> {
-    match approve_document_shell(source, options, approval_options) {
+    match approve_document_shell(source, options, approval_options, mode) {
         Ok(result) => Ok(result.approved_commands),
-        Err(CompositionError::PreFlightDiscoveryFailed(_)) => Ok(Default::default()),
+        Err(CompositionError::PreFlightDiscoveryFailed(_) | CompositionError::InlinePromptDirectiveFailed { .. }) => {
+            Ok(Default::default())
+        }
         Err(e) => Err(e),
     }
 }
 
 /// Discover and approve a document's template shell surface (frontmatter
-/// `$(...)`, body `::shell`/`::shell-block`, and every transcluded child)
-/// with the exact options its preparation composes with.
+/// `$(...)`, the composed text's `::shell`/`::shell-block`, and every
+/// transcluded child) with the exact options its preparation composes with.
 ///
 /// This is the one resolver for approved bytes: the discovery walk and the
 /// compose that executes run on [`canonical_compose_options`] built from the
-/// same `options`, so both see the same target defaults, `proxy.with:`
-/// overlay, caller and runtime layers, reserved sequence inputs, snapshot, and
-/// source-relative base directory.
+/// same `options`, over the same document ([`document_for_mode`]: the body for
+/// a chained run, the delivered `prompt` for an inline one), so both see the
+/// same text, target defaults, `proxy.with:` overlay, caller and runtime
+/// layers, reserved sequence inputs, snapshot, and source-relative base
+/// directory. An inline run's commands are reported at the source's `prompt`
+/// property, with no line.
 ///
 /// ## Errors
 ///
@@ -651,6 +678,7 @@ pub fn approve_document_shell(
     source: &ResolvedCompositionSource,
     options: &PrepareOptions,
     approval_options: &crate::harness::ShellApprovalOptions,
+    mode: CompositionMode,
 ) -> Result<super::PreFlightResult, CompositionError> {
     observe_prepared_context(
         options,
@@ -660,18 +688,358 @@ pub fn approve_document_shell(
     // removed grammar here, before composition would meet it.
     reject_removed_loop_reads_in_source(source)?;
     reject_removed_sequence_reads_in_source(source, options, None)?;
+    // An inline document without a string `prompt` composes nothing; its
+    // preparation reports the typed error.
+    let Ok(document) = document_for_mode(&source.markdown, &source.resolved_path, mode, options.set_overrides.as_ref()) else {
+        return super::resolve_shell_approvals(None, None, approval_options, None, None);
+    };
     let ctx = derive_compose_context(source, options);
     let compose_request = prepared_request(
-        canonical_compose_options(source, &ctx, options, None),
+        canonical_compose_options(source, &ctx, options, schema_phase_for(mode)),
         options,
     )?;
-    super::resolve_shell_approvals(
-        Some(&source.markdown),
-        Some(&compose_request),
+    super::preflight::resolve_document_shell_approvals(
+        &document,
+        &compose_request,
         approval_options,
-        None,
-        None,
+        PromptOrigin::for_mode(mode, &source.resolved_path, &source.original_text).as_ref(),
     )
+}
+
+/// The document a preparation in `mode` composes, and so the only text its
+/// pre-flight discovery may walk: the source itself for a chained run; for an
+/// inline run, the source's frontmatter with the delivered `prompt` (see
+/// [`inline_prompt_text`]) as its body. An inline run never composes the
+/// source's body, so discovering there approves commands that never run and
+/// misses the ones that do.
+///
+/// The generated document carries the context identity [`PromptOrigin`]
+/// recognizes, so its failures can be reported at `path`'s `prompt`.
+///
+/// ## Errors
+///
+/// `PromptPropertyMissing` or `PromptPropertyWrongType` for an inline run
+/// without a string `prompt`.
+pub(super) fn document_for_mode<'a>(
+    markdown: &'a Markdown,
+    path: &Path,
+    mode: CompositionMode,
+    set_overrides: Option<&serde_json::Value>,
+) -> Result<std::borrow::Cow<'a, Markdown>, CompositionError> {
+    match mode {
+        CompositionMode::ChainedDocument => Ok(std::borrow::Cow::Borrowed(markdown)),
+        CompositionMode::InlineFrontmatterPrompt => {
+            let frontmatter = markdown.frontmatter();
+            let prompt = inline_prompt_text(frontmatter, set_overrides)?;
+            Ok(std::borrow::Cow::Owned(
+                Markdown::with_frontmatter(frontmatter.clone(), prompt)
+                    .with_context_identity(PromptOrigin::context_identity(path)),
+            ))
+        }
+    }
+}
+
+/// The authored home of the body [`document_for_mode`] generates for an
+/// inline run: the source file's `prompt` property.
+///
+/// That body has no file of its own, so Darkmatter numbers its commands and
+/// directives from the generated document (frontmatter included, or the
+/// body after earlier stages rewrote it) and reports their failures against
+/// a context showing generated text. Neither is a position in the file, and
+/// no line of the YAML text is proven to be the directive's, so a published
+/// origin of the generated body is moved to the source file's `prompt`
+/// property with no line or excerpt.
+///
+/// A failure is the generated body's when its context carries the identity
+/// [`document_for_mode`] gave that document (Darkmatter keeps it through
+/// interpolation, block removal, and every other rewrite), or, for a
+/// `::shell-block` error, when it names the source file, which an inline run
+/// composes only as that body. A transcluded child keeps its own: a local
+/// child names its file, a remote one is file-less without the identity.
+/// Commands of frontmatter `$(...)` values keep their own origins too.
+///
+/// Covered: every location-bearing shell-expansion failure (`::shell`, and a
+/// `::shell-block` command's cause), `::shell-block` option, parse, and
+/// command errors, page-block (`::block`, block pairing, `when=`) errors,
+/// transclusion directive errors that name a generated line, `::map` /
+/// `::filter` failures (Darkmatter names their site by the same identity),
+/// `::toc-linking` and `::file-links` failures (Darkmatter names their
+/// document by it), and the site of a failure inside a repeated copy, whose
+/// wrapped failure is translated by the same rules. A block-pairing reason
+/// is published without the secondary line Darkmatter keeps beside it.
+///
+/// Only published copies move. Darkmatter's discovery and execution still
+/// compare the generated body with itself, so the guard that refuses a command
+/// discovery never saw is untouched.
+pub(crate) struct PromptOrigin<'a> {
+    path: &'a Path,
+    text: &'a str,
+}
+
+impl<'a> PromptOrigin<'a> {
+    /// The prompt origin of an inline run of `source`; `None` for a chained
+    /// run, whose body is the file's own.
+    pub(crate) fn for_mode(mode: CompositionMode, path: &'a Path, text: &'a str) -> Option<Self> {
+        matches!(mode, CompositionMode::InlineFrontmatterPrompt).then_some(Self { path, text })
+    }
+
+    /// The context identity of the body generated from `path`'s `prompt`.
+    fn context_identity(path: &Path) -> PathBuf {
+        PathBuf::from(format!("<prompt of {}>", biscuit_file::to_portable_string(path)))
+    }
+
+    const PROPERTY: &'static str = "prompt";
+
+    fn origin() -> darkmatter::markdown::compose::ShellCommandOrigin {
+        darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter { key: Self::PROPERTY.to_string(), line: None }
+    }
+
+    fn is_source(&self, file: &Path) -> bool {
+        file == self.path
+            || matches!(
+                (biscuit_file::canonicalize_simplified(file), biscuit_file::canonicalize_simplified(self.path)),
+                (Ok(left), Ok(right)) if left == right
+            )
+    }
+
+    /// Whether `ctx` is the generated document's: it carries the generated
+    /// document's identity, or names this file while showing text that is
+    /// not the file's (a context built from the request's source path).
+    fn is_generated(&self, ctx: &biscuit_terminal::errors::SourceContext) -> bool {
+        self.is_identity(&ctx.absolute) || (self.is_source(&ctx.absolute) && &*ctx.content != self.text)
+    }
+
+    /// Whether `document` is the generated document's identity. Unlike the
+    /// source file, which a `::file` of the source names too, only the
+    /// generated document carries it.
+    fn is_identity(&self, document: &Path) -> bool {
+        document == Self::context_identity(self.path)
+    }
+
+    /// Move a discovered site of the generated body to the `prompt` property.
+    pub(crate) fn site(&self, source_file: &Path, origin: &mut darkmatter::markdown::compose::ShellCommandOrigin) {
+        use darkmatter::markdown::compose::ShellCommandOrigin;
+        if self.is_source(source_file) && matches!(origin, ShellCommandOrigin::Body { .. } | ShellCommandOrigin::ShellBlock { .. }) {
+            *origin = Self::origin();
+        }
+    }
+
+    /// Report a shell failure of the generated document against the source
+    /// file, and one of its generated body against the `prompt` property.
+    /// Whether it moved.
+    fn shell_error(&self, error: &mut darkmatter::markdown::compose::ShellExpansionError) -> bool {
+        use darkmatter::markdown::compose::ShellCommandOrigin;
+        let Some((ctx, origin)) = error.location_mut() else {
+            return false;
+        };
+        if !self.is_generated(ctx) {
+            return false;
+        }
+        let absolute = biscuit_file::canonicalize_simplified(self.path).unwrap_or_else(|_| self.path.to_path_buf());
+        *ctx = biscuit_terminal::errors::SourceContext::new(absolute, self.path.to_path_buf(), self.text);
+        if matches!(origin, ShellCommandOrigin::Body { .. } | ShellCommandOrigin::ShellBlock { .. }) {
+            *origin = Self::origin();
+        }
+        true
+    }
+
+    /// Drop the line of a warning the generated document reported: it counts
+    /// the generated document, not the file. A child's warning keeps its own.
+    fn warning(&self, warning: &mut darkmatter::markdown::compose::ComposeWarning) {
+        if warning.document().is_none_or(|document| self.is_source(document)) {
+            warning.line_number = None;
+        }
+    }
+
+    /// `error` with every published location of the generated body moved to
+    /// the source's `prompt` property (see [`PromptOrigin`]).
+    pub(crate) fn composition_error(&self, error: CompositionError) -> CompositionError {
+        match error {
+            CompositionError::ComposeFailed(markdown) => self.markdown_error(markdown, CompositionError::ComposeFailed),
+            CompositionError::PreFlightDiscoveryFailed(markdown) => {
+                self.markdown_error(markdown, CompositionError::PreFlightDiscoveryFailed)
+            }
+            CompositionError::ShellExpansionFailed { source_path, mut error } => {
+                self.shell_error(&mut error);
+                CompositionError::ShellExpansionFailed { source_path, error }
+            }
+            other => other,
+        }
+    }
+
+    /// [`Self::composition_error`] for a Darkmatter error `wrap` reports.
+    fn markdown_error(&self, error: MarkdownError, wrap: fn(MarkdownError) -> CompositionError) -> CompositionError {
+        self.translate(error).map_or_else(|directive| directive, wrap)
+    }
+
+    /// `error` with its published locations of the generated body moved to
+    /// the `prompt` property, or, for a directive failure Darkmatter located
+    /// only in that body, the [`CompositionError::InlinePromptDirectiveFailed`]
+    /// it is published as.
+    fn translate(&self, error: MarkdownError) -> Result<MarkdownError, CompositionError> {
+        match error {
+            MarkdownError::ShellExpansion(mut shell) => {
+                self.shell_error(&mut shell);
+                Ok(MarkdownError::ShellExpansion(shell))
+            }
+            MarkdownError::ShellBlock(block) if self.owns_block(&block) => {
+                use darkmatter::markdown::compose::ShellBlockError;
+                let (message, command) = match *block {
+                    ShellBlockError::Parse { message, .. } => (message, None),
+                    ShellBlockError::Unterminated { opening_text, .. } => (unclosed(&opening_text), None),
+                    ShellBlockError::Command { mut source, .. } => {
+                        self.shell_error(&mut source);
+                        (source.to_string(), Some(source))
+                    }
+                };
+                Err(self.directive_error(message, command))
+            }
+            MarkdownError::Collection(collection)
+                if collection.site().is_some_and(|site| self.is_generated_source(&site.source)) =>
+            {
+                let path = collection.iteration_path();
+                let reason = match &*collection {
+                    darkmatter::markdown::compose::collection_blocks::CollectionError::Malformed { message, .. } => {
+                        message.clone()
+                    }
+                    other => other.to_string(),
+                };
+                Err(self.directive_error(with_iteration(reason, &path), None))
+            }
+            MarkdownError::TocLinking(toc) if toc.document().is_some_and(|document| self.is_identity(document)) => {
+                Err(self.directive_error(toc.reason(), None))
+            }
+            MarkdownError::FileLinks(links) if links.document().is_some_and(|document| self.is_identity(document)) => {
+                Err(self.directive_error(links.reason(), None))
+            }
+            MarkdownError::InIteration(mut failure) => {
+                if failure.location.as_deref().is_some_and(|location| self.is_generated_source(location)) {
+                    failure.location = None;
+                }
+                match self.translate(*failure.error) {
+                    Ok(inner) => {
+                        failure.error = Box::new(inner);
+                        Ok(MarkdownError::InIteration(failure))
+                    }
+                    Err(CompositionError::InlinePromptDirectiveFailed { source_path, property, message, command }) => {
+                        Err(CompositionError::InlinePromptDirectiveFailed {
+                            source_path,
+                            property,
+                            message: with_iteration(message, &failure.iteration_path),
+                            command,
+                        })
+                    }
+                    Err(other) => Err(other),
+                }
+            }
+            error => match self.directive_reason(&error) {
+                Some(message) => Err(self.directive_error(message, None)),
+                None => Ok(error),
+            },
+        }
+    }
+
+    /// Whether a Darkmatter location is in the generated body.
+    fn is_generated_source(&self, source: &darkmatter::markdown::SourceRef) -> bool {
+        use darkmatter::markdown::SourceRef;
+        match source {
+            SourceRef::OnDisk(ctx) | SourceRef::OnDiskSpan { context: ctx, .. } => self.is_generated(ctx),
+            SourceRef::Supplied { .. } | SourceRef::Effective { .. } => false,
+        }
+    }
+
+    fn directive_error(
+        &self,
+        message: String,
+        command: Option<Box<darkmatter::markdown::compose::ShellExpansionError>>,
+    ) -> CompositionError {
+        CompositionError::InlinePromptDirectiveFailed {
+            source_path: self.path.to_path_buf(),
+            property: Self::PROPERTY.to_string(),
+            message,
+            command,
+        }
+    }
+
+    /// Whether a `::shell-block` error is the generated body's: Darkmatter
+    /// names the composed document's file on every one, and an inline run
+    /// composes this file only as that body: the generated document enters
+    /// the transclusion ancestry as this file, so a `::file` of it is a cycle.
+    fn owns_block(&self, error: &darkmatter::markdown::compose::ShellBlockError) -> bool {
+        use darkmatter::markdown::compose::ShellBlockError;
+        let (ShellBlockError::Parse { source_file, .. }
+        | ShellBlockError::Unterminated { source_file, .. }
+        | ShellBlockError::Command { source_file, .. }) = error;
+        source_file.as_deref().is_some_and(|file| self.is_source(file))
+    }
+
+    /// The position-free reason of a page-block or transclusion directive
+    /// failure of the generated body; `None` for any other error, or a
+    /// child's.
+    fn directive_reason(&self, error: &MarkdownError) -> Option<String> {
+        use darkmatter::markdown::compose::TransclusionError;
+        use darkmatter::markdown::compose::conditions::ConditionError;
+        use darkmatter::markdown::compose::page_blocks::PageBlockError;
+        let condition = |expr: &str, reason: &dyn std::fmt::Display| format!("condition `{expr}` failed: {reason}");
+        match error {
+            MarkdownError::PageBlock(block) => match block.as_ref() {
+                PageBlockError::ParseDirective { ctx, message, .. } if self.is_generated(ctx) => Some(message.clone()),
+                PageBlockError::UnmatchedEnd { ctx, .. } if self.is_generated(ctx) => {
+                    Some("`::end-block` has no block to close".to_string())
+                }
+                PageBlockError::UnterminatedBlock { ctx, opening_text, .. } if self.is_generated(ctx) => {
+                    Some(unclosed(opening_text))
+                }
+                PageBlockError::Condition(failure) => match failure.as_ref() {
+                    ConditionError::Parse { ctx, expr, message, .. } if self.is_generated(ctx) => {
+                        Some(condition(expr, message))
+                    }
+                    ConditionError::Eval { ctx, expr, cause, .. } if self.is_generated(ctx) => Some(condition(expr, cause)),
+                    _ => None,
+                },
+                _ => None,
+            },
+            MarkdownError::Transclusion(transclusion) => match transclusion.as_ref() {
+                TransclusionError::ParseDirective { ctx, message, .. } if self.is_generated(ctx) => Some(message.clone()),
+                TransclusionError::InvalidReference { ctx, reference, directive_kind, .. } if self.is_generated(ctx) => {
+                    Some(format!("invalid {} reference `{reference}`", directive_kind.as_str()))
+                }
+                TransclusionError::ConditionParse { ctx, expr, message, .. } if self.is_generated(ctx) => {
+                    Some(condition(expr, message))
+                }
+                TransclusionError::ConditionEval { ctx, expr, cause, .. } if self.is_generated(ctx) => {
+                    Some(condition(expr, cause))
+                }
+                TransclusionError::InvalidFrontmatterAssignment { ctx, raw, reason, .. } if self.is_generated(ctx) => {
+                    Some(format!("invalid frontmatter assignment on `::file`: {reason} (value: {raw})"))
+                }
+                TransclusionError::InvalidReassignedFrontmatterProperty { ctx, name, .. } if self.is_generated(ctx) => {
+                    Some(format!("invalid reassigned frontmatter property `{name}` on `::file`"))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+/// The reason an unclosed block reports, without its line.
+fn unclosed(opener: &str) -> String {
+    format!("`{opener}` is never closed with `::end-block`")
+}
+
+/// `message` with the original items of the `::map` / `::filter` copy it
+/// failed in, which are positions in the data, not in any text.
+fn with_iteration(message: String, path: &darkmatter::markdown::compose::expression::iteration::IterationPath) -> String {
+    if path.is_empty() { message } else { format!("{message} at {path}") }
+}
+
+/// The schema phase a preparation in `mode` composes at.
+fn schema_phase_for(mode: CompositionMode) -> Option<SchemaPhase> {
+    match mode {
+        CompositionMode::ChainedDocument => None,
+        CompositionMode::InlineFrontmatterPrompt => Some(SchemaPhase::Launch),
+    }
 }
 
 use super::error::CompositionError;
@@ -948,6 +1316,67 @@ pub fn read_selection_hints(
     super::parse_selection_hints_from_frontmatter(frontmatter).ok()
 }
 
+/// Compose `source`'s document values alone, for a sequence document's
+/// owner preparation ([`crate::composition::sequence::document`]).
+///
+/// The canonical assembly narrowed to the frontmatter surface, with frontmatter
+/// `$( … )` expansion disabled, so nothing runs and the body is never read: a
+/// value that a shell produces keeps its authored text. Caller layers, schema
+/// coercion and defaults, and interpolation apply as they would to the
+/// document's full preparation. The returned composition carries no prompt,
+/// lifecycle, or selection hints and is never launched; the schema layer
+/// ([`crate::composition::schema`]) judges it like any other.
+pub(super) fn prepare_values_on(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    mode: CompositionMode,
+) -> Result<PreparedComposition, CompositionError> {
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
+    let mut ctx = derive_compose_context(source, &options);
+    for (key, value) in &options.env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
+    }
+    let schema_phase = match mode {
+        CompositionMode::ChainedDocument => None,
+        CompositionMode::InlineFrontmatterPrompt => Some(SchemaPhase::Launch),
+    };
+    let compose_opts = canonical_compose_options(source, &ctx, &options, schema_phase)
+        .only_frontmatter_surface()
+        .disable(darkmatter::markdown::compose::ComposeOperation::FrontmatterShellExpansion)
+        .with_pre_approved_commands(
+            darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new(),
+        );
+    let request = prepared_request(compose_opts, &options)?;
+    let input_layers = super::CallerInputLayers::from_options(&options);
+    let (composed, report) =
+        recording_triggers(source.markdown.compose_with_warnings(&request), &source.resolved_path, &options)?;
+    let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, schema_phase, &request)?;
+    Ok(PreparedComposition {
+        mode,
+        entry: DocumentEntryReason::Direct,
+        schema_verdict_deferred: options.defer_schema_verdict,
+        resolved_path: source.resolved_path.clone(),
+        source_repo_root: options.source_repo_root.clone(),
+        prompt: String::new(),
+        effective_frontmatter,
+        selection_hints: EffectiveSelectionHints::default(),
+        closure: CompositionClosurePlan::Direct,
+        launch_schema,
+        lifecycle: super::lifecycle::LifecycleConfig::default(),
+        deferred_lifecycle_keys: sorted_deferred_keys(&report),
+        compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
+        input_layers,
+        compose_context: ctx,
+        document_epoch: options.document_epoch,
+    })
+}
+
 fn prepare_direct_on(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
@@ -1114,7 +1543,12 @@ fn prepare_inline_on(
         },
     )?;
 
-    let prompt_text = inline_prompt_text(fm, options.set_overrides.as_ref())?;
+    let temp_md = document_for_mode(
+        &source.markdown,
+        &source.resolved_path,
+        CompositionMode::InlineFrontmatterPrompt,
+        options.set_overrides.as_ref(),
+    )?;
 
     observe_prepared_context(
         &options,
@@ -1124,8 +1558,6 @@ fn prepare_inline_on(
         &options,
         crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
     );
-    // Build temporary markdown (frontmatter + prompt as body) and compose
-    let temp_md = Markdown::with_frontmatter(fm.clone(), &prompt_text);
     // Reuse the single composition-start snapshot when supplied; see
     // `prepare_direct`.
     let mut ctx = derive_compose_context(source, &options);
@@ -1142,8 +1574,10 @@ fn prepare_inline_on(
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
+    let prompt_origin = PromptOrigin { path: &source.resolved_path, text: &source.original_text };
     let (composed, report, selected) =
-        compose_selecting(&temp_md, &compose_request, &source.resolved_path, &options, select)?;
+        compose_selecting(&temp_md, &compose_request, &source.resolved_path, &options, select)
+            .map_err(|error| prompt_origin.composition_error(error))?;
     if let Some(selected) = selected {
         *ctx.env_mut() = selected.env;
         input_layers.env_overrides = selected.overrides;
@@ -1195,7 +1629,10 @@ fn prepare_inline_on(
     );
 
     let mut warnings = lifecycle_warnings;
-    warnings.extend(report.warnings.iter().cloned());
+    warnings.extend(report.warnings.iter().cloned().map(|mut warning| {
+        prompt_origin.warning(&mut warning);
+        warning
+    }));
     if let Some(path) = retired_guardrails {
         warnings.push(darkmatter::markdown::compose::ComposeWarning::new(
             "inline_guardrails",
@@ -1553,23 +1990,35 @@ fn top_level_override_keys(overrides: Option<&serde_json::Value>) -> Vec<String>
 mod tests;
 
 /// Check a prompt document's deferred shell values before its task runs setup.
-/// This discovery walk is passive, including transcluded documents.
+/// This discovery walk is passive, including transcluded documents, and walks
+/// the text `mode` composes ([`document_for_mode`]).
 ///
 /// ## Errors
-/// Returns the owner's typed shell input or discovery error without executing commands.
+/// Returns the owner's typed shell input or discovery error without executing
+/// commands; an inline run's is reported at the source's `prompt` property,
+/// with no line.
 pub fn validate_document_shell_late_values(
     source: &ResolvedCompositionSource,
     options: &PrepareOptions,
+    mode: CompositionMode,
 ) -> Result<super::lifecycle::LifecycleConfig, CompositionError> {
     observe_prepared_context(options, crate::invocation_context::PreparedContextConsumer::Preflight);
     let ctx = derive_compose_context(source, options);
     let request = prepared_request(
-        canonical_compose_options(source, &ctx, options, None)
+        canonical_compose_options(source, &ctx, options, schema_phase_for(mode))
             .with_deferred_shell_value_validation(true),
         options,
     )?;
-    source.markdown.compose_preflight(&request)
-        .map_err(|error| map_compose_error(&source.resolved_path, error))?;
+    let document = document_for_mode(&source.markdown, &source.resolved_path, mode, options.set_overrides.as_ref())?;
+    document
+        .compose_preflight(&request)
+        .map_err(|error| {
+            let error = map_compose_error(&source.resolved_path, error);
+            match PromptOrigin::for_mode(mode, &source.resolved_path, &source.original_text) {
+                Some(origin) => origin.composition_error(error),
+                None => error,
+            }
+        })?;
     let authored_values = authored_lifecycle_values(source, options);
     let authored = super::lifecycle::parse_lifecycle_config_with_orders(
         &authored_values,
@@ -1592,6 +2041,6 @@ pub fn validate_document_shell_late_values(
     }
     let mut probe = options.clone();
     probe.validate_deferred_shell_values = true;
-    let prepared = prepare_sequence_probe(source, probe, CompositionMode::ChainedDocument)?;
+    let prepared = prepare_sequence_probe(source, probe, mode)?;
     Ok(prepared.lifecycle)
 }

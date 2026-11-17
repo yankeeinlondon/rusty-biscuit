@@ -422,7 +422,8 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
         ],
     );
 
-    // A document whose only control is `sequence` selects sequence.yaml alone.
+    // A document whose only control is `sequence` selects sequence.yaml and,
+    // because `sequence` identifies a Claudine document, claudine.yaml too.
     let output = process
         .command()
         .args(["schema", "triggers"])
@@ -439,7 +440,7 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
             .to_string()
     };
     assert!(!line("sequence.yaml").contains("not matched") && line("sequence.yaml").contains("matched"), "{trace}");
-    assert!(line("claudine.yaml").contains("not matched"), "{trace}");
+    assert!(!line("claudine.yaml").contains("not matched") && line("claudine.yaml").contains("matched"), "{trace}");
 
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");
@@ -556,7 +557,7 @@ fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
     assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
 }
 
-/// The four depth-four container controls select `sequence.yaml` alone and
+/// The four depth-four container controls select `sequence.yaml` and `claudine.yaml` and
 /// validate through the CLI; a defect in the innermost container's events is
 /// reported at its own item.
 #[test]
@@ -598,8 +599,9 @@ fn depth_four_container_controls_validate_and_their_innermost_defects_are_locate
     );
 
     let trace = triggers(&process, &documents[0]);
+    // `sequence` identifies a Claudine document, so the main contract applies too.
     assert_trigger(&trace, "sequence.yaml", true);
-    assert_trigger(&trace, "claudine.yaml", false);
+    assert_trigger(&trace, "claudine.yaml", true);
 
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");

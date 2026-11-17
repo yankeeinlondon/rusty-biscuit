@@ -130,12 +130,9 @@ pub(super) fn translate_schema_failure(
         &options.trigger_findings(),
         None,
     )?;
-    let phase = match mode {
-        PrepareMode::Inline(_) => Some(SchemaPhase::Launch),
-        PrepareMode::Direct(..) => None,
-    };
+    let phase = mode.is_inline().then_some(SchemaPhase::Launch);
     let mut categorized = categorize_problems(&problems, effective.as_ref(), phase);
-    if matches!(mode, PrepareMode::Direct(..)) {
+    if !mode.is_inline() {
         // Direct compose fills a required property its own expression left
         // `null` at launch, through interactive collection; see
         // `promote_null_required_to_missing`.

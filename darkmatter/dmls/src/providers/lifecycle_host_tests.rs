@@ -1,11 +1,11 @@
-//! One combined diagnostics pass discovers the lifecycle host once and shares
-//! it with the frontmatter and DSL providers; a panic in that discovery drops
-//! only those two providers' diagnostics.
+//! One combined diagnostics pass reads the lifecycle host from the document's
+//! selected host view and shares it with the frontmatter and DSL providers;
+//! a panic while reading it drops only those two providers' diagnostics.
 //!
 //! Discovery is counted by the reads of a host catalog that
-//! [`DiscoveryProbe`] observes on this thread: every discovery reads each
-//! visited catalog once, cached or not, and nothing else in a pass reads
-//! through the probe.
+//! [`DiscoveryProbe`] observes on this thread: the overlay's schema
+//! preparation selects the host, and no diagnostics pass reads a catalog
+//! again.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -106,6 +106,7 @@ impl Repository {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         f(&ctx)
     }
@@ -142,10 +143,11 @@ fn standalone(ctx: &DocumentContext) -> Vec<Diagnostic> {
     out
 }
 
-/// One pass under a catalog with no usable artifact discovers once and
+/// One pass under a catalog with no usable artifact reads no catalog and
 /// reports exactly what the providers report on their own: the incomplete
 /// warning, and the `md` host's narrowing of the `finalize` stack. With the
-/// artifact repaired, the next pass discovers afresh and the warning is gone.
+/// artifact repaired, the next overlay selects afresh and the warning is
+/// gone.
 #[test]
 fn one_lifecycle_discovery_serves_a_combined_pass_and_a_repair_shows_next_request() {
     let repository = Repository::new();
@@ -156,7 +158,7 @@ fn one_lifecycle_discovery_serves_a_combined_pass_and_a_repair_shows_next_reques
     repository.with_ctx(|ctx| {
         let probe = DiscoveryProbe::install();
         let combined = registry.diagnostics(ctx);
-        assert_eq!(catalog_reads(&probe), 1, "one discovery per combined pass");
+        assert_eq!(catalog_reads(&probe), 0, "the pass reads the host its overlay selected");
 
         let incomplete = with_code(&combined, code::LIFECYCLE_INCOMPLETE_ANALYSIS);
         assert_eq!(incomplete.len(), 1, "{combined:#?}");
@@ -170,14 +172,14 @@ fn one_lifecycle_discovery_serves_a_combined_pass_and_a_repair_shows_next_reques
             "the md host narrows the guarded call: {combined:#?}"
         );
         assert_eq!(combined, standalone(ctx), "the shared host changes no provider's result");
-        assert_eq!(catalog_reads(&probe), 2, "standalone frontmatter and DSL each discover");
+        assert_eq!(catalog_reads(&probe), 0, "standalone frontmatter and DSL read the same view");
     });
 
     repository.write_artifact(&catalog);
     repository.with_ctx(|ctx| {
         let probe = DiscoveryProbe::install();
         let combined = registry.diagnostics(ctx);
-        assert_eq!(catalog_reads(&probe), 1, "one discovery per combined pass");
+        assert_eq!(catalog_reads(&probe), 0, "the pass reads the host its overlay selected");
         assert!(with_code(&combined, code::LIFECYCLE_INCOMPLETE_ANALYSIS).is_empty(), "{combined:#?}");
         assert_eq!(
             lines_of(&combined, code::EXPRESSION_UNCERTAIN_CALL),
@@ -189,7 +191,7 @@ fn one_lifecycle_discovery_serves_a_combined_pass_and_a_repair_shows_next_reques
 }
 
 /// A broken host catalog is reported by the DSL provider's own catalog
-/// check in a combined pass, beside a usable host found once.
+/// check in a combined pass, beside a usable host the overlay selected.
 #[test]
 fn a_broken_host_catalog_is_still_reported_in_a_combined_lifecycle_pass() {
     let repository = Repository::new();
@@ -205,7 +207,7 @@ fn a_broken_host_catalog_is_still_reported_in_a_combined_lifecycle_pass() {
     repository.with_ctx(|ctx| {
         let probe = DiscoveryProbe::install();
         let combined = registry.diagnostics(ctx);
-        assert_eq!(probe.take_reads().iter().filter(|read| **read == catalog).count(), 1);
+        assert_eq!(probe.take_reads().iter().filter(|read| **read == catalog).count(), 0);
         let reported = with_code(&combined, code::SCHEMA_HOST_CATALOG);
         assert_eq!(reported.len(), 1, "{combined:#?}");
         assert!(reported[0].message.contains("broken.yaml"), "{}", reported[0].message);

@@ -83,6 +83,14 @@
   coverage audit to catch. It has been the `protect-your-bacon` required
   context since 2026-09-13, replacing `ci-verdict`. Load the `rust-devops`
   skill before changing CI scope, evidence reuse, or the gate.
+- **Permission changes are reported, not gated.** `permission-scope` runs the
+  **base** commit's checker against the candidate's Git objects and never runs
+  candidate code; when a change widens or narrows committed `permissions`, it
+  keeps one comment on the pull request, composed by Darkmatter from
+  `.github/ci/permission-report.md`, that says which and lists every entry that
+  changed, and the merge is the decision. Nothing waits for an approval; only a
+  checker or render error fails the job, which feeds `ci-gate` like any
+  blocking job.
 
 ## CI/CD Test-scope Discipline
 

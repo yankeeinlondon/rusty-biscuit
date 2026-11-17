@@ -165,10 +165,21 @@ impl RepositoryContexts {
 
     /// The context for the document at `path`: its repository's context
     /// derived for the document, or the cached build failure.
+    ///
+    /// A document whose folder does not exist yet (an unsaved buffer for
+    /// `~/.claudine/config.yaml` before `~/.claudine/` is created) is
+    /// anchored at the nearest existing ancestor folder, so it has the
+    /// context a file there would have. That anchoring is never cached
+    /// under the absent folder: once the folder exists, its own key applies.
     pub fn for_document(&self, path: &Path) -> DocumentResolution {
         let folder = path.parent().unwrap_or(path);
         let mut state = self.state.lock().expect("context cache lock poisoned");
-        let key = self.folder_key(&mut state, folder).key;
+        let anchor = if state.folders.contains_key(folder) || folder.is_dir() {
+            folder
+        } else {
+            folder.ancestors().skip(1).find(|ancestor| ancestor.is_dir()).unwrap_or(folder)
+        };
+        let key = self.folder_key(&mut state, anchor).key;
         let entry = self.entry(&mut state, &key);
         DocumentResolution {
             generation: entry.generation,

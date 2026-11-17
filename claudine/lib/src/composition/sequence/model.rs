@@ -270,6 +270,24 @@ pub struct SequencePlan {
     /// authored YAML list: a data file read through an offset or operator, a
     /// `{{ … }}` expression, or `$( … )` output. Those keep canonical order.
     pub authored: AuthoredOrder,
+    /// The whole document that declared the list, when it came from one: the
+    /// invoked document's inline list, or a whole file a root `sequence:`
+    /// references (then the referenced file, not the invoking one). `None`
+    /// for a data selection or a dynamic source.
+    pub document_scope: Option<std::sync::Arc<super::document::SequenceDocumentScope>>,
+}
+
+impl SequencePlan {
+    /// This plan carrying the invocation token `sequence_id`, in the plan and
+    /// in every step's state.
+    #[must_use]
+    pub fn with_sequence_id(mut self, sequence_id: &str) -> Self {
+        self.sequence_id = sequence_id.to_string();
+        for step in &mut self.steps {
+            step.state.sequence_id = sequence_id.to_string();
+        }
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------

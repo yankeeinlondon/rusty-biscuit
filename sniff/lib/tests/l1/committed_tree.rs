@@ -451,3 +451,55 @@ fn committed_tree_snapshot_reads_from_other_threads() {
         assert_eq!(reader.join().unwrap(), blob("shared\n"));
     }
 }
+
+fn discover(path: &Path) -> GitRepo {
+    GitRepo::discover(path)
+        .expect("discover")
+        .expect("fixture repository")
+}
+
+#[test]
+fn committed_tree_at_pins_the_named_commit_whatever_head_names() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let repo = init(root);
+    write_and_stage(&repo, root, "policy.yaml", "base\n");
+    let base = commit_index(&repo, "HEAD", "base");
+    write_and_stage(&repo, root, "policy.yaml", "head\n");
+    write_and_stage(&repo, root, "added.txt", "added\n");
+    let head = commit_index(&repo, "HEAD", "head");
+
+    let git_repo = discover(root);
+    let at_base = git_repo.committed_tree_at(&base.to_string()).unwrap();
+    let at_head = git_repo.committed_tree_at(&head.to_string()).unwrap();
+
+    assert_eq!(at_base.commit_id(), Some(base.to_string()));
+    assert_eq!(read(&at_base, "policy.yaml"), blob("base\n"));
+    assert_eq!(read(&at_base, "added.txt"), CommittedEntry::Absent);
+    assert_eq!(at_head.commit_id(), Some(head.to_string()));
+    assert_eq!(read(&at_head, "policy.yaml"), blob("head\n"));
+    // The independent oracle agrees on the pinned tree.
+    let tree = String::from_utf8(git(root, &["rev-parse", &format!("{base}^{{tree}}")])).unwrap();
+    assert_eq!(at_base.tree_id().as_deref(), Some(tree.trim()));
+}
+
+#[test]
+fn committed_tree_at_refuses_anything_but_a_full_commit_id() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let repo = init(root);
+    write_and_stage(&repo, root, "policy.yaml", "base\n");
+    let commit = commit_index(&repo, "HEAD", "base");
+    let git_repo = discover(root);
+    let full = commit.to_string();
+
+    // A ref name, an abbreviation, and a revision expression are never parsed.
+    for spelling in ["HEAD", "main", &full[..12], &format!("{full}^"), ""] {
+        assert_git_error(git_repo.committed_tree_at(spelling));
+    }
+    // A well-formed id of an object that is absent.
+    assert_git_error(git_repo.committed_tree_at(&"0".repeat(40)));
+    // A tree id names an object that is not a commit.
+    let tree = repo.find_commit(commit).unwrap().tree_id().to_string();
+    assert_git_error(git_repo.committed_tree_at(&tree));
+}

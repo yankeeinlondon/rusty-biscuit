@@ -67,8 +67,16 @@ fn schema_problems(failure: &ComposeFailure) -> &[ValidationProblem] {
     }
 }
 
-fn applied(path: &str, value: Value) -> AppliedDefault {
-    AppliedDefault { path: PropertyPath::parse(path).expect("path"), value }
+/// Each default as `(path, value, schema location)`; the layer that
+/// declared it is asserted where a test is about it.
+fn located(defaults: &[AppliedDefault]) -> Vec<(String, Value, String)> {
+    defaults.iter().map(|applied| (applied.path.to_string(), applied.value.clone(), applied.pointer.clone())).collect()
+}
+
+fn applied(path: &str, value: Value) -> (String, Value, String) {
+    let path = PropertyPath::parse(path).expect("path");
+    let pointer = path.segments().iter().map(|segment| format!("/properties/{segment}")).collect::<String>() + "/default";
+    (path.to_string(), value, pointer)
 }
 
 fn context_at(dir: &Path) -> biscuit_file::FileResolutionContext {
@@ -306,10 +314,10 @@ fn passive_validation_reports_defaults_and_leaves_the_input_unchanged() {
     let direct = effective.validate(&input);
 
     assert!(report.valid, "{:?}", report.problems);
-    assert_eq!(report.defaults, [applied("x", json!("hello"))]);
+    assert_eq!(located(&report.defaults), [applied("x", json!("hello"))]);
     assert!(!markdown.frontmatter().as_map().contains_key("x"));
     assert!(direct.valid, "{:?}", direct.problems);
-    assert_eq!(direct.defaults, [applied("x", json!("hello"))]);
+    assert_eq!(located(&direct.defaults), [applied("x", json!("hello"))]);
     assert_eq!(input, json!({}));
 }
 
@@ -337,7 +345,7 @@ fn yaml_document_validation_reports_defaults() {
         panic!("a schema applies");
     };
     assert!(validation.report.valid, "{:?}", validation.report.problems);
-    assert_eq!(validation.report.defaults, [applied("retries", json!(3))]);
+    assert_eq!(located(&validation.report.defaults), [applied("retries", json!(3))]);
 }
 
 /// Whole-YAML validation follows the same rule as frontmatter: an optional
@@ -359,7 +367,7 @@ fn yaml_document_validation_defaults_missing_and_null_values() {
         panic!("a schema applies");
     };
     assert!(validation.report.valid, "{:?}", validation.report.problems);
-    assert_eq!(validation.report.defaults, [applied("retries", json!(3)), applied("mode", json!("auto"))]);
+    assert_eq!(located(&validation.report.defaults), [applied("retries", json!(3)), applied("mode", json!("auto"))]);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
 
     let text = "$schema: ./settings-schema.yaml\nname: null\n";
@@ -528,4 +536,197 @@ fn a_completed_lifecycle_stack_keeps_its_authored_verdict_through_composition() 
         "{:?}",
         schema_problems(&failure)
     );
+}
+
+/// An eager file check the default's own structural check cannot run fails
+/// on the completed value; the failure belongs to the schema default.
+mod eager_file_defaults {
+    use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
+    use simplified_schema::SchemaOriginKind;
+
+    use super::*;
+
+    const EAGER_INLINE: &str = "---\n$schema:\n  doc: file(required; eager; default(./note.md))\n---\nBody {{ doc }}\n";
+
+    #[track_caller]
+    fn attributed(problems: &[ValidationProblem]) -> &AppliedDefault {
+        let [problem] = problems else { panic!("one problem expected, got {problems:?}") };
+        assert_eq!(problem.code, ValidationProblemCode::InvalidFileReference);
+        assert_eq!(problem.path, "/doc");
+        assert_eq!((problem.line, problem.column), (None, None), "no authored text holds a default");
+        assert!(problem.message.contains("schema default at schema location `/properties/doc/default`"), "{}", problem.message);
+        let default = problem.default.as_ref().expect("the problem names its default");
+        assert_eq!((default.path.to_string(), default.pointer.as_str()), ("doc".to_string(), "/properties/doc/default"));
+        default
+    }
+
+    #[test]
+    fn composition_attributes_a_missing_eager_default_target_to_the_default() {
+        let dir = TempDir::new().unwrap();
+
+        let failure = try_compose(dir.path(), EAGER_INLINE).expect_err("note.md does not exist");
+
+        attributed(schema_problems(&failure));
+        let [diagnostic] = error_diagnostics(&failure.error).try_into().expect("one record");
+        assert_eq!(diagnostic.code, "dm.schema.invalid_file_reference");
+        let source = diagnostic.source.as_ref().expect("the document is named");
+        assert_eq!((source.line, source.column), (None, None), "no authored position is invented");
+        let origin = diagnostic.schema_default.as_ref().expect("the record names the default");
+        assert_eq!((origin.path.as_str(), origin.schema_location.as_str()), ("doc", "/properties/doc/default"));
+        assert_eq!(origin.schema_file, None, "the document's own inline schema declares it");
+    }
+
+    #[test]
+    fn composition_accepts_an_eager_default_whose_target_exists() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "note.md", "note\n");
+
+        let composed = compose(dir.path(), EAGER_INLINE);
+
+        assert!(composed.frontmatter().as_map().contains_key("doc"), "the default is inserted");
+    }
+
+    #[test]
+    fn a_lazy_file_default_composes_whether_or_not_its_target_exists() {
+        let dir = TempDir::new().unwrap();
+        let lazy = "---\n$schema:\n  doc: file(required; default(./note.md))\n---\nBody {{ doc }}\n";
+
+        assert!(compose(dir.path(), lazy).content().contains("Body ./note.md"));
+        write(dir.path(), "note.md", "note\n");
+        assert!(compose(dir.path(), lazy).content().contains("Body ./note.md"));
+    }
+
+    #[test]
+    fn a_default_from_a_referenced_schema_file_names_that_file() {
+        let dir = TempDir::new().unwrap();
+        let schema = write(dir.path(), "schemas/doc-schema.yaml", "$schema:\n  doc: file(required; eager; default(./note.md))\n");
+        let path = write(dir.path(), "doc.md", "---\n$schema: ./schemas/doc-schema.yaml\n---\nBody\n");
+        let schema_file = biscuit_file::canonicalize_simplified(&schema).expect("schema file");
+        let canonical = |file: &Path| biscuit_file::canonicalize_simplified(file).expect("a named schema file exists");
+
+        let report = DarkmatterSchemas::new(context_at(dir.path())).validate(&markdown_at(&path)).expect("schema prepares");
+        let failure = try_compose(dir.path(), "---\n$schema: ./schemas/doc-schema.yaml\n---\nBody\n").expect_err("note.md does not exist");
+
+        assert!(!report.valid);
+        let passive = attributed(&report.problems);
+        assert_eq!(passive.origin.as_ref().map(|origin| origin.kind), Some(SchemaOriginKind::ReferencedFile));
+        let named = passive.origin.as_ref().and_then(|origin| origin.file()).expect("the schema file is named");
+        assert_eq!(canonical(named), schema_file);
+        assert!(report.problems[0].message.contains(&named.display().to_string()), "{}", report.problems[0].message);
+        attributed(schema_problems(&failure));
+        let [diagnostic] = error_diagnostics(&failure.error).try_into().expect("one record");
+        let origin = diagnostic.schema_default.as_ref().expect("the record names the default");
+        assert_eq!(origin.schema_file.as_deref().map(canonical), Some(schema_file));
+    }
+
+    /// Named types whose eager file defaults name a missing target.
+    const IMPORTED_TYPES: &str = "kind: schema\ntypes:\n  Doc: file(required; eager; default(./note.md))\n  Holder:\n    target: file(required; eager; default(./note.md))\n";
+
+    #[track_caller]
+    fn canonical(file: &Path) -> std::path::PathBuf {
+        biscuit_file::canonicalize_simplified(file).expect("a named schema file exists")
+    }
+
+    #[track_caller]
+    fn declaring_file(applied: &AppliedDefault) -> std::path::PathBuf {
+        canonical(applied.origin.as_ref().and_then(|origin| origin.file()).expect("a schema file is named"))
+    }
+
+    #[test]
+    fn a_default_imported_through_a_named_type_names_the_file_that_declares_it() {
+        let dir = TempDir::new().unwrap();
+        let types = canonical(&write(dir.path(), "types/types.yaml", IMPORTED_TYPES));
+        let document = "---\n$schema:\n  doc: Doc@./types/types.yaml\n---\nBody\n";
+        let path = write(dir.path(), "doc.md", document);
+
+        let report = DarkmatterSchemas::new(context_at(dir.path())).validate(&markdown_at(&path)).expect("schema prepares");
+        let failure = try_compose(dir.path(), document).expect_err("note.md does not exist");
+
+        let passive = attributed(&report.problems);
+        assert_eq!(declaring_file(passive), types, "the importing document declares no default");
+        assert!(report.problems[0].message.contains("types.yaml"), "{}", report.problems[0].message);
+        attributed(schema_problems(&failure));
+        let [diagnostic] = error_diagnostics(&failure.error).try_into().expect("one record");
+        let origin = diagnostic.schema_default.as_ref().expect("the record names the default");
+        assert_eq!(origin.schema_file.as_deref().map(canonical), Some(types));
+    }
+
+    #[test]
+    fn a_nested_default_of_a_named_type_imported_by_a_schema_file_names_the_type_file() {
+        let dir = TempDir::new().unwrap();
+        let types = canonical(&write(dir.path(), "types/types.yaml", IMPORTED_TYPES));
+        write(dir.path(), "schemas/doc-schema.yaml", "$schema:\n  holder: Holder@../types/types.yaml\n");
+        let path = write(dir.path(), "doc.md", "---\n$schema: ./schemas/doc-schema.yaml\nholder: {}\n---\nBody\n");
+
+        let report = DarkmatterSchemas::new(context_at(dir.path())).validate(&markdown_at(&path)).expect("schema prepares");
+
+        let [problem] = report.problems.as_slice() else { panic!("one problem expected, got {:?}", report.problems) };
+        assert_eq!(problem.path, "/holder/target");
+        assert_eq!((problem.line, problem.column), (None, None), "no authored text holds a default");
+        let default = problem.default.as_ref().expect("the problem names its default");
+        // `holder` is optional, so it lowers to a null-or-object union.
+        assert_eq!(default.pointer, "/properties/holder/anyOf/1/properties/target/default");
+        assert_eq!(declaring_file(default), types, "the type file declares it, not the importing schema file");
+    }
+
+    /// The trigger cannot match in the first validation pass, where `stage`
+    /// is still an unrun `$( … )`; only the post-shell pass matches it,
+    /// inserts its eager default, and finds the default's target missing.
+    #[test]
+    fn a_default_a_post_shell_trigger_inserts_is_attributed_in_the_second_pass() {
+        let dir = trigger_repository();
+        let trigger = canonical(&write(
+            dir.path(),
+            "schemas/eager.yaml",
+            "kind: schema-trigger\nmatch:\n  stage: literal(review; required)\n$schema:\n  doc: file(required; eager; default(./note.md))\n",
+        ));
+        write(dir.path(), "docs/stage.ini", "[doc]\n\tstage = review\n");
+        let document = "---\nstage: $(git config --file stage.ini --get doc.stage)\n---\nBody\n";
+
+        let failure = try_compose_at(dir.path(), "docs/doc.md", document, |options| {
+            options
+                .with_trigger_schemas(true)
+                .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
+                .with_shell(ShellExpansionOptions::default())
+                .with_shell_working_directory(dir.path().join("docs"))
+                .with_shell_approval_handler(Arc::new(AllowAll))
+        })
+        .expect_err("the trigger's default names a missing note.md");
+
+        let default = attributed(schema_problems(&failure));
+        assert_eq!(default.origin.as_ref().map(|origin| origin.kind), Some(SchemaOriginKind::Trigger));
+        assert_eq!(declaring_file(default), trigger);
+        let [diagnostic] = error_diagnostics(&failure.error).try_into().expect("one record");
+        let source = diagnostic.source.as_ref().expect("the document is named");
+        assert_eq!((source.line, source.column), (None, None), "no authored position is invented");
+        let origin = diagnostic.schema_default.as_ref().expect("the record names the default");
+        assert_eq!(origin.schema_location, "/properties/doc/default");
+        assert_eq!(origin.schema_file.as_deref().map(canonical), Some(trigger));
+    }
+
+    #[test]
+    fn passive_validation_attributes_a_missing_eager_default_target_to_the_default() {
+        let dir = TempDir::new().unwrap();
+        let path = write(dir.path(), "doc.md", EAGER_INLINE);
+
+        let report = DarkmatterSchemas::new(context_at(dir.path())).validate(&markdown_at(&path)).expect("schema prepares");
+
+        assert!(!report.valid);
+        let default = attributed(&report.problems);
+        assert_eq!(default.origin.as_ref().map(|origin| origin.kind), Some(SchemaOriginKind::Document));
+    }
+
+    #[test]
+    fn an_authored_missing_eager_file_keeps_its_authored_position() {
+        let dir = TempDir::new().unwrap();
+
+        let failure = try_compose(dir.path(), "---\n$schema:\n  doc: file(required; eager; default(./note.md))\ndoc: ./absent.md\n---\nBody\n")
+            .expect_err("absent.md does not exist");
+
+        let [problem] = schema_problems(&failure) else { panic!("one problem") };
+        assert!(problem.default.is_none());
+        assert_eq!(problem.line, Some(4), "{problem:?}");
+        let [diagnostic] = error_diagnostics(&failure.error).try_into().expect("one record");
+        assert!(diagnostic.schema_default.is_none());
+    }
 }

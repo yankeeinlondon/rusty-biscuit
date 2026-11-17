@@ -532,7 +532,7 @@ fn problem_error(source: &str, path: Option<&Path>, problem: HeaderProblem) -> C
     if problem.callback {
         CollectionError::InvalidCallback { site, message: problem.message }
     } else {
-        CollectionError::Malformed { site, message: problem.message }
+        CollectionError::Malformed { site, message: problem.message, note: None }
     }
 }
 
@@ -540,6 +540,7 @@ fn structural_error(source: &str, path: Option<&Path>, error: &BlockPairError) -
     CollectionError::Malformed {
         site: site(source, path, line_span(source, error.line())),
         message: error.to_string(),
+        note: error.note(),
     }
 }
 

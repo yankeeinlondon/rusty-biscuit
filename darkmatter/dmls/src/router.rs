@@ -393,6 +393,8 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         facts_events: std::cell::RefCell::new(facts::FactsEvents::default()),
         store_inputs,
         slot_jobs,
+        registration_files: std::cell::RefCell::default(),
+        hosts_generation: std::cell::Cell::new(0),
     };
     let mut router = Router::new(connection, state).with_internal(
         (internal_tx, internal_rx),
@@ -773,6 +775,12 @@ pub struct ServerState {
     store_inputs: facts::StoreInputs,
     /// The slot worker's job queue.
     slot_jobs: Sender<crate::slot_jobs::SlotJob>,
+    /// The configuration-level host registration warnings last published,
+    /// by the normalized path of the file each names.
+    registration_files: std::cell::RefCell<HashMap<PathBuf, Vec<lsp_types::Diagnostic>>>,
+    /// The [`OverlayState::hosts_generation`] the open documents were last
+    /// refreshed at.
+    hosts_generation: std::cell::Cell<u64>,
 }
 
 impl ServerState {
@@ -997,6 +1005,10 @@ impl ServerState {
                 &self.timings,
             )
         });
+        let host = match overlay.as_ref().and_then(|overlay| overlay.host.as_ref()) {
+            Some(_) => None,
+            None => self.overlay.unframed_host(&path, &resolution),
+        };
         let ctx = DocumentContext {
             uri,
             path: &path,
@@ -1008,6 +1020,7 @@ impl ServerState {
             profile: &self.profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host,
         };
         Some(self.timings.time(Stage::ProviderChain, || f(&ctx)))
     }
@@ -1152,11 +1165,15 @@ impl ServerState {
             validation.emit(path, threshold);
         }
         let listing = self.snapshot.load().listing();
+        // A file a host registration names (a configuration, a manifest, a
+        // member) keeps those warnings beside its own diagnostics.
+        let registration = computed.as_ref().map(|(_, path)| self.registration_file_diagnostics(path)).unwrap_or_default();
         let diagnostics = computed
             .map(|(diagnostics, _)| diagnostics)
             .unwrap_or_default()
             .into_iter()
             .filter(|diagnostic| !listing_gates(listing, diagnostic))
+            .chain(registration)
             .collect();
         self.diagnostics.publish(uri.clone(), version, diagnostics);
     }
@@ -1189,8 +1206,18 @@ impl ServerState {
 
     /// Publishes the skipped-trigger warnings registry preparations changed
     /// since the last call (see
-    /// [`OverlayState::take_trigger_diagnostic_transitions`]).
+    /// [`OverlayState::take_trigger_diagnostic_transitions`]), then the host
+    /// registration warnings ([`Self::publish_registration_files`]).
     fn publish_trigger_transitions(&self) {
+        // A changed registration reaches documents that did not wait for it
+        // (those without frontmatter) and every other open document of its
+        // configuration.
+        let generation = self.overlay.hosts_generation();
+        if self.hosts_generation.replace(generation) != generation {
+            for uri in self.documents.open_uris() {
+                self.refresh_diagnostics(&uri);
+            }
+        }
         let mut trigger_transitions = HashMap::new();
         for transition in self.overlay.take_trigger_diagnostic_transitions() {
             trigger_transitions.insert(transition.path, transition.finding);
@@ -1211,18 +1238,79 @@ impl ServerState {
                 .as_ref()
                 .map(crate::diagnostics::frontmatter::invalid_trigger_diagnostic)
                 .into_iter()
+                .chain(self.registration_file_diagnostics(&path))
                 .collect();
             self.diagnostics.publish(uri, None, diagnostics);
         }
+        self.publish_registration_files();
+    }
+
+    /// Publishes each configuration-level host registration warning (a
+    /// refused entry, a same-host conflict) on the file it names: the
+    /// declaring configuration file, the manifest, or the member. Only a
+    /// file whose warnings changed since the last call is published again,
+    /// an open one through its full refresh, so its own diagnostics stay
+    /// beside them; a file that no longer has any is cleared.
+    fn publish_registration_files(&self) {
+        let mut current: HashMap<PathBuf, Vec<lsp_types::Diagnostic>> = HashMap::new();
+        for found in self.overlay.host_registration_diagnostics() {
+            current
+                .entry(crate::overlay::registry::normalized(&found.file))
+                .or_default()
+                .push(crate::diagnostics::frontmatter::registration_diagnostic(&found));
+        }
+        let changed: std::collections::BTreeSet<PathBuf> = {
+            let mut published = self.registration_files.borrow_mut();
+            let changed = current
+                .keys()
+                .chain(published.keys())
+                .filter(|file| current.get(*file) != published.get(*file))
+                .cloned()
+                .collect();
+            *published = current;
+            changed
+        };
+        for file in changed {
+            let open = self
+                .documents
+                .open_uris()
+                .into_iter()
+                .find(|uri| uri_to_file_path(uri).is_some_and(|path| crate::overlay::registry::normalized(&path) == file));
+            match open {
+                Some(uri) => self.refresh_diagnostics(&uri),
+                None => {
+                    let Some(uri) = crate::workspace::file_path_to_uri(&file) else {
+                        continue;
+                    };
+                    let kept = self.closed_file_diagnostics(&uri);
+                    self.diagnostics.publish(uri, None, kept);
+                }
+            }
+        }
+    }
+
+    /// The host registration warnings last published for the file at
+    /// `path`.
+    fn registration_file_diagnostics(&self, path: &Path) -> Vec<lsp_types::Diagnostic> {
+        let published = self.registration_files.borrow();
+        if published.is_empty() {
+            return Vec::new();
+        }
+        published.get(&crate::overlay::registry::normalized(path)).cloned().unwrap_or_default()
     }
 
     /// The diagnostics a closed file keeps: the skipped-trigger warning a
-    /// prepared registry still reports for it, or none.
+    /// prepared registry still reports for it and the host registration
+    /// warnings that name it, or none.
     fn closed_file_diagnostics(&self, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
-        uri_to_file_path(uri)
-            .and_then(|path| self.overlay.trigger_finding(&path))
+        let Some(path) = uri_to_file_path(uri) else {
+            return Vec::new();
+        };
+        self.overlay
+            .trigger_finding(&path)
             .map(|finding| crate::diagnostics::frontmatter::invalid_trigger_diagnostic(&finding))
             .into_iter()
+            .chain(self.registration_file_diagnostics(&path))
             .collect()
     }
 
@@ -1678,6 +1766,9 @@ pub struct Router {
     /// Renames whose build just revalidated the index store for them, in
     /// fallback watch mode (see [`Router::needs_index_build`]).
     revalidated: HashSet<RequestId>,
+    /// The configuration notices already shown this session, by code and
+    /// file (by code alone for `dm.config.missing`).
+    config_notices_shown: HashSet<(&'static str, PathBuf)>,
 }
 
 impl Router {
@@ -1696,6 +1787,7 @@ impl Router {
             index_build: IndexBuildState::NotStarted,
             next_build: 0,
             revalidated: HashSet::new(),
+            config_notices_shown: HashSet::new(),
         }
     }
 
@@ -1778,11 +1870,13 @@ impl Router {
     }
 
     /// Keeps the schema-location watches equal to the folders the
-    /// prepared trigger registries read plus the folders holding parsed
-    /// Markdown dependencies (which may lie outside every workspace folder,
-    /// beyond the workspace globs), re-registering when that set changes. A
-    /// client without `relativePatternSupport` gets none and is served by the
-    /// save-driven fallback.
+    /// prepared trigger registries and the installed host registrations
+    /// read (configuration files present or absent, manifests, members, and
+    /// their imports and artifacts, whatever their extension) plus the
+    /// folders holding parsed Markdown dependencies (which may lie outside
+    /// every workspace folder, beyond the workspace globs), re-registering
+    /// when that set changes. A client without `relativePatternSupport` gets
+    /// none and is served by the save-driven fallback.
     fn sync_schema_watches(&mut self) {
         if self.state.watch_mode != WatchMode::ClientWatched || self.state.schema_watch_fallback {
             return;
@@ -1793,6 +1887,7 @@ impl Router {
             return;
         }
         let mut folders = self.state.overlay.trigger_watch_folders();
+        folders.extend(self.state.overlay.host_watch_folders());
         folders.extend(
             self.state
                 .dependency_folders()
@@ -1822,6 +1917,25 @@ impl Router {
         self.sync_schema_watches();
         self.dispatch_slot_jobs();
         self.sync_slot_watches();
+        self.show_config_notices();
+    }
+
+    /// Shows each session-level notice of the passive configuration loads
+    /// once per session as a `window/showMessage`: the missing user file
+    /// (`dm.config.missing`, a warning naming the file and `md init`) once
+    /// however many configurations report it, and each legacy policy file
+    /// awaiting migration (`dm.config.migration`, information) once. DMLS
+    /// only reports them: it never creates, migrates, or prompts.
+    fn show_config_notices(&mut self) {
+        for notice in self.state.overlay.host_config_notices() {
+            let missing = notice.code == darkmatter::config::load::CONFIG_MISSING_CODE;
+            let key = (notice.code, if missing { PathBuf::new() } else { notice.file.clone() });
+            if !self.config_notices_shown.insert(key) {
+                continue;
+            }
+            let typ = if missing { MessageType::WARNING } else { MessageType::INFO };
+            show_message(&self.connection.sender, typ, format!("dmls: {}: {}", notice.code, notice.message));
+        }
     }
 
     /// Sends every schema-slot job demanded since the last message to the
@@ -1835,9 +1949,11 @@ impl Router {
     }
 
     /// Keeps the schema-slot watches equal to the paths the installed slot
-    /// resolutions read: one watcher per path, whatever its extension. A
-    /// client that cannot root a watcher at a folder (or rejected one) is
-    /// served by the save-driven `stat` re-check instead.
+    /// resolutions read, plus each repository `HEAD` (and the branch ref it
+    /// names) the installed host registrations depend on: one watcher per
+    /// path, whatever its extension. A client that cannot root a watcher at
+    /// a folder (or rejected one) is served by the save-driven `stat`
+    /// re-check instead.
     fn sync_slot_watches(&mut self) {
         if self.state.watch_mode != WatchMode::ClientWatched || self.state.schema_watch_fallback {
             return;
@@ -1845,7 +1961,8 @@ impl Router {
         if !self.state.profile.supports_relative_watch_patterns {
             return;
         }
-        let paths = self.state.overlay.slots().watched_paths();
+        let mut paths = self.state.overlay.slots().watched_paths();
+        paths.extend(self.state.overlay.host_head_paths());
         if paths == self.watches.slot_paths {
             return;
         }

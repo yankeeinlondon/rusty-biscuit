@@ -333,7 +333,7 @@ Timeouts, shell policy, and runtime attempt classification for composed prompt p
 - `error` — `HarnessError` enum covering parse, runtime, shell, shell-audit, and path resolution failures
 - `parse` — frontmatter-to-plan parser accepting `timeout`, `step_timeout`, `timeout_warn`, and `step_timeout_warn`
 - `audit` — shell command collection across lifecycle stacks for pre-flight approval
-- `shell` — shell policy adapter reusing Darkmatter's tokenizer, blacklist/whitelist, and approval handler infrastructure
+- `shell` — shell policy adapter reusing Darkmatter's tokenizer, built-in blacklist, `permissions.shell-commands` evaluation, and approval handler infrastructure (see [Pre-Flight Shell Approval](../docs/topics/pre-flight-checks.md))
 - `resolve` — source-relative path resolution (`@repo/path`, `./local`, `/absolute`)
 - `timeout` — human-friendly duration parser (`30s`, `5m`, `2h`)
 - `runtime` — `build_attempt_outcome()` and `classify_failure()` for mapping stream summaries to harness outcomes

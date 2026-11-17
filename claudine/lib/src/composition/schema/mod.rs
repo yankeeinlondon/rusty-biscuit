@@ -231,12 +231,40 @@ pub fn prepare_inline_with_schema_selecting(
     prepare_with_schema(source, options, PrepareMode::Inline(Some(select)))
 }
 
+/// The document values of a sequence owner, judged with the same
+/// categorization and drop-and-retry rules as a full preparation in `mode`,
+/// without reading the body or running a shell
+/// ([`crate::composition::sequence::document::prepare_sequence_document_values`]).
+///
+/// ## Errors
+///
+/// As [`prepare_direct_with_schema`] (or [`prepare_inline_with_schema`] for an
+/// inline `mode`), minus the body-only failures.
+pub(crate) fn prepare_values_with_schema(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    mode: CompositionMode,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_with_schema(source, options, PrepareMode::Values(mode))
+}
+
 /// The preparation a schema-aware entry runs (and reruns after dropping an
 /// invalid optional), with its identity selector, if any.
 #[derive(Clone)]
 pub(super) enum PrepareMode<'s> {
     Direct(PromptSource, Option<&'s ResolvedIdentitySelector<'s>>),
     Inline(Option<&'s ResolvedIdentitySelector<'s>>),
+    /// A sequence owner's document values in this composition mode: the
+    /// frontmatter surface only, with shells left unexpanded.
+    Values(CompositionMode),
+}
+
+impl PrepareMode<'_> {
+    /// Whether this preparation judges at the inline launch phase rather
+    /// than as a direct compose.
+    pub(super) fn is_inline(&self) -> bool {
+        matches!(self, Self::Inline(_) | Self::Values(CompositionMode::InlineFrontmatterPrompt))
+    }
 }
 
 fn prepare_with_schema(
@@ -279,6 +307,7 @@ fn run_prepare(
             prepare_direct_with_prompt_selecting(source, options, prompt_source.clone(), *select)
         }
         PrepareMode::Inline(select) => prepare_inline_selecting(source, options, *select),
+        PrepareMode::Values(mode) => super::prepare::prepare_values_on(source, options, *mode),
     }
 }
 

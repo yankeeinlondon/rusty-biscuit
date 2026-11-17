@@ -354,7 +354,7 @@ fn clean(
         workspace: None,
         document_path,
     };
-    clean_document(&clean_request, || schema_config(flags, document_path, request)).map_err(
+    clean_document(&clean_request, || schema_config(raw, flags, document_path, request)).map_err(
         |error| match error {
             FrontmatterRepairError::Extraction(error) => {
                 CleanFailure { error: Report::new(error), trigger_findings: None }
@@ -373,6 +373,7 @@ fn clean(
 /// frontmatter block, so contexts are built — and repository discovery paid
 /// for — only when the schema tier runs.
 fn schema_config(
+    raw: &str,
     flags: &CleanSchemaFlags,
     document_path: Option<&Path>,
     request: &DocumentRequest<'_>,
@@ -396,7 +397,7 @@ fn schema_config(
     let session = std::sync::Arc::new(session);
     // The library builds the configuration at most once per run.
     let _ = request.slot_session.set(std::sync::Arc::clone(&session));
-    let mut config = CleanSchemaConfig::new(context).with_slot_session(session);
+    let mut config = CleanSchemaConfig::new(context.clone()).with_slot_session(session);
 
     if flags.no_baseline_schema || crate::commands::compose::env_disables_baseline_schema() {
         config = config.without_baseline_schema();
@@ -413,6 +414,24 @@ fn schema_config(
         config = config.with_schema_override(serde_json::Value::String(
             schema.to_string_lossy().into_owned(),
         ));
+    }
+
+    // The run's registered hosts; the document's selection warnings are
+    // reported once with the load's.
+    if !flags.no_schema_triggers
+        && let Some(hosts) = request.request.registered_hosts(&context)
+    {
+        let mut document = Markdown::from(raw);
+        if let Some(path) = document_path {
+            document = document.with_source(darkmatter::markdown::compose::ComposeSource::File(path.to_path_buf()));
+        }
+        let identified = hosts.identify(
+            &darkmatter::markdown::schemas::frontmatter_as_json(&document),
+            document_path,
+            &context,
+        );
+        request.request.report_host_diagnostics(&identified.diagnostics);
+        config = config.with_registered_hosts(hosts);
     }
 
     Ok(config.with_trigger_schemas(!flags.no_schema_triggers))

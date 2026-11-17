@@ -538,7 +538,8 @@ impl Markdown {
         // re-walking it (F8). Matching is re-evaluated against the current
         // frontmatter in each pass regardless.
         // Every default both passes insert: their verdicts tell a filled
-        // lifecycle flag from a written one by it.
+        // lifecycle flag from a written one by it, and the later pass
+        // attributes a problem with one to its default.
         let mut filled_defaults = Vec::new();
         {
             let sv_start = perf.is_enabled().then(std::time::Instant::now);

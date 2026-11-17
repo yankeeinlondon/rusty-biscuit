@@ -183,6 +183,21 @@ property from its `default(...)` when the value is missing or `null`,
 whether or not the property is `required`, and reports each default it
 applied.
 
+Each applied default is an `AppliedDefault` in `ValidationSuccess::defaults`:
+its `path`, its `value`, its `pointer` (the JSON Pointer of the `default`
+keyword in the lowered JSON Schema, such as `/properties/retries/default`),
+and an `origin` a host may fill with where the default is declared (always
+`None` from this crate).
+
+Expansion inlines a `Name@file` named type, so the lowered schema no longer
+shows which file a default inside it came from. Resolution records that in
+`ResolvedSchema::default_files`: for each default a type imported from
+another schema file supplies, the property path it stands in for and the
+file that declares it. With `doc: Thing@./types.yaml` and `Thing` declaring
+`own: number(required; default(1))`, the entry is `["doc", "own"]` →
+`types.yaml`. A default the resolved schema declares itself is not listed,
+nor is one inside a list's items or below a pattern key.
+
 ```rust
 use serde_json::json;
 use simplified_schema::SimplifiedSchema;
@@ -355,6 +370,18 @@ The rules behind the table:
   candidate after defaults are applied. A default that one arm declares
   fills the property whichever arm then matches, and a closed arm that does
   not declare the property rejects it.
+- **A used default is still judged with the whole value.** The default
+  check runs without file access, so an eager file default whose target does
+  not exist (`doc: file(required; eager; default(./note.md))` with no
+  `note.md`) passes it and fails when the completed value is judged. Such a
+  problem belongs to the default, not to anything the author wrote: its
+  `ValidationProblem::default` holds the `AppliedDefault` that supplied the
+  value, its message ends with
+  `(the value is the schema default at schema location `/properties/doc/default`)`,
+  and its `line` and `column` are `None`. A problem with an authored value
+  has no `default`. A host that judges a completed value with its own
+  validators attributes its problems the same way with
+  `simplified_schema::defaults::attribute_problems(problems, defaults)`.
 - **A pending default stays pending.** `default({{ n }})` is a
   [slot](./language/slots.md); until it is resolved, validation fails with
   `SchemaError::UnresolvedSlots` as for any template. Applying defaults never

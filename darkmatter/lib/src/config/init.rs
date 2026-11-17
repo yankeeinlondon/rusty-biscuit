@@ -457,6 +457,96 @@ pub fn effective_permissions(scope: ConfigScope, block: &Value) -> Option<Value>
     Some(effective)
 }
 
+/// What [`register_manifest`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisterReport {
+    /// The configuration file that lists the manifest.
+    pub path: PathBuf,
+    /// [`InitAction::Unchanged`] when an entry already named the manifest.
+    pub action: InitAction,
+}
+
+/// Adds `reference` (a manifest reference, as it should be written) to the
+/// `register` list of `scope`'s configuration file, unless an entry already
+/// names the same manifest: entries are compared by the manifest file they
+/// resolve to ([`manifest_identity`](super::registration::manifest_identity)),
+/// not by spelling. Every existing entry, value, and comment is kept; a
+/// missing file is created with every default and the one entry. The host
+/// program publishes the manifest first, so `reference` must name an
+/// existing file.
+///
+/// ## Errors
+///
+/// - [`InitError::NoHome`] or [`InitError::NotARepository`];
+/// - [`InitError::Invalid`] when the file is invalid, its `register` value
+///   is not a list, or `reference` names no existing local manifest;
+/// - [`InitError::Read`] or [`InitError::Write`]. Nothing was changed.
+pub fn register_manifest(
+    context: &FileResolutionContext,
+    scope: ConfigScope,
+    reference: &str,
+) -> Result<RegisterReport, InitError> {
+    let observation = observe(context, scope)?;
+    if let BlockState::Invalid(error) = &observation.permissions {
+        return Err(InitError::Invalid(error.clone()));
+    }
+    let revision = match scope {
+        ConfigScope::User => ConfigRevision::User,
+        ConfigScope::Repository => ConfigRevision::RepositoryWorktree,
+    };
+    let invalid = |message: String| {
+        InitError::Invalid(ConfigError::unlocated(
+            super::load::ConfigErrorKind::InvalidSetting,
+            &observation.path,
+            revision,
+            message,
+        ))
+    };
+    let wanted = super::registration::manifest_identity(reference, &observation.path, context)
+        .map_err(|why| invalid(format!("cannot register `{reference}`: {why}")))?;
+    let register_path = |index: Option<usize>| {
+        let mut segments = vec![String::from("register")];
+        segments.extend(index.map(|index| index.to_string()));
+        PropertyPath::from_segments(segments).map_err(|error| invalid(error.to_string()))
+    };
+
+    let change = match (&observation.bytes, &observation.authored) {
+        (Some(bytes), Some(authored)) => {
+            let edit = match authored.get("register") {
+                None | Some(Value::Null) => {
+                    YamlEdit::Set { path: register_path(None)?, value: Value::Array(vec![Value::from(reference)]) }
+                }
+                Some(Value::Array(entries)) => {
+                    let registered = entries.iter().filter_map(Value::as_str).any(|entry| {
+                        super::registration::manifest_identity(entry, &observation.path, context)
+                            .is_ok_and(|identity| identity == wanted)
+                    });
+                    if registered {
+                        return Ok(RegisterReport { path: observation.path, action: InitAction::Unchanged });
+                    }
+                    YamlEdit::Set { path: register_path(Some(entries.len()))?, value: Value::from(reference) }
+                }
+                Some(_) => return Err(invalid(String::from("`register` is not a list, so no host can be registered"))),
+            };
+            TargetChange::edit(&observation.path, SourceExpectation::Bytes(bytes.clone()), vec![edit])
+        }
+        _ => {
+            let mut edits = Vec::new();
+            for (key, default) in top_level_defaults(scope) {
+                let value = if key == "register" { Value::Array(vec![Value::from(reference)]) } else { default };
+                let path = PropertyPath::from_segments([key]).map_err(|error| invalid(error.to_string()))?;
+                edits.push(YamlEdit::Set { path, value });
+            }
+            TargetChange::create(&observation.path, String::new(), edits)
+        }
+    };
+    let action = if observation.bytes.is_some() { InitAction::Updated } else { InitAction::Created };
+    let mut transaction = ConfigTransaction::new();
+    transaction.add(change).map_err(InitError::Write)?;
+    commit_checked(transaction, context, &|_| None)?;
+    Ok(RegisterReport { path: observation.path, action })
+}
+
 /// Every top-level setting of `scope` with its schema default, in schema
 /// order.
 fn top_level_defaults(scope: ConfigScope) -> Vec<(String, Value)> {

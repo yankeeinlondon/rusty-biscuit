@@ -245,7 +245,7 @@ flowchart TD
 ```
 
 Where the rules live, how the user and repository layers combine, and the
-commit rule are described in [Configuration](../topics/configuration.md).
+commit rule are described in [Permissions](../topics/permissions.md).
 
 ### Blacklisted Commands and Syntax
 

@@ -161,7 +161,12 @@ mod json_files {
     }
 
     fn n_defaulted(value: &Value) -> Vec<AppliedDefault> {
-        vec![AppliedDefault { path: simplified_schema::PropertyPath::parse("n").unwrap(), value: value.clone() }]
+        vec![AppliedDefault {
+            path: simplified_schema::PropertyPath::parse("n").unwrap(),
+            value: value.clone(),
+            pointer: "/properties/n/default".to_string(),
+            origin: None,
+        }]
     }
 
     #[test]

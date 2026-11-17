@@ -139,6 +139,7 @@ pub fn locating_problem(segments: &[String]) -> ValidationProblem {
         offending_properties: Vec::new(),
         file_reference: None,
         caller_file: None,
+        default: None,
     }
 }
 

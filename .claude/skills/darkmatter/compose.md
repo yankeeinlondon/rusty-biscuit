@@ -1117,6 +1117,13 @@ every policy and located by line and column:
 Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw text: pass 1
 neither decodes their tokens nor converts their `{{{ … }}}` literals, so the
 caller's event-time evaluation sees each escape as authored.
+Excluding a key defers its rendering, not its verdict: the composition
+verdict drops an excluded key's schema problems only for a caller that
+judges them when it runs the events (Claudine's `post_shell_validate`).
+Under `with_selected_host` (`md compose` of a foreign document) nothing runs
+the host's events, so `run_with_registry` keeps those problems, setting aside
+only what `schemas::pending_rendering_sets_aside` sets aside for `md schema
+validate`. A new `with_exclude_keys` caller must say which side it is on.
 
 **Schema pending.** Pending is decided by what a later stage resolves, never
 by text shape alone (`PendingDeferral` in `compose/schema_validation.rs`).
@@ -1688,7 +1695,18 @@ darkmatter/lib/src/
   `::block` gate, and report references composition never produces.
 - **Diagnostics.** `dm.collection.*`, `dm.expression.invalid_callback`,
   `dm.iteration.{visit,expansion}_limit`; located diagnostics carry `span` and
-  `iteration_path`. Recovery: `with_allow_untyped_{map,filter}_variables`.
+  `iteration_path`. Engine and precheck sites name the body under a `document`
+  placeholder until `inline/collection_blocks.rs::anchor` / `call_precheck.rs::collection_rejection`
+  re-anchor them to the loaded file; a file-less document keeps the body site,
+  named by its context identity (`Markdown::identified_unfiled`) when it has
+  one, so a host can tell its generated body from a remote child's. The same
+  holds for `TocLinkingError`/`FileLinksError`: each names its `document`
+  (`Markdown::error_document`: the file, else the identity), stamped by the
+  compose stage, the transclusion engine, and the pre-flight walk, and
+  `reason()` is its line-free message, which a tolerated failure's warning
+  uses for a document with an identity (`Markdown::generated_identity`).
+  Block-pair reasons are line-free too; the secondary line (`BlockPairError::note`)
+  rides in the consumers' `note` field and their `Display`. Recovery: `with_allow_untyped_{map,filter}_variables`.
   Budget counters stay context-free (`CollectionError::budget`); the stage
   that charged them locates the failure. A later body stage's failure at a
   site inside a copy goes through `site_scope::scope_failure` (or

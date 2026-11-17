@@ -711,6 +711,7 @@ mod shared_fields {
             reference_details: None,
             data_location: None,
             grants_needed: None,
+            schema_default: None,
         }
     }
 

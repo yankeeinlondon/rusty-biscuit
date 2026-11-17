@@ -57,7 +57,7 @@ impl<'a> LegBranch<'a> {
             Mutex::new(seed.clone())
         });
         Self {
-            runtime: Arc::new(RuntimeState::from_snapshot(seed.clone())),
+            runtime: Arc::new(RuntimeState::from_sequence_snapshot(seed.clone())),
             live_frontmatter,
             ledger,
         }

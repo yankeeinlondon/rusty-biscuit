@@ -95,12 +95,12 @@ impl<'a> PathSubject<'a> {
     /// context, so it never admits a document: a trigger with a `$path`
     /// condition never matches, never silently matches.
     #[cfg(not(feature = "file"))]
-    fn admits(&self, _globs: &PathGlobs) -> bool {
+    pub(crate) fn admits(&self, _globs: &PathGlobs) -> bool {
         false
     }
 
     #[cfg(feature = "file")]
-    fn admits(&self, globs: &PathGlobs) -> bool {
+    pub(crate) fn admits(&self, globs: &PathGlobs) -> bool {
         let Some((document, context)) = self.document else {
             return false;
         };
@@ -212,7 +212,7 @@ fn fmt_globs(globs: &[String]) -> String {
 }
 
 /// Evaluates one property condition against the frontmatter root.
-fn property_matches(frontmatter: &Value, name: &str, atom: &PropertyAtom) -> bool {
+pub(crate) fn property_matches(frontmatter: &Value, name: &str, atom: &PropertyAtom) -> bool {
     let value = frontmatter.get(name);
     let required = is_required(atom);
     match value {

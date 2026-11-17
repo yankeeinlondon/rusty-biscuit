@@ -58,8 +58,14 @@ thread_local! {
 }
 
 fn validate_with_base(frontmatter: &str) -> darkmatter::markdown::schemas::ValidationReport {
+    BASE_API.with(|api| validate_with(api, frontmatter))
+}
+
+/// [`validate_with_base`] against an already built `api`, for a test that
+/// validates many documents: building the baseline once is most of the cost.
+fn validate_with(api: &DarkmatterSchemas, frontmatter: &str) -> darkmatter::markdown::schemas::ValidationReport {
     let md: Markdown = format!("---\n{frontmatter}---\nBody\n").as_str().into();
-    BASE_API.with(|api| api.validate(&md).expect("validation must run"))
+    api.validate(&md).expect("validation must run")
 }
 
 fn parse_schema_yaml(raw: &str) -> serde_json::Value {
@@ -691,10 +697,11 @@ fn base_style_schema_agrees_with_the_runtime_style_parser() {
         ("markdown: {fixed-width: 80, indentation: 2, list-item-padding: one}", true),
         ("markdown: {indentation: 3}", false),
     ];
+    let api = base_api();
     let mut disagreements = Vec::new();
     for (style, expected) in cases {
         let yaml = format!("style:\n  {style}\n");
-        let report = validate_with_base(&yaml);
+        let report = validate_with(&api, &yaml);
         let runtime = runtime_style(&yaml);
         let runtime_valid = runtime.as_ref().is_some_and(|warnings| !warnings.iter().any(|w| w.is_schema_issue()));
         assert!(
@@ -717,7 +724,7 @@ fn base_style_schema_agrees_with_the_runtime_style_parser() {
     // these; the schema admits them.
     for style in ["page: {theme: neon}", "page: {theme: 5}", "disclosure: {padding-left: -1}", "{mx: 2px}"] {
         let yaml = format!("style:\n  {style}\n");
-        assert!(validate_with_base(&yaml).valid, "{style}: schema admits it");
+        assert!(validate_with(&api, &yaml).valid, "{style}: schema admits it");
         assert!(runtime_style(&yaml).is_none(), "{style}: runtime rejects it");
     }
 }

@@ -768,6 +768,7 @@ pub(crate) fn prepare_and_run_active_document(
             ).with_sequence_value(step_scope.and_then(|scope| scope.caller_overrides.sequence_value().cloned())),
             &caller_input_records,
             &approval_options,
+            kind.mode(),
             &mut prep_substages,
         )?
     };
@@ -843,6 +844,7 @@ fn eager_shell_preflight(
     caller_overrides: &claudine::composition::LayeredOverrides,
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     approval_options: &claudine::harness::ShellApprovalOptions,
+    mode: claudine::composition::CompositionMode,
     prep_substages: &mut Vec<crate::perf::SubstageTiming>,
 ) -> Result<DocumentBoot> {
     // The audit composes through the same canonical options, with the same
@@ -873,7 +875,7 @@ fn eager_shell_preflight(
     let shell_approval_t = std::time::Instant::now();
     let preflight = {
         let _span = info_span!("compose_prep.shell_preflight").entered();
-        claudine::composition::approve_document_shell(source, &discovery_options, approval_options)?
+        claudine::composition::approve_document_shell(source, &discovery_options, approval_options, mode)?
     };
     record_prep_substage(
         prep_substages,
@@ -1243,6 +1245,7 @@ fn build_and_run_loop(
                                 iteration_options,
                                 staged.approved.clone(),
                                 &staged.approval_options,
+                                kind.mode(),
                             )
                             .and_then(|(fresh, options)| {
                                 let approved = options.pre_approved_commands.clone().unwrap_or_default();
@@ -1294,6 +1297,7 @@ fn build_and_run_loop(
                             &mut iteration_options,
                             approval_options,
                             ctx.iteration,
+                            kind.mode(),
                         )?;
                         kind.prepare_without_schema(live, iteration_options)?
                     }
@@ -1303,6 +1307,7 @@ fn build_and_run_loop(
                             &mut iteration_options,
                             approval_options,
                             ctx.iteration,
+                            kind.mode(),
                         )?;
                         kind.prepare_staged(source, iteration_options, entry, schema_stage)?
                     }
@@ -1312,6 +1317,7 @@ fn build_and_run_loop(
                             &mut iteration_options,
                             approval_options,
                             ctx.iteration,
+                            kind.mode(),
                         )?;
                         kind.prepare_without_schema(source, iteration_options)?
                     }
@@ -1738,10 +1744,6 @@ fn execute_loop_or_single(
     }
 
     if let Some(staged) = staged {
-        if let Some(ref mut timings) = startup_timings {
-            timings.prep_phase = compose_entry.elapsed();
-            timings.prep_substages = prep_substages;
-        }
         return run_staged_single(
             shared,
             file,
@@ -1759,6 +1761,8 @@ fn execute_loop_or_single(
             system_prompt_args,
             verbose,
             startup_timings,
+            prep_substages,
+            compose_entry,
             step_scope,
         );
     }
@@ -1838,6 +1842,7 @@ fn audit_loop_iteration_template(
     options: &mut PrepareOptions,
     approval_options: &claudine::harness::ShellApprovalOptions,
     iteration: usize,
+    mode: claudine::composition::CompositionMode,
 ) -> std::result::Result<(), CompositionError> {
     let frozen;
     let policy = if iteration > 1 {
@@ -1846,7 +1851,7 @@ fn audit_loop_iteration_template(
     } else {
         approval_options
     };
-    let approved = claudine::composition::preflight_document_shell(source, options, policy)?;
+    let approved = claudine::composition::preflight_document_shell(source, options, policy, mode)?;
     options
         .pre_approved_commands
         .get_or_insert_with(Default::default)
@@ -1955,7 +1960,9 @@ fn run_staged_single(
     handoff_ledger: SharedRunLedger,
     system_prompt_args: &SystemPromptArgs,
     verbose: u8,
-    startup_timings: Option<crate::perf::StartupTimings>,
+    mut startup_timings: Option<crate::perf::StartupTimings>,
+    prep_substages: Vec<crate::perf::SubstageTiming>,
+    compose_entry: std::time::Instant,
     step_scope: Option<&StepScope>,
 ) -> Result<ActiveDocumentOutcome> {
     let StagedBoot {
@@ -2048,6 +2055,7 @@ fn run_staged_single(
                 options,
                 approved,
                 &approval_options,
+                kind.mode(),
             )
             .and_then(|(fresh, options)| {
                 prepare_collecting_missing(
@@ -2088,6 +2096,14 @@ fn run_staged_single(
         None,
         step_scope,
     );
+    // The prep window closes here, after `initialize`, the stabilized reread,
+    // and the composition it measures, exactly as on the ordinary route: the
+    // report nests this composition beneath `prep phase` (RC-2), so a window
+    // closed before `initialize` would hold a child that outlasts it.
+    if let Some(ref mut timings) = startup_timings {
+        timings.prep_phase = compose_entry.elapsed();
+        timings.prep_substages = prep_substages;
+    }
     let outcome = execute_staged_composition(
         request,
         verbose,

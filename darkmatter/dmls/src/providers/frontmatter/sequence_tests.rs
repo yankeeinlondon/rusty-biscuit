@@ -130,6 +130,7 @@ fn with_ctx_at<R>(
         profile: &profile,
         overlay: overlay.as_ref(),
         resolution: &resolution,
+        host: None,
     };
     f(&ctx)
 }

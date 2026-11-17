@@ -110,22 +110,34 @@ fn render_inline_sequence_mismatch_block(source_path: &std::path::Path) -> Statu
 }
 
 fn render_sequence_missing_properties_block(
-    failures: &[SequenceMissingPropertiesStep],
+    failures: &[SequenceMissingPropertiesEntry],
 ) -> StatusBlock {
-    let plural = if failures.len() == 1 { "step" } else { "steps" };
+    let steps = failures.iter().filter(|failure| matches!(failure.subject, SequenceMissingSubject::Step { .. })).count();
+    let documents = failures.len() - steps;
+    let counted = |count: usize, one: &str, many: &str| format!("{count} {}", if count == 1 { one } else { many });
+    let owners = match (steps, documents) {
+        (_, 0) => counted(steps, "step", "steps"),
+        (0, _) => counted(documents, "document", "documents"),
+        _ => format!("{} and {}", counted(steps, "step", "steps"), counted(documents, "document", "documents")),
+    };
     let mut body = vec![Prose::new(format!(
-        "Missing required schema properties in {} {plural} of the sequence.",
-        failures.len()
+        "Missing required schema properties in {owners} of the sequence."
     ))];
 
-    // One paragraph per step: its heading, then one row per detail.
+    // One paragraph per owner: its heading, then one row per detail.
     for failure in failures {
         let file_link = render_file_link(&failure.source_path);
-        let mut step = format!(
-            "<b>Step {}: <cyan>{}</cyan></b> ({file_link})",
-            failure.step,
-            escape_prose_path(&failure.step_name),
-        );
+        let mut step = match &failure.subject {
+            SequenceMissingSubject::Step { number, name } => {
+                format!("<b>Step {number}: <cyan>{}</cyan></b> ({file_link})", escape_prose_path(name))
+            }
+            SequenceMissingSubject::Document { property } if property.is_empty() => {
+                format!("<b>Document</b> {file_link}")
+            }
+            SequenceMissingSubject::Document { property } => {
+                format!("<b>Document</b> {file_link} (<cyan>`{property}`</cyan>)")
+            }
+        };
         if let Some(desc) = failure
             .frontmatter_description
             .as_deref()

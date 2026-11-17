@@ -113,13 +113,30 @@ impl HostFunctions {
     /// [`HostFunctionError::BuiltinCollision`] when the catalog declares a
     /// function a built-in already names; the artifact is not consulted.
     pub fn analysis_only(catalog: HostFunctionCatalog, artifact: FactsArtifact<'_>) -> Result<Self, HostFunctionError> {
+        let path = facts_artifact_path(catalog.path());
+        Self::analysis_only_at(catalog, &path, artifact)
+    }
+
+    /// [`Self::analysis_only`] for a facts artifact that a caller located
+    /// itself (a host registration manifest names it) rather than beside the
+    /// catalog: `facts_path` is where `artifact` was read, and reasons name
+    /// it. The artifact must still record the catalog's hash.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::analysis_only`].
+    pub fn analysis_only_at(
+        catalog: HostFunctionCatalog,
+        facts_path: &Path,
+        artifact: FactsArtifact<'_>,
+    ) -> Result<Self, HostFunctionError> {
         let names = catalog.function_names();
         validate_names(names.iter().map(|name| (*name, &[][..])))?;
-        let path = facts_artifact_path(catalog.path());
+        let path = facts_path;
         let whole = |reason: String| -> Vec<HostFunction> {
             names.iter().map(|name| incomplete(name, reason.clone())).collect()
         };
-        let functions = match read_entries(&catalog, &names, artifact, &path) {
+        let functions = match read_entries(&catalog, &names, artifact, path) {
             Err(reason) => whole(reason),
             Ok(entries) => {
                 let functions: Vec<HostFunction> = names

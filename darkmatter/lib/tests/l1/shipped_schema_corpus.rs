@@ -202,6 +202,12 @@ const EXCEPTIONS: &[Exception] = &[
         Class::Trigger,
         "the sequence document's catalog, applied by trigger",
     ),
+    exception(
+        "claudine/schemas",
+        "claudine-document.yaml",
+        Class::Trigger,
+        "Claudine's identifying trigger, named by its `darkmatter-host` manifest; its payload is empty",
+    ),
     // claudine/docs/schemas: design drafts, not loaded by any reader.
     exception(
         "claudine/docs/schemas",

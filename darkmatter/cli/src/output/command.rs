@@ -208,7 +208,12 @@ impl CommandRun {
     ///
     /// [`ReportedExit`] for a failed run; the original error where `main` still
     /// has to report it.
-    pub fn finish<T: CommandOutput>(self, result: Result<Completed<T>>) -> Result<()> {
+    pub fn finish<T: CommandOutput>(mut self, result: Result<Completed<T>>) -> Result<()> {
+        // Run notices raised while the command worked (a registration a
+        // document's context loaded) follow the ones held at `begin`.
+        if self.is_data() {
+            self.diagnostics.extend(super::take_run_notices());
+        }
         match result {
             Err(error) if passes_through(&error) => Err(error),
             Err(error) if !self.is_data() => Err(error),

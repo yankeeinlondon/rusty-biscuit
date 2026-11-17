@@ -194,6 +194,21 @@ pub struct LoadedTrigger {
     pub(crate) text: Option<std::sync::Arc<str>>,
 }
 
+impl LoadedTrigger {
+    /// A trigger read from the file `path` outside schema-root discovery (a
+    /// host registration names it), with `text` the bytes the caller read
+    /// and parsed into `envelope`. Its payload resolves from `path`'s folder
+    /// like a root trigger's ([`resolve_trigger_payload`]), and an inline
+    /// payload's slots are positioned in `text`; `pattern_cwd` is as for
+    /// [`LoadedTrigger::pattern_cwd`].
+    ///
+    /// [`resolve_trigger_payload`]: super::assemble::resolve_trigger_payload
+    #[must_use]
+    pub fn from_file(path: PathBuf, text: std::sync::Arc<str>, envelope: TriggerEnvelope, pattern_cwd: PathBuf) -> Self {
+        Self { source: TriggerSource::File(path), envelope, pattern_cwd, bundle: None, text: Some(text) }
+    }
+}
+
 /// A file shadowed by an earlier root's file of the same name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShadowedFile {

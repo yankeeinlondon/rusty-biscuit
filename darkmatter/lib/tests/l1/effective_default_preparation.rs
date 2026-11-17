@@ -62,7 +62,11 @@ fn the_host_and_the_library_fill_the_same_defaults() {
         let host = schema.validate(&input);
         let library = prepared.validate_soft(&input).expect("library accepts");
         assert!(host.valid, "{input}: {:?}", host.problems);
-        assert_eq!(host.defaults, library.defaults, "{input}");
+        // Only the host knows where a default is declared.
+        let without_origin = |defaults: Vec<simplified_schema::AppliedDefault>| -> Vec<_> {
+            defaults.into_iter().map(|applied| simplified_schema::AppliedDefault { origin: None, ..applied }).collect()
+        };
+        assert_eq!(without_origin(host.defaults), library.defaults, "{input}");
     }
 }
 

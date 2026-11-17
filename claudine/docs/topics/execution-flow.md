@@ -616,7 +616,8 @@ claudine sequence --dry-run @batch.md
 
 `composition::resolve_sequence_plan` reads an inline step list or resolves a
 sequence file reference. External files accept `{ sequence: [...] }` or
-`{ kind: sequence, sequence: [...], template: {...} }`. A task's `sequence:` accepts
+`{ kind: sequence, sequence: [...], template: {...}, $state: {...} }`, whose root
+`$schema` describes the document and whose `$state` types each step. A task's `sequence:` accepts
 an inline list or a reference using the same source grammar. Groups execute
 concurrently; ordered work belongs in a sequence. Document-level `fail_fast`
 and the CLI `--fail-fast` option are rejected.

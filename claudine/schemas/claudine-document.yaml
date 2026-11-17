@@ -1,0 +1,64 @@
+# Claudine's identifying trigger: a document it matches is a Claudine
+# document. A `darkmatter-host` manifest names it as `identify`, so with
+# Claudine registered, Darkmatter (md and DMLS) applies Claudine's triggers,
+# globals, and lifecycle only to a document this matches. Hand-maintained;
+# see README.md.
+#
+# Each identifying key is matched once per non-null YAML type, as in
+# claudine.yaml, so ordinary trigger matching and Darkmatter's identification
+# (which tests only that a required key is present and not null) select the
+# same documents, and a value of the wrong type still identifies Claudine so
+# its schema can report the type error.
+#
+# Only keys Darkmatter's own `md` host does not own identify Claudine. The
+# shared events `initialize`, `cancelled`, and `finalize` belong to both
+# hosts, so they never identify Claudine on their own. It has no `$schema`
+# payload: identification adds no types.
+kind: schema-trigger
+match:
+    group:
+        - sequence: string(required)
+        - sequence: number(required)
+        - sequence: boolean(required)
+        - sequence: object(required)
+        - sequence: "unknown[](required)"
+        - start: string(required)
+        - start: number(required)
+        - start: boolean(required)
+        - start: object(required)
+        - start: "unknown[](required)"
+        - blocked: string(required)
+        - blocked: number(required)
+        - blocked: boolean(required)
+        - blocked: object(required)
+        - blocked: "unknown[](required)"
+        - success: string(required)
+        - success: number(required)
+        - success: boolean(required)
+        - success: object(required)
+        - success: "unknown[](required)"
+        - failure: string(required)
+        - failure: number(required)
+        - failure: boolean(required)
+        - failure: object(required)
+        - failure: "unknown[](required)"
+        - loop: string(required)
+        - loop: number(required)
+        - loop: boolean(required)
+        - loop: object(required)
+        - loop: "unknown[](required)"
+        - prompt: string(required)
+        - prompt: number(required)
+        - prompt: boolean(required)
+        - prompt: object(required)
+        - prompt: "unknown[](required)"
+        - agent: string(required)
+        - agent: number(required)
+        - agent: boolean(required)
+        - agent: object(required)
+        - agent: "unknown[](required)"
+        - model: string(required)
+        - model: number(required)
+        - model: boolean(required)
+        - model: object(required)
+        - model: "unknown[](required)"

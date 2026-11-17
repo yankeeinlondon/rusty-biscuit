@@ -1,0 +1,29 @@
+# A host registration manifest (`darkmatter-host`, format version 1): the one
+# file a host program installs that names everything a passive reader needs
+# to analyze the host's documents. A `register` entry of `.darkmatter.yaml`
+# points at it.
+#
+# The envelope is closed and every field is required, including an explicit
+# `functions: []`. Members are local file references resolved from the
+# manifest's directory; a remote member is refused without being fetched.
+# Darkmatter validates a manifest against `darkmatter-host` before it reads
+# any member.
+kind: schema
+description: Darkmatter's host registration manifest.
+types:
+    member-reference: "string(not-empty) -> A local file reference, resolved from the manifest's directory (`./schemas/globals.yaml`)."
+    function-pair:
+        catalog: "member-reference(required) -> The host function catalog: the signatures."
+        facts: "member-reference(required) -> The facts artifact generated from the host's registrations for that catalog."
+        $constraints: { closed: true }
+    darkmatter-host:
+        kind: "literal(darkmatter-host; required) -> The manifest envelope."
+        format_version: "literal(1; required) -> The manifest format; this reader understands 1."
+        host: "string(not-empty; required) -> The host's identifier; its lifecycle artifact must record the same host."
+        version: "string(not-empty; required) -> The host release that wrote the manifest (not the format)."
+        identify: "member-reference(required) -> The identifying schema trigger: a document it matches belongs to this host."
+        triggers: "member-reference[](required) -> Schema triggers applied, in this order, only to documents the host identifies."
+        globals: "member-reference(required) -> The host's global catalog."
+        lifecycle: "member-reference(required) -> The host's lifecycle artifact for that catalog."
+        functions: "function-pair[](required) -> Host function catalogs, each with its facts artifact."
+        $constraints: { closed: true }

@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::TransclusionError;
 use simplified_schema::{
-    FileReferenceDiagnostic, JsonPointer, ValidationProblem, ValidationProblemCode, ValidationProblemKind,
+    AppliedDefault, FileReferenceDiagnostic, JsonPointer, PropertyPath, SchemaOrigin, ValidationProblem,
+    ValidationProblemCode, ValidationProblemKind,
 };
 
 use super::helpers::{assert_contains_all, render};
@@ -148,6 +149,7 @@ fn schema_validation_missing_required_renders_block() {
             offending_properties: Vec::new(),
             file_reference: None,
             caller_file: None,
+            default: None,
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Planner prompt".to_string()),
@@ -177,6 +179,7 @@ fn schema_validation_wrong_type_renders_block() {
             offending_properties: Vec::new(),
             file_reference: None,
             caller_file: None,
+            default: None,
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
@@ -213,6 +216,7 @@ fn schema_validation_format_failure_renders_block() {
             offending_properties: Vec::new(),
             file_reference: Some(FileReferenceDiagnostic::InvalidSyntax { raw: String::new() }),
             caller_file: None,
+            default: None,
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Design document".to_string()),
@@ -248,6 +252,7 @@ fn schema_validation_format_failure_escapes_markup() {
                 resolved_from: Some(PathBuf::from("/tmp/test")),
             }),
             caller_file: None,
+            default: None,
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Design document".to_string()),
@@ -319,6 +324,7 @@ fn schema_validation_root_union_arm_index_renders_block() {
             offending_properties: Vec::new(),
             file_reference: None,
             caller_file: None,
+            default: None,
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
@@ -349,6 +355,7 @@ fn schema_validation_multiple_problems_renders_block() {
                 offending_properties: Vec::new(),
                 file_reference: None,
                 caller_file: None,
+                default: None,
             },
             ValidationProblem {
                 path: "/version".to_string(),
@@ -366,6 +373,7 @@ fn schema_validation_multiple_problems_renders_block() {
                 offending_properties: Vec::new(),
                 file_reference: None,
                 caller_file: None,
+                default: None,
             },
         ],
         summary: "frontmatter did not satisfy the schema".to_string(),
@@ -374,4 +382,69 @@ fn schema_validation_multiple_problems_renders_block() {
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
+}
+
+/// A problem with a value a schema default supplied has no frontmatter text
+/// to correct: the hint names the default and the file that declares it,
+/// beside the frontmatter hint an authored problem still needs.
+#[test]
+fn schema_validation_default_problem_hint_names_the_schema_default() {
+    let default_problem = ValidationProblem {
+        path: "/doc".to_string(),
+        property: Some("doc".to_string()),
+        message: "file not found: ./note.md (the value is the schema default at schema location \
+                  `/properties/doc/default` in `/tmp/test/types.yaml`)"
+            .to_string(),
+        kind: ValidationProblemKind::Invalid,
+        line: None,
+        column: None,
+        arm_index: None,
+        description: None,
+        code: ValidationProblemCode::InvalidFileReference,
+        instance_path: JsonPointer::parse("/doc"),
+        schema_path: None,
+        offending_property: None,
+        offending_properties: Vec::new(),
+        file_reference: None,
+        caller_file: None,
+        default: Some(AppliedDefault {
+            path: PropertyPath::parse("doc").unwrap(),
+            value: "./note.md".into(),
+            pointer: "/properties/doc/default".to_string(),
+            origin: Some(SchemaOrigin::referenced_file("/tmp/test/types.yaml")),
+        }),
+    };
+    let authored_problem = ValidationProblem {
+        path: "/version".to_string(),
+        property: None,
+        message: "\"alpha\" is not of type \"number\"".to_string(),
+        kind: ValidationProblemKind::Type,
+        line: Some(4),
+        column: Some(10),
+        code: ValidationProblemCode::TypeMismatch,
+        instance_path: JsonPointer::parse("/version"),
+        default: None,
+        ..default_problem.clone()
+    };
+    let only_default = MarkdownError::SchemaValidationFailed {
+        path: PathBuf::from("/tmp/test/doc.md"),
+        problems: vec![default_problem.clone()],
+        summary: "frontmatter did not satisfy the schema".to_string(),
+        description: None,
+        source: None,
+    };
+    let mixed = MarkdownError::SchemaValidationFailed {
+        path: PathBuf::from("/tmp/test/doc.md"),
+        problems: vec![authored_problem, default_problem],
+        summary: "frontmatter did not satisfy the schema".to_string(),
+        description: None,
+        source: None,
+    };
+
+    let only_default = render(&only_default);
+    let mixed = render(&mixed);
+
+    assert!(!only_default.contains("Correct the frontmatter"), "{only_default}");
+    assert!(mixed.contains("Correct the frontmatter"), "{mixed}");
+    insta::assert_snapshot!(only_default);
 }

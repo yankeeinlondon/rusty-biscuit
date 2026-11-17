@@ -293,6 +293,8 @@ pub(crate) fn prepare_resolved(
     // member here, and nothing here adds the bytes it resolved to. Pre-flight
     // already judged exclusions, so a member runs.
     if let Some(ref approved) = options.pre_approved_commands {
+        // An invalid `permissions` block outranks pre-flight's approvals.
+        types::request_policy(options)?;
         for normalized in &normalized_commands {
             if !approved.contains_exact(normalized) {
                 return Err(ShellExpansionError::NotPreApproved {
@@ -303,7 +305,6 @@ pub(crate) fn prepare_resolved(
                 });
             }
         }
-        types::request_policy(options)?;
         return Ok(PreparedShellDirective::resolved(effective, display_command));
     }
 

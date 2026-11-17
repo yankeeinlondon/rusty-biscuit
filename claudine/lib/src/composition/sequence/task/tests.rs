@@ -6799,5 +6799,17 @@ mod referenced_documents;
 #[path = "tests/group_freshness.rs"]
 mod group_freshness;
 
+#[path = "tests/inline_check.rs"]
+mod inline_check;
+
+#[path = "tests/stale_admission.rs"]
+mod stale_admission;
+
+#[path = "tests/referenced_owner_schema.rs"]
+mod referenced_owner_schema;
+
+#[path = "tests/declaration_writes.rs"]
+mod declaration_writes;
+
 #[path = "tests/authoring_documents.rs"]
 mod authoring_documents;

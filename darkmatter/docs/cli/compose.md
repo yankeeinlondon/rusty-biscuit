@@ -373,6 +373,15 @@ finalize:
   and exits 130; a second Ctrl-C exits at once. An interrupted data output prints
   no value.
 
+- **Another host's document.** When a [registered host](../topics/host-registration.md)
+  identifies the root document (a Claudine document, say), `md compose`
+  validates it against that host's schemas, runs only the events it shares
+  with the host (`initialize`, `cancelled`, `finalize` for Claudine), never
+  the host's own events or `composed`/`failed`, and reports one
+  `dm.host.foreign_document` notice naming the host's own command. The
+  host's globals, such as `seq`, fail when read. See
+  [`md compose` of a host's document](../topics/host-registration.md#md-compose-of-a-hosts-document).
+
 A lifecycle run in Markdown mode does not print the `--perf` report or the verbose
 compose summary; a data output still carries `perf`. There is no dry-run mode;
 `--shell` is the only report-only mode.

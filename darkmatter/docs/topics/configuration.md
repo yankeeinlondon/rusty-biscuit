@@ -14,14 +14,17 @@ This page covers:
 - [what a configuration file holds](#the-file) and its [defaults](#defaults),
 - [setting the files up](#setting-up-md-init) with `md init`, and what
   [Claudine's setup](#when-claudine-is-set-up) does to them,
-- [the permissions block](#permissions), and pointing it at
+- [the permissions block](#permissions) in brief (its rules are in
+  [Permissions](./permissions.md)), and pointing it at
   [another file](#pointing-at-another-file),
 - [loading a snapshot](#loading-a-snapshot) from Rust,
 - [how errors are reported](#errors), and
 - [the repository's two revisions](#the-repository-file-at-head-and-in-the-working-copy).
 
 To change a file safely from code, see
-[Writing Configuration Files Safely](./config-writes.md).
+[Writing Configuration Files Safely](./config-writes.md). What a `register`
+entry names, and how a registered host loads, is
+[Host Registration](./host-registration.md).
 
 ## The File
 
@@ -45,6 +48,9 @@ register:
 Any other key is an error, and so is a second YAML document, a duplicate key,
 or an empty file. Write `{}` for a file that keeps every default.
 
+Each `register` entry names a host manifest (`kind: darkmatter-host`); see
+[Host Registration](./host-registration.md) for its format and loading.
+
 The shape and every default come from one shipped schema,
 `darkmatter/schemas/darkmatter-config.yaml`. Darkmatter, DMLS, and Claudine
 read defaults from it; none of them hard-codes a default. Other schemas import
@@ -59,6 +65,16 @@ types:
     host-config:
         permissions: user-permissions@darkmatter:config
 ```
+
+### Editing a configuration file
+
+DMLS checks `~/.darkmatter.yaml` and `<repo-root>/.darkmatter.yaml` (and
+Claudine's `.claudine/config.yaml` in the same two places) against the same
+scope contract as `md`, with completion, hover showing each setting's
+description and default, and located diagnostics. A newly created, still
+empty buffer already offers every key, even before its folder exists (a
+`~/.claudine/config.yaml` buffer opened before `~/.claudine/` is created).
+See [Configuration files](./schemas/dmls-schema-support.md#configuration-files).
 
 ## Defaults
 
@@ -154,103 +170,27 @@ flowchart TD
 
 ## Permissions
 
-`permissions` holds three separate policies; an entry of one never approves
-anything for another.
-
-**`file-read`** lists glob references (the grammar `$path` and `match()`
-use). A leading `!` excludes what it matches.
-
-| Pattern | Means | User | Repository |
-| --- | --- | --- | --- |
-| `./*.yaml`, `data/*.csv` | relative to the reading document | yes | yes, unless `..` leaves the starting folder |
-| `&docs/**/*.md` | from the repository root | yes | yes, unless `..` climbs above the root |
-| `^*.md` | nearest package, package area, then repository | yes | yes |
-| `~/notes/*.md` | under your home directory | yes | no |
-| `{{NOTES}}/*.md` | under a declared portable variable | yes, when listed in `PORTABLE_ENV_VARIABLES` | only when its value lies inside the repository |
-| `/etc/*.md`, `C:\data\*.md` | absolute | no | no |
-| `@x/*.md`, `vault:x/*.md`, URLs | search roots and remote | no | no |
-
-**`shell-commands`** lists rules, one per entry: `exact <command>`,
-`prefix <executable>`, or `template <shape>`, optionally led by `!`. A rule
-with no command is an error.
-
-**`network`** is `allow` or `deny`.
-
-### How the scopes combine
-
-A read or a command is **pre-approved** (it runs without asking) when:
-
-1. no `!` entry in the user file, the repository file at `HEAD`, or the
-   repository working copy matches it, **and**
-2. the user file allows it, **or** the repository file allows it both at
-   `HEAD` and in the working copy.
-
-Everything else needs a current-run approval: a prompt, or an
-approval-required error where nothing can prompt. An exclusion is not a
-deny list; a current-run approval can still permit the operation. The
-built-in shell blacklist is separate and always wins.
-
-The two repository revisions are judged per operation, not entry by entry,
-so they need not share entries:
+`permissions` holds three separate policies: `file-read` (the files a schema
+slot may read without asking), `shell-commands` (the commands that run
+without a prompt), and `network` (`allow` or `deny` for URL fetches). A
+leading `!` on a list entry excludes what it matches from pre-approval:
 
 ```yaml
-# .darkmatter.yaml at HEAD        # .darkmatter.yaml in the working copy
-permissions:                      permissions:
-    shell-commands:                   shell-commands:
-        - prefix ls                       - exact ls -la
+permissions:
+    file-read:
+        - "&**/*.yaml"
+        - "!&secrets/**"
+    shell-commands:
+        - prefix ls
+    network: deny
 ```
 
-`ls -la` is pre-approved (both revisions allow it); `ls -R` is not (only
-`HEAD` allows it).
-
-| Example | Pre-approved? |
-| --- | --- |
-| user `file-read: []`, repository defaults, reading `&docs/a.md` | yes: the repository allows it |
-| repository `file-read: ["&**/*.md", "!&secrets/**"]`, reading `secrets/key.md` | no: excluded |
-| user `!prefix rm`, repository `prefix rm` | no: an exclusion in any file removes pre-approval |
-
-`network` is `allow` only when every applicable file says `allow`: the user
-file outside a repository; the user file, `HEAD`, and the working copy inside
-one. An absent file counts as its defaults (`deny`). `--allow host=HOST`
-still allows one host for one run on top.
-
-**File reads.** A `file-read` entry is judged for the document doing the
-read: `./*.yaml` means YAML files beside that document, `&` is the
-repository root, `~/` the home. `..` in the path being read is resolved
-before matching (`docs/../secrets/key.md` is `secrets/key.md`), and a file
-that does not exist yet is judged by where it would be. A repository entry
-allows a file only when the file's real location, after following symbolic
-links, is inside the repository: a link to a file outside never becomes a
-repository allow. An exclusion matches either the path as written or where
-a link leads.
-
-In code, `ConfigSnapshot::policy()` returns the evaluated
-`darkmatter::config::permissions::PermissionPolicy`:
-
-```rust
-use biscuit_file::FileResolutionContext;
-use darkmatter::config::load::ConfigSnapshot;
-use darkmatter::markdown::compose::shell_expansion::policy::{check_user_blacklist, check_whitelist, normalize_command};
-use std::path::Path;
-
-fn decide(snapshot: &ConfigSnapshot, reading: &FileResolutionContext) -> Result<(), Box<dyn std::error::Error>> {
-    let policy = snapshot.policy()?;
-    let read = policy.file_read(Path::new("data/table.csv"), reading);
-    let args = vec!["-la".to_string()];
-    let normalized = normalize_command("ls", &args);
-    let shell = policy.shell().verdict(
-        |allows| check_whitelist(allows, "ls", &normalized),
-        |excluded| check_user_blacklist(excluded, "ls", &args, &normalized),
-    );
-    println!("{} {} {:?}", read.is_preapproved(), shell.is_preapproved(), policy.network());
-    Ok(())
-}
-```
-
-`PermissionPolicy::verdict` is the same rule for any per-file predicate, and
-`policy.shell().exclusions()` is every file's `!` rules in one set.
-`snapshot.permissions()` still returns each file's raw setting (a reference
-unfollowed).
+Inside a repository, an operation is pre-approved when no file excludes it
+and either your user file allows it or the repository file allows it both as
+committed at `HEAD` and in the working copy; `network` is `allow` only when
+every file says so. The entry forms, how the scopes combine, current-run
+approvals, and the built-in shell blacklist are described in
+[Permissions](./permissions.md).
 
 ### Pointing at another file
 
@@ -368,7 +308,8 @@ the code `dm.config.reference`; every other problem `dm.config.invalid`.
 file is normal and never reported), the permissions error, and each
 registration finding. `md` and Claudine report the missing file as described
 in [How `md` and Claudine report configuration](#how-md-and-claudine-report-configuration);
-reporting in DMLS is **planned**. The same module defines the codes
+DMLS reports it as described in [How DMLS reports configuration](#how-dmls-reports-configuration).
+The same module defines the codes
 `dm.config.not_saved` and `dm.config.migration` for saving approvals and
 migrating legacy files.
 
@@ -465,7 +406,9 @@ flowchart TD
 Each migrated file, each dropped line, and each blacklist rule is one
 `dm.config.migration` notice in `diagnostics()`. A `Passive` load (DMLS,
 validators) writes nothing; it reports each legacy file a writing run would
-migrate.
+migrate. DMLS shows each such notice once per session (see
+[How DMLS reports configuration](#how-dmls-reports-configuration)) and leaves
+the file where it is.
 
 ## One Snapshot per Request
 
@@ -572,6 +515,28 @@ another repository is judged by that repository's rules, in the same order as
 policy. DMLS shows the same verdict on a shell command's hover from a
 `Passive` load; it never prompts or saves.
 
+### How DMLS reports configuration
+
+DMLS, the language server, loads the configuration passively: it never
+creates, migrates, or writes a file, and never prompts. It shows these as
+editor messages (`window/showMessage`), each once per editor session:
+
+| Situation | Message |
+| --- | --- |
+| `~/.darkmatter.yaml` does not exist | one `dm.config.missing` warning naming the file and `md init`, however many documents load the configuration. A repository without `.darkmatter.yaml` shows nothing |
+| a legacy policy file is waiting to be migrated | one `dm.config.migration` information message per file, saying the next `md` or Claudine run migrates it |
+
+For example, with no user file:
+
+```text
+dmls: dm.config.missing: `/home/me/.darkmatter.yaml` does not exist, so every setting takes its default; `md init` creates it
+```
+
+Creating the file needs no restart: DMLS watches both configuration files,
+present or absent, and reloads them when they change. A problem inside an
+open configuration file is reported on that file (see
+[Editing a configuration file](#editing-a-configuration-file)).
+
 ## The Repository File at HEAD and in the Working Copy
 
 Inside a repository the file is read twice: as committed at the `HEAD` the
@@ -581,7 +546,8 @@ own, and each takes the repository defaults when it is absent (an unborn
 as an invalid working file does.
 
 The two are kept apart so a repository's permissions can widen only through
-committed content (see [How the scopes combine](#how-the-scopes-combine)):
+committed content (see
+[How the scopes combine](./permissions.md#how-the-scopes-combine)):
 an uncommitted edit that adds an entry has no effect until it is committed,
 while one that removes an entry or adds a `!` applies at once. Each revision
 follows its own reference, so turning an inline block into a reference,
@@ -603,6 +569,53 @@ flowchart LR
 
 A committed `.darkmatter.yaml` that is a symbolic link, a directory, or a
 submodule is an error; it is never followed.
+
+## The Cloned-Repository Risk
+
+The commit rule stops an uncommitted edit, including an agent editing its own
+configuration, from widening a repository's permissions. It cannot protect you
+from a repository whose **committed** configuration is hostile: clone it, and
+its `shell-commands` can pre-approve any command (its `file-read` still cannot
+leave the repository). Read a cloned repository's `.darkmatter.yaml` and
+`.claudine/config.yaml` before you run Darkmatter or Claudine in it.
+
+A repository can make every widening deliberate by reviewing each committed
+change to its permissions. `darkmatter::config::widening` is the comparison
+for that: `compare_revisions(repository, base, head, &inputs)` reads two
+commits as Git objects only (nothing is checked out or run), resolves each
+policy file's block in each commit (following a reference to its target in
+that same commit, with the shipped defaults filled in), and returns a
+`WideningReport` whose `potential_widening` is true when the head may grant
+more:
+
+```rust
+use darkmatter::config::widening::{WideningInputs, compare_revisions};
+
+let inputs = WideningInputs::from_json(&std::fs::read_to_string(".github/ci/permission-inputs.json")?)?;
+let report = compare_revisions(Path::new("."), &base_commit, &head_commit, &inputs)?;
+for reason in &report.reasons {
+    println!("{}: {:?} — {}", reason.input, reason.kind, reason.detail);
+}
+```
+
+| Change | Result |
+|---|---|
+| the same block, inline or behind a reference, in any order | not widening |
+| an entry removed, a `!` exclusion added, `network: allow` → `deny` | not widening |
+| an entry added (a rewritten glob or command counts as added) | `added-allow` |
+| a `!` exclusion removed | `removed-exclusion` |
+| `network: deny` → `allow` | `network-allowed` |
+| a deleted file or property whose default is wider | `added-allow` |
+| a shipped default that grows, or that the trusted code cannot read | `added-allow`, `defaults-not-understood` |
+| any change to a file the check depends on | `checker-input-changed` |
+| a file, Git, YAML, or reference error in either commit | an error, never "no change" |
+
+This repository runs the comparison in CI from the base commit's code and,
+when a pull request widens or narrows the resolved permissions, says which in
+a comment on that pull request and lists every entry that changed, so whoever
+merges it decides with the change in view; see
+"Permission-change report" in `docs/topics/ci-cd.md`. The report makes a
+widening visible, not impossible.
 
 ## Saving an "Always Allow" Approval
 

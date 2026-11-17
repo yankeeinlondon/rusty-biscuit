@@ -47,7 +47,6 @@ struct Selects {
 
 const NONE: Selects = Selects { claudine: false, inline: false, sequence: false };
 const CLAUDINE: Selects = Selects { claudine: true, inline: false, sequence: false };
-const SEQUENCE: Selects = Selects { claudine: false, inline: false, sequence: true };
 const CLAUDINE_AND_SEQUENCE: Selects = Selects { claudine: true, inline: false, sequence: true };
 
 /// The schema verdict a document must get.
@@ -257,7 +256,7 @@ fn frozen_lib_review() {
     assert_shipped(&Shipped {
         label: "lib/tests/fixtures/frozen_prompts/prompts/review.md",
         text: include_str!("../fixtures/frozen_prompts/prompts/review.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -348,7 +347,7 @@ fn frozen_cli_implement() {
     assert_shipped(&Shipped {
         label: "cli/tests/fixtures/frozen_prompts/prompts/implement.md",
         text: include_str!("../../../cli/tests/fixtures/frozen_prompts/prompts/implement.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -370,7 +369,7 @@ fn frozen_cli_review_loop() {
     assert_shipped(&Shipped {
         label: "cli/tests/fixtures/frozen_prompts/prompts/review-loop.md",
         text: include_str!("../../../cli/tests/fixtures/frozen_prompts/prompts/review-loop.md"),
-        selects: SEQUENCE,
+        selects: CLAUDINE_AND_SEQUENCE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -381,7 +380,7 @@ fn frozen_cli_review() {
     assert_shipped(&Shipped {
         label: "cli/tests/fixtures/frozen_prompts/prompts/review.md",
         text: include_str!("../../../cli/tests/fixtures/frozen_prompts/prompts/review.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -475,6 +474,30 @@ fn frozen_cli_make_it_markdown() {
     });
 }
 
+// The nested step of the frozen `complete.yaml` reproduction: both inputs
+// arrive from the sequence at launch, so passively they are absent.
+#[test]
+fn frozen_cli_sequence_state_schema_plan() {
+    assert_shipped(&Shipped {
+        label: "cli/tests/fixtures/frozen_prompts/sequence-state-schema/plan.md",
+        text: include_str!("../../../cli/tests/fixtures/frozen_prompts/sequence-state-schema/plan.md"),
+        selects: NONE,
+        schema: Invalid(&[("", "\"spec\" is a required property"), ("", "\"plan\" is a required property")]),
+        parser: ACCEPTS,
+    });
+}
+
+#[test]
+fn frozen_cli_sequence_state_schema_spec() {
+    assert_shipped(&Shipped {
+        label: "cli/tests/fixtures/frozen_prompts/sequence-state-schema/spec.md",
+        text: include_str!("../../../cli/tests/fixtures/frozen_prompts/sequence-state-schema/spec.md"),
+        selects: NONE,
+        schema: Valid,
+        parser: ACCEPTS,
+    });
+}
+
 // ── Research fleets and row prompts ────────────────────────────────────────
 // A fleet coordinator references its roster and names its row prompt; the
 // ones that also set `agent` and `model` select Claudine's trigger too. A row
@@ -508,7 +531,7 @@ fn research_agent_cli_fleet() {
     assert_shipped(&Shipped {
         label: "docs/research/agent-cli/_fleet.md",
         text: include_str!("../../../docs/research/agent-cli/_fleet.md"),
-        selects: SEQUENCE,
+        selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
     });
@@ -728,7 +751,7 @@ fn research_model_serving_api_standards_research() {
     assert_shipped(&Shipped {
         label: "docs/research/model-serving-api-standards/_research.md",
         text: include_str!("../../../docs/research/model-serving-api-standards/_research.md"),
-        selects: SEQUENCE,
+        selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
     });
@@ -783,7 +806,7 @@ fn research_reasoning_level_fleet() {
     assert_shipped(&Shipped {
         label: "docs/research/reasoning-level/_fleet.md",
         text: include_str!("../../../docs/research/reasoning-level/_fleet.md"),
-        selects: SEQUENCE,
+        selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
     });

@@ -131,9 +131,7 @@ impl SlotGrants {
         reading: &FileResolutionContext,
         target: &ReadTarget,
     ) -> Option<Result<(), GateRefusal>> {
-        if let SlotPermissions::Invalid(error) = &self.permissions
-            && !matches!(target.location, ReadLocation::Remote(_))
-        {
+        if let SlotPermissions::Invalid(error) = &self.permissions {
             return Some(Err(GateRefusal::InvalidPermissions(error.clone())));
         }
         let target = canonical(target);
@@ -144,6 +142,12 @@ impl SlotGrants {
             ReadLocation::Remote(_) => None,
         };
         let book = self.book.lock().unwrap_or_else(PoisonError::into_inner);
+        // An invalid network permission refuses a URL before any approval.
+        if path.is_none()
+            && let Some(error) = book.network().config_error()
+        {
+            return Some(Err(GateRefusal::InvalidPermissions(error.clone())));
+        }
         match book.decide(&target.location) {
             Some(GrantDecision::Deny) => return Some(Err(GateRefusal::Denied)),
             Some(GrantDecision::Allow) => return Some(Ok(())),
@@ -154,10 +158,7 @@ impl SlotGrants {
                 SlotPermissions::Captured(policy) => policy.file_read(path, reading).is_preapproved().then_some(Ok(())),
                 SlotPermissions::Unconfigured | SlotPermissions::Invalid(_) => None,
             },
-            None if book.network_allows(&target.location) => Some(Ok(())),
-            // Invalid permissions leave no blanket network consent; a host
-            // no `--allow host=HOST` names reports why.
-            None => book.network().config_error().map(|error| Err(GateRefusal::InvalidPermissions(error.clone()))),
+            None => book.network_allows(&target.location).then_some(Ok(())),
         }
     }
 

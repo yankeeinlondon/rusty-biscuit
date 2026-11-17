@@ -233,6 +233,7 @@ fn prediction_calls_the_evaluator_only_for_an_evaluable_template() {
             with_origin: Path::new("/seq.md"),
             task_property: "tasks[0]",
             step_frontmatter: &Default::default(),
+            step_authored: &empty,
             caller_setters: &empty,
             sequence_path: Path::new("/seq.md"),
         };
