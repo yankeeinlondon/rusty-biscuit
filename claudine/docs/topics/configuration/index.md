@@ -21,21 +21,40 @@ The elements of the configuration are strongly typed using [Simplified Schema](s
 treemap-beta
 "Permissions"
     "Network": 1
-    "Filesystem": 2
-    "Shell Commands": 3
-    "Sandboxing": 4
+    "Filesystem": 1
+    "Shell Commands": 1
+    "Sandboxing": 1
 "Providers"
+    "Preferences": 1
+    "Stacks": 1
 "Communication"
     "TTS": 1
-    "Notifications": 2
-    "Chat": 3
+    "Notifications": 1
+    "Chat": 1
 "Shared Resources"
-    "Commands"
-    "Skills"
-    "MCP"
+    "Subagents": 1
+    "Commands": 1
+    "Skills": 1
+    "MCP": 1
+"Features"
+    "Logging":1
+    "Protect": 1
+    "Hooks": 1
+    "Scheduler": 1
+    "PR Actions": 1
+    "CICD Actions": 1
+    "Mesh Nodes": 1
 ```
 
+### Permissions
 
+The default policy in Claudine for permissions is "restrictive but ergonomic" and how that translates depends on the area being discussed.
+
+- for the **network** the default URLs allowed only includes the git provider that hosts your "remote" (when in a git repo; nothing included when outside of a git repo)
+- for the **file system** we default to:
+    - [read, write, metadata]: all files in the repo (except for `.env*`) files
+    - [metadata]: `.env*` in the repo
+    - 
 
 ## Darkmatter Config Sharing
 
