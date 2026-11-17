@@ -28,7 +28,8 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
-review_iterations: 0
+review_iterations: 2
+completed: true
 implemented: true
 implemented_by: "claude/opus"
 ---
