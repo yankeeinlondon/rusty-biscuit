@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use sniff::programs::{Editor, ProgramMetadata};
 use thiserror::Error;
 
-pub use launch::{EDITOR_TERMINATE_GRACE, LaunchIo, LaunchOptions, LaunchOutput, LaunchPlan, LaunchStdin};
+pub use launch::{EDITOR_TERMINATE_GRACE, LaunchIo, LaunchOptions, LaunchOutput, LaunchPlan, LaunchReport, LaunchStdin};
 pub use resolve::{RejectReason, ResolvedEditor, SurfaceRequest, resolve_editor, resolve_editor_command};
 pub use service::{EditError, EditOutcome, EditRequest, EditorHostFacts, EditorOutput, EditorService, ProcessEditorService};
 pub use surface::{EnvironmentProbe, TerminalDenyScope, deny_terminal_in_this_thread, terminal_denied};
@@ -302,6 +302,7 @@ pub fn edit_text(initial: &str, suffix: &str) -> Result<Option<String>, EditorEr
 
 #[cfg(test)]
 mod tests {
+    #[cfg_attr(not(unix), allow(unused_imports))]
     use super::*;
     #[cfg(unix)]
     use serial_test::serial;

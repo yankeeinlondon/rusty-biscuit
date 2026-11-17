@@ -66,13 +66,9 @@ pub(super) fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
     let root: Value = match serde_json::from_str(&error_tag) {
         Ok(v) => v,
         Err(err) => {
-            // If it's not valid JSON, return the raw tag (truncated if huge).
-            // The 1.17.8 flat `error.error="…"` form lands here verbatim.
+            // Not JSON: the raw tag is the message, kept whole. The 1.17.8
+            // flat `error.error="…"` form lands here verbatim.
             debug!(%err, "opencode error tag not valid JSON; falling back to raw");
-            if error_tag.len() > 500 {
-                let truncated: String = error_tag.chars().take(497).collect();
-                return format!("{truncated}...");
-            }
             return error_tag;
         }
     };

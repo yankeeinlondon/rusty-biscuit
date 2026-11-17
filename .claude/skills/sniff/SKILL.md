@@ -19,6 +19,17 @@ and runtime path; it does not cross into native Windows detectors.
 - Build `PATH` with `std::env::join_paths`; never hard-code `:` or `;`.
 - Use bounded subprocess helpers from `process`; never poll a child with piped
   output that is not being drained.
+- Other crates own a child's whole process tree with `sniff::process::ProcessTree`
+  ([process trees](../../../sniff/docs/topics/process-trees.md)).
+  An interactive owned child also takes the terminal's foreground through
+  `sniff::process::ForegroundHandoff` (`process/foreground.rs`; prepare after
+  group configuration and before spawn, declare it before the tree, restore
+  after reaping). Its tests script the parent-side syscalls through the
+  private `TerminalOps` adapter and never touch the ambient terminal. Its
+  callers are Darkmatter's `editor/launch.rs::LaunchPlan` (owned terminal
+  editors) and Claudine's `task/shell.rs::run_owned_lifecycle_command` (every
+  lifecycle shell); a behavior change reaches both. Never let a caller add its
+  own `tcsetpgrp` `pre_exec` hook instead.
 - Windows audio detection uses PowerShell CIM, not `wmic`.
 - `current_user_id()` returns the effective Unix UID or Windows process-token
   SID without subprocess, registry, environment-variable, or network fallback.

@@ -292,7 +292,9 @@ pub(crate) fn execute_sequence(
     let context = invocation.capture_launch_context(&requirements);
     // Writes stay inside the caller's launch scope; relative targets still
     // resolve against the sequence source (`base_dir` below).
-    let engine = darkmatter::effects::EffectEngine::builder().mutation_root(file_resolution_context.launch_magic_scope().local_root()).build();
+    let engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(claudine::invocation_context::lifecycle_mutation_root(Some(&invocation), &file_resolution_context)?)
+        .build();
     // The root's events read its prepared values, as a referenced document's
     // events read its own. Before `initialize` the caller's values are all
     // there is; `start` prepares them again with what has been written and

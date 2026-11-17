@@ -6810,3 +6810,6 @@ mod referenced_owner_schema;
 
 #[path = "tests/declaration_writes.rs"]
 mod declaration_writes;
+
+#[path = "tests/authoring_documents.rs"]
+mod authoring_documents;

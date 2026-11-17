@@ -252,6 +252,17 @@ When `--follow` is enabled:
 5. **Recursive expansion** — followed children may themselves have transclusions
    that get expanded, with the same unified rendering applied at each depth.
 
+6. **Each inclusion shows its own copy** — a file included more than once is
+   prepared once per inclusion, with that inclusion's `set`, `replace`, and
+   inherited values, and each edge expands the copy it produced. With
+   `::file ./leaf.md set.word="a"` followed by `::file ./leaf.md set.word="b"`,
+   where `leaf.md` links `./present.md` only when `word == 'a'` and
+   `./missing.md` only when `word == 'b'`, the first edge shows `./present.md`
+   and the second `./missing.md`; with `--validate`, only `./missing.md` is
+   marked `[missing]`. The same holds for the copies a `::map` or `::filter`
+   repeats from one directive line: each copy's label belongs to its own
+   target, so an existing target is never marked by a sibling copy's issue.
+
 ## Validation Mode (`--validate`)
 
 When `--validate` is enabled:
@@ -332,7 +343,9 @@ no graph to print, so it is
   are reported. Transclusion entries have no `node` property.
 - **With `--follow`** (or `--compose`): Each followable transclusion includes
   a nested `node` object with the child document's own references and
-  transclusions, recursively expanded.
+  transclusions, recursively expanded. A file included twice with different
+  values has a different `node` under each inclusion, each as that inclusion
+  prepared it.
 - **Without `--validate`**: The `validation` key is omitted entirely.
 - **With `--validate`**: The `validation` key is always present. Check
   `validation.valid` to determine whether the document has errors.

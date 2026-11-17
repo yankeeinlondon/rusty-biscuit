@@ -330,7 +330,7 @@ assert_eq!(meta.get("author").unwrap().as_str(), "Ken");
 
 Helper methods: `is_valid()`, `error_count()`.
 
-Issue codes include `MissingLocalTarget`, `InvalidUrl`, `RemoteUnreachable`, `RemoteDisallowed`, `MissingSourceContext`, `UnsupportedScheme`, and `MissingFragmentTarget`.
+Issue codes include `MissingLocalTarget`, `EmptyTarget`, `InvalidUrl`, `RemoteUnreachable`, `RemoteDisallowed`, `MissingSourceContext`, `UnsupportedScheme`, and `MissingFragmentTarget`.
 
 ```rust
 let options = ReferenceValidationOptions {

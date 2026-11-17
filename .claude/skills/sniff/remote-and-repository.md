@@ -77,6 +77,16 @@ repositories. Focused inspection may open a registered target to validate it:
 - Ahead/behind work follows the focused detail request and does not widen the
   aggregate path.
 
+Discovery (`git::open::trusted_discover`, behind `repo_root`, `GitRepo::discover`
+and every focused helper) matches git for a broken gitfile: gix's upward search
+skips a `.git` *file* that points at no repository and keeps walking, so
+`reject_skipped_gitfile` turns any `.git` file between the start path and the
+repository found (or the filesystem root) into `SniffError::Git("discover", …)`.
+Otherwise the enclosing repository would be reported, and a consumer that
+bounds writes by it (Darkmatter and Claudine lifecycle hosts) would widen
+past the broken checkout. A `.git` *directory* that is not a repository is
+still skipped, as git skips it.
+
 ## Recent commits
 
 `RecentCommits::collect(&repo, &options)` gathers the set;

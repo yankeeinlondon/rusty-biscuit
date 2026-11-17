@@ -238,8 +238,9 @@ pub struct StackExecutionContext<'a> {
     /// `None`, it falls back to a demand-driven capture rooted at
     /// `ctx_base_dir`/`base_dir`.
     pub prepared_context: Option<&'a ComposeContext>,
-    /// The request's file-resolution context, used by document-authored file
-    /// expressions.
+    /// The file-resolution context of the document that authored the stack
+    /// (a referenced sequence or group has its own), used by document-authored
+    /// file expressions and lifecycle write targets.
     pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,
@@ -611,6 +612,16 @@ impl LifecycleHost for StackExecutionContext<'_> {
 
     fn interrupted(&self) -> bool {
         crate::interrupt::interrupted()
+    }
+
+    /// An interrupt ends the normal work of `initialize`, `start`, and
+    /// `loop`, even after an action whose failure `no_error` suppressed; the
+    /// cleanup events it leads to run whole. On Unix a lifecycle command that
+    /// holds the terminal receives a typed Ctrl-C itself and reports it by
+    /// marking the run interrupted, so the next normal action must not start.
+    #[cfg(unix)]
+    fn stops_on_interrupt(&self) -> bool {
+        matches!(self.signal, LifecycleSignal::Initialize | LifecycleSignal::Start | LifecycleSignal::Loop)
     }
 
     fn editor(&self) -> Option<&dyn darkmatter::editor::EditorService> {

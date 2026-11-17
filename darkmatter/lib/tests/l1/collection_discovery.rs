@@ -441,7 +441,7 @@ mod reference_validation {
     use super::*;
 
     #[test]
-    fn validation_reads_repeated_bodies_without_running_callbacks_or_shell() {
+    fn validation_reads_repeated_bodies_without_running_shell() {
         let (_guard, root) = root();
         write(&root, "a.md", "# A\n");
         write(&root, "b.md", "# B\n");

@@ -45,8 +45,22 @@ impl TaskExecution<'_> {
         let guard = LifecycleRunGuard::new(&sequence.lifecycle, &runtime_context, self.stack.emitter);
         let mut runner = ContainerRunner::new(guard).with_subject(SubjectKind::Sequence);
         let state = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
-        let result = match self.open_loop(sequence.loop_config.as_ref(), LoopResultKind::Sequence, &state, runtime) {
-            Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut(), base),
+        // The container's events, gate, loop cap, proxy, and children read its
+        // own document: its path and that document's context travel together.
+        // Its reread (`prepare_nested_sequence`) resolves the reference from
+        // the calling task's, so keeps `self.stack`'s.
+        let result = match self.authoring_context(&sequence.origin_path) {
+            Ok(own_context) => {
+                let own_stack = StackExecutionContext {
+                    source_path: &sequence.origin_path,
+                    file_resolution_context: &own_context,
+                    ..self.stack.with_signal(self.stack.signal)
+                };
+                match (TaskExecution { stack: &own_stack, ..*self }).open_loop(sequence.loop_config.as_ref(), LoopResultKind::Sequence, &state, runtime) {
+                    Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut(), &own_stack, base),
+                    Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+                }
+            }
             Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
         };
         runtime.replace_sequence_scope(outer_seq, outer_outputs);
@@ -56,8 +70,10 @@ impl TaskExecution<'_> {
     fn run_sequence_attempts(
         &self, sequence: &PreflightSequence, runtime: &Arc<RuntimeState>, run_id: &str,
         runner: &mut ContainerRunner<'_>, mut frame: Option<&mut LoopFrame>,
+        own_stack: &StackExecutionContext<'_>,
         mut base: Option<SharedFrontmatter>,
     ) -> PrimaryOutcome {
+        let file_resolution_context = own_stack.file_resolution_context;
         let mut signal = LifecycleSignal::Initialize;
         // Taken as each pass enters `start`; a retry of the pass returns here.
         let mut checkpoint = PassCheckpoint::take(runtime);
@@ -143,6 +159,7 @@ impl TaskExecution<'_> {
                 shell_runner: if shell_enabled { self.stack.shell_runner } else { &disabled },
                 seq: Some(&seq), runtime_state: Some(runtime.as_ref()), frontmatter: &event_frontmatter,
                 live_frontmatter, source_path: &sequence.origin_path, err: error.as_ref(), loop_values,
+                file_resolution_context,
                 ..self.stack.with_signal(signal)
             };
             if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
@@ -219,6 +236,7 @@ impl TaskExecution<'_> {
                             seq: Some(&seq), runtime_state: Some(runtime.as_ref()),
                             frontmatter: state.data(), live_frontmatter, source_path: &task.origin_path, loop_values,
                             prepared_context: run.as_ref().map(|opened| &opened.context).or(self.stack.prepared_context),
+                            file_resolution_context,
                             ..self.stack.with_signal(LifecycleSignal::Start)
                         };
                         let child = TaskExecution {
@@ -328,6 +346,7 @@ impl TaskExecution<'_> {
                         let gate = StackExecutionContext {
                             seq: Some(&gate_seq), runtime_state: Some(runtime.as_ref()), frontmatter: &gate_frontmatter,
                             live_frontmatter, source_path: &sequence.origin_path, err: None, loop_values: Some(&ambient),
+                            file_resolution_context,
                             ..self.stack.with_signal(LifecycleSignal::Loop)
                         };
                         match finish_container_pass(frame, runner.guard_mut(), &gate, runtime) {
@@ -407,7 +426,7 @@ impl TaskExecution<'_> {
                     signal = if signal == LifecycleSignal::Failure { LifecycleSignal::Finalize } else { LifecycleSignal::Failure };
                 }
                 ContainerEventDecision::Proxy { target, overlay } => {
-                    return self.run_container_proxy(&target, overlay);
+                    return (TaskExecution { stack: own_stack, ..*self }).run_container_proxy(&target, overlay);
                 }
                 decision => {
                     let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,

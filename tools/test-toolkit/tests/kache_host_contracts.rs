@@ -1105,88 +1105,154 @@ fn report_names_a_missing_config_base_dir_as_an_invalid_base() {
 /// one-element array form is not. A path that exists but is not a directory
 /// is one kache cannot clone into, so it is invalid here though `wt`
 /// accepts it.
+///
+/// One test per row: each runs a full `report`, so rows in one test ran
+/// serially and the test grew with the table.
 #[cfg(unix)]
-#[test]
-fn report_resolves_the_worktree_base_by_the_wt_contract() {
-    let scratch = tempfile::tempdir().expect("tempdir");
-    let base = scratch.path().join("base");
-    fs::create_dir_all(&base).expect("base");
-    let repository = scratch.path().join("repository");
-    fs::create_dir_all(repository.join(".git")).expect("repository");
-    let file = scratch.path().join("file");
-    fs::write(&file, "").expect("file");
-    let quoted = |path: &std::path::Path| serde_json::to_string(path).expect("JSON path");
+mod report_resolves_the_worktree_base_by_the_wt_contract {
+    use std::{fs, path::Path};
 
-    let cases: Vec<(&str, Option<PathBuf>, Option<String>, String)> = vec![
-        (
-            "WT wins over a malformed config",
-            Some(base.clone()),
-            Some("{".to_owned()),
-            format!("base=covered path={}", base.display()),
-        ),
-        (
-            "an empty WT defers to the config",
-            None,
-            Some(format!("{{\"base_dir\": {}, \"extra\": 1}}", quoted(&base))),
-            format!("base=covered path={}", base.display()),
-        ),
-        (
-            "the one-element array form",
-            None,
-            Some(format!("[{}]", quoted(&base))),
-            format!("base=covered path={}", base.display()),
-        ),
-        (
-            "a config base_dir naming a Git repository",
-            None,
-            Some(format!("{{\"base_dir\": {}}}", quoted(&repository))),
-            format!(
-                "base=invalid reason=config-base-dir-is-a-git-repository path={}",
-                repository.display()
-            ),
-        ),
-        (
-            "no base_dir key",
-            None,
-            Some("{}".to_owned()),
-            "base=invalid reason=config-malformed path=".to_owned(),
-        ),
-        (
-            "a null base_dir",
-            None,
-            Some("{\"base_dir\": null}".to_owned()),
-            "base=invalid reason=config-malformed path=".to_owned(),
-        ),
-        (
-            "a repeated base_dir",
-            None,
-            Some(format!(
-                "{{\"base_dir\": {0}, \"base_dir\": {0}}}",
-                quoted(&base)
-            )),
-            "base=invalid reason=config-malformed path=".to_owned(),
-        ),
-        (
-            "a WT naming a file",
-            Some(file.clone()),
-            None,
-            format!("base=invalid reason=wt-not-a-directory path={}", file.display()),
-        ),
-        ("nothing configured", None, None, "base=unconfigured path=-".to_owned()),
-    ];
-    for (label, wt, config, expected) in cases {
+    use super::report_with;
+
+    /// The paths a row's settings name, under one scratch directory: an
+    /// existing directory, a Git repository, and a regular file.
+    struct Paths {
+        _scratch: tempfile::TempDir,
+        base: std::path::PathBuf,
+        repository: std::path::PathBuf,
+        file: std::path::PathBuf,
+    }
+
+    fn paths() -> Paths {
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let base = scratch.path().join("base");
+        fs::create_dir_all(&base).expect("base");
+        let repository = scratch.path().join("repository");
+        fs::create_dir_all(repository.join(".git")).expect("repository");
+        let file = scratch.path().join("file");
+        fs::write(&file, "").expect("file");
+        Paths {
+            _scratch: scratch,
+            base,
+            repository,
+            file,
+        }
+    }
+
+    fn quoted(path: &Path) -> String {
+        serde_json::to_string(path).expect("JSON path")
+    }
+
+    /// Runs `report` with `WT` and `~/.worktree.json` as given and asserts
+    /// its `kache-host: base=` line.
+    fn assert_base(wt: Option<&Path>, config: Option<String>, expected: &str) {
         let (code, stdout) = report_with(|fixture| {
             if let Some(wt) = wt {
-                fixture.set_wt_env(wt);
+                fixture.set_wt_env(wt.to_path_buf());
             }
             if let Some(config) = config {
                 fs::write(fixture.home().join(".worktree.json"), config).expect("config");
             }
         });
-        assert_eq!(code, Some(0), "{label}:\n{stdout}");
+        assert_eq!(code, Some(0), "{stdout}");
         assert!(
             stdout.contains(&format!("kache-host: {expected}")),
-            "{label}: expected `{expected}`:\n{stdout}"
+            "expected `{expected}`:\n{stdout}"
         );
+    }
+
+    #[test]
+    fn wt_wins_over_a_malformed_config() {
+        let paths = paths();
+        assert_base(
+            Some(&paths.base),
+            Some("{".to_owned()),
+            &format!("base=covered path={}", paths.base.display()),
+        );
+    }
+
+    #[test]
+    fn an_empty_wt_defers_to_the_config() {
+        let paths = paths();
+        assert_base(
+            None,
+            Some(format!(
+                "{{\"base_dir\": {}, \"extra\": 1}}",
+                quoted(&paths.base)
+            )),
+            &format!("base=covered path={}", paths.base.display()),
+        );
+    }
+
+    #[test]
+    fn the_one_element_array_form() {
+        let paths = paths();
+        assert_base(
+            None,
+            Some(format!("[{}]", quoted(&paths.base))),
+            &format!("base=covered path={}", paths.base.display()),
+        );
+    }
+
+    #[test]
+    fn a_config_base_dir_naming_a_git_repository() {
+        let paths = paths();
+        assert_base(
+            None,
+            Some(format!("{{\"base_dir\": {}}}", quoted(&paths.repository))),
+            &format!(
+                "base=invalid reason=config-base-dir-is-a-git-repository path={}",
+                paths.repository.display()
+            ),
+        );
+    }
+
+    #[test]
+    fn no_base_dir_key() {
+        assert_base(
+            None,
+            Some("{}".to_owned()),
+            "base=invalid reason=config-malformed path=",
+        );
+    }
+
+    #[test]
+    fn a_null_base_dir() {
+        assert_base(
+            None,
+            Some("{\"base_dir\": null}".to_owned()),
+            "base=invalid reason=config-malformed path=",
+        );
+    }
+
+    #[test]
+    fn a_repeated_base_dir() {
+        let paths = paths();
+        assert_base(
+            None,
+            Some(format!(
+                "{{\"base_dir\": {0}, \"base_dir\": {0}}}",
+                quoted(&paths.base)
+            )),
+            "base=invalid reason=config-malformed path=",
+        );
+    }
+
+    #[test]
+    fn a_wt_naming_a_file() {
+        let paths = paths();
+        assert_base(
+            Some(&paths.file),
+            None,
+            &format!(
+                "base=invalid reason=wt-not-a-directory path={}",
+                paths.file.display()
+            ),
+        );
+    }
+
+    #[test]
+    fn nothing_configured() {
+        assert_base(None, None, "base=unconfigured path=-");
     }
 }

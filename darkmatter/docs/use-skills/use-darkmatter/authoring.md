@@ -184,6 +184,7 @@ Internal-only text. Blocks nest.
 ::code ./snippet.rs                      <!-- fenced code block; language from the extension -->
 ::code ./demo.rs disclosure=true
 ::file https://example.com/x.md          <!-- needs --allow host=example.com -->
+::file ../../topics/guide.md interpolate=false  <!-- child prose kept as written -->
 ```
 
 - A child sees the parent's frontmatter. Its own keys win, and `set=` or
@@ -196,6 +197,13 @@ Internal-only text. Blocks nest.
   `disclosure=true|"summary"` (wraps it in a disclosure block), and
   `replace=true|false|{…}`. Every option needs `=value`: a bare
   `quotation` is a parse error.
+- `interpolate=false` (on `::file` and `::url`) keeps the child's prose as
+  written: its `{{{ … }}}` examples are not evaluated, warn about nothing, and
+  stay as typed, triple braces included, even if a name matches your
+  frontmatter. Use it to transclude a docs page that shows expressions. The
+  child's frontmatter and directive inputs (`when=`, targets, option values,
+  `::shell`) still evaluate, and every document it includes inherits the
+  setting. A value other than a boolean word or unquoted `null` is an error.
 - A target may use any file-reference form: `./`, bare, `&`, `^`, `@`, `~`,
   `{{{VAR}}}`, an absolute path, or `https://`.
 
@@ -281,10 +289,16 @@ finalize:
   in your editor, waits for it to close, then runs the next action. A missing
   file is created first; `create_new: true` refuses an existing one; `gui`
   picks a graphical (`true`) or terminal (`false`) editor. A known editor gets its
-  wait flag (`code --wait`); one that cannot wait is never chosen. Under `md` the file
-  must sit inside the prompt's own directory. A terminal editor needs stdin,
+  wait flag (`code --wait`); one that cannot wait is never chosen. A terminal editor needs stdin,
   stdout, and stderr on a terminal, so it fails with `--output json`, a
   redirected stdout, or a document read from stdin.
+- On Linux and macOS a terminal editor holds the terminal while it is open: a
+  Ctrl-C you type goes to the editor, not to `md`. Quit the editor to go on
+  (`:cq` fails the action), or signal `md` itself to cancel the run, which
+  stops the editor (`SIGTERM`, then `SIGKILL` after 2 s). `md` takes the
+  terminal and its settings back when the editor exits; if it cannot lend or
+  restore the terminal, the edit fails (`prepare the terminal` or
+  `restore the terminal`).
 - The target is mandatory: `edit: null`, `edit: []`, a blank path, or a long
   form without `file` is an error. A native number or boolean names a file by
   its text (`edit: 5` opens `5`).
@@ -296,6 +310,16 @@ finalize:
   beside it fails `md compose` before any event fires, even when the values
   agree (`md schema validate` does not catch this). The `no_error: false`
   that schema validation fills in never counts as a second placement.
+- Every file action (`edit`, the `*_frontmatter` writers, `ensure_file`,
+  `ensure_dir`, `append_line`, `append_jsonl`) writes only inside the working
+  tree you launched `md` in: the repository or worktree top level, or the
+  launch directory outside a repository. A relative path resolves like a
+  read from the document: an existing file is the one a read finds (for
+  `notes.md`, the document's folder, then the repository root), a missing one
+  is created beside the document. Write `./notes.md` to pin the document's
+  folder, or `{{{ ctx.cwd }}}/notes.md` for the launch directory. A prompt
+  stored outside your project cannot write beside itself; a target outside
+  the boundary, through a symlink too, is refused before anything is created.
 - `initialize` runs before schema validation, so its effects stay done when
   the frontmatter is then refused (the run goes on to `failed`, `finalize`).
   Put effects that must not happen for an invalid document in `composed`.

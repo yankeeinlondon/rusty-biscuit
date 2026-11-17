@@ -59,6 +59,9 @@ pub struct EditOutcome {
     /// containment).
     pub attempted: bool,
     pub result: Result<(), EditError>,
+    /// Set when the edit's outcome stands but the host should tell the user
+    /// something, such as a GUI editor window that had to be closed.
+    pub warning: Option<String>,
 }
 
 /// Why an `edit` failed.
@@ -160,13 +163,19 @@ impl ProcessEditorService {
 impl EditorService for ProcessEditorService {
     fn edit(&self, request: &EditRequest<'_>) -> EditOutcome {
         let mut attempted = false;
-        let result = self.run(request, &mut attempted);
-        EditOutcome { attempted, result }
+        let mut warning = None;
+        let result = self.run(request, &mut attempted, &mut warning);
+        EditOutcome { attempted, result, warning }
     }
 }
 
 impl ProcessEditorService {
-    fn run(&self, request: &EditRequest<'_>, attempted: &mut bool) -> Result<(), EditError> {
+    fn run(
+        &self,
+        request: &EditRequest<'_>,
+        attempted: &mut bool,
+        warning: &mut Option<String>,
+    ) -> Result<(), EditError> {
         if (request.cancelled)() {
             return Err(EditorError::Cancelled { path: request.target.to_path_buf() }.into());
         }
@@ -193,11 +202,13 @@ impl ProcessEditorService {
             path: cleaned.clone(),
             source,
         })?;
-        LaunchPlan::new(editor, launch_path).run(LaunchOptions {
+        let report = LaunchPlan::new(editor, launch_path).run_reporting(LaunchOptions {
             io,
             own_tree: true,
             cancelled: Some(request.cancelled),
-        })?;
+        });
+        *warning = report.warning;
+        report.result?;
 
         ensure_within(request.mutation_root, &cleaned).map_err(EditError::Containment)?;
         match std::fs::metadata(&cleaned) {

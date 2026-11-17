@@ -347,6 +347,16 @@ fn collect_recursive(
     nested_key: Option<String>,
     inherited: &InheritedDiscovery,
 ) -> MarkdownResult<super::PreflightGraphNode> {
+    // A source already being walked further up this branch is a cycle,
+    // which composition rejects; walking it again under new values (an
+    // expression-valued `set` can produce new ones on every level) would
+    // never end.
+    let walking = walk_source_key(options, nested_key.clone()).map(|key| format!("{key}\0walking"));
+    if let Some(marker) = &walking
+        && !visited.insert(marker.clone())
+    {
+        return Ok(super::PreflightGraphNode::default());
+    }
     let start = trigger_warnings.len();
     let mut kept = None;
     let walked = collect_document(
@@ -365,6 +375,9 @@ fn collect_recursive(
         inherited,
         &mut kept,
     );
+    if let Some(marker) = &walking {
+        visited.remove(marker);
+    }
     if walked.is_err()
         && let Some(KeptOnFailure { mut warnings, own_end }) = kept
     {
@@ -410,18 +423,8 @@ fn collect_document(
     };
 
     let is_nested = nested_key.is_some();
-    let source_key = nested_key.or_else(|| match &options.source {
-        ComposeSource::File(path) => Some(
-            biscuit_file::canonicalize_simplified(path)
-                .unwrap_or_else(|_| path.clone())
-                .to_string_lossy()
-                .to_string(),
-        ),
-        ComposeSource::Url(url) => Some(url.to_string()),
-        ComposeSource::Unknown => None,
-    });
-    if let Some(key) = source_key
-        && !visited.insert(key)
+    if let Some(key) = walk_source_key(options, nested_key)
+        && !visited.insert(visited_key(key, options, markdown, inherited))
     {
         return Ok(super::PreflightGraphNode::default());
     }
@@ -452,7 +455,7 @@ fn collect_document(
     // ── Deferred context reads ─────────────────────────────────────
     // Metadata only (R30): planning names the lazy reads and function calls
     // this source can reach, and observes none of them.
-    *capabilities = std::mem::take(capabilities).union(&DeferredCapabilities::for_document(markdown));
+    *capabilities = std::mem::take(capabilities).union(&DeferredCapabilities::for_document_with(markdown, options.prose_enabled()));
 
     // ── Frontmatter commands ───────────────────────────────────────
     let deferred_keys = derived_deferred_keys(
@@ -996,7 +999,7 @@ fn collect_document(
                         if let Some((canonical, _)) = &walked_key
                             && scoped_walked.keys().any(|(walked, _)| walked == canonical)
                         {
-                            visited.remove(canonical);
+                            visited.remove(&visited_key(canonical.clone(), &child_options, &child, &for_children));
                         }
                         let child = std::sync::Arc::new(collect_recursive(
                             &child,
@@ -1031,11 +1034,14 @@ fn collect_document(
                 let Some(body) = fetch_remote_child_body(&url, remote_fetch)? else {
                     continue;
                 };
-                // Composition gives a remote child its parent's options and
-                // nothing of the parent's state or the directive's `set`
-                // overlay; its commands are approved for exactly that.
-                let child = Markdown::from(body);
-                let child_options = options.clone().with_source_url(url.clone());
+                // Composition gives a remote child its parent's options with
+                // the directive's own inputs (`interpolate=`, `replace=`) and
+                // its `set` overlay written over the child's frontmatter, and
+                // nothing of the parent's state; its commands are approved for
+                // exactly that.
+                let mut child = Markdown::from(body);
+                transclusion::apply_directive_set_overlay(&mut child, &directive.options);
+                let child_options = transclusion::remote_child_options(options, &directive.options, url.clone());
                 let child = collect_recursive(
                     &child,
                     &child_options,
@@ -1153,7 +1159,7 @@ fn collect_document(
                 let child = Markdown::from(body);
                 collect_recursive(
                     &child,
-                    &options.clone().with_source_url(url),
+                    &transclusion::remote_child_options(options, &transclusion::BlockOptions::default(), url),
                     seen,
                     entries,
                     candidates,
@@ -1183,7 +1189,7 @@ fn collect_document(
     // Runtime composes the content against the root source, inheriting this
     // document's state as a `::file` child does; so does this walk.
     let mut nested_contents = discovery.nested_compose.take_discovered();
-    nested_contents.extend(authored_as_markdown_literals(markdown));
+    nested_contents.extend(authored_as_markdown_literals(markdown, options.prose_enabled()));
     for content in nested_contents {
         let key = format!("as_markdown:{}", biscuit_hash::xx_hash(&content));
         let mut nested_options = transclusion::inherited_child_options(
@@ -1692,6 +1698,50 @@ fn pending_shell_literals(
     pending
 }
 
+/// A walked source's key in `visited`: the same source is walked again
+/// whenever anything that can change what it evaluates differs.
+///
+/// That is the child's starting frontmatter (which a directive's `set`
+/// overlay writes), the request's compose-cache fingerprint (the same option
+/// identity a composed child's cache key uses: the prose setting, the values
+/// it inherits from its parent as external state and their origin, caller
+/// overrides, replacement options, and the opening anchor), and what
+/// discovery alone carries for its parent's unexecuted values. Cycles are
+/// bounded separately by [`collect_recursive`]'s source-only marker.
+fn visited_key(
+    source_key: String,
+    options: &crate::markdown::compose::ComposeRequest,
+    markdown: &Markdown,
+    inherited: &InheritedDiscovery,
+) -> String {
+    format!(
+        "{source_key}\0{:016x}\0{:016x}\0{:016x}",
+        frontmatter_digest(markdown),
+        options.compose_cache_fingerprint(),
+        inherited.digest(),
+    )
+}
+
+/// The digest of the frontmatter a walked document starts from.
+fn frontmatter_digest(markdown: &Markdown) -> u64 {
+    biscuit_hash::xx_hash(&serde_json::to_string(markdown.frontmatter().as_map()).unwrap_or_default())
+}
+
+/// The source identity of a walk: `nested_key` for `as_markdown` content,
+/// otherwise the document's canonical file or URL.
+fn walk_source_key(options: &crate::markdown::compose::ComposeRequest, nested_key: Option<String>) -> Option<String> {
+    nested_key.or_else(|| match &options.source {
+        ComposeSource::File(path) => Some(
+            biscuit_file::canonicalize_simplified(path)
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .to_string(),
+        ),
+        ComposeSource::Url(url) => Some(url.to_string()),
+        ComposeSource::Unknown => None,
+    })
+}
+
 /// What a local child inherits from the discovery of its parent, beyond the
 /// parent's state itself: the inherited values whose executed form discovery
 /// cannot know.
@@ -1707,6 +1757,19 @@ struct InheritedDiscovery {
     /// Keys whose value reads a host-declared late root, directly or through
     /// another such key (see `ComposeOptions::with_deferred_shell_roots`).
     deferred: HashSet<String>,
+}
+
+impl InheritedDiscovery {
+    /// An order-independent identity of these sets, for [`visited_key`].
+    fn digest(&self) -> u64 {
+        let mut pending: Vec<String> = self.pending.iter().map(|(key, value)| format!("{key}={value}")).collect();
+        pending.sort();
+        let mut unobserved = self.unobserved.clone();
+        unobserved.sort();
+        let mut deferred: Vec<&String> = self.deferred.iter().collect();
+        deferred.sort();
+        biscuit_hash::xx_hash(&format!("{pending:?}\0{unobserved:?}\0{deferred:?}"))
+    }
 }
 
 /// The keys of `markdown` whose value discovery cannot observe as composition
@@ -1914,10 +1977,11 @@ const UNEVALUATED_IN_DISCOVERY: &[&str] = &[
 ];
 
 /// Every string-literal `as_markdown` argument in the authored frontmatter and
-/// body, including conditional branches and regions discovery never reaches.
-fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
+/// body, including conditional branches and regions discovery never reaches
+/// (but not prose an `interpolate=false` inclusion keeps as written).
+fn authored_as_markdown_literals(markdown: &Markdown, prose_enabled: bool) -> Vec<String> {
     let mut literals = Vec::new();
-    for expression in authored_expressions(markdown) {
+    for expression in authored_expressions(markdown, prose_enabled) {
         visit_calls(&expression, &mut |name, args, _locals| {
             if name == "as_markdown"
                 && let [Expr::StringLiteral(content)] = args
@@ -1930,13 +1994,14 @@ fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
 }
 
 /// Every `ping`/`ping_under` call in the authored frontmatter and body whose
-/// arguments are all literals, including branches discovery never evaluates.
+/// arguments are all literals, including branches discovery never evaluates
+/// (but not prose an `interpolate=false` inclusion keeps as written).
 ///
 /// A call whose arguments do not validate is left to the compose pass to
 /// reject: preflight reports effects, it does not diagnose authoring.
 fn authored_icmp_probes(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> Vec<PlannedIcmpProbe> {
     let authority = options.icmp_authority().discovering();
-    for expression in authored_expressions(markdown) {
+    for expression in authored_expressions(markdown, options.prose_enabled()) {
         visit_calls(&expression, &mut |name, args, _locals| {
             if name != "ping" && name != "ping_under" {
                 return;
@@ -1964,14 +2029,22 @@ fn literal_value(expression: &Expr) -> Option<Value> {
 }
 
 /// Parsed `{{ … }}` expressions from frontmatter string values and the whole
-/// body, code blocks included.
-fn authored_expressions(markdown: &Markdown) -> Vec<Expr> {
+/// body, code blocks included; with `prose_enabled` false (an
+/// `interpolate=false` inclusion), only the body's directive inputs.
+fn authored_expressions(markdown: &Markdown, prose_enabled: bool) -> Vec<Expr> {
+    let body = match prose_enabled {
+        true => std::borrow::Cow::Borrowed(markdown.content()),
+        false => std::borrow::Cow::Owned(crate::markdown::compose::interpolation::active_inputs::mask_prose(
+            markdown.content(),
+            None,
+        )),
+    };
     markdown
         .frontmatter()
         .as_map()
         .values()
         .filter_map(serde_json::Value::as_str)
-        .chain(std::iter::once(markdown.content()))
+        .chain(std::iter::once(body.as_ref()))
         .flat_map(ExpressionFinder::find_all_plain)
         .filter_map(|location| parse(&location.expression).ok())
         .collect()

@@ -1360,12 +1360,13 @@ fn construct_lifecycle_runtime(
         // containing the launch directory, otherwise that directory) — never
         // the prompt's own repository, which differs whenever the prompt lives
         // in a shared library.
-        let lifecycle_mutation_root = request
-            .prepared
-            .input_layers
-            .file_resolution_context
-            .launch_magic_scope()
-            .local_root();
+        let lifecycle_mutation_root = match claudine::invocation_context::lifecycle_mutation_root(
+            request.invocation_context.as_ref(),
+            &request.prepared.input_layers.file_resolution_context,
+        ) {
+            Ok(root) => root,
+            Err(error) => return CompositionPhaseResult::Failed(error.into()),
+        };
         let lifecycle_effect_engine = EffectEngine::builder()
             .mutation_root(lifecycle_mutation_root)
             .auto_rehash(false)
@@ -1469,6 +1470,7 @@ fn execute_initialize_catch(
             None => event_ctx,
         };
         let outcome = guard.execute_event(step.signal, &event_ctx);
+        claudine::composition::lifecycle::report::warn_tolerated_action_error(event_ctx.emitter, event_ctx.term, step.signal, &outcome);
         assert!(protocol.record(step.signal, outcome));
     }
     let result = protocol
@@ -1607,6 +1609,7 @@ pub(super) fn route_initialize(
                         LifecycleSignal::Finalize,
                         &init_ctx.with_signal(LifecycleSignal::Finalize),
                     );
+                    claudine::composition::lifecycle::report::warn_tolerated_action_error(init_ctx.emitter, init_ctx.term, LifecycleSignal::Finalize, &finalize);
                     if let Some(info) = finalize.evaluation_error.as_ref() {
                         return Err(crate::output::error_walker::emit_lifecycle_evaluation_error_early(
                             source_path, "finalize", info, term,

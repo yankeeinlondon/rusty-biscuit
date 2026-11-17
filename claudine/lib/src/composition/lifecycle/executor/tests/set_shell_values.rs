@@ -485,16 +485,27 @@ fn missing_and_interrupted_commands_fail_the_set() {
     assert_set_fails(&repo, "$(claudine-no-such-command-r9 run)::ok", "not found");
 
     // A user interruption keeps its cancellation outcome rather than turning
-    // into a recoverable value.
-    let config = prepared(
-        &repo,
-        &start(json!([{ "set": { "v": format!("$({})::ok", repo.git("diff --quiet")) } }])),
-    );
+    // into a recoverable value. A cleanup event still runs its actions after
+    // an interrupt, so its `set` meets the interruption.
+    let set = json!([{ "set": { "v": format!("$({})::ok", repo.git("diff --quiet")) } }]);
+    let config = prepared(&repo, &json!({ "finalize": set.clone() }));
     crate::interrupt::mark_interrupted();
-    let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
+    let result = run(&config, &[LifecycleSignal::Finalize], &map(json!({})), &MockShell::new(0));
     crate::interrupt::clear_for_tests();
     assert!(result.outcome.evaluation_error.is_some(), "{:?}", result.outcome);
     assert!(!result.mutations.contains_key("v"));
+
+    // On Unix an interrupt ends `start` before its next action, so the `set`
+    // never runs.
+    #[cfg(unix)]
+    {
+        let config = prepared(&repo, &start(set));
+        crate::interrupt::mark_interrupted();
+        let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
+        crate::interrupt::clear_for_tests();
+        assert_eq!(result.outcome, LifecycleEventOutcome::default());
+        assert!(!result.mutations.contains_key("v"));
+    }
 }
 
 #[test]

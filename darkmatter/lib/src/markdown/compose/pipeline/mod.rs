@@ -125,9 +125,11 @@ impl Markdown {
             }
 
             if options.is_enabled(ComposeOperation::Interpolation) {
-                for entry in
-                    remote::discover_remote_urls_from_expressions(&self.content, &options.source)
-                {
+                for entry in remote::discover_remote_urls_from_expressions_with(
+                    &self.content,
+                    &options.source,
+                    options.prose_enabled(),
+                ) {
                     catalog.add(entry);
                 }
             }

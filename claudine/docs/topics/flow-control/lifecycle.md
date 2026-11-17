@@ -37,7 +37,7 @@ can read. [Flow Control](flow-control.md) explains the directives (`retry`,
 
 The lifecycle grammar (events, action lists, `when`/`then`/`else`, bundles)
 and the engine that fires events and routes failures belong to
-[Darkmatter](../../../../darkmatter/docs/topics/lifecycle/index.md). Darkmatter
+[Darkmatter](darkmatter/docs/topics/lifecycle/index.md). Darkmatter
 defines five document events: `initialize`, `composed`, `failed`, `cancelled`,
 and `finalize`. A program that runs documents is a **host**: it registers its
 own events and may rename two of Darkmatter's. Claudine:
@@ -261,6 +261,38 @@ Communications the first stack already emitted are not undone.
   [verify-then-retry example](#verify-an-artifact-on-success-then-retry-once-from-finalize)
   relies on this.
 - From `blocked`, `failure` and `finalize` run as catch-only cleanup.
+
+### A failed action is always reported
+
+An action can fail after its values evaluated: a write refused because its
+target is outside the mutation root, a message that could not be sent, an
+editor that could not run. Where it fails decides what happens to the run,
+but Claudine always tells you which action failed and why; you do not need a
+`failure` stack that prints `err.msg`.
+
+| Where the action failed | The run | What is reported |
+|---|---|---|
+| `initialize`, `start` | fails; `failure` and `finalize` run as cleanup | the run's error |
+| `blocked` | already failing for the error that selected `blocked`, which the run reports; `failure` and `finalize` run as cleanup | a warning naming the event |
+| `success`, `failure`, `cancelled`, `finalize`, the `loop:` gate | outcome unchanged | a warning naming the event |
+
+```yaml
+finalize:
+  - ensure_file: /etc/notes.md   # outside the project
+```
+
+This run still exits `0`, and prints:
+
+```text
+⚠ `finalize` action failed: refusing to write outside the mutation root: /etc/notes.md (root: /work/project)
+```
+
+The report is the whole message, however long the target and root paths
+are, and `err.msg` carries the same complete text (see [`err.msg`](#errmsg)).
+
+`no_error: true` on the action silences both the failure and its report.
+Containers fail on a failed action in any event; see
+[Sequence and group containers](#sequence-and-group-containers).
 
 ### `finalize` is not an unconditional `finally`
 
@@ -1055,12 +1087,57 @@ A non-zero exit code is an action error unless `no_error: true` is set. A
 
 A `shell` command uses Claudine's own terminal, so it can be interactive:
 `shell: just commit` may launch another `claudine compose` that prompts or
-drives an agent's TUI. When cancellation stops a running command, the command
-and everything it started end together, with one exception on macOS and Linux:
-while Claudine is the terminal's foreground job, the command runs in
-Claudine's own process group so the terminal does not stop it. Ctrl-C still
-reaches everything it started, but a sibling-failure cancellation ends only
-the command itself, not background processes it left running.
+drives an agent's TUI.
+
+```yaml
+start:
+  - shell: "just commit"   # may prompt, open an editor, or run a nested agent
+  - say: "Committed"       # skipped if you pressed Ctrl-C during `just commit`
+```
+
+On macOS and Linux, while Claudine is the terminal's foreground job, the
+command is handed the terminal's foreground for as long as it runs, and
+Claudine takes it back, with your terminal settings, before the next action.
+While the command runs:
+
+- **It can read the keyboard**, through the stdin it inherits from Claudine
+  or by opening the terminal directly, as `ssh` and `gpg` do for a
+  passphrase.
+- **A Ctrl-C you type reaches the command, not Claudine.** A command that
+  ignores Ctrl-C keeps the terminal until it exits; to stop Claudine anyway,
+  signal Claudine itself (`kill -INT <claudine pid>`), which cancels the run
+  as described in [Signal handling](../signal-handling.md).
+- **A command that ends because of that Ctrl-C cancels the run.** A command
+  killed by `SIGINT`, or a shell that exits 130 because its child was, counts
+  as your interrupt: its background processes are stopped, the terminal is
+  restored, the run is marked interrupted, and the action's result is 130.
+  The next `start` or `loop` action does not run, even after
+  `no_error: true`, and the `cancelled` and `finalize` events run as usual.
+
+When Claudine is not the terminal's foreground job (it runs in the
+background with `&`, under CI, or with no terminal at all) nothing is handed
+over. A command ended by `SIGINT` is then an ordinary signal exit, and exit
+130 an ordinary non-zero exit code.
+
+Two more rules follow from a terminal having a single foreground:
+
+- **One terminal command at a time.** If a lifecycle command starts while
+  another one in the same Claudine process holds the terminal, the second
+  fails before it starts, with an I/O error "another terminal foreground
+  handoff is active in this process".
+- **The terminal must come back.** If Claudine cannot restore the terminal
+  after a command that exited 0, the action fails. After any other result the
+  restoration failure is logged and the command's own result stands.
+
+Every lifecycle shell command, like every sequence shell task, owns its process
+tree: when the command finishes, background processes it left running are
+stopped, and when cancellation stops a running command, the command and
+everything it started end together (after a 250 ms grace period on macOS and
+Linux). See [Process trees](../../../../sniff/docs/topics/process-trees.md) for
+what that covers on each OS, and its
+[terminal handoff section](../../../../sniff/docs/topics/process-trees.md#handing-the-terminal-to-an-interactive-child)
+for how the foreground is lent and restored. On Windows nothing is handed
+over: the command shares Claudine's console.
 
 #### Shell actions approved by their shape
 
@@ -1206,6 +1283,71 @@ success:
       body: "{{ payload }}"
 ```
 
+#### Where file actions write
+
+Every file action — the frontmatter writers, `ensure_file`, `ensure_dir`,
+`append_line`, `append_jsonl`, and [`edit`](#edit-actions) — follows one rule
+in every Claudine route: `compose`, `inline-compose`, the provider wrappers,
+`sequence`, groups, tasks, loops, and `prep`/`proxy` documents.
+
+- **One boundary for the whole run.** Writes must stay inside the working
+  tree you launched Claudine in: the top level of the Git repository (or
+  linked worktree) containing the launch directory, or that directory
+  outside a repository. It is captured when the command starts and stays the
+  same across sequence steps, group members, loop iterations, retries, and
+  resumed attempts. A provider's working directory never changes it.
+- **A repository Claudine cannot read stops the run.** "Outside a
+  repository" means Claudine looked and found none. When it finds a
+  repository at the launch directory but cannot read it (for example a
+  `.git/config` that Git refuses to parse), it cannot know the boundary, so
+  `compose`, `inline-compose`, and `sequence` stop before any lifecycle
+  action runs, exit non-zero, and name the launch directory and the cause:
+
+  ```text
+  lifecycle actions cannot run: repository discovery at the launch directory
+  /work/app/package failed: Git error during discover: Repository
+  configuration could not be loaded
+  ```
+
+  Repair the repository, or launch from a directory outside it, and run the
+  command again. A provider wrapper run that composes no document
+  (`claudine claude "fix the bug"`) is not affected.
+- **Relative paths start at the authoring document.** A path is read like
+  any [file reference](../file-referencing.md) from the file that wrote the
+  action: an existing file is the one a read would find (for `notes.md`, the
+  document's folder, then the repository root), and a missing one is created
+  where that read looks first, beside the document. A referenced sequence
+  file, group file, group catalog, or `kind: task` file is its own authoring
+  document, so the relative targets of its events, loop gate, and tasks
+  resolve beside that file; an inline group or task uses the document that
+  contains it.
+- **The target is checked before anything happens.** A target outside the
+  boundary is refused before a parent directory is created, a file is
+  loaded, or an editor starts. The check follows symlinks, so a link inside
+  the project that leads elsewhere is refused.
+
+A sequence kept in a shared library therefore cannot write beside itself
+when you run it from your project; give it an absolute path inside your
+project instead:
+
+```yaml
+# ~/shared/release.md (a sequence), run from ~/proj
+initialize:
+  - ensure_file: ["{{ ctx.cwd }}/release-notes.md", "# Notes"]   # writes ~/proj/release-notes.md
+  - append_line: ["log.md", "started"]                            # refused: ~/shared is outside ~/proj
+```
+
+Earlier releases created a missing relative target at the launch workspace
+root, except in a sequence file's own root `initialize`, which wrote beside
+the sequence file. Both now follow the rule above: a missing bare name is
+created beside the authoring document, so name a project-root file with an
+absolute path such as `{{ ctx.cwd }}/notes.md`. The full selection rules,
+with examples, are in Darkmatter's
+[Where file actions write](../../../../darkmatter/docs/topics/lifecycle/index.md#where-file-actions-write).
+
+The boundary limits lifecycle file actions only; it does not sandbox an
+approved `shell` command, the provider, or the editor.
+
 ### Expression-Function Actions
 
 Any Darkmatter read-only expression function can be invoked for its result. The result is logged in the lifecycle/status style.
@@ -1320,13 +1462,13 @@ flowchart TD
     G -- no --> X3["fail: saved bytes are kept"]
 ```
 
-- **The target.** A file that already exists is opened as it is. A missing
-  relative path is created inside the workspace Claudine was launched in, not
-  beside the prompt, and every target must stay inside that workspace, so an
-  absolute path elsewhere is refused. The one exception is a sequence file's
-  own root `initialize`, which writes inside the sequence file's directory,
-  as `ensure_file` and the other file actions there do. `@`-prefixed
-  references work as they do for other file actions; a URL is refused.
+- **The target.** The target is chosen as for every file action (see
+  [Where file actions write](#where-file-actions-write)). A file that already
+  exists is opened as it is; a missing relative path is created beside the
+  authoring document, and every target must stay inside the working tree
+  Claudine was launched in, so an absolute path elsewhere is refused.
+  Prefixed references such as `@` and `&` work as they do for other file
+  actions; a URL is refused without fetching anything.
 - **Your bytes are kept exactly.** The action never trims, composes, or
   rewrites the saved file, and never rolls it back or deletes a file it
   created, even when the action or the run fails afterward. A later
@@ -1502,7 +1644,7 @@ Every field below describes the **effective diagnostic** — the one error in th
 | `err.origin` | string | Who remediates: `provider`, `author`, `caller`, `environment`, or `internal`. |
 | `err.severity` | string | Operator-facing severity: `info`, `warning`, or `error`. Defaulted from `disposition` (`transient`/`throttled`/`needs_input` → `warning`, `correctable`/`unrecoverable` → `error`) and overridable per code. |
 | `err.detail.*` | typed | Per-instance payload — the fields that vary per occurrence (`err.detail.reference`, `err.detail.property`, `err.detail.reset_at`, …). Shape depends on `code`; an absent field reads as `null`. |
-| `err.msg` | string | Concise, notification-safe rendering of the selected error — see [below](#errmsg). |
+| `err.msg` | string | The complete, single-line, escape-free message of the selected error; never shortened — see [below](#errmsg). |
 | `err.cause.*` | typed | The next registered diagnostic below the selected one — see [below](#errcause). |
 
 #### A registered code always carries a detail object
@@ -1532,17 +1674,19 @@ failure:
 
 #### `err.msg`
 
-The selected diagnostic's **concise** message: single-line, escape-free, and length-clamped (~240 characters), so a TTS route, a webhook, or a desktop notification can use it verbatim.
+The selected diagnostic's complete message, normalized to one line: escape sequences are stripped and line breaks, tabs, and other control characters are folded into single spaces. It is **never shortened**, so a long explanation stays whole and can be long. The same text reaches the run's error, a step's failure line, an `action failed` warning, the diagnostic snapshot's `message`, and `err.msg`.
 
-It is deliberately **not** the multi-line rendered block — that block is for a terminal, and pushing it through a speech synthesizer or a Slack message is what the clamp exists to prevent. It is also not a classifier input: match on `err.code`, never on this text.
+It is deliberately **not** the multi-line rendered block — that block is for a terminal. It is also not a classifier input: match on `err.code`, never on this text.
+
+A delivery channel with its own size limit (a speech engine, a chat message, a desktop notification) fits the text itself; Claudine submits the whole message, which is not a promise that a notification center or remote service displays all of it. To announce a failure briefly, write a fixed message or use `err.code`:
 
 ```yaml
 failure:
-  - say: "{{ err.msg }}"                          # safe: one clean line
-  - notify: "{{ err.code }}: {{ err.msg }}"
+  - say: "The run failed. Check the terminal for the full explanation."
+  - notify: "Run failed: {{ err.code }}"
 ```
 
-For a provider attempt failure, `err.msg` keeps the established `harness::failure_message` precedence (its headline, timeout, and stderr fallbacks, plus the `(attempt N)` suffix) rather than being replaced by a typed error's `Display`. Both producers pass through the same hygiene stage, so a typed error and a provider failure cannot reach a notification under different rules.
+For a provider attempt failure, `err.msg` keeps the established `harness::failure_message` precedence (the provider's explicit error, kept whole, then the guard, timeout, last-useful-stderr-line, and exit-code fallbacks, plus the `(attempt N)` suffix) rather than being replaced by a typed error's `Display`. Both producers pass through the same hygiene stage, so a typed error and a provider failure cannot reach a notification under different rules.
 
 #### `err.cause`
 
@@ -1569,8 +1713,8 @@ failure:
 `err.code == 'timeout.claudine_completion_delayed'` when Claudine reaches its
 cleanup deadline without a confirmed provider completion verdict. Its
 `err.detail` will retain available response data and the observed cleanup
-state, with explicit completeness flags. `err.msg` will remain a concise
-headline and will not include the response body.
+state, with explicit completeness flags. `err.msg` will remain the one-line
+selected message and will not include the response body.
 
 For example, a failure handler will be able to print an identified answer:
 
@@ -2068,6 +2212,18 @@ stateDiagram-v2
     cancelled --> finalize
     finalize --> [*]: publish only on success
     skipped --> [*]: no finalize
+```
+
+A failed action in any of a container's events fails the container (its
+`loop:` gate excepted: there it warns and the loop continues, as for a
+document). The failure is reported once: a nested container's by the step
+that ran it, the root sequence's own as `sequence failed: …`. When a
+`failure` or `finalize` action fails after a child already failed, both
+failures are reported, and the child's is not repeated.
+
+```text
+⤫ step 1/1 failed: refusing to write outside the mutation root: /work/other/a.md (root: /work/project)
+⤫ sequence failed: refusing to write outside the mutation root: /work/other/b.md (root: /work/project)
 ```
 
 A `proxy` transfers the container's place to a target without any remaining

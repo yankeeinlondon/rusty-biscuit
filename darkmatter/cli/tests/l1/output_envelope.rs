@@ -16,7 +16,7 @@ use std::process::Output;
 use test_toolkit::argv_recorder::ARGV_RECORDER_FILE;
 
 const GOOD: &str = "---\ntitle: T\n---\n# Head\n\nbody text\n";
-const BROKEN: &str = "# Head\n\nsee [gone](./nope.md)\n";
+const BROKEN: &str = "# Head\n\nsee ![gone](./nope.png)\n";
 const LEGACY_TITLE: &str = "[Docs](https://example.com/a \"class='x'\")\n";
 /// A paragraph with a soft break, wide enough that 20 columns reflows it.
 const SOFT_BROKEN: &str = "one two three four five six seven\neight nine ten eleven twelve thirteen\n";
@@ -46,7 +46,7 @@ fn with_document(name: &str, content: &str) -> CliProcessFixture {
     fixture
 }
 
-/// A failing input for `command`: a broken link for compose, nothing to read
+/// A failing input for `command`: a broken image for compose, nothing to read
 /// for render, which has no reference check.
 fn failing_input(fixture: &CliProcessFixture, command: &str) -> &'static str {
     if command == "compose" {
@@ -188,7 +188,7 @@ fn conforms_compose_broken_link() {
         Some(BROKEN),
         &["compose", "doc.md"],
         Expect::Failure,
-        &["dm.reference.missing_hyperlink"],
+        &["dm.reference.missing_image"],
     );
 }
 
@@ -677,7 +677,7 @@ macro_rules! broken_reference_exits_1 {
                 assert!(output.stderr.is_empty(), "{}", stderr_of(&output));
                 let envelope = parse_data("json", &stdout_of(&output));
                 assert_eq!(envelope["outcome"], "failure", "{envelope:#}");
-                assert_eq!(codes(&envelope), ["dm.reference.missing_hyperlink"], "{envelope:#}");
+                assert_eq!(codes(&envelope), ["dm.reference.missing_image"], "{envelope:#}");
             }
         }
     )*};
@@ -969,8 +969,8 @@ fn the_plain_recipe_keeps_its_bytes() {
 /// A report line is never wrapped off a terminal, whatever `--width` says.
 #[test]
 fn the_problem_report_is_plain_and_unwrapped_on_a_pipe() {
-    let reference = "./a-long-reference-name-well-past-any-narrow-column-limit-at-all.md";
-    let fixture = with_document("report_unwrapped", &format!("[gone]({reference})\n"));
+    let reference = "./a-long-reference-name-well-past-any-narrow-column-limit-at-all.png";
+    let fixture = with_document("report_unwrapped", &format!("![gone]({reference})\n"));
     for args in [&["compose", "doc.md"][..], &["compose", "doc.md", "--width", "20"]] {
         let output = run(&fixture, args);
         let stderr = stderr_of(&output);

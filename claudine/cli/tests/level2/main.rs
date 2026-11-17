@@ -54,6 +54,8 @@ mod level2_lifecycle_ctrl_c_tmux;
 #[cfg(unix)]
 mod level2_lifecycle_dispatch;
 #[cfg(unix)]
+mod level2_lifecycle_foreground_handoff;
+#[cfg(unix)]
 mod level2_lifecycle_loop;
 #[cfg(unix)]
 mod level2_malformed_frontmatter_capture;

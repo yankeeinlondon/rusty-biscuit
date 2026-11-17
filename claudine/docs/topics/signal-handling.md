@@ -137,6 +137,44 @@ to async-signal-safe operations:
 guard composes cleanly with the per-iteration handler installed around
 each agent child by `wait_with_signal_and_early_termination`.
 
+### Ctrl+C while a lifecycle command holds the terminal
+
+Everything above assumes Claudine receives the `SIGINT`. On macOS and Linux
+that stops being true while a lifecycle `shell:` action runs in the
+terminal's foreground:
+
+```yaml
+start:
+  - shell: "just commit"   # holds the terminal while it runs
+```
+
+While Claudine is the terminal's foreground job, each lifecycle command is
+handed the terminal's foreground for as long as it runs (see
+[Shell Actions](flow-control/lifecycle.md#shell-actions) and
+[Process trees](../../../sniff/docs/topics/process-trees.md#handing-the-terminal-to-an-interactive-child)).
+During that time:
+
+- **A typed Ctrl+C goes to the command, not to Claudine.** The compose guard
+  does not run: no notice, no press count, and no repeat-interrupt
+  escalation. A command that ignores Ctrl+C keeps the terminal until it
+  exits.
+- **The repeat-interrupt ladder applies only while Claudine receives
+  signals**: before and after the command, or when the signal is sent to
+  Claudine's own process (`kill -INT <claudine pid>`). Use that to stop a
+  command that will not exit; it reaches the guard and the cancellation path
+  stops the command's whole process tree.
+- **The command's exit reports the interrupt.** A command that ends by
+  `SIGINT`, or a shell that exits 130 because its child did, sets the same
+  process-scoped interrupt flag once its process tree is stopped and the
+  terminal restored, so the run is cancelled exactly as if Claudine had seen
+  the press: the next `start` or `loop` action does not run, and `cancelled`
+  and `finalize` run as usual.
+
+When Claudine is not the foreground job (a background job, or no terminal
+at all), nothing is handed over: a `SIGINT` sent to Claudine follows the
+ladder above, and a command's exit 130 is an ordinary exit code. Native Windows never hands the console over, so its
+behavior is unchanged.
+
 ### Ctrl+C during the exit drain
 
 Before any ordinary exit, the CLI waits up to 10 seconds for outbound

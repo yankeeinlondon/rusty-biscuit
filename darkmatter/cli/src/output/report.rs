@@ -23,7 +23,7 @@ use darkmatter::markdown::compose::{ComposePerfReport, ComposeSource, ComposeWar
 use darkmatter::markdown::output::command::{
     DocumentEnvelope, LifecycleOutputEntry, Outcome, PerfData, PerfStage, ReferenceSummary,
 };
-use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity, ReferenceValidationReport};
+use darkmatter::markdown::reference::validate::{ReferenceSeverity, ReferenceValidationReport};
 use renderable::OutputOptions;
 
 use super::{OPEN_FAILED_CODE, ResolvedOutput, SERIALIZATION_CODE, output_diagnostic, stdout_text, width_warning_diagnostic};
@@ -108,13 +108,13 @@ impl ReportSink {
     }
 
     /// Records the reference check's totals and the issues a formatted run
-    /// prints: errors, and missing targets inside inserted text.
+    /// prints: errors, and the missing or empty targets that only warn.
     pub fn references(&self, report: &ReferenceValidationReport) {
         self.summary(ReferenceSummary::from_report(report));
-        let reported = report.issues.iter().filter(|issue| {
-            issue.severity == ReferenceSeverity::Error
-                || (issue.severity == ReferenceSeverity::Warning && issue.code == ReferenceIssueCode::MissingLocalTarget)
-        });
+        let reported = report
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == ReferenceSeverity::Error || issue.is_reported_warning());
         self.diagnostics.lock().expect("sink lock").extend(reported.map(reference_issue_diagnostic));
     }
 

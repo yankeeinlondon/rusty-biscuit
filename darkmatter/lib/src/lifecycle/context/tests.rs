@@ -97,7 +97,7 @@ fn a_registered_cause_projects_one_level_under_cause() {
 }
 
 #[test]
-fn an_action_failure_message_is_made_concise() {
+fn an_action_failure_message_is_normalized() {
     let info = LifecycleErrorInfo::from_action_failure_with(&OneCode, "shell", "first\n\tsecond");
 
     assert_eq!(info.msg, "first second");

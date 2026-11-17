@@ -67,7 +67,7 @@ pub enum ReplaceOption {
 }
 
 /// Parsed options for a block directive.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockOptions {
     /// Replace behavior override.
     pub replace: ReplaceOption,
@@ -117,6 +117,34 @@ pub struct BlockOptions {
     /// `set.note="{{ note }}"` after body interpolation), so the child never
     /// scans it again.
     pub values_origin: crate::markdown::compose::OverrideOrigin,
+
+    /// The directive's local `interpolate=` value: `false` only when the
+    /// author wrote a false boolean word on `::file` or `::url`. Absent,
+    /// `null`, and true words all store `true`, so those spellings compare
+    /// equal. A `false` here can only disable the child's prose
+    /// interpolation; `true` never re-enables what an ancestor disabled.
+    pub interpolate: bool,
+}
+
+// Hand-written because `interpolate` defaults to `true`: the prologue and
+// epilogue children are built from `BlockOptions::default()` and must inherit
+// the parent's setting rather than disable it.
+impl Default for BlockOptions {
+    fn default() -> Self {
+        Self {
+            replace: ReplaceOption::default(),
+            quotation: None,
+            disclosure: None,
+            when_expr: None,
+            exclude: Vec::new(),
+            unknown_options: Vec::new(),
+            set_object: None,
+            set_properties: Vec::new(),
+            deferred_set_errors: Vec::new(),
+            values_origin: crate::markdown::compose::OverrideOrigin::default(),
+            interpolate: true,
+        }
+    }
 }
 
 /// A parser-recorded set-override error whose severity is resolved later.

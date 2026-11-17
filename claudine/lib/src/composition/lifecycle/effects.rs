@@ -1,6 +1,10 @@
 //! Claudine's [`LifecycleEffects`] service: Darkmatter's text-only
 //! communication calls resolved against Claudine's settings and delivered
 //! through a [`LifecycleEmitter`].
+//!
+//! A `test-fixtures` build also carries an in-process hold on one `info`
+//! text, so terminal tests can keep Claudine itself busy inside a lifecycle
+//! event (see `test_hold`). A default build has no such hold.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -70,6 +74,8 @@ impl LifecycleEffects for ClaudineLifecycleEffects<'_> {
 
     fn info(&self, text: &str) {
         self.emitter.emit_info(text, self.term);
+        #[cfg(feature = "test-fixtures")]
+        test_hold::hold_if_requested(text);
     }
 
     fn warn(&self, text: &str) {
@@ -99,5 +105,53 @@ impl LifecycleEffects for ClaudineLifecycleEffects<'_> {
 
     fn notification(&self, title: &str) {
         self.emitter.emit_notification(title);
+    }
+}
+
+/// In-process lifecycle work that a keypress cannot end, for the terminal
+/// Ctrl+C tests of the host's repeat-interrupt ladder.
+///
+/// A lifecycle `shell` action cannot stand in for it: the command runs in its
+/// own process group and holds the terminal's foreground, so a typed Ctrl+C
+/// reaches the command rather than Claudine. This hold keeps Claudine in the
+/// event's `info` action, with the terminal still Claudine's.
+///
+/// Active only for the exact text [`HOLD_TEXT`] with [`HOLD_ENV`] set to a
+/// path prefix: after the text is emitted it writes `<prefix>.reached`, then
+/// waits for `<prefix>.release` for at most [`HOLD_BOUND`], or until the
+/// directory holding the marker files is removed (a test that dropped its
+/// workspace).
+#[cfg(feature = "test-fixtures")]
+mod test_hold {
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    const HOLD_TEXT: &str = "terminal-lifecycle-test-hold";
+    const HOLD_ENV: &str = "CLAUDINE_TEST_LIFECYCLE_HOLD";
+    /// Ends a hold whose test never released it, so a failed test cannot
+    /// leave Claudine parked indefinitely.
+    const HOLD_BOUND: Duration = Duration::from_secs(60);
+    const POLL: Duration = Duration::from_millis(10);
+
+    pub(super) fn hold_if_requested(text: &str) {
+        if text != HOLD_TEXT {
+            return;
+        }
+        let Ok(prefix) = std::env::var(HOLD_ENV) else {
+            return;
+        };
+        let reached = PathBuf::from(format!("{prefix}.reached"));
+        let release = PathBuf::from(format!("{prefix}.release"));
+        if std::fs::write(&reached, b"").is_err() {
+            return;
+        }
+        let dir = match reached.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => PathBuf::from("."),
+        };
+        let deadline = Instant::now() + HOLD_BOUND;
+        while !release.exists() && dir.is_dir() && Instant::now() < deadline {
+            std::thread::sleep(POLL);
+        }
     }
 }

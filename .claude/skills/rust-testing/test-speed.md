@@ -176,3 +176,59 @@ when the schema checks files), resolving a document's own `$schema`, and
 merging its layers. In a Time Profiler sample of that Claudine run (debug),
 the validator compile was about 17% of the process (about 150 ms) and
 decoding the prepared bundle section about 15%.
+
+### 9. Every process-spawning test 3–10× slower on a loaded host
+
+When tests spread across a whole family each take about 1 s alone and 6–15 s
+in a full run on a host loaded far above its core count, no single test is
+waiting: each process is CPU-bound in unoptimized code, and the host's load
+divides the CPU among them. Splitting tests or cutting fixture spawns trims
+the edges; what fixes the family is less CPU per process. Profile one process
+without root (`xcrun xctrace record --template 'Time Profiler' --launch --
+<binary> <args>`, then `xcrun xctrace export --xpath` the `time-profile`
+table) and attribute samples to the nearest workspace crate:
+
+- **Generic code compiled at opt-level 0.** `core`, `hashbrown`, and `alloc`
+  frames monomorphized into a workspace crate run at that crate's
+  opt-level. Simplified Schema's preparation was about 90% of a refused
+  `claudine sequence` and of a schema-matrix cell. The workspace
+  `Cargo.toml` sets `opt-level = 3` for it (and its YAML parser, and the SVG
+  stack `GitGraph::plan` uses) under `[profile.test.package.*]`: 0.43 → 0.15 s
+  of CPU per `claudine sequence`, 1.6 → 0.6 s per matrix cell, 1.7 → 0.7 s
+  per graph-layout test. It costs a few seconds when that crate is rebuilt.
+  `opt-level = 1` gained under a quarter of that; measure before settling.
+- **Work repeated per item.** A walk that recomputes a pure per-schema-node
+  answer for every instance value, or finds earlier entries by a linear
+  scan, grows with the document: Darkmatter's operand walker took 3.2 s of
+  CPU on a 200-item lifecycle document until it memoized each node's markers
+  and indexed sites by path (1.0 s).
+
+### 10. Every test of a binary slower by the same few seconds
+
+When a binary's tests take about 0.4 s alone but share one floor in a run
+(every one about 3.4 s), they are waiting on one shared first step, not
+competing for CPU. Time the phases inside one test (`eprintln!` of
+`Instant::elapsed`, run with `--success-output final`). In repo-deps' archive
+tests the floor was the per-run `cargo build` of the shipped `ci-build`: a
+no-op that waited about 3 s on `target/debug`'s artifact lock ("Blocking
+waiting for file lock on artifact directory"; `lsof` on
+`target/debug/.cargo-artifact-lock` found only the host's kache daemon with
+it open; the wait was intermittent), with every other test queued behind it. The Nextest setup script already
+built the binary, so it now exports the path through `$NEXTEST_ENV`
+(`_ci_build_for_tests`) and no test calls Cargo. A test that only inspects a
+produced artifact reads the run's shared one rather than compiling its own
+(`shared_fixture` in `scripts/ci-build-archive-tests.rs`): the four that built
+privately took 6-7 s together and 0.3 s each now.
+
+### 11. Tests that each run a real compile, fast alone and slow together
+
+A test that compiles a fixture workspace starts a Cargo that uses every core.
+Eleven such repo-deps tests (0.5-4.2 s alone) started together at the end of
+the package run and the last took 5.6-9.3 s on a quiet 16-core host. Remove
+redundant builds first (feature attribution's `wrapper_in` now reads the
+setup script's `ci-build` too). Then put only the compiling tests in a bounded
+Nextest test group (`repo-deps-fixture-compiles`, `max-threads = 4`, in
+`.config/nextest.toml`). A test waiting for a group slot has not started, so
+its time is not counted, and the run's wall-clock stayed about 10.8 s. Keep
+cheap inspections out of the group, and add a new fixture-compiling test to
+the group's override filter.

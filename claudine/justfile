@@ -170,7 +170,7 @@ test-l2 *args="":
 # Ctrl+C keystroke delivery into a real WezTerm window (signal-handling.md).
 # The tmux multiplexer Ctrl+C coverage lives at L2 (`just test-l2`).
 test-l3 *args="":
-    @just _test_l3 claudine-cli --features terminal-tests {{ args }}
+    @just _test_l3 claudine-cli --features terminal-tests,test-fixtures {{ args }}
 
 # not applicable: claudine emits terminal/CLI output, not HTML
 test-browser:

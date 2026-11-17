@@ -97,11 +97,41 @@ failure:
 `claudine context --side-effects` lists every verb and its arguments
 (`edit` is a lifecycle action, not a catalog verb, so it is not listed).
 
-`edit` writes only inside the launch workspace and never picks an editor
-that cannot wait. A terminal editor needs a real terminal, so it fails
+File actions (`edit`, the frontmatter writers, `ensure_file`, `ensure_dir`,
+`append_line`, `append_jsonl`) write only inside the working tree Claudine
+was launched in (the repository or worktree top level, or the launch
+directory outside a repository), fixed for the whole run. A repository at
+the launch directory that cannot be read (a corrupt `.git/config`) stops
+`compose`, `inline-compose`, and `sequence` with an error before any
+lifecycle action runs. A relative path
+resolves like a read from the document that wrote the action: an existing
+file is the one a read finds, a missing one is created beside that document
+(a referenced sequence or group file is its own document). A shared prompt
+outside your project therefore writes into it through an absolute path such
+as `{{{ ctx.cwd }}}/notes.md`, never beside itself; a target outside the
+boundary, through a symlink too, is refused before anything is created.
+
+`edit` never picks an editor that cannot wait. A terminal editor needs a real terminal, so it fails
 without one and in a parallel group member, which may run only a GUI
 editor. No timeout closes an open editor; Ctrl-C or a failing sibling
 does.
+
+A `shell` command runs on Claudine's terminal, so it may prompt
+(`start: [shell: "just commit"]`). On macOS and Linux, while Claudine is the
+terminal's foreground job, the command holds the terminal until it exits:
+
+- it reads the keyboard, and a Ctrl-C you type goes to it, not to Claudine;
+- if it ends from that Ctrl-C (killed by `SIGINT`, or a shell exiting 130),
+  the run is cancelled: the next `start` or `loop` action does not run, even
+  with `no_error`, and `cancelled` and `finalize` run;
+- a command that ignores Ctrl-C keeps the terminal; `kill -INT <claudine pid>`
+  cancels the run from outside;
+- only one command may hold the terminal at a time in one Claudine process;
+  a second fails before it starts.
+
+Without the foreground (a background job, CI, no terminal) nothing is handed
+over and 130 is an ordinary exit code. Either way, background processes a
+command leaves running are stopped when it finishes.
 
 **Flow control:**
 
@@ -137,6 +167,18 @@ when the document is parsed. Shell commands can't read `err`, `timing`, or
 `current`.
 
 `claudine errors` lists every `err.code`.
+
+`err.msg` is the complete explanation folded onto one escape-free line. It
+is never shortened, so it can be long. To announce a failure briefly, write a
+fixed message or use `err.code`; to decide what to do, match on `err.code`,
+never on the message text. A notification center or remote service may show
+only part of a long message.
+
+```yaml
+failure:
+  - say: "The run failed. Check the terminal for the full explanation."
+  - notify: "Run failed: {{ err.code }}"
+```
 
 ### A recovery pattern
 

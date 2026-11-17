@@ -111,8 +111,9 @@ pub trait LifecycleErrorInfoExt: Sized {
     /// facets are attached. `msg` passes through
     /// [`concise_message`](crate::harness::concise_message), the same hygiene
     /// [`failure_message`](crate::harness::failure_message) applies on the
-    /// provider-attempt path; the pass is idempotent, which is what lets the
-    /// provider cascade keep its budget-reserved `(attempt N)` suffix.
+    /// provider-attempt path: normalized to one escape-free line, not
+    /// shortened. The pass is idempotent, so the provider cascade's
+    /// `(attempt N)` suffix survives it intact.
     fn from_action_failure(verb: impl Into<String>, msg: impl Into<String>) -> Self;
 }
 

@@ -679,6 +679,19 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   Claudine's prompt parameters) read. DMLS reads triggers from disk only; it
   registers no embedded bundle.
 - Workspace dependency tracking for referenced schemas and documents.
+- `::file` / `::url` `interpolate=` (`overlay/directives.rs`,
+  `providers/dsl.rs`): key and `true`/`false` value completion come from
+  `option_keys`/`option_values` (`::code` lists neither, so it gets the
+  unknown-option warning); `directive_hover` returns
+  `INTERPOLATE_OPTION_HOVER` (the author-ruled sentence, keep it verbatim)
+  before the directive hover when the cursor is on the option; and
+  `invalid_interpolate_options` reports `dm.directive.invalid_option_value`
+  through the library's `parse_interpolate_value` (quoting read from the
+  raw value span; a missing value at the key; a value holding an
+  expression, found by `ExpressionFinder::find_all_plain` as for directive
+  targets, is skipped because composition evaluates it first). The setting belongs to one
+  inclusion, so nothing changes how an open child is analyzed
+  (`tests/l1/file_interpolate_option.rs` pins that).
 - Recursive named types: every DMLS walk of a `PropertyDef` opens a
   `TypeExpr::Ref` through `providers::frontmatter::definitions(ctx)`, the
   bundle's `DefinitionLookup` (`overlay/schema.rs`: the effective schema's

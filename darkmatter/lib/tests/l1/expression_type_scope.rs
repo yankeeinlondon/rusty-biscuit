@@ -378,15 +378,15 @@ fn equality_with_a_null_only_subject_narrows_the_other_side() {
 // ── differential soundness against the evaluator ────────────────────────
 
 /// The sample values, and the directory `file_exists` resolves against.
-struct Values(HashMap<String, Value>, Option<ResolutionContext>);
+struct Values<'a>(HashMap<String, Value>, Option<&'a ResolutionContext>);
 
-impl EvaluationLookup for Values {
+impl EvaluationLookup for Values<'_> {
     fn get(&self, path: &str) -> Option<Value> {
         self.0.get(path).cloned()
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        self.1.clone()
+        self.1.cloned()
     }
 }
 
@@ -435,17 +435,20 @@ fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str, files: &ResolutionCon
         (Polarity::True, site.assume(&parsed, Polarity::True)),
         (Polarity::False, site.assume(&parsed, Polarity::False)),
     ];
-    let x_type = type_at(&site, "x");
-    let y_type = type_at(&site, "y");
-    let x_samples: Vec<_> = samples().into_iter().filter(|value| x_type.admits(value)).collect();
-    let y_samples: Vec<_> = samples().into_iter().filter(|value| y_type.admits(value)).collect();
+    let all_samples = samples();
+    // `admits` lowers and looks up a validator on every call, so each type
+    // judges each sample once rather than once per pair.
+    let admitted = |ty: &ScopedType| -> Vec<bool> { all_samples.iter().map(|value| ty.admits(value)).collect() };
+    let x_admitted = admitted(&type_at(&site, "x"));
+    let y_admitted = admitted(&type_at(&site, "y"));
     let side_types = sides.each_ref().map(|(_, scope)| [type_at(scope, "x"), type_at(scope, "y")]);
+    let side_admitted = side_types.each_ref().map(|types| types.each_ref().map(admitted));
     let mut reached = [false, false];
-    for x in &x_samples {
-        for y in &y_samples {
+    for (xi, x) in all_samples.iter().enumerate().filter(|(index, _)| x_admitted[*index]) {
+        for (yi, y) in all_samples.iter().enumerate().filter(|(index, _)| y_admitted[*index]) {
             let lookup = Values(
                 HashMap::from([("x".to_string(), x.clone()), ("y".to_string(), y.clone())]),
-                Some(files.clone()),
+                Some(files),
             );
             let Ok(outcome) = evaluate(&parsed, &lookup) else {
                 continue;
@@ -453,9 +456,10 @@ fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str, files: &ResolutionCon
             let taken = if darkmatter::markdown::compose::expression::is_truthy(&outcome) { 0 } else { 1 };
             reached[taken] = true;
             let (polarity, _) = &sides[taken];
-            for ((name, value), ty) in [("x", x), ("y", y)].into_iter().zip(&side_types[taken]) {
+            for (slot, (name, value, index)) in [("x", x, xi), ("y", y, yi)].into_iter().enumerate() {
+                let ty = &side_types[taken][slot];
                 assert!(
-                    ty.admits(value),
+                    side_admitted[taken][slot][index],
                     "{guard} is {polarity:?} for x={x}, y={y}, but the analyzed {name} ({}) excludes {value}",
                     shape_text(ty)
                 );
@@ -543,7 +547,15 @@ const DIFFERENTIAL_SCHEMAS: &[(&str, Option<&str>)] = &[
     ("undeclared", None),
 ];
 
-fn assert_differential(name: &str) {
+/// Which half of [`GUARDS`] a differential test runs; the halves together
+/// are every guard.
+#[derive(Clone, Copy)]
+enum GuardHalf {
+    First,
+    Second,
+}
+
+fn assert_differential(name: &str, half: GuardHalf) {
     let (_, text) = DIFFERENTIAL_SCHEMAS.iter().find(|(row, _)| *row == name).expect("a declared row");
     let schema = text.map(schema);
     let declared = DeclaredTypes::new(schema.as_ref());
@@ -551,10 +563,18 @@ fn assert_differential(name: &str) {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("a"), "").unwrap();
     let files = ResolutionContext::new(biscuit_file::FileResolutionContext::new(dir.path()));
-    let named = Values(HashMap::from([("x".to_string(), json!("a"))]), Some(files.clone()));
+    let named = Values(HashMap::from([("x".to_string(), json!("a"))]), Some(&files));
     assert_eq!(evaluate(&expr("file_exists(x)"), &named).unwrap(), json!(true));
-    for guard in GUARDS {
+    let (first, second) = GUARDS.split_at(GUARDS.len() / 2);
+    let guards = match half {
+        GuardHalf::First => first,
+        GuardHalf::Second => second,
+    };
+    for guard in guards {
         assert_sound(&declared, guard, &files);
+    }
+    if matches!(half, GuardHalf::First) {
+        return;
     }
     // Where a string is declared, `file_exists(x)` holding leaves nothing
     // else: the evaluator answers false for every non-text value.
@@ -567,14 +587,22 @@ fn assert_differential(name: &str) {
     }
 }
 
-/// One test per declaration, so nextest spreads the rows across cores.
+/// Two tests per declaration, one per half of the guards, so nextest
+/// spreads the work across cores.
 macro_rules! differential {
     ($($name:ident),* $(,)?) => {
         mod every_guard_side_admits_every_value_the_evaluator_sends_there {
             $(
-                #[test]
-                fn $name() {
-                    super::assert_differential(stringify!($name));
+                mod $name {
+                    #[test]
+                    fn first_half_of_the_guards() {
+                        super::super::assert_differential(stringify!($name), super::super::GuardHalf::First);
+                    }
+
+                    #[test]
+                    fn second_half_of_the_guards() {
+                        super::super::assert_differential(stringify!($name), super::super::GuardHalf::Second);
+                    }
                 }
             )*
         }

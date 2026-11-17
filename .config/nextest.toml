@@ -22,12 +22,18 @@ experimental = ["setup-scripts"]
 # compiled `ci-build` and its dependencies inside its own test, every concurrent
 # fixture queued on Cargo's lock behind it, and on `windows-latest` the first
 # four hit the 90s kill together. Building once here, before any of them runs,
-# leaves each fixture's own rebuild the no-op it is on a warm tree.
+# leaves each fixture's own rebuild the no-op it is on a warm tree. The recipe
+# also exports the binary's path, so the fixtures skip even that no-op: it
+# still waits on the target directory's lock (about 3 s, intermittently, on a
+# host whose compiler-cache daemon had it open), and every fixture of the run
+# waited behind it.
 [scripts.setup.build-ci-build]
-command = 'cargo build --quiet --no-default-features --features build-tools --manifest-path scripts/Cargo.toml --bin ci-build'
+command = 'just _ci_build_for_tests'
 
+# Feature attribution's wrapped fixture builds run under the same binary
+# (`wrapper_in`), so they read the same exported path.
 [[profile.default.scripts]]
-filter = 'binary_id(repo-deps::bin/ci-build)'
+filter = 'binary_id(repo-deps::bin/ci-build) | (binary_id(repo-deps::bin/feature-attribution) & (test(=tests::a_wrapped_fixture_build_compiles_exactly_the_predicted_configurations) | test(=tests::a_forwarded_feature_what_if_matches_a_build_with_the_alignment_declared)))'
 setup = 'build-ci-build'
 
 # A process's first CoreText font scan lists the directory its executable is
@@ -53,6 +59,15 @@ setup = 'coretext-small-bundle'
 [[profile.default.scripts]]
 platform = { host = "cfg(target_os = \"macos\")" }
 filter = 'package(biscuit-visualized) & !test(/(^|::)(level2_|level3_|browser_|real_)/)'
+setup = 'coretext-small-bundle'
+
+# CoreAudio's client setup (`HALSystem::InitializeShell`) reads the main bundle
+# too, so Sniff's live audio callers paid the same scan: about 3.1 s alone and
+# 6 s in a package run, against 0.6-0.9 s with this (2026-11-16, 803,121
+# entries). Keep this filter equal to the `sniff-macos-coreaudio` override's.
+[[profile.default.scripts]]
+platform = { host = "cfg(target_os = \"macos\")" }
+filter = 'package(sniff) & (test(=hardware::audio::tests::detect_audio_devices_on_macos) | test(=hardware::audio::tests::detect_audio_devices_returns_vec) | test(=hardware::tests::test_detect_hardware_full_includes_gpu_on_macos) | test(=tests::test_detect_returns_result) | test(=integration::test_detect_completes_in_reasonable_time))'
 setup = 'coretext-small-bundle'
 
 # Darkmatter's Mermaid tests render over the host's fonts too: the static-SVG
@@ -84,6 +99,19 @@ schematic-fresh-output = { max-threads = 1 }
 # the developer's desktop. Parallel L2 runs them one at a time so at most one
 # window is open, while the rest of the tier keeps its parallel workers.
 apple-terminal-l2 = { max-threads = 1 }
+# Sniff's live CoreAudio callers on macOS. The first CoreAudio call in a
+# process sets up the audio HAL, and macOS serializes that setup across
+# processes: five of these started together each waited for all the others
+# (about 14s each, against about 3s alone). One at a time, each pays only its
+# own setup.
+sniff-macos-coreaudio = { max-threads = 1 }
+# repo-deps' tests that compile a fixture workspace with a real Cargo/rustc.
+# Each takes 0.5-4.2 s alone, but each child Cargo uses every core: when the
+# eleven start together at the end of a package run, the last of them took
+# 5.6-9.3 s on an otherwise quiet 16-core host (2026-11-16). Four at a time
+# keeps each near its own time; the cheap inspections around them are not in
+# the group. The member list is the `repo-deps-fixture-compiles` override's.
+repo-deps-fixture-compiles = { max-threads = 4 }
 
 [profile.default]
 # Direct local nextest invocations also leave capacity for other host work.
@@ -183,9 +211,20 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(tree-hugger) & test(/generic_boundary::|oversized_owner_warm_hits::|oversized_enclosing_generic|oversized_owner_impl/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# A new repo-deps test that compiles a fixture workspace belongs here too.
+[[profile.default.overrides]]
+filter = '(binary_id(repo-deps::bin/ci-build) & (test(=archive::tests::a_real_external_dynamic_dependency_is_discovered_and_refused_when_removed) | test(=archive::tests::the_canonical_tier_recipes_run_the_fixture_archive_without_rebuilding_it) | test(=archive::tests::the_archive_runs_every_tier_from_another_checkout_with_no_compiler_in_reach) | test(=archive::tests::a_combined_invocation_unifies_the_feature_graphs_the_producer_keeps_apart) | test(=archive::tests::failed_and_refused_keys_report_themselves_and_let_an_unrelated_key_finish) | test(=archive::tests::one_owner_tree_shares_a_dependency_compile_without_unifying_features) | test(=archive::tests::produce_accepts_the_planned_head_and_refuses_the_merge_revision) | test(=tests::two_tier_configurations_compile_the_same_package_twice_and_are_reported_apart) | test(=tests::cargo_drives_the_shipped_wrapper_and_a_warm_rebuild_records_no_work))) | (binary_id(repo-deps::bin/feature-attribution) & (test(=tests::a_wrapped_fixture_build_compiles_exactly_the_predicted_configurations) | test(=tests::a_forwarded_feature_what_if_matches_a_build_with_the_alignment_declared)))'
+test-group = 'repo-deps-fixture-compiles'
+
 [[profile.default.overrides]]
 filter = 'test(/(^|::)level2_apple_terminal_/)'
 test-group = 'apple-terminal-l2'
+
+# The full list of live audio callers is kept in `.claude/skills/sniff/testing.md`.
+[[profile.default.overrides]]
+platform = { host = "cfg(target_os = \"macos\")" }
+filter = 'package(sniff) & (test(=hardware::audio::tests::detect_audio_devices_on_macos) | test(=hardware::audio::tests::detect_audio_devices_returns_vec) | test(=hardware::tests::test_detect_hardware_full_includes_gpu_on_macos) | test(=tests::test_detect_returns_result) | test(=integration::test_detect_completes_in_reasonable_time))'
+test-group = 'sniff-macos-coreaudio'
 
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
 # (helper + crashpad processes that inherit the test's stdout) is the slowest

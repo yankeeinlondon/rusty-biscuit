@@ -1273,6 +1273,20 @@ mod tests {
     }
 
     #[test]
+    fn f2_interpolate_option_tokens_like_every_other_option() {
+        let text = "::file ./doc.md interpolate=false\n";
+        assert_eq!(
+            shapes(&directive_tokens(text, 0), text),
+            vec![
+                ("::file", TokenType::Macro, modifier::DIRECTIVE),
+                ("./doc.md", TokenType::Str, modifier::DIRECTIVE),
+                ("interpolate", TokenType::Property, modifier::DIRECTIVE),
+                ("false", TokenType::Str, modifier::DIRECTIVE),
+            ]
+        );
+    }
+
+    #[test]
     fn f2_unknown_directive_yields_no_token() {
         // An unrecognized `::frobnicate` is never surfaced by the scanner, so it
         // stays plain prose (the `dm.directive.unknown` diagnostic owns it).

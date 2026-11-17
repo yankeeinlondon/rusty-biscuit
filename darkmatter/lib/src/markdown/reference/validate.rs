@@ -180,6 +180,32 @@ impl ReferenceIssue {
             _ => None,
         }
     }
+
+    /// Whether this issue was raised for `record` in the inclusion `trail`.
+    ///
+    /// A reference id and trail do not identify one reference: the copies a
+    /// `::map` or `::filter` repeats from one directive line share both, and
+    /// differ only in their targets. The target comparison follows how
+    /// validation spells `reference_display`: the raw target, or only its path
+    /// when the path itself is missing.
+    /// An [`ReferenceIssueCode::EmptyTarget`] spells the whole construct
+    /// instead, because its target says nothing.
+    pub(crate) fn describes(&self, record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> bool {
+        self.reference_id == record.id
+            && self.included_via == trail
+            && record.target.raw().is_none_or(|raw| {
+                self.reference_display == raw
+                    || self.reference_display == split_path_fragment(raw).0
+                    || (self.code == ReferenceIssueCode::EmptyTarget && raw.trim().is_empty())
+            })
+    }
+
+    /// Whether this is a warning a composition reports: a target that is
+    /// missing or empty but does not fail the document unless denied.
+    pub fn is_reported_warning(&self) -> bool {
+        self.severity == ReferenceSeverity::Warning
+            && matches!(self.code, ReferenceIssueCode::MissingLocalTarget | ReferenceIssueCode::EmptyTarget)
+    }
 }
 
 impl Serialize for ReferenceIssue {
@@ -211,6 +237,8 @@ impl Serialize for ReferenceIssue {
 pub enum ReferenceIssueCode {
     /// Local file target does not exist.
     MissingLocalTarget,
+    /// The target is empty, as in `[text]()`.
+    EmptyTarget,
     /// URL is syntactically invalid.
     InvalidUrl,
     /// Remote URL returned an error or timed out.
@@ -245,6 +273,7 @@ impl ReferenceIssueCode {
     pub fn reason_phrase(self) -> &'static str {
         match self {
             Self::MissingLocalTarget => "file not found",
+            Self::EmptyTarget => "no target",
             Self::MissingFragmentTarget => "no matching heading",
             Self::InvalidUrl => "malformed URL",
             Self::RemoteUnreachable => "unreachable",
@@ -402,8 +431,13 @@ fn validate_graph_contents(
                     continue;
                 }
 
-                // Check for fragment in local path (e.g., "./other.md#section")
                 let raw_str = raw.to_string_lossy();
+                if raw_str.trim().is_empty() {
+                    report.issues.push(empty_target(record, trail));
+                    continue;
+                }
+
+                // Check for fragment in local path (e.g., "./other.md#section")
                 let (path_part, fragment) = split_path_fragment(&raw_str);
                 let resolved_path = validate_local_path(
                     &path_part,
@@ -419,17 +453,27 @@ fn validate_graph_contents(
                 if options.validate_fragments
                     && let Some(ref frag) = fragment
                 {
-                    validate_cross_doc_fragment(
-                        resolved_path.as_deref(),
-                        &path_part,
-                        frag,
-                        ref_source,
-                        record,
-                        trail,
-                        &mut report,
-                        &options.graph,
-                        &mut heading_cache,
-                    );
+                    if resolved_path.is_some()
+                        && let Some(raw_slugs) = graph.prepared_headings().toc_slugs_for(record)
+                    {
+                        // A generated `::toc-linking` anchor names a raw
+                        // heading of its target, as composition linked it.
+                        if !raw_slugs.contains(&frag.to_lowercase()) {
+                            report.issues.push(missing_cross_doc_fragment(&path_part, frag, record, trail));
+                        }
+                    } else {
+                        validate_cross_doc_fragment(
+                            resolved_path.as_deref(),
+                            &path_part,
+                            frag,
+                            ref_source,
+                            record,
+                            trail,
+                            &mut report,
+                            &options.graph,
+                            &mut heading_cache,
+                        );
+                    }
                 }
 
                 if options.fail_fast && report.error_count() > 0 {
@@ -736,6 +780,44 @@ fn validate_local_path(
     }
 }
 
+/// The issue for `record`, whose target is empty.
+///
+/// A hyperlink or image with no target still renders its text, so it only
+/// warns (a caller's policy may deny it); any other construct has nothing to
+/// load and is an error. The message quotes the construct, because its empty
+/// target cannot identify it.
+fn empty_target(record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> ReferenceIssue {
+    use super::types::ReferenceSyntax;
+    let text = |key: &str| record.attributes.get(key).and_then(|value| value.as_str()).unwrap_or_default();
+    let construct = match record.origin.syntax {
+        ReferenceSyntax::MarkdownLink => format!("[{}]()", text("display")),
+        ReferenceSyntax::MarkdownImage => format!("![{}]()", text("alt")),
+        ReferenceSyntax::HtmlAnchor => format!("<a href=\"\">{}</a>", text("display")),
+        syntax => syntax.construct_phrase().trim_start_matches("in ").to_string(),
+    };
+    let (message, severity) = match record.kind {
+        ReferenceKind::Hyperlink | ReferenceKind::Image => (
+            format!(
+                "{} `{construct}` has no target",
+                record.origin.syntax.construct_phrase().trim_start_matches("in ")
+            ),
+            ReferenceSeverity::Warning,
+        ),
+        _ => (format!("`{construct}` has no target"), ReferenceSeverity::Error),
+    };
+    ReferenceIssue {
+        code: ReferenceIssueCode::EmptyTarget,
+        message,
+        severity,
+        kind: record.kind,
+        reference_display: construct,
+        reference_id: record.id.clone(),
+        origin: record.origin.clone(),
+        included_via: trail.to_vec(),
+        detail: None,
+    }
+}
+
 // ── Fragment validation ─────────────────────────────────────────────
 
 /// Collects heading slugs from prepared document content.
@@ -842,7 +924,9 @@ fn cached_prepared_heading_slugs(
 ///
 /// Resolves the target path using `biscuit_file::FileReference` (rec #6)
 /// relative to the reference's own origin source (rec #5). Validates
-/// against prepared headings (after InlinePre) rather than raw headings.
+/// against prepared headings (after InlinePre) rather than raw headings;
+/// a reference generated by `::toc-linking` never reaches this, since its
+/// anchors name raw headings (see `PreparedHeadingSnapshot::toc_slugs_for`).
 #[allow(clippy::too_many_arguments)]
 fn validate_cross_doc_fragment(
     target_path: Option<&std::path::Path>,
@@ -882,18 +966,27 @@ fn validate_cross_doc_fragment(
         );
         let frag_lower = fragment.to_lowercase();
         if !headings.contains(&frag_lower) {
-            report.issues.push(ReferenceIssue {
-                code: ReferenceIssueCode::MissingFragmentTarget,
-                message: format!("Fragment '#{fragment}' not found in {path}"),
-                severity: ReferenceSeverity::Error,
-                kind: record.kind,
-                reference_display: format!("{path}#{fragment}"),
-                reference_id: record.id.clone(),
-                origin: record.origin.clone(),
-                included_via: trail.to_vec(),
-                detail: None,
-            });
+            report.issues.push(missing_cross_doc_fragment(path, fragment, record, trail));
         }
+    }
+}
+
+fn missing_cross_doc_fragment(
+    path: &str,
+    fragment: &str,
+    record: &ReferenceRecord,
+    trail: &[ReferenceTrailStep],
+) -> ReferenceIssue {
+    ReferenceIssue {
+        code: ReferenceIssueCode::MissingFragmentTarget,
+        message: format!("Fragment '#{fragment}' not found in {path}"),
+        severity: ReferenceSeverity::Error,
+        kind: record.kind,
+        reference_display: format!("{path}#{fragment}"),
+        reference_id: record.id.clone(),
+        origin: record.origin.clone(),
+        included_via: trail.to_vec(),
+        detail: None,
     }
 }
 
@@ -1257,6 +1350,31 @@ mod tests {
                 .iter()
                 .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget)
         );
+    }
+
+    #[test]
+    fn empty_link_and_image_targets_warn_and_quote_the_construct() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source_path = dir.path().join("source.md");
+        std::fs::write(&source_path, "").unwrap();
+
+        let md = Markdown::new("[Expression Engine]()\n\n![a pic]()\n")
+            .with_source(ComposeSource::File(source_path));
+        let report = validate(&md, &validation_options_at(dir.path())).unwrap();
+
+        let displays: Vec<_> = report
+            .issues
+            .iter()
+            .map(|issue| (issue.code, issue.severity, issue.reference_display.as_str()))
+            .collect();
+        assert_eq!(
+            displays,
+            [
+                (ReferenceIssueCode::EmptyTarget, ReferenceSeverity::Warning, "[Expression Engine]()"),
+                (ReferenceIssueCode::EmptyTarget, ReferenceSeverity::Warning, "![a pic]()"),
+            ]
+        );
+        assert!(report.issues.iter().all(ReferenceIssue::is_reported_warning));
     }
 
     #[test]

@@ -96,6 +96,7 @@ pub(super) fn run_step_task(
                 agent_perf: None,
                 compose_perf,
                 tasks: Vec::new(),
+                secondary: Vec::new(),
             };
         }
     };
@@ -111,9 +112,23 @@ pub(super) fn run_step_task(
     // Relative targets resolve against the document that authored the task,
     // but writes stay inside the caller's launch scope, even when that
     // document lives outside it.
-    let engine = EffectEngine::builder()
-        .mutation_root(task_source_context.file_resolution_context().launch_magic_scope().local_root())
-        .build();
+    let mutation_root = match claudine::invocation_context::lifecycle_mutation_root(
+        Some(&run.prep_context.invocation),
+        task_source_context.file_resolution_context(),
+    ) {
+        Ok(root) => root,
+        Err(error) => {
+            return StepOutcome::Failed {
+                message: error.to_string(),
+                snapshot: DiagnosticSnapshot::select(&error).map(Box::new),
+                agent_perf: None,
+                compose_perf,
+                tasks: Vec::new(),
+                secondary: Vec::new(),
+            };
+        }
+    };
+    let engine = EffectEngine::builder().mutation_root(mutation_root).build();
     let emitter = DefaultLifecycleEmitter;
     let settings = claudine::composition::sequence::task::task_playback_settings();
     let messaging = claudine::messaging::RuntimeMessagingSettings {
@@ -212,7 +227,7 @@ pub(super) fn run_step_task(
             message: outcome
                 .error
                 .as_ref()
-                .map_or_else(|| "task failed".to_string(), |d| d.message().to_string()),
+                .map_or_else(|| "task failed".to_string(), |d| d.info.msg.clone()),
             // The task diagnostic already carries the projection `err.*` reads;
             // reuse it rather than re-deriving a second, possibly divergent one.
             snapshot: outcome
@@ -222,6 +237,7 @@ pub(super) fn run_step_task(
             agent_perf,
             compose_perf,
             tasks,
+            secondary: outcome.secondary_errors.into_iter().map(|d| d.info).collect(),
         },
     }
 }
@@ -260,7 +276,10 @@ pub(super) fn root_step_guard<'a>(
         .derive_source(&task.origin_path)
         .expect("resolved task document always has a parent directory");
     let engine = EffectEngine::builder()
-        .mutation_root(source_context.file_resolution_context().launch_magic_scope().local_root())
+        .mutation_root(claudine::invocation_context::lifecycle_mutation_root(
+            Some(&run.prep_context.invocation),
+            source_context.file_resolution_context(),
+        )?)
         .build();
     let emitter = DefaultLifecycleEmitter;
     let settings = claudine::composition::sequence::task::task_playback_settings();

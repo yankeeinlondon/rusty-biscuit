@@ -348,6 +348,28 @@ home read also needs its `context_construction_guard.rs` allowance. Because
 `~/.claudine` fixtures run on Windows too: do not gate them `cfg(unix)` for the
 home.
 
+Every lifecycle `EffectEngine` in `cli/src` takes its mutation root from
+`claudine::invocation_context::lifecycle_mutation_root(invocation, context)`,
+never `launch_magic_scope().local_root()` directly: it refuses a retained
+failed launch discovery (`CompositionError::LaunchRepositoryUnreadable`,
+`io.read_failed`) so the launch-directory fallback is used only after a
+successful observation of no working tree. A direct wrapper's memory-file
+harness (empty lifecycle) passes `None`. Tests:
+`invocation_context::tests::lifecycle_mutation_root_*`,
+`cli/tests/l1/lifecycle_mutation_root.rs` (one row per host family).
+
+A lifecycle action failure that no error return carries is shown through
+`claudine::composition::lifecycle::report`, never an ad hoc `emit_warn`:
+`warn_tolerated_action_error` for a document event other than
+`initialize`/`start` and for every loop gate (`run_loop_gate`, shared by all
+four looping owners), `report_container_failure` for the root sequence's
+recorded failures (`RootRun::report_recorded`, skipping the error its producer
+already reported) and a step's `TaskOutcome.secondary_errors`. Both report
+the complete `err.msg` (`LifecycleErrorInfo::msg`), which is never shortened
+(run, step, and setup errors read it too). Tests:
+`cli/tests/l1/lifecycle_refusal_reports.rs`,
+`lib/src/composition/looping/engine/tests/gate_action_errors.rs`.
+
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
 suppress lifecycle audio. Tests of literal shipped prompts should set child-only
@@ -647,13 +669,21 @@ Sibling cancellation uses `composition.cancelled` with `err.detail.group`,
 explicitly inherit `lifecycle::cancellation::CancellationToken` scopes. Keep
 terminal execution on `LifecycleRunGuard::run_event_stack`: its cleanup scope
 allows terminal actions to finish after cancellation while preserving repeat
-interrupt grace. Lifecycle shell exact/template dispatch shares task shells'
-owned process trees, except on Unix while Claudine holds its terminal's
-foreground (`task/shell.rs::holds_terminal_foreground`): an inherited-terminal
-child in a group of its own is stopped by `SIGTTIN`/`SIGTTOU` forever (a
-nested `claudine compose` from `shell: just commit` hung this way), so it runs
-in Claudine's group and only the direct child is terminated on cancellation.
-Regression: `cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`.
+interrupt grace. Task shells and lifecycle shell exact/template dispatch own
+their process trees through Sniff's `sniff::process::ProcessTree`
+([process trees](../../../sniff/docs/topics/process-trees.md)). On Unix a
+lifecycle command also takes the terminal's foreground through
+`sniff::process::ForegroundHandoff` (`task/shell.rs::run_owned_lifecycle_command`),
+or an inherited-terminal child in a group of its own is stopped by
+`SIGTTIN`/`SIGTTOU` forever (a nested `claudine compose` from
+`shell: just commit` hung this way). A foreground command's `SIGINT` end or
+exit 130 marks the run interrupted, and `StackExecutionContext::stops_on_interrupt`
+then ends `initialize`/`start`/`loop` before their next action. A second
+concurrent lifecycle command fails before spawn (`WouldBlock` →
+`ShellRunError::Spawn`), and `settle_lifecycle_command` lets a restore failure
+fail only an exit-0 command. Without the foreground, SIGINT is `-1` and 130 an
+ordinary code. Regressions: `cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`,
+`task/shell/lifecycle_tests.rs`, `lifecycle/executor/tests/interrupt_stops.rs`.
 Container events use
 `lifecycle::runtime::ContainerRunner` and `LifecycleRunGuard`; root initialize
 precedes static preflight, nested preparation is just in time. Retry preserves

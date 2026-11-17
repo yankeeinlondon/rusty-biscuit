@@ -552,12 +552,48 @@ fn evaluation_raise_projects_typed_cause_without_moving_err_aliases() {
     );
     assert!(recorder.events().is_empty(), "nothing dispatched");
 
-    // `err.msg` stays notification-safe: single line, escape-free, non-empty,
-    // and inside the ~240-char cap the TTS/webhook routes rely on.
-    assert!(!info.msg.is_empty());
+    // `err.msg` is one escape-free line that keeps the raise's own words;
+    // delivery routes fit its length, the projection does not.
     assert!(!info.msg.contains('\n'));
     assert!(!info.msg.contains('\u{1b}'));
-    assert!(info.msg.chars().count() <= 240, "msg: {}", info.msg);
+    assert!(info.msg.contains("no_such_function"), "msg: {}", info.msg);
+}
+
+/// A long `err.msg` reaches a `say` action whole, and delivering it does not
+/// change the error the next action reads.
+#[test]
+fn a_long_err_msg_reaches_speech_whole_and_unchanged() {
+    let config = parse_lifecycle_config(
+        &json!({ "failure": [{ "say": "{{ err.msg }}" }, { "message": "{{ err.msg }}" }] }),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let text = format!("{}SAY-END", "the disk filled up ".repeat(32));
+    assert!(text.chars().count() >= 600);
+    let err = io_err(&text);
+    let before = err.clone();
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Failure,
+        &fm,
+        Some(&err),
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    context.execute_event(&config);
+
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Speech(text.clone()), Emitted::Message(text)]
+    );
+    assert_eq!(err, before, "delivery must not mutate err");
 }
 
 /// The `Prose` arm carries a failure the expression layer describes itself, and

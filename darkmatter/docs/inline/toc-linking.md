@@ -8,6 +8,8 @@ The basic syntax is:
 
 This instruction will provide links to the H2-H6 headings in the referenced file.
 
+The headings are read from the referenced file's source as written: its own `replace:` map, its `{{ … }}` interpolation, and `::block when=` conditions are not applied first. A target containing `## Hello WORD` with `replace: { WORD: World }` is linked as `[Hello WORD](./target.md#hello-word)`, and [fragment validation](./link-validation.md) accepts that anchor.
+
 ## Parameters
 
 ### Link Levels

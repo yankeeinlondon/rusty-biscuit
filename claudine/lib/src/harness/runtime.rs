@@ -5,6 +5,8 @@ use crate::harness::model::{
 };
 use crate::stream::summary::StreamExecutionSummary;
 use biscuit_terminal::discovery::eval::strip_ansi_codes;
+use darkmatter::lifecycle::envelope::concise_message_with_suffix;
+pub use darkmatter::lifecycle::envelope::concise_message;
 use tracing::info_span;
 
 /// Map `ProcessTermination` and `AttemptOutcome` to a `FailureEvent`.
@@ -91,15 +93,6 @@ pub fn build_attempt_outcome(
     }
 }
 
-/// Maximum rendered length of a failure message, in characters.
-///
-/// The message becomes the lifecycle `err.msg`, which feeds TTS, outbound
-/// messaging routes, and the stderr banner — it is the headline, not the
-/// archive. The full text stays available in `stderr_text` and the stream
-/// summary. The bound is the lifecycle envelope's; tests read it here.
-#[cfg(test)]
-const FAILURE_MESSAGE_MAX_CHARS: usize = darkmatter::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS;
-
 /// Build the operator-facing message for a failed attempt.
 ///
 /// Prefers the most contextual source available:
@@ -116,14 +109,14 @@ const FAILURE_MESSAGE_MAX_CHARS: usize = darkmatter::lifecycle::envelope::CONCIS
 /// 5. a termination label, falling back to the generic exit-code message so
 ///    the operator is never left without any signal.
 ///
-/// The whole rendered message — every cascade branch (provider, guard,
-/// timeout, stderr, and the fallbacks) plus any `(attempt N)` suffix — is
-/// passed through one final hygiene stage: escapes stripped, collapsed to a
-/// single line, and clamped so the returned string is always ≤
-/// [`CONCISE_MESSAGE_MAX_CHARS`](darkmatter::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS) characters. The suffix is budget-reserved,
-/// so it survives truncation rather than being cut off. The `(attempt N)`
-/// suffix is appended only when `attempt > 1` — at attempt 1 it would imply
-/// a retry that may never happen.
+/// The message becomes the lifecycle `err.msg`: the complete selected
+/// explanation, escape-free and folded onto one line, never shortened. An
+/// explicit `error_message` is kept whole (every line), while stderr
+/// contributes only its last useful line; the stderr log itself is never
+/// appended. An `error_message` that normalizes to nothing (only escapes or
+/// whitespace) falls through to the next source. The `(attempt N)` suffix
+/// is appended only when `attempt > 1` — at attempt 1 it would imply a retry
+/// that may never happen.
 pub fn failure_message(outcome: &AttemptOutcome, attempt: u32) -> String {
     let base = base_failure_message(outcome);
     let suffix = if attempt > 1 {
@@ -131,29 +124,17 @@ pub fn failure_message(outcome: &AttemptOutcome, attempt: u32) -> String {
     } else {
         String::new()
     };
-    sanitize_message(&base, &suffix)
-}
-
-/// Reduce arbitrary error text to a concise, notification-safe line.
-///
-/// The same hygiene [`failure_message`] applies to a provider attempt failure,
-/// exposed for the other producer of notification-facing text: the
-/// [`DiagnosticSnapshot`] message projected from a typed error's `Display`.
-/// One implementation means a typed error and a provider failure cannot reach
-/// TTS, messaging, or a desktop notification under different rules.
-///
-/// [`DiagnosticSnapshot`]: crate::diagnostics::DiagnosticSnapshot
-pub fn concise_message(text: &str) -> String {
-    sanitize_message(text, "")
+    concise_message_with_suffix(&base, &suffix)
 }
 
 fn base_failure_message(outcome: &AttemptOutcome) -> String {
-    if let Some(line) = outcome
+    if let Some(message) = outcome
         .error_message
         .as_deref()
-        .and_then(|text| headline(text, LinePick::First))
+        .map(concise_message)
+        .filter(|message| !message.is_empty())
     {
-        return line;
+        return message;
     }
     if outcome.termination == ProcessTermination::Aborted
         && let Some(message) = outcome.guard_context.as_ref().and_then(guard_message)
@@ -163,11 +144,7 @@ fn base_failure_message(outcome: &AttemptOutcome) -> String {
     if outcome.termination == ProcessTermination::TimedOut {
         return timeout_message(outcome);
     }
-    if let Some(line) = outcome
-        .stderr_text
-        .as_deref()
-        .and_then(|text| headline(text, LinePick::Last))
-    {
+    if let Some(line) = outcome.stderr_text.as_deref().and_then(last_useful_line) {
         return line;
     }
     match outcome.termination {
@@ -245,38 +222,15 @@ fn format_secs(secs: u64) -> String {
     }
 }
 
-enum LinePick {
-    First,
-    Last,
-}
-
-/// Reduce provider-derived text to its headline line: strip escapes, then
-/// pick the first (structured error message) or last (stderr — providers
-/// print the fatal line last) non-empty line. Length clamping is deferred to
-/// [`sanitize_message`], the single final pass shared by every cascade
-/// branch, so provider text is never double-ellipsized.
-fn headline(text: &str, pick: LinePick) -> Option<String> {
+/// The last non-empty line of escape-stripped stderr; providers print the
+/// fatal line last.
+fn last_useful_line(text: &str) -> Option<String> {
     let stripped = strip_ansi_codes(text);
-    let mut lines = stripped.lines().map(str::trim).filter(|line| !line.is_empty());
-    let line = match pick {
-        LinePick::First => lines.next(),
-        LinePick::Last => lines.next_back(),
-    }?;
-    Some(line.to_string())
-}
-
-/// Final hygiene pass over the complete failure message. Runs over *every*
-/// cascade branch — including guard-context and timeout text that is
-/// interpolated from user-configured `pattern`/`scope` — so no unsanitized
-/// input can reach the lifecycle `err.msg` (TTS, messaging routes, desktop
-/// notifications, stderr banner).
-///
-/// The rule is the lifecycle envelope's
-/// [`concise_message_with_suffix`](darkmatter::lifecycle::envelope::concise_message_with_suffix),
-/// so `base + suffix` is always ≤ [`CONCISE_MESSAGE_MAX_CHARS`](darkmatter::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS) and the
-/// `(attempt N)` suffix always survives intact.
-fn sanitize_message(base: &str, suffix: &str) -> String {
-    darkmatter::lifecycle::envelope::concise_message_with_suffix(base, suffix)
+    stripped
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]

@@ -1132,10 +1132,13 @@ _ensure-kache:
     # today. Already on the serving device → that IS the store (still pinned in
     # the config file; spec §2 ruling); otherwise the probe's cascade
     # candidate. A doctor failure here makes placement undecidable — same skip
-    # bucket as any other pre-activation failure.
+    # bucket as any other pre-activation failure. `config-source`, not
+    # `report`: only the doctor store is read here, and `report` would also
+    # re-run the clone checks and the macOS passthrough probe (a codesign)
+    # that steps (1), (2), and (5) already own.
     report_out=""
     report_rc=0
-    report_out="$(./scripts/kache-host.sh report 2>&1)" || report_rc=$?
+    report_out="$(./scripts/kache-host.sh config-source 2>&1)" || report_rc=$?
     if [[ $report_rc -ne 0 ]]; then
         kache_off "kache doctor failed after install ($(sed -n 's/^kache-host: error=//p' <<<"$report_out" | head -1)) — store placement is undecidable."
     fi
@@ -1249,7 +1252,8 @@ _ensure-kache:
         for ((i = 0; i < tries; i++)); do
             read_daemon || true
             [[ "$daemon_running" == "yes" && "$daemon_version" == "$installed" ]] && return 0
-            sleep 1
+            # No sleep after the last read: nothing reads the state again.
+            ((i + 1 < tries)) && sleep 1
         done
         return 1
     }
@@ -1496,10 +1500,11 @@ install-kache binary_only="false":
 
 # The durable guard. Init's verdict is point-in-time, but the worktree base
 # can be configured — or re-pointed — after activation and binaries can be
-# replaced, so this recipe re-checks the facts through the script init used
-# (`scripts/kache-host.sh report`): the store is whatever `kache doctor`
-# resolves (never a reconstruction — the pre-2026-09-23 recipe guessed from
-# KACHE_DIR and reported false verdicts), plus the checkout/worktree-base
+# replaced, so this recipe re-checks the facts through the script init uses,
+# in its `report` subcommand (`scripts/kache-host.sh report`): the store is
+# whatever `kache doctor` resolves (never a reconstruction — the
+# pre-2026-09-23 recipe guessed from KACHE_DIR and reported false verdicts),
+# plus the checkout/worktree-base
 # device check, init's clone check re-run from that store, the macOS
 # env-passthrough result, the daemon (service installed, running, same version
 # as the binary), and the user config's `local_store` pin and `ignore_env`.

@@ -245,6 +245,10 @@ impl RemoteUrlCatalog {
 ///
 /// Uses [`FileReference`] classification to find URL targets and maps them to
 /// the appropriate [`RemoteUrlConsumer`] based on directive kind.
+///
+/// A target that still holds a `{{ … }}` expression does not classify as a
+/// URL, so it is never prefetched; the transclusion stage registers the URL
+/// it evaluates to.
 pub fn discover_remote_urls_from_directives(
     directives: &[BlockDirective],
     source: &ComposeSource,
@@ -299,6 +303,18 @@ pub fn discover_remote_urls_from_expressions(
     content: &str,
     source: &ComposeSource,
 ) -> Vec<DiscoveredRemoteUrl> {
+    discover_remote_urls_from_expressions_with(content, source, true)
+}
+
+/// [`discover_remote_urls_from_expressions`] for a body composed with its
+/// prose interpolation `prose_enabled` or not: under an `interpolate=false`
+/// inclusion only expressions in directive inputs are evaluated, so a sample
+/// URL in the prose registers no fetch.
+pub(crate) fn discover_remote_urls_from_expressions_with(
+    content: &str,
+    source: &ComposeSource,
+    prose_enabled: bool,
+) -> Vec<DiscoveredRemoteUrl> {
     // A remote-read URL argument is a string literal that validates as an
     // `http(s)` URL, so it necessarily contains the substring "http". When the
     // document has none, no expression can register a URL — skip the full
@@ -308,7 +324,13 @@ pub fn discover_remote_urls_from_expressions(
         return Vec::new();
     }
 
-    let locations = ExpressionFinder::new(content).find_all();
+    let mut locations = ExpressionFinder::new(content).find_all();
+    if !prose_enabled {
+        let active = super::interpolation::active_inputs::active_input_ranges(content, None);
+        locations.retain(|location| {
+            super::interpolation::active_inputs::intersects_active(&active, &(location.start..location.end))
+        });
+    }
     if locations.is_empty() {
         return Vec::new();
     }
@@ -520,6 +542,24 @@ mod tests {
         ComposeSource::File(PathBuf::from("/test/doc.md"))
     }
 
+    /// A sample URL in prose an `interpolate=false` inclusion keeps as
+    /// written registers nothing; the same call in a directive input does.
+    #[test]
+    fn suppressed_prose_registers_no_expression_url() {
+        let content = "Sample: {{ frontmatter(\"https://example.com/prose.md\", \"t\") }}\n\
+                       ::file ./x.md set.t=\"{{ frontmatter('https://example.com/gate.md', 't') }}\"\n";
+        let urls = |prose_enabled| {
+            discover_remote_urls_from_expressions_with(content, &file_source(), prose_enabled)
+                .into_iter()
+                .map(|found| found.url.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(urls(false), ["https://example.com/gate.md"]);
+        let mut normal = urls(true);
+        normal.sort();
+        assert_eq!(normal, ["https://example.com/gate.md", "https://example.com/prose.md"]);
+    }
+
     fn unknown_source() -> ComposeSource {
         ComposeSource::Unknown
     }
@@ -591,6 +631,20 @@ mod tests {
         let results = discover_remote_urls_from_directives(&directives, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::TransclusionFile);
+    }
+
+    #[test]
+    fn skip_targets_that_are_still_templates() {
+        let directives = vec![
+            make_directive(DirectiveKind::File, "https://example.com/{{ item }}.md", 1),
+            make_directive(DirectiveKind::Url, "https://{{ host }}/doc.md", 2),
+            make_directive(DirectiveKind::Code, "https://example.com/{{ name }}.rs", 3),
+            make_directive(DirectiveKind::File, "https://example.com/{{item}}.md", 4),
+            make_directive(DirectiveKind::File, "https://example.com/plain.md", 5),
+        ];
+        let results = discover_remote_urls_from_directives(&directives, &file_source());
+        let urls: Vec<&str> = results.iter().map(|entry| entry.url.as_str()).collect();
+        assert_eq!(urls, ["https://example.com/plain.md"]);
     }
 
     #[test]

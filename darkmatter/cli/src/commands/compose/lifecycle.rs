@@ -175,7 +175,7 @@ pub(super) fn run(mut compose: LifecycleCompose<'_>) -> Result<()> {
             // problem in the document.
             Some(sink) if error.cause.is_some() => sink.document_diagnostics(lifecycle_failure_diagnostics(error)),
             Some(sink) => sink.diagnostics(lifecycle_failure_diagnostics(error)),
-            None => effects.status(StatusState::Error, &error.msg),
+            None => effects.status(StatusState::Error, error.msg.as_str()),
         }
     }
     if let (Some(sink), Some(started)) = (sink, started) {
@@ -537,6 +537,9 @@ impl<'a> ComposeHost<'a> {
                 ("compose", compose_error(failure.error))
             })?;
         self.pending_triggers.merge_into(&mut report.warnings);
+        if let Some(checked) = &self.deferred_report {
+            report.warnings.retain(|warning| !super::reference_check_reported(warning, checked));
+        }
         if let Some(sink) = self.document.sink {
             sink.warnings(&report.warnings);
             if let Some(perf_report) = &report.perf {

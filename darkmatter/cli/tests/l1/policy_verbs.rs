@@ -459,6 +459,30 @@ fn a_denied_missing_link_inside_inserted_text_blocks() {
 }
 
 #[test]
+fn an_empty_link_target_warns_with_the_link_and_blocks_only_when_denied() {
+    let fixture = CliProcessFixture::named("policy_empty_link");
+    let document = fixture.write_file("cwd/doc.md", "# Doc\n\nSee [Expression Engine]() here.\n");
+    let output = fixture.command().arg("compose").arg(&document).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("See [Expression Engine]() here."));
+    assert!(stderr.contains("`[Expression Engine]()` has no target"), "{stderr}");
+    assert!(stderr.contains("line 3, column 5"), "{stderr}");
+
+    for args in [
+        &["compose", "--deny", "missing-hyperlinks"][..],
+        &["compose", "--deny", "dm.reference.missing_hyperlink"],
+        &["compose", "--deny", "all"],
+    ] {
+        let output = fixture.command().args(args).arg(&document).output().unwrap();
+        let stderr = stderr_of(&output);
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        assert!(stderr.contains("`[Expression Engine]()` has no target"), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
 fn deny_style_and_deny_all_block_a_style_issue_on_every_render_path() {
     let fixture = CliProcessFixture::named("policy_style");
     let document = fixture.write_file("cwd/doc.md", "---\nstyle:\n  page:\n    bogus-key: 1\n---\n# Doc\n");

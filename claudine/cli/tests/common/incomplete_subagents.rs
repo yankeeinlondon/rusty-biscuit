@@ -10,8 +10,8 @@
 //! `task_notification` records — so it is authored once here rather than typed
 //! out twice with a chance of diverging.
 //!
-//! Task identities stay with the callers: L1 picks names that overflow the
-//! 240-character headline budget, L2 picks names long enough to force the
+//! Task identities stay with the callers: L1 picks names long enough to prove
+//! the lifecycle headline names every task, L2 picks names long enough to force the
 //! rendered list to wrap at the minimum supported width. Only the framing is
 //! shared.
 

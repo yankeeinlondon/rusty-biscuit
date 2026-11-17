@@ -9,6 +9,7 @@
 
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 use serial_test::serial;
@@ -20,13 +21,15 @@ use test_toolkit::fake_editor::{
 #[cfg(unix)]
 use test_toolkit::fake_editor::FAKE_EDITOR_IGNORE_TERM;
 
+#[cfg(unix)]
+use crate::editor_support::kill_pid;
 use crate::editor_support::{
-    ScopedEnv, editor_dir, install_fake_editor, kill_pid, process_alive, resolved, wait_for_file, wait_for_pids,
+    ScopedEnv, editor_dir, install_fake_editor, process_alive, resolved, wait_for_file, wait_for_pids,
     wait_until_dead,
 };
-use darkmatter::editor::{
-    EDITOR_TERMINATE_GRACE, EditorError, LaunchIo, LaunchOptions, LaunchOutput, LaunchPlan, LaunchStdin,
-};
+#[cfg(unix)]
+use darkmatter::editor::EDITOR_TERMINATE_GRACE;
+use darkmatter::editor::{EditorError, LaunchIo, LaunchOptions, LaunchOutput, LaunchPlan, LaunchStdin};
 use sniff::programs::EditorSurface;
 
 fn owned<'a>(io: LaunchIo, cancelled: &'a dyn Fn() -> bool) -> LaunchOptions<'a> {
@@ -284,4 +287,194 @@ fn a_plain_launch_keeps_the_host_process_group() {
     let owned_group = unsafe { libc::getpgid(owned_child as libc::pid_t) };
     kill_pid(owned_child);
     assert_ne!(owned_group, host_group, "an owned launch leads its own process group");
+}
+
+/// An owned terminal editor that inherits the host's stdin runs in the
+/// terminal's foreground (it reads a line typed before it started, which a
+/// background group could not do without being stopped), and the host has
+/// the foreground back after a successful, an unsuccessful, and a cancelled
+/// edit. A second handoff while one is active is refused as `prepare the
+/// terminal`. The host must lead a session on a terminal, so each step runs
+/// in [`terminal_helper`] on a PTY and writes what it saw to a report.
+#[cfg(unix)]
+#[test]
+#[serial]
+fn an_owned_terminal_editor_takes_the_foreground_and_gives_it_back() {
+    use std::io::{Read, Write};
+    use std::sync::{Arc, Mutex};
+
+    let work = tempfile::tempdir().unwrap();
+    let report = work.path().join("report");
+    let mut helper = Command::new(std::env::current_exe().unwrap());
+    helper
+        .args(["--exact", "editor_launcher::terminal_helper", "--nocapture"])
+        .env("EDITOR_TERMINAL_REPORT", &report)
+        .current_dir(work.path());
+    let (mut child, mut terminal) = spawn_on_terminal(helper);
+    let transcript = Arc::new(Mutex::new(Vec::new()));
+    let mut reader = terminal.try_clone().unwrap();
+    let drained = Arc::clone(&transcript);
+    // Never joined: whether a PTY read ends once the helper has gone differs
+    // between kernels.
+    std::thread::spawn(move || {
+        let mut chunk = [0u8; 4096];
+        while let Ok(read) = reader.read(&mut chunk) {
+            if read == 0 {
+                break;
+            }
+            drained.lock().unwrap().extend_from_slice(&chunk[..read]);
+        }
+    });
+    // Queued in the terminal's input until the editor reads it.
+    terminal.write_all(b"typed-into-editor\n").unwrap();
+    let transcript = || String::from_utf8_lossy(&transcript.lock().unwrap()).into_owned();
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "the helper never finished; report so far:\n{}\ntranscript:\n{}",
+                std::fs::read_to_string(&report).unwrap_or_default(),
+                transcript()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let transcript = transcript();
+    let report = std::fs::read_to_string(&report).unwrap_or_default();
+    assert!(status.success(), "helper failed\nreport:\n{report}\ntranscript:\n{transcript}");
+    assert_eq!(
+        report.lines().collect::<Vec<_>>(),
+        [
+            "contended: prepare the terminal WouldBlock",
+            "read: typed-into-editor host-foreground",
+            "nonzero: 5 host-foreground",
+            "cancelled: host-foreground",
+        ],
+        "transcript:\n{transcript}"
+    );
+}
+
+/// Starts `command` as a session leader whose controlling terminal is a new
+/// PTY, with all three streams on it, and returns the PTY's master side.
+#[cfg(unix)]
+fn spawn_on_terminal(mut command: Command) -> (std::process::Child, std::fs::File) {
+    use std::ffi::{CStr, OsStr};
+    use std::os::fd::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::process::CommandExt;
+
+    // SAFETY: `posix_openpt` returns a new descriptor this function owns;
+    // `grantpt`/`unlockpt` act on it; `ptsname`'s static buffer is copied at
+    // once, and every test here is `#[serial]`.
+    let (master, slave_name) = unsafe {
+        let master = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+        assert!(master >= 0, "open a PTY: {}", std::io::Error::last_os_error());
+        let master = std::fs::File::from_raw_fd(master);
+        let raw = std::os::fd::AsRawFd::as_raw_fd(&master);
+        assert_eq!(libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC), 0);
+        assert_eq!(libc::grantpt(raw), 0, "grantpt");
+        assert_eq!(libc::unlockpt(raw), 0, "unlockpt");
+        let name = libc::ptsname(raw);
+        assert!(!name.is_null(), "ptsname");
+        (master, OsStr::from_bytes(CStr::from_ptr(name).to_bytes()).to_owned())
+    };
+    let slave = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOCTTY)
+        .open(&slave_name)
+        .expect("open the PTY's terminal side");
+    command
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave);
+    // SAFETY: runs in the forked child before `exec` and calls only the
+    // async-signal-safe `setsid` and `ioctl`; stdin is already the PTY.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = command.spawn().expect("start the helper on the PTY");
+    (child, master)
+}
+
+/// The host process for
+/// `an_owned_terminal_editor_takes_the_foreground_and_gives_it_back`; does
+/// nothing unless that test started it.
+#[cfg(unix)]
+#[test]
+fn terminal_helper() {
+    use std::io::Write;
+    use sniff::process::{ForegroundHandoff, TreeConfig};
+    use test_toolkit::fake_editor::FAKE_EDITOR_READ_LINE;
+
+    let Ok(report) = std::env::var("EDITOR_TERMINAL_REPORT") else {
+        return;
+    };
+    let mut report = std::fs::File::create(report).unwrap();
+    let host_foreground = || {
+        let terminal = std::fs::File::open("/dev/tty").expect("the helper has a controlling terminal");
+        // SAFETY: both calls only query process state through an open descriptor.
+        let owner = unsafe { libc::tcgetpgrp(std::os::fd::AsRawFd::as_raw_fd(&terminal)) };
+        if owner == unsafe { libc::getpgrp() } { "host-foreground" } else { "host-background" }
+    };
+    let editors = editor_dir();
+    let editor = install_fake_editor(editors.path(), "terminal-editor");
+    let target = editors.path().join("note.md");
+    std::fs::write(&target, "").unwrap();
+    let terminal_editor = || LaunchPlan::new(resolved(editor.clone(), Some(EditorSurface::Terminal), &[]), &target);
+    fn with_terminal(cancelled: &dyn Fn() -> bool) -> LaunchOptions<'_> {
+        LaunchOptions {
+            io: LaunchIo { stdin: LaunchStdin::Inherit, stdout: LaunchOutput::Discard, stderr: LaunchOutput::Discard },
+            own_tree: true,
+            cancelled: Some(cancelled),
+        }
+    }
+
+    let mut holder = Command::new("true");
+    TreeConfig::process_group().configure(&mut holder);
+    let mut held = ForegroundHandoff::prepare(&mut holder).unwrap();
+    assert!(held.is_active(), "the helper does not hold the PTY's foreground");
+    let error = terminal_editor().run(with_terminal(&|| false)).unwrap_err();
+    let EditorError::Io { operation, source } = &error else {
+        panic!("{error:?}");
+    };
+    writeln!(report, "contended: {operation} {:?}", source.kind()).unwrap();
+    held.restore().unwrap();
+    drop(held);
+
+    let mut env = ScopedEnv::new();
+    env.set(FAKE_EDITOR_READ_LINE, "1");
+    terminal_editor().run(with_terminal(&|| false)).unwrap();
+    let read = std::fs::read_to_string(&target).unwrap();
+    writeln!(report, "read: {} {}", read.trim_end(), host_foreground()).unwrap();
+    drop(env);
+
+    let mut env = ScopedEnv::new();
+    env.set(FAKE_EDITOR_EXIT, "5");
+    let error = terminal_editor().run(with_terminal(&|| false)).unwrap_err();
+    let EditorError::NonZeroExit { code, .. } = error else {
+        panic!("{error:?}");
+    };
+    writeln!(report, "nonzero: {code} {}", host_foreground()).unwrap();
+    drop(env);
+
+    let marker = editors.path().join("held");
+    let mut env = ScopedEnv::new();
+    env.set(FAKE_EDITOR_HOLD, &marker);
+    let error = terminal_editor().run(with_terminal(&|| marker.exists())).unwrap_err();
+    assert!(matches!(error, EditorError::Cancelled { .. }), "{error:?}");
+    writeln!(report, "cancelled: {}", host_foreground()).unwrap();
+    drop(env);
 }

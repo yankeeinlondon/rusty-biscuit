@@ -147,9 +147,10 @@ stack continues with the next action:
 |---|---|
 | No editor matches | every set variable (`$EDITOR`, `$VISUAL`) names a program that is missing or cannot wait for the file to close; with `gui` set, no editor of that kind is configured or installed |
 | The host cannot run the chosen editor | a terminal editor under a data output (`--output json`), with stdin or stdout redirected, with the document read from stdin, in a parallel group member, or while another editor holds the terminal; a GUI editor with no display session |
-| The file reference or filesystem refuses the target | a malformed reference, a URL, a path outside the mutation root, a directory at the path, a parent directory that cannot be created |
+| The file reference or filesystem refuses the target | a malformed reference, a URL, a path outside the [mutation root](./index.md#where-file-actions-write), a directory at the path, a parent directory that cannot be created |
 | The name is taken under `create_new: true` | a file, directory, or symlink already holds the name |
 | The editor cannot be started | the resolved program fails to launch |
+| The terminal cannot be lent to a terminal editor, or given back | Linux and macOS: `prepare the terminal` failed before the editor started, or `restore the terminal` failed after an edit that otherwise succeeded |
 | The editor exits with a nonzero status | the user quits Vim with `:cq` |
 | The target is gone after the editor exits | the file was deleted, replaced by a directory, or moved outside the mutation root |
 
@@ -183,9 +184,12 @@ added in parentheses only when the reason does not already name it:
 `initialize[1].edit` could not edit the file: `nvim` is a terminal editor and needs an interactive terminal, but stdout is not a terminal (/work/plan.md)
 ```
 
-Like every lifecycle failure message, it is folded onto one line of at most
-240 characters, and it is the `msg` that `failed` and `finalize` read in
-`err.msg`.
+Like every lifecycle failure message, it is folded onto one line; it is never
+shortened, so a long error stays whole. A channel that cannot show it all fits
+it itself. The command's own failure report (the terminal status line, or the
+diagnostic's `message` under `--output json`) and `err.msg`, which `failed`
+and `finalize` read, carry the same complete line, however long the paths in
+it are; see [Fields](#fields).
 
 ## Cancellation
 
@@ -216,7 +220,12 @@ flowchart LR
   whole process tree is terminated, a GUI editor's waiting client only. Bytes
   it saved and a file it created are kept, and the next action never runs,
   even with `no_error`. While a terminal editor holds the terminal, Ctrl-C
-  typed at the keyboard goes to the editor rather than to `md`.
+  typed at the keyboard goes to the editor rather than to `md`. See
+  [Process trees](../../../../sniff/docs/topics/process-trees.md) for what
+  "the whole process tree" covers on each OS.
+- If Windows cannot keep a finished GUI editor running, the edit still
+  succeeds and a warning says the editor was closed; under `--deny all` that
+  warning blocks like any other.
 
 `cancelled` can only clean up. Its one flow verb is `stop`; `skip` and
 `error` there are parse errors.
@@ -260,7 +269,7 @@ finalize:
 
 | Field | Meaning |
 |---|---|
-| `msg` | A concise, single-line message. Always present. Safe to print; do not branch on it. |
+| `msg` | The complete, single-line, escape-free message. Always present, never shortened, so it can be long; do not branch on it. |
 | `code` | A stable dotted code such as `composition.invalid_file_reference`. |
 | `category` | The coarse domain: the dotted prefix of `code`. |
 | `disposition` | How to handle it: `transient`, `throttled`, `correctable`, `needs_input`, or `unrecoverable`. |
@@ -283,6 +292,20 @@ failed:
       then:
           - warn: "a link is broken: {{ err.msg }}"
 ```
+
+Because `msg` is never shortened, it can be long. Where a long message would
+be unwelcome, such as a notification banner, write fixed text and leave the
+full message to the terminal report:
+
+```yaml
+failed:
+    - warn: "{{ err.msg }}"          # the terminal gets the whole explanation
+    - notify: "the document did not compose"
+```
+
+`notify` is a host verb (Claudine supplies it; `md` does not). Submitting the
+full message is not a promise that it is shown in full: a notification center
+or remote service may display only part of a long one.
 
 ## Host-level rules
 

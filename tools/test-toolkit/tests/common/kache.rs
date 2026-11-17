@@ -151,7 +151,7 @@ state='{state}'
 printf '%s\n' "$*" >> "$state/invocations.log"
 printf 'kache %s\n' "$*" >> "$state/commands.log"
 case "${{1:-}}" in
-    --version) echo "kache $(cat "$state/version")" ;;
+    --version) echo "kache $(<"$state/version")" ;;
     # kache's resolution with no KACHE_* store variable: the `local_store` of
     # the config file it loads (a non-empty KACHE_CONFIG selects that file),
     # else the built-in default, the fixture store.
@@ -159,11 +159,11 @@ case "${{1:-}}" in
         config="${{KACHE_CONFIG:-${{XDG_CONFIG_HOME:-$HOME/.config}}/kache/config.toml}}"
         store="$(sed -n 's/^local_store = "\(.*\)"$/\1/p' "$config" 2> /dev/null | head -1)"
         store="${{store:-{store}}}"
-        [[ -e "$state/doctor-store" ]] && store="$(cat "$state/doctor-store")"
-        printf '{{"version":"%s","checks":[{{"label":"Cache dir","pass":true,"detail":"%s"}}]}}\n' "$(cat "$state/version")" "$store" ;;
+        [[ -e "$state/doctor-store" ]] && store="$(<"$state/doctor-store")"
+        printf '{{"version":"%s","checks":[{{"label":"Cache dir","pass":true,"detail":"%s"}}]}}\n' "$(<"$state/version")" "$store" ;;
     daemon)
         case "${{2:-}}" in
-            --json) cat "$state/daemon.json" ;;
+            --json) printf '%s' "$(<"$state/daemon.json")" ;;
             install) python3 "$state/daemon.py" "$state/daemon.json" install - ;;
             start | restart)
                 if [[ "$2" == restart && -e "$state/fail-daemon-restart" ]]; then
@@ -173,14 +173,14 @@ case "${{1:-}}" in
                 if [[ "$2" == restart && -e "$state/stale-daemon-restart" ]]; then
                     exit 0
                 fi
-                python3 "$state/daemon.py" "$state/daemon.json" "$2" "$(cat "$state/version")" ;;
+                python3 "$state/daemon.py" "$state/daemon.json" "$2" "$(<"$state/version")" ;;
             *) exit 64 ;;
         esac ;;
     # `kache rustc ARGS` runs the `rustc` on PATH — the passthrough probe's
     # stub compiler. Model both modes explicitly: the host's Bash may strip
     # DYLD_* at startup or preserve it, depending on the executable.
     rustc)
-        if [[ "${{2:-}}" == DYLD_FALLBACK_LIBRARY_PATH && "$(cat "$state/passthrough")" == forward ]]; then
+        if [[ "${{2:-}}" == DYLD_FALLBACK_LIBRARY_PATH && "$(<"$state/passthrough")" == forward ]]; then
             echo ".kache-host-dyld-survivor"
             exit 0
         fi
@@ -454,8 +454,8 @@ state='{state}'
 printf 'cargo %s\n' "$*" >> "$state/commands.log"
 case "${{1:-}}" in
     binstall)
-        release="$(cat "$state/release")"
-        if [[ -x '{bin}/kache' && "$(cat "$state/version")" == "$release" ]]; then
+        release="$(<"$state/release")"
+        if [[ -x '{bin}/kache' && "$(<"$state/version")" == "$release" ]]; then
             echo "fake binstall: kache $release is already the latest"
         else
             /bin/cp "$state/kache-bin" '{bin}/kache'
@@ -489,7 +489,7 @@ exec /usr/bin/codesign "$@"
 "#
             ),
         );
-        self.write_executable("bin/sleep", "#!/usr/bin/env bash\nexit 0\n");
+        symlink("/usr/bin/true", self.path("bin/sleep")).expect("link a no-op sleep");
         self.write_executable(
             "bin/python3",
             &format!(
@@ -669,7 +669,8 @@ done
 if [[ $clone -eq 1 ]]; then
     destination="${{args[${{#args[@]}}-1]}}"
     printf 'clone %s\n' "$destination" >> '{log}'
-    case "$(basename "$(dirname "$destination")")" in
+    parent="${{destination%/*}}"
+    case "${{parent##*/}}" in
 {case_arm}    esac
 fi
 exec /bin/cp "${{args[@]}}"

@@ -292,7 +292,7 @@ impl NestedCompose {
         options.preflight_graph = None;
         let context = runtime.context_epoch.context_for_source(
             options.context(),
-            &ContextRequirements::for_document(&child),
+            &ContextRequirements::for_document_with(&child, options.prose_enabled()),
             options.context_authority(),
         );
         runtime.record_context_groups(context.capture_requirements());

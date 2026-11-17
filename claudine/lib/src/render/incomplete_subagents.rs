@@ -9,10 +9,10 @@ use crate::stream::task_ledger::SubagentOutcome;
 
 /// The full operator diagnostic for a run whose sub-agent work never finished.
 ///
-/// The companion to the concise lifecycle headline, which is clamped to 240
-/// characters and may name only the first few tasks. This component is under
-/// no such budget: it enumerates **every** incomplete fact, so the terminal and
-/// the machine record agree on the count even when the headline does not.
+/// The companion to the one-line lifecycle headline, which names every task in
+/// a single sentence. This component lays the same facts out as a list, one
+/// incomplete task per item, so the terminal and the machine record agree on
+/// the count.
 ///
 /// The heading's second sentence states how the run ended around the
 /// unfinished work. Without [`Self::with_exit`] it stays termination-neutral:

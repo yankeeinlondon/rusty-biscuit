@@ -141,6 +141,10 @@ pub(super) enum StepOutcome {
         agent_perf: Option<crate::perf::AgentExecutionPerf>,
         compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
         tasks: Vec<SequenceTaskResult>,
+        /// Failures that did not decide the step, such as a nested
+        /// container's `failure` event refusing its own action after a child
+        /// failed. Reported after the step's own failure line.
+        secondary: Vec<claudine::composition::lifecycle::context::LifecycleErrorInfo>,
     },
     Interrupted {
         agent_perf: Option<crate::perf::AgentExecutionPerf>,
@@ -220,6 +224,7 @@ pub(super) fn run_sequence_steps(
         let interrupted_step = matches!(outcome, StepOutcome::Interrupted { .. });
         let skipped = matches!(outcome, StepOutcome::Skipped);
 
+        let mut secondary = Vec::new();
         let (success, error, error_snapshot, providers, agent_perf, compose_perf, tasks) =
             match outcome {
             StepOutcome::Succeeded {
@@ -234,15 +239,19 @@ pub(super) fn run_sequence_steps(
                 agent_perf,
                 compose_perf,
                 tasks,
-            } => (
-                false,
-                Some(message),
-                snapshot,
-                Vec::new(),
-                agent_perf,
-                compose_perf,
-                tasks,
-            ),
+                secondary: also,
+            } => {
+                secondary = also;
+                (
+                    false,
+                    Some(message),
+                    snapshot,
+                    Vec::new(),
+                    agent_perf,
+                    compose_perf,
+                    tasks,
+                )
+            }
             StepOutcome::Interrupted {
                 agent_perf,
                 compose_perf,
@@ -296,6 +305,12 @@ pub(super) fn run_sequence_steps(
             emit_step_skipped(step_index, total_steps);
         } else if !run.silent {
             emit_step_status(run, step_index, total_steps, success, &error, &providers);
+            let subject = format!("step {}/{}", step_index + 1, total_steps);
+            for info in &secondary {
+                claudine::composition::lifecycle::report::report_container_failure(
+                    &claudine::composition::DefaultLifecycleEmitter, &log::terminal(), &subject, info,
+                );
+            }
             emit_group_task_breakdown(&tasks);
         }
 
@@ -558,6 +573,7 @@ fn run_one_step(
             agent_perf: outcome.agent_perf,
             compose_perf,
             tasks: Vec::new(),
+            secondary: Vec::new(),
         },
         Err(error) => StepOutcome::Failed {
             message: error.to_string(),
@@ -568,6 +584,7 @@ fn run_one_step(
             agent_perf: None,
             compose_perf,
             tasks: Vec::new(),
+            secondary: Vec::new(),
         },
     }
 }
@@ -756,6 +773,7 @@ impl StepOutcome {
             agent_perf: None,
             compose_perf: None,
             tasks: Vec::new(),
+            secondary: Vec::new(),
         }
     }
 }

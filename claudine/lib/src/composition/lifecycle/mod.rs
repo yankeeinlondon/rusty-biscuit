@@ -58,6 +58,7 @@ pub mod effects;
 pub mod executor;
 pub mod prep;
 pub mod registry;
+pub mod report;
 pub mod runtime;
 mod structured_shell;
 pub mod prewarm;
@@ -378,7 +379,8 @@ pub trait LifecycleEmitter: Sync {
     ///
     /// `stderr` is the statusless channel: rich text and links are honored, but
     /// no `Status` decoration is applied. Status decoration is reserved for
-    /// [`emit_info`](Self::emit_info) and [`emit_warn`](Self::emit_warn).
+    /// [`emit_info`](Self::emit_info), [`emit_warn`](Self::emit_warn), and
+    /// [`emit_error`](Self::emit_error).
     fn emit_stderr(&self, signal: LifecycleSignal, text: &str, term: &Terminal);
 
     /// Dispatch a message via the configured messaging route.
@@ -415,6 +417,15 @@ pub trait LifecycleEmitter: Sync {
     /// owning lifecycle event.
     fn emit_warn(&self, text: &str, term: &Terminal) {
         let rendered = darkmatter::lifecycle::render_status_line(StatusState::Warning, text, term);
+        crate::render::console::write_stderr_line(&rendered);
+    }
+
+    /// Write a styled `Error` status line to stderr.
+    ///
+    /// The status state is fixed to [`StatusState::Error`] regardless of the
+    /// owning lifecycle event.
+    fn emit_error(&self, text: &str, term: &Terminal) {
+        let rendered = darkmatter::lifecycle::render_status_line(StatusState::Error, text, term);
         crate::render::console::write_stderr_line(&rendered);
     }
 

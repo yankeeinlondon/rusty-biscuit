@@ -1280,6 +1280,16 @@ fn exempted(toks: &[Tok]) -> BTreeSet<usize> {
     exempt
 }
 
+/// Whether `source` holds any text a form or a hosted-root literal is spelled
+/// with. Literal bodies are compared as the source's own bytes, never
+/// escape-decoded, so a file without these substrings has no form and no
+/// violation, and a full-tree scan need not tokenize it (almost every file).
+fn may_spell_a_form(source: &str) -> bool {
+    [MANIFEST_VAR, BIN_EXE_PREFIX, HOSTED_ROOT]
+        .iter()
+        .any(|needle| source.contains(needle))
+}
+
 /// Every compile-time path form in `source`, whether or not it sits in a
 /// recognized runtime-first expression.
 ///
@@ -1288,6 +1298,9 @@ fn exempted(toks: &[Tok]) -> BTreeSet<usize> {
 /// the filtered violation list would declare the harness's own implementation
 /// stale.
 fn raw_forms(source: &str) -> Vec<(usize, FormKind)> {
+    if !may_spell_a_form(source) {
+        return Vec::new();
+    }
     occurrences(&tokenize(source))
         .into_iter()
         .map(|found| (found.line, found.kind))
@@ -1297,6 +1310,9 @@ fn raw_forms(source: &str) -> Vec<(usize, FormKind)> {
 /// Every violation in `source`: raw forms minus the recognized safe fallbacks,
 /// plus the independent hosted-root literal check.
 fn violations_in(source: &str) -> Vec<(usize, &'static str)> {
+    if !may_spell_a_form(source) {
+        return Vec::new();
+    }
     let toks = tokenize(source);
     let exempt = exempted(&toks);
 

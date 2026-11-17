@@ -7,8 +7,8 @@ use std::sync::Mutex;
 /// Records every line the gate's notification fields and stack produce,
 /// tagged with the channel that carried it.
 #[derive(Default)]
-struct TextRecorder {
-    lines: Mutex<Vec<String>>,
+pub(super) struct TextRecorder {
+    pub(super) lines: Mutex<Vec<String>>,
 }
 
 impl TextRecorder {

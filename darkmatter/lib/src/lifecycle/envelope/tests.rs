@@ -29,13 +29,29 @@ fn coded() -> DiagnosticSnapshot {
     }
 }
 
-#[test]
-fn a_suffix_survives_clamping() {
-    let long = "x".repeat(CONCISE_MESSAGE_MAX_CHARS * 2);
-    let message = concise_message_with_suffix(&long, " (attempt 2)");
+/// `(input, expected)` pairs covering every hygiene rule: escapes, every line
+/// boundary, stray controls, empty and blank input, and interior spacing.
+const HYGIENE: &[(&str, &str)] = &[
+    ("\u{1b}[1;31mred\u{1b}[0m text", "red text"),
+    ("see \u{1b}]8;;https://example.com\u{7}the docs\u{1b}]8;;\u{7} now", "see the docs now"),
+    ("first\nsecond", "first second"),
+    ("first\r\nsecond", "first second"),
+    ("first\tsecond", "first second"),
+    ("bell\u{7}here", "bell here"),
+    ("line\u{2028}separator", "line separator"),
+    ("paragraph\u{2029}separator", "paragraph separator"),
+    ("next\u{85}line", "next line"),
+    ("", ""),
+    (" \n\t\r\n  ", ""),
+    ("interior  double  spaces", "interior  double  spaces"),
+    ("  padded\n  lines  \n", "padded lines"),
+];
 
-    assert_eq!(message.chars().count(), CONCISE_MESSAGE_MAX_CHARS);
-    assert!(message.ends_with("… (attempt 2)"), "{message}");
+#[test]
+fn hygiene_table() {
+    for (input, expected) in HYGIENE {
+        assert_eq!(concise_message(input), *expected, "input {input:?}");
+    }
 }
 
 #[test]
@@ -44,6 +60,40 @@ fn concise_message_is_idempotent() {
 
     assert_eq!(once, "red line");
     assert_eq!(concise_message(&once), once);
+    for (input, _) in HYGIENE {
+        let once = concise_message(input);
+        assert_eq!(concise_message(&once), once, "input {input:?}");
+    }
+}
+
+#[test]
+fn a_long_base_and_suffix_stay_intact() {
+    let long = "x".repeat(600);
+
+    let message = concise_message_with_suffix(&long, " (attempt 2)");
+
+    assert_eq!(message, format!("{long} (attempt 2)"));
+    assert!(!message.contains('…'), "{message}");
+}
+
+#[test]
+fn lengths_around_the_old_limit_are_unchanged() {
+    let mixed: String = "path/段落/🦀 ".chars().cycle().take(2_000).collect::<String>().trim_end().to_string();
+    let mut inputs: Vec<String> = [239, 240, 241].iter().map(|len| "a".repeat(*len)).collect();
+    inputs.push(mixed);
+
+    for input in &inputs {
+        let message = concise_message(input);
+        assert_eq!(message, *input);
+        assert_eq!(message.chars().count(), input.chars().count());
+    }
+}
+
+#[test]
+fn the_suffix_is_normalized_too() {
+    let message = concise_message_with_suffix("base", " (attempt \u{1b}[31m2\u{1b}[0m\n)");
+
+    assert_eq!(message, "base (attempt 2 )");
 }
 
 #[test]

@@ -5,7 +5,9 @@ use super::super::super::types::{AuthoredSpan, MarkdownError, MarkdownResult};
 use super::super::context::effective_state as state;
 use super::super::body_origin::{BodyOrigin, BodyProvenance, DataRanges, PendingRead, PendingReads, ScopeRanges};
 use super::super::directive_targets::{DirectiveTargetRewrite, rewrite_directive_targets};
+use super::super::context::options::ProseInterpolation;
 use super::super::interpolation;
+use super::super::interpolation::active_inputs::{active_input_ranges, intersects_active};
 use super::super::shell_expansion;
 use super::super::expression::{
     BindingView, EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding,
@@ -30,6 +32,10 @@ use tracing::debug;
 ///
 /// The body is scanned once: text an expression or literal inserts, like any
 /// data an earlier stage inserted, is never scanned again.
+///
+/// A child included with `interpolate=false` evaluates only its directive
+/// inputs ([`active_input_ranges`]); its prose, code blocks included, keeps
+/// every `{{ … }}` and `{{{ … }}}` as written.
 ///
 /// A span that cannot be parsed or evaluated fails the stage regardless of
 /// `ComposeOptions::fail_fast`, and the body is left unrewritten. Only the
@@ -59,7 +65,11 @@ pub(crate) fn run_stage(
 ) -> MarkdownResult<usize> {
     use interpolation::{Evaluator, ScanMode};
 
-    let scan_mode = if resolve_interpolate_code_blocks(markdown, options) {
+    // Under an `interpolate=false` inclusion only directive inputs evaluate,
+    // and code blocks are prose: `interpolate_code_blocks` cannot re-enable
+    // them.
+    let prose_suppressed = options.prose_interpolation == ProseInterpolation::DisabledByInclusion;
+    let scan_mode = if !prose_suppressed && resolve_interpolate_code_blocks(markdown, options) {
         ScanMode::Plain
     } else {
         ScanMode::MarkdownAware
@@ -133,7 +143,17 @@ pub(crate) fn run_stage(
         }
         !late
     };
-    let select: interpolation::rewrite::SpanSelection<'_> = floor.map(|_| &defer as _);
+    // A declined span is never parsed, evaluated, or reported, and a declined
+    // `{{{ … }}}` literal keeps its three braces.
+    let active = prose_suppressed.then(|| active_input_ranges(&targets.output, Some(&data)));
+    let selected = |span: std::ops::Range<usize>, source: Option<&str>| {
+        if active.as_ref().is_some_and(|active| !intersects_active(active, &span)) {
+            return false;
+        }
+        floor.is_none() || defer(span, source)
+    };
+    let select: interpolation::rewrite::SpanSelection<'_> =
+        (prose_suppressed || floor.is_some()).then_some(&selected as _);
     let result = rewrite_body(
         BodyRewrite { markdown, state, schemas, options, document: &document, runtime, scan_mode },
         &targets.output,

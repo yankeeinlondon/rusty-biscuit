@@ -44,7 +44,7 @@ fn yaml(text: &str) -> Value {
     serde_yaml_ng::from_str(text).unwrap_or_else(|error| panic!("fixture is YAML: {error}\n{text}"))
 }
 
-fn parse(frontmatter: &Value) -> Result<LifecycleConfig, LifecycleError> {
+fn parse(frontmatter: &Value) -> Result<LifecycleConfig, Box<LifecycleError>> {
     let registry = EventRegistry::md();
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
@@ -53,7 +53,7 @@ fn parse(frontmatter: &Value) -> Result<LifecycleConfig, LifecycleError> {
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: &registry,
     };
-    parse_lifecycle_config_with(frontmatter, Path::new(SOURCE), &options)
+    parse_lifecycle_config_with(frontmatter, Path::new(SOURCE), &options).map_err(Box::new)
 }
 
 /// Every action of `signal`'s stack, through both branches.
@@ -87,7 +87,7 @@ struct Refusal {
 fn refusal(frontmatter: &Value) -> Refusal {
     let error = parse(frontmatter).expect_err(&format!("{frontmatter} is refused"));
     let text = error.to_string();
-    let (variant, source_path, property) = match &error {
+    let (variant, source_path, property) = match &*error {
         LifecycleError::LifecycleInvalidArgs { source_path, property, .. } => ("InvalidArgs", source_path, property),
         LifecycleError::LifecycleWrongArity { source_path, property, .. } => ("WrongArity", source_path, property),
         LifecycleError::LifecycleActionInvalidLongForm { source_path, property, .. } => {
@@ -401,7 +401,7 @@ fn no_expression_function_or_side_effect_is_named_like_a_lifecycle_only_verb() {
 #[test]
 fn a_misspelled_edit_suggests_edit() {
     let refused = parse(&json!({ "composed": [{ "edti": "a.md" }] })).expect_err("unknown verb");
-    let LifecycleError::LifecycleUnknownVerb { verb, property, rewrite, .. } = &refused else {
+    let LifecycleError::LifecycleUnknownVerb { verb, property, rewrite, .. } = &*refused else {
         panic!("expected an unknown verb, got {refused:?}");
     };
     assert_eq!((verb.as_str(), property.as_str()), ("edti", "composed[0].edti"));

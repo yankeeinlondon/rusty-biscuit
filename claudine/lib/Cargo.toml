@@ -118,24 +118,14 @@ shell-words = "1"
 strum = { version = "0.28", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
-# Process-group termination for task shell commands: `kill(-pgid, …)` is the
-# only way to reach descendants a command backgrounded (see
-# `composition/sequence/task/shell.rs`).
+# The `SIGINT` a foreground lifecycle command can end by, in
+# `composition/sequence/task/shell.rs`, and process checks in tests.
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-# Job Object ownership of a task shell command's process tree, mirroring the
-# CLI wrap path. No `Win32_System_Console`: this path terminates the Job
-# directly and sends no console control events.
-windows = { version = "0.62", features = [
-    "Win32_Foundation",
-    "Win32_System_JobObjects",
-    "Win32_System_Threading",
-    # Thread enumeration for the suspended-spawn → Job-assign → resume
-    # sequence: std exposes no thread handle, so the initial thread is found
-    # via a Toolhelp snapshot (see `composition/sequence/task/shell.rs`).
-    "Win32_System_Diagnostics_ToolHelp",
-] }
+# The Win32 error codes `config/atomic.rs` matches when a locked or missing
+# file refuses a write. Process-tree ownership is Sniff's.
+windows = { version = "0.62", features = ["Win32_Foundation"] }
 
 [dev-dependencies]
 # The setup handshake's interrupted-transfer test fails a replacement through

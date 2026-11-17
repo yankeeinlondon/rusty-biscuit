@@ -56,6 +56,15 @@ A lifecycle [`edit`](../topics/lifecycle/index.md#editing-a-file-edit) action
 chooses its editor the same way, so it never picks a non-blocking editor
 either. It can also require a terminal or a GUI editor with its `gui` option.
 
+The two differ in how they run the editor. `md edit` starts it in `md`'s own
+process group and simply waits, so a terminal editor uses the terminal as
+`md` does and nothing has to be handed over. A lifecycle `edit` owns the
+editor's process tree so that cancelling the run can stop it; on Linux and
+macOS that puts a terminal editor in a group of its own, and `md` lends it the
+terminal's foreground for the edit (see
+[Cancellation](../topics/lifecycle/index.md#cancellation) and
+[Process trees](../../../sniff/docs/topics/process-trees.md#handing-the-terminal-to-an-interactive-child)).
+
 ## Creating a file
 
 When the reference matches nothing, the file is created at the first place the

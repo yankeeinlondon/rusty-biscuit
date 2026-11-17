@@ -51,9 +51,24 @@ impl DeferredCapabilities {
 
     /// Scans both authored frontmatter values and the document body.
     pub fn for_document(document: &crate::markdown::Markdown) -> Self {
+        Self::for_document_with(document, true)
+    }
+
+    /// [`for_document`](Self::for_document) for a document composed with its
+    /// prose interpolation `prose_enabled` or not: a child included with
+    /// `interpolate=false` plans only what its frontmatter and directive
+    /// inputs can reach.
+    pub(crate) fn for_document_with(document: &crate::markdown::Markdown, prose_enabled: bool) -> Self {
         let frontmatter =
             serde_json::to_string(document.frontmatter().as_map()).unwrap_or_default();
-        Self::for_content(&format!("{frontmatter}\n{}", document.content()))
+        let body = match prose_enabled {
+            true => std::borrow::Cow::Borrowed(document.content()),
+            false => std::borrow::Cow::Owned(crate::markdown::compose::interpolation::active_inputs::mask_prose(
+                document.content(),
+                None,
+            )),
+        };
+        Self::for_content(&format!("{frontmatter}\n{body}"))
     }
 
     /// The cataloged `ctx` keys a `current.<key>` reference could refresh.
@@ -206,6 +221,23 @@ mod tests {
         let planned =
             DeferredCapabilities::for_content("{{ false ? current.branch : current.os }}");
         assert_eq!(keys(&planned), ["branch", "os"]);
+    }
+
+    #[test]
+    fn suppressed_prose_plans_only_frontmatter_and_directive_inputs() {
+        let document: crate::markdown::Markdown = "---\nbranch: '{{ current.branch }}'\n---\n\
+             Probe {{ ping(\"10.1.2.3\") }} on {{ current.os }}.\n\
+             ::block when=\"ping_under('10.1.2.4', 100)\"\nx\n::end-block\n"
+            .into();
+
+        let suppressed = DeferredCapabilities::for_document_with(&document, false);
+        assert_eq!(keys(&suppressed), ["branch"]);
+        assert_eq!(suppressed.functions().collect::<Vec<_>>(), ["ping_under"]);
+
+        let normal = DeferredCapabilities::for_document_with(&document, true);
+        assert_eq!(normal, DeferredCapabilities::for_document(&document));
+        assert_eq!(keys(&normal), ["branch", "os"]);
+        assert_eq!(normal.functions().collect::<Vec<_>>(), ["ping", "ping_under"]);
     }
 
     #[test]

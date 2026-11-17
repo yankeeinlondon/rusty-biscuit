@@ -1542,8 +1542,12 @@ Review the current changes.
 
 A `side_effect` task resolves file-touching effects relative to the document
 that authored the task. An externalized `task:` or `group:` file therefore
-uses its own directory and repository, even when referenced from another
-repository.
+resolves relative paths from its own directory, even when referenced from
+another repository, while every write must still stay inside the working
+tree Claudine was launched in (see
+[Where file actions write](./lifecycle.md#where-file-actions-write)). A
+shared task file outside your project writes into it through an absolute
+path, never beside itself.
 
 ### Shell tasks
 
@@ -1561,6 +1565,23 @@ Every command gets a **30s** default timeout, overridable with `timeout:` as a
 duration (`45s`, `2m`) — a bare integer is rejected because the unit is part of
 the grammar, and `0s` is rejected rather than read as unbounded. A task passes
 when every command exits `0`. Stdout is concatenated in declaration order.
+
+Each command owns its process tree, so a timeout, a Ctrl-C, or a failing
+sibling also stops the background processes the command started. What that
+covers on each OS is described in
+[Process trees](../../../../sniff/docs/topics/process-trees.md).
+
+A task command is not interactive: its stdin is empty and its stdout is
+captured, so it never takes the terminal, and a Ctrl-C you type reaches
+Claudine, which stops the task. A command that must prompt belongs in a
+lifecycle `shell:` action instead, which runs on Claudine's terminal and holds
+its foreground while it runs (see
+[Shell Actions](lifecycle.md#shell-actions)):
+
+```yaml
+start:
+  - shell: "just commit"
+```
 
 Caller values (`key=value`, `--set`) are plain names to `shell:` commands and
 to authored step data, in the first task and in later ones, so

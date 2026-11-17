@@ -79,9 +79,18 @@ pages with the behavior.
   task, step guard) builds its `EffectEngine` with the request context's
   `launch_magic_scope().local_root()` (the working tree containing the
   launch directory, else that directory), so a prompt in a sibling library
-  can edit a `{{ ctx.cwd }}` path but not a file beside itself. A failure message is
-  clamped to one 240-character line (`concise_message`), so `md` puts the
-  reason before the target. Terminal-editor success is provable only in L2
+  can edit a `{{ ctx.cwd }}` path but not a file beside itself. The resolver
+  derives the document context from `inputs.file_resolution_context`, so a
+  host running a stack for another document (Claudine's referenced sequences
+  and groups) must pass that document's own context, keeping the launch
+  scope, or the reference fails as "does not contain the resolution source".
+  Failure messages are folded to one escape-free line (`concise_message`)
+  and never shortened, so `err.msg`, `DiagnosticSnapshot::message`, and
+  every report (`report_diagnostics::lifecycle_failure_diagnostics`,
+  `md compose`'s status line, Claudine's run and step errors) carry the same
+  complete text; delivery adapters (speech, messaging, notifications) fit it
+  to their channel. `edit` keeps its reason-first wording because it reads
+  better. Terminal-editor success is provable only in L2
   (`cli/tests/level2/level2_edit_action.rs`); L1 process tests use the fake
   editor installed as `code` (GUI, `--wait`) with `DISPLAY` set.
 - The editor seam is `darkmatter::editor::EditorService` (`edit(&EditRequest)
@@ -97,12 +106,18 @@ pages with the behavior.
   `EditError::Editor(EditorError::Cancelled)`, test with `is_cancelled()`).
   `EditOutcome::attempted` turns true at the first create or launch; the
   executor then calls `host.side_effect_attempted()` once so cached reads
-  are dropped. The service owns the editor's process tree
-  (`process_tree.rs`: own process group on Unix, kill-on-close Job Object on
-  Windows) and polls `EditRequest::cancelled` every 20 ms; cancellation
-  terminates the tree (Unix `SIGTERM`, `EDITOR_TERMINATE_GRACE`, then
-  `SIGKILL`) and reaps it before returning. Windows specifics are in the
-  `os` skill.
+  are dropped. The service owns the editor's process tree with Sniff's
+  `sniff::process::ProcessTree` (own process group on Unix, kill-on-close Job
+  Object assigned before the editor runs on Windows) and polls
+  `EditRequest::cancelled` every 20 ms; cancellation terminates the tree
+  (Unix `SIGTERM`, `EDITOR_TERMINATE_GRACE`, then `SIGKILL`) and reaps it
+  before returning. On Unix a terminal editor with inherited stdin also runs
+  under `sniff::process::ForegroundHandoff`, restored explicitly after the
+  editor is reaped (details in [library-surfaces.md](library-surfaces.md)). When Windows cannot release a finished editor's tree,
+  `EditOutcome::warning` carries the text and the executor passes it to
+  `LifecycleEffects::warn` once; the edit still succeeds. Contract:
+  [process trees](../../../sniff/docs/topics/process-trees.md); Windows
+  specifics are in the `os` skill.
 - `edit` is a lifecycle-only verb, never a catalog entry: schema projection
   (`hand_owner`) fails generation when a catalog function or effect is named
   `edit`. Its schema types (`edit-short`/`edit-long` in

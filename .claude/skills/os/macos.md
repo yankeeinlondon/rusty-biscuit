@@ -109,9 +109,9 @@ takes `git` from `PATH` pays on every call.
   group without the signal and survives. Repeat the group kill until it fails.
   A group that holds only zombies returns `EPERM` on macOS but `0` on Linux.
   So "repeat until it fails" ends on macOS and spins forever on Linux. This is
-  why Claudine's `ProcessTree` drop
-  (`claudine/lib/src/composition/sequence/task/shell.rs`) repeats the kill only
-  off Linux, with a time limit.
+  why the shared owner in `sniff/lib/src/process/tree/unix.rs` repeats the
+  kill only off Linux, with a time limit
+  ([process trees](../../../sniff/docs/topics/process-trees.md)).
 - The surviving child keeps whatever the group inherited. If it holds a
   test's stderr, nextest reports `LEAK-FAIL` after the test passed, even
   though every pid the test watched was reaped.
@@ -407,12 +407,17 @@ no longer watches files, so its user docs no longer describe fseventsd.
   skill's `installation.md` has the details. A fake wrapper in a fixture that
   models this stripping must `unset DYLD_FALLBACK_LIBRARY_PATH` explicitly,
   because a plain Bash passthrough can keep the variable on hosted macOS.
-- **CoreAudio client setup is serialized across processes.** The first
-  `AudioObjectGetPropertyData*` call initializes the HAL, about 0.75 s of
-  serial time each here (seven third-party HAL plug-ins): 1 process 1.1 s,
-  6 together 4.6 s each, with under 0.2 s of CPU apiece. Tests that enumerate
-  audio devices slow down by their count, not core count; keep them few
-  (sniff's `testing.md`).
+- **CoreAudio client setup lists the executable's directory.** The first
+  `AudioObjectGetPropertyData*` call initializes the HAL, and
+  `HALSystem::InitializeShell` calls `CFBundleGetMainBundle`, the same
+  main-bundle directory scan as CoreText's below. With 803,121 entries in
+  `target/debug/deps` (2026-11-16) that took a Sniff audio test 3.1 s alone
+  (most of it kernel time in `__getdirentries64`) and 6 s in a package run;
+  `CFProcessPath=/usr/bin/true` took it to 0.6-0.9 s. Sniff's live audio
+  tests get the `coretext-small-bundle` setup script and also run one at a
+  time in the `sniff-macos-coreaudio` group (sniff's `testing.md`). An
+  earlier note blamed the seven third-party HAL plug-ins; a `sample` of the
+  process does not support that.
 - **CoreText's first font enumeration lists the executable's directory.**
   `CTFontCollection` (fontique's system-font scan, so every Mermaid
   measurement in `biscuit-visualized`) registers the main bundle's fonts, and

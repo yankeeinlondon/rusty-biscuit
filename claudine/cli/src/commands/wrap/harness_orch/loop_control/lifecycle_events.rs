@@ -81,7 +81,7 @@ pub(super) fn execute_terminal_event(
                 err,
                 Some(&timing),
             );
-            guard.run_event_stack(signal, &ctx)
+            run_event_stack_reported(guard, signal, &ctx)
         };
         if let Some(StackControl::Error { reason }) = outcome.control.as_ref() {
             // The stack downgraded the run. Re-designate the already-recorded
@@ -174,7 +174,20 @@ pub(super) fn run_failure_event_for_downgrade(
         Some(err),
         Some(&timing),
     );
-    guard.run_event_stack(LifecycleSignal::Failure, &ctx)
+    run_event_stack_reported(guard, LifecycleSignal::Failure, &ctx)
+}
+
+/// Run `signal`'s stack through `guard`, warning about an action failure the
+/// run's error does not carry
+/// ([`warn_tolerated_action_error`](claudine::composition::lifecycle::report::warn_tolerated_action_error)).
+pub(super) fn run_event_stack_reported(
+    guard: &claudine::composition::LifecycleRunGuard<'_>,
+    signal: LifecycleSignal,
+    ctx: &claudine::composition::lifecycle::executor::StackExecutionContext<'_>,
+) -> LifecycleEventOutcome {
+    let outcome = guard.run_event_stack(signal, ctx);
+    claudine::composition::lifecycle::report::warn_tolerated_action_error(ctx.emitter, ctx.term, signal, &outcome);
+    outcome
 }
 
 /// Run one lifecycle event's stack, recording emission state in
@@ -214,7 +227,7 @@ pub(super) fn run_lifecycle_event(
         err,
         Some(&timing),
     );
-    guard.run_event_stack(signal, &ctx)
+    run_event_stack_reported(guard, signal, &ctx)
 }
 
 /// Build a stack context from a materialized prompt and guard-derived routes.

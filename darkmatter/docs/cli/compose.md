@@ -290,6 +290,12 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 
   A data output reports the same problems in `diagnostics`, with the document as `null`.
 
+- **An empty link target** (`[text]()` or `![alt]()`) only warns: the document composes, the link keeps its text, and stderr names the link and where it is. `--deny missing-hyperlinks` (or `--deny missing-image-refs` for an image, or `--deny all`) makes the warning fail the run with status 1. In a data output it is a `warning` diagnostic with code `dm.reference.missing_hyperlink` (or `dm.reference.missing_image`) and reason `no target`.
+
+  ```text
+  hyperlink `[Expression Engine]()` has no target (line 49, column 42)
+  ```
+
 - **`--allow` allowances** relax validation for specific categories. When all errors belong to allowed categories, compose proceeds normally: content goes to stdout, issues are reported on stderr, and the exit status is 0. If any errors remain in non-allowed categories, compose still blocks with exit status 1.
 
   ```bash
