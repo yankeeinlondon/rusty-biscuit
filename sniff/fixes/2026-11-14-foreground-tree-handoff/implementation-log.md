@@ -182,6 +182,29 @@ decisions_for_review:
     code also stops `initialize`, because shell actions cannot run in
     `initialize`. Any of these can be softened or removed if the reviewer
     prefers documenting only tested behavior.
+  - |-
+    Phase 4 fixed seven Windows-only compiler warnings in darkmatter-cli's
+    L1 tests, test code only. Four of the files (compose_edit_action.rs,
+    editor_service.rs, editor_support.rs, and the imports of
+    editor_launcher.rs) predate this fix and belong to the editor-backed edit
+    work. The plan did not ask for this. The fixes gate Unix-only imports
+    behind #[cfg(unix)], delete a Windows kill_pid that nothing on Windows
+    calls, and allow unused_mut on non-Unix targets for three `let mut`
+    bindings that only Unix-gated code pushes to. The alternative was to
+    record the warnings and leave them, which keeps this fix's diff to its own
+    scope but leaves a Windows -D warnings build of those tests red. To revert,
+    restore those four files from the Phase 3 commit.
+  - |-
+    The WSL2 rig (build-wsl) was declared on this host, but no WSL2 run was
+    attempted; the plan expected it to be undeclared. It shares a machine with
+    build-win, whose storage preflight refused both native Windows runs (32.7
+    GiB free of 50 GiB required). The os skill warns that the two hosts compete
+    for memory and disk. So this fix has no native Windows or WSL2 runtime
+    evidence and relies on the nightly CI cells for both. The alternative is
+    `just cross-check sniff --os wsl` (and the other packages) once that
+    machine has headroom, or overriding the Windows preflight, which the
+    recipe reserves for emergencies. Nothing needs redoing if the reviewer
+    wants that evidence; it is an extra run.
 source_files_during_phase_3:
   - sniff/cli/src/bin/foreground_handoff_fixture.rs
   - sniff/cli/Cargo.toml
@@ -217,31 +240,69 @@ skills_files_updated_during_phase_3:
   - .claude/skills/darkmatter/lifecycle.md
   - .claude/skills/os/SKILL.md
   - .claude/skills/os/windows.md
-message_to_agent: |-
-  Phase 3 is done; all four Wave 3 tasks are checked. New evidence:
-  sniff-detection-cli L2 `level2_foreground_handoff` (5 modes through the
-  `foreground_handoff_fixture` bin, test-fixtures only) and claudine-cli L2
-  `level2_lifecycle_foreground_handoff` (8 tests: typed C-c, SIGINT to
-  claudine, success/nonzero controls, nested claudine, structured chain,
-  background host, redirected stdin). `level2_lifecycle_ctrl_c_tmux` was
-  failing 4/6 before Phase 3 (typed keys now reach the foreground shell);
-  it passes 6/6 after the terminal_interrupt.rs fixture switched to the
-  test-fixtures in-process hold in lifecycle/effects.rs
-  (CLAUDINE_TEST_LIFECYCLE_HOLD). claudine's `just test-l3` now enables
-  test-fixtures; do not run L3 (focus). Running claudine `just test-l2` with a
-  filter exits 1 because its claudine-gen leg matches 0 tests and the
-  tmux backend proof then fails for that leg; read the claudine-cli summary
-  and its backend-proof line instead, or run the legs separately. The
-  untracked claudine/docs/topics/config-files.md and
-  claudine/docs/topics/schemas/schema-triggers.md were not created by this
-  fix (they appeared mid-session, likely the author's own work); leave them
-  alone and keep them out of this fix's file lists. Phase 4 still owns: full
-  L1 for darkmatter and claudine, the darkmatter edit L2 filters, the
-  Windows cross-compiles (`just check-windows` does not enable
-  test-fixtures, so also cargo-check sniff-detection-cli with
-  --features test-fixtures for x86_64-pc-windows-gnu), Linux runtime
-  evidence, and closing the record. build-win storage preflight refused
-  runtime runs in Phases 1-2.
+source_files_during_phase_4:
+  - darkmatter/cli/tests/l1/editor_launcher.rs
+  - darkmatter/cli/tests/l1/editor_support.rs
+  - darkmatter/cli/tests/l1/editor_service.rs
+  - darkmatter/cli/tests/l1/compose_edit_action.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/os/linux.md
+source_code:
+  - sniff/lib/src/process.rs
+  - sniff/lib/src/process/foreground.rs
+  - sniff/lib/src/process/foreground/tests.rs
+  - darkmatter/lib/src/editor/launch.rs
+  - darkmatter/lib/src/editor/launch/tests.rs
+  - darkmatter/cli/tests/l1/editor_launcher.rs
+  - claudine/lib/Cargo.toml
+  - claudine/lib/src/composition/sequence/task/shell.rs
+  - claudine/lib/src/composition/sequence/task/shell/lifecycle_tests.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/interrupt_stops.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+  - claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs
+  - sniff/cli/src/bin/foreground_handoff_fixture.rs
+  - sniff/cli/Cargo.toml
+  - sniff/cli/tests/level2/level2_foreground_handoff.rs
+  - sniff/cli/tests/level2/main.rs
+  - claudine/cli/tests/level2/level2_lifecycle_foreground_handoff.rs
+  - claudine/cli/tests/level2/main.rs
+  - claudine/cli/tests/common/terminal_interrupt.rs
+  - claudine/lib/src/composition/lifecycle/effects.rs
+  - claudine/lib/tests/l1/context_construction_guard.rs
+  - claudine/justfile
+  - darkmatter/cli/tests/l1/editor_support.rs
+  - darkmatter/cli/tests/l1/editor_service.rs
+  - darkmatter/cli/tests/l1/compose_edit_action.rs
+documentation:
+  - sniff/docs/topics/process-trees.md
+  - .claude/skills/sniff/SKILL.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/darkmatter/library-surfaces.md
+  - .claude/skills/os/windows.md
+  - sniff/docs/sniff-library-architecture.md
+  - sniff/README.md
+  - sniff/lib/README.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/docs/topics/signal-handling.md
+  - claudine/docs/topics/testing.md
+  - claudine/docs/use-skills/use-claudine/lifecycle.md
+  - darkmatter/docs/topics/lifecycle/index.md
+  - darkmatter/docs/topics/lifecycle/error-handling.md
+  - darkmatter/docs/cli/edit.md
+  - darkmatter/docs/dependencies.md
+  - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+  - .claude/skills/sniff/architecture.md
+  - .claude/skills/sniff/testing.md
+  - .claude/skills/darkmatter/lifecycle.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/linux.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-11-14-foreground-tree-handoff (4 phases)
@@ -617,3 +678,191 @@ message_to_agent: |-
   session. No agent of this fix created them. They were left untouched and
   are not listed in this phase's frontmatter.
 - Phase 3 tasks complete: all four Wave 3 checkboxes are checked.
+
+## Phase 4
+
+- Started 2026-11-16 with Phases 1–3 committed (HEAD `d33974e76`). The only
+  uncommitted file at the start was the author's
+  `claudine/docs/topics/schemas/schema-triggers.md`, which this fix does not
+  own; it was left untouched.
+- Phase 4 is validation only; it ran serially in this session with no
+  subagents, so each gate ran on an otherwise idle host (start load ≈ 7.6).
+- Full L1 on macOS (each area's `just test`, run serially):
+  - `cd sniff && just test`: 3646 passed, 34 skipped. The first run
+    recorded one slow test, `network::tests::test_detect_network_returns_info`,
+    at 8.5 s (load 7.6 → 18 on 16 cores). That test is one of the few that
+    deliberately make a live WAN-IP request. With the recipe's features it
+    took 2.2–2.3 s alone. A second full run passed with none at or above
+    5.0 s (2.9 s for that test), and `just slow-tests fresh` exits 0. It
+    was a network-latency outlier in code this fix does not touch, so no
+    change was made.
+  - `cd darkmatter && just test`: 17049 passed, 10 skipped, none slow.
+  - `cd claudine && just test`: 12261 passed, 15 skipped, none slow.
+- Focused L2 on macOS through detached tmux (`BISCUIT_TEST_REQUIRED_BACKENDS=tmux`):
+  - claudine-cli (run as its own leg, `just _test_l2 claudine-cli --features terminal-tests,test-fixtures …`,
+    to avoid the claudine-gen 0-test leg): 23/23 passed,
+    `backend-proof: tmux run=23 skip=0`. Breakdown:
+    `level2_lifecycle_foreground_handoff` 8, `level2_lifecycle_ctrl_c_tmux`
+    6, `level2_edit_interactive_capture` 7, `level2_edit_action` 2.
+  - sniff `just test-l2 level2_foreground_handoff`: 5/5, `tmux run=5 skip=0`.
+  - darkmatter `just test-l2 level2_edit_action`: 2/2 (darkmatter-cli),
+    `tmux run=2 skip=0`; the library and DMLS legs match 0 tests.
+  - No L3 was run, and no focus-enabling variable was set.
+- Lint: `just lint` is clean in sniff, darkmatter, and claudine. Also clean:
+  `cargo clippy -p sniff --all-targets -- -D warnings`,
+  `cargo clippy -p sniff-detection-cli --all-targets -- -D warnings`, and the
+  same with `--features test-fixtures`.
+- `just check-tier-coverage` for sniff, darkmatter, and claudine: 0 stranded.
+- Windows cross-compiles (x86_64-pc-windows-gnu, `RUSTC_WRAPPER=""`,
+  `target/windows-check`, `-Wa,-mbig-obj`; compile evidence only):
+  - `just check-windows` in sniff and in claudine: pass, no warnings.
+  - `cargo check -p sniff-detection-cli --features test-fixtures --bins --tests`:
+    pass.
+  - `cargo check -p darkmatter -p darkmatter-cli --tests`: passed, but the
+    darkmatter-cli `l1` test target had 7 Windows-only warnings. None came
+    from this fix's changes (Phase 2 added only a `#[cfg(unix)]` test and no
+    imports), but this fix's file `editor_launcher.rs` had three of them.
+    All 7 are fixed, test code only:
+    - `editor_launcher.rs`: the Unix-only imports (`Duration`/`Instant`,
+      `kill_pid`, `EDITOR_TERMINATE_GRACE`) are now `#[cfg(unix)]`.
+    - `editor_support.rs`: the Windows `kill_pid` was removed; nothing calls
+      it on Windows.
+    - `editor_service.rs` (2) and `compose_edit_action.rs` (1): a `let mut`
+      that only Unix-gated code pushes to now carries
+      `#[cfg_attr(not(unix), allow(unused_mut))]`.
+    - The re-check is warning-free. On macOS the touched tests (`just test
+      editor_launcher editor_service compose_edit_action editor_support`)
+      passed 38/38, none slow, and darkmatter `just lint` is clean.
+- Obsolete-implementation search (live source, docs, and skills outside
+  `fixes/`/`features/`):
+  - `holds_terminal_foreground` and `run_in_own_group`: no matches.
+  - `tcsetpgrp`/`TIOCSPGRP` in darkmatter or claudine: no matches.
+  - `tcsetattr`/`tcgetattr` remain only in the test PTY helper
+    `claudine/cli/tests/common/pty.rs`.
+  - "direct-child-only" survives only in `shell.rs` docs that say no such
+    degraded path exists.
+  - Foreground *detection* in `darkmatter/lib/src/editor/surface.rs`
+    (`tcgetpgrp == getpgrp`) is unrelated and was kept, as the plan asks.
+- Edit test files: `git diff 3e32c4a7c HEAD` (the commit before this fix's
+  first commit, `5bf7e9bc1`) shows no change to
+  `darkmatter/cli/tests/level2/level2_edit_action.rs`,
+  `claudine/cli/tests/level2/level2_edit_action.rs`, or
+  `claudine/cli/tests/level2/level2_edit_interactive_capture.rs`.
+- Runtime evidence on other OSes. All three rigs (`BUILD_LINUX`, `BUILD_WIN`,
+  `BUILD_WSL`) are declared on this host now; the plan expected only Linux.
+  Every run went through `just cross-check` / `scripts/cross-check.sh` (the
+  repository's standing-clone flow, as the task prompt requires), not a
+  hand-made tar copy. No source was edited on any host.
+  - **Linux (build-linux) L1**, canonical archive mode unless noted:
+    - sniff: 2644 passed, 32 skipped, none slow.
+    - sniff-detection-cli: 979 passed, 13 skipped, none slow.
+    - darkmatter-cli: 2606 passed, 85 skipped, none slow.
+    - claudine: 6749 passed, 5 skipped, none slow.
+    - claudine-cli: the first run failed to *link*
+      (`collect2: ld terminated with signal 9`); the host killed the linker
+      for memory, and SSH stopped answering meanwhile. The retry with
+      `--build-jobs 1` passed 5192, skipped 315, none slow. The os skill's
+      `linux.md` now records this for claudine-cli.
+    - darkmatter: the archive build was killed the same way on the `browser`,
+      `level2`, lib-test, and example links. `os/build-hosts.md` says not to
+      retry the archive, so it ran in plain nextest mode:
+      `--build-jobs 1 --features effects-instrumentation,work-counters --lib --test l1`.
+      That passed 12480, skipped 4, and printed no SLOW line. This mode has
+      no tier filter and records no receipt, so it is targeted Linux
+      evidence, not a CI cell.
+  - **Linux focused L2** (plain nextest through cross-check,
+    `BISCUIT_TEST_REQUIRED_BACKENDS=tmux` forwarded, `--build-jobs 1`):
+    - sniff-detection-cli `--features test-fixtures level2_foreground_handoff`:
+      5/5, about 0.5 s each. These are real runs: a skip takes about 0.02 s,
+      and the required backend turns a missing tmux into a panic.
+    - claudine-cli `--features terminal-tests,test-fixtures` with the four
+      filters: 23/23 (`…foreground_handoff` 8, `…ctrl_c_tmux` 6,
+      `…edit_interactive_capture` 7, `…edit_action` 2). None finished in
+      skip time.
+    - darkmatter-cli `--features terminal-tests,test-fixtures level2_edit_action`:
+      2/2, about 0.6 s each.
+  - **Native Windows (build-win): runtime evidence unavailable.**
+    `cross-check --os windows` for darkmatter-cli and sniff both stopped at
+    the build host's `_storage_preflight` before compiling: 32.7 GiB free,
+    50 GiB required, even after automatic Cargo reclaim. This is the same
+    refusal Phases 1–2 hit. The documented override is for emergencies only,
+    so it was not used. No test failed, so `os_failing` is not set. Native
+    Windows runtime coverage is left to the nightly CI cells; the
+    x86_64-pc-windows-gnu compiles above are compile evidence only.
+  - **WSL2 (build-wsl): not run.** It shares a machine with build-win, which
+    is short of storage, and the os skill warns that a WSL archive build
+    competes with that host for memory and disk. No WSL2 runtime evidence
+    exists for this fix; the nightly WSL2 CI cell remains responsible for it.
+    Linux results are not WSL2 evidence.
+- Closing record (the whole fix, Phases 1–4):
+  - **Shared API.** `sniff::process::ForegroundHandoff`
+    (`prepare(&mut Command)`, `is_active`, `restore`) is the only code in the
+    repository that moves the terminal foreground. It works alongside
+    `TreeConfig::process_group()` / `ProcessTree::attach`. The `/dev/tty`
+    descriptor and signal-mask choices are in the Phase 1 entry:
+    `O_NOCTTY` plus close-on-exec; `sigprocmask` in the `pre_exec` hook;
+    `pthread_sigmask` on the restoring thread only. The process-wide claim
+    flag is in decisions_for_review.
+  - **Changed callers.** Darkmatter's `editor/launch.rs` hands off only to
+    an owned terminal editor that inherits stdin. Claudine's exact-byte and
+    structured lifecycle commands (`sequence/task/shell.rs`) always own
+    their tree and hand off whenever Claudine holds the terminal. The former
+    foreground exception and its direct-child-only runner are deleted.
+  - **What changes for the keyboard.** While a lifecycle command or editor
+    holds the foreground, typed keys, typed Ctrl-C included, go to that
+    command, not to Claudine. A typed Ctrl-C that ends the command counts as
+    cancellation, and Claudine then reaps the command's whole tree. A
+    host-directed SIGINT to Claudine still cancels and reaps it. In-process
+    lifecycle work keeps the host's escalation ladder.
+  - **Test-only fixture correction.** The ctrl-c tmux fixture's
+    `trap '' INT` lifecycle shell would now receive the typed keys itself.
+    It was replaced by the `test-fixtures`-only in-process hold
+    (`CLAUDINE_TEST_LIFECYCLE_HOLD`). The test files' assertions are
+    unchanged.
+  - **Spec example correction.** The spec's illustrative
+    `initialize: shell` placement is not valid. Every doc and fixture uses
+    `start:` instead.
+  - Unrelated worktree state was kept as found: the author's modified
+    `claudine/docs/topics/schemas/schema-triggers.md`. The untracked
+    `claudine/docs/topics/config-files.md` no longer appears as untracked.
+  - Behavior-changing symbols' comments were reviewed in Phases 1–3. Phase 4
+    changed only test-only `cfg` gating, with no behavior change. Its one
+    removed function, the Windows `kill_pid`, had no doc comment.
+- **Concurrent edits by someone else.** From 16:18 on 2026-11-16, while the
+  Linux runs were in progress, files outside this fix were changed in the
+  working tree, most likely by the author:
+  - `darkmatter/cli/src/args/policy.rs`, `commands/compose.rs`,
+    `commands/compose/lifecycle.rs`, and `output/report.rs`;
+  - `darkmatter/cli/tests/l1/output_envelope.rs` and `policy_verbs.rs`;
+  - `darkmatter/lib/src/markdown/compose/report_diagnostics.rs`,
+    `reference/file_tree/model.rs`, and `reference/validate.rs`;
+  - five `darkmatter/docs/` pages;
+  - `claudine/docs/topics/config-files.md`.
+
+  None of them were touched, and none are listed in this phase's
+  frontmatter. Every macOS gate above, and this phase's own test edits
+  (15:03), came before 16:18, so those results describe this fix's tree
+  alone. Each `cross-check` ships the whole working tree, so the last Linux
+  L2 legs (about 16:10–16:38) may have included some of those in-progress
+  edits; they passed anyway. The gates were not rerun over someone else's
+  unfinished work.
+- Scope calculator over this phase's own files (`.claude/skills/os/linux.md`,
+  the four darkmatter-cli test files, plan, log, spec):
+  `packages: ['darkmatter-cli', 'test-toolkit', 'darkmatter']`,
+  `change_class: package`. The gates were therefore required, and they ran
+  (above). Dependent check: `cd tools && just test` passed 563, skipped 4,
+  none slow.
+- Requirement → test mapping for this phase's one code change:
+
+  | Change | Evidence |
+  |---|---|
+  | darkmatter-cli `l1` compiles warning-free for Windows | `cargo check -p darkmatter-cli --tests --target x86_64-pc-windows-gnu` (0 warnings; it was 7) |
+  | No change in behavior on Unix | `just test editor_launcher editor_service compose_edit_action editor_support` 38/38; darkmatter `just lint` clean; Linux darkmatter-cli L1 2606/2606 |
+
+  No file-format reader changed, so the input-robustness matrix does not
+  apply.
+- Skipped or unavailable: native Windows runtime (storage preflight), WSL2
+  runtime (not attempted), and L3 (never run; it takes window focus). No
+  test failed on any host.
+- Phase 4 tasks complete: both Wave 4 checkboxes are checked. Final state:
+  **implementation complete, ready for review**.

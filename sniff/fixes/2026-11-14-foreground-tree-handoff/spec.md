@@ -29,6 +29,8 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
 review_iterations: 0
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Own the tree of a command that holds the terminal

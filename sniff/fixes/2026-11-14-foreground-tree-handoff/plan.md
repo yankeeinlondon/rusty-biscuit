@@ -1,7 +1,7 @@
 ---
 total_phases: 4
 created: 2026-11-14
-phase: 4
+phase: 5
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -76,6 +76,69 @@ skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/lifecycle.md
 - .claude/skills/os/SKILL.md
 - .claude/skills/os/windows.md
+source_files_during_phase_4:
+- darkmatter/cli/tests/l1/editor_launcher.rs
+- darkmatter/cli/tests/l1/editor_support.rs
+- darkmatter/cli/tests/l1/editor_service.rs
+- darkmatter/cli/tests/l1/compose_edit_action.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/os/linux.md
+source_code:
+- sniff/lib/src/process.rs
+- sniff/lib/src/process/foreground.rs
+- sniff/lib/src/process/foreground/tests.rs
+- darkmatter/lib/src/editor/launch.rs
+- darkmatter/lib/src/editor/launch/tests.rs
+- darkmatter/cli/tests/l1/editor_launcher.rs
+- claudine/lib/Cargo.toml
+- claudine/lib/src/composition/sequence/task/shell.rs
+- claudine/lib/src/composition/sequence/task/shell/lifecycle_tests.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/interrupt_stops.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+- claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs
+- sniff/cli/src/bin/foreground_handoff_fixture.rs
+- sniff/cli/Cargo.toml
+- sniff/cli/tests/level2/level2_foreground_handoff.rs
+- sniff/cli/tests/level2/main.rs
+- claudine/cli/tests/level2/level2_lifecycle_foreground_handoff.rs
+- claudine/cli/tests/level2/main.rs
+- claudine/cli/tests/common/terminal_interrupt.rs
+- claudine/lib/src/composition/lifecycle/effects.rs
+- claudine/lib/tests/l1/context_construction_guard.rs
+- claudine/justfile
+- darkmatter/cli/tests/l1/editor_support.rs
+- darkmatter/cli/tests/l1/editor_service.rs
+- darkmatter/cli/tests/l1/compose_edit_action.rs
+documentation:
+- sniff/docs/topics/process-trees.md
+- .claude/skills/sniff/SKILL.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/os/windows.md
+- sniff/docs/sniff-library-architecture.md
+- sniff/README.md
+- sniff/lib/README.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/signal-handling.md
+- claudine/docs/topics/testing.md
+- claudine/docs/use-skills/use-claudine/lifecycle.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/cli/edit.md
+- darkmatter/docs/dependencies.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- .claude/skills/sniff/architecture.md
+- .claude/skills/sniff/testing.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/linux.md
+completed_phase: 4
+implemented: true
 ---
 
 # Shared Terminal Foreground Handoff Implementation Plan
@@ -507,7 +570,7 @@ the same terminal ownership contract. No format-reader behavior has changed.
 
 ### Wave 4: Integrated verification
 
-- [ ] **Run scoped gates**
+- [x] **Run scoped gates**
   - Run full L1 once after all changes with `just test` from `sniff/`,
     `darkmatter/`, and `claudine/`. These recipes use nextest and the area's
     declared features. Use their positional filters for earlier focused runs;
@@ -546,7 +609,7 @@ the same terminal ownership contract. No format-reader behavior has changed.
     for review with this evidence limitation stated explicitly, without a
     human gate between phases.
 
-- [ ] **Close implementation record**
+- [x] **Close implementation record**
   - Create `implementation-log.md` beside this plan. Record the shared API,
     changed callers, keyboard-delivery implications, test-only fixture
     correction, `/dev/tty` descriptor and signal-mask decisions, and the valid
