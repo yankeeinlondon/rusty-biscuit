@@ -14,10 +14,11 @@
   through `test-toolkit`'s `LockedAudioSpool` fixture while device-free tests
   inspect durable queued audio. Neither crate declares `fs4` itself.
 - `claudine-cli`'s `test-fixtures` feature also enables `test-toolkit` as an
-  optional dependency for the `claudine-argv-recorder` fixture binary
+  optional dependency for two fixture binaries: `claudine-argv-recorder`
   (`test_toolkit::argv_recorder`), a native program that records its argument
-  vector for the shell template tests. It adds no crate: `test-toolkit` is
-  already a dev dependency.
+  vector for the shell template tests, and `claudine-fake-editor`
+  (`test_toolkit::fake_editor`), a native fake editor that tests point
+  `EDITOR` at. It adds no crate: `test-toolkit` is already a dev dependency.
 - `claudine-gen` keeps its optional `terminal-tests` dependency on
   `test-toolkit` and also declares it as a dev dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. The dev entry adds

@@ -13,7 +13,7 @@
 
 use std::ffi::OsStr;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 use super::identity::OpportunityId;
 use crate::error::{ClaudineError, Result};
@@ -40,7 +40,8 @@ Claudine's existing runaway limits still apply.";
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SteeringConfig {
-    #[serde(default, skip_serializing_if = "AutomaticSteeringConfig::is_unset")]
+    /// `null` reads as unset, like an absent key.
+    #[serde(default, deserialize_with = "crate::config::wire::null_as_default", skip_serializing_if = "AutomaticSteeringConfig::is_unset")]
     pub automatic: AutomaticSteeringConfig,
 }
 
@@ -55,23 +56,20 @@ impl SteeringConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AutomaticSteeringConfig {
-    /// `None` when the key is absent, so the layer inherits. An explicit
-    /// `null` is an error rather than a second spelling of absent.
-    #[serde(default, deserialize_with = "present_bool", skip_serializing_if = "Option::is_none")]
+    /// `None` when the key is absent or `null`, so the layer inherits. The
+    /// user file's schema default makes the user's value `Some(true)` unless
+    /// it says otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 }
 
 impl AutomaticSteeringConfig {
-    /// Whether `enabled` is absent.
+    /// Whether `enabled` is unset.
     pub fn is_unset(&self) -> bool {
         self.enabled.is_none()
     }
 }
 
-/// Reads a key that is present as a boolean; `null` and other types fail.
-fn present_bool<'de, D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Option<bool>, D::Error> {
-    bool::deserialize(deserializer).map(Some)
-}
 
 /// Parses a [`AUTO_STEER_ENV`] value: trimmed, case-insensitive
 /// `true/false`, `1/0`, `yes/no`, or `on/off`.

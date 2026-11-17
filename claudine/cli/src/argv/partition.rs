@@ -51,6 +51,7 @@ use claudine::composition::{ArgumentsAfterFile, CallerArgument};
 use crate::args::Cli;
 use crate::commands::compose::ComposeArgs;
 use crate::commands::sequence::SequenceArgs;
+use crate::commands::wrap::WrapperArgs;
 
 use super::{COMPOSITION_SUBCOMMANDS, as_utf8, find_subcommand, looks_like_flag, looks_like_setter};
 
@@ -102,7 +103,7 @@ impl std::fmt::Display for PartitionError {
 impl std::error::Error for PartitionError {}
 
 /// How a flag token consumes (or does not consume) the following token.
-enum Ownership {
+pub(super) enum Ownership {
     /// Not a Claudine-owned flag.
     Unowned,
     /// Owned; entirely self-contained (`--flag`, `--flag=v`, `-abc`, `-mv`).
@@ -111,8 +112,9 @@ enum Ownership {
     ConsumesNext,
 }
 
-/// Claudine-owned option surface for the composition subcommands, derived
-/// from the clap command definitions.
+/// Claudine-owned option surface of a command, derived from the clap command
+/// definitions: [`Self::for_composition`] for the composition subcommands,
+/// [`Self::for_wrapper`] for the provider wrappers.
 pub(crate) struct OwnedFlags {
     value_flags: HashSet<String>,
     bool_flags: HashSet<String>,
@@ -129,19 +131,34 @@ impl OwnedFlags {
         };
         // Root globals (`--plain`, `--verbose`/`-v`, `--debug`, `--help`/`-h`,
         // `--version`) propagate onto every subcommand.
-        owned.absorb_command(&Cli::command());
+        owned.absorb_command(&Cli::command(), |_| true);
         owned.absorb_args::<ComposeArgs>();
         owned.absorb_args::<SequenceArgs>();
         owned
     }
 
-    fn absorb_args<A: Args>(&mut self) {
-        let cmd = A::augment_args(clap::Command::new("__argv_introspect"));
-        self.absorb_command(&cmd);
+    /// Build the owned surface of a provider wrapper (`claudine claude …`):
+    /// the root [`Cli`] globals (`--verbose`/`-v`, `--debug`, `--plain`) plus
+    /// every option [`WrapperArgs`] declares, hidden ones and `--help`/`-h`
+    /// included. Root options that are not global (`--version`) are not a
+    /// wrapper's, so they stay with the provider.
+    pub(crate) fn for_wrapper() -> Self {
+        let mut owned = Self {
+            value_flags: HashSet::new(),
+            bool_flags: HashSet::new(),
+        };
+        owned.absorb_command(&Cli::command(), clap::Arg::is_global_set);
+        owned.absorb_args::<WrapperArgs>();
+        owned
     }
 
-    fn absorb_command(&mut self, cmd: &clap::Command) {
-        for arg in cmd.get_arguments() {
+    fn absorb_args<A: Args>(&mut self) {
+        let cmd = A::augment_args(clap::Command::new("__argv_introspect"));
+        self.absorb_command(&cmd, |_| true);
+    }
+
+    fn absorb_command(&mut self, cmd: &clap::Command, include: impl Fn(&clap::Arg) -> bool) {
+        for arg in cmd.get_arguments().filter(|arg| include(arg)) {
             let has_flag_name = arg.get_long().is_some() || arg.get_short().is_some();
             if !has_flag_name {
                 continue;
@@ -180,6 +197,16 @@ impl OwnedFlags {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn value_flags_for_tests(&self) -> &HashSet<String> {
+        &self.value_flags
+    }
+
+    #[cfg(test)]
+    pub(super) fn bool_flags_for_tests(&self) -> &HashSet<String> {
+        &self.bool_flags
+    }
+
     fn is_value_flag(&self, flag: &str) -> bool {
         self.value_flags.contains(flag)
     }
@@ -195,7 +222,7 @@ impl OwnedFlags {
     }
 
     /// Classify a flag-shaped token against the owned surface.
-    fn classify(&self, token: &str) -> Ownership {
+    pub(super) fn classify(&self, token: &str) -> Ownership {
         if let Some(long_body) = token.strip_prefix("--") {
             let name = long_body.split('=').next().unwrap_or(long_body);
             let full = format!("--{name}");

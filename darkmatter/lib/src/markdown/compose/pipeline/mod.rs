@@ -125,9 +125,11 @@ impl Markdown {
             }
 
             if options.is_enabled(ComposeOperation::Interpolation) {
-                for entry in
-                    remote::discover_remote_urls_from_expressions(&self.content, &options.source)
-                {
+                for entry in remote::discover_remote_urls_from_expressions_with(
+                    &self.content,
+                    &options.source,
+                    options.prose_enabled(),
+                ) {
                     catalog.add(entry);
                 }
             }
@@ -416,9 +418,6 @@ impl Markdown {
         let mut provenance = prepare_frontmatter_for_compose(self, options);
         let mut deferred_keys = Vec::new();
         let mut provisional_keys = std::collections::HashSet::new();
-        // Every schema default either schema-validation pass inserts, so the
-        // later pass attributes a problem with one to its default.
-        let mut applied_defaults = Vec::new();
 
         // Caller file parameters are invocation-owned semantic inputs.
         // Project them from their captured origins before the
@@ -538,6 +537,10 @@ impl Markdown {
         // disk; the post-shell pass below reuses that registry instead of
         // re-walking it (F8). Matching is re-evaluated against the current
         // frontmatter in each pass regardless.
+        // Every default both passes insert: their verdicts tell a filled
+        // lifecycle flag from a written one by it, and the later pass
+        // attributes a problem with one to its default.
+        let mut filled_defaults = Vec::new();
         {
             let sv_start = perf.is_enabled().then(std::time::Instant::now);
             let schema_consumer = runtime
@@ -557,7 +560,7 @@ impl Markdown {
                 },
                 &schema_consumer,
                 report,
-                &mut applied_defaults,
+                &mut filled_defaults,
             )?;
             // A schema default is the schema's value, not authored text:
             // later stages never scan it for `{{ … }}` or `$( … )`.
@@ -713,7 +716,7 @@ impl Markdown {
                     },
                     &schema_consumer,
                     report,
-                    &mut applied_defaults,
+                    &mut filled_defaults,
                 )?;
                 for path in defaulted {
                     provenance.data_mut().mark(path);
@@ -731,6 +734,7 @@ impl Markdown {
                     options,
                     &prepared_schemas,
                     &fse_report.typed_keys,
+                    &filled_defaults,
                 )?;
             }
         }

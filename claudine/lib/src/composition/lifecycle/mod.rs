@@ -53,10 +53,12 @@ mod binding_checks;
 pub mod cancellation;
 pub mod context;
 pub mod control;
+pub mod editor;
 pub mod effects;
 pub mod executor;
 pub mod prep;
 pub mod registry;
+pub mod report;
 pub mod runtime;
 mod structured_shell;
 pub mod prewarm;
@@ -139,13 +141,17 @@ pub(crate) fn with_mapping_shape<'a>(
 
 /// The parse options of Claudine's lifecycle profile: Claudine's event
 /// registry, the embedded Playa effect catalog, and unknown verbs rejected
-/// because every verb must run.
+/// because every verb must run. `authored_values` is the authored
+/// counterpart of a schema-completed input
+/// ([`LifecycleParseOptions::authored_values`]).
 fn claudine_parse_options<'a>(
     authored: Option<&'a darkmatter::markdown::Frontmatter>,
+    authored_values: Option<&'a serde_json::Value>,
 ) -> LifecycleParseOptions<'a> {
     LifecycleParseOptions {
         is_known_effect: &is_known_effect,
         authored,
+        authored_values,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: claudine_registry(),
     }
@@ -164,7 +170,7 @@ pub const LIFECYCLE_ARTIFACT_PATH: &str = "claudine/schemas/globals.lifecycle.js
 /// `just regen-lifecycle-artifact` in `claudine/` rewrites it.
 pub fn lifecycle_artifact() -> String {
     darkmatter::lifecycle::host_profile::lifecycle_artifact(
-        &claudine_parse_options(None),
+        &claudine_parse_options(None, None),
         playa::SoundEffect::all_names(),
         crate::composition::schema::globals::HOST_CATALOG_TEXT,
     )
@@ -205,20 +211,25 @@ pub fn parse_lifecycle_config(
     frontmatter: &serde_json::Value,
     source_file: &Path,
 ) -> Result<LifecycleConfig, CompositionError> {
-    parse_lifecycle_config_with_orders(frontmatter, source_file, None)
+    parse_lifecycle_config_with_orders(frontmatter, source_file, None, None)
 }
 
 /// [`parse_lifecycle_config`] with the authored frontmatter, whose retained
-/// mapping order gives a `set:` mapping its authored key order.
+/// mapping order gives a `set:` mapping its authored key order, and, when
+/// `frontmatter` was completed by a schema, its authored values: the
+/// frontmatter as written, before the completion filled `no_error` defaults
+/// ([`LifecycleParseOptions::authored_values`]). `None` parses `frontmatter`
+/// as authored.
 pub(crate) fn parse_lifecycle_config_with_orders(
     frontmatter: &serde_json::Value,
     source_file: &Path,
     authored: Option<&darkmatter::markdown::Frontmatter>,
+    authored_values: Option<&serde_json::Value>,
 ) -> Result<LifecycleConfig, CompositionError> {
     darkmatter::lifecycle::parse_lifecycle_config_with(
         frontmatter,
         source_file,
-        &claudine_parse_options(authored),
+        &claudine_parse_options(authored, authored_values),
     )
     .map_err(CompositionError::from)
 }
@@ -241,7 +252,7 @@ pub(crate) fn parse_loop_gate(
         source_file,
         property,
         authored,
-        &claudine_parse_options(None),
+        &claudine_parse_options(None, None),
     )
     .map_err(CompositionError::from)
 }
@@ -264,6 +275,7 @@ pub fn parse_task_action_stack(
     parse_task_action_stack_with_order(
         signal,
         raw,
+        None,
         source_file,
         property,
         &darkmatter::lifecycle::AuthoredOrder::default(),
@@ -271,10 +283,13 @@ pub fn parse_task_action_stack(
 }
 
 /// [`parse_task_action_stack`] against the stack's authored key order, which
-/// is positioned at the `setup:`/`teardown:` value itself.
+/// is positioned at the `setup:`/`teardown:` value itself. `authored_value`
+/// is `raw`'s authored counterpart when a schema completed `raw`; `None`
+/// parses `raw` as authored.
 pub(crate) fn parse_task_action_stack_with_order(
     signal: LifecycleSignal,
     raw: &serde_json::Value,
+    authored_value: Option<&serde_json::Value>,
     source_file: &Path,
     property: &str,
     authored: &darkmatter::lifecycle::AuthoredOrder,
@@ -282,10 +297,11 @@ pub(crate) fn parse_task_action_stack_with_order(
     darkmatter::lifecycle::parse_task_action_stack_with(
         signal,
         raw,
+        authored_value,
         source_file,
         property,
         authored,
-        &claudine_parse_options(None),
+        &claudine_parse_options(None, None),
     )
     .map_err(CompositionError::from)
 }
@@ -305,13 +321,16 @@ pub fn parse_single_action(
     source_file: &Path,
     property: &str,
 ) -> Result<LifecycleAction, CompositionError> {
-    parse_single_action_with_order(signal, raw, source_file, property, None)
+    parse_single_action_with_order(signal, raw, None, source_file, property, None)
 }
 
 /// [`parse_single_action`] with a `set:` mapping's authored key order.
+/// `authored_value` is `raw`'s authored counterpart when a schema completed
+/// `raw`; `None` parses `raw` as authored.
 pub(crate) fn parse_single_action_with_order(
     signal: LifecycleSignal,
     raw: &serde_json::Value,
+    authored_value: Option<&serde_json::Value>,
     source_file: &Path,
     property: &str,
     authored_set_order: Option<&[String]>,
@@ -319,10 +338,11 @@ pub(crate) fn parse_single_action_with_order(
     darkmatter::lifecycle::parse_single_action_with(
         signal,
         raw,
+        authored_value,
         source_file,
         property,
         authored_set_order,
-        &claudine_parse_options(None),
+        &claudine_parse_options(None, None),
     )
     .map_err(CompositionError::from)
 }
@@ -359,7 +379,8 @@ pub trait LifecycleEmitter: Sync {
     ///
     /// `stderr` is the statusless channel: rich text and links are honored, but
     /// no `Status` decoration is applied. Status decoration is reserved for
-    /// [`emit_info`](Self::emit_info) and [`emit_warn`](Self::emit_warn).
+    /// [`emit_info`](Self::emit_info), [`emit_warn`](Self::emit_warn), and
+    /// [`emit_error`](Self::emit_error).
     fn emit_stderr(&self, signal: LifecycleSignal, text: &str, term: &Terminal);
 
     /// Dispatch a message via the configured messaging route.
@@ -396,6 +417,15 @@ pub trait LifecycleEmitter: Sync {
     /// owning lifecycle event.
     fn emit_warn(&self, text: &str, term: &Terminal) {
         let rendered = darkmatter::lifecycle::render_status_line(StatusState::Warning, text, term);
+        crate::render::console::write_stderr_line(&rendered);
+    }
+
+    /// Write a styled `Error` status line to stderr.
+    ///
+    /// The status state is fixed to [`StatusState::Error`] regardless of the
+    /// owning lifecycle event.
+    fn emit_error(&self, text: &str, term: &Terminal) {
+        let rendered = darkmatter::lifecycle::render_status_line(StatusState::Error, text, term);
         crate::render::console::write_stderr_line(&rendered);
     }
 

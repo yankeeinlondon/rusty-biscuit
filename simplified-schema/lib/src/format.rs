@@ -724,7 +724,7 @@ impl TypeDefinitionOptions {
                 }
             }
         }
-        if self.declared_required && !def.is_required() {
+        if self.declared_required && (!def.is_required() || def.admits_null()) {
             return Err(format!("{subject} must be declared `required`, with no alternative that admits null"));
         }
         if self.container && container_admission(def) == ContainerAdmission::NotContainer {

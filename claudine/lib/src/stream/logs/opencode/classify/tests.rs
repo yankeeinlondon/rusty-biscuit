@@ -1149,15 +1149,16 @@ use crate::stream::logs::opencode::events::*;
     }
 
     #[test]
-    fn non_json_error_tag_truncation_respects_char_boundaries() {
+    fn non_json_error_tag_is_kept_whole() {
         use std::collections::BTreeMap;
 
-        // 496 ASCII bytes, then a 4-byte emoji, then more ASCII. Byte 497
-        // falls inside the emoji, so a byte-index slice at 497 would panic.
+        // A long multi-byte tag: well past the old 500-byte cap, with an
+        // emoji straddling where a byte-index cut used to land.
         let prefix = "x".repeat(496);
         let error_tag = format!("{prefix}😀AI_APICallError: something went wrong");
         assert!(error_tag.len() > 500);
         let raw = error_tag.clone();
+        let tag_chars = error_tag.chars().count();
         let record = OpenCodeLogRecord {
             level: LogLevel::Error,
             timestamp: Utc::now(),
@@ -1172,8 +1173,8 @@ use crate::stream::logs::opencode::events::*;
         match classify(&record) {
             LogClassification::ApiFailure { message, .. } => {
                 assert!(message.starts_with(&prefix));
-                assert!(message.contains("😀"));
-                assert!(message.ends_with("..."));
+                assert!(message.ends_with("😀AI_APICallError: something went wrong"));
+                assert_eq!(message.chars().count(), tag_chars);
             }
             other => panic!("expected ApiFailure, got {other:?}"),
         }
@@ -1217,10 +1218,9 @@ use crate::stream::logs::opencode::events::*;
         }
     }
 
-    /// The cap counts chars, not bytes — a multi-byte payload must not panic
-    /// on a split codepoint.
+    /// A long multi-byte payload with no stack marker is kept whole.
     #[test]
-    fn error_headline_cap_respects_char_boundaries() {
+    fn error_headline_keeps_a_long_multibyte_payload_whole() {
         let payload = "😀".repeat(400);
         let record = parse_new_format_record(&format!(
             "timestamp=2026-07-28T00:36:54.753Z level=ERROR run=3d79f440 message=failed error={payload}"
@@ -1228,8 +1228,8 @@ use crate::stream::logs::opencode::events::*;
 
         match classify(&record) {
             LogClassification::UnclassifiedError { error, .. } => {
-                assert!(error.ends_with("..."), "expected truncation marker: {error}");
-                assert_eq!(error.chars().count(), 300);
+                assert_eq!(error, payload);
+                assert_eq!(error.chars().count(), 400);
             }
             other => panic!("expected UnclassifiedError, got {other:?}"),
         }

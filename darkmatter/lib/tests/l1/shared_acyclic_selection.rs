@@ -346,11 +346,13 @@ fn context_dependent_union_bodies_stay_inlined() {
     assert!(tolerates_empty("loose"));
     assert!(!tolerates_empty("strict"));
 
-    // A nullable union makes each use optional.
+    // A nullable union accepts a written `null` at each use, while a
+    // `required` use still demands the key.
     let nullable = resolved(&root, "maybe: [null, \"{ n: string }\"]\na: maybe(required)\nb: maybe\n");
     assert!(defs(&nullable).is_empty(), "{:?}", defs(&nullable));
-    assert!(nullable.json_schema.get("required").is_none());
+    assert_eq!(nullable.json_schema["required"], json!(["a"]));
     assert!(accepts(&nullable, json!({ "a": null, "b": { "n": "x" } })));
+    assert!(!accepts(&nullable, json!({ "b": null })));
 }
 
 #[test]

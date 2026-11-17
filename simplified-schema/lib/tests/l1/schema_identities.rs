@@ -68,7 +68,7 @@ fn layered_digest(digest: SchemaDigest) -> u64 {
 #[test]
 fn a_layered_identity_is_pinned_for_fixed_inputs() {
     assert_eq!(format!("{:016x}", layered_digest(fixed_identity())), "83df5d9770344f89");
-    assert_eq!(format!("{:016x}", layered_digest(fixed_projection())), "e89539b57da19d99");
+    assert_eq!(format!("{:016x}", layered_digest(fixed_projection())), "2da28dfe4c5dcd41");
     assert!(fixed_identity().judges_files, "a layer judging files makes the merge judge files");
 }
 

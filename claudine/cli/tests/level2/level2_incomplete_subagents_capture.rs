@@ -102,8 +102,8 @@ const HANGING_INDENT: &str = "  ";
 const LIST_WIDTH_LIMIT: u32 = PANE_COLS - 1;
 
 /// The bullet `IncompleteSubagents` configures. Only the full diagnostic uses
-/// it, so anchoring on it keeps the concise headline — which names the same
-/// tasks, truncated — from satisfying a list assertion.
+/// it, so anchoring on it keeps the one-line lifecycle headline, which names
+/// every task too, from satisfying a list assertion.
 const BULLET: &str = "\u{2022} ";
 
 /// Printed by the shell immediately before claudine runs.

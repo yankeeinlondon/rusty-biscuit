@@ -250,13 +250,12 @@ impl Shape {
 
 impl Shape {
     /// The shape of a property declaration: [`Self::of_type`], plus `null`
-    /// unless the shared presence rule makes the property required. A
-    /// required property is present whether written or supplied by its
-    /// `default(...)`, which composition inserts; an optional property's
-    /// default is never inserted, so it keeps `null`.
+    /// unless the property is required or has a non-null literal
+    /// `default(...)`. Composition fills a missing or `null` value with its
+    /// default, required or not, so such a property never reads as `null`.
     pub(super) fn from_definition(def: &PropertyDef) -> Self {
         let shape = Self::of_type(def);
-        if def.is_required() { shape } else { shape.with_null() }
+        if def.is_required() || has_non_null_default(def) { shape } else { shape.with_null() }
     }
 
     /// The values of the type `def` itself, with no optionality: its leaf
@@ -700,4 +699,19 @@ fn arm_differs(arm: &PropertyAtom, value: &Value) -> Option<PropertyAtom> {
         (TypeExpr::Primitive(SimplifiedType::Boolean), Value::Bool(flag)) => Some(literal_atom(Value::Bool(!flag))),
         _ => Some(arm.clone()),
     }
+}
+
+/// Whether one of `def`'s atoms declares a literal default other than `null`.
+/// A pending `{{ }}` default is not known yet, so it does not count.
+fn has_non_null_default(def: &PropertyDef) -> bool {
+    let atoms = match def {
+        PropertyDef::Single(atom) => std::slice::from_ref(atom),
+        PropertyDef::Union(atoms) => atoms.as_slice(),
+    };
+    atoms.iter().any(|atom| {
+        let constraints = if atom.is_array { &atom.array_constraints } else { &atom.constraints };
+        constraints
+            .iter()
+            .any(|constraint| matches!(constraint, Constraint::Default(value) if !value.is_null()))
+    })
 }

@@ -685,13 +685,10 @@ fn run_direct_wrap_pipeline_simulation(
     //    the profile for every provider.
     let _ = profile.apply_model(&mut child_args, &mut env_overrides, "test-model");
 
-    // 5. Output format (simulation of --format stream-json)
-    let _ = profile.apply_output_format(&mut child_args, OutputFormat::Stream);
-
-    // 6. apply_structured_stream
+    // 5. apply_structured_stream
     profile.apply_structured_stream(&mut child_args);
 
-    // 7. prompt_delivery (NEW CORRECT ORDER)
+    // 6. prompt_delivery (NEW CORRECT ORDER)
     let _ = profile
         .prompt_delivery(&child_args, prompt, true)
         .unwrap()
@@ -862,7 +859,7 @@ enum FirstMessage<'a> {
 }
 
 /// The child argv the direct wrapper builds for `claudine <provider> … --
-/// <tail>`: clap, the wrapper flag extractor, prompt extraction, the
+/// <tail>`: clap, the separator consumption, prompt extraction, the
 /// entrypoint, non-interactive flags, and prompt delivery, in the order
 /// `run_wrapper` applies them.
 fn direct_wrap_argv_with_tail(
@@ -902,15 +899,8 @@ fn direct_wrap_argv_with_tail(
         .unwrap_or_else(|err| panic!("{provider:?}: {raw:?} must parse: {err}"))
         .args;
     let mut child_args = parsed.passthrough.clone();
-    let extracted = crate::commands::wrap::flags::extract_wrapper_flags_from_passthrough_with_raw(
-        &mut child_args,
-        &raw,
-    )
-    .unwrap();
-    assert!(
-        !extracted.edit && !extracted.interactive,
-        "{provider:?}: {raw:?}: the tail must not yield wrapper flags"
-    );
+    crate::commands::wrap::flags::consume_passthrough_separator_with_raw(&mut child_args, &raw);
+    assert_eq!(parsed.interactive, interactive, "{provider:?}: {raw:?}: the tail must not yield wrapper flags");
     assert_eq!(parsed.edit, matches!(message, FirstMessage::Edited(_)));
 
     let p = profile(provider);

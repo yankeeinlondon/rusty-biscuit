@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use darkmatter::markdown::{Markdown, MarkdownError};
-use serde_json::{Value, json};
+use serde_json::json;
 use tempfile::TempDir;
 
 use crate::content_policy_fixtures::MIXED_POLICY_FRONTMATTER;
@@ -118,12 +118,12 @@ fn pending_templates_are_checked_after_resolution() {
     }
 }
 
-/// A document that declares `content_policy` itself keeps composition's rule
-/// for an absent optional document-declared property: it is materialized as
-/// `null`. The baseline's own declaration never does that (see
+/// A document that declares `content_policy` itself follows composition's
+/// rule for every declared property: an unwritten optional property gains no
+/// key, exactly as under the baseline's own declaration (see
 /// `a_document_without_a_policy_gains_no_policy_key`).
 #[test]
-fn a_document_declared_policy_keeps_optional_null_materialization() {
+fn a_document_declared_policy_is_not_written_when_absent() {
     let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let (_dir, root) = temp_root();
     std::fs::write(root.join("content-policy.yaml"), shipped).expect("write schema");
@@ -131,7 +131,7 @@ fn a_document_declared_policy_keeps_optional_null_materialization() {
 
     let (composed, _) = compose(&root, &format!("{declared}title: no policy\n"));
     let composed = composed.expect("an absent optional policy composes");
-    assert_eq!(composed.frontmatter().as_map().get("content_policy"), Some(&Value::Null));
+    assert!(!composed.frontmatter().as_map().contains_key("content_policy"), "{:?}", composed.frontmatter().as_map());
 
     let (composed, _) = compose(&root, &format!("{declared}content_policy: [Duration(3mo)]\n"));
     assert_eq!(problem_paths(&composed.expect_err("the document's type still applies")), ["/content_policy/0"]);

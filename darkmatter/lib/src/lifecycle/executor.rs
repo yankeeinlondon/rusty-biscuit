@@ -9,17 +9,17 @@
 //! ## Scope
 //!
 //! This is the **engine**. It dispatches communication, side-effect, shell,
-//! and expression-function actions through their routes and reports which
-//! lifecycle control action fired (if any) plus whether an unintentional
-//! action error must route the run to `failure`. It does **not** perform the
+//! expression-function, and `edit` actions through their routes and reports
+//! which lifecycle control action fired (if any) plus whether an
+//! unintentional action error must route the run to `failure`. It does **not** perform the
 //! runtime control flow those outcomes imply (`Skip` opt-out, `Proxy`
 //! hand-off, `Retry`/`Resume`/`Defer` re-entry) — that belongs to the host's
 //! runtime.
 //!
 //! What depends on the host's model is asked through seams: [`LifecycleHost`]
-//! (bindings, runtime-state writes, loops, `prep`, shell policy, cancellation,
-//! failure classification), [`ShellRunner`], and the [`LifecycleServices`]
-//! (communication and the diagnostic catalog).
+//! (bindings, runtime-state writes, loops, `prep`, shell policy, the editor
+//! service, cancellation, failure classification), [`ShellRunner`], and the
+//! [`LifecycleServices`] (communication and the diagnostic catalog).
 //!
 //! ## Error propagation
 //!
@@ -50,12 +50,15 @@ use std::error::Error as StdError;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use biscuit_file::{FileReference, FileReferenceKind};
+use biscuit_file::{FileReference, FileReferenceKind, PathIdentity};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::effects::{EffectEngine, effect_registration};
+use crate::editor::{EditError, EditRequest};
+use crate::effects::fs_write::{canonicalize_with_missing_tail, ensure_within};
+use crate::effects::{EffectEngine, EffectError, effect_registration};
+use crate::markdown::compose::context::merge::json_type_name;
 use crate::markdown::compose::expression::{
     BindingView, Expr, ExpressionError, ExpressionFinder, ResolutionContext, RuntimeBinding, evaluate, functions,
     is_truthy, scalar_string, unknown_function_error,
@@ -70,7 +73,7 @@ use crate::markdown::compose::{
 };
 
 use super::actions::{
-    CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, LifecycleNode,
+    CommunicationChannel, EditAction, LifecycleAction, LifecycleActionKind, LifecycleControlAction, LifecycleNode,
     RetryBackoff, RuntimeSet, ShellAction, WithOverlay, WithValue, is_known_side_effect,
 };
 use super::cancellation;
@@ -171,6 +174,30 @@ enum ActionStep {
     EvaluationErrored(LifecycleErrorInfo),
 }
 
+/// The side-effect verbs whose first operand is a Markdown file whose
+/// frontmatter they rewrite.
+const FRONTMATTER_VERBS: [&str; 7] = [
+    "set_frontmatter",
+    "merge_frontmatter",
+    "delete_frontmatter",
+    "increment_frontmatter",
+    "decrement_frontmatter",
+    "append_frontmatter",
+    "prepend_frontmatter",
+];
+
+/// Why a mutation target did not resolve to a local path.
+enum MutationTargetError {
+    Reference(biscuit_file::FileReferenceError),
+    /// The reference has no document-scoped candidate to create.
+    NoLocalTarget,
+    /// A recursive reference matched nothing; its search directory is never
+    /// a new filename.
+    UnmatchedRecursive,
+    /// The selected target lies outside the engine's mutation root.
+    Outside(EffectError),
+}
+
 /// Which layer an action error originated in.
 ///
 /// The stack loop routes the two to different outcome channels: an
@@ -180,10 +207,12 @@ enum ActionStep {
 /// policy.
 enum ActionFailure {
     /// An expression/binding raise: control-argument evaluation, message/shell
-    /// interpolation, or side-effect argument evaluation.
+    /// interpolation, or side-effect argument evaluation. An `edit` whose
+    /// target is not a non-blank string, or that a cancellation stopped, is
+    /// also one.
     Evaluation(LifecycleErrorInfo),
     /// A side-effect dispatch failure: shell non-zero, an effect-engine error,
-    /// or an invalid resolved effect name.
+    /// an invalid resolved effect name, or a failed `edit`.
     Dispatch(LifecycleErrorInfo),
 }
 
@@ -696,6 +725,7 @@ impl<'a> StackExecutor<'a> {
                     .map(|_| None)
                     .map_err(|error| ActionFailure::Evaluation(self.expr_error(func.function.clone(), error)))
             }
+            LifecycleActionKind::Edit(edit) => self.dispatch_edit(edit, property, working).map(|()| None),
             // Only a profile that ignores verbs produces one. It runs nothing,
             // and each occurrence reached says so once.
             LifecycleActionKind::Ignored(ignored) => {
@@ -1004,14 +1034,18 @@ impl<'a> StackExecutor<'a> {
         // the host stores it so the next preparation reads it back instead of
         // scanning it. `working` keeps it raw.
         let stored = |idx: usize| v(idx).map(|value| self.inputs.host.persisted_data(&value));
+        // A frontmatter verb's file operand is resolved once; the engine writes
+        // that target and the live-state mirror compares that same target.
+        let frontmatter_target = if FRONTMATTER_VERBS.contains(&verb) { Some(path(0)?) } else { None };
+        let target = || frontmatter_target.as_deref().unwrap_or_default();
         let result = match verb {
-            "set_frontmatter" => engine.set_frontmatter(&s(0)?, &s(1)?, stored(2)?),
-            "merge_frontmatter" => engine.merge_frontmatter(&s(0)?, stored(1)?),
-            "delete_frontmatter" => engine.delete_frontmatter(&s(0)?, &s(1)?),
-            "increment_frontmatter" => engine.increment_frontmatter(&s(0)?, &s(1)?),
-            "decrement_frontmatter" => engine.decrement_frontmatter(&s(0)?, &s(1)?),
-            "append_frontmatter" => engine.append_frontmatter(&s(0)?, &s(1)?, stored(2)?),
-            "prepend_frontmatter" => engine.prepend_frontmatter(&s(0)?, &s(1)?, stored(2)?),
+            "set_frontmatter" => engine.set_frontmatter(target(), &s(1)?, stored(2)?),
+            "merge_frontmatter" => engine.merge_frontmatter(target(), stored(1)?),
+            "delete_frontmatter" => engine.delete_frontmatter(target(), &s(1)?),
+            "increment_frontmatter" => engine.increment_frontmatter(target(), &s(1)?),
+            "decrement_frontmatter" => engine.decrement_frontmatter(target(), &s(1)?),
+            "append_frontmatter" => engine.append_frontmatter(target(), &s(1)?, stored(2)?),
+            "prepend_frontmatter" => engine.prepend_frontmatter(target(), &s(1)?, stored(2)?),
             "ensure_file" => {
                 if takes_content {
                     engine.ensure_file_with_content(&path(0)?, &s(1)?).map(Value::String)
@@ -1031,7 +1065,9 @@ impl<'a> StackExecutor<'a> {
         // over typed so the projection reads it, rather than pre-flattening it
         // here and handing the snapshot prose.
         let out = result.map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
-        self.mirror_frontmatter_mutation(verb, &values, working);
+        if let Some(target) = &frontmatter_target {
+            self.mirror_frontmatter_mutation(verb, Path::new(target), &values, working);
+        }
         Ok(out)
     }
 
@@ -1208,45 +1244,156 @@ impl<'a> StackExecutor<'a> {
         }
     }
 
-    /// Resolve a document-authored mutation target through the same captured
-    /// file-reference context used by composition.
-    ///
-    /// Existing targets follow ordinary document resolution precedence. For a
-    /// missing implicit-relative target, creation stays anchored to the
-    /// mutation root, preserving the effect engine's relative mutation policy;
-    /// other reference kinds use their first document-scoped candidate. A later
-    /// transclusion therefore resolves the same identity.
+    /// Resolve a side effect's document-authored mutation target; see
+    /// [`Self::mutation_target`]. Every failure is a dispatch failure of `verb`.
     fn resolve_effect_path(&self, verb: &str, raw: &str) -> Result<String, ActionFailure> {
-        let request_context = self.inputs.file_resolution_context;
         let reference = FileReference::new(raw).map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
-        let document_context = request_context.for_source(self.inputs.source_path);
+        match self.mutation_target(&reference) {
+            Ok(path) => Ok(path.to_string_lossy().into_owned()),
+            Err(MutationTargetError::Reference(error)) => Err(ActionFailure::Dispatch(self.error_or_action(verb, &error))),
+            Err(MutationTargetError::NoLocalTarget) => Err(ActionFailure::Dispatch(
+                self.action_failure(verb, format!("file reference `{raw}` has no local mutation target")),
+            )),
+            Err(MutationTargetError::UnmatchedRecursive) => Err(ActionFailure::Dispatch(self.action_failure(
+                verb,
+                format!("recursive file reference `{raw}` matched no file, and a search directory is never a new filename"),
+            ))),
+            Err(MutationTargetError::Outside(error)) => Err(ActionFailure::Dispatch(self.error_or_action(verb, &error))),
+        }
+    }
+
+    /// Resolve an `edit` target exactly as a side effect's mutation target,
+    /// except that a URL is refused before resolution, so nothing is fetched.
+    ///
+    /// ## Errors
+    ///
+    /// The [`EditError`] for a URL or a reference that does not resolve.
+    fn resolve_edit_target(&self, raw: &str) -> Result<PathBuf, EditError> {
+        let reference = FileReference::new(raw)?;
+        if reference.class().kind == FileReferenceKind::Url {
+            return Err(EditError::UrlRefused { reference: raw.to_string() });
+        }
+        match self.mutation_target(&reference) {
+            Ok(path) => Ok(path),
+            Err(MutationTargetError::Reference(error)) => Err(error.into()),
+            Err(MutationTargetError::NoLocalTarget | MutationTargetError::UnmatchedRecursive) => {
+                Err(EditError::NoLocalTarget { reference: raw.to_string() })
+            }
+            Err(MutationTargetError::Outside(error)) => Err(EditError::Containment(error)),
+        }
+    }
+
+    /// Select a document-authored mutation target by the file-reference
+    /// contract, then check it against the engine's mutation root.
+    ///
+    /// An existing file is the contract's lookup result; a missing target is
+    /// the contract's first candidate (beside the document for an implicit
+    /// relative path), so a later read of the same reference finds the file
+    /// just created. The mutation root is only the boundary: it never
+    /// supplies a base. The returned path is lexically clean and has passed
+    /// [`ensure_within`](crate::effects::fs_write::ensure_within) before
+    /// anything is opened, created, or written.
+    fn mutation_target(&self, reference: &FileReference) -> Result<PathBuf, MutationTargetError> {
+        let document_context = self.inputs.file_resolution_context.for_source(self.inputs.source_path);
         let resolved = reference
             .resolve_in_context(&document_context)
-            .map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
-        let path = match resolved {
+            .map_err(MutationTargetError::Reference)?;
+        let target = match resolved {
             Some(path) => path,
-            // A new implicit-relative target is created under the mutation root.
-            // Joined directly rather than through `request_context.for_cwd(..)`:
-            // that context keeps the document's repository boundary, and the
-            // mutation root (the launch workspace) lies outside it whenever the
-            // document comes from a different repository, e.g. a shared prompt
-            // library.
-            None if reference.class().kind == FileReferenceKind::ImplicitRelative => {
-                self.inputs.effect_engine.mutation_root().join(raw)
-            }
+            // A recursive reference's candidates are search roots (directories).
+            None if reference.class().recursive => return Err(MutationTargetError::UnmatchedRecursive),
             None => reference
                 .candidate_plan(&document_context)
-                .map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?
+                .map_err(MutationTargetError::Reference)?
                 .into_iter()
                 .next()
                 .map(|candidate| candidate.path().to_path_buf())
-                .ok_or_else(|| {
-                    ActionFailure::Dispatch(
-                        self.action_failure(verb, format!("file reference `{raw}` has no local mutation target")),
-                    )
-                })?,
+                .ok_or(MutationTargetError::NoLocalTarget)?,
         };
-        Ok(path.to_string_lossy().into_owned())
+        ensure_within(self.inputs.effect_engine.mutation_root(), &target).map_err(MutationTargetError::Outside)
+    }
+
+    /// Open an `edit` action's file in the host's editor and wait for it.
+    ///
+    /// A `file` value that is not a non-blank string, and a cancellation
+    /// (before the editor starts or while it is open), are evaluation
+    /// failures that `no_error` never suppresses. Every other failure
+    /// (resolution, eligibility, preparation, the editor itself, a host with
+    /// no editor) is a dispatch failure, reported to the host as
+    /// [`LifecycleRunFailure::EditFailed`] for it to classify. A warning the
+    /// editor service returns goes to the host's warning channel whatever the
+    /// result; it never turns a successful edit into a failure.
+    ///
+    /// The cancellation probe is [`cancellation::cause_with`], not
+    /// `requested_with`: terminal events run inside a cleanup scope, where
+    /// `requested_with` is always false, and an `edit` there must still run
+    /// on a healthy run but never after a cancellation.
+    fn dispatch_edit(&self, edit: &EditAction, property: &str, working: &SharedFrontmatter) -> Result<(), ActionFailure> {
+        let value = self
+            .evaluate_operand(&edit.file, working)
+            .map_err(|error| ActionFailure::Evaluation(self.expr_error("edit", error)))?;
+        let raw = match value {
+            Value::String(text) if !text.trim().is_empty() => text,
+            Value::String(_) => {
+                return Err(ActionFailure::Evaluation(self.action_failure("edit", "`edit` needs a non-blank path")));
+            }
+            other => {
+                return Err(ActionFailure::Evaluation(self.action_failure(
+                    "edit",
+                    format!("`edit` needs a string path, got {}", json_type_name(&other)),
+                )));
+            }
+        };
+        let target = self
+            .resolve_edit_target(&raw)
+            .map_err(|error| self.edit_failed(property, PathBuf::from(&raw), error))?;
+        let cancelled = || cancellation::cause_with(|| self.inputs.host.interrupted()).is_some();
+        if cancelled() {
+            return Err(ActionFailure::Evaluation(
+                self.action_failure("edit", "the run was cancelled, so `edit` did not open an editor"),
+            ));
+        }
+        let Some(service) = self.inputs.host.editor() else {
+            return Err(self.edit_failed(property, target, EditError::Unsupported));
+        };
+        let outcome = service.edit(&EditRequest {
+            target: &target,
+            mutation_root: self.inputs.effect_engine.mutation_root(),
+            create_new: edit.create_new,
+            gui: edit.gui,
+            cancelled: &cancelled,
+        });
+        // A failed edit may still have created or saved the file.
+        if outcome.attempted {
+            self.inputs.host.side_effect_attempted();
+        }
+        if let Some(text) = &outcome.warning {
+            self.effects.warn(text);
+        }
+        match outcome.result {
+            Err(error) if error.is_cancelled() => Err(self.edit_cancelled()),
+            _ if cancelled() => Err(self.edit_cancelled()),
+            Ok(()) => Ok(()),
+            Err(error) => Err(self.edit_failed(property, target, error)),
+        }
+    }
+
+    fn edit_cancelled(&self) -> ActionFailure {
+        ActionFailure::Evaluation(self.action_failure("edit", "the run was cancelled while an `edit` was open"))
+    }
+
+    fn edit_failed(&self, property: &str, target: PathBuf, error: EditError) -> ActionFailure {
+        ActionFailure::Dispatch(
+            self.inputs
+                .host
+                .failure(LifecycleRunFailure::EditFailed {
+                    source_path: self.inputs.source_path.to_path_buf(),
+                    property: property.to_string(),
+                    target,
+                    error: Box::new(error),
+                })
+                .at_property(property.to_string()),
+        )
     }
 
     /// Mirror a successful frontmatter-verb mutation onto the in-memory
@@ -1256,10 +1403,7 @@ impl<'a> StackExecutor<'a> {
     /// view consistent so a later action in the same stack resolves `{{ … }}`
     /// against the mutated value (just-in-time resolution). Mutations targeting
     /// any other file are not mirrored — they do not change this document.
-    fn mirror_frontmatter_mutation(&self, verb: &str, values: &[Value], working: &mut SharedFrontmatter) {
-        let Some(Value::String(target)) = values.first() else {
-            return;
-        };
+    fn mirror_frontmatter_mutation(&self, verb: &str, target: &Path, values: &[Value], working: &mut SharedFrontmatter) {
         if !self.targets_document(target) {
             return;
         }
@@ -1305,22 +1449,14 @@ impl<'a> StackExecutor<'a> {
         }
     }
 
-    /// Whether a side-effect target path refers to the document being processed.
-    ///
-    /// Resolves both the target and the document source against the effect
-    /// engine's mutation root (relative paths join it; absolute paths win) and
-    /// compares them lexically.
-    fn targets_document(&self, target: &str) -> bool {
-        let root = self.inputs.effect_engine.mutation_root();
-        let resolve = |raw: &Path| -> PathBuf {
-            if raw.is_absolute() {
-                lexical_normalize(raw)
-            } else {
-                lexical_normalize(&root.join(raw))
-            }
+    /// Whether a resolved side-effect target is the document being processed,
+    /// by filesystem identity: symlinked or `..` spellings of one file match.
+    fn targets_document(&self, target: &Path) -> bool {
+        let identity = |path: &Path| {
+            let canonical = canonicalize_with_missing_tail(path).unwrap_or_else(|| path.to_path_buf());
+            PathIdentity::new(&canonical)
         };
-        let target_clean = target.trim().trim_matches('"').trim_matches('\'');
-        resolve(Path::new(target_clean)) == resolve(self.inputs.source_path)
+        identity(target) == identity(self.inputs.source_path)
     }
 
     /// Invoke a read-only expression function for its result, logging it in
@@ -1889,23 +2025,6 @@ fn first_template_span(value: &Value, suffix: &mut String) -> Option<(String, St
         }),
         _ => None,
     }
-}
-
-/// Lexically normalize a path (resolve `.`/`..` components) without touching the
-/// filesystem, so two paths that name the same document compare equal.
-fn lexical_normalize(path: &Path) -> PathBuf {
-    use std::path::Component;
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

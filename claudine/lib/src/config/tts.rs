@@ -42,14 +42,10 @@ pub enum VoiceSelection {
 pub struct TtsConfigSettings {
     /// Which TTS provider to use (e.g., "say", "espeak", "elevenlabs").
     ///
-    /// Absent selects the default provider, exactly as `"tts": true` does;
-    /// an explicit `null` is rejected rather than read as absent. Resolved to
-    /// a `TtsProvider` variant at runtime in the dispatch runner.
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    /// Absent or `null` selects the default provider, exactly as
+    /// `"tts": true` does. Resolved to a `TtsProvider` variant at runtime in
+    /// the dispatch runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
 
     /// Optional voice selection (single ID or gendered aliases).
@@ -61,26 +57,11 @@ pub struct TtsConfigSettings {
     pub gender: Gender,
 
     /// Whether lifecycle speech is synthesized ahead of time into the audio
-    /// cache. Absent means on; `null` is rejected rather than read as absent.
-    ///
-    /// Kept as an `Option` so a load/save round trip never writes the default
-    /// into the user's file. Read it through [`TtsValue::prewarm_enabled`].
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    /// cache. A file read through the schema always has it: absent or `null`
+    /// takes the schema's `true`. `None` (a value built in code) means on as
+    /// well; read it through [`TtsValue::prewarm_enabled`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prewarm: Option<bool>,
-}
-
-/// Deserialize a field that may be omitted but, when written, must hold a
-/// value: `null` fails here instead of collapsing into `None` (absent).
-fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    T::deserialize(deserializer).map(Some)
 }
 
 // ============================================================================

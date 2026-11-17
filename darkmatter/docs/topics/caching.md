@@ -220,7 +220,8 @@ executed command attempt (a frontmatter `$( … )`, a `::shell` line, a shell
 block, or a lifecycle shell step, whether it succeeded or failed) and after
 every lifecycle side effect that ran (`append_line`, `append_jsonl`,
 `ensure_file`, `ensure_dir`, the frontmatter mutations, and `http_post`,
-whether it succeeded or failed), before the next expression evaluates. A
+whether it succeeded or failed) and after every lifecycle `edit` that created
+its file or launched an editor, before the next expression evaluates. A
 lifecycle step that did not run, such as one its `when:` guard turned off,
 leaves the memo alone. A shell command answered from
 shell command memoization ran nothing and leaves the memo alone. Emptying the

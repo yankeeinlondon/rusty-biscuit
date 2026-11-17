@@ -12,8 +12,8 @@
 #
 # Only keys Darkmatter's own `md` host does not own identify Claudine. The
 # shared events `initialize`, `cancelled`, and `finalize` belong to both
-# hosts, so they never identify Claudine on their own. The payload is empty:
-# identification adds no types.
+# hosts, so they never identify Claudine on their own. It has no `$schema`
+# payload: identification adds no types.
 kind: schema-trigger
 match:
     group:
@@ -62,4 +62,3 @@ match:
         - model: boolean(required)
         - model: object(required)
         - model: "unknown[](required)"
-$schema: {}

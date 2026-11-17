@@ -1,0 +1,15 @@
+# Frozen from the motivating `complete.yaml`: a root `$schema` declaring the
+# caller's `spec`, a derived `plan`, and a nested `planning` container whose
+# guarded `plan` step reads both. `with:` hands the derived `plan` to the
+# prompt document, which has its own values.
+kind: sequence
+$schema:
+    spec: file(required;match(**/*spec*.md);eager) -> the specification to complete
+plan: "{{ dirname(spec) + '/plan.md' }}"
+sequence:
+    - name: planning
+      sequence:
+          - name: plan
+            when: "!file_exists(plan)"
+            prompt: ./plan.md
+            with: { plan: "{{ plan }}" }

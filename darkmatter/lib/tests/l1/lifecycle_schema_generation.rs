@@ -244,6 +244,7 @@ fn with_function_named(name: &'static str) -> Vec<ExpressionFunctionDescriptor> 
 fn a_new_collision_with_a_hand_verb_or_reserved_key_fails_the_projection() {
     for (name, owner) in [
         ("stop", "a lifecycle control verb"),
+        ("edit", "a lifecycle-only verb"),
         ("info", "a communication channel"),
         ("shell", "the `shell` action"),
         ("set", "lifecycle `set`"),

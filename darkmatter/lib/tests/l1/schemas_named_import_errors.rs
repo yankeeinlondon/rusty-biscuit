@@ -86,8 +86,14 @@ fn an_import_target_that_cannot_supply_named_types_is_a_located_schema_document_
             "the `kind: schema` envelope does not satisfy its definition `simplified-schema/schemas/schema.yaml`: `/extra`",
         ),
         (
+            // A null `types` is absent, so the envelope has no usable carrier.
             "implicit null types",
             "kind: schema\ntypes:\n",
+            "the `kind: schema` envelope does not satisfy its definition `simplified-schema/schemas/schema.yaml`: `/$schema`",
+        ),
+        (
+            "empty types",
+            "kind: schema\ntypes: {}\n",
             "the `kind: schema` envelope does not satisfy its definition `simplified-schema/schemas/schema.yaml`: `/types`",
         ),
         (
@@ -182,18 +188,5 @@ fn an_invalid_sibling_entry_fails_an_import_of_a_valid_one() {
         let message = schema_document_message(label, &types, result);
 
         assert!(message.contains("bad"), "{label}: {message}");
-    }
-}
-
-/// An empty `types` mapping is a valid table that declares nothing, so the
-/// import names the missing type rather than treating the file as invalid.
-#[test]
-fn an_empty_types_mapping_reports_the_imported_name_as_unknown() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let (_, result) = import_from(dir.path(), "kind: schema\ntypes: {}\n");
-
-    match result {
-        Err(SchemaError::UnknownNamedType { name, .. }) => assert_eq!(name, "name"),
-        other => panic!("expected UnknownNamedType, got {:?}", other.map(|resolved| resolved.json_schema)),
     }
 }

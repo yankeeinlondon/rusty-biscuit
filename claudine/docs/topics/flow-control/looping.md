@@ -110,6 +110,8 @@ invalid loop definition (prompts/count.md): unknown `loop.untill` key (did you m
 Every loop configuration error names the file and the key, as above. These are errors, never silently ignored:
 
 - `null` for `loop` or any of its keys, and `loop: {}` (it has no condition);
+  the one exception is `no_error` beside the loop's loose lifecycle verbs,
+  where `null` is the same as leaving the flag out;
 - an empty `while`/`until`, and an empty `action: ""` (`action: []` is the explicit "no action");
 - both `while` and `until`, or both `action` and `actions`.
 
@@ -483,6 +485,7 @@ A loop has no fail-fast switch (see [Frontmatter shape](#frontmatter-shape)), an
 | An `error` in `success` that nothing recovers | The loop ends; the error names the pass and the reason. |
 | The pass cannot complete (for example, a refused `proxy`: missing target, cycle, hop limit) | The loop ends with that error, reported once. |
 | An explicit `error` in the gate | The loop owner fails with `LifecycleLoopGateFailed`, naming the pass; the condition is not read. |
+| An action in the gate fails (for example a write outside the mutation root) | Not a failure: a warning names the action's reason, and the loop goes on to its condition. `no_error: true` silences it. |
 | The condition cannot be parsed or evaluated, or an action cannot be staged | The loop owner fails with `LoopEvaluationFailed`, naming the `loop:` key and the pass; nothing of the action is committed. |
 | A container action is refused when writing runtime state | `LoopActionWriteRefused` names the action and the pass; the staged writes are not committed. |
 

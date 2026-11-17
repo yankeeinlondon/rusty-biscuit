@@ -64,6 +64,8 @@ use crate::markdown::compose::shell_expansion::{
 };
 use crate::markdown::compose::{ComposeContext, ComposeRequest, ContextBuildError};
 
+use crate::editor::EditorService;
+
 use super::context::{LifecycleErrorInfo, LifecycleTiming};
 use super::envelope::{DiagnosticCatalog, DiagnosticSnapshot};
 use super::error::LifecycleError;
@@ -103,12 +105,14 @@ pub fn registry() -> &'static Arc<EventRegistry> {
     REGISTRY.get_or_init(|| Arc::new(EventRegistry::md()))
 }
 
-/// The parse options of the `md` profile.
+/// The parse options of the `md` profile. `md` parses the document as
+/// written, so the parsed value is its own authored source.
 pub fn parse_options(authored: Option<&Frontmatter>) -> LifecycleParseOptions<'_> {
     LifecycleParseOptions {
         // `effect` is unprovided, so no effect name is ever checked.
         is_known_effect: &|_| false,
         authored,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::IgnoreUnprovided(UNPROVIDED_VERBS.into()),
         registry: registry(),
     }
@@ -434,6 +438,8 @@ pub struct MdStackHost<'a> {
     pub state: &'a MdRuntimeState,
     /// The cancellation probe.
     pub interrupted: &'a (dyn Fn() -> bool + Sync),
+    /// What `edit` opens its file through; `None` refuses every `edit`.
+    pub editor: Option<&'a dyn EditorService>,
 }
 
 impl LifecycleHost for MdStackHost<'_> {
@@ -535,6 +541,10 @@ impl LifecycleHost for MdStackHost<'_> {
         self.request.options().invalidate_data_memo();
     }
 
+    fn editor(&self) -> Option<&dyn EditorService> {
+        self.editor
+    }
+
     fn is_known_effect(&self, _name: &str) -> bool {
         false
     }
@@ -564,6 +574,17 @@ fn failure_message(failure: LifecycleRunFailure) -> (&'static str, String) {
         LifecycleRunFailure::PrepFailed { property, message, .. } => ("prep", format!("`{property}` failed: {message}")),
         LifecycleRunFailure::WithEvaluationFailed { property, path, message, .. } => {
             ("with", format!("`{property}.{path}` failed to evaluate: {message}"))
+        }
+        // The reason comes first because it reads better: most reasons
+        // already name the target, often more than once.
+        LifecycleRunFailure::EditFailed { property, target, error, .. } => {
+            let reason = error.to_string();
+            let target = target.display().to_string();
+            if reason.contains(&target) {
+                ("edit", format!("`{property}` could not edit the file: {reason}"))
+            } else {
+                ("edit", format!("`{property}` could not edit the file: {reason} ({target})"))
+            }
         }
         LifecycleRunFailure::CancellationRecovery { action, .. } => {
             ("cancelled", format!("cancellation cannot `{action}`"))
@@ -790,6 +811,9 @@ pub struct MdStackContext<'a> {
     pub timing: &'a LifecycleTiming,
     /// The cancellation probe.
     pub interrupted: &'a (dyn Fn() -> bool + Sync),
+    /// What `edit` opens its file through; `None` refuses every `edit` as
+    /// unsupported.
+    pub editor: Option<&'a dyn EditorService>,
 }
 
 /// Runs `event`'s stack of `config` in `context`.
@@ -805,6 +829,7 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         request: context.request,
         state: context.state,
         interrupted: context.interrupted,
+        editor: context.editor,
     };
     let shell_runner = MdShellRunner {
         permission: event.shells,

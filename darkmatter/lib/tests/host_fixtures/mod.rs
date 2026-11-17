@@ -38,7 +38,6 @@ match:
     group:
         - widget: object(required)
         - gadget: string(required)
-$schema: {}
 ";
 
 pub const WIDGET_TRIGGER: &str = "\
@@ -99,6 +98,7 @@ pub fn lifecycle_artifact_for(host: &str, catalog_text: &str) -> String {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: &registry,
     };
@@ -141,7 +141,6 @@ match:
     group:
         - sequence: \"unknown[](required)\"
         - start: \"unknown[](required)\"
-$schema: {}
 ";
 
 /// Types the relay's own keys, and `composed`/`failed` as `null` with a
@@ -198,6 +197,7 @@ pub fn relay_lifecycle_artifact() -> String {
     let options = LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: &registry,
     };

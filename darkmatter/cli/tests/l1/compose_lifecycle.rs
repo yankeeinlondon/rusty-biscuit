@@ -263,6 +263,37 @@ fn a_composed_error_runs_finalize_without_failed_and_exits_nonzero() {
 }
 
 #[test]
+fn a_long_composed_error_reaches_the_diagnostic_and_err_msg_whole() {
+    let fixture = CliProcessFixture::named("lifecycle-long-composed-error");
+    let text = format!("{}TAIL-MARKER", "long reason ".repeat(49));
+    assert!(text.chars().count() > 590, "the error must exceed the old 240-character limit");
+    let doc = fixture.write_file(
+        "cwd/doc.md",
+        &format!(
+            "---\ncomposed:\n  - error: \"{text}\"\nfinalize:\n  - info: \"event:finalize {{{{ err.msg }}}}\"\n---\nbody\n"
+        ),
+    );
+    let ran = compose(&fixture, &doc, &[]);
+    assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+    assert_eq!(events(&ran.stderr), ["finalize"], "{}", ran.stderr);
+
+    let finalize = ran
+        .stderr
+        .lines()
+        .find(|line| line.contains("event:finalize"))
+        .expect("finalize ran");
+    assert!(finalize.contains(&text), "err.msg was shortened: {finalize}");
+    assert!(!finalize.contains('…'), "{finalize}");
+    assert!(
+        ran.stderr
+            .lines()
+            .any(|line| !line.contains("event:finalize") && line.contains("TAIL-MARKER")),
+        "the terminal diagnostic lost the tail: {}",
+        ran.stderr
+    );
+}
+
+#[test]
 fn a_bare_error_in_composed_names_the_md_event() {
     let fixture = CliProcessFixture::named("lifecycle-bare-error");
     let doc = fixture.write_file(
@@ -556,4 +587,332 @@ fn a_provably_wrong_lifecycle_call_rejects_before_any_event() {
         "{}",
         ran.stderr
     );
+}
+
+// ── Flags follow conversion; a declared but unwritten key is not written ────
+
+/// A native number never converts to a Boolean flag, so the document fails
+/// before any effect.
+#[test]
+fn a_numeric_no_error_fails_before_any_effect() {
+    assert_refused_before_any_effect(
+        "lifecycle-numeric-no-error",
+        "composed:\n  - info: \"event:composed\"\n    no_error: 5\n",
+        "no_error",
+    );
+}
+
+/// Two authored placements of one flag conflict even when equal; a filled-in
+/// default never counts as one.
+#[test]
+fn two_authored_no_error_placements_fail_before_any_effect() {
+    assert_refused_before_any_effect(
+        "lifecycle-duplicate-no-error",
+        "composed:\n  - info: { text: \"event:composed\", no_error: true }\n    no_error: true\n",
+        "no_error",
+    );
+}
+
+/// Boolean-like text converts, a `null` flag counts as omitted, and the
+/// lifecycle reads the document's values: `title` is declared but unwritten,
+/// so it reads as `null` and no `title` key reaches the composed output.
+#[test]
+fn converted_and_null_flags_run_and_an_unwritten_declared_key_stays_absent() {
+    let fixture = CliProcessFixture::named("lifecycle-converted-flags");
+    let doc = fixture.write_file(
+        "cwd/doc.md",
+        "---\n$schema:\n  title: string\ncomposed:\n  - info: \"event:composed title-null={{ is_null(title) }}\"\n    no_error: \"yes\"\n\
+         \x20 - info: \"event:second\"\n    no_error: null\n---\nbody\n",
+    );
+    let ran = compose(&fixture, &doc, &["--frontmatter"]);
+    assert_eq!(ran.status, Some(0), "{}", ran.stderr);
+    assert_eq!(events(&ran.stderr), ["composed", "second"], "{}", ran.stderr);
+    assert!(ran.stderr.contains("title-null=true"), "{}", ran.stderr);
+    assert!(!ran.stdout.lines().any(|line| line.starts_with("title:")), "{}", ran.stdout);
+}
+
+// The mutation root is the caller's launch scope (the Git working tree
+// containing the launch directory, else that directory), never the composed
+// document's directory; relative targets still resolve against the document.
+
+#[test]
+fn a_prompt_in_a_subdirectory_writes_to_the_launch_root_through_a_parent_reference() {
+    let fixture = CliProcessFixture::named("lifecycle-root-launch-scope");
+    let doc = fixture.write_file(
+        "cwd/prompts/doc.md",
+        "---\ninitialize:\n  - ensure_file: [\"../root-note.md\", \"from-prompt\"]\n---\nbody\n",
+    );
+    let ran = compose(&fixture, &doc, &[]);
+    assert_eq!(ran.status, Some(0), "{}", ran.stderr);
+    let written = fixture.cwd().join("root-note.md");
+    assert_eq!(
+        std::fs::read_to_string(&written).expect("the launch root holds the target"),
+        "from-prompt"
+    );
+    assert!(!fixture.cwd().join("prompts/root-note.md").exists());
+}
+
+#[test]
+fn a_prompt_outside_the_launch_scope_cannot_write_beside_itself() {
+    let fixture = CliProcessFixture::named("lifecycle-root-foreign-prompt");
+    let doc = fixture.write_file(
+        "shared/doc.md",
+        "---\ninitialize:\n  - ensure_file: [\"beside.md\", \"from-prompt\"]\n---\nbody\n",
+    );
+    let ran = compose(&fixture, &doc, &["--output", "json"]);
+    assert_eq!(ran.status, Some(1), "{}", ran.stdout);
+    let envelope: serde_json::Value = serde_json::from_str(&ran.stdout).expect("one JSON envelope");
+    let message = envelope["diagnostics"][0]["message"].as_str().expect("a failure diagnostic");
+    let target = fixture.workspace_path().join("shared").join("beside.md");
+    let (named_target, named_root) = message
+        .strip_prefix("refusing to write outside the mutation root: ")
+        .and_then(|rest| rest.split_once(" (root: "))
+        .unwrap_or_else(|| panic!("a containment refusal: {message}"));
+    assert_eq!(named_target, target.display().to_string());
+    let root = biscuit_file::canonicalize_simplified(fixture.cwd()).expect("the launch directory exists");
+    assert_eq!(named_root, format!("{})", root.display()), "{message}");
+    assert!(envelope["document"].is_null(), "no document was written: {envelope}");
+    assert!(!fixture.workspace_path().join("shared/beside.md").exists());
+    assert!(!fixture.cwd().join("beside.md").exists());
+}
+
+#[test]
+fn a_launch_from_a_repository_subdirectory_bounds_writes_by_the_working_tree_top() {
+    let fixture = CliProcessFixture::named("lifecycle-root-working-tree");
+    if !fixture.initialize_repository() {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let launch = fixture.cwd().join("sub");
+    std::fs::create_dir_all(&launch).expect("launch directory");
+    let doc = fixture.write_file(
+        "cwd/prompts/doc.md",
+        "---\ninitialize:\n  - ensure_file: [\"../top-note.md\", \"from-prompt\"]\n---\nbody\n",
+    );
+    let output = fixture
+        .command_builder()
+        .host_path()
+        .ambient_context(&launch)
+        .build()
+        .arg("compose")
+        .arg(&doc)
+        .output()
+        .expect("md runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(
+        std::fs::read_to_string(fixture.cwd().join("top-note.md")).expect("the working tree top holds the target"),
+        "from-prompt"
+    );
+}
+
+/// `md compose <input>` launched from `launch` (a directory the test built),
+/// reading `stdin` when given.
+fn compose_from(fixture: &CliProcessFixture, launch: &Path, input: &Path, stdin: Option<&str>) -> Ran {
+    let mut command = fixture.command_builder().host_path().ambient_context(launch).build();
+    command.arg("compose").arg(input);
+    if let Some(text) = stdin {
+        command.write_stdin(text);
+    }
+    let output = command.output().expect("md runs");
+    Ran {
+        status: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+/// How a run that wrote `written` and left every `absent` path uncreated ended.
+enum Ended {
+    Succeeded,
+    /// Failed on a target outside the mutation root.
+    Refused,
+}
+
+/// The run's path expectations: it ended as `ended`, every `written` file
+/// holds exactly its text, and no `absent` path exists.
+fn assert_writes(ran: &Ran, ended: Ended, written: &[(&Path, &str)], absent: &[&Path]) {
+    match ended {
+        Ended::Succeeded => assert_eq!(ran.status, Some(0), "{}", ran.stderr),
+        Ended::Refused => {
+            assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+            assert!(ran.stderr.contains("outside the mutation root"), "{}", ran.stderr);
+        }
+    }
+    for (path, text) in written {
+        let found = std::fs::read_to_string(path).unwrap_or_else(|_| panic!("{} was written: {}", path.display(), ran.stderr));
+        assert_eq!(found, *text, "{}", path.display());
+    }
+    for path in absent {
+        assert!(!path.exists(), "{} must not exist", path.display());
+    }
+}
+
+/// A document whose `initialize` runs each action, in order.
+fn initializing(actions: &[String], body: &str) -> String {
+    let mut text = String::from("---\ninitialize:\n");
+    for action in actions {
+        text.push_str(&format!("  - {action}\n"));
+    }
+    text.push_str("---\n");
+    text.push_str(body);
+    text
+}
+
+/// `ensure_file: [<path>, <content>]`, quoted for YAML.
+fn ensure_file(path: impl AsRef<Path>, content: &str) -> String {
+    let path = serde_json::to_string(&path.as_ref().to_string_lossy()).expect("a path string");
+    format!("ensure_file: [{path}, \"{content}\"]")
+}
+
+#[test]
+fn the_specs_example_resolves_each_target_by_the_file_reference_contract() {
+    let fixture = CliProcessFixture::named("lifecycle-root-spec-example");
+    // The implicit relative path's second candidate is the repository root.
+    if !fixture.initialize_repository() {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let auth = fixture.write_file("cwd/specs/auth.md", "# Auth\nexisting\n");
+    let doc = fixture.write_file(
+        "cwd/prompts/doc.md",
+        &initializing(
+            &[
+                ensure_file("specs/auth.md", "# Auth"),
+                "append_line: [\"specs/auth.md\", \"reviewed\"]".to_string(),
+                ensure_file("specs/new.md", "# New"),
+            ],
+            "body\n",
+        ),
+    );
+
+    let ran = compose_from(&fixture, fixture.cwd(), &doc, None);
+
+    let created = fixture.cwd().join("prompts/specs/new.md");
+    assert_writes(
+        &ran,
+        Ended::Succeeded,
+        &[(&auth, "# Auth\nexisting\nreviewed\n"), (&created, "# New")],
+        &[&fixture.cwd().join("specs/new.md")],
+    );
+}
+
+#[test]
+fn stdin_input_resolves_relative_targets_against_the_launch_directory() {
+    let fixture = CliProcessFixture::named("lifecycle-root-stdin");
+    let launch = fixture.cwd().join("here");
+    std::fs::create_dir_all(&launch).expect("launch directory");
+    let document = initializing(&[ensure_file("notes.md", "x"), ensure_file("a/b/c.md", "nested")], "body\n");
+
+    let ran = compose_from(&fixture, &launch, Path::new("-"), Some(&document));
+
+    assert_writes(&ran, Ended::Succeeded, &[(&launch.join("notes.md"), "x"), (&launch.join("a/b/c.md"), "nested")], &[]);
+    assert!(ran.stdout.contains("body"), "{}", ran.stdout);
+    assert!(!fixture.cwd().join("notes.md").exists());
+}
+
+#[test]
+fn outside_any_repository_the_launch_directory_is_the_root() {
+    let fixture = CliProcessFixture::named("lifecycle-root-no-repository");
+    let inside = fixture.cwd().join("inside.md");
+    let sibling = fixture.workspace_path().join("sibling/beyond.md");
+    let doc = fixture.write_file("cwd/doc.md", &initializing(&[ensure_file(&inside, "in"), ensure_file(&sibling, "out")], "body\n"));
+
+    let ran = compose_from(&fixture, fixture.cwd(), &doc, None);
+
+    assert_writes(&ran, Ended::Refused, &[(&inside, "in")], &[&sibling, sibling.parent().unwrap()]);
+}
+
+#[test]
+fn a_launch_from_a_monorepo_package_is_bounded_by_the_repository_top_not_the_package() {
+    let fixture = CliProcessFixture::named("lifecycle-root-package");
+    // A one-member workspace is not detected as a monorepo; two are.
+    fixture.write_file("cwd/Cargo.toml", "[workspace]\nmembers = [\"area/pkg\", \"other\"]\n");
+    for (relative, name) in [("area/pkg", "pkg"), ("other", "other")] {
+        fixture.write_file(
+            format!("cwd/{relative}/Cargo.toml"),
+            &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+        );
+        fixture.write_file(format!("cwd/{relative}/src/lib.rs"), "");
+    }
+    if !fixture.initialize_repository() {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let package = fixture.cwd().join("area/pkg");
+    let beyond = fixture.workspace_path().join("beyond.md");
+    let doc = fixture.write_file(
+        "cwd/area/pkg/doc.md",
+        &initializing(
+            &[ensure_file("../../top-note.md", "from-package"), ensure_file(&beyond, "out")],
+            "body\n",
+        ),
+    );
+
+    let ran = compose_from(&fixture, &package, &doc, None);
+
+    assert_writes(&ran, Ended::Refused, &[(&fixture.cwd().join("top-note.md"), "from-package")], &[&beyond]);
+    // The launch really was a package launch.
+    let pinned = fixture.write_file("cwd/area/pkg/scope.md", "package={{ ctx.current_package }}\n");
+    let scope = compose_from(&fixture, &package, &pinned, None);
+    assert!(scope.stdout.contains("package=pkg"), "{}{}", scope.stdout, scope.stderr);
+}
+
+#[test]
+fn a_launch_inside_a_linked_worktree_is_bounded_by_that_worktree_never_the_main_checkout() {
+    let fixture = CliProcessFixture::named("lifecycle-root-worktree");
+    let main = fixture.cwd().join("main");
+    let linked = fixture.cwd().join("linked");
+    fixture.write_file("cwd/main/README.md", "main\n");
+    if !fixture.initialize_repository_at(&main) || !fixture.add_worktree(&main, &linked) {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let in_worktree = linked.join("in-worktree.md");
+    let in_main = main.join("in-main.md");
+    let doc = fixture.write_file("cwd/linked/doc.md", &initializing(&[ensure_file(&in_worktree, "wt"), ensure_file(&in_main, "main")], "body\n"));
+
+    let ran = compose_from(&fixture, &linked, &doc, None);
+
+    assert_writes(&ran, Ended::Refused, &[(&in_worktree, "wt")], &[&in_main]);
+}
+
+#[test]
+fn a_corrupt_repository_at_launch_fails_before_any_file_action() {
+    let fixture = CliProcessFixture::named("lifecycle-root-corrupt-git");
+    // `objects/` and `refs/` make it a repository to discovery; a `.git`
+    // holding only `HEAD` is no repository at all, to Git and to `md`.
+    for dir in ["objects", "refs"] {
+        std::fs::create_dir_all(fixture.cwd().join(".git").join(dir)).expect("repository directory");
+    }
+    fixture.write_file("cwd/.git/HEAD", "garbage\n");
+    let made = fixture.cwd().join("made.md");
+    let doc = fixture.write_file("cwd/doc.md", &initializing(&[ensure_file("made.md", "x")], "body\n"));
+
+    let ran = compose_from(&fixture, fixture.cwd(), &doc, None);
+
+    assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+    assert!(ran.stderr.contains("\"HEAD\" could not be decoded"), "{}", ran.stderr);
+    assert!(!made.exists(), "no file action ran");
+    assert!(ran.stdout.is_empty(), "nothing composed: {}", ran.stdout);
+}
+
+#[test]
+fn a_broken_gitfile_at_launch_fails_rather_than_bounding_writes_by_the_enclosing_repository() {
+    let fixture = CliProcessFixture::named("lifecycle-root-broken-gitfile");
+    if !fixture.initialize_repository() {
+        eprintln!("git is unavailable; skipping");
+        return;
+    }
+    let inner = fixture.cwd().join("inner");
+    let missing = fixture.workspace_path().join("missing-admin");
+    fixture.write_file("cwd/inner/.git", &format!("gitdir: {}\n", missing.display()));
+    let doc = fixture.write_file("cwd/inner/doc.md", &initializing(&[ensure_file("../escaped.md", "x")], "body\n"));
+
+    let ran = compose_from(&fixture, &inner, &doc, None);
+
+    assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+    assert!(ran.stderr.contains("does not point to a valid repository"), "{}", ran.stderr);
+    assert!(!fixture.cwd().join("escaped.md").exists(), "the enclosing repository is never the boundary");
+    assert!(ran.stdout.is_empty(), "nothing composed: {}", ran.stdout);
 }

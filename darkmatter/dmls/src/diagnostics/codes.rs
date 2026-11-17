@@ -153,6 +153,9 @@ pub mod code {
     pub const DIRECTIVE_UNMATCHED_END: &str = "dm.directive.unmatched_end";
     /// An option key a directive family does not recognize.
     pub const DIRECTIVE_MALFORMED_OPTION: &str = "dm.directive.malformed_option";
+    /// A recognized option whose value composition rejects (an
+    /// `interpolate=` that is not a boolean word or unquoted `null`).
+    pub const DIRECTIVE_INVALID_OPTION_VALUE: &str = "dm.directive.invalid_option_value";
     /// A `::disclosure` triple left structurally malformed.
     pub const DIRECTIVE_MALFORMED_DISCLOSURE: &str = "dm.directive.malformed_disclosure";
     /// A `::file`/`::code`/`::toc-linking` target that matched no file.

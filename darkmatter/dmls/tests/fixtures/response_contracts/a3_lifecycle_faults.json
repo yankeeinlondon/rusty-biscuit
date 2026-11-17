@@ -60,6 +60,25 @@
     {
       "range": {
         "start": {
+          "line": 43,
+          "character": 6
+        },
+        "end": {
+          "line": 44,
+          "character": 0
+        }
+      },
+      "severity": 1,
+      "code": "dm.schema.constraint",
+      "source": "darkmatter.schema",
+      "message": "a `when` item needs `then` or sibling actions",
+      "data": {
+        "instance_path": "/initialize/4"
+      }
+    },
+    {
+      "range": {
+        "start": {
           "line": 37,
           "character": 13
         },

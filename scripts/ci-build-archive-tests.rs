@@ -1084,10 +1084,11 @@ const FIXTURE_MANIFEST: &str = "build-archive-portability-local-host-0f1e2d3c4b5
 /// directory is the shared build's: read it, never change it. A test that
 /// hides or edits it calls [`produce_fixture`].
 ///
-/// The consumer checkout is a copy, with its Git history so its tree matches
-/// the manifest. A test that runs the shipped `verify --workspace` builds its
-/// own fixture: against the shared build it wrote no verdict on
-/// ubuntu-latest's archive run, though it passed on every other host.
+/// The consumer checkout and the plan are copies too, the checkout with its Git
+/// history so its tree matches the manifest, so nothing the shipped `verify`
+/// reads lives under the shared build. In an archive run that directory is
+/// inside nextest's own extraction, and `verify --workspace` against it once
+/// wrote no verdict on ubuntu-latest.
 ///
 /// Every test is its own process, so the build is shared through the target
 /// directory: the first test to take the lock builds it, keyed by the shipped
@@ -1101,6 +1102,8 @@ fn shared_fixture(dir: &Path) -> Produced {
     let manifest = read_manifest(&manifest_path).expect("the shared manifest must parse");
     let workspace = dir.join("workspace");
     copy_tree(&shared.join("workspace"), &workspace);
+    let plan = dir.join("plan.json");
+    fs::copy(shared.join("plan.json"), &plan).expect("copying the shared plan");
     Produced {
         out,
         target: shared.join("target"),
@@ -1108,7 +1111,7 @@ fn shared_fixture(dir: &Path) -> Produced {
         producer_workspace: shared.join("workspace"),
         manifest_path,
         manifest,
-        plan: shared.join("plan.json"),
+        plan,
         triple: host_triple(),
     }
 }
@@ -1290,7 +1293,7 @@ fn the_fixture_archive_carries_every_declared_payload_class() {
 #[test]
 fn a_produced_fixture_verifies_including_its_own_archive_inventory() {
     let dir = Scratch::new("verify-e2e");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     let (accepted, verdict) = verify_fixture(
         &produced,
         &[
@@ -1311,7 +1314,7 @@ fn a_consumer_reports_its_extraction_apart_from_its_identity_checks() {
     // rather than a cost folded into test time. The verifier extracts the whole
     // archive to list it, and that is the window reported.
     let dir = Scratch::new("verify-timings");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     let out = dir.path().join("nested/verdict.json");
     let (accepted, verdict) = verify_fixture(
         &produced,
@@ -1626,7 +1629,7 @@ fn an_archive_missing_a_declared_binary_is_refused_before_any_test_starts() {
     // The inventory is the one claim a checksum cannot make: these bytes are
     // intact, and they are an archive of fewer programs than the plan resolved.
     let dir = Scratch::new("inventory-short");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     let mut manifest = produced.manifest.clone();
     manifest
         .test_binaries
@@ -1661,7 +1664,7 @@ fn an_archive_missing_a_declared_binary_is_refused_before_any_test_starts() {
 #[test]
 fn an_archive_of_more_programs_than_the_plan_resolved_is_refused() {
     let dir = Scratch::new("inventory-long");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     let mut manifest = produced.manifest.clone();
     let dropped = manifest
         .test_binaries

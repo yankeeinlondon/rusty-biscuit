@@ -134,9 +134,10 @@ fn snapshot_from_cause(cause: &DiagnosticCause) -> DiagnosticSnapshot {
 
 impl fmt::Display for RestoredDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = &self.snapshot.message;
         match &self.context {
-            Some(context) => write!(f, "{context}: {}", self.snapshot.message),
-            None => f.write_str(&self.snapshot.message),
+            Some(context) => write!(f, "{context}: {message}"),
+            None => f.write_str(message),
         }
     }
 }

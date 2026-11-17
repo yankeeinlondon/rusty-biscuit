@@ -2141,7 +2141,8 @@ impl Drop for TraversalOnly {
 // ============================================================================
 
 /// A `goose` stub that counts its launches, plus the `events.log` path the
-/// fixtures' `initialize` stacks append to.
+/// fixtures' `initialize` stacks append to: every caller keeps its document in
+/// `prompts/`, and a missing relative log is created beside that document.
 #[cfg(unix)]
 fn caller_file_fixture(label: &str) -> (CliProcessFixture, std::path::PathBuf, std::path::PathBuf) {
     let fixture = CliProcessFixture::named(label);
@@ -2153,7 +2154,7 @@ fn caller_file_fixture(label: &str) -> (CliProcessFixture, std::path::PathBuf, s
     let spec = fixture.cwd().join("features/2026-06-30-style/spec.md");
     fs::create_dir_all(spec.parent().unwrap()).unwrap();
     fs::write(&spec, "---\ntitle: Style\n---\nSpec body.\n").unwrap();
-    let events = fixture.cwd().join("events.log");
+    let events = fixture.cwd().join("prompts/events.log");
     (fixture, count_path, events)
 }
 

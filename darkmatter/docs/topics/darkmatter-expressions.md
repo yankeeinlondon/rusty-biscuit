@@ -196,12 +196,13 @@ See [Inserted Text Is Data](../inline/interpolation.md#inserted-text-is-data).
 
 ### Nullable directive targets
 
-Optional schema properties remain nullable until the document or caller binds
-a concrete non-null value. The `default(...)` of an optional property is
-descriptive metadata; it does not install a runtime value and therefore does
-not make an unbound target non-null. (A `required` property with a default is
-present: composition writes its default.) Use `required`, provide a concrete
-binding, or guard the directive:
+An optional schema property with no default stays nullable until the document
+or caller binds a concrete non-null value. A property with a non-null literal
+`default(...)`, optional or `required`, is never null: composition writes its
+default into a missing or `null` value, so `log: file(default(log.md))`
+makes `::file {{log}}` safe. (A default written as a `{{ }}` template does not
+count.) Otherwise use `required`, provide a concrete binding, or guard the
+directive:
 
 ```md
 ::block when="file_exists(log)"
@@ -315,7 +316,7 @@ three layers, which stay separate:
 
 | Layer | Comes from | Example |
 | --- | --- | --- |
-| Declaration | the document's schema | `tag: string \| null`; an optional property includes `null`, and its `default(…)` binds no value; a `required` property, with or without a default, excludes `null` |
+| Declaration | the document's schema | `tag: string \| null`; an optional property includes `null` unless it has a non-null literal `default(…)`; a `required` property adds no `null` of its own (`unknown(required)` still admits it) |
 | Refinement | every guard enclosing the site | under `when="tag"`, `tag` is `string` |
 | Approval fallback | shell templates only | a placeholder of unknown or non-string type approves as `{{ string }}` |
 

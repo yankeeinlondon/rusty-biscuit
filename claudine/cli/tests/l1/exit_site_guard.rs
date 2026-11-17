@@ -93,7 +93,7 @@ const EXIT_ALLOWLIST: &[AllowedExit] = &[
     AllowedExit {
         file: "main.rs",
         function: "run",
-        position: "if let Some(destination) = argv::select_composition_help(&raw_argv, argv::completion_mode_active())",
+        position: "if let Some(destination) = argv::select_help(&raw_argv, argv::completion_mode_active())",
         form: "exit_before_runtime",
         reason: "a composition help request was answered from the original argv \
                  before the runtime existed, so no delivery can have started",

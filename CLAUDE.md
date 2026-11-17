@@ -224,7 +224,43 @@ Update alongside code changes:
       show exactly how to use the feature, and illustrate choices with examples
 - `docs/dependencies.md` (and per-area `docs/dependencies.md`) when crates are added/removed
 - `.claude/skills/` when architecture or workflows change
+- the area's caller skills (`docs/use-skills/`) when what a caller can do changes, then `just publish-skills`
 - This file when workspace layout, commands, or repo-wide conventions change
+
+## Skill Audiences
+
+- **Repo skills** (`.claude/skills/<name>/`, e.g. `darkmatter`, `claudine`)
+  are for agents working on this repository's source: internals, module
+  layout, invariants, tests. They may link into `docs/`.
+- **Caller skills** (`use-darkmatter`, `use-dmls`, `use-claudine`, …) are for
+  agents in *other* repositories that use these tools: commands, flags,
+  document syntax, library APIs, never internals.
+    - their canonical source is `{package-area}/docs/use-skills/<skill>/`;
+      `just publish-skills` in that area composes each Markdown file with this
+      repository's `md` and installs the result in `~/.claude/skills/<skill>/`.
+      Never edit the installed copy
+    - they may use any Darkmatter composition feature (`::file`, `::code`,
+      `::block`, interpolation, …). Prefer transcluding a passage of the
+      package's canonical `docs/` over restating it, so the skill cannot drift
+      from it; `./`, `../`, and bare references resolve beside the skill file
+      (`::file ../../topics/lifecycle/index.md`). A transcluded passage is
+      composed too: its inline `{{ … }}` examples are evaluated (against the
+      skill's own frontmatter, if a name matches), while fenced examples and
+      `::code` content stay verbatim. When a transcluded passage's prose
+      shows expressions that must survive publication, include it with
+      `::file … interpolate=false`, and check the published text.
+      Publication runs with `--deny all`, so an undeclared name fails it
+    - they are composed, so an interpolation shown as an example is written
+      `{{{ … }}}` (it publishes as `{{ … }}`); show a triple-brace literal
+      itself in a fenced code block in the body (frontmatter strings are
+      interpolated even inside a fence, so describe it in words there).
+      Composition normalizes layout (tables,
+      line wrapping); do not fight it
+- **A caller skill never contradicts its package's `docs/`.** It is a
+  summary for outsiders; where they disagree, `docs/` is right and the skill is
+  fixed in the same change. The same goes between a repo skill and its caller
+  skill: each carries what its audience needs, and neither restates the
+  other's details.
 
 ## Rules
 

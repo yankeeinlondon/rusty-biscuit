@@ -4,7 +4,8 @@ Loaded from the `simplified-schema` skill. How a referenced `$schema` file
 is classified, how envelopes are admitted, and where the line between this
 crate and Darkmatter runs.
 
-grammar's typed error unchanged, `span` a byte range in the exact supplied
+A rejected definition's `SchemaError::SchemaDocument` keeps the parser's
+typed error as `source`, and its `span` is a byte range in the exact supplied
 text (whole Markdown file, CRLF counted). Never stringify a `SchemaError` into
 `message` alone; see [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md#a-rejected-definition-in-a-schema-document).
 
@@ -25,11 +26,13 @@ before their payload is read: `envelope.rs` soft-validates each against the
 compiled `simplified-schema/schemas/schema.yaml` / `yaml-schema.yaml`
 (`envelope::ENVELOPE_DEFINITIONS`, `admit_envelope_text`). Those files are the
 only authority for envelope structure (closed keys, `$schema` or `types`,
-`types` a mapping, non-null metadata); never add a structural check to
+`types` a mapping, `not-empty` metadata); never add a structural check to
 `standalone.rs` (`shipped_corpus.rs` guards it). Rust keeps only category
 grammar, duplicate/undeclared categories, and duplicate overloads. Metadata
 is read from the converted copy (`description: 123` → `"123"`); `$schema` /
-`types` carriers are never converted. Report order: envelope problem, then a
+`types` carriers are never converted, and a null carrier is absent
+(`RecognizedStandalone::{payload_key, payload, local_types}`: a tagged
+`$schema: null` beside `types` is a `types`-only document). Report order: envelope problem, then a
 parser-located definition failure inside a carrier, then the carrier shape
 (`standalone.rs::rejected_envelope`; `locate_standalone_definition_failure`
 returns `None` when the envelope itself is malformed). The definitions
@@ -44,6 +47,18 @@ admission; metadata from `accepted`) and prepares a `yaml-schema` with
 `resolve::prepare_standalone_yaml_schema`, so the compiled envelope never
 judges its shape twice. Tests: `envelope_admission.rs`,
 `yaml_schema_envelope.rs`.
+
+Null carriers are absent: a null `description`/`categories`/`types` is
+omitted, a tagged `$schema: null` beside a usable `types` table is a
+types-only document, an untagged document whose `$schema` is null is
+ordinary YAML (`standalone.rs::recognize_standalone`), and a trigger's
+`$schema: null` is matcher-only. An
+*empty* carrier is not absent: `types: {}` and a trigger's `$schema: {}`/`[]`/
+blank text are refused (`triggers/envelope.rs::parse_trigger_envelope`
+mirrors `schema-trigger.yaml`'s `schema(not-empty)`, so discovery and
+whole-YAML loading agree). `envelope_null_carriers.rs` runs every carrier cell
+through the parser, admission (normal and `PreparationMode::Uncached`), both
+factories, and whole-YAML loading, which must agree.
 
 Ownership boundary: this crate owns all three shipped definitions
 (`schemas/{schema,yaml-schema,schema-trigger}.yaml`, compiled into

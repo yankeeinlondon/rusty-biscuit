@@ -267,8 +267,10 @@ pub fn evaluate_completion(
         });
     };
 
+    // The live frontmatter is completed, and its lifecycle was judged when
+    // the run launched: no flag in it is taken for an authored placement.
     let report = effective
-        .validate_for_phase(instance, SchemaPhase::Completion)
+        .validate_completed(instance, &serde_json::Value::Null, Some(SchemaPhase::Completion))
         .map_err(|error| {
             schema_error_to_composition_error(
                 source_path,

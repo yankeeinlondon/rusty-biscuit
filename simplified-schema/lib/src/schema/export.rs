@@ -229,7 +229,6 @@ fn write_object_constraints(constraints: &[Constraint]) -> Result<Mapping, Simpl
             Constraint::Unique => ("unique", true.into()),
             Constraint::Generated => ("generated", true.into()),
             Constraint::Integer => ("integer", true.into()),
-            Constraint::NonNull => ("non-null", true.into()),
             Constraint::Closed => ("closed", true.into()),
             other => {
                 return Err(unsupported(&format!(
@@ -266,7 +265,7 @@ fn write_atom(atom: &PropertyAtom) -> Result<YamlValue, SimplifiedSchemaError> {
                 && atom
                     .constraints
                     .iter()
-                    .all(|c| matches!(c, Constraint::Required | Constraint::NonNull | Constraint::Generated)) =>
+                    .all(|c| matches!(c, Constraint::Required | Constraint::Generated)) =>
         {
             if atom.constraints.is_empty() {
                 return write_shape(shape).map(YamlValue::Mapping);

@@ -26,6 +26,8 @@ mod level2_dry_run_approval_capture;
 #[cfg(unix)]
 mod level2_dry_run_metadata_capture;
 #[cfg(unix)]
+mod level2_edit_action;
+#[cfg(unix)]
 mod level2_edit_interactive_capture;
 #[cfg(unix)]
 mod level2_explicit_operation_file_miss;
@@ -51,6 +53,8 @@ mod level2_lifecycle_control;
 mod level2_lifecycle_ctrl_c_tmux;
 #[cfg(unix)]
 mod level2_lifecycle_dispatch;
+#[cfg(unix)]
+mod level2_lifecycle_foreground_handoff;
 #[cfg(unix)]
 mod level2_lifecycle_loop;
 #[cfg(unix)]

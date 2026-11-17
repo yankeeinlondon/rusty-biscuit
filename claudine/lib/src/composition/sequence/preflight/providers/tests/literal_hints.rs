@@ -301,6 +301,7 @@ fn layers<'a>(
         with_origin: Path::new("/seq.md"),
         task_property: "tasks[0]",
         step_frontmatter: &STEP,
+        step_authored: &EMPTY,
         caller_setters: if setters.is_empty() { &EMPTY } else { setters },
         sequence_path: Path::new("/seq.md"),
     }
@@ -561,4 +562,29 @@ mod counted {
             assert!(early[2] > early[1], "{tasks} tasks: {early:?}");
         }
     }
+}
+
+/// A sequence value derived from another (`choice: "{{ pick }}"`) binds a
+/// shell as its prepared value, but a hint reading it still follows its
+/// authored reads: a write to `pick` that only a later prompt document
+/// makes moves the hint to the launch.
+#[test]
+fn a_hint_reading_a_prepared_derived_value_follows_its_authored_reads_to_a_write() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\n---\n\nFirst.\n");
+    write(dir.path(), "writes.md", "---\nsuccess:\n  - set:\n      pick: opencode\n---\n\nSecond.\n");
+    let path = sequence(
+        dir.path(),
+        json!([
+            { "name": "first", "prompt": "plain.md", "with": { "agent": "{{ choice }}" } },
+            { "name": "second", "prompt": "writes.md" }
+        ]),
+        "pick: codex\nchoice: \"{{ pick }}\"\n",
+    );
+    let graph = build(&path, json!({}));
+    let first = prediction(&graph, 0);
+    assert!(
+        matches!(first.agent, HintState::DecidedAtLaunch { reason: LaunchDecision::RuntimeWritten, .. }),
+        "{first:?}"
+    );
 }

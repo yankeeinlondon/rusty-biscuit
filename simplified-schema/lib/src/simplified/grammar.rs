@@ -592,6 +592,12 @@ impl ListOwner {
     }
 }
 
+/// The message for the removed `non-null` marker, in a type string or a
+/// `$constraints` block.
+pub(crate) const NON_NULL_REMOVED: &str = "`non-null` is no longer supported: a missing key and `null` are the same \
+     value. Use `not-empty` for a string, list, or mapping that must have content when written, or \
+     `required` for a key that must be written; drop it from a type with no \"empty\" value";
+
 const MIXED_OPTIONS_MESSAGE: &str = "separate `alphanumeric` options from constraints with `;`, \
      as in `alphanumeric(allow-dashes; min(1))`";
 
@@ -880,7 +886,7 @@ impl<'a> Parser<'a> {
         if let Some(description) = self.parse_top_level_description()? {
             arms.last_mut().expect("a union has an option").description = Some(description);
         }
-        if let Some(problem) = union_invariant_problem(&arms, true) {
+        if let Some(problem) = union_invariant_problem(&arms) {
             return self.union_err(problem);
         }
         Ok(arms_to_def(arms))
@@ -897,10 +903,6 @@ impl<'a> Parser<'a> {
             ),
             UnionInvariant::DuplicateOverload { message, .. } => self.err(message, 0..self.src.len()),
             UnionInvariant::Narrows(problem) => self.narrows_err(problem),
-            UnionInvariant::NonNull { arm, message } => {
-                let span = arm.and_then(|index| self.arm_spans.get(index).cloned()).unwrap_or(0..self.src.len());
-                self.err(message, span)
-            }
         }
     }
 
@@ -1130,7 +1132,6 @@ impl<'a> Parser<'a> {
                 !matches!(
                     constraint,
                     Constraint::Required
-                        | Constraint::NonNull
                         | Constraint::Default(_)
                         | Constraint::Generated
                         | Constraint::Deferred
@@ -1861,7 +1862,7 @@ impl<'a> Parser<'a> {
             let description = self.read_inline_object_description()?;
             arms.last_mut().expect("a union has an option").description = Some(description);
         }
-        if let Some(problem) = union_invariant_problem(&arms, false) {
+        if let Some(problem) = union_invariant_problem(&arms) {
             return self.union_err(problem);
         }
         Ok(arms_to_def(arms))
@@ -2044,7 +2045,7 @@ impl<'a> Parser<'a> {
         for constraint in constraints {
             match constraint {
                 Constraint::Required
-                | Constraint::NonNull
+                | Constraint::NotEmpty
                 | Constraint::Generated
                 | Constraint::Deferred
                 | Constraint::Category(_)
@@ -2785,7 +2786,6 @@ impl<'a> Parser<'a> {
             ("unique", false) => Constraint::Unique,
             ("generated", false) => Constraint::Generated,
             ("deferred", false) => Constraint::Deferred,
-            ("non-null", false) => Constraint::NonNull,
             ("mapping", false) => {
                 self.check_declaration_option(&keyword, SimplifiedType::Schema, owner, is_array_level, &kw_span)?;
                 Constraint::Mapping
@@ -2845,7 +2845,8 @@ impl<'a> Parser<'a> {
                 self.check_declaration_option(&keyword, SimplifiedType::Schema, owner, is_array_level, &kw_span)?;
                 self.parse_property_option(kw_span)?
             }
-            ("non-null" | "mapping" | "declared-required" | "container", true) => {
+            ("non-null", _) => return self.err(NON_NULL_REMOVED, kw_span),
+            ("mapping" | "declared-required" | "container", true) => {
                 return self.err(format!("`{keyword}` does not take arguments"), kw_span);
             }
             ("required", true) => {
@@ -3644,30 +3645,18 @@ pub(crate) enum UnionInvariant {
     DuplicateOverload { arm: usize, message: String },
     /// A `narrows` clause the overloads cannot carry.
     Narrows(narrowing::NarrowsProblem),
-    /// `non-null` over a value that admits null; `arm` is the marked option.
-    NonNull { arm: Option<usize>, message: String },
 }
 
 /// The first violated invariant of the options `arms`, in the order the
-/// parser has always checked them. `check_non_null` is off for an inline
-/// object's member, whose `non-null` the resolver judges after expansion.
-pub(crate) fn union_invariant_problem(arms: &[PropertyAtom], check_non_null: bool) -> Option<UnionInvariant> {
+/// parser has always checked them.
+pub(crate) fn union_invariant_problem(arms: &[PropertyAtom]) -> Option<UnionInvariant> {
     if let Some(duplicate) = second_suggestion_span(arms) {
         return Some(UnionInvariant::SecondSuggestion(duplicate));
     }
     if let Some((arm, message)) = super::signature::duplicate_overload_arm(arms, None) {
         return Some(UnionInvariant::DuplicateOverload { arm, message });
     }
-    if let Some(problem) = narrowing::overload_arms_problem(arms) {
-        return Some(UnionInvariant::Narrows(problem));
-    }
-    if !check_non_null {
-        return None;
-    }
-    let marked = arms.iter().position(PropertyAtom::marks_non_null);
-    let message = if let [atom] = arms { PropertyDef::Single(atom.clone()) } else { PropertyDef::Union(arms.to_vec()) }
-        .non_null_problem()?;
-    Some(UnionInvariant::NonNull { arm: marked, message })
+    narrowing::overload_arms_problem(arms).map(UnionInvariant::Narrows)
 }
 
 impl UnionInvariant {
@@ -3681,7 +3670,7 @@ impl UnionInvariant {
                 duplicate.span,
                 vec![GrammarRelated { message: FIRST_SUGGESTION.into(), span: duplicate.first_span, arm: None }],
             ),
-            Self::DuplicateOverload { message, .. } | Self::NonNull { message, .. } => (message, 0..0, Vec::new()),
+            Self::DuplicateOverload { message, .. } => (message, 0..0, Vec::new()),
             Self::Narrows(problem) => (problem.message, problem.span, Vec::new()),
         };
         SchemaError::Grammar { property: property.to_string(), message, span, related }

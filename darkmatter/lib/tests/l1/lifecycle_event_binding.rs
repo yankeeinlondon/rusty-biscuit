@@ -83,6 +83,7 @@ impl Root {
             output: &Silent,
             timing: &timing,
             interrupted: &never,
+            editor: None,
         };
         let event = MdEvent {
             signal: LifecycleSignal::Start,

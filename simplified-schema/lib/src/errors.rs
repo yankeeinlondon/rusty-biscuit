@@ -182,7 +182,7 @@ fn is_json_path(path: &Path) -> bool {
 impl fmt::Display for NotSchemaReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            NotSchemaReason::TypesOnly => "it declares only `types`, with no `$schema` property",
+            NotSchemaReason::TypesOnly => "it declares only `types`, with no `$schema` value",
             NotSchemaReason::NoSchemaProperty => "it has no `$schema` property",
             NotSchemaReason::NotAMapping => "its root is not a mapping",
             NotSchemaReason::JsonMissingDialect => "it does not declare its JSON Schema dialect in `$schema`",
@@ -934,33 +934,40 @@ pub enum SchemaError {
         suggestion: String,
     },
 
-    /// The `default(...)` of a required property, needed because the
-    /// property is absent, does not satisfy the property's own definition.
+    /// The `default(...)` of a property, needed because its value is
+    /// missing or `null`, does not satisfy the property's own definition.
     /// `pointer` is the JSON Pointer of the `default` keyword in the lowered
     /// JSON Schema; the lowered schema keeps no source position.
-    #[error("the default of required property `{path}` does not satisfy its definition (schema location `{pointer}`): {message}")]
+    #[error("the default of property `{path}` does not satisfy its definition (schema location `{pointer}`): {message}")]
     InvalidDefault {
         path: crate::PropertyPath,
         pointer: String,
         message: String,
     },
 
-    /// Absent required properties could be filled from more than one union
-    /// arm, and the arms complete the value differently. `pointer` is the
-    /// union's JSON Pointer in the lowered JSON Schema; `path` is `None` for
-    /// a root union.
+    /// One object location declares different defaults for one property,
+    /// typically on different union arms. A default is never chosen by arm,
+    /// so the schema cannot be prepared. A key no schema names, selected by
+    /// several `patternProperties` (or a pattern and a catch-all) with
+    /// different defaults, can only be detected from the key itself, so that
+    /// conflict is raised while defaults are applied, and only when the key
+    /// needs its default. `pointer` is the object location's
+    /// JSON Pointer in the lowered JSON Schema and `declarations` the
+    /// pointer of each `default` keyword.
     #[error(
-        "required defaults are ambiguous at {}: union arms {arms:?} at schema location `{pointer}` each complete the value differently",
-        path.as_ref().map_or_else(|| "the document root".to_string(), |path| format!("`{path}`"))
+        "property `{property}` declares different defaults at schema location `{pointer}` ({}); a property has at most one default",
+        declarations.iter().map(|pointer| format!("`{pointer}`")).collect::<Vec<_>>().join(", ")
     )]
-    AmbiguousDefaults {
-        path: Option<crate::PropertyPath>,
+    ConflictingDefaults {
         pointer: String,
-        arms: Vec<usize>,
+        property: String,
+        declarations: Vec<String>,
     },
 
-    /// Filling defaults followed `reference` back to itself without
-    /// descending into the value, so the expansion would never end.
+    /// Default preparation would never end: a `$ref` chain returns to
+    /// itself without describing a child value (`path` is `None`, and
+    /// `reference` the reference), or a default keeps creating another
+    /// defaulted parent (`reference` is that default's JSON Pointer).
     #[error(
         "default expansion repeats `{reference}` at {} without descending into the value",
         path.as_ref().map_or_else(|| "the document root".to_string(), |path| format!("`{path}`"))
@@ -1841,13 +1848,14 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 ),
 
             SchemaError::InvalidDefault { .. }
-            | SchemaError::AmbiguousDefaults { .. }
+            | SchemaError::ConflictingDefaults { .. }
             | SchemaError::RecursiveDefault { .. } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("SchemaError", "required default cannot be applied"))
+                .error_header(ErrorHeader::new("SchemaError", "default cannot be applied"))
                 .body(vec![Prose::new(Prose::escape_text_outside_code_spans(&self.to_string()))])
                 .hint(
                     "Fix the <cyan>default(...)</cyan> at the reported schema location so it satisfies \
-                     its property's definition and only one union arm can supply it, or write the value.",
+                     its property's definition, declare one default per property across union arms, \
+                     or write the value.",
                 ),
         }
     }

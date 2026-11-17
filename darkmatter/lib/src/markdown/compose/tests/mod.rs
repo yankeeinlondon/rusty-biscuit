@@ -8,6 +8,7 @@ use super::transclusion::TransclusionEngine;
 use biscuit_terminal::utils::UnicodeWidthStr;
 
 mod caching;
+mod file_interpolate;
 mod fixtures;
 mod frontmatter;
 mod icmp;

@@ -39,6 +39,12 @@ const ALLOWLIST: &[Allowance] = &[
         "absolute hyperlink target for a relative path in an error block (rendering)",
     ),
     ambient(
+        "composition/lifecycle/effects.rs",
+        "std::env::var",
+        1,
+        "`test-fixtures` hook that holds a lifecycle `info` action for terminal Ctrl+C tests",
+    ),
+    ambient(
         "composition/lifecycle/prewarm/fixture.rs",
         "std::env::var",
         1,

@@ -159,6 +159,7 @@ pub fn shape_from_json_schema(schema: &Value) -> Shape {
         index,
         budget: std::cell::Cell::new(REFERENCE_BUDGET),
         descent: std::cell::Cell::new(0),
+        patterns: std::cell::RefCell::new(HashMap::new()),
         document: Arc::new(Document {
             root: schema.clone(),
             embedded: OnceLock::new(),
@@ -281,6 +282,10 @@ struct Translator<'s> {
     /// Value descents on the current translation path; a reference cycle is
     /// expressible only when this grew since its target was entered.
     descent: std::cell::Cell<usize>,
+    /// Compiled `pattern` and `patternProperties` sources, `None` when one
+    /// does not compile: a target referenced from many places is expanded at
+    /// each, and compiling its patterns again was most of a translation.
+    patterns: std::cell::RefCell<HashMap<&'s str, Option<TextPattern>>>,
     document: Arc<Document>,
 }
 
@@ -344,6 +349,14 @@ impl Part {
 }
 
 impl<'s> Translator<'s> {
+    fn pattern(&self, source: &'s str) -> Option<TextPattern> {
+        self.patterns
+            .borrow_mut()
+            .entry(source)
+            .or_insert_with(|| TextPattern::new(source).ok())
+            .clone()
+    }
+
     fn node(&self, node: &'s Value, references: &mut Vec<Frame>) -> Shape {
         match node {
             Value::Bool(true) => Shape::Any,
@@ -511,7 +524,7 @@ impl<'s> Translator<'s> {
         }
     }
 
-    fn enumeration(&self, map: &Map<String, Value>, members: &[Value], declared: Option<&[Kind]>) -> Part {
+    fn enumeration(&self, map: &'s Map<String, Value>, members: &[Value], declared: Option<&[Kind]>) -> Part {
         let admitted: Vec<&Value> = members
             .iter()
             .filter(|member| declared.is_none_or(|kinds| admits(kinds, member)))
@@ -545,7 +558,7 @@ impl<'s> Translator<'s> {
         }
     }
 
-    fn text(&self, map: &Map<String, Value>) -> Part {
+    fn text(&self, map: &'s Map<String, Value>) -> Part {
         let format = map.get("format").and_then(Value::as_str);
         let length_or_pattern = ["minLength", "maxLength", "pattern"].iter().any(|keyword| map.contains_key(*keyword));
         match format {
@@ -576,9 +589,9 @@ impl<'s> Translator<'s> {
         let max_length = length("maxLength");
         let pattern = match map.get("pattern") {
             None => None,
-            Some(Value::String(source)) => match TextPattern::new(source.as_str()) {
-                Ok(pattern) => Some(pattern),
-                Err(_) => {
+            Some(Value::String(source)) => match self.pattern(source) {
+                Some(pattern) => Some(pattern),
+                None => {
                     exact = false;
                     None
                 }
@@ -698,12 +711,12 @@ impl<'s> Translator<'s> {
         let mut patterns = Vec::new();
         if let Some(entries) = map.get("patternProperties").and_then(Value::as_object) {
             for (source, schema) in entries {
-                match TextPattern::new(source.as_str()) {
-                    Ok(pattern) => patterns.push(PatternSlot {
+                match self.pattern(source) {
+                    Some(pattern) => patterns.push(PatternSlot {
                         matcher: KeyMatcher::Pattern(pattern),
                         shape: self.child(schema, references),
                     }),
-                    Err(_) => exact = false,
+                    None => exact = false,
                 }
             }
         }

@@ -917,23 +917,12 @@ fn construct_argv_and_system_prompt(
             )
             .map_err(crate::commands::exec_prep::ModelStageError::into_report)?;
 
-        // R8 — from here to the MCP fold, no document surface moves `--output`,
-        // the system prompt, or `--sandbox`. What a per-attempt rebuild records
-        // is the *intent* for the two flags (which is what stays fixed) and the
-        // rendered slice only for the system prompt, whose already-composed
-        // content is the immutable part.
-
-        // Universal --output flag
-        if let Some(ref output_str) = request.output {
-            let format: super::super::profile::OutputFormat = (*output_str).into();
-            if let Some(warn) = profile.apply_output_format(&mut child_args, format)
-                && !silent
-                && !quiet
-            {
-                log::warn(&warn);
-            }
-        }
-        let argv_after_output = child_args.len();
+        // R8 — from here to the MCP fold, no document surface moves the system
+        // prompt or `--sandbox`. What a per-attempt rebuild records is the
+        // *intent* for `--sandbox` (which is what stays fixed) and the rendered
+        // slice only for the system prompt, whose already-composed content is
+        // the immutable part.
+        let argv_before_system_prompt = child_args.len();
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
 
@@ -1040,7 +1029,7 @@ fn construct_argv_and_system_prompt(
                 }
             }
         }
-        let system_prompt_args = child_args[argv_after_output..].to_vec();
+        let system_prompt_args = child_args[argv_before_system_prompt..].to_vec();
 
         // Universal --sandbox flag
         if request.sandbox
@@ -1169,7 +1158,6 @@ fn construct_argv_and_system_prompt(
             }
             lp::LaunchPlanInputs {
                 provider_tail: request.provider_tail.clone(),
-                output_format: request.output.map(Into::into),
                 system_prompt_args,
                 system_prompt_opencode_config,
                 system_prompt: Some(effective_sp.clone()),
@@ -1368,10 +1356,17 @@ fn construct_lifecycle_runtime(
         };
 
         // Build an effect engine for lifecycle side effects / expression functions.
-        // Writes are confined to the launch workspace (the launch repo root when
-        // known, otherwise the launch cwd) — never the prompt's own repository,
-        // which differs whenever the prompt lives in a shared library.
-        let lifecycle_mutation_root = env_plan.child_cwd.as_path();
+        // Writes are confined to the caller's launch scope (the working tree
+        // containing the launch directory, otherwise that directory) — never
+        // the prompt's own repository, which differs whenever the prompt lives
+        // in a shared library.
+        let lifecycle_mutation_root = match claudine::invocation_context::lifecycle_mutation_root(
+            request.invocation_context.as_ref(),
+            &request.prepared.input_layers.file_resolution_context,
+        ) {
+            Ok(root) => root,
+            Err(error) => return CompositionPhaseResult::Failed(error.into()),
+        };
         let lifecycle_effect_engine = EffectEngine::builder()
             .mutation_root(lifecycle_mutation_root)
             .auto_rehash(false)
@@ -1475,6 +1470,7 @@ fn execute_initialize_catch(
             None => event_ctx,
         };
         let outcome = guard.execute_event(step.signal, &event_ctx);
+        claudine::composition::lifecycle::report::warn_tolerated_action_error(event_ctx.emitter, event_ctx.term, step.signal, &outcome);
         assert!(protocol.record(step.signal, outcome));
     }
     let result = protocol
@@ -1613,6 +1609,7 @@ pub(super) fn route_initialize(
                         LifecycleSignal::Finalize,
                         &init_ctx.with_signal(LifecycleSignal::Finalize),
                     );
+                    claudine::composition::lifecycle::report::warn_tolerated_action_error(init_ctx.emitter, init_ctx.term, LifecycleSignal::Finalize, &finalize);
                     if let Some(info) = finalize.evaluation_error.as_ref() {
                         return Err(crate::output::error_walker::emit_lifecycle_evaluation_error_early(
                             source_path, "finalize", info, term,

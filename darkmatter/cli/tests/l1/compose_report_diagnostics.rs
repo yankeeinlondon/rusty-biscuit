@@ -396,7 +396,9 @@ fn the_check_runs_no_shell_directive() {
 
 /// A reference the file-reference grammar rejects: the graph build fails with
 /// a typed error that holds no file, on a document the command opened itself.
-const UNPARSEABLE_PROLOGUE: &str = "---\ntitle: x\nprologue: \"{{ title }}.md\"\n---\n# Top\n";
+/// The prologue resolves to `{{ title }}.md` (a literal token), as composition
+/// resolves it, before the grammar reads it.
+const UNPARSEABLE_PROLOGUE: &str = "---\ntitle: x\nprologue: \"{{{ title }}}.md\"\n---\n# Top\n";
 
 fn failure_source(fixture: &CliProcessFixture, args: &[&str], document: &Path) -> Value {
     let output = fixture.command().args(args).arg(document).args(["--output", "json"]).output().unwrap();

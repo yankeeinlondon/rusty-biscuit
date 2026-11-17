@@ -11,7 +11,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::{
     self, CompositionError, MissingProperty, ResolvedCompositionSource, SequenceExecutionOptions,
-    SequenceMissingPropertiesStep, SequencePlan, SequenceStepDraft,
+    SequenceMissingPropertiesEntry, SequencePlan, SequenceStepDraft,
 };
 use claudine::composition::preflight::checks::{AGENT_RESOLUTION, LIFECYCLE_SHELL_AUDIT, sequence_preflight};
 use color_eyre::eyre::Result;
@@ -37,7 +37,8 @@ mod task_run;
 use jit::StepComposeContext;
 #[cfg(test)]
 use phase1c::find_first_unsupported;
-use phase1c::run_phase_1c_with_schema;
+use phase1c::{RootPlanRequest, prepare_root_plan, run_phase_1c_with_schema};
+pub(crate) use phase1c::RootSequence;
 use resolve::apply_user_set_to_hints;
 
 /// Exit code emitted when Ctrl+C is observed during a sequence run.
@@ -143,12 +144,21 @@ fn approve_preflight_graph(
             .with_exclude_keys(claudine::composition::claudine_registry().authored_event_keys())
             .with_deferred_shell_roots(reference.deferred_shell_roots());
         // The task's approval-time `with` reaches its document as data, as
-        // it does at the task's turn.
+        // it does at the task's turn, and a relative file value in it
+        // resolves from the file that authored it, never the launch folder.
         if !reference.with.is_empty() {
-            opts = composition::LayeredOverrides::data(Some(&serde_json::Value::Object(
-                reference.with.clone(),
-            )))
-            .apply_to(opts);
+            let with = serde_json::Value::Object(reference.with.clone());
+            let with_source_context = invocation
+                .derive_source(&reference.with_origin)
+                .expect("a preflight task always has an authoring source");
+            let records = composition::CallerInputLayers::from_caller_overrides(
+                Some(with.clone()),
+                with_source_context.file_resolution_context().clone(),
+            )
+            .caller_input_records;
+            opts = composition::LayeredOverrides::data(Some(&with))
+                .apply_to(opts)
+                .with_caller_input_records(records);
         }
         if let Some(area) = launch_area {
             opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
@@ -248,7 +258,7 @@ fn emit_missing_include_note(document: &std::path::Path) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_sequence(
     source: &ResolvedCompositionSource,
-    plan: SequencePlan,
+    root_sequence: &RootSequence<'_>,
     shared: &SharedComposeArgs,
     user_set_overrides: Option<serde_json::Value>,
     caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
@@ -265,8 +275,8 @@ pub(crate) fn execute_sequence(
     use claudine::composition::lifecycle::executor::StackExecutionContext;
     use claudine::composition::lifecycle::runtime::ContainerEventDecision;
     use claudine::composition::lifecycle::context::LifecycleErrorInfo;
-    let runtime = Arc::new(composition::RuntimeState::new());
-    let seq = SequenceBinding::container(&plan.sequence_id, Vec::new()).to_value();
+    let runtime = Arc::new(composition::RuntimeState::new_sequence());
+    let seq = SequenceBinding::container(&root_sequence.sequence_id, Vec::new()).to_value();
     runtime.set_sequence_binding(seq.clone());
     let mut frontmatter: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter().map(|(k,v)| (k.clone(),v.clone())).collect();
     if let Some(values) = user_set_overrides.as_ref().and_then(serde_json::Value::as_object) {
@@ -280,8 +290,24 @@ pub(crate) fn execute_sequence(
     let emitter = DefaultLifecycleEmitter;
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
     let context = invocation.capture_launch_context(&requirements);
-    let engine = darkmatter::effects::EffectEngine::builder().mutation_root(source_context.base_dir()).build();
-    let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
+    // Writes stay inside the caller's launch scope; relative targets still
+    // resolve against the sequence source (`base_dir` below).
+    let engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(claudine::invocation_context::lifecycle_mutation_root(Some(&invocation), &file_resolution_context)?)
+        .build();
+    // The root's events read its prepared values, as a referenced document's
+    // events read its own. Before `initialize` the caller's values are all
+    // there is; `start` prepares them again with what has been written and
+    // collected since. A preview fires no event.
+    let event_values = if shared.dry_run { None } else {
+        root_event_values(&RootEventInputs {
+            source, overrides: user_set_overrides.as_ref(), runtime_writes: serde_json::Map::new(),
+            caller_input_records: &caller_input_records, launch: invocation.launch_file_resolution_context(),
+            launch_area: Some(file_resolution_context.request_cwd()), compose_context: &context,
+            file_resolution_context: &file_resolution_context,
+        })
+    };
+    let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(event_values.unwrap_or_else(|| frontmatter.clone()));
     let live = Mutex::new(frontmatter_view.clone());
     let lifecycle_context = LifecycleRuntimeContext { settings: &settings, messaging: &messaging, term: &term,
         source_path: &source.resolved_path, repo_root: source_context.repository_root(), launch_area: Some(file_resolution_context.request_cwd()), context: Some(&context) };
@@ -325,7 +351,7 @@ pub(crate) fn execute_sequence(
     }
     let mut startup_timings = startup_timings;
     loop {
-        let outcome = execute_sequence_inner(source, plan.clone(), shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
+        let outcome = execute_sequence_inner(source, root_sequence, shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
         if shared.dry_run { return outcome; }
         let (signal, error) = match &outcome {
             Ok(130) => {
@@ -352,6 +378,48 @@ pub(crate) fn execute_sequence(
             other => return Err(color_eyre::eyre::eyre!("invalid terminal transition: {other:?}")),
         }
     }
+}
+
+/// What [`root_event_values`] prepares the root document under.
+struct RootEventInputs<'a> {
+    source: &'a ResolvedCompositionSource,
+    /// The caller's setters, with every value collected for the root.
+    overrides: Option<&'a serde_json::Value>,
+    /// Every runtime write so far, above the caller's values.
+    runtime_writes: serde_json::Map<String, serde_json::Value>,
+    caller_input_records: &'a darkmatter::markdown::compose::CallerInputRecords,
+    /// The context a caller's value without a record resolves from.
+    launch: &'a biscuit_file::FileResolutionContext,
+    launch_area: Option<&'a std::path::Path>,
+    compose_context: &'a darkmatter::markdown::compose::ComposeContext,
+    file_resolution_context: &'a biscuit_file::FileResolutionContext,
+}
+
+/// The values the root sequence's own events read: its prepared values (its
+/// own properties, coerced, defaulted and derived by its `$schema`, under the
+/// caller's values and then every runtime write so far), as a whole
+/// referenced document's events read its own.
+///
+/// The schema verdict is withheld: the root's inputs are judged, and a
+/// missing one collected, by its steps' compositions, and an `initialize`
+/// may still supply one. Nothing runs (frontmatter `$( … )` is not
+/// expanded). `None` when the values do not prepare; the step that composes
+/// the root reports why, and the events read the authored values meanwhile.
+fn root_event_values(inputs: &RootEventInputs<'_>) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let mut layers = composition::CallerInputLayers::from_caller_overrides(inputs.overrides.cloned(), inputs.launch.clone());
+    layers.caller_input_records.extend(inputs.caller_input_records.iter().map(|(key, record)| (key.clone(), record.clone())));
+    layers.file_ref_fallback_dir = inputs.launch_area.map(std::path::Path::to_path_buf);
+    let mut options = layers.apply_to(composition::PrepareOptions::new(inputs.file_resolution_context.clone()));
+    let mut overrides = options.layered_overrides();
+    for (key, value) in &inputs.runtime_writes {
+        overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, key.clone(), value.clone());
+    }
+    options.set_layered_overrides(overrides);
+    options.prepared_context = Some(inputs.compose_context.clone());
+    options.defer_schema_verdict = true;
+    composition::sequence::document::prepare_sequence_document_values(
+        inputs.source, options, composition::CompositionMode::ChainedDocument,
+    ).ok().map(|prepared| prepared.values)
 }
 
 /// The root sequence's loop frame, when its frontmatter declares `loop:`.
@@ -388,7 +456,7 @@ fn root_loop_frame(
 #[allow(clippy::too_many_arguments)]
 fn execute_sequence_inner(
     source: &ResolvedCompositionSource,
-    plan: SequencePlan,
+    root_sequence: &RootSequence<'_>,
     shared: &SharedComposeArgs,
     user_set_overrides: Option<serde_json::Value>,
     caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
@@ -435,28 +503,6 @@ fn execute_sequence_inner(
     } else {
         None
     };
-
-    let effective_fail_fast = execution_options
-        .fail_fast_override
-        .unwrap_or(plan.document_fail_fast);
-
-    // `--step-timeout` / `--stall-timeout` apply to every step in the
-    // sequence. Early validation happens in the CLI entry point; the raw
-    // string is resolved per-step by the composition executor.
-    let _ = shared.step_timeout_secs()?;
-    let _ = shared.stall_timeout_secs()?;
-
-    let total_steps = plan.steps.len();
-
-    if !silent {
-        let term = log::terminal();
-        let status = Status::from_prose(format!(
-            "<b>Sequence:</b> <yellow>{}</yellow> step(s)",
-            total_steps
-        ))
-        .state(StatusState::Info);
-        log::message(&status.render(&term));
-    }
 
     // Persistent interrupt tracker for the duration of the sequence run. Every
     // step boundary and every running shell task polls this flag, so it needs a
@@ -529,14 +575,79 @@ fn execute_sequence_inner(
     prep_context.invocation.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::Preflight,
     );
-    let graph = composition::build_preflight_graph_with_invocation(
-        &plan,
-        source,
-        graph_context.clone(),
-        &prep_context.invocation,
-        &prep_context.source_context,
-        user_set_overrides.as_ref(),
-    )?;
+    // The plan is filled once, on the first attempt, after the root's
+    // `initialize` (whose writes its templates may read) and after every
+    // owning document's inputs are collected; a retry runs the same plan and
+    // the values collected for it.
+    let mut asked = std::collections::HashSet::new();
+    let root_plan_request = RootPlanRequest {
+        root: root_sequence,
+        runtime_writes: root.runtime.mutations().into_iter().collect(),
+        caller_input_records: &caller_input_records,
+        launch: prep_context.invocation.launch_file_resolution_context(),
+        compose_context: &graph_context,
+        invocation: &prep_context.invocation,
+        source_context: &prep_context.source_context,
+        file_resolution_context: &file_resolution_context,
+        launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
+        silent,
+    };
+    let (plan, graph, user_set_overrides, recheck_owners) = match (&root.plan, &root.collected_overrides) {
+        (Some(plan), Some(overrides)) => {
+            let graph = composition::reread_preflight_graph_with_invocation(
+                plan,
+                source,
+                graph_context.clone(),
+                &prep_context.invocation,
+                &prep_context.source_context,
+                overrides.as_ref(),
+            )?;
+            (plan.clone(), graph, overrides.clone(), None)
+        }
+        _ => {
+            let prepared = prepare_root_plan(&root_plan_request, user_set_overrides, &mut asked)?;
+            let graph = composition::build_preflight_graph_after_discovery(
+                &prepared.plan,
+                source,
+                graph_context.clone(),
+                &prep_context.invocation,
+                &prep_context.source_context,
+                Some(&prepared.layers),
+                &prepared.inventory,
+            )?;
+            // Empty containers still enter their lifecycle and produce an
+            // empty result.
+            if prepared.plan.steps.is_empty() {
+                crate::commands::sequence::emit_empty_sequence_notice(&source.resolved_path);
+            }
+            root.plan = Some(prepared.plan.clone());
+            let recheck = prepared.recheck_owners.then(|| prepared.layers.clone());
+            (prepared.plan, graph, prepared.overrides, recheck)
+        }
+    };
+    let effective_fail_fast = execution_options
+        .fail_fast_override
+        .unwrap_or(plan.document_fail_fast);
+
+    // `--step-timeout` / `--stall-timeout` apply to every step in the
+    // sequence. Early validation happens in the CLI entry point; the raw
+    // string is resolved per-step by the composition executor.
+    let _ = shared.step_timeout_secs()?;
+    let _ = shared.stall_timeout_secs()?;
+
+    let total_steps = plan.steps.len();
+
+    if !silent {
+        let term = log::terminal();
+        let status = Status::from_prose(format!(
+            "<b>Sequence:</b> <yellow>{}</yellow> step(s)",
+            total_steps
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
+    }
+
+
     // A referenced prompt document composes only at its own turn, so its
     // single-pass lifecycle literals are checked here, before any approval
     // prompt or step can run.
@@ -670,6 +781,11 @@ fn execute_sequence_inner(
             return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
         }
     }
+    // An owning document's own preparation failure is reported after the
+    // graph's structure and provider selection, which report first.
+    if let Some(layers) = &recheck_owners {
+        root_plan_request.recheck_owners(layers)?;
+    }
     if !silent && (shared.dry_run || verbose > 0) {
         emit_provider_plan(&selections);
     }
@@ -731,16 +847,21 @@ fn execute_sequence_inner(
         document_shell_values: None,
     };
 
+    // The first step composes against the root's `initialize` writes, so the
+    // probe does too; a dry run fired no lifecycle and composes without them.
+    let initialized = (!shared.dry_run).then(|| root.runtime.snapshot());
     let Some(validated) = run_phase_1c_with_schema(
         source,
         &plan,
         &resolved_targets,
         &user_set_overrides,
+        initialized.as_ref(),
         &compose_ctx,
         effective_fail_fast,
         preflight_approved,
         &interrupted,
         silent,
+        &mut asked,
     )?
     else {
         if let Some(mut acc) = perf_accumulator {
@@ -786,7 +907,10 @@ fn execute_sequence_inner(
         shared,
         compose: &compose_ctx,
         approved: validated.approved_commands,
-        user_set_overrides: validated.resolved_overrides,
+        user_set_overrides: {
+            root.collected_overrides = Some(validated.resolved_overrides.clone());
+            validated.resolved_overrides
+        },
         interrupted: &interrupted,
         effective_fail_fast,
         silent,
@@ -803,6 +927,18 @@ fn execute_sequence_inner(
         if !shared.dry_run {
             root.enter_pass();
             root.started = true;
+            // Each entry reads the root's values as prepared now, from the
+            // file as it reads now: what the caller supplied and was
+            // collected, then every write so far.
+            let live = composition::reload_composition_source(source).ok();
+            if let Some(values) = root_event_values(&RootEventInputs {
+                source: live.as_ref().unwrap_or(source), overrides: run_context.user_set_overrides.as_ref(), runtime_writes: root.runtime.mutations().into_iter().collect(),
+                caller_input_records: &caller_input_records, launch: prep_context.invocation.launch_file_resolution_context(),
+                launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()), compose_context: &graph_context,
+                file_resolution_context: &file_resolution_context,
+            }) {
+                root.refresh_event_values(values);
+            }
             let decision = root.event(claudine::composition::LifecycleSignal::Start, None)?;
             if !matches!(decision, claudine::composition::lifecycle::runtime::ContainerEventDecision::Continue) {
                 root.pending = Some(decision);

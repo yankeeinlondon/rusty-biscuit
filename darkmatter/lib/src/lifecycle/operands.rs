@@ -41,7 +41,8 @@
 use serde_json::Value;
 
 use super::actions::{
-    CommunicationChannel, expression_function_signature, is_lifecycle_control_verb, side_effect_signature,
+    CommunicationChannel, expression_function_signature, is_lifecycle_control_verb, is_lifecycle_only_verb,
+    side_effect_signature,
 };
 use crate::effects::effect_registration;
 use simplified_schema::coercion::{BindOptions, Defer};
@@ -187,15 +188,22 @@ pub struct TemplateOperand {
 
 /// The operands of the `form` spelling of `verb`'s action `value` that the
 /// lifecycle parser reads as templates, for a verb the parser owns itself
-/// (communication, `shell`, the flow-control directives, and `set`); `None`
-/// for a catalog verb, whose operands [`action_call`] reads.
+/// (communication, `shell`, the flow-control directives, the lifecycle-only
+/// verbs, and `set`); `None` for a catalog verb, whose operands
+/// [`action_call`] reads.
 ///
 /// Values the parser takes as something else are left out: `no_error`,
-/// `break.code`, the removed communication keys, a `set` value that is a
-/// whole-value `$( … )` command, and a `break` or `prep` list.
+/// `break.code`, `edit.create_new` and `edit.gui`, the removed communication
+/// keys, a `set` value that is a whole-value `$( … )` command, and a `break`
+/// or `prep` list.
 pub fn template_operands(verb: &str, form: OperandForm, value: &Value) -> Option<Vec<TemplateOperand>> {
     let communication = CommunicationChannel::from_verb(verb).is_some();
-    if !(communication || verb == "shell" || verb == "set" || is_lifecycle_control_verb(verb)) {
+    if !(communication
+        || verb == "shell"
+        || verb == "set"
+        || is_lifecycle_control_verb(verb)
+        || is_lifecycle_only_verb(verb))
+    {
         return None;
     }
     let operand = |location, nested| TemplateOperand { location, nested };
@@ -214,6 +222,7 @@ pub fn template_operands(verb: &str, form: OperandForm, value: &Value) -> Option
             .filter(|key| {
                 !(key.as_str() == "no_error"
                     || (verb == "break" && key.as_str() == "code")
+                    || (verb == "edit" && matches!(key.as_str(), "create_new" | "gui"))
                     || (communication && matches!(key.as_str(), "message" | "sound" | "route")))
             })
             .map(|key| operand(OperandLocation::Key(key.clone()), key == "with"))

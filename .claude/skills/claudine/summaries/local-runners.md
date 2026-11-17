@@ -15,7 +15,7 @@ Finally, local runners are often the fastest way to try brand-new open-weight mo
 The five runners Claudine tracks are all HTTP servers, but they have different product shapes.
 
 | Runner    | Shape                                                                       | Default           | Primary install pattern                                                                        |
-|-----------|-----------------------------------------------------------------------------|-------------------|------------------------------------------------------------------------------------------------|
+| --------- | --------------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------- |
 | Ollama    | Open-source app/service plus CLI for GGUF models                            | `127.0.0.1:11434` | macOS app or Homebrew, Linux service/script/Docker, Windows tray app or zip                    |
 | LM Studio | Desktop/headless local model app with closed-source server and open tooling | `127.0.0.1:1234`  | macOS/Windows/Linux app, `lms` CLI, `llmster` daemon                                           |
 | oMLX      | Open-source macOS Apple Silicon MLX runner                                  | `127.0.0.1:8000`  | macOS app, Homebrew tap, Python/source path                                                    |
@@ -31,7 +31,7 @@ That difference affects Claudine in practice. A bridge layer should not treat "l
 All five runners expose OpenAI-compatible APIs under `/v1`, so the OpenAI-style base URL includes `/v1`:
 
 | Runner    | OpenAI base URL             |
-|-----------|-----------------------------|
+| --------- | --------------------------- |
 | Ollama    | `http://localhost:11434/v1` |
 | LM Studio | `http://localhost:1234/v1`  |
 | oMLX      | `http://localhost:8000/v1`  |
@@ -41,7 +41,7 @@ All five runners expose OpenAI-compatible APIs under `/v1`, so the OpenAI-style 
 All five also expose an Anthropic Messages-compatible surface at `/v1/messages`, so Anthropic-style clients should use a base URL without `/v1`:
 
 | Runner    | Anthropic base URL       |
-|-----------|--------------------------|
+| --------- | ------------------------ |
 | Ollama    | `http://localhost:11434` |
 | LM Studio | `http://localhost:1234`  |
 | oMLX      | `http://localhost:8000`  |
@@ -61,7 +61,7 @@ Detection needs two layers: installation detection and running-server identifica
 Installation detection is platform-specific:
 
 | Runner    | Useful install signals                                                                                  |
-|-----------|---------------------------------------------------------------------------------------------------------|
+| --------- | ------------------------------------------------------------------------------------------------------- |
 | Ollama    | `ollama` binary, macOS `/Applications/Ollama.app`, Linux `ollama.service`, Windows `ollama.exe`         |
 | LM Studio | `lms` binary, macOS `/Applications/LM Studio.app`, `llmster` daemon, LM Studio home pointer             |
 | oMLX      | `omlx` binary, macOS `/Applications/oMLX.app`, `omlx-server` process                                    |
@@ -71,7 +71,7 @@ Installation detection is platform-specific:
 Running detection must be HTTP-response based. Ports alone are insufficient.
 
 | Runner    | Strong running probe                                                                                                                                                         |
-|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Ollama    | `GET /` returns `Ollama is running`; `GET /api/version` returns version JSON                                                                                                 |
 | LM Studio | `GET /v1/models` returns OpenAI-style model list with `owned_by: organization_owner` when auth is off; `/api/v1/models` has LM Studio model metadata                         |
 | oMLX      | `GET /health` returns JSON with `status: healthy`; `/openapi.json` identifies `oMLX API`                                                                                     |
@@ -99,7 +99,7 @@ vLLM is deployment-shaped. It is configured through `vllm serve` flags and optio
 Model IDs are not portable across runners.
 
 | Runner    | Common grammar                                                                                                                    |
-|-----------|-----------------------------------------------------------------------------------------------------------------------------------|
+| --------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | Ollama    | `name[:tag]`, `namespace/model`, `hf.co/{user}/{repo}[:quant]`                                                                    |
 | LM Studio | `publisher/model`, `publisher/repo/file.gguf`, `id@quant`                                                                         |
 | oMLX      | local model directory, `{owner}/{model}`, `<model>:<profile>`                                                                     |

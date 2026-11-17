@@ -405,6 +405,24 @@ impl CliProcessFixture {
         })
     }
 
+    /// Commits everything in the repository at `repo` and adds a detached
+    /// linked worktree of that commit at `worktree`, with no host
+    /// configuration (see [`Self::commit_all`]).
+    ///
+    /// ## Returns
+    ///
+    /// Whether the commit and `git worktree add` succeeded.
+    pub fn add_worktree(&self, repo: &Path, worktree: &Path) -> bool {
+        self.commit_all(repo)
+            && git(&self.git_global_config)
+                .args(["worktree", "add", "-q", "--detach"])
+                .arg(worktree)
+                .current_dir(repo)
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+    }
+
     /// `git init` a disposable repository at the fixture `cwd`; see
     /// [`CliProcessFixture::initialize_repository_at`].
     pub fn initialize_repository(&self) -> bool {

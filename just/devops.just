@@ -73,6 +73,24 @@ _ci_build_counter label:
         } >>"${GITHUB_OUTPUT}"
     fi
 
+# The `build-ci-build` Nextest setup script (`.config/nextest.toml`): build the
+# `ci-build` binary repo-deps' end-to-end tests drive, and hand them its path
+# as `BISCUIT_CI_BUILD_SHIPPED` so none of them calls Cargo again. Best effort:
+# without the path (no `jq`, an unwritable `NEXTEST_ENV`) the tests build it
+# themselves.
+_ci_build_for_tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    messages="$(cargo build --quiet --message-format=json-render-diagnostics \
+        --no-default-features --features build-tools \
+        --manifest-path scripts/Cargo.toml --bin ci-build)"
+    [[ -n "${NEXTEST_ENV:-}" ]] || exit 0
+    binary="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "ci-build") | .executable // empty' \
+        <<<"${messages}" 2>/dev/null | tail -n 1 || true)"
+    if [[ -n "${binary}" ]]; then
+        { printf 'BISCUIT_CI_BUILD_SHIPPED=%s\n' "${binary}" >>"${NEXTEST_ENV}"; } 2>/dev/null || true
+    fi
+
 # Render the recorded compiler work and write the measurement document for one
 # `{package, environment, gate}` cell.
 #

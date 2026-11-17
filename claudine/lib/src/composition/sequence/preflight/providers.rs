@@ -124,17 +124,39 @@ pub struct ProviderPrediction {
     pub agent: HintState,
     #[allow(missing_docs)]
     pub model: HintState,
-    /// The templated `agent` and `model` values (under [`HINT_ENTRY`]) and
-    /// every key they read, directly or through another key, with its value.
-    /// Once the whole graph is known, preflight checks whether these read a
-    /// key the graph's lifecycle writes, including one with no value before
-    /// that write.
-    pub(crate) dependencies: Vec<(String, Value)>,
+    /// The authored reads of the templated `agent` and `model` values, one
+    /// closure per owner that supplied them, recorded as the prediction is
+    /// built. Once the whole graph is known, preflight checks whether these
+    /// read a key the graph's lifecycle writes, including one with no value
+    /// before that write. Empty for a literal hint.
+    pub(crate) dependencies: Vec<DependencyScope>,
 }
 
-/// The name a selection value takes in [`ProviderPrediction::dependencies`],
-/// which no frontmatter key can have.
-const HINT_ENTRY: &str = "\u{0}hint";
+/// One owner's part of a prediction's read graph: `entry` and every key it
+/// reads, directly or through other keys of the same owner, with the
+/// authored value that owner gives it. A name is only ever looked up in the
+/// owner that evaluates it, so two owners' same-named keys never meet.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DependencyScope {
+    /// The value the closure starts from: a selection key, or a synthetic
+    /// `\0with.<key>` entry no frontmatter key can name.
+    pub(crate) entry: String,
+    pub(crate) values: Vec<(String, Value)>,
+    /// `None` for a selection value's own closure. `Some(key)` for the
+    /// sequence-scope closure of the task `with:` entry `key` that a document
+    /// closure reads: when it reaches a runtime write, the document closure's
+    /// read of `key` does too.
+    pub(crate) feeds: Option<String>,
+}
+
+impl DependencyScope {
+    fn reaches(&self, marked: &HashSet<String>) -> bool {
+        let no_roots = DeferredShellRoots::new(std::iter::empty::<&str>());
+        marked.contains(&self.entry)
+            || derived_deferred_keys(self.values.iter().map(|(key, value)| (key, value)), &no_roots, marked)
+                .contains(&self.entry)
+    }
+}
 
 /// The three classes a prompt task's provider falls into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,10 +222,17 @@ impl ProviderPrediction {
     /// Move a static, failed, or empty-list hint that reads a key the graph writes at
     /// runtime, or that is such a key, to the launch.
     pub(crate) fn defer_runtime_written(&mut self, written: &HashSet<String>) {
-        let no_roots = DeferredShellRoots::new(std::iter::empty::<&str>());
-        let reads_written = !self.dependencies.is_empty()
-            && derived_deferred_keys(self.dependencies.iter().map(|(key, value)| (key, value)), &no_roots, written)
-                .contains(HINT_ENTRY);
+        let reads_written = !self.dependencies.is_empty() && {
+            let mut marked = written.clone();
+            for scope in &self.dependencies {
+                if let Some(fed) = &scope.feeds
+                    && scope.reaches(written)
+                {
+                    marked.insert(fed.clone());
+                }
+            }
+            self.dependencies.iter().any(|scope| scope.feeds.is_none() && scope.reaches(&marked))
+        };
         for (key, state) in SELECTION_KEYS.iter().zip([&mut self.agent, &mut self.model]) {
             if !(reads_written || written.contains(*key)) {
                 continue;
@@ -242,6 +271,9 @@ pub(crate) struct HintLayers<'a> {
     pub(crate) task_property: &'a str,
     /// The early-binding state the `with` values read.
     pub(crate) step_frontmatter: &'a SharedFrontmatter,
+    /// The authored values of the keys [`Self::step_frontmatter`] holds as
+    /// prepared values: what a dependency closure follows in their place.
+    pub(crate) step_authored: &'a Map<String, Value>,
     pub(crate) caller_setters: &'a Map<String, Value>,
     /// The sequence source, which a caller setter is attributed to.
     pub(crate) sequence_path: &'a Path,
@@ -341,7 +373,7 @@ fn predict_key(
     key: &str,
     layers: &HintLayers<'_>,
     states: &mut PredictionStates,
-    dependencies: &mut Vec<(String, Value)>,
+    dependencies: &mut Vec<DependencyScope>,
     evaluate: &mut Evaluator<'_>,
 ) -> Result<HintState, crate::composition::CompositionError> {
     if let Some(value) = layers.caller_setters.get(key) {
@@ -365,7 +397,10 @@ fn predict_key(
         // the same name.
         let entry = format!("\u{0}with.{key}");
         let lookup = |name: &str| if name == entry { Some(value) } else { layers.step_frontmatter.get(name) };
-        let decided = classify_reads(&entry, &lookup, &HashSet::new(), dependencies);
+        if reads_expression(value) {
+            dependencies.push(with_scope(key, value, layers, None));
+        }
+        let decided = classify_reads(&entry, &lookup, &HashSet::new());
         if let Some(state) = decided.into_state(source.clone()) {
             return Ok(state);
         }
@@ -394,6 +429,7 @@ fn predict_key(
     if !reads_expression(value) {
         return Ok(HintState::Static { value: value.clone(), source });
     }
+    record_document_scopes(key, layers, dependencies);
     let raw_state = states.authored(layers);
     let late_with: HashSet<String> = layers
         .with_deferred
@@ -401,7 +437,7 @@ fn predict_key(
         .filter(|name| !layers.with_failed.contains_key(*name))
         .cloned()
         .collect();
-    let decided = classify_reads(key, &|name| raw_state.get(name), &late_with, dependencies);
+    let decided = classify_reads(key, &|name| raw_state.get(name), &late_with);
     if let Some(state) = decided.into_state(source.clone()) {
         return Ok(state);
     }
@@ -415,6 +451,51 @@ fn predict_key(
         Ok(value) => HintState::Static { value, source },
         Err(cause) => HintState::Failed { source, cause },
     })
+}
+
+/// The sequence-scope closure of the task `with:` entry `key` (`value`),
+/// which reads the enclosing sequence's state: a key early binding holds as
+/// a prepared value is followed through its authored value, so every link
+/// of a derived chain is kept.
+fn with_scope(key: &str, value: &Value, layers: &HintLayers<'_>, feeds: Option<String>) -> DependencyScope {
+    let entry = format!("\u{0}with.{key}");
+    let lookup = |name: &str| {
+        if name == entry {
+            Some(value)
+        } else {
+            layers.step_authored.get(name).or_else(|| layers.step_frontmatter.get(name))
+        }
+    };
+    DependencyScope { values: read_closure(&entry, &lookup).into_iter().collect(), entry, feeds }
+}
+
+/// Record the dependencies of the document value `key`: its closure over the
+/// prompt document under the caller's setters, and the sequence-scope closure
+/// of each task `with:` entry that closure reads. A `with:` entry no setter
+/// replaces has no value in the document scope, since it is evaluated in the
+/// sequence's; a document key of the same name is never read in its place.
+///
+/// Classification keeps reading [`PredictionStates::authored`]; only what a
+/// runtime write can reach is recorded here.
+fn record_document_scopes(key: &str, layers: &HintLayers<'_>, dependencies: &mut Vec<DependencyScope>) {
+    let lookup = |name: &str| {
+        layers.caller_setters.get(name).or_else(|| {
+            if layers.with.contains_key(name) { None } else { layers.document.get(name) }
+        })
+    };
+    let closure = read_closure(key, &lookup);
+    let mut fed: BTreeSet<String> = BTreeSet::new();
+    for value in closure.values() {
+        fed.extend(value_read_roots(value).into_iter().filter(|root| {
+            !layers.caller_setters.contains_key(root)
+                && layers.with.get(root).is_some_and(reads_expression)
+        }));
+    }
+    dependencies.push(DependencyScope { entry: key.to_string(), values: closure.into_iter().collect(), feeds: None });
+    for name in fed {
+        let value = &layers.with[&name];
+        dependencies.push(with_scope(&name, value, layers, Some(name.clone())));
+    }
 }
 
 /// The failure of the first (by name) failed `with` entry `key` of
@@ -460,8 +541,8 @@ impl ReadClass {
 }
 
 /// Classify `key` of the state `lookup` reads by what it reads, directly or
-/// through other keys of that state, and add its value and theirs to
-/// `dependencies`. `late` names keys already known to be late.
+/// through other keys of that state. `late` names keys already known to be
+/// late.
 ///
 /// Only `key` and the keys it reaches can change its class, so the
 /// classification copies and scans those alone: a step state's other keys,
@@ -470,12 +551,11 @@ fn classify_reads<'v>(
     key: &str,
     lookup: &dyn Fn(&str) -> Option<&'v Value>,
     late: &HashSet<String>,
-    dependencies: &mut Vec<(String, Value)>,
 ) -> ReadClass {
     // A literal reads nothing.
-    let Some(value) = lookup(key).filter(|value| reads_expression(value)) else {
+    if !lookup(key).is_some_and(reads_expression) {
         return ReadClass::Evaluable;
-    };
+    }
     let state = read_closure(key, lookup);
     crate::note_work!(PredictionWithStateNodes, crate::work_counters::value_nodes(state.iter()));
     let mut reads = BTreeSet::new();
@@ -483,16 +563,12 @@ fn classify_reads<'v>(
     let reaches = |marked: &HashSet<String>| -> bool {
         marked.contains(key) || derived_deferred_keys(state.iter(), &no_roots, marked).contains(key)
     };
-    // Each key `key` derives from, for the runtime-write check.
+    // Each key `key` derives from, for naming a circular read.
     for candidate in state.keys() {
         if candidate != key && reaches(&HashSet::from([candidate.clone()])) {
             reads.insert(candidate.trim_start_matches("\u{0}with.").to_string());
-            dependencies.push((candidate.clone(), state[candidate].clone()));
         }
     }
-    // A key the value reads that has no value yet is still a read: a
-    // lifecycle `set` may create it before the task's turn.
-    dependencies.push((HINT_ENTRY.to_string(), value.clone()));
     let circular: HashSet<String> = state
         .iter()
         .filter(|(_, value)| value_text(value).is_some_and(|text| first_target_identity_root(&text).is_some()))

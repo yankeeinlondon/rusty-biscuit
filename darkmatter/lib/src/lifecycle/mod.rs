@@ -45,6 +45,7 @@
 //! let options = LifecycleParseOptions {
 //!     is_known_effect: &|_| false,
 //!     authored: None,
+//!     authored_values: None,
 //!     unknown_verbs: UnknownVerbPolicy::Reject,
 //!     registry: &EventRegistry::md(),
 //! };
@@ -63,7 +64,7 @@ use biscuit_terminal::components::status::StatusState;
 use crate::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 
 use self::actions::{
-    CommunicationAction, CommunicationChannel, ExpressionFunctionAction, IgnoredAction, LifecycleAction,
+    CommunicationAction, CommunicationChannel, EditAction, ExpressionFunctionAction, IgnoredAction, LifecycleAction,
     LifecycleActionKind, LifecycleControlAction, LifecycleNode, LifecyclePath, RetryBackoff, RuntimeSet,
     RuntimeSetError, ShellAction, SideEffectAction, WithOverlay, WithOverlayError, all_lifecycle_verbs,
     expression_function_signature, is_known_lifecycle_verb, rewrite_to_positional, side_effect_signature,
@@ -100,6 +101,7 @@ mod validate;
 use action_shape::*;
 #[doc(hidden)]
 pub use action_shape::{action_value_to_expr, closest_spelling};
+pub(crate) use action_shape::{edit_flag_problem, edit_target_problem};
 pub use authored_order::AuthoredOrder;
 pub use context::{LifecycleCause, LifecycleErrorInfo, LifecycleEvaluationReason, LifecycleTiming};
 pub use effects::{LifecycleEffects, dispatch_communication, render_prose_line, render_status_line};
@@ -121,6 +123,7 @@ pub use parse::{
 };
 #[doc(hidden)]
 pub use parse::{action_type, runs_a_shell, with_mapping_shape};
+pub(crate) use parse::{ActionMapPosition, AuthoredSource, placement_rule};
 #[doc(hidden)]
 pub use source_map::{AuthoredValue, LifecycleSourceMap};
 pub use source_map::AuthoredSegment;

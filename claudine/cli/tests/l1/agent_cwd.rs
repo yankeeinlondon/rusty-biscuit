@@ -108,9 +108,10 @@ fn write_config(home: &Path, action: Option<(&str, &str)>) {
         |(command, params)| {
             serde_json::json!({
                 "before_prompt": [{
-                    "type": "bash",
-                    "command": command,
-                    "params": params
+                    "bash": {
+                        "command": command,
+                        "params": params
+                    }
                 }]
             })
         },

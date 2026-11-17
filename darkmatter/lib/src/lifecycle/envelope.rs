@@ -42,9 +42,6 @@ use serde_json::Value;
 /// do not know.
 pub const DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 
-/// Upper bound, in characters, of a [`concise_message`].
-pub const CONCISE_MESSAGE_MAX_CHARS: usize = 240;
-
 /// The public projection of the diagnostic selected to speak for a failure.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiagnosticSnapshot {
@@ -67,10 +64,9 @@ pub struct DiagnosticSnapshot {
     /// omitted.
     pub detail: Value,
 
-    /// Concise, notification-safe message — single-line, escape-free, and
-    /// length-clamped (see [`concise_message`]), so a TTS route, a webhook, or a
-    /// desktop notification can use it verbatim. It is *not* the multi-line
-    /// rendered block.
+    /// Complete, single-line, escape-free message of the selected diagnostic
+    /// (see [`concise_message`]); no length limit. Delivery adapters fit it to
+    /// their destination. It is *not* the multi-line rendered block.
     pub message: String,
 
     /// The next registered diagnostic below this one, when the chain has one.
@@ -105,7 +101,8 @@ pub struct DiagnosticCause {
     pub severity: String,
     /// The catalog-shaped instance payload.
     pub detail: Value,
-    /// Concise, notification-safe message.
+    /// Complete, single-line, escape-free message of the selected diagnostic;
+    /// no length limit. Delivery adapters fit it to their destination.
     pub message: String,
 }
 
@@ -205,12 +202,12 @@ impl PartialEq for SourceExcerpt {
     }
 }
 
-/// Reduce arbitrary error text to a concise, notification-safe line.
+/// Normalize arbitrary error text to one escape-free line.
 ///
-/// Escapes are stripped, the text is collapsed to one line, and it is clamped
-/// to [`CONCISE_MESSAGE_MAX_CHARS`] characters. Every message that can reach
-/// TTS, messaging, or a desktop notification goes through this one rule. The
-/// pass is idempotent.
+/// Terminal escape sequences are stripped and the text is folded onto one line
+/// (see [`concise_message_with_suffix`] for the folding rule). The text is never
+/// shortened: a long error stays whole, and a destination that cannot show it
+/// all fits it itself. The pass is idempotent.
 ///
 /// ## Examples
 ///
@@ -220,39 +217,34 @@ impl PartialEq for SourceExcerpt {
 /// assert_eq!(concise_message("first\n  second\t"), "first second");
 /// ```
 pub fn concise_message(text: &str) -> String {
-    concise_message_with_suffix(text, "")
+    normalize(text)
 }
 
-/// [`concise_message`] with `suffix` appended after clamping.
+/// [`concise_message`] over `base` followed by `suffix`.
 ///
-/// The suffix's characters are reserved from the budget, so a suffix such as
-/// `" (attempt 2)"` survives truncation rather than being cut off.
+/// The pair is normalized as one string, so an escape or line break in the
+/// suffix gets the same hygiene as the base. The caller supplies any
+/// separator, such as the leading space of `" (attempt 2)"`; interior spaces
+/// are kept. Nothing is shortened.
+///
+/// Folding splits on control characters (line feeds, carriage returns, tabs,
+/// stray control bytes) and on the Unicode line and paragraph separators
+/// (U+2028, U+2029), trims each segment, drops empty ones, and joins the rest
+/// with one space.
 pub fn concise_message_with_suffix(base: &str, suffix: &str) -> String {
-    let single_line = collapse_to_line(&strip_ansi_codes(base));
-    let budget = CONCISE_MESSAGE_MAX_CHARS.saturating_sub(suffix.chars().count());
-    format!("{}{suffix}", clamp_chars(&single_line, budget))
+    normalize(&format!("{base}{suffix}"))
 }
 
-/// Fold a (possibly multi-line) string to a single line: split on any control
-/// character (newlines, tabs, stray escape bytes), trim each segment, and
-/// rejoin with a single space.
+fn normalize(text: &str) -> String {
+    collapse_to_line(&strip_ansi_codes(text))
+}
+
 fn collapse_to_line(text: &str) -> String {
-    text.split(|c: char| c.is_control())
+    text.split(|c: char| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// Clamp `line` to at most `budget` characters, reserving one character for
-/// the trailing `…` when truncation occurs so the returned string never
-/// exceeds `budget`.
-fn clamp_chars(line: &str, budget: usize) -> String {
-    if line.chars().count() <= budget {
-        return line.to_string();
-    }
-    let clamped: String = line.chars().take(budget.saturating_sub(1)).collect();
-    format!("{clamped}…")
 }
 
 #[cfg(test)]

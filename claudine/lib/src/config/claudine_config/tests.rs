@@ -45,10 +45,10 @@ fn actions_map_snake_case_keys() {
         "preferred_agent": "claude",
         "actions": {
             "session_start": [
-                { "type": "sound_effect", "effect": "doorbell" }
+                { "sound_effect": { "effect": "doorbell" } }
             ],
             "turn_complete": [
-                { "type": "speak", "message": "Done!" }
+                { "speak": { "message": "Done!" } }
             ]
         }
     });
@@ -272,8 +272,9 @@ fn validate_accepts_valid_messenger_active_config() {
             "active_config": "main",
             "configurations": {
                 "main": {
-                    "provider": "discord",
-                    "channel_id": "999"
+                    "discord": {
+                        "channel_id": "999"
+                    }
                 }
             }
         }
@@ -289,8 +290,9 @@ fn validate_accepts_messenger_with_no_active_config() {
         "messenger": {
             "configurations": {
                 "route1": {
-                    "provider": "slack",
-                    "channel_id": "C123"
+                    "slack": {
+                        "channel_id": "C123"
+                    }
                 }
             }
         }
@@ -506,7 +508,7 @@ fn repo_override_accepts_actions() {
     let config = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
         "actions": {
             "session_start": [
-                { "type": "sound_effect", "effect": "doorbell" }
+                { "sound_effect": { "effect": "doorbell" } }
             ]
         }
     }))
@@ -520,16 +522,16 @@ fn repo_override_accepts_actions() {
 fn repo_override_with_active_messenger_round_trips() {
     let json = r#"{ "active_messenger": "work-slack" }"#;
     let repo: RepoOverrideConfig = serde_json::from_str(json).unwrap();
-    assert_eq!(repo.active_messenger, Some(Some("work-slack".to_string())));
+    assert_eq!(repo.active_messenger, Some("work-slack".to_string()));
     let serialized = serde_json::to_string(&repo).unwrap();
     assert!(serialized.contains("work-slack"));
 }
 
 #[test]
-fn repo_override_with_null_active_messenger_disables() {
+fn repo_override_with_null_active_messenger_inherits() {
     let json = r#"{ "active_messenger": null }"#;
     let repo: RepoOverrideConfig = serde_json::from_str(json).unwrap();
-    assert_eq!(repo.active_messenger, Some(None));
+    assert_eq!(repo.active_messenger, None);
 }
 
 #[test]
@@ -678,15 +680,16 @@ fn full_config_round_trip() {
         "canonical_provider": "gemini",
         "actions": {
             "session_start": [
-                { "type": "sound_effect", "effect": "doorbell" }
+                { "sound_effect": { "effect": "doorbell" } }
             ]
         },
         "messenger": {
             "active_config": "work",
             "configurations": {
                 "work": {
-                    "provider": "slack",
-                    "channel_id": "C0ABC"
+                    "slack": {
+                        "channel_id": "C0ABC"
+                    }
                 }
             }
         },

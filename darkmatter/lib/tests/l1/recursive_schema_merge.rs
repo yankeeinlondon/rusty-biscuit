@@ -182,7 +182,9 @@ fn raw_baseline() -> Value {
             "note": {
                 "type": "string",
                 "default": "#/$defs/item",
-                "const": "kept",
+                // A default is applied to a missing `note`, so it satisfies
+                // the property's own assertion.
+                "const": "#/$defs/item",
                 "examples": [{"$ref": "#/$defs/item"}],
                 "x-darkmatter-suggest": [{"$defs": {"item": 1}}],
             },

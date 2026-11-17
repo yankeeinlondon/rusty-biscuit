@@ -247,13 +247,14 @@ fn array_suffix_applies_to_the_whole_returned_union() {
 // ── requiredness ─────────────────────────────────────────────────────────
 
 #[test]
-fn required_suffix_over_null_admitting_types_stays_optional() {
+fn required_suffix_over_null_admitting_types_requires_the_key() {
     for value in [json!("null"), json!("unknown"), json!("string | null")] {
         let host = Answers::new(&[("t", value.clone())]);
         let resolved = resolve(&document("status: \"{{ t }}(required)\""), &host)
             .unwrap_or_else(|error| panic!("{value}: {error}"));
-        assert!(!required(&resolved).contains(&"status".to_owned()), "{value}: {}", json_schema(&resolved));
-        assert!(resolved.validate_strict(&json!({})).is_ok(), "{value}: an absent status is accepted");
+        assert!(required(&resolved).contains(&"status".to_owned()), "{value}: {}", json_schema(&resolved));
+        assert!(resolved.validate_strict(&json!({})).is_err(), "{value}: an absent status is refused");
+        assert!(resolved.validate_strict(&json!({ "status": null })).is_ok(), "{value}: a written null is accepted");
     }
 }
 
@@ -305,12 +306,15 @@ fn conflicting_default_is_a_suffix_conflict() {
 }
 
 #[test]
-fn non_null_over_a_null_admitting_result_is_an_invalid_expansion() {
-    let host = Answers::new(&[("t", json!("string | null"))]);
-    let (slot, kind, property, _) = slot_result(resolve(&document("status: \"{{ t }}(non-null)\""), &host));
+fn a_returned_type_spelling_the_removed_non_null_is_not_a_type_definition() {
+    let host = Answers::new(&[("t", json!("string(non-null)"))]);
+    let (slot, kind, property, _) = slot_result(resolve(&document("status: \"{{ t }}\""), &host));
     assert_eq!(slot.expression, "t");
     assert_eq!(property.as_deref(), Some("status"));
-    assert!(matches!(kind, SlotResultKind::InvalidExpansion(_)), "{kind:?}");
+    assert!(
+        matches!(&kind, SlotResultKind::NotATypeDefinition(error) if error.to_string().contains("`non-null` is no longer supported")),
+        "{kind:?}"
+    );
 }
 
 #[test]
@@ -596,15 +600,14 @@ fn nested_template_constraint_resolves() {
 }
 
 #[test]
-fn non_null_after_nested_substitution_is_a_located_invalid_expansion() {
-    // The static `null | (string(non-null) | boolean)[]` is a grammar error;
-    // the template is not, until the returned `non-null` joins the group.
-    assert!(SimplifiedSchema::try_from(document("status: \"null | (string(non-null) | boolean)[]\"").as_str()).is_err());
-    let host = Answers::new(&[("t", json!("string(non-null)"))]);
-    let (slot, kind, property, _) = slot_result(resolve(&document("status: \"null | ({{ t }} | boolean)[]\""), &host));
-    assert_eq!(slot.expression, "t");
-    assert_eq!(property.as_deref(), Some("status"));
-    assert!(matches!(kind, SlotResultKind::InvalidExpansion(_)), "{kind:?}");
+fn not_empty_after_nested_substitution_matches_the_static_text() {
+    assert_equivalent(
+        &document("status: \"null | ({{ t }} | boolean)[]\""),
+        &[("t", json!("string(not-empty)"))],
+        &document("status: \"null | (string(not-empty) | boolean)[]\""),
+        &json!({ "status": ["x", true] }),
+        &json!({ "status": [""] }),
+    );
 }
 
 #[test]

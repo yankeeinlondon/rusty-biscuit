@@ -13,7 +13,37 @@ Validation covers all reference types discovered by the reference analysis subsy
 
 References are extracted via graph traversal, so validation naturally covers the full transclusion tree when the document uses `::file`, `::code`, `::toc-linking`, or frontmatter prologue/epilogue directives.
 
-For `::toc-linking`, validation checks the resolved target file dependency and also sees the generated markdown links that directive injects into the effective composed document.
+Each document is checked as composition prepares it. A `::block when=` keeps only the content its condition selects, and a [`::map`](./map.md) or [`::filter`](./filter.md) body is checked once for every item composition keeps. Inside each copy, a directive's target, its `set` and `replace=` values, its `when=` condition, and the links the copy contains read that item's value:
+
+```md
+---
+$schema:
+  words: string[](required)
+words: [one, two]
+---
+::map words "item => item"
+::file ./{{ item }}.md
+::end-map
+```
+
+Validation follows `./one.md` and `./two.md` and checks the references in each, and a filtered-out item contributes nothing. The check never runs a `::shell` command; in a document with a `::map` or `::filter`, shell output is left to composition.
+
+For `::toc-linking`, validation checks the resolved target file dependency and also sees the generated markdown links that directive injects into the effective composed document. Those generated links name the target's headings as written in its source, so their fragments are checked against those source headings. Every other cross-document fragment, including a link you write by hand to the same target, is checked against the target's prepared headings (after its replacements, interpolation, and conditional blocks):
+
+```md
+<!-- toc.md -->
+---
+replace:
+  WORD: World
+---
+## Hello WORD
+```
+
+| Reference | With fragment checking |
+|---|---|
+| `::toc-linking ./toc.md` (generates `./toc.md#hello-word`) | valid |
+| `[Hello](./toc.md#hello-world)` | valid |
+| `[Hello](./toc.md#hello-word)` | `MissingFragmentTarget` |
 
 ## Path Resolution
 
@@ -62,6 +92,7 @@ prepared body, for code that walks the graph; authored positions are in
 | Code | Severity | Meaning |
 |------|----------|---------|
 | `MissingLocalTarget` | Error | Local file does not exist |
+| `EmptyTarget` | Warning for a hyperlink or image, Error otherwise | The target is empty, as in `[text]()`; the issue's reference quotes the construct |
 | `InvalidUrl` | Error | URL is syntactically malformed |
 | `RemoteUnreachable` | Error | HTTP check failed or timed out |
 | `RemoteDisallowed` | Info | Remote validation disabled, cannot verify |

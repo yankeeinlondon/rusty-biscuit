@@ -56,6 +56,22 @@ name = "claudine-argv-recorder"
 path = "tests/bin/argv_recorder/main.rs"
 required-features = ["test-fixtures"]
 
+# Test-only native fake editor (`test_toolkit::fake_editor`) for the tests that
+# run the `edit` lifecycle action through Claudine's stacks; gated like the
+# others.
+[[bin]]
+name = "claudine-fake-editor"
+path = "tests/bin/fake_editor/main.rs"
+required-features = ["test-fixtures"]
+
+# Test-only native `echo` for sequence tests that read a templated `echo`'s
+# output: a template command is never run through a shell, so Windows has no
+# `echo` program; gated like the others.
+[[bin]]
+name = "claudine-fake-echo"
+path = "tests/bin/fake_echo/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.
@@ -77,7 +93,8 @@ biscuit-file = { path = "../../biscuit-file/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib" }
 claudine = { path = "../lib" }
-# Only for the `claudine-argv-recorder` fixture binary (`test-fixtures`).
+# Only for the `claudine-argv-recorder` and `claudine-fake-editor` fixture
+# binaries (`test-fixtures`).
 test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 playa = { path = "../../playa/lib", features = ["sound-effects", "native-playback"] }
 sniff = { path = "../../sniff/lib" }

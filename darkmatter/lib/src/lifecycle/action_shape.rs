@@ -41,7 +41,10 @@ fn classify_positional_value(
     // The message names the operand the way the expression walker does
     // (`start[0].info.text`, `start[1].ensure_file.arg[1]`).
     let convert = |index: usize, item: &serde_json::Value| {
-        action_value_to_expr(item).map_err(|source| {
+        // An `edit` target is text: a YAML number or boolean names a file by
+        // its spelling (`edit: 5` opens `5`).
+        let item = if verb == "edit" { edit_file_value(item) } else { std::borrow::Cow::Borrowed(item) };
+        action_value_to_expr(&item).map_err(|source| {
             let operand = match positional_operand_field(verb) {
                 Some(field) => format!("{property_name}.{field}"),
                 None => format!("{property_name}.arg[{index}]"),
@@ -88,6 +91,7 @@ pub(super) fn positional_operand_field(verb: &str) -> Option<&'static str> {
         "break" => Some("reason"),
         "prep" => Some("target"),
         "shell" => Some("command"),
+        "edit" => Some("file"),
         _ if CommunicationChannel::from_verb(verb).is_some() => Some("text"),
         _ => None,
     }
@@ -208,6 +212,16 @@ fn build_non_control_positional_action(
             on_error: None,
             pre_resolved: false,
             template: None,
+        }));
+    }
+
+    // `edit` takes exactly its target; `create_new` and `gui` need the long form.
+    if verb == "edit" {
+        check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
+        return Ok(LifecycleActionKind::Edit(EditAction {
+            file: edit_file(args.into_iter().next().expect("arity checked"), source_file, property_name)?,
+            create_new: false,
+            gui: None,
         }));
     }
 
@@ -482,6 +496,31 @@ pub(super) fn build_action_from_params(
         }));
     }
 
+    // `edit`: `file` required. `create_new` and `gui` arrive only as boolean
+    // literals, already converted by `parse_long_form`, which drops a `null`
+    // one: `create_new` then defaults to false and `gui` states no preference.
+    if verb == "edit" {
+        let file = params_map.remove("file").ok_or_else(|| LifecycleError::LifecycleInvalidArgs {
+            source_path: source_file.to_path_buf(),
+            property: property.to_string(),
+            action: verb.to_string(),
+            message: "`edit` requires a `file` parameter".to_string(),
+        })?;
+        let flag = |expr: Option<Expr>| match expr {
+            Some(Expr::BoolLiteral(flag)) => Some(flag),
+            None => None,
+            Some(other) => unreachable!("`edit` flags are checked to be boolean literals, got `{other}`"),
+        };
+        let create_new = flag(params_map.remove("create_new")).unwrap_or(false);
+        let gui = flag(params_map.remove("gui"));
+        reject_extra_params(verb, &params_map, property, source_file)?;
+        return Ok(LifecycleActionKind::Edit(EditAction {
+            file: edit_file(file, source_file, &format!("{property}.file"))?,
+            create_new,
+            gui,
+        }));
+    }
+
     // Expression-function actions with concrete named parameters. Variadic
     // functions (`and`, `or`) are positional-only and reject long form.
     if let Some(signature) = expression_function_signature(verb) {
@@ -664,6 +703,90 @@ fn prep_target(target: Expr, source_file: &Path, property: &str) -> Result<Expr,
     })
 }
 
+/// An `edit` target is a non-blank string or an interpolation. A non-blank
+/// literal is kept byte-for-byte. `property` locates the operand itself: the
+/// verb for the short form, its `file` key for the long form.
+fn edit_file(file: Expr, source_file: &Path, property: &str) -> Result<Expr, LifecycleError> {
+    let Some(message) = edit_file_problem(&file) else {
+        return Ok(file);
+    };
+    Err(LifecycleError::LifecycleInvalidArgs {
+        source_path: source_file.to_path_buf(),
+        property: property.to_string(),
+        action: "edit".to_string(),
+        message: message.to_string(),
+    })
+}
+
+/// An authored `edit` target converted as the shared conversion engine
+/// converts a value for a `string` parameter: a YAML number or boolean
+/// becomes its text (`5` → `"5"`, `true` → `"true"`); every other value is
+/// returned as written, for the target rules to judge.
+pub(crate) fn edit_file_value(value: &serde_json::Value) -> std::borrow::Cow<'_, serde_json::Value> {
+    if !matches!(value, serde_json::Value::Number(_) | serde_json::Value::Bool(_)) {
+        return std::borrow::Cow::Borrowed(value);
+    }
+    match bind(&Shape::text(), value) {
+        Ok(bound) => std::borrow::Cow::Owned(bound.value().clone()),
+        Err(_) => std::borrow::Cow::Borrowed(value),
+    }
+}
+
+/// Why the lifecycle parser refuses `file` as an `edit` target, if it does:
+/// a blank literal, or a whole-value template whose literal result is a
+/// number or boolean. An authored YAML number or boolean never reaches this
+/// check as one: [`edit_file_value`] has already made it text.
+pub(crate) fn edit_file_problem(file: &Expr) -> Option<&'static str> {
+    match file {
+        Expr::StringLiteral(text) if text.trim().is_empty() => Some("`edit.file` must not be blank"),
+        Expr::NumberLiteral(_) => Some("`edit.file` must be a string, got number"),
+        Expr::BoolLiteral(_) => Some("`edit.file` must be a string, got boolean"),
+        _ => None,
+    }
+}
+
+/// Why the lifecycle parser refuses the authored `edit` target `value`, if it
+/// does, and whether the refusal is a type mismatch rather than a blank value.
+/// Schema validation reports the same verdict at the operand.
+pub(crate) fn edit_target_problem(value: &serde_json::Value) -> Option<(&'static str, bool)> {
+    let converted = edit_file_value(value);
+    let target = action_value_to_expr(&converted).ok()?;
+    edit_file_problem(&target).map(|message| (message, !converted.is_string()))
+}
+
+/// A literal Boolean flag (`no_error`, `edit.create_new`, `edit.gui`) read
+/// through the shared conversion engine: `null` is no value, a YAML boolean
+/// is kept, and boolean-like text (`"yes"`, `"false"`) converts. A native
+/// number never becomes a boolean, and a `{{ … }}` template is refused: flags
+/// are literals, never evaluated.
+///
+/// ## Errors
+///
+/// The message the parser and schema validation both report for `name`.
+pub(crate) fn literal_flag(name: &str, value: &serde_json::Value) -> Result<Option<bool>, String> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let shape = Shape::boolean();
+    if check_exact(&shape, value).is_ok() {
+        return Ok(value.as_bool());
+    }
+    match bind(&shape, value) {
+        Ok(bound) => Ok(bound.value().as_bool()),
+        Err(_) => Err(format!("`{name}` must be a boolean, got {}", json_type_name(value))),
+    }
+}
+
+/// Why the lifecycle parser refuses `value` for `edit`'s long-form `key`, if
+/// it does: `create_new` and `gui` are literal flags ([`literal_flag`]), so a
+/// number, a list, or a template is refused, while `null` is no value.
+pub(crate) fn edit_flag_problem(key: &str, value: &serde_json::Value) -> Option<String> {
+    if !matches!(key, "create_new" | "gui") {
+        return None;
+    }
+    literal_flag(&format!("edit.{key}"), value).err()
+}
+
 /// Collect key/value action arguments in the positional order of the one
 /// overload their keys select ([`VerbSignature::select_named`]).
 ///
@@ -750,3 +873,4 @@ fn expr_to_string(expr: &Expr) -> String {
 use super::*;
 use super::actions::{LongFormMismatch, VerbSignature};
 use crate::markdown::compose::context::merge::json_type_name;
+use simplified_schema::coercion::{Shape, bind, check_exact};

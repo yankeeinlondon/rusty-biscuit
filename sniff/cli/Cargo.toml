@@ -32,6 +32,14 @@ name = "render_git_status_fixture"
 path = "src/bin/render_git_status_fixture.rs"
 required-features = ["test-fixtures"]
 
+# Test-only helper that the Level 2 foreground-handoff test runs from a shell in
+# a real terminal: it drives `sniff::process::ForegroundHandoff` and records
+# the terminal's foreground group and settings to marker files.
+[[bin]]
+name = "foreground_handoff_fixture"
+path = "src/bin/foreground_handoff_fixture.rs"
+required-features = ["test-fixtures"]
+
 [features]
 test-fixtures = ["dep:biscuit-test-harness"]
 

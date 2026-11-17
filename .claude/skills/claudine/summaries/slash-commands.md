@@ -13,7 +13,7 @@ This summary focuses on Claudine's compiled provider set: Claude Code, Codex CLI
 All providers expose something command-like, but they disagree on almost every important detail.
 
 | Provider    | Primary reusable command surface      | Native invocation                                      | Main artifact                                 |
-|:------------|:--------------------------------------|:-------------------------------------------------------|:----------------------------------------------|
+| :---------- | :------------------------------------ | :----------------------------------------------------- | :-------------------------------------------- |
 | Claude Code | Skills and legacy custom commands     | `/name`                                                | `SKILL.md` directory or `.md` command file    |
 | Codex CLI   | Agent Skills                          | `$SkillName` or `/skills` picker                       | `SKILL.md` directory                          |
 | Gemini CLI  | Custom commands plus Agent Skills     | `/name` for commands; model/tool activation for skills | TOML command file or `SKILL.md` directory     |
@@ -60,7 +60,7 @@ The practical rule is that descriptive metadata can often be mapped, but executi
 Providers also disagree on where commands live.
 
 | Provider    | User command or skill location examples                                                                |
-|:------------|:-------------------------------------------------------------------------------------------------------|
+| :---------- | :----------------------------------------------------------------------------------------------------- |
 | Claude Code | `~/.claude/skills/<name>/SKILL.md`, `~/.claude/commands/<name>.md`                                     |
 | Codex CLI   | `~/.agents/skills/<name>/SKILL.md`, deprecated `~/.codex/skills/<name>/SKILL.md`                       |
 | Gemini CLI  | `~/.gemini/commands/**/*.toml`, `~/.gemini/skills/`, `~/.agents/skills/`                               |
@@ -82,13 +82,13 @@ Claude Code supports a rich placeholder grammar: `$ARGUMENTS` for the raw argume
 
 OpenCode overlaps with Claude but is not identical. It supports `$ARGUMENTS` and positional `$1`, `$2`, etc.; the highest-numbered positional placeholder receives remaining arguments joined by spaces. Arguments are tokenized with shell-style quote awareness. If a template contains no `$ARGUMENTS` or `$N` placeholders, the raw argument string is appended to the rendered prompt.
 
-Gemini and Qwen use `for the raw argument string. Qwen appends arguments to the rendered prompt, separated by two line breaks, when` is absent. Qwen also shell-escapes \`` automatically when it appears inside `!{...}`. Gemini custom commands have the same broad raw-argument shape but live in TOML rather than Markdown.
+Gemini and Qwen use `{{args}}` for the raw argument string. Qwen appends arguments to the rendered prompt, separated by two line breaks, when `{{args}}` is absent. Qwen also shell-escapes `{{args}}` automatically when it appears inside `!{...}`. Gemini custom commands have the same broad raw-argument shape but live in TOML rather than Markdown.
 
-Goose accepts exactly one raw parameter after the slash command name and maps it into a declared recipe parameter, substituted with Jinja-style \`` placeholders in recipe fields such as `instructions`, `prompt`, and activities. Any other recipe parameters must be optional and provide defaults.
+Goose accepts exactly one raw parameter after the slash command name and maps it into a declared recipe parameter, substituted with Jinja-style `{{ parameter_name }}` placeholders in recipe fields such as `instructions`, `prompt`, and activities. Any other recipe parameters must be optional and provide defaults.
 
 Codex Agent Skills have no placeholder grammar; any arguments are ordinary prompt text after `$SkillName` or after selecting a skill. Kimi similarly appends additional text after `/skill:<name>` or `/flow:<name>` without documented positional or named placeholder substitution. Roo's provider catalog marks prompt arguments as positional-only, but the dedicated slash-command research refresh is still missing and should verify exact substitution syntax before Claudine rewrites Roo arguments automatically.
 
-Shell and file interpolation are even less portable. Claude and OpenCode support inline shell output with similar bang-backtick command syntax. OpenCode supports `@path` file references. Gemini and Qwen use `!{...}` shell injection and `@{...}` file injection; Qwen expands file references first, shell commands second, and \`` last. Goose recipes can include extensions, settings, sub-recipes, retry checks, and response schemas that reach beyond prompt interpolation.
+Shell and file interpolation are even less portable. Claude and OpenCode support inline shell output with similar bang-backtick command syntax. OpenCode supports `@path` file references. Gemini and Qwen use `!{...}` shell injection and `@{...}` file injection; Qwen expands file references first, shell commands second, and `{{args}}` last. Goose recipes can include extensions, settings, sub-recipes, retry checks, and response schemas that reach beyond prompt interpolation.
 
 Claudine should treat shell injection, file injection, dynamic context expansion, recipe extensions, subtask routing, flow execution, mode selection, and tool permissions as non-portable by default.
 
@@ -97,7 +97,7 @@ Claudine should treat shell injection, file injection, dynamic context expansion
 The visible command grammar differs enough that "slash command" is an overloaded term.
 
 | Provider    | Invocation examples                        | Namespace behavior                                                                                   |
-|:------------|:-------------------------------------------|:-----------------------------------------------------------------------------------------------------|
+| :---------- | :----------------------------------------- | :--------------------------------------------------------------------------------------------------- |
 | Claude Code | `/commit`, `/research:publish`             | Skills, legacy commands, built-ins, nested skills, and plugins share or qualify names                |
 | Codex CLI   | `$skill-creator`, `/skills`                | User-defined skills are not `/name` commands                                                         |
 | Gemini CLI  | `/commit`, `/git:commit`                   | TOML command paths become colon namespaces                                                           |
@@ -127,7 +127,7 @@ A useful portability classification should separate four cases.
 
 **Portable Agent Skills core:** A standard `SKILL.md` directory with only common Agent Skills metadata and Markdown body can often be linked or copied among Agent Skills-compatible providers, especially Codex and providers that search `.agents/skills`. Kimi, Gemini, Qwen, and Codex all participate in this ecosystem to some degree. Even then, invocation semantics differ, so "portable" should mean the artifact is structurally portable, not that the user invokes it the same way everywhere.
 
-**Prompt-body portable with rewrite:** Most Markdown command bodies are reusable after transforming metadata and argument placeholders. Claude, OpenCode, Qwen, Roo, and standard Kimi skill bodies often fall into this category. The prose can survive; `$ARGUMENTS`, \``, `$1`, `/skill:` prefixes, model fields, agent fields, mode fields, subtask fields, tool fields, file references, and shell blocks need mapping or removal.
+**Prompt-body portable with rewrite:** Most Markdown command bodies are reusable after transforming metadata and argument placeholders. Claude, OpenCode, Qwen, Roo, and standard Kimi skill bodies often fall into this category. The prose can survive; `$ARGUMENTS`, `{{args}}`, `$1`, `/skill:` prefixes, model fields, agent fields, mode fields, subtask fields, tool fields, file references, and shell blocks need mapping or removal.
 
 **Format-convertible but non-portable:** Gemini TOML commands, deprecated Qwen TOML commands, Goose recipes, and OpenCode JSON command objects can be converted, but the source artifact should not be linked directly into another provider. Claudine needs to parse and emit a target-native resource. Goose is especially important because the command is split between a config entry and a recipe file.
 
@@ -150,7 +150,7 @@ The command linker should be conservative.
 | Goose recipes                 | Treat as config-plus-recipe resources, not standalone command files                               |
 | Gemini TOML commands          | Convert to target-native command format rather than linking                                       |
 | OpenCode JSON commands        | Convert the `command` entry to the target's native command format                                 |
-| Qwen Markdown commands        | Rewrite \``, `!{...}`, `@{...}`, and colon namespaces as needed                                    |
+| Qwen Markdown commands        | Rewrite `{{args}}`, `!{...}`, `@{...}`, and colon namespaces as needed                            |
 | Qwen skills                   | Map the Agent Skills core, but preserve or warn on Qwen-only fields                               |
 | Kimi standard skills          | Reuse the body, but rewrite `/skill:<name>` invocation semantics                                  |
 | Kimi flow skills              | Classify separately from ordinary prompt commands                                                 |

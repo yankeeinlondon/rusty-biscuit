@@ -55,8 +55,11 @@ Path shorthand in this file:
 - Mirrors of the lowering (Darkmatter's `call_binding/translate.rs`, the
   library's trigger `matcher.rs`) must reuse the library's `simplified::declaration_options_payload`
   and `format::{judge_schema, judge_type_definition}` for the `schema` /
-  `type-definition` declaration options, and treat `non-null` as a marker
-  (no null arm, never a presence requirement). `about.rs` catalogs constraints
+  `type-definition` declaration options (`not-empty` there lowers to
+  `pattern: "\S"`, `minProperties: 1`, and `minItems: 1`; only
+  `minProperties` under `mapping`). `non-null` is removed: the grammar and
+  `$constraints` refuse it with `grammar::NON_NULL_REMOVED`, and DMLS never
+  offers it. `about.rs` catalogs constraints
   per type (`SCHEMA_CONSTRAINT_DESCRIPTORS`, parity-tested against the grammar)
   and `$constraints` keys per placement (`BLOCK_CONSTRAINT_DESCRIPTORS`, which
   feeds DMLS key completion); a new constraint or `$constraints` key updates both.
@@ -269,17 +272,20 @@ expression-typed field is still accepted lexically. See
 
 Validation-only APIs are passive and read-only. Composition may coerce declared
 scalar types and normalize a successful eager `file(eager)` value to its
-repo-relative path. At the same schema seam, after first-pass frontmatter
-interpolation and before coercion, composition materializes an absent optional,
-no-default top-level property as `null` only when the winning declaration comes
-from the document's inline or referenced SimplifiedSchema. Baseline and trigger
-properties, raw JSON Schema, root unions, nested properties, required
-properties, and defaulted properties do not materialize. A compose run with no
-effective schema and all validation-only APIs remain non-mutating. Repeated
-schema passes are idempotent, and present values are preserved exactly.
+repo-relative path. At the same schema seam composition writes each default
+`applied_defaults` reports (a missing or `null` value, required or not) and
+nothing else: a declared but unwritten property never gains a `null` key, so a
+transcluded child's `required` sees only what was written. The undeclared-name
+warning asks `EffectiveSchema::declares_top_level_property`, never the data.
+Never reintroduce synthetic bindings. A compose run with no effective schema
+and all validation-only APIs remain non-mutating. Repeated schema passes are
+idempotent, and present values are preserved exactly. Expression typing
+(`scope/shape.rs::Shape::from_definition`) drops `null` for a required
+property or one with a non-null literal default.
 
-Required defaults: `EffectiveSchema::validate_instance` judges the candidate
-`simplified_schema::defaults::prepare_defaults` completes (soft paths:
+Defaults: `EffectiveSchema::validate_instance` judges the candidate
+`simplified_schema::defaults::prepare_defaults` completes from the schema's
+`DefaultPlan` (`default_plan()`, memoized per layered identity; soft paths:
 defaults, conversion, defaults again, as `Prepared::validate_soft`;
 `converted_candidate`/`complete`), with this schema's validators, nested
 templates, and `SHARED_VALIDATOR_CACHE`; never add a second defaulting walk.
@@ -288,27 +294,26 @@ path only when `alternatives_supply_defaults` is false): a union arm that
 accepts it as written and another that accepts it completed is
 `AmbiguousDefaults`, never an early pass.
 `ValidationReport::defaults` lists them; the caller's value is never touched
-(`data_copy` excludes defaults, so `md set` never writes one). An engine error
+(`data_copy` converts the default-completed candidate, then withdraws each applied default, so `md set` never writes one). An engine error
 becomes one `ConstraintViolation` problem at the property, `schema_path` = the
 default's pointer, no line/column (`default_problem`). Composition
-(`run_with_registry`) inserts `EffectiveSchema::required_defaults` before
+(`run_with_registry`) inserts `EffectiveSchema::applied_defaults` (every missing or `null` property with a default, required or not) before
 conversion in every pass (skipping composition-pending, `exclude_keys`, and
 present paths), then loops verdict → insert while a re-matched trigger reports
 more; it returns the inserted paths and the pipeline marks them data in
 `FrontmatterProvenance`. Pass 1 interpolation runs before this, so only pass 2
-and later see a default. Presence typing needed no change: `PropertyDef::is_required`
-already makes a required property non-null whether written or defaulted.
+and later see a default. Preparation runs on every value, valid or not; never
+reintroduce an "accepted as written" shortcut before it.
 Provenance of an inserted default: `complete` fills each `AppliedDefault::origin`
-from `origins` (top-level key), `validate_instance` calls
-`defaults::attribute_problems` after `locate_all`, and composition, whose
-verdicts see defaults already inserted, keeps every default it inserted across
-both passes (`applied_defaults` in the pipeline) and attributes the final
-problems with it. `report_diagnostics` projects `ValidationProblem::default`
-as `Diagnostic::schema_default` (`SchemaDefaultOrigin`, in every output
-schema); DMLS ranges such a problem at the declaration
-(`refused_default_range`) and adds `data.schema_default`. A default declared
-through a `Name@file` import inside a schema reports the declaring layer's
-file, not the import's: the lowered schema keeps no per-definition source.
+from `default_files` (a `Name@file` import's declaring file), else `origins`
+(top-level key); `validate_instance` calls `defaults::attribute_problems` after
+`locate_all`, and composition, whose verdicts see defaults already inserted,
+keeps every default it inserted across both passes (`filled_defaults` in the
+pipeline, each `FilledDefault` carrying its `AppliedDefault`) and attributes the
+final problems with them. `report_diagnostics` projects
+`ValidationProblem::default` as `Diagnostic::schema_default`
+(`SchemaDefaultOrigin`, in every output schema); DMLS ranges such a problem at
+the declaration (`refused_default_range`) and adds `data.schema_default`.
 
 Runtime consumers use `SchemaPhase::Launch` and `SchemaPhase::Completion` on
 an already-resolved `EffectiveSchema`. `required` and `eager` are independent
@@ -321,10 +326,13 @@ axes, derived recursively:
 | `required` | absence may be deferred; a present value is type-checked | must be present and valid |
 | `required; eager` | must be present and valid | must be present and valid |
 
-Explicit null counts as absence, so an eager-only null is allowed at both
-phases. Exception: a null-admitting whole value (see
-[Core types](#core-types-unknown-null-alphanumeric-shell)) is optional at both
-phases whatever its markers. Completion observes the final working instance without coercion, while
+A phase relaxes only parent `required` membership (`phase::lower` over the
+original AST); value fragments keep the declared type, so a written `null` on
+`number(required)` fails at launch too, while an omitted one is deferred.
+An eager-only (optional) `null` is allowed at both phases. A null-admitting
+type accepts a written `null` but keeps its presence: `unknown(required)` may
+be omitted at launch and must be written by completion
+(`lib/tests/l1/schemas_effective_presence.rs`). Completion observes the final working instance without coercion, while
 the existing unphased `validate*` authoring behavior remains unchanged. Raw JSON
 Schema retains its authored `required` behavior at both phases, and trigger
 match conditions reject `eager` because matching has no runtime phase.
@@ -668,6 +676,12 @@ pattern-key arm that excludes every md verb lets another host's verb (`say`,
 `retry`) pass untyped and unoffered. md's profile is still a deliberately
 tolerant three-level unroll (`md-stack`, `md-item-1..3`, `md-loose-body`)
 whose side-effect and function arguments are untyped (one pattern key);
+`bound_operands.rs::untyped_bodies` still finds every action dictionary in
+an untyped `md-loose-body` (descending each recorded conditional's
+`then`/`else` as the parser does, inheriting that conditional's typed verbs
+as "provided") so the parser's placement and flag rules
+(`parse.rs::placement_rule`) apply at every depth; neither profile encodes
+the parser's five-level depth limit;
 host profiles built from `partials/lifecycle.yaml` (Claudine's) are
 recursive and typed. The neutral shape of every verb, Claudine's
 included, lives in `partials/lifecycle.yaml`. Its expression-function and
@@ -718,7 +732,44 @@ hand-written verb types in `partials/lifecycle.yaml` (communication, `shell`,
 the directives but `stop`/`skip`, `set`) carry the same marker; for them
 `lifecycle::template_operands` names exactly the strings the parser reads as
 templates (every `with:` and `set` value nested, not a `$( … )` `set` value,
-`no_error`, or `break.code`) and the walk only scans those, never binds. So
+`no_error`, or `break.code`) and the walk only scans those, never binds.
+`edit` (lifecycle-only, typed by hand: `create_new: boolean(default(false))`,
+`gui: boolean`, `no_error: boolean(default(false))`) additionally gets the
+parser's own rules (`BoundOperands::report_refused_targets` →
+`lifecycle::{edit_target_problem, edit_flag_problem}`, shared with the
+parser, both over `action_shape.rs::{edit_file_value, literal_flag}` and
+`simplified_schema::coercion`): `edit: 5` names file `"5"`, boolean-like flag
+text converts, `null` is no value, a native number or `{{ }}` template flag is
+refused, and `edit: null` is refused (no target; the optional wrapper would
+otherwise admit it). `lib/tests/l1/lifecycle_edit_schema_parity.rs` is its
+parity matrix. The same walk records every action dictionary (an object
+whose type declares `no_error` beside `when`, or beside `while`/`until` for a
+`loop:` block; a value with a conditional arm is a list item wherever it
+sits, else an element of a list is) and judges it with the parser's own
+placement and branch-shape rules, `lifecycle::placement_rule` in `parse.rs`,
+whose helpers the parser calls too (`BoundOperands::report_placements`, run
+last and only where no other problem sits inside the dictionary): a flag
+beside `then` (`false` included; `literal(false)` exists for the filled
+default), two placements, a flag on `set` (`null` included), a `when` guarding
+nothing, `when`/`then`/`else` in a dictionary of verbs, a non-literal sibling
+flag, and a non-literal inner flag of a long form the host reads (a typed verb,
+or any side effect or expression function, so md's `unknown`-typed ones too; a
+verb md does not provide is never read). Flags count only where authored
+(`bound_operands::FlagOrigin`): `validate(&Value)`, `validate(&Markdown)` and
+friends judge the input as given; `EffectiveSchema::validate_completed(completed,
+authored, phase)` takes the authored values explicitly (`Value::Null`: nothing
+authored). Composition completes the document in place, so its verdict
+(`schema_validation::run_with_registry`, `validate_typed_shell_values`) calls
+`DarkmatterSchemas::validate_with_authored` with `authored_view`: per top-level
+key, the loaded text's value (`Frontmatter::authored_values`) while the value
+keeps its written shape, else the current value with every default either pass
+inserted undone (`FilledDefault`, a filled `null` restored), and nothing for a
+key only inherited from the nesting document. Problems on `exclude_keys` (md's
+and Claudine's lifecycle events) are dropped there; their hosts judge them
+(md's parser, Claudine's `post_shell_validate` with
+`authored_lifecycle_values`, the parser's own source). Never validate a
+completed lifecycle through the plain APIs. Rows:
+`lifecycle_schema_parity.rs::agreement_rows!`. So
 `number: [pear, 7]` passes and `length: [true]` fails; never widen a generated
 type to fix a schema/binder disagreement. Bind from the authored value, not
 the converted working copy. `lib/tests/l1/lifecycle_generated_operands.rs`
@@ -761,8 +812,9 @@ Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typi
 - Every constraint survives a reference, including `required` and `generated`
   (nothing is stripped; no use-site opt-out). Presence declared inside an
   object type does not make the holding property required. An optional variant
-  is declared directly or as `[T, null]`; aliasing the required type
-  re-inherits presence.
+  is declared directly; aliasing the required type re-inherits presence, and
+  `[T, null]` hoists `T`'s `required` too (it admits a written `null` but still
+  needs the key).
 - `alphanumeric` options are identity, not mergeable constraints:
   `check_use_site_options` (`resolve.rs`, before merging) drops an equal
   canonical set and raises `ConstraintConflict` with
@@ -1011,8 +1063,8 @@ References; Choosing an Arm: Reporting versus Changing Data).
   default under `[]` fails as `ScalarDefault`. The Rust API can supply an
   actual JSON-array arm default, which hoists to the list; inherited and
   use-site defaults must agree under shared numeric normalization. This adds
-  no list-valued default spelling to the grammar. An optional property's
-  default is never inserted (required ones are; see "Required defaults").
+  no list-valued default spelling to the grammar. A default fills a missing
+  or `null` value whether or not the property is required.
 - Representation: a bare `U` stays `PropertyDef::Union`. A postfixed reference
   is `PropertyDef::Single(atom)` with `atom.ty == TypeExpr::Union(arms)`
   and `atom.is_array` for `U[]`; the parser produces the same atom for the
@@ -1188,13 +1240,15 @@ needs `@this`.
   type).
 - **Effective presence** is one calculation: `PropertyDef::is_required` /
   `PropertyAtom::is_required` = a `required` marker (written, inherited,
-  hoisted, or after `[]`) and not `admits_null()`. `admits_null()` is true for
-  a non-array `null`/`unknown` or a non-array union (property-level or
-  `TypeExpr::Union`) with such an arm, on resolved input. Lowering, trigger
-  matching and the vacuous-arm lint, phase projection, completion,
-  composition materialization, DMLS, and Claudine all read it; never re-derive
-  presence from the raw marker (`marks_required` is crate-private). `eager`
-  and `generated` never restore presence. `unknown[](required)` /
+  hoisted, or after `[]`). It asks only whether the key is written (or a
+  default supplies it); `admits_null()` (a non-array `null`/`unknown` or a
+  non-array union with such an arm, on resolved input) is independent and
+  decides only whether a written `null` satisfies the type, so
+  `null(required)` and `[number(required), null]` are required. Lowering,
+  trigger matching and the vacuous-arm lint, phase projection, completion,
+  DMLS, and Claudine all read it; never re-derive presence from the raw
+  marker (`marks_required` is crate-private), and never let null admission
+  cancel it. `unknown[](required)` /
   `null[](required)` still require the list; a nullable child leaves its
   parent's presence alone. Raw JSON Schema keeps its authored `required`.
 - Root unions are inclusive (`anyOf`, one or more arms); XOR is written with

@@ -625,7 +625,6 @@ pub fn build_schema_status_report_for_mode(
             Some(&error),
         )
     })?;
-    complete_launch_defaults(&effective, phase, &stored, &mut report);
     let caller_resolved =
         caller_resolved_file_properties(
             &report.problems,
@@ -730,7 +729,7 @@ pub(in crate::composition) fn status_report_from_validation(
             && (!is_present || is_null);
         let state = if is_invalid {
             PropertyState::Invalid
-        } else if !is_present && defaulted.contains(name.as_str()) {
+        } else if (!is_present || is_null) && defaulted.contains(name.as_str()) {
             PropertyState::Defaulted
         } else if deferred {
             PropertyState::Deferred

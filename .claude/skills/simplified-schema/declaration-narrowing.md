@@ -1,4 +1,4 @@
-# Declaration narrowing: `non-null`, `closed`, meta-type options, `claims`
+# Declaration narrowing: `not-empty`, `closed`, meta-type options, `claims`
 
 Implementation notes for four language additions. The user-facing record is
 in `simplified-schema/docs/topics/`; this file says where the code is and
@@ -7,31 +7,61 @@ which traps to avoid.
 ```yaml
 $schema:
     kind: literal(yaml-schema; required)
-    description: string(non-null)
-    categories: string[](non-null)
+    description: string(not-empty)
+    categories: string[](not-empty)
     $schema: schema(required; property(kind, type-definition(forms(literal, enum); declared-required)))
-    types: schema(mapping; non-null)
+    types: schema(mapping; not-empty)
     $constraints: { closed: true }
 ```
 
-## `non-null` (`Constraint::NonNull`)
+## Presence is `required` alone
 
-- A presence marker like `required`: read from either constraint list
-  (`string[](non-null)` == `string(non-null)[]`), hoisted from union arms,
-  moved from an object block's `$constraints: { non-null: true }` onto the atom
-  (`simplified/mod.rs::parse_mapping_atom`), treated as `required` by
-  subtyping and use-site merges (`resolve.rs::is_union_marker`, `is_flag`,
-  `resolve/recursive.rs`).
-- Lowering (`convert.rs::atom_to_schema`, `union_property_to_schema`) drops
-  the optional `anyOf [{type: null}, X]` wrapper and never adds the property to
-  `required`. No custom vocabulary.
-- Over a null-admitting value it is a grammar error: in the parser
-  (`PropertyDef::non_null_problem`) and again after named-type expansion
-  (`resolve.rs::check_non_null_use`), since `Opt(non-null)` cannot be judged
-  before `Opt` resolves.
-- A `null` fails as `TypeMismatch` when the fragment has a `type`, as
-  `ConstraintViolation` for `enum` and property unions. Soft validation never
-  converts it. Tests: `tests/l1/non_null_properties.rs`.
+The value and default rules built on presence are in [defaults.md](defaults.md).
+
+- `PropertyDef::is_required` / `PropertyAtom::is_required` are the written,
+  inherited, or hoisted `required` marker. Null admission (`admits_null`)
+  decides only whether a written `null` satisfies the type; it never cancels
+  `required` (`null(required)`, `[number(required), null]`, `Maybe(required)`
+  for `Maybe: string | null` all demand the key). Tests:
+  `tests/l1/required_presence.rs`.
+- Phase projection is a lowering option, not an AST rewrite:
+  `phase::lower(schema, definitions, phase)` →
+  `convert.rs::Lowering::lists_required`. Value fragments keep the authored
+  marker (a launch-unlisted `number(required)` still rejects `null`); only
+  parent `required` arrays change. Bump `phase::PROJECTION_REVISION` with any
+  change to what it emits.
+- `declared-required` (format option) still also refuses a null-admitting
+  alternative (`format.rs`); that is the option's own contract.
+
+## `non-null` is removed; `not-empty` covers containers
+
+- `non-null` in a type string or a `$constraints` block is a located
+  `SchemaError::Grammar` with `grammar::NON_NULL_REMOVED` (kept in
+  `is_constraint_keyword` so every spelling reaches that message). There is
+  no `Constraint::NonNull`.
+- `Constraint::NotEmpty` lowers per family (`convert.rs`): text (`string`,
+  `alphanumeric`, `yaml`, `json`) → `pattern: "\S"`
+  (`NOT_EMPTY_TEXT_PATTERN`); list (array-level list) → `minItems` through
+  the same `Bounds` as `min(n)`; `object`, inline objects, dictionaries, and
+  `$constraints: { not-empty: true }` → `minProperties` through
+  `apply_object_arity`; `schema` / `type-definition` → `pattern`,
+  `minProperties`, and `minItems` together (each applies only to its JSON
+  type). `number`, `boolean`, `null`, `unknown` refuse it
+  (`invalid_constraint`'s dedicated message). Trigger conditions judge it by
+  the value's shape (`triggers/matcher.rs`). Tests:
+  `tests/l1/not_empty_values.rs`, `declaration_grammar.rs`.
+- `not-empty` never rejects `null` or a missing key. `yaml`/`json` judge the
+  text, so `"{}"` has content (see [defaults.md](defaults.md)). Placement
+  matters: `string[](not-empty)` is the list's `minItems`,
+  `string(not-empty)[]` each item's `pattern`.
+- Under `schema(mapping)` only `minProperties` is added (the mapping check
+  already refuses text and lists, and a second keyword would shrink DMLS's
+  diagnostic range for `types: []`).
+- `resolve.rs::is_array_container_constraint` admits `not-empty`, so
+  `action[](not-empty)` over a named union resolves.
+- Keep Darkmatter in parity when a family changes: the call-binding
+  translator (`call_binding/translate.rs`, conformance rows `not_empty_*`)
+  and the `about.rs` descriptors behind `md schema about` and completion.
 
 ## `closed` (`Constraint::Closed`)
 

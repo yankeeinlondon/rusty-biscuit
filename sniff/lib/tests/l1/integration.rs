@@ -3033,3 +3033,46 @@ fn test_recent_commits_unborn_repo_is_empty_and_outside_is_not_a_repository() {
     let outside = tempfile::TempDir::new().unwrap();
     assert!(GitRepo::discover(outside.path()).unwrap().is_none());
 }
+
+/// A `.git` file that points at no repository is a discovery failure, as it
+/// is in git: the upward search must not skip it and report the enclosing
+/// repository (a caller bounding writes by that root would widen past the
+/// broken checkout). A gitfile that points at a repository opens it, and a
+/// `.git` directory that is not a repository is skipped, as git skips it.
+#[test]
+fn test_a_broken_gitfile_is_a_discovery_failure_not_the_enclosing_repository() {
+    use sniff::filesystem::git::repo_root;
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let outer = temp.path().join("outer");
+    git2::Repository::init(&outer).unwrap();
+    let inner = outer.join("inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    let canonical = |path: &std::path::Path| std::fs::canonicalize(path).unwrap();
+
+    for content in [format!("gitdir: {}\n", temp.path().join("missing").display()), "garbage\n".to_string()] {
+        std::fs::write(inner.join(".git"), &content).unwrap();
+        let error = repo_root(&inner).expect_err(&format!("a broken gitfile ({content:?}) is not the outer repository"));
+        assert!(error.to_string().contains("does not point to a valid repository"), "{error}");
+        assert!(repo_root(&inner.join(".")).is_err(), "an equivalent spelling is refused too");
+    }
+
+    // A gitfile pointing at a real repository's git directory opens it, with
+    // the gitfile's directory as the working tree.
+    let store = temp.path().join("store");
+    git2::Repository::init(&store).unwrap();
+    std::fs::write(inner.join(".git"), format!("gitdir: {}\n", store.join(".git").display())).unwrap();
+    let root = repo_root(&inner).unwrap().expect("the gitfile's repository");
+    assert_eq!(canonical(&root), canonical(&inner));
+
+    // A `.git` directory that is not a repository is skipped, as git skips it.
+    std::fs::remove_file(inner.join(".git")).unwrap();
+    std::fs::create_dir_all(inner.join(".git")).unwrap();
+    std::fs::write(inner.join(".git/HEAD"), "garbage\n").unwrap();
+    let root = repo_root(&inner).unwrap().expect("the enclosing repository");
+    assert_eq!(canonical(&root), canonical(&outer));
+
+    // A directory outside any repository is still `Ok(None)`.
+    let outside = tempfile::TempDir::new().unwrap();
+    assert!(repo_root(outside.path()).unwrap().is_none());
+}

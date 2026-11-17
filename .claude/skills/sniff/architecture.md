@@ -277,8 +277,25 @@ All subprocesses go through `process::run_with_timeout` or
 pipe draining, process-tree termination, and reaping on macOS, Linux, and
 Windows. Preserve caller cwd and environment when using the builder form.
 
-`process` is public only for `configure_detached_child`, which other packages
-(`playa`, `biscuit-speaks`, `git-wt-cli`) use to set up an intentionally
+`process` is public for three things. The process-tree owner
+(`ProcessTree`, `TreeConfig`, `TreeIsolation`, `CleanupScan`,
+`TreeTermination`) owns a spawned child and everything it starts; the bounded
+helpers use it, and so do Darkmatter's login-shell probes and editor and
+Claudine's task and lifecycle shells. `ForegroundHandoff`
+(`process/foreground.rs`) lends an owned interactive child the controlling
+terminal's foreground on Unix and restores the caller's group and `termios`;
+Darkmatter's owned terminal editor and every Claudine lifecycle shell use it,
+Sniff's own spawns never do. It is a separate guard, not a `TreeConfig`
+option, because it holds terminal state rather than processes: the transfer
+runs in the child's `pre_exec` (SIGTTOU blocked), restoration blocks SIGTTOU
+on the calling thread only, and a process-wide `AtomicBool` claim makes a
+second active handoff `WouldBlock`. Its tests drive the private `TerminalOps`
+adapter; `sniff/cli/src/bin/foreground_handoff_fixture.rs` exercises the real
+terminal. The contract, per-OS guarantees, and caller policies of both are in
+[`sniff/docs/topics/process-trees.md`](../../../sniff/docs/topics/process-trees.md);
+never add a private copy in a caller. `configure_detached_child` serves the
+opposite case: other packages (`playa`, `biscuit-speaks`, `git-wt-cli`) use it
+to set up an intentionally
 detached, unbounded child. It sets a new process group on Unix and, on Windows,
 clears `HANDLE_FLAG_INHERIT` on this process's stdio before setting the
 detached creation flags. The caller still sets null stdio. Sniff's own spawns

@@ -207,6 +207,10 @@ pub struct ClaudineConfig {
     pub protect: ProtectConfig,
 
     /// Actions bound to canonical Claudine events (cross-provider).
+    ///
+    /// Written in the file as keyed actions (`- bash: { command: … }`); an
+    /// event whose list is `null` has no actions.
+    #[serde(with = "super::wire::actions")]
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
 
     /// Optional per-event matcher strings.
@@ -217,8 +221,10 @@ pub struct ClaudineConfig {
     /// it falls back to compiling a regex (`Bash|Edit`). Strings that are
     /// neither produce a warning and the binding fires unconditionally.
     ///
+    /// An event whose matcher is `null` has none.
+    ///
     /// [`RuntimeMatcher`]: crate::dispatch::matcher::RuntimeMatcher
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(deserialize_with = "super::wire::null_entries_unset", skip_serializing_if = "HashMap::is_empty")]
     pub matchers: HashMap<AgenticEvent, String>,
 
     /// Favorite agent provider for lazy composition operations.
@@ -237,8 +243,9 @@ pub struct ClaudineConfig {
     ///
     /// Augments or replaces the dynamically fetched model catalog used to
     /// validate frontmatter `model` hints during composition resolution.
-    /// User-scope only; repo configs may not declare this field.
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    /// User-scope only; repo configs may not declare this field. A provider
+    /// whose override is `null` has none.
+    #[serde(deserialize_with = "super::wire::null_entries_unset", skip_serializing_if = "HashMap::is_empty")]
     pub models: HashMap<Provider, ProviderModelOverride>,
 
     /// Default sound effects for outcome categories.
@@ -324,10 +331,9 @@ fn is_default_guard_settings(value: &GuardSettings) -> bool {
 ///
 /// A repo config file (`{repo}/.claudine/config.yaml`) only contains the
 /// fields that are allowed to differ per-repo. Unlike [`ClaudineConfig`],
-/// every field is an override: absent inherits the user's value, so the
-/// schema inserts nothing here and the `#[serde(default)]`s below read an
-/// absent override as "no override", which is presence-sensitive and
-/// deliberate.
+/// every field is an override: absent or `null` inherits the user's value,
+/// so the `#[serde(default)]`s below and the null-as-unset readers read
+/// both as "no override".
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepoOverrideConfig {
@@ -336,28 +342,23 @@ pub struct RepoOverrideConfig {
     pub canonical_provider: Option<Provider>,
 
     /// Override or extend actions for this repo (per-event replacement).
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    /// Keyed in the file as in [`ClaudineConfig::actions`]; a `null` event
+    /// list is no override for that event.
+    #[serde(default, with = "super::wire::actions", skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
 
     /// Override or extend per-event matchers for this repo.
     ///
     /// Per-event replacement: a repo entry fully replaces the user's entry
     /// for the same event. See [`ClaudineConfig::matchers`] for compilation
-    /// semantics.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    /// semantics. A `null` matcher is no override for that event.
+    #[serde(default, deserialize_with = "super::wire::null_entries_unset", skip_serializing_if = "HashMap::is_empty")]
     pub matchers: HashMap<AgenticEvent, String>,
 
-    /// Override the active messenger configuration key for this repo.
-    ///
-    /// - `None` (absent): no override, inherit from user config.
-    /// - `Some(None)` (JSON `null`): disable messenger for this repo.
-    /// - `Some(Some(key))`: use the named configuration for this repo.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_messenger_override"
-    )]
-    pub active_messenger: Option<Option<String>>,
+    /// The user's messenger route this repo sends to instead of
+    /// `messenger.active_config`; `None` (absent or `null`) inherits it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_messenger: Option<String>,
 
     /// Repo-scoped exit-expression rules (Cluster E1).
     ///
@@ -376,8 +377,8 @@ pub struct RepoOverrideConfig {
     pub guard_settings: Option<GuardSettings>,
 
     /// Repo-scoped steering settings. A value set here overrides the user's;
-    /// an absent one inherits it.
-    #[serde(default, skip_serializing_if = "SteeringConfig::is_unset")]
+    /// an absent or `null` one inherits it.
+    #[serde(default, deserialize_with = "super::wire::null_as_default", skip_serializing_if = "SteeringConfig::is_unset")]
     pub steering: SteeringConfig,
 
     /// Darkmatter's repository `permissions` block, exactly as written; see
@@ -399,7 +400,7 @@ impl RepoOverrideConfig {
     }
 
     /// Reads a whole repository document, judged by the repository schema.
-    /// Nothing is inserted: an absent override inherits.
+    /// An absent or `null` override inherits.
     ///
     /// ## Errors
     ///
@@ -413,16 +414,6 @@ impl RepoOverrideConfig {
     pub(crate) fn from_effective(effective: serde_json::Value, file: Option<&std::path::Path>) -> Result<Self> {
         serde_json::from_value(effective).map_err(|error| typed_read_failure(file, &error))
     }
-}
-
-fn deserialize_optional_messenger_override<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<Option<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value: Option<String> = serde::Deserialize::deserialize(deserializer)?;
-    Ok(Some(value))
 }
 
 /// The schema's projection of an empty user file.

@@ -21,11 +21,12 @@
 //! When the effective frontmatter violates the resolved schema, compose aborts
 //! with a styled [`BlockError`] that names the offending property.
 //!
-//! This stage also MUTATES the stored frontmatter. It first materializes each
-//! absent, optional, no-default top-level property owned by the document's
-//! inline or referenced SimplifiedSchema as JSON `null`, and inserts the
-//! default of each absent required property that declares one (the source
-//! file is never edited; the inserted paths are recorded as data). It then converts
+//! This stage also MUTATES the stored frontmatter. It inserts each default the
+//! schema's default preparation applies, filling a missing or `null` value
+//! (the source file is never edited; the inserted paths are recorded as data).
+//! It never writes a key the author did not write and no default supplies: a
+//! declared but unset property stays absent, and the undeclared-name warning
+//! consults the schema's declarations instead of the data. It then converts
 //! values to their declared types through the one conversion engine (e.g. the
 //! string `"yes"` against a `boolean` field becomes a real JSON bool) via
 //! [`coerce_frontmatter_with_pending`] and writes the converted top-level
@@ -49,7 +50,7 @@ use crate::markdown::compose::ComposeReport;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
 use simplified_schema::{
-    CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SchemaOriginKind, SchemaRoot,
+    CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer,
     ValidationProblem, ValidationProblemCode, ValidationProblemKind,
 };
 use simplified_schema::coerce::coerce_frontmatter_with_pending;
@@ -498,11 +499,9 @@ pub(crate) fn prepare_schemas(
 ///    the baseline: the process-cached
 ///    compiled JSON Schema when the baseline is the Darkmatter default (F9),
 ///    else `.with_baseline(...)` for a caller-supplied `SchemaRoot`.
-/// 3. Resolves the effective schema once and materializes absent, optional,
-///    no-default top-level bindings owned by a document or referenced-file
-///    SimplifiedSchema as JSON `null`.
-/// 4. Inserts the default of every absent required property the schema
-///    reports ([`EffectiveSchema::required_defaults`]) into the frontmatter
+/// 3. Resolves the effective schema once.
+/// 4. Inserts every default the schema's default preparation applies
+///    ([`EffectiveSchema::applied_defaults`]) into the frontmatter
 ///    (never into the source file, never into a composition-pending or
 ///    caller-owned key), so conversion, every later stage, and the composed
 ///    output see it.
@@ -533,10 +532,12 @@ pub(crate) fn prepare_schemas(
 ///
 /// Returns the paths of the defaults it inserted, which the caller records
 /// as data: a schema default is never scanned for `{{ … }}` or `$( … )`.
-/// The defaults themselves are added to `applied`, which the caller keeps
-/// across passes: the frontmatter holds them from then on, so a later
-/// verdict's problem with one of them is attributed to its schema default
-/// through this list, never to an authored position.
+/// Each is also pushed onto `filled`, which holds every default this
+/// document's composition has inserted so far, an earlier pass's included:
+/// the verdict reads it to tell a filled lifecycle flag from an authored one
+/// ([`authored_view`]), and since the frontmatter holds the defaults from
+/// then on, a later verdict's problem with one of them is attributed to its
+/// schema default through it, never to an authored position.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
@@ -547,7 +548,7 @@ pub(crate) fn run_with_registry(
     deferral: PendingDeferral<'_>,
     consumer: &Path,
     compose_report: &mut ComposeReport,
-    applied: &mut Vec<simplified_schema::AppliedDefault>,
+    filled: &mut Vec<FilledDefault>,
 ) -> MarkdownResult<Vec<Vec<ValuePathSegment>>> {
     let mut inserted = Vec::new();
     let Some(schemas) = prepared.schemas.as_ref() else {
@@ -586,10 +587,6 @@ pub(crate) fn run_with_registry(
     ensure_projection_stable(effective.as_ref(), markdown, options, projection, data)?;
 
     if let Some(effective) = effective.as_ref() {
-        materialize_optional_document_bindings(markdown, effective);
-    }
-
-    if let Some(effective) = effective.as_ref() {
         // Convert values to their declared types and write the converted
         // top-level properties back, so real types flow to every later stage
         // and into the composed output.
@@ -599,8 +596,8 @@ pub(crate) fn run_with_registry(
         // the whole schema accepts, which an absent required property would
         // prevent. A default the engine refuses is not reported here; the
         // verdict reports it as a problem at the schema default.
-        if let Ok(defaults) = effective.required_defaults(&instance)
-            && insert_defaults(markdown, &defaults, &composition_pending, options, &mut inserted, applied)
+        if let Ok(defaults) = effective.applied_defaults(&instance)
+            && insert_defaults(markdown, &defaults, &composition_pending, options, &mut inserted, filled)
         {
             instance = build_validation_instance(markdown, options, data).0;
         }
@@ -632,31 +629,29 @@ pub(crate) fn run_with_registry(
     // A launch-preparing caller judges the instance at its runtime phase so a
     // required-but-not-eager property may still be absent; every other caller
     // keeps the unphased authoring verdict.
-    let judge = |schemas: &DarkmatterSchemas, markdown: &Markdown| {
-        match options.schema_phase {
-            Some(phase) => schemas.validate_for_phase(markdown, phase),
-            None => schemas.validate(markdown),
-        }
-        .map_err(|err| MarkdownError::SchemaValidationFailed {
-            path: path.clone(),
-            problems: Vec::new(),
-            summary: format!("schema could not be prepared: {err}"),
-            description: description.clone(),
-            source: Some(Box::new(err)),
-        })
+    let judge = |schemas: &DarkmatterSchemas, markdown: &Markdown, filled: &[FilledDefault]| {
+        schemas
+            .validate_with_authored(markdown, options.schema_phase, &authored_view(markdown, options, filled))
+            .map_err(|err| MarkdownError::SchemaValidationFailed {
+                path: path.clone(),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: description.clone(),
+                source: Some(Box::new(err)),
+            })
     };
-    let mut report = judge(schemas, markdown)?;
+    let mut report = judge(schemas, markdown, filled)?;
     // The verdict re-matches triggers on the completed frontmatter; one the
     // inserted values newly match can require further defaults. Each round
     // only fills absent paths, so this ends.
     while !report.defaults.is_empty() {
         let composition_pending = composition_pending_keys(markdown, options, data, deferral);
-        if !insert_defaults(markdown, &report.defaults, &composition_pending, options, &mut inserted, applied) {
+        if !insert_defaults(markdown, &report.defaults, &composition_pending, options, &mut inserted, filled) {
             break;
         }
-        report = judge(schemas, markdown)?;
+        report = judge(schemas, markdown, filled)?;
     }
-    simplified_schema::defaults::attribute_problems(&mut report.problems, applied);
+    simplified_schema::defaults::attribute_problems(&mut report.problems, &applied_defaults(filled));
 
     for advisory in &report.advisories {
         compose_report.add_schema_advisory(advisory, consumer);
@@ -745,12 +740,12 @@ pub(crate) fn run_with_registry(
     let authored_copies = projection.authored_copies(fm_map, options);
     if !authored_copies.is_empty() {
         let origins = schemas.caller_origins().clone().without_supplied_values();
-        let mut problems: Vec<_> = judge(&schemas.clone().with_caller_origins(origins), markdown)?
+        let mut problems: Vec<_> = judge(&schemas.clone().with_caller_origins(origins), markdown, filled)?
             .problems
             .into_iter()
             .filter(|problem| authored_copies.contains(&problem.path))
             .collect();
-        simplified_schema::defaults::attribute_problems(&mut problems, applied);
+        simplified_schema::defaults::attribute_problems(&mut problems, &applied_defaults(filled));
         if !problems.is_empty() {
             return Err(MarkdownError::SchemaValidationFailed {
                 path,
@@ -814,9 +809,136 @@ fn composition_pending_keys(
     composition_pending
 }
 
+/// A default composition wrote into a document's frontmatter.
+#[derive(Debug, Clone)]
+pub(crate) struct FilledDefault {
+    /// Where, as it stands in the frontmatter.
+    path: Vec<ValuePathSegment>,
+    /// Whether it replaced a written `null` rather than a missing key.
+    replaced_null: bool,
+    /// The default itself, which a later verdict's problem with it is
+    /// attributed to.
+    applied: simplified_schema::AppliedDefault,
+}
+
+/// The defaults in `filled` that filled a missing key, which
+/// [`simplified_schema::defaults::attribute_problems`] attributes problems to;
+/// one that replaced a written `null` sits under the author's key.
+fn applied_defaults(filled: &[FilledDefault]) -> Vec<simplified_schema::AppliedDefault> {
+    filled.iter().filter(|default| !default.replaced_null).map(|default| default.applied.clone()).collect()
+}
+
+/// The frontmatter of `markdown` as written, before composition filled any
+/// default into it: the authored counterpart the verdict reads lifecycle
+/// `no_error` flags from, so a filled `false` is never a placement while one
+/// the author wrote, `null` included, still is.
+///
+/// Each top-level value comes from where its flags were written:
+///
+/// - a value that still has the shape of the loaded text (only scalars
+///   converted, only keys or `null`s filled) is that text's, read from
+///   [`Frontmatter::raw_source`](crate::markdown::Frontmatter::raw_source);
+/// - a value a caller supplied in its place (`--set`, a data override, a
+///   setter, a whole-value template) is the frontmatter's value with
+///   `filled` undone;
+/// - a value inherited from the document nesting this one, which that
+///   document already judged, holds nothing authored here.
+///
+/// A document with no loaded text is its own authored source, less `filled`.
+fn authored_view(
+    markdown: &Markdown,
+    options: &crate::markdown::compose::ComposeRequest,
+    filled: &[FilledDefault],
+) -> serde_json::Value {
+    let mut unfilled = crate::markdown::schemas::frontmatter_as_json(markdown);
+    for default in filled {
+        undo_default(&mut unfilled, default);
+    }
+    let serde_json::Value::Object(unfilled) = unfilled else {
+        return serde_json::Value::Null;
+    };
+    let frontmatter = markdown.frontmatter();
+    let Some(serde_json::Value::Object(raw)) = frontmatter.authored_values() else {
+        return serde_json::Value::Object(unfilled);
+    };
+    let supplied = |key: &str| {
+        [&options.set_overrides, &options.data_overrides]
+            .into_iter()
+            .flatten()
+            .any(|overrides| overrides.get(key).is_some())
+            || options.setters.names_whole_key(key)
+    };
+    let inherited = |key: &str| options.external_state.as_ref().is_some_and(|state| state.get(key).is_some());
+    let current = frontmatter.as_map();
+    let authored = unfilled
+        .into_iter()
+        .filter_map(|(key, value)| match (raw.get(&key), current.get(&key)) {
+            (Some(written), Some(now)) if !supplied(&key) && keeps_shape(written, now) => Some((key, written.clone())),
+            (None, _) if inherited(&key) && !supplied(&key) => None,
+            _ => Some((key, value)),
+        })
+        .collect();
+    serde_json::Value::Object(authored)
+}
+
+/// Whether `now` is `written` with only scalars changed (conversion,
+/// interpolation of a scalar) and keys added or `null`s filled (defaults, an
+/// inherited mapping merged in): its structure is still the written one.
+fn keeps_shape(written: &serde_json::Value, now: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    match (written, now) {
+        (Value::Null, now) => !now.is_object() && !now.is_array(),
+        (Value::Object(written), Value::Object(now)) => written.iter().all(|(key, value)| match now.get(key) {
+            Some(now) => keeps_shape(value, now),
+            None => value.is_null(),
+        }),
+        (Value::Array(written), Value::Array(now)) => {
+            written.len() == now.len() && written.iter().zip(now).all(|(written, now)| keeps_shape(written, now))
+        }
+        (Value::Object(_) | Value::Array(_), _) | (_, Value::Object(_) | Value::Array(_)) => false,
+        _ => true,
+    }
+}
+
+/// Puts back what `default` replaced in `value`: removes its key, or writes
+/// the `null` it filled. A path no longer present is left alone.
+fn undo_default(value: &mut serde_json::Value, default: &FilledDefault) {
+    let Some((last, parents)) = default.path.split_last() else {
+        return;
+    };
+    let mut node = value;
+    for segment in parents {
+        let next = match (segment, node) {
+            (ValuePathSegment::Key(key), serde_json::Value::Object(map)) => map.get_mut(key),
+            (ValuePathSegment::Index(index), serde_json::Value::Array(items)) => items.get_mut(*index),
+            _ => None,
+        };
+        let Some(next) = next else {
+            return;
+        };
+        node = next;
+    }
+    match (last, node) {
+        (ValuePathSegment::Key(key), serde_json::Value::Object(map)) if default.replaced_null => {
+            if let Some(slot) = map.get_mut(key) {
+                *slot = serde_json::Value::Null;
+            }
+        }
+        (ValuePathSegment::Key(key), serde_json::Value::Object(map)) => {
+            map.shift_remove(key);
+        }
+        (ValuePathSegment::Index(index), serde_json::Value::Array(items)) => {
+            if let Some(slot) = items.get_mut(*index) {
+                *slot = serde_json::Value::Null;
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Writes each of `defaults` into the document's frontmatter where its path
-/// is still absent, and pushes each written path onto `inserted` and each
-/// written default onto `written`. A default
+/// is still absent or `null`, and pushes each written path onto `inserted`
+/// and, with what it replaced, onto `filled`. A default
 /// below a composition-pending key (a later stage writes that value), a
 /// caller-owned `exclude_keys` key, or `$schema` is skipped. Returns whether
 /// anything was written.
@@ -826,7 +948,7 @@ fn insert_defaults(
     composition_pending: &HashSet<String>,
     options: &crate::markdown::compose::ComposeRequest,
     inserted: &mut Vec<Vec<ValuePathSegment>>,
-    written: &mut Vec<simplified_schema::AppliedDefault>,
+    filled: &mut Vec<FilledDefault>,
 ) -> bool {
     let mut wrote = false;
     let fm_map = markdown.frontmatter_mut().as_map_mut();
@@ -836,14 +958,17 @@ fn insert_defaults(
         if key == "$schema" || composition_pending.contains(key) || options.exclude_keys.contains(key) {
             continue;
         }
-        if applied.path.resolve_map(fm_map).value().is_some() {
-            continue;
-        }
+        // A default replaces a missing or `null` value, never another one.
+        let replaced_null = match applied.path.resolve_map(fm_map).value() {
+            Some(value) if !value.is_null() => continue,
+            found => found.is_some(),
+        };
         if simplified_schema::set_at(fm_map, &applied.path, applied.value.clone()).is_err() {
             continue;
         }
-        inserted.push(value_path(fm_map, segments));
-        written.push(applied.clone());
+        let path = value_path(fm_map, segments);
+        filled.push(FilledDefault { path: path.clone(), replaced_null, applied: applied.clone() });
+        inserted.push(path);
         wrote = true;
     }
     wrote
@@ -889,6 +1014,7 @@ pub(crate) fn validate_typed_shell_values(
     options: &crate::markdown::compose::ComposeRequest,
     prepared: &PreparedSchemas,
     keys: &HashSet<String>,
+    filled: &[FilledDefault],
 ) -> MarkdownResult<()> {
     let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(());
@@ -902,10 +1028,8 @@ pub(crate) fn validate_typed_shell_values(
         .as_map()
         .get("description")
         .and_then(|v| v.as_str().map(String::from));
-    let report = match options.schema_phase {
-        Some(phase) => schemas.validate_for_phase(markdown, phase),
-        None => schemas.validate(markdown),
-    }
+    let report = schemas
+        .validate_with_authored(markdown, options.schema_phase, &authored_view(markdown, options, filled))
     .map_err(|err| MarkdownError::SchemaValidationFailed {
         path: path.clone(),
         problems: Vec::new(),
@@ -979,34 +1103,6 @@ pub(crate) fn verify_projection_stability(
         }
     };
     ensure_projection_stable(effective.as_ref(), markdown, options, projection, data)
-}
-
-/// Adds composition bindings for eligible document-owned schema properties.
-///
-/// Eligibility comes from the resolved SimplifiedSchema AST and origin map,
-/// not from nullable JSON Schema shape. This keeps raw JSON Schema, root
-/// unions, nested properties, baseline properties, and trigger payloads out of
-/// the mutation boundary. Presence wins over synthesis, including explicit
-/// `null` and other falsey values; repeated schema passes are therefore
-/// idempotent.
-fn materialize_optional_document_bindings(markdown: &mut Markdown, effective: &EffectiveSchema) {
-    let Some(SchemaRoot::Single(shape)) = effective.simplified.as_ref() else {
-        return;
-    };
-
-    let eligible = shape.properties.iter().filter_map(|(name, definition)| {
-        let origin = effective.origins.get(name)?;
-        let document_owned = matches!(
-            origin.kind,
-            SchemaOriginKind::Document | SchemaOriginKind::ReferencedFile
-        );
-        (document_owned && !definition.is_required() && !definition.has_default())
-            .then(|| name.clone())
-    });
-    let fm_map = markdown.frontmatter_mut().as_map_mut();
-    for name in eligible {
-        fm_map.entry(name).or_insert(serde_json::Value::Null);
-    }
 }
 
 pub(crate) fn prepare_caller_projection(
@@ -2622,42 +2718,21 @@ mod tests {
     }
 
     #[test]
-    fn document_optional_bindings_materialize_before_coercion_and_are_idempotent() {
+    fn absent_optional_document_properties_are_never_written_and_reruns_are_stable() {
         let mut md = md_with_schema("$schema:\n  first: string\n  count: number\n");
         let options = ComposeOptions::new();
-        let effective = DarkmatterSchemas::new(
-            crate::markdown::compose::test_request(options.clone()).resolution_context().clone(),
-        )
-            .effective_for(&md)
-            .unwrap()
-            .unwrap();
-        let expected_order = match effective.simplified.as_ref().unwrap() {
-            SchemaRoot::Single(shape) => {
-                shape.properties.keys().map(String::as_str).collect::<Vec<_>>()
-            }
-            SchemaRoot::Union(_) => panic!("expected a single schema shape"),
-        };
 
         assert!(run(&mut md, &options).is_ok());
         let first_pass = md.frontmatter().as_map().clone();
-        assert_eq!(first_pass.get("first"), Some(&serde_json::Value::Null));
-        assert_eq!(first_pass.get("count"), Some(&serde_json::Value::Null));
-        assert_eq!(
-            first_pass
-                .keys()
-                .filter(|key| matches!(key.as_str(), "first" | "count"))
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            expected_order,
-            "bindings follow resolved SimplifiedSchema declaration order"
-        );
+        assert!(!first_pass.contains_key("first"), "a declared name is not a written key");
+        assert!(!first_pass.contains_key("count"));
 
         assert!(run(&mut md, &options).is_ok());
         assert_eq!(md.frontmatter().as_map(), &first_pass);
     }
 
     #[test]
-    fn referenced_document_optional_binding_materializes() {
+    fn a_referenced_schema_s_absent_optional_property_is_never_written() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("schema.yaml"), "$schema:\n  optional: string\n")
             .unwrap();
@@ -2666,10 +2741,7 @@ mod tests {
         let options = ComposeOptions::new().with_source_file(&doc_path);
 
         assert!(run(&mut md, &options).is_ok());
-        assert_eq!(
-            md.frontmatter().as_map().get("optional"),
-            Some(&serde_json::Value::Null)
-        );
+        assert!(!md.frontmatter().as_map().contains_key("optional"));
     }
 
     #[test]
@@ -2698,7 +2770,7 @@ mod tests {
     }
 
     #[test]
-    fn non_document_owned_and_nested_properties_do_not_materialize() {
+    fn baseline_root_union_and_nested_properties_are_never_written() {
         let mut baseline_only = md_with_schema("title: hi\n");
         let baseline = SchemaRoot::Single({
             let mut shape = SchemaShape::new();
@@ -2733,17 +2805,17 @@ mod tests {
     }
 
     #[test]
-    fn defaulted_document_property_does_not_materialize() {
+    fn defaulted_document_property_takes_its_default_rather_than_null() {
         let mut md = md_with_schema(
             "$schema:\n  mode:\n    - 'string(default(auto))'\n    - 'literal(auto; default(auto))'\n",
         );
 
         assert!(run(&mut md, &ComposeOptions::new()).is_ok());
-        assert!(!md.frontmatter().as_map().contains_key("mode"));
+        assert_eq!(md.frontmatter().as_map().get("mode"), Some(&serde_json::json!("auto")));
     }
 
     #[test]
-    fn raw_json_schema_property_does_not_materialize() {
+    fn a_raw_json_schema_property_is_never_written() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("schema.json"),
@@ -2759,7 +2831,7 @@ mod tests {
     }
 
     #[test]
-    fn trigger_payload_property_does_not_materialize() {
+    fn a_trigger_payload_property_is_never_written() {
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".git")).unwrap();
         std::fs::create_dir_all(repo.path().join("schemas")).unwrap();
@@ -2790,12 +2862,8 @@ mod tests {
 
         assert!(run(&mut md, &options).is_ok());
         let map = md.frontmatter().as_map();
-        assert_eq!(map.get("optional"), Some(&serde_json::Value::Null));
-        assert_eq!(
-            map.len(),
-            3,
-            "only $schema, title, and the document binding remain"
-        );
+        assert!(!map.contains_key("optional"));
+        assert_eq!(map.len(), 2, "only $schema and title remain");
     }
 
     #[test]

@@ -173,10 +173,14 @@ fenced `---`…`---` file is two documents and fails to load.
 
 Important contracts:
 
-- Optional schema properties accept missing or `null` values. A property whose
-  whole value admits null (`null`, `unknown`/`any`, or a union with such an
-  arm) is never required, whatever its `required`, `eager`, or `generated`
-  markers; one shared presence calculation decides this for every consumer.
+- A missing key and `null` are the same value. `required` means only "the
+  key is written" (or a default supplies it); null admission never cancels
+  it, and a written `null` is then judged by the type. A `default(...)` fills
+  a missing or `null` value, required or not, in the composed copy only:
+  `data_copy` withdraws applied defaults so `md set` never writes one, and
+  composition never synthesizes `null` keys for declared but unwritten
+  properties. One shared presence calculation decides this for every
+  consumer; see [schema.md](schema.md#composition-and-validation).
 - `alphanumeric` options are type identity (canonical, never merged or
   widened); `shell` is a passive `darkmatter-shell` format, never parsed or
   run. See [schema.md](schema.md#core-types-unknown-null-alphanumeric-shell).

@@ -19,6 +19,8 @@ mod characterization_error_routes;
 mod cli_process_fixture;
 mod codex_app_server;
 mod command_routing;
+#[cfg(feature = "test-fixtures")]
+mod config_json5_wiring;
 #[cfg(unix)]
 mod config_yaml_wiring;
 mod darkmatter_config_gate;
@@ -159,6 +161,10 @@ mod lifecycle_prep;
 #[cfg(unix)]
 mod lifecycle_initialize_zero_attempts;
 mod lifecycle_renamed_events;
+// Installs the `claudine-fake-editor` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod lifecycle_edit_action;
 // Records launches with the Unix-only `launch_recorder`.
 #[cfg(unix)]
 mod lifecycle_root_preparation;
@@ -170,6 +176,11 @@ mod lifecycle_literal_escapes;
 mod lifecycle_traces;
 mod lifecycle_message_drain;
 mod lifecycle_mutation_root;
+// Installs the `claudine-fake-editor` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod lifecycle_refusal_reports;
+mod lifecycle_mutation_lifetime;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
@@ -312,6 +323,8 @@ mod wrap_structured_stream;
 mod wrap_watchdog_startup_stall;
 #[cfg(unix)]
 mod wrap_watchdog_timeout;
+#[cfg(unix)]
+mod wrapper_option_position;
 
 mod sequence_containers;
 mod sequence_frozen_graph;

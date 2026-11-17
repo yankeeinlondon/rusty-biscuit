@@ -19,6 +19,7 @@ The short version for `md compose`:
 | An error in `initialize` | `failed`, `finalize` | no | 1 |
 | Preflight: a refused shell command | `failed`, `finalize` | no | 1 |
 | Preflight: unresolved references (a missing include, a broken link) | `failed`, `finalize` | no | 1 |
+| Schema validation refuses the frontmatter | `failed`, `finalize` (after `initialize` has run) | no | 1 |
 | An error in `composed` | `finalize` | no | 1 |
 | Writing the document (for example a closed stdout pipe) | `finalize` | partly, never repeated | 1 |
 | An error in `failed` or `finalize` | see [Errors inside cleanup](#errors-inside-cleanup) | — | 1 |
@@ -55,7 +56,26 @@ An error raised in `initialize` (an explicit `error`, or an expression that
 fails to evaluate) ends `initialize`, skips composition, and runs `failed`
 then `finalize`. So does any failure while preparing the document: a shell
 command the audit refuses, a reference that does not resolve, a lifecycle
-command whose template value is missing at preflight.
+command whose template value is missing at preflight, or frontmatter that its
+[schema](../../inline/schema-validation.md) refuses.
+
+Schema validation is part of composition, so it runs **after** `initialize`.
+A document whose frontmatter fails its schema still runs `initialize` first,
+and whatever `initialize` did (a file an `edit` created, for example) stays
+done. Put a side effect that must not happen for an invalid document in
+`composed`, which never fires after a refusal:
+
+```yaml
+$schema:
+    count: number(required)
+count: many                  # refused: not a number
+initialize:
+    - info: "runs"           # prints, before validation
+composed:
+    - info: "never runs"
+failed:
+    - warn: "{{ err.msg }}"  # prints: Schema validation failed for "…": frontmatter did not satisfy the schema
+```
 
 ```yaml
 initialize:
@@ -112,6 +132,65 @@ finalize:
     - info: "{{ err.msg }}"     # prints: cleanup broke
 ```
 
+### When an `edit` fails
+
+An [`edit`](./index.md#editing-a-file-edit) action opens a file in the
+user's editor, so it can fail for reasons no other action has: there may be
+no suitable editor, no terminal to lend it, or the editor may exit with an
+error. A failed `edit` is an error in its event like any other, routed by the
+rules above: in `initialize` it runs `failed` and `finalize`.
+
+These are **execution failures**. `no_error: true` suppresses them, and the
+stack continues with the next action:
+
+| Failure | Example |
+|---|---|
+| No editor matches | every set variable (`$EDITOR`, `$VISUAL`) names a program that is missing or cannot wait for the file to close; with `gui` set, no editor of that kind is configured or installed |
+| The host cannot run the chosen editor | a terminal editor under a data output (`--output json`), with stdin or stdout redirected, with the document read from stdin, in a parallel group member, or while another editor holds the terminal; a GUI editor with no display session |
+| The file reference or filesystem refuses the target | a malformed reference, a URL, a path outside the [mutation root](./index.md#where-file-actions-write), a directory at the path, a parent directory that cannot be created |
+| The name is taken under `create_new: true` | a file, directory, or symlink already holds the name |
+| The editor cannot be started | the resolved program fails to launch |
+| The terminal cannot be lent to a terminal editor, or given back | Linux and macOS: `prepare the terminal` failed before the editor started, or `restore the terminal` failed after an edit that otherwise succeeded |
+| The editor exits with a nonzero status | the user quits Vim with `:cq` |
+| The target is gone after the editor exits | the file was deleted, replaced by a directory, or moved outside the mutation root |
+
+Three kinds of problem are **never suppressed**, even with `no_error`:
+
+- **A malformed action** (`edit: []`, `edit: null`, `gui: 1`, an unknown
+  field) is a parse error reported before anything runs.
+- **A path that is not a non-blank string at run time**, such as
+  `edit: "{{ count }}"` where `count` is a number, is an evaluation error.
+- **Cancellation.** An `edit` that was open when the run was cancelled, or
+  that is reached after cancellation, ends the stack; see
+  [Cancellation](#cancellation).
+
+```yaml
+initialize:
+    - edit: { file: notes.md, no_error: true }   # optional: a refusal or :cq does not stop the stack
+    - edit: { file: plan.md }                    # required: any failure stops here
+    - info: "both files are ready"
+```
+
+A refusal made before the file would be created (no matching editor, an
+ineligible host, a refused reference) leaves no new file or directory. A
+failure after that point keeps whatever exists: the created file, and any
+bytes the editor saved.
+
+The message names the action's property, then the reason. The target is
+added in parentheses only when the reason does not already name it:
+
+```text
+`initialize[0].else[0].edit` could not edit the file: /work/specs/new-widget/spec.md already exists, and `create_new` requires a new file
+`initialize[1].edit` could not edit the file: `nvim` is a terminal editor and needs an interactive terminal, but stdout is not a terminal (/work/plan.md)
+```
+
+Like every lifecycle failure message, it is folded onto one line; it is never
+shortened, so a long error stays whole. A channel that cannot show it all fits
+it itself. The command's own failure report (the terminal status line, or the
+diagnostic's `message` under `--output json`) and `err.msg`, which `failed`
+and `finalize` read, carry the same complete line, however long the paths in
+it are; see [Fields](#fields).
+
 ## Cancellation
 
 Ctrl-C stops the run wherever it is. No further normal actions run and no
@@ -137,6 +216,16 @@ flowchart LR
   twice.
 - A second Ctrl-C exits immediately, cutting cleanup short.
 - Output already written before the interrupt stays written.
+- An open [`edit`](./index.md#cancellation) is stopped: a terminal editor's
+  whole process tree is terminated, a GUI editor's waiting client only. Bytes
+  it saved and a file it created are kept, and the next action never runs,
+  even with `no_error`. While a terminal editor holds the terminal, Ctrl-C
+  typed at the keyboard goes to the editor rather than to `md`. See
+  [Process trees](../../../../sniff/docs/topics/process-trees.md) for what
+  "the whole process tree" covers on each OS.
+- If Windows cannot keep a finished GUI editor running, the edit still
+  succeeds and a warning says the editor was closed; under `--deny all` that
+  warning blocks like any other.
 
 `cancelled` can only clean up. Its one flow verb is `stop`; `skip` and
 `error` there are parse errors.
@@ -180,7 +269,7 @@ finalize:
 
 | Field | Meaning |
 |---|---|
-| `msg` | A concise, single-line message. Always present. Safe to print; do not branch on it. |
+| `msg` | The complete, single-line, escape-free message. Always present, never shortened, so it can be long; do not branch on it. |
 | `code` | A stable dotted code such as `composition.invalid_file_reference`. |
 | `category` | The coarse domain: the dotted prefix of `code`. |
 | `disposition` | How to handle it: `transient`, `throttled`, `correctable`, `needs_input`, or `unrecoverable`. |
@@ -203,6 +292,20 @@ failed:
       then:
           - warn: "a link is broken: {{ err.msg }}"
 ```
+
+Because `msg` is never shortened, it can be long. Where a long message would
+be unwelcome, such as a notification banner, write fixed text and leave the
+full message to the terminal report:
+
+```yaml
+failed:
+    - warn: "{{ err.msg }}"          # the terminal gets the whole explanation
+    - notify: "the document did not compose"
+```
+
+`notify` is a host verb (Claudine supplies it; `md` does not). Submitting the
+full message is not a promise that it is shown in full: a notification center
+or remote service may display only part of a long one.
 
 ## Host-level rules
 

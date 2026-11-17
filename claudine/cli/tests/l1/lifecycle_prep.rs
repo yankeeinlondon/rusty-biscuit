@@ -2,7 +2,8 @@
 //! invocation of its own and the caller's event continues; only the target's
 //! effects on disk reach the caller.
 //!
-//! Events append to `trace.log`; documents launch a recording stub provider.
+//! Events append to `trace.log` beside the entry document; documents launch a
+//! recording stub provider.
 
 use std::fs;
 use std::time::Duration;
@@ -40,7 +41,10 @@ fn run(command: &str, files: &[(&str, &str)], entry: &str) -> Run {
         .arg(fixture.cwd().join(entry))
         .output()
         .unwrap();
-    let trace = fs::read_to_string(fixture.cwd().join("trace.log"))
+    // A bare `trace.log` is created beside the entry document that first
+    // writes it; later writers in that directory find the same file.
+    let entry_dir = fixture.cwd().join(entry).parent().unwrap().to_path_buf();
+    let trace = fs::read_to_string(entry_dir.join("trace.log"))
         .unwrap_or_default()
         .lines()
         .map(str::to_string)

@@ -130,12 +130,18 @@ fn unique_marker() -> String {
     format!("INIT_GEN_{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
-/// Runs `claudine compose prompts/router.md spec=… phase=… -y --claude` in a
-/// tmux pane and returns the rendered frame and exit status.
+/// Runs `claudine compose prompts/router.md spec=<absolute spec> phase=… -y
+/// --claude` in a tmux pane and returns the rendered frame and exit status.
+///
+/// The spec is passed absolute: the target declares `spec` as plain text, not a
+/// `file`, so a relative value carries no caller provenance and the `log` path
+/// derived from it resolves beside the proxied document under `prompts/`. The
+/// assertions expect the log beside the spec under the fixture `cwd`.
 fn run_router(staged: &Staged, phase: u32) -> (String, String) {
+    let spec = staged.fixture.cwd().join(SPEC_ARGUMENT);
     let arguments = format!(
         "compose prompts/router.md spec={spec} phase={phase} -y --claude",
-        spec = sh_quote(SPEC_ARGUMENT),
+        spec = sh_quote(&spec.display().to_string()),
     );
     run_claudine(staged, &arguments)
 }

@@ -625,42 +625,6 @@ fn conforms_validate_and_compose_complete_an_entry_a_pattern_key_selects() {
     }
 }
 
-/// One alternative accepts the value as written and another accepts it
-/// completed with its default, at the root (`root.md`) and beneath `shape`
-/// (`doc.md`, whose raw JSON Schema arms admit each other's keys): both are
-/// ambiguous, located where the alternatives are.
-#[test]
-fn conforms_schema_validate_locates_alternatives_that_complete_a_valid_value_differently() {
-    let fixture = with_document("output-validate-ambiguous", "---\n$schema: ./open.json\nshape:\n  b: y\n---\n# H\n");
-    fixture.write_file("cwd/root.md", "---\n$schema: ./either.yaml\nb: y\n---\n# H\n");
-    fixture.write_file(
-        "cwd/either.yaml",
-        "kind: schema\n$schema:\n  - a: number(required; default(1))\n  - b: string(required; default(z))\n",
-    );
-    let arms = json!([
-        { "type": "object", "properties": { "a": { "type": "number", "default": 1 } }, "required": ["a"] },
-        { "type": "object", "properties": { "b": { "type": "string", "default": "z" } }, "required": ["b"] }
-    ]);
-    fixture.write_file(
-        "cwd/open.json",
-        &json!({ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": { "shape": { "anyOf": arms } } })
-            .to_string(),
-    );
-    let value = conforms(
-        include_str!("../../schemas/output/schema-validate.yaml"),
-        &fixture,
-        &["schema", "validate", "root.md", "doc.md", "--output", "json"],
-        1,
-    );
-    let files = value["files"].as_array().expect("files");
-    let located: Vec<(&Value, &str)> =
-        files.iter().map(|file| (&file["problems"][0]["path"], file["problems"][0]["message"].as_str().unwrap_or_default())).collect();
-    assert_eq!(located[0].0, "", "{value:#}");
-    assert!(located[0].1.contains("ambiguous at the document root"), "{value:#}");
-    assert_eq!(located[1].0, "/shape", "{value:#}");
-    assert!(located[1].1.contains("ambiguous at `shape`"), "{value:#}");
-}
-
 #[test]
 fn conforms_schema_validate_keeps_a_failing_and_an_unopened_file_apart() {
     let fixture = with_document("output-validate-failure", "---\n$schema:\n  name: string(required)\n---\n# H\n");

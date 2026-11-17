@@ -14,7 +14,7 @@ use std::time::Instant;
 use crate::composition::error::CompositionError;
 use crate::composition::launch_workspace::LaunchWorkspaceContext;
 use crate::composition::types::{
-    CompositionMode, InstalledProviderSnapshot, OutputFormat, SessionInteractivitySource,
+    CompositionMode, InstalledProviderSnapshot, SessionInteractivitySource,
     SharedApprovalCache,
 };
 use crate::composition::{MAX_PROXY_HOPS, SequenceStepOverlay, proxy_handoff_allowed};
@@ -29,8 +29,6 @@ use super::handoff::{HopApproval, ProxyHandoff, ProxyProvenance, ResolvedProxyTa
 /// document owns the output, never where the output goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutputPolicy {
-    /// Universal output format, when the caller fixed one.
-    pub format: Option<OutputFormat>,
     /// Whether this invocation is one step of a sequence run.
     pub sequence: bool,
     /// Header-only preflight output.
@@ -140,7 +138,6 @@ impl InvocationInputsDraft {
             mode,
             step_overrides: None,
             output_policy: CommandOutputPolicy {
-                format: None,
                 sequence: false,
                 quiet: false,
                 silent: false,

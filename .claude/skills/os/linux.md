@@ -91,6 +91,10 @@ replacement refusal independently of the filesystem allocator.
 - `--build-jobs 2` is not always enough: on 2026-10-18 `worktree-cli` (about
   25 test binaries) was killed at 2 jobs and linked only at
   `--build-jobs 1`, which then took a few minutes longer.
+- `claudine-cli` behaves the same: on 2026-11-16 its default-jobs archive
+  build was killed linking the `claudine` bin's test target, and SSH stopped
+  answering while it ran; `--build-jobs 1` linked and passed. Start
+  `claudine-cli` at `--build-jobs 1` rather than discovering this again.
 
 ## inotify: watches follow inodes, new directories are not watched
 

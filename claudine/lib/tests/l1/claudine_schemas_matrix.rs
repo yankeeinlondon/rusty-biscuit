@@ -255,7 +255,10 @@ const COLUMNS: &[Column] = &[
         pointer: "/$schema",
         probes: ACTION_PROBES,
         selection: false,
-        outcomes: [UNCONSTRAINED, Error, Error, Error, Error, UNCONSTRAINED, Error, Error],
+        // A null payload is an absent one: a matcher-only trigger. An empty
+        // payload is refused: omit it, or write `null`, for a matcher-only
+        // trigger.
+        outcomes: [UNCONSTRAINED, UNCONSTRAINED, Error, Error, Error, Error, Error, Error],
     },
     // A trigger condition operand: the `start: string(required)` alternative,
     // after the five `sequence` alternatives.

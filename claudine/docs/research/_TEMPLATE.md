@@ -27,14 +27,19 @@ Keep `_fleet.md` as the entrypoint:
 ```yaml
 ---
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
-research_prompt: "@claudine/docs/research/<topic>/_research.md"
+initialize:
+    - set:
+          research_prompt: "@claudine/docs/research/<topic>/_research.md"
 agent: opencode
 model: kimi-for-coding/k2p7
 ---
 ```
 
 The shared formal task roster adds a `prompt` executable to each canonical
-provider row. `_local-runner-tasks.yaml` does the same for local runners.
+provider row, filled from `research_prompt`. A referenced roster never reads
+the fleet's own properties, so the fleet writes it in `initialize`; that
+root hook is the fleet's only one. A dry run fires no events, so preview a
+fleet with `research_prompt=…` as a setter. `_local-runner-tasks.yaml` does the same for local runners.
 A parity test enforces identical row data and order with the canonical
 rosters; when a roster changes, update its task projection alongside it.
 

@@ -26,14 +26,13 @@
 //!
 //! Every operand type is the catalog type with `deferred` added to each atom
 //! that is not `unknown` or `null`, so a `{{ … }}` template is accepted there
-//! and checked once the event renders it. The schema system makes an
-//! optional object property accept `null` and never requires a property
-//! whose type admits `null`; a long form therefore spells presence through
-//! its arms instead of through optionality. Each subset of the optional
-//! parameters is its own closed arm with every present parameter marked
-//! `required`, and an arm holding a parameter whose type admits `null` counts
-//! its keys with `min-keys`. A tuple's optional position already rejects
-//! `null` unless its type admits it.
+//! and checked once the event renders it. A long form spells which
+//! parameters were written through its arms: each subset of the optional
+//! parameters is its own closed arm with every parameter it includes marked
+//! `required`, which asks only for the key, so a parameter whose type admits
+//! `null` still accepts a written `null`. Each arm takes one optional
+//! `no_error: boolean(default(false))`. A tuple's optional position already
+//! rejects `null` unless its type admits it.
 //!
 //! The projected types alone cannot carry a runtime registration's own rules
 //! (`number`'s and `round`'s numeric recovery, `length`'s refusal of a
@@ -60,7 +59,7 @@ use simplified_schema::simplified::{
 };
 
 use super::LOOP_ITERATION_KEYS;
-use super::actions::{CommunicationChannel, is_lifecycle_control_verb};
+use super::actions::{CommunicationChannel, is_lifecycle_control_verb, is_lifecycle_only_verb};
 
 /// The keys a lifecycle action map reserves beside its verbs.
 const RESERVED_KEYS: &[&str] = &["when", "then", "else", "no_error"];
@@ -558,6 +557,8 @@ fn hand_owner(name: &str) -> Option<&'static str> {
         Some("the `shell` action")
     } else if is_lifecycle_control_verb(name) {
         Some("a lifecycle control verb")
+    } else if is_lifecycle_only_verb(name) {
+        Some("a lifecycle-only verb")
     } else if name == "set" {
         Some("lifecycle `set`")
     } else if RESERVED_KEYS.contains(&name) {
@@ -911,10 +912,10 @@ fn list_of(item: PropertyDef) -> PropertyAtom {
 }
 
 /// One closed object per subset of the optional parameters (none first, then
-/// by bitmask in parameter order), each present parameter marked `required`
-/// when its type does not admit null. An arm holding a parameter that admits
-/// null cannot require it, so it counts its keys with `min-keys`, and its
-/// `no_error` flag is a separate arm that counts one more key.
+/// by bitmask in parameter order). Every parameter the subset includes is
+/// marked `required`, which asks only that its key be written: a parameter
+/// whose type admits null still accepts a written `null`. Each arm also takes
+/// one optional `no_error: boolean(default(false))`.
 fn long_arms(verb: &str, parameters: &[FunctionParameter]) -> Result<Vec<PropertyAtom>, ProjectionError> {
     if parameters.iter().any(|parameter| parameter.name == NO_ERROR) {
         return Err(ProjectionError::NoErrorParameter { verb: verb.to_string() });
@@ -923,31 +924,19 @@ fn long_arms(verb: &str, parameters: &[FunctionParameter]) -> Result<Vec<Propert
     let mut arms = Vec::new();
     for mask in 0..(1usize << optional.len()) {
         let mut shape = SchemaShape::new();
-        let mut counts_keys = false;
         for (index, parameter) in parameters.iter().enumerate() {
             let position = optional.iter().position(|optional_index| *optional_index == index);
             if position.is_some_and(|bit| mask & (1 << bit) == 0) {
                 continue;
             }
             let mut def = defer_operand(&parameter.def);
-            if def.admits_null() {
-                counts_keys = true;
-            } else {
-                mark_required(&mut def);
-            }
+            mark_required(&mut def);
             shape.properties.insert(parameter.name.clone(), def);
         }
         let mut no_error = PropertyAtom::bare(SimplifiedType::Boolean);
-        if counts_keys {
-            let keys = shape.properties.len();
-            arms.push(object_atom(shape.clone(), Some(keys)));
-            no_error.constraints.push(Constraint::Required);
-            shape.properties.insert(NO_ERROR.to_string(), PropertyDef::Single(no_error));
-            arms.push(object_atom(shape, Some(keys + 1)));
-        } else {
-            shape.properties.insert(NO_ERROR.to_string(), PropertyDef::Single(no_error));
-            arms.push(object_atom(shape, None));
-        }
+        no_error.constraints.push(Constraint::Default(serde_json::Value::Bool(false)));
+        shape.properties.insert(NO_ERROR.to_string(), PropertyDef::Single(no_error));
+        arms.push(object_atom(shape));
     }
     Ok(arms)
 }
@@ -960,11 +949,11 @@ fn mark_required(def: &mut PropertyDef) {
     atom.constraints.push(Constraint::Required);
 }
 
-fn object_atom(shape: SchemaShape, min_keys: Option<usize>) -> PropertyAtom {
+fn object_atom(shape: SchemaShape) -> PropertyAtom {
     PropertyAtom {
         ty: TypeExpr::InlineObject(shape),
         is_array: false,
-        constraints: min_keys.map(Constraint::MinKeys).into_iter().collect(),
+        constraints: Vec::new(),
         array_constraints: Vec::new(),
         description: None,
     }
@@ -1058,8 +1047,8 @@ mod tests {
         assert_eq!(
             rendered(verb.long.as_ref().expect("long form")),
             [
-                "{query: object(deferred;required),no_error: boolean}(operands(pr_list-long))",
-                "{count: number(integer;min(1);max(100);deferred;required),no_error: boolean}(operands(pr_list-long))",
+                "{query: object(deferred;required),no_error: boolean(default(false))}(operands(pr_list-long))",
+                "{count: number(integer;min(1);max(100);deferred;required),no_error: boolean(default(false))}(operands(pr_list-long))",
             ]
         );
     }

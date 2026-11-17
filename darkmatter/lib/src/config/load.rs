@@ -695,7 +695,7 @@ impl Observe<'_> {
                                 context.problem(&segments, message),
                             ));
                         }
-                        None => whole.push(context.problem(&segments, describe_null(message, document.get("register")))),
+                        None => whole.push(context.problem(&segments, message)),
                     }
                 }
                 if whole.is_empty() {
@@ -1039,19 +1039,10 @@ fn message(problem: &ValidationProblem) -> String {
 /// A union failure at `permissions` itself, worded for the value written.
 fn describe_permissions(message: String, authored: Option<&Value>) -> String {
     match authored {
-        Some(Value::Null) => "`permissions` cannot be null; omit it to keep the defaults".to_string(),
         Some(Value::String(_)) => "the `permissions` reference is blank".to_string(),
         Some(Value::Object(_)) => message,
         Some(_) => "`permissions` must be a mapping or a file reference".to_string(),
         None => message,
-    }
-}
-
-fn describe_null(message: String, authored: Option<&Value>) -> String {
-    if authored.is_some_and(Value::is_null) {
-        "`register` cannot be null; omit it for an empty list".to_string()
-    } else {
-        message
     }
 }
 

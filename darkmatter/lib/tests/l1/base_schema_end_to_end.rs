@@ -51,8 +51,14 @@ fn claudine_api() -> (tempfile::TempDir, DarkmatterSchemas) {
     (dir, api)
 }
 
+thread_local! {
+    /// One base schema per test thread: building it captures the process
+    /// directory's repository, too costly to repeat for every case of a table.
+    static BASE_API: DarkmatterSchemas = base_api();
+}
+
 fn validate_with_base(frontmatter: &str) -> darkmatter::markdown::schemas::ValidationReport {
-    validate_with(&base_api(), frontmatter)
+    BASE_API.with(|api| validate_with(api, frontmatter))
 }
 
 /// [`validate_with_base`] against an already built `api`, for a test that

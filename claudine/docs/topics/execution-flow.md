@@ -390,7 +390,6 @@ Applies provider-specific flags to child args:
 - Non-interactive flags via `profile.apply_non_interactive_flags()`
 - Model discovery for providers that require one non-interactively (catalog `model_required_in_non_tty`: env vars, then the profile's configured default)
 - Model flag via `profile.apply_model()`
-- Output format via `profile.apply_output_format()`
 - Sandbox via `profile.apply_sandbox()`
 
 **Affected by:**
@@ -400,7 +399,6 @@ Applies provider-specific flags to child args:
 | `--yolo` / `-y`        | Enables provider-specific auto-approval mode              |
 | `--interactive` / `-i` | Switches from non-interactive to interactive session mode |
 | `--no-interactive`     | Forces non-interactive mode, overriding `interactive: true` frontmatter |
-| `--output` / `-o`      | Sets output format (json, text, stream)                   |
 | `--sandbox`            | Enables provider-specific sandboxing                      |
 | `--model`              | Applied to provider-specific flags                        |
 
@@ -618,7 +616,8 @@ claudine sequence --dry-run @batch.md
 
 `composition::resolve_sequence_plan` reads an inline step list or resolves a
 sequence file reference. External files accept `{ sequence: [...] }` or
-`{ kind: sequence, sequence: [...], template: {...} }`. A task's `sequence:` accepts
+`{ kind: sequence, sequence: [...], template: {...}, $state: {...} }`, whose root
+`$schema` describes the document and whose `$state` types each step. A task's `sequence:` accepts
 an inline list or a reference using the same source grammar. Groups execute
 concurrently; ordered work belongs in a sequence. Document-level `fail_fast`
 and the CLI `--fail-fast` option are rejected.

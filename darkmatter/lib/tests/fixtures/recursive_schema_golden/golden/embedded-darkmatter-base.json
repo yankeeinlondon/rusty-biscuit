@@ -6409,10 +6409,21 @@
                     "type": "string",
                     "format": "darkmatter-expression",
                     "description": "the condition choosing then or else"
+                  },
+                  "no_error": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "const": false
+                      }
+                    ],
+                    "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                   }
                 },
                 "patternProperties": {
-                  "^(?!(?:when)$)(?:then|else)$": {
+                  "^(?!(?:when|no_error)$)(?:then|else)$": {
                     "anyOf": [
                       {
                         "type": "array",
@@ -6438,10 +6449,21 @@
                                   "type": "string",
                                   "format": "darkmatter-expression",
                                   "description": "the condition choosing then or else"
+                                },
+                                "no_error": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "const": false
+                                    }
+                                  ],
+                                  "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                                 }
                               },
                               "patternProperties": {
-                                "^(?!(?:when)$)(?:then|else)$": {
+                                "^(?!(?:when|no_error)$)(?:then|else)$": {
                                   "anyOf": [
                                     {
                                       "type": "array",
@@ -6467,10 +6489,21 @@
                                                 "type": "string",
                                                 "format": "darkmatter-expression",
                                                 "description": "the condition choosing then or else"
+                                              },
+                                              "no_error": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "null"
+                                                  },
+                                                  {
+                                                    "const": false
+                                                  }
+                                                ],
+                                                "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                                               }
                                             },
                                             "patternProperties": {
-                                              "^(?!(?:when)$)(?:then|else)$": {
+                                              "^(?!(?:when|no_error)$)(?:then|else)$": {
                                                 "$ref": "#/$defs/md-loose-body",
                                                 "description": "the actions to run when the condition holds (then) or when it does not (else)"
                                               }
@@ -6478,7 +6511,34 @@
                                             "required": [
                                               "when"
                                             ],
-                                            "minProperties": 2
+                                            "x-darkmatter-uncounted-keys": {
+                                              "keys": [
+                                                "no_error"
+                                              ],
+                                              "min": 2
+                                            },
+                                            "allOf": [
+                                              {
+                                                "if": {
+                                                  "properties": {
+                                                    "no_error": false
+                                                  }
+                                                },
+                                                "then": {
+                                                  "minProperties": 2
+                                                }
+                                              },
+                                              {
+                                                "if": {
+                                                  "required": [
+                                                    "no_error"
+                                                  ]
+                                                },
+                                                "then": {
+                                                  "minProperties": 3
+                                                }
+                                              }
+                                            ]
                                           },
                                           {
                                             "type": "string",
@@ -6517,7 +6577,34 @@
                               "required": [
                                 "when"
                               ],
-                              "minProperties": 2
+                              "x-darkmatter-uncounted-keys": {
+                                "keys": [
+                                  "no_error"
+                                ],
+                                "min": 2
+                              },
+                              "allOf": [
+                                {
+                                  "if": {
+                                    "properties": {
+                                      "no_error": false
+                                    }
+                                  },
+                                  "then": {
+                                    "minProperties": 2
+                                  }
+                                },
+                                {
+                                  "if": {
+                                    "required": [
+                                      "no_error"
+                                    ]
+                                  },
+                                  "then": {
+                                    "minProperties": 3
+                                  }
+                                }
+                              ]
                             },
                             {
                               "type": "string",
@@ -6556,7 +6643,34 @@
                 "required": [
                   "when"
                 ],
-                "minProperties": 2
+                "x-darkmatter-uncounted-keys": {
+                  "keys": [
+                    "no_error"
+                  ],
+                  "min": 2
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "no_error": false
+                      }
+                    },
+                    "then": {
+                      "minProperties": 2
+                    }
+                  },
+                  {
+                    "if": {
+                      "required": [
+                        "no_error"
+                      ]
+                    },
+                    "then": {
+                      "minProperties": 3
+                    }
+                  }
+                ]
               },
               {
                 "type": "string",
@@ -6666,7 +6780,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -6701,7 +6816,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -6736,7 +6852,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -6771,7 +6888,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -6806,7 +6924,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -6841,7 +6960,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -6872,6 +6992,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when this action fails"
         }
       },
@@ -6965,7 +7086,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               }
             }
@@ -6994,7 +7116,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               }
             }
@@ -7037,7 +7160,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "x-darkmatter-operands": "error-long"
@@ -7065,6 +7189,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when this action fails"
         }
       },
@@ -7147,6 +7272,81 @@
           ],
           "description": "assign runtime values: a mapping of destinations to values (no long form, no no_error)"
         },
+        "edit": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "\\S",
+              "x-darkmatter-deferred": true,
+              "description": "open this file in the editor and wait for it to close; a missing file is created",
+              "x-darkmatter-operands": "edit-short"
+            },
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "pattern": "\\S",
+                  "x-darkmatter-deferred": true
+                }
+              ],
+              "minItems": 1,
+              "items": false,
+              "x-darkmatter-operands": "edit-short"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "pattern": "\\S",
+                  "x-darkmatter-deferred": true
+                },
+                "create_new": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ],
+                  "default": false
+                },
+                "gui": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "no_error": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ],
+                  "default": false
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "description": "open file in the editor and wait for it to close; create_new refuses an existing file, gui chooses a graphical (true) or terminal (false) editor",
+              "x-darkmatter-operands": "edit-long"
+            }
+          ]
+        },
         "when": {
           "anyOf": [
             {
@@ -7168,11 +7368,12 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when this action fails"
         }
       },
       "patternProperties": {
-        "^(?!(?:set|when|no_error)$)(?:append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_file_type|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|load_data|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try_frontmatter|upper|validate_schema|values|without_date)$": {
+        "^(?!(?:set|edit|when|no_error)$)(?:append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_file_type|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|load_data|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try_frontmatter|upper|validate_schema|values|without_date)$": {
           "description": "a Darkmatter side effect or expression function; the parser checks its arguments"
         }
       },
@@ -7236,6 +7437,30 @@
             "minProperties": 3,
             "maxProperties": 3
           }
+        }
+      ]
+    },
+    "edit-short": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "\\S",
+          "x-darkmatter-deferred": true,
+          "description": "open this file in the editor and wait for it to close; a missing file is created",
+          "x-darkmatter-operands": "edit-short"
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "pattern": "\\S",
+              "x-darkmatter-deferred": true
+            }
+          ],
+          "minItems": 1,
+          "items": false,
+          "x-darkmatter-operands": "edit-short"
         }
       ]
     },
@@ -7358,6 +7583,16 @@
             }
           ]
         },
+        "edit": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/edit-short"
+            }
+          ]
+        },
         "set": {
           "anyOf": [
             {
@@ -7391,11 +7626,12 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when one of these actions fails"
         }
       },
       "patternProperties": {
-        "^(?!(?:stdout|stderr|info|warn|success|message|stop|skip|error|set|when|no_error)$)(?!(?:shell|then|else)$)": {
+        "^(?!(?:stdout|stderr|info|warn|success|message|stop|skip|error|edit|set|when|no_error)$)(?!(?:shell|then|else)$)": {
           "description": "a side effect, an expression function, or an action md does not provide"
         }
       }
@@ -7405,13 +7641,13 @@
         {
           "type": "array",
           "items": {},
-          "description": "a list of actions, checked only by the lifecycle parser"
+          "description": "a list of actions; validation checks their placements and flags, the lifecycle parser their verbs"
         },
         {
           "type": "object",
           "additionalProperties": {},
           "properties": {},
-          "description": "a dictionary of verbs, checked only by the lifecycle parser"
+          "description": "a dictionary of verbs; validation checks its placements and flags, the lifecycle parser its verbs"
         }
       ]
     },
@@ -7420,7 +7656,7 @@
       "additionalProperties": false,
       "properties": {},
       "patternProperties": {
-        "^(?!(?:stdout|stderr|info|warn|success|message|stop|skip|error|shell|set|append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_file_type|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|load_data|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try|try_frontmatter|upper|validate_schema|values|without_date|when|then|else|no_error)$)": {
+        "^(?!(?:stdout|stderr|info|warn|success|message|stop|skip|error|shell|set|edit|append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_file_type|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|load_data|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try|try_frontmatter|upper|validate_schema|values|without_date|when|then|else|no_error)$)": {
           "description": "an action md does not provide; md compose ignores it with a warning"
         }
       },
@@ -7468,7 +7704,8 @@
                     {
                       "type": "boolean"
                     }
-                  ]
+                  ],
+                  "default": false
                 }
               },
               "required": [
@@ -7499,6 +7736,7 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when this action fails"
         }
       },
@@ -7697,6 +7935,16 @@
           ],
           "description": "run a shell command (never in initialize)"
         },
+        "edit": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/edit-short"
+            }
+          ]
+        },
         "set": {
           "anyOf": [
             {
@@ -7730,11 +7978,12 @@
               "type": "boolean"
             }
           ],
+          "default": false,
           "description": "keep the stack running when one of these actions fails"
         }
       },
       "patternProperties": {
-        "^(?!(?:stdout|stderr|info|warn|success|message|stop|skip|error|shell|set|when|no_error)$)(?!(?:then|else)$)": {
+        "^(?!(?:stdout|stderr|info|warn|success|message|stop|skip|error|shell|edit|set|when|no_error)$)(?!(?:then|else)$)": {
           "description": "a side effect, an expression function, or an action md does not provide"
         }
       }
@@ -7768,10 +8017,21 @@
                     "type": "string",
                     "format": "darkmatter-expression",
                     "description": "the condition choosing then or else"
+                  },
+                  "no_error": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "const": false
+                      }
+                    ],
+                    "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                   }
                 },
                 "patternProperties": {
-                  "^(?!(?:when)$)(?:then|else)$": {
+                  "^(?!(?:when|no_error)$)(?:then|else)$": {
                     "anyOf": [
                       {
                         "type": "array",
@@ -7800,10 +8060,21 @@
                                   "type": "string",
                                   "format": "darkmatter-expression",
                                   "description": "the condition choosing then or else"
+                                },
+                                "no_error": {
+                                  "anyOf": [
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "const": false
+                                    }
+                                  ],
+                                  "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                                 }
                               },
                               "patternProperties": {
-                                "^(?!(?:when)$)(?:then|else)$": {
+                                "^(?!(?:when|no_error)$)(?:then|else)$": {
                                   "anyOf": [
                                     {
                                       "type": "array",
@@ -7832,10 +8103,21 @@
                                                 "type": "string",
                                                 "format": "darkmatter-expression",
                                                 "description": "the condition choosing then or else"
+                                              },
+                                              "no_error": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "null"
+                                                  },
+                                                  {
+                                                    "const": false
+                                                  }
+                                                ],
+                                                "description": "filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
                                               }
                                             },
                                             "patternProperties": {
-                                              "^(?!(?:when)$)(?:then|else)$": {
+                                              "^(?!(?:when|no_error)$)(?:then|else)$": {
                                                 "$ref": "#/$defs/md-loose-body",
                                                 "description": "the actions to run when the condition holds (then) or when it does not (else)"
                                               }
@@ -7843,7 +8125,34 @@
                                             "required": [
                                               "when"
                                             ],
-                                            "minProperties": 2
+                                            "x-darkmatter-uncounted-keys": {
+                                              "keys": [
+                                                "no_error"
+                                              ],
+                                              "min": 2
+                                            },
+                                            "allOf": [
+                                              {
+                                                "if": {
+                                                  "properties": {
+                                                    "no_error": false
+                                                  }
+                                                },
+                                                "then": {
+                                                  "minProperties": 2
+                                                }
+                                              },
+                                              {
+                                                "if": {
+                                                  "required": [
+                                                    "no_error"
+                                                  ]
+                                                },
+                                                "then": {
+                                                  "minProperties": 3
+                                                }
+                                              }
+                                            ]
                                           },
                                           {
                                             "type": "string",
@@ -7885,7 +8194,34 @@
                               "required": [
                                 "when"
                               ],
-                              "minProperties": 2
+                              "x-darkmatter-uncounted-keys": {
+                                "keys": [
+                                  "no_error"
+                                ],
+                                "min": 2
+                              },
+                              "allOf": [
+                                {
+                                  "if": {
+                                    "properties": {
+                                      "no_error": false
+                                    }
+                                  },
+                                  "then": {
+                                    "minProperties": 2
+                                  }
+                                },
+                                {
+                                  "if": {
+                                    "required": [
+                                      "no_error"
+                                    ]
+                                  },
+                                  "then": {
+                                    "minProperties": 3
+                                  }
+                                }
+                              ]
                             },
                             {
                               "type": "string",
@@ -7927,7 +8263,34 @@
                 "required": [
                   "when"
                 ],
-                "minProperties": 2
+                "x-darkmatter-uncounted-keys": {
+                  "keys": [
+                    "no_error"
+                  ],
+                  "min": 2
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "no_error": false
+                      }
+                    },
+                    "then": {
+                      "minProperties": 2
+                    }
+                  },
+                  {
+                    "if": {
+                      "required": [
+                        "no_error"
+                      ]
+                    },
+                    "then": {
+                      "minProperties": 3
+                    }
+                  }
+                ]
               },
               {
                 "type": "string",

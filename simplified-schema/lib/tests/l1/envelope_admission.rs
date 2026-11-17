@@ -6,8 +6,9 @@
 //! Each row edits one control fixture once, so every edit is known to be the
 //! load-bearing one. The default outcome of an invalid shape is a
 //! `SchemaDocument` naming the definition, located at the offending token;
-//! the listed exceptions are a number `description` (converts softly) and a
-//! `types`-only `kind: schema` (valid).
+//! the listed exceptions are a number `description` (converts softly), a
+//! `types`-only `kind: schema` (valid), and a null optional carrier or
+//! metadata field (read as absent).
 
 use serde_json::json;
 use simplified_schema::embedded::{EmbeddedDocument, ShippedSources};
@@ -124,21 +125,69 @@ fn an_unknown_top_level_key_is_rejected_at_the_key() {
 }
 
 #[test]
-fn null_metadata_and_payload_carriers_are_rejected() {
-    for (label, text, definition) in CONTROLS {
+fn null_optional_metadata_and_types_read_as_absent() {
+    for (label, text, _) in CONTROLS {
         for (key, original) in [
             ("description", "description: Reviews"),
             ("categories", "categories: [Core]"),
             ("types", "types:\n  Id: string"),
         ] {
             let edited = text.replacen(original, &format!("{key}: null"), 1);
-            assert_rejected(&format!("{label} {key}: null"), &edited, definition, &format!("`/{key}`"), "null");
+            let admission = admit_envelope_text(&edited, "subject.yaml").unwrap().unwrap();
+            assert!(admission.is_admitted(), "{label} {key}: null: {:#?}", admission.problems);
+            let document = parse_standalone_schema_document(&edited, "subject.yaml")
+                .unwrap_or_else(|error| panic!("{label} {key}: null: {error}"))
+                .expect("a schema document");
+            assert!(document.exports_schema, "{label} {key}: null");
+            match key {
+                "description" => assert_eq!(document.description, None, "{label}"),
+                "categories" => assert_eq!(document.categories, None, "{label}"),
+                _ => assert_eq!(document.local_types, None, "{label}"),
+            }
         }
-        let schema = text.find("$schema:").unwrap();
-        let types = text.find("types:").unwrap();
-        let edited = format!("{}$schema: null\n{}", &text[..schema], &text[types..]);
-        assert_rejected(&format!("{label} $schema: null"), &edited, definition, "`/$schema`", "null");
     }
+}
+
+#[test]
+fn a_tagged_null_schema_beside_types_is_a_types_only_document() {
+    let edited = TAGGED.replacen("$schema:\n  title: string\n", "$schema: null\n", 1);
+    let document = parse_standalone_schema_document(&edited, "subject.yaml").unwrap().expect("a schema document");
+    assert!(!document.exports_schema);
+    assert_eq!(document, {
+        let types_only = TAGGED.replacen("$schema:\n  title: string\n", "", 1);
+        let mut expected = parse_standalone_schema_document(&types_only, "subject.yaml").unwrap().unwrap();
+        // Spans are byte offsets into each text; compare the meaning.
+        expected.source_map = document.source_map.clone();
+        expected
+    });
+}
+
+#[test]
+fn a_null_schema_without_a_usable_alternative_is_rejected() {
+    // `kind: yaml-schema` requires its export.
+    let yaml_schema = YAML_SCHEMA.replacen("$schema:\n  kind: literal(review; required)\n", "$schema: null\n", 1);
+    assert_rejected("yaml-schema $schema: null", &yaml_schema, YAML_SCHEMA_DEFINITION_PATH, "`/$schema`", "null");
+    // A tagged document with neither a usable export nor a types table.
+    let tagged = TAGGED
+        .replacen("$schema:\n  title: string\n", "$schema: null\n", 1)
+        .replacen("types:\n  Id: string\n", "", 1);
+    assert!(parse_standalone_schema_document(&tagged, "subject.yaml").is_err(), "{tagged}");
+    // An empty types table is not a usable carrier either.
+    let empty_types = TAGGED.replacen("$schema:\n  title: string\n", "", 1).replacen("types:\n  Id: string\n", "types: {}\n", 1);
+    assert!(parse_standalone_schema_document(&empty_types, "subject.yaml").is_err(), "{empty_types}");
+}
+
+#[test]
+fn a_null_typed_property_inside_a_payload_is_a_declaration() {
+    let edited = TAGGED.replacen("  title: string\n", "  title: string\n  n: null\n", 1);
+    let document = parse_standalone_schema_document(&edited, "subject.yaml").unwrap().expect("a schema document");
+    assert!(document.exports_schema);
+    let simplified_schema::simplified::SchemaDeclaration::Schema(simplified_schema::simplified::SchemaRoot::Single(shape)) =
+        &document.declaration
+    else {
+        panic!("a single root");
+    };
+    assert!(shape.properties.contains_key("n"), "{shape:?}");
 }
 
 #[test]
@@ -212,7 +261,7 @@ fn a_category_entry_that_cannot_be_text_is_rejected_by_the_definition() {
 
 #[test]
 fn the_content_factory_rejects_a_malformed_envelope_with_a_located_error() {
-    let text = TAGGED.replacen("description: Reviews", "description: null", 1);
+    let text = TAGGED.replacen("description: Reviews", "description: \"\"", 1);
     match SimplifiedSchema::try_from(text.as_str()) {
         Err(error) => {
             let message = error.to_string();

@@ -181,6 +181,39 @@ pub fn scan_darkmatter_directives(source: &str) -> Vec<ParsedDirective> {
     scan_darkmatter_directives_in(source, None)
 }
 
+/// Validates the value of a `::file` / `::url` `interpolate=` option.
+///
+/// `decoded` is the value with any surrounding quotes removed, and
+/// `was_quoted` says whether the author wrote quotes. The composition parser
+/// and the language server share this one validator, so an editor diagnostic
+/// and a composition error agree on every spelling.
+///
+/// ## Returns
+///
+/// - `Ok(None)` for the unquoted word `null`, the null value, which means the
+///   default (`true`); a quoted `"null"` is text and is rejected
+/// - `Ok(Some(b))` for a boolean word (`true`/`false`, `yes`/`no`, `on`/`off`,
+///   `1`/`0`, any letter case, trimmed), quoted or not
+///
+/// ## Errors
+///
+/// The reason, as a sentence fragment, for an empty value or any other text
+/// (including an object or array literal).
+pub fn parse_interpolate_value(decoded: &str, was_quoted: bool) -> Result<Option<bool>, String> {
+    if !was_quoted && decoded == "null" {
+        return Ok(None);
+    }
+    if decoded.trim().is_empty() {
+        return Err("'interpolate=' requires a value: true or false".to_string());
+    }
+    simplified_schema::numeric::parse_boolean_word(decoded)
+        .map(Some)
+        .ok_or_else(|| {
+            let shown = if was_quoted { format!("\"{decoded}\"") } else { decoded.to_string() };
+            format!("'interpolate=' must be true or false (or yes/no, on/off, 1/0, null), not {shown}")
+        })
+}
+
 /// [`scan_darkmatter_directives`] over a body whose `data` bytes were inserted
 /// by an earlier stage: a directive counts only when its line start, prefix,
 /// and keyword are authored, and code regions are found in the masked view.

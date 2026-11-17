@@ -177,15 +177,16 @@ futures-util = { version = "0.3", optional = true }
 image = { version = "0.25", optional = true }
 
 [target.'cfg(unix)'.dependencies]
-# `setsid` and process-group cleanup for login-shell queries in
-# `markdown/compose/shell_expansion/launcher.rs`. Only the raw syscall is needed,
-# so `libc` rather than a wrapper crate; already compiled transitively.
+# The editor's terminal-foreground handoff (`editor/launch.rs`), terminal
+# checks (`editor/surface.rs`, `markdown/compose/shell_expansion/probe.rs`), and
+# process checks in tests. Process-tree ownership (including the login-shell
+# query's `setsid`) is Sniff's. Only raw syscalls are needed, so `libc` rather
+# than a wrapper crate; already compiled transitively.
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-# Kill-on-close Job Object that contains a login-shell probe's process tree
-# (`markdown/compose/shell_expansion/launcher.rs`).
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_JobObjects"] }
+# The Win32 error codes `atomic_replace.rs` matches when a rename is refused.
+windows = { version = "0.62", features = ["Win32_Foundation"] }
 
 [dev-dependencies]
 image = "0.25"

@@ -202,13 +202,13 @@ pub fn is_known_side_effect(verb: &str) -> bool {
 ///
 /// This is the parse-time validator required by decision #6 in the
 /// positional-and-key-value plan. It unions communication channels, the
-/// `shell` verb, lifecycle control verbs, Darkmatter side-effect verbs, and
-/// Darkmatter expression-function verbs.
+/// `shell` verb, lifecycle control verbs, the lifecycle-only verbs,
+/// Darkmatter side-effect verbs, and Darkmatter expression-function verbs.
 pub fn is_known_lifecycle_verb(verb: &str) -> bool {
     if CommunicationChannel::from_verb(verb).is_some() || verb == "shell" {
         return true;
     }
-    if is_lifecycle_control_verb(verb) {
+    if is_lifecycle_control_verb(verb) || is_lifecycle_only_verb(verb) {
         return true;
     }
     if is_known_side_effect(verb) {
@@ -229,8 +229,19 @@ pub fn is_lifecycle_control_verb(verb: &str) -> bool {
     LIFECYCLE_CONTROL_VERBS.contains(&verb)
 }
 
+/// The parser-owned verbs that are neither flow control nor a catalog entry:
+/// no expression function or side effect carries their name. Schema
+/// generation and the catalog-equality checks read this list as the expected
+/// non-catalog verbs.
+pub const LIFECYCLE_ONLY_VERBS: &[&str] = &["edit"];
+
+/// Returns `true` when `verb` is one of [`LIFECYCLE_ONLY_VERBS`].
+pub fn is_lifecycle_only_verb(verb: &str) -> bool {
+    LIFECYCLE_ONLY_VERBS.contains(&verb)
+}
+
 /// Returns `true` when `verb` names a known Darkmatter expression function.
-fn is_known_expression_function_verb(verb: &str) -> bool {
+pub(crate) fn is_known_expression_function_verb(verb: &str) -> bool {
     expression_function_descriptors()
         .iter()
         .any(|d| &*d.name == verb && d.accepts_value_arguments())
@@ -282,6 +293,7 @@ pub fn all_lifecycle_verbs() -> Vec<&'static str> {
     }
     verbs.push("shell");
     verbs.extend(LIFECYCLE_CONTROL_VERBS);
+    verbs.extend(LIFECYCLE_ONLY_VERBS);
     for desc in EFFECT_DESCRIPTORS {
         if let Some(verb) = parsed_verb_of(desc.signature) {
             verbs.push(verb);

@@ -129,3 +129,34 @@ pub(crate) enum Commands {
     /// Show the diagnostic error-code contract (codes, dispositions, details).
     Errors(commands::errors::ErrorsArgs),
 }
+
+/// Exit status of a refused invocation: a usage error, with nothing run.
+pub(crate) const EXIT_USAGE: i32 = 2;
+
+/// The refusal for `-o`/`--output`, when `command` carries it.
+///
+/// The option is declared, and hidden from help, only so that this message
+/// answers it instead of clap's "unexpected argument". The caller prints the
+/// message to stderr and exits with [`EXIT_USAGE`] before any preparation:
+/// no lifecycle event, shell approval, editor, provider resolution, or dry-run
+/// rendering may precede it, so a caller that asked for JSON never receives
+/// text with exit 0.
+pub(crate) fn refuse_output_option(command: &Commands) -> Option<String> {
+    let target = match command {
+        Commands::Claude(args)
+        | Commands::Codex(args)
+        | Commands::Gemini(args)
+        | Commands::Kimi(args)
+        | Commands::Qwen(args)
+        | Commands::Opencode(args)
+        | Commands::Goose(args)
+        | Commands::Kilo(args)
+        | Commands::Pi(args)
+        | Commands::Antigravity(args) => args.output.as_deref(),
+        Commands::Compose(args) => args.shared.output.as_deref(),
+        Commands::InlineCompose(args) => args.shared.output.as_deref(),
+        Commands::Sequence(args) => args.shared.output.as_deref(),
+        _ => None,
+    }?;
+    Some(format!("the --output {target} CLI option has not been implemented yet in Claudine"))
+}

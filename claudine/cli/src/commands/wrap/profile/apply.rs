@@ -16,7 +16,7 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail};
 
 use super::super::system_prompt::SystemPromptApplication;
-use super::{OutputFormat, YoloOutcome, has_any_flag, has_flag};
+use super::{YoloOutcome, has_any_flag, has_flag};
 
 /// Catalog-driven default for [`WrapperProfile::apply_yolo`](super::WrapperProfile::apply_yolo).
 pub(super) fn apply_yolo(
@@ -113,49 +113,6 @@ pub(super) fn apply_entrypoint(provider: Provider, args: &mut Vec<String>, non_i
             if !has_flag(args, flag) {
                 args.push(flag.to_string());
             }
-        }
-    }
-}
-
-/// Catalog-driven default for
-/// [`WrapperProfile::apply_output_format`](super::WrapperProfile::apply_output_format).
-pub(super) fn apply_output_format(
-    provider: Provider,
-    args: &mut Vec<String>,
-    format: OutputFormat,
-) -> Option<String> {
-    let info = provider_info(provider);
-    let provider_format = match format {
-        OutputFormat::Json => claudine::provider::OutputFormat::Json,
-        OutputFormat::Text => claudine::provider::OutputFormat::Text,
-        OutputFormat::Stream => claudine::provider::OutputFormat::Stream,
-    };
-    let Some(support) = info
-        .output_formats
-        .iter()
-        .find(|s| s.format == provider_format)
-    else {
-        return Some(format!(
-            "{provider} does not support --output {format}; this flag was skipped"
-        ));
-    };
-
-    match support.selector {
-        OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => None,
-        OutputFormatSelector::Flag { flag } | OutputFormatSelector::TransportFlag { flag } => {
-            if !has_flag(args, flag) {
-                args.push(flag.to_string());
-            }
-            None
-        }
-        OutputFormatSelector::FlagValue { flag } => {
-            if !has_flag(args, flag)
-                && !args.iter().any(|arg| arg.starts_with(&format!("{flag}=")))
-            {
-                args.push(flag.to_string());
-                args.push(support.native_name.to_string());
-            }
-            None
         }
     }
 }

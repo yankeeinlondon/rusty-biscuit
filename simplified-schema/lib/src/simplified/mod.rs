@@ -488,8 +488,12 @@ fn parse_dollar_constraint(context: &str, key: &str, v: &YamlValue) -> Result<Co
             Constraint::Integer
         }
         "non-null" => {
-            constraints_flag(context, key, v)?;
-            Constraint::NonNull
+            return Err(SchemaError::Grammar {
+                property: context.to_string(),
+                message: grammar::NON_NULL_REMOVED.to_string(),
+                span: 0..0,
+                related: Vec::new(),
+            });
         }
         "closed" => {
             constraints_flag(context, key, v)?;
@@ -641,7 +645,7 @@ fn parse_property_definition_at_depth(
                     related: Vec::new(),
                 }));
             }
-            if let Some(problem) = grammar::union_invariant_problem(&arms, true) {
+            if let Some(problem) = grammar::union_invariant_problem(&arms) {
                 return Err(list_union_failure(name, path, &items[..], problem));
             }
             Ok(PropertyDef::Union(arms))
@@ -695,10 +699,6 @@ fn list_union_failure(
                 .collect();
             (problem.located, problem.message, problem.span, related)
         }
-        grammar::UnionInvariant::NonNull { arm, message } => {
-            let marked = arm.unwrap_or(0);
-            (marked, message, whole(marked).unwrap_or(0..0), Vec::new())
-        }
     };
     DefinitionFailure::at(&path.union_arm(arm))(SchemaError::Grammar { property: name.to_string(), message, span, related })
 }
@@ -726,13 +726,13 @@ fn parse_mapping_atom(
         }));
     }
     let mut shape = parse_schema_shape(context, value, nested_object_depth + 1, path)?;
-    // A block `required` / `non-null` / `generated` on a property's object means the same
+    // A block `required` / `generated` on a property's object means the same
     // as the postfix on that property, so it moves onto the atom where every
     // presence consumer (`is_required`, phase projection, lowering) reads it.
     let (presence, block): (Vec<_>, Vec<_>) = shape
         .constraints
         .into_iter()
-        .partition(|c| matches!(c, Constraint::Required | Constraint::NonNull | Constraint::Generated));
+        .partition(|c| matches!(c, Constraint::Required | Constraint::Generated));
     shape.constraints = block;
     let mut atom = PropertyAtom::bare_inline_object(shape);
     atom.constraints = presence;

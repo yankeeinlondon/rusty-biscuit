@@ -26,9 +26,6 @@ enum Outcome {
     /// Loading fails and nothing usable is produced, with no recognized
     /// envelope to name.
     Fails,
-    /// The file is a well-formed envelope but not a `$schema` target:
-    /// `NotASchemaDocument` with this reason.
-    NotASchema(NotSchemaReason),
 }
 
 use Outcome::*;
@@ -78,10 +75,6 @@ fn walk(seed_name: &str, seed: &str, cells: &[Cell], declare: fn(&str) -> String
             Fails => validate_document(dir, &reference)
                 .ok()
                 .map(|report| format!("expected a load error, got a report {report:?}")),
-            NotASchema(expected) => match validate_document(dir, &reference) {
-                Err(SchemaError::NotASchemaDocument { reason, .. }) if reason == expected => None,
-                other => Some(format!("expected NotASchemaDocument {{ {expected:?} }}, got {other:?}")),
-            },
         };
         if let Some(problem) = problem {
             failures.push(format!("{seed_name}/{}: {problem}\n--- source ---\n{source}", cell.label));
@@ -108,8 +101,8 @@ const TAGGED_CELLS: &[Cell] = &[
     cell("types list", Set("types", " [timing]"), Rejects),
     cell("types one wrong element", Replace("    timing:\n", "    bad: 5\n    timing:\n"), Rejects),
     cell("types every element wrong", Set("types", "\n    first: 5\n    second: true"), Rejects),
-    // Still a `types`-only document, so not a `$schema` target.
-    cell("types empty mapping", Set("types", " {}"), NotASchema(NotSchemaReason::TypesOnly)),
+    // A types-only envelope needs a non-empty table (`not-empty`).
+    cell("types empty mapping", Set("types", " {}"), Rejects),
     cell("types duplicate", Duplicate("types"), Rejects),
     cell("second document", Append("---\nkind: schema\ntypes: {}\n"), Rejects),
     cell("trailing garbage", Append("]\n"), Rejects),
@@ -230,8 +223,9 @@ fn walk_types(seed_name: &str, seed: &str, cells: &[TypesCell]) {
 const CATEGORY_CELLS: &[TypesCell] = &[
     types_cell("control", Control, Loads),
     types_cell("categories absent", Remove("categories"), Loads),
-    // The shape of the list is `schema.yaml`'s `categories: string[](non-null)`.
-    types_cell("categories null", Set("categories", " null"), RejectsWith("schema.yaml`: `/categories`")),
+    // The shape of the list is `schema.yaml`'s `categories: string[](not-empty)`;
+    // a null list is unset, like an absent one.
+    types_cell("categories null", Set("categories", " null"), Loads),
     types_cell("categories number", Set("categories", " 5"), RejectsWith("schema.yaml`: `/categories`")),
     types_cell(
         "categories mapping",
@@ -250,11 +244,7 @@ const CATEGORY_CELLS: &[TypesCell] = &[
     ),
     // A number entry converts softly to its text, as in frontmatter.
     types_cell("categories number element", Replace("    - Devops\n", "    - Devops\n    - 5\n"), Loads),
-    types_cell(
-        "categories empty list",
-        Set("categories", " []"),
-        RejectsWith("category `Math` is not declared in `categories:`"),
-    ),
+    types_cell("categories empty list", Set("categories", " []"), RejectsWith("schema.yaml`: `/categories`")),
     types_cell(
         "categories blank name",
         Replace("    - Devops\n", "    - \" -> unnamed\"\n"),

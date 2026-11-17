@@ -72,8 +72,6 @@ pub(super) struct UseSummary {
     /// a use site's bounds are checked against them so a contradiction is
     /// reported with both declarations.
     bounds: Vec<Tagged>,
-    /// Whether the value admits null, which makes every use optional.
-    pub(super) admits_null: bool,
 }
 
 /// A constraint that describes a definition's use site rather than its value.
@@ -81,7 +79,6 @@ fn is_use_site_marker(constraint: &Constraint) -> bool {
     matches!(
         constraint,
         Constraint::Required
-            | Constraint::NonNull
             | Constraint::Generated
             | Constraint::Eager
             | Constraint::Default(_)
@@ -97,7 +94,7 @@ fn is_use_site_marker(constraint: &Constraint) -> bool {
 fn is_arm_property_marker(constraint: &Constraint) -> bool {
     matches!(
         constraint,
-        Constraint::Required | Constraint::NonNull | Constraint::Generated | Constraint::Default(_)
+        Constraint::Required | Constraint::Generated | Constraint::Default(_)
     )
 }
 
@@ -369,7 +366,6 @@ impl ImportEngine<'_> {
                             markers,
                             description: atom.description.clone(),
                             bounds,
-                            admits_null: false,
                         }
                     }
                     (ty, false) => {
@@ -391,7 +387,6 @@ impl ImportEngine<'_> {
                             markers,
                             description: atom.description.clone(),
                             bounds,
-                            admits_null: atom.admits_null(),
                         }
                     }
                 }
@@ -476,7 +471,6 @@ impl ImportEngine<'_> {
         };
         let mut markers = own;
         let mut array_arm = None;
-        let mut admits_null = false;
         for (index, arm) in arms.iter().enumerate() {
             let origin = |constraint: &Constraint| SchemaConstraintOrigin {
                 source: site.source.clone(),
@@ -493,13 +487,11 @@ impl ImportEngine<'_> {
                 .map(|constraint| (constraint.clone(), origin(constraint)))
                 .collect();
             let mut arm_is_array = arm.is_array;
-            admits_null |= arm.admits_null();
             if let (TypeExpr::Ref(target), false) = (&arm.ty, arm.is_array) {
                 let inner = self.summary_of(target, summaries, visiting)?;
                 let inherited = inner.markers.into_iter().filter(|(c, _)| is_arm_property_marker(c)).collect();
                 arm_markers = merge_constraints(inherited, arm_markers, &merge_site)?;
                 arm_is_array = inner.outer == DefinitionOuter::Array;
-                admits_null |= inner.admits_null;
             }
             if arm_is_array && array_arm.is_none() {
                 array_arm = Some(index);
@@ -512,7 +504,6 @@ impl ImportEngine<'_> {
             markers,
             description,
             bounds: Vec::new(),
-            admits_null,
         })
     }
 }
@@ -647,7 +638,7 @@ impl ImportEngine<'_> {
 
     /// Whether `base`, a shared definition's expansion, behaves the same
     /// stored once as at each use. Its top level must not admit null (which
-    /// makes each use optional) or carry an annotation the converter places
+    /// lowers each use without its optional `null` wrapper) or carry an annotation the converter places
     /// at the use (`operands`, `deferred`); a union's alternatives must
     /// carry no property marker or suggestion, which a property hoists or
     /// counts, no optional `file` alternative, whose empty-string tolerance
@@ -903,7 +894,7 @@ fn first_pass_postfix(
 /// - over anything else, `[]` is refused when the definition is already an
 ///   array; a use site's `min`/`max` count a definition list's items; and
 ///   bounds that contradict the definition's own are a conflict naming both;
-/// - a definition that admits null is never required.
+/// - a use-site `required` survives a definition that admits null.
 fn apply_reference_postfix(
     base: PropertyAtom,
     provenance: AtomProvenance,
@@ -1038,11 +1029,7 @@ fn apply_reference_postfix(
             (merge_constraints(inherited_value, use_site, &merge_site)?, inherited_array)
         }
     };
-    let (mut value, mut array) = reconcile_property_defaults(value, array, &merge_site)?;
-    if summary.admits_null {
-        value.retain(|(constraint, _)| !matches!(constraint, Constraint::Required));
-        array.retain(|(constraint, _)| !matches!(constraint, Constraint::Required));
-    }
+    let (value, array) = reconcile_property_defaults(value, array, &merge_site)?;
     let (constraints, value_origins) = value.into_iter().unzip();
     let (array_constraints, array_origins) = array.into_iter().unzip();
     Ok(ExpandedDef::Single(

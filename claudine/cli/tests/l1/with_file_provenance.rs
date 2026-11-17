@@ -135,7 +135,8 @@ fn a_retry_with_file_resolves_from_the_retried_document() {
 
     let output = run_compose(&fixture, fixture.cwd(), &document, &[]);
 
-    let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap_or_default();
+    // A missing relative `events.log` is created beside the retried document.
+    let events = std::fs::read_to_string(fixture.cwd().join("prompts/router/events.log")).unwrap_or_default();
     assert!(
         events.contains("attempt=none") && events.contains("attempt=authoring"),
         "events:\n{events}\nstderr:\n{output}"
@@ -378,4 +379,73 @@ fn a_proxy_from_a_sequence_task_resolves_from_the_router() {
     let prompt = std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     assert!(prompt.contains("ROUTE=authoring"), "prompt:\n{prompt}\nstderr:\n{stderr}");
+}
+
+/// A reusable sequence document in `sub/` whose prompt task passes `notes`
+/// as a `with:` file value, and the three ways to reach it: invoked directly,
+/// named by a root `sequence:`, and nested as a task. Returns the three
+/// documents to invoke.
+fn write_with_routes(fixture: &CliProcessFixture, notes: &str) -> [std::path::PathBuf; 3] {
+    let sub = fixture.cwd().join("sub");
+    write(&sub.join("brief.md"), "---\n$schema:\n  notes: 'file(required;eager)'\n---\nNOTES={{ notes }}\n");
+    write(&sub.join("only-here.md"), "---\nmarker: child\n---\n");
+    write(&sub.join("notes.md"), "---\nmarker: child\n---\n");
+    let child = sub.join("child.yaml");
+    write(&child, &format!("kind: sequence\nsequence:\n  - name: work\n    prompt: ./brief.md\n    with:\n      notes: '{notes}'\n"));
+    let root = fixture.cwd().join("root.yaml");
+    write(&root, "kind: sequence\nsequence: sub/child.yaml\n");
+    let nested = fixture.cwd().join("nested.yaml");
+    write(&nested, "kind: sequence\nsequence:\n  - name: outer\n    sequence: sub/child.yaml\n");
+    [child, root, nested]
+}
+
+/// Run `claudine sequence --goose document` from the fixture root and return
+/// the `NOTES=` value the provider received.
+fn sequence_notes(fixture: &CliProcessFixture, document: &std::path::Path) -> String {
+    let _ = std::fs::remove_file(fixture.home().join("provider-prompt"));
+    let output = fixture
+        .command()
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .args(["sequence", "--goose", document.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{}: stderr:\n{stderr}", document.display());
+    assert!(!fixture.audio_spool().exists(), "provenance tests must not publish audio");
+    launched_notes(fixture, &stderr)
+}
+
+/// A relative `with:` file that exists only beside the task's sequence
+/// document is accepted by approval and bound from there on every route; the
+/// launch folder has no such file.
+#[test]
+fn a_sequence_task_with_file_resolves_beside_its_author_on_every_route() {
+    let fixture = fixture("with-provenance-sequence-routes");
+    for document in write_with_routes(&fixture, "./only-here.md") {
+        let notes = sequence_notes(&fixture, &document);
+        assert!(notes.ends_with("sub/only-here.md"), "{}: {notes}", document.display());
+    }
+}
+
+/// An absolute `with:` file is the same file on every route.
+#[test]
+fn an_absolute_sequence_task_with_file_is_the_same_on_every_route() {
+    let fixture = fixture("with-provenance-sequence-absolute");
+    let absolute = fixture.cwd().join("sub").join("only-here.md");
+    let spelled = absolute.to_str().unwrap().replace('\\', "/");
+    for document in write_with_routes(&fixture, &spelled) {
+        let notes = sequence_notes(&fixture, &document);
+        assert!(notes.ends_with("sub/only-here.md"), "{}: {notes}", document.display());
+    }
+}
+
+/// With a `notes.md` in both the launch folder and beside the sequence
+/// document, the one beside the document is the file the prompt renders.
+#[test]
+fn a_sequence_task_with_file_prefers_its_authors_folder_over_the_launch_folder() {
+    let fixture = fixture("with-provenance-sequence-both");
+    for document in write_with_routes(&fixture, "./notes.md") {
+        let notes = sequence_notes(&fixture, &document);
+        assert!(notes.ends_with("sub/notes.md"), "{}: {notes}", document.display());
+    }
 }

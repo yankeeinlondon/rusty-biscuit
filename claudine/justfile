@@ -14,6 +14,7 @@ import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
 import "../just/spec.just"
+import "../just/skills.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -158,7 +159,7 @@ test-l2 *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     eval "$(just _test_run_scope)"
-    just _test_l2 claudine-cli --features terminal-tests {{ args }}
+    just _test_l2 claudine-cli --features terminal-tests,test-fixtures {{ args }}
     # claudine-gen owns the report-rendering L2 tests (declared in its manifest).
     just _test_l2 claudine-gen --features terminal-tests {{ args }}
 
@@ -169,7 +170,7 @@ test-l2 *args="":
 # Ctrl+C keystroke delivery into a real WezTerm window (signal-handling.md).
 # The tmux multiplexer Ctrl+C coverage lives at L2 (`just test-l2`).
 test-l3 *args="":
-    @just _test_l3 claudine-cli --features terminal-tests {{ args }}
+    @just _test_l3 claudine-cli --features terminal-tests,test-fixtures {{ args }}
 
 # not applicable: claudine emits terminal/CLI output, not HTML
 test-browser:
@@ -499,16 +500,22 @@ git-conflict:
 readme:
     _readme_files claudine
 
-# publish summary research to the claudine skill
-publish-summary-research:
+# Publish Claudine's skills: the composed research summaries into the repo's
+# `claudine` skill, and the caller skill (`docs/use-skills/use-claudine`) into
+# this host's user skill directory (`dest` overrides `~/.claude/skills`).
+publish-skills dest="": _publish-summary-research
+    @just _publish_use_skills "{{ dest }}"
+
+_publish-summary-research:
     #!/usr/bin/env bash
     set -euo pipefail
     echo
     dest="../.claude/skills/claudine/summaries"
     mkdir -p "${dest}"
+    md="$(just _repo_md)"
     for src in ./docs/research/summary/*.md; do
         name="$(basename "${src}")"
-        out="$(md compose "${src}")"
+        out="$("${md}" compose "${src}")"
         # a summary whose sequence has not run yet composes to an empty body
         if [ -z "${out//[[:space:]]/}" ]; then
             echo -e "{{ DIM }}skipped ${name} (no generated body yet){{ RESET }}"

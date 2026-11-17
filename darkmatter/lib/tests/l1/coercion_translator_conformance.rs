@@ -79,6 +79,9 @@ fn probes() -> Vec<Value> {
         json!({"inner": {"count": "3"}}),
         json!({"x_a": "yes", "n": "2"}),
         json!([]),
+        json!({}),
+        json!(""),
+        json!("  "),
         json!(["1", "2"]),
         json!(["2", "yes"]),
         json!([true]),
@@ -176,10 +179,17 @@ conformance! {
     deferred_property => "\"{ id: number(deferred) }\"";
     deferred_file => "\"file(deferred)\"";
     deferred_tuple => "\"tuple([number, number]; deferred)\"";
-    non_null_number => "\"number(non-null)\"";
-    non_null_file => "\"file(non-null)\"";
-    non_null_union => "\"number(non-null) | boolean\"";
-    non_null_object_property => "\"{ id: number(non-null) }\"";
+    not_empty_string => "\"string(not-empty)\"";
+    not_empty_list => "\"number[](not-empty)\"";
+    not_empty_union => "\"string(not-empty) | boolean\"";
+    not_empty_object_property => "\"{ id: string(not-empty) }\"";
+    required_null => "\"null(required)\"";
+    required_nullable_union => "\"number(required) | null\"";
+    not_empty_yaml => "\"yaml(not-empty)\"";
+    not_empty_json => "\"json(not-empty)\"";
+    not_empty_object => "\"object(not-empty)\"";
+    not_empty_inline_object => "\"{ id: string }(not-empty)\"";
+    not_empty_dictionary => "\"{ <string>: string }(not-empty)\"";
 }
 
 /// The `deferred` cases above agree because both translators mark the same

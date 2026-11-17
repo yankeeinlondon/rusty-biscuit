@@ -32,6 +32,8 @@ types:
         change: "any -> Change metadata used by Darkmatter workflows. The v1 baseline accepts all shapes until the public change contract is finalized."
         replace: "object -> Literal text replacement map applied during compose. Keys are source strings and values are replacement strings."
         ctx: "context@./context-variables.yaml"
+        # A `default(null)` on an optional property is a no-op: it never adds a
+        # key, and a written `null` stays `null`.
         prologue:
             - "string(default(null)) -> File reference, inline text, or bare filename inserted before the body during transclusion."
             - "string[] -> Ordered prologue references inserted before the body during transclusion."

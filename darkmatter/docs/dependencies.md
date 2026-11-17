@@ -68,10 +68,12 @@ same scheme validation and deny-all-by-default host policy.
   uses its pure layout-invariant helpers without opening a terminal.
 - The CLI's separate `terminal-tests` feature enables its terminal harness.
 - The CLI's `test-fixtures` feature enables `test-toolkit` as an optional
-  dependency for one target, the `darkmatter-argv-recorder` fixture binary
+  dependency for two fixture binaries: `darkmatter-argv-recorder`
   (`test_toolkit::argv_recorder`), which the shell template tests run as a
-  native program. `just test` and CI enable it; `md`'s install never builds
-  it. It adds no crate: `test-toolkit` is already a dev dependency.
+  native program, and `darkmatter-fake-editor` (`test_toolkit::fake_editor`),
+  a native fake editor that editor tests point `EDITOR` at. `just test` and CI
+  enable it; `md`'s install never builds either. It adds no crate:
+  `test-toolkit` is already a dev dependency.
 
 The corresponding integration targets declare `required-features`, so an L1
 filter does not first compile binaries and native/browser dependencies that it
@@ -126,12 +128,15 @@ features their tier requires.
 
 ## Login-shell Probes
 
-- `windows` (Windows only, `Win32_Foundation` and `Win32_System_JobObjects`)
-  places each `has_alias`/`has_builtin_function`/`has_user_function`/
-  `can_execute` shell query in a kill-on-close Job Object, so a PowerShell
-  profile cannot leave processes running after the query ends. Unix uses the
-  existing `libc` dependency for the equivalent `setsid` session and
-  process-group kill.
+- Each `has_alias`/`has_builtin_function`/`has_user_function`/`can_execute`
+  shell query, and each editor an `edit` action opens, is owned by
+  `sniff::process::ProcessTree`, so a profile or editor cannot leave processes
+  running after it ends: a new session or process group on Unix, and on
+  Windows a kill-on-close Job Object the child is assigned to before it runs.
+  Darkmatter needs no platform crate for this; see
+  `sniff/docs/topics/process-trees.md`.
+- `windows` (Windows only, `Win32_Foundation`) supplies the error codes
+  `atomic_replace.rs` matches when Windows refuses a rename.
 
 ## Compose Text Replacement
 
@@ -205,13 +210,17 @@ features their tier requires.
   host application's signal disposition. The ungated `wait`/`kill` core we use
   is `waitid`/`WaitForSingleObject`-based and installs nothing, so Darkmatter
   carries no platform split of its own.
-- `libc` (Unix only) supplies `setsid` for the alias-lookup child in
-  `markdown/compose/shell_expansion/alias.rs`. That lookup must run the shell
-  interactively to see rc-file aliases, and an interactive shell left on the
-  caller's controlling terminal stops itself with `SIGTTIN` whenever it is not
-  the terminal's foreground process group — a hang, not an error. A new session
-  is the only thing that detaches the controlling terminal; a new process group
-  alone does not. One syscall, so the raw binding rather than a wrapper crate.
+- `libc` (Unix only) supplies the terminal checks in `editor/surface.rs` and
+  `markdown/compose/shell_expansion/probe.rs`. The editor's terminal-foreground
+  handoff comes from Sniff (`sniff::process::ForegroundHandoff`). The login-shell query's new
+  session is applied through Sniff's session mode
+  (`sniff::process::TreeConfig::session`), not a `setsid` call of Darkmatter's
+  own. A session is needed because the lookup must run the shell interactively
+  to see rc-file aliases, and an interactive shell left on the caller's
+  controlling terminal stops itself with `SIGTTIN` whenever it is not the
+  terminal's foreground process group — a hang, not an error. A new session is
+  the only thing that detaches the controlling terminal; a new process group
+  alone does not. Raw syscalls, so the binding rather than a wrapper crate.
 
 ## Mermaid Diagram Components
 

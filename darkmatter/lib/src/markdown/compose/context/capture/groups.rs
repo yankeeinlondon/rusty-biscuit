@@ -126,12 +126,24 @@ impl ContextRequirements {
     /// frontmatter string, lifecycle blocks included, are scanned whole, as
     /// frontmatter interpolation scans them.
     pub fn for_document(document: &crate::markdown::Markdown) -> Self {
+        Self::for_document_with(document, true)
+    }
+
+    /// [`for_document`](Self::for_document) for a document composed with its
+    /// prose interpolation `prose_enabled` or not. A child included with
+    /// `interpolate=false` keeps its prose, code blocks included, as written,
+    /// so only its directive inputs (and its frontmatter) can demand a group.
+    pub(crate) fn for_document_with(document: &crate::markdown::Markdown, prose_enabled: bool) -> Self {
         let mut requirements = Self::for_frontmatter(document.frontmatter().as_map().values());
         let code_is_executable =
             matches!(document.fm_get::<bool>("interpolate_code_blocks"), Ok(Some(true)));
-        let body = match code_is_executable {
-            true => scan_needed_groups(document.content()),
-            false => scan_executable_body_groups(document.content()),
+        let body = match (prose_enabled, code_is_executable) {
+            (false, _) => scan_needed_groups(&crate::markdown::compose::interpolation::active_inputs::mask_prose(
+                document.content(),
+                None,
+            )),
+            (true, true) => scan_needed_groups(document.content()),
+            (true, false) => scan_executable_body_groups(document.content()),
         };
         requirements.groups.extend(body);
         requirements
@@ -523,6 +535,28 @@ Today is {{ ctx.utc }} on {{ ctx.os }}.
         assert!(requirements.contains(ContextGroup::Git));
         assert!(requirements.contains(ContextGroup::Os));
         assert!(!requirements.contains(ContextGroup::Gpu));
+    }
+
+    /// Under an `interpolate=false` inclusion the prose is never composed, so
+    /// only frontmatter and directive inputs demand a group, and a child's
+    /// `interpolate_code_blocks: true` cannot make a code example demand one.
+    #[test]
+    fn suppressed_prose_demands_only_through_frontmatter_and_directive_inputs() {
+        let document: crate::markdown::Markdown = "---\ninterpolate_code_blocks: true\nbranch: '{{ ctx.branch }}'\n---\nOn {{ ctx.os }} with `{{ ctx.cpu_cores }}`.\n\n```md\n{{ ctx.dirty_files }}\n```\n::file ./x.md when=\"ctx.gpu\"\n"
+            .into();
+
+        let suppressed = ContextRequirements::for_document_with(&document, false);
+        assert!(suppressed.contains(ContextGroup::Git), "frontmatter still demands");
+        assert!(suppressed.contains(ContextGroup::Gpu), "a directive input still demands");
+        assert!(!suppressed.contains(ContextGroup::Os));
+        assert!(!suppressed.contains(ContextGroup::Hardware));
+        assert!(!suppressed.contains(ContextGroup::FileChanges));
+
+        let normal = ContextRequirements::for_document_with(&document, true);
+        assert_eq!(normal, ContextRequirements::for_document(&document));
+        for group in [ContextGroup::Os, ContextGroup::Hardware, ContextGroup::FileChanges, ContextGroup::Gpu] {
+            assert!(normal.contains(group), "the control demands {group:?}");
+        }
     }
 
     /// A fenced or indented example is not composed, so it demands nothing;

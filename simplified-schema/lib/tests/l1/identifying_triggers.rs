@@ -226,7 +226,7 @@ fn identify_admits_and_recognizes_a_claudine_style_host() {
     const OWNED: [&str; 8] = ["initialize", "cancelled", "finalize", "composed", "failed", "title", "summary", "tags"];
 
     let alternatives: String = HOST_KEYS.iter().map(|key| format!("    - {key}: object(required)\n")).collect();
-    let conditions = envelope(&format!("kind: schema-trigger\nmatch:\n  group:\n{alternatives}$schema: {{}}\n"));
+    let conditions = envelope(&format!("kind: schema-trigger\nmatch:\n  group:\n{alternatives}"));
     let trigger = admit(&conditions, &OWNED).expect("every alternative names a host-only key");
 
     let non_null = [json!("text"), json!(3), json!(1.5), json!(true), json!([1]), json!({ "a": 1 })];

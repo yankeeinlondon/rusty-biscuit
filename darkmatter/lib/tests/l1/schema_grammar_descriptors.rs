@@ -454,10 +454,9 @@ fn a_declared_categories_list_limits_category_names() {
     assert!(parse_standalone_schema_document(without, "/w/types.yaml").expect("loads").is_some());
 
     for (categories, message) in [
-        ("[]", "category `Text` is not declared"),
+        ("[]", "schema.yaml`: `/categories`"),
         ("[Text, ' Text ']", "`categories[1]`: duplicate category `Text`"),
         ("[Text, ' -> no name']", "`categories[1]`: a category name cannot be blank"),
-        ("null", "schema.yaml`: `/categories`"),
         ("[Text, {a: b}]", "schema.yaml`: `/categories/1`"),
         ("[Text ->]", "`categories[0]`: `->` must be followed by a description"),
     ] {
@@ -465,6 +464,10 @@ fn a_declared_categories_list_limits_category_names() {
         let error = parse_standalone_schema_document(&source, "/w/types.yaml").expect_err(categories);
         assert!(error.to_string().contains(message), "{categories}: {error}");
     }
+
+    // A null `categories` is unset, as an absent one: no restriction.
+    let unset = "kind: schema\ncategories: null\ntypes:\n  t: 'string(category(Text))'\n";
+    assert!(parse_standalone_schema_document(unset, "/w/types.yaml").is_ok());
 
     // A category nested in a tuple, parameter, or inline object is checked too.
     let nested = "kind: schema\ncategories: [Math]\ntypes:\n  t: 'tuple([string(category(Text))])'\n";

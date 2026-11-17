@@ -1,6 +1,8 @@
 ---
 sequence: "@claudine/docs/research/_provider-tasks.yaml"
-research_prompt: "@claudine/docs/research/non-interactive-sessions/_research.md"
+initialize:
+    - set:
+          research_prompt: "@claudine/docs/research/non-interactive-sessions/_research.md"
 agent: codex
 model: gpt-5.6-sol
 ---

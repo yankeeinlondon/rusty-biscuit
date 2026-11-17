@@ -8,8 +8,8 @@
 # (with `user-permissions` or `repository-permissions` for a scope's
 # defaults) and never declare it again.
 #
-# A list a user writes replaces its scope's default; an absent property keeps
-# it. Explicit `null` is invalid for every setting.
+# A list a user writes replaces its scope's default; an absent or `null`
+# property keeps it.
 kind: schema
 description: Darkmatter's user and repository configuration files, and the permissions block other programs import.
 types:
@@ -24,7 +24,7 @@ types:
     # The shared permissions shape. `file-read` has no default here: its
     # default depends on the scope (`user-permissions`, `repository-permissions`).
     permissions:
-        file-read: "file-read-pattern[](non-null) -> Files a schema slot may read without asking. Its default depends on the scope."
+        file-read: "file-read-pattern[](not-empty) -> Files a schema slot may read without asking. Its default depends on the scope."
         shell-commands: shell-command-rules
         network: network-setting
         $constraints: { closed: true }

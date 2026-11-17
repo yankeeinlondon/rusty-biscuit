@@ -75,6 +75,47 @@ pub(crate) fn append_guarded(root: &Path, target: &Path, bytes: &[u8]) -> Result
         .map_err(io_error)
 }
 
+/// What [`create_new_guarded`] found at its target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CreateOutcome {
+    /// The name was free and an empty file now holds it.
+    Created,
+    /// Something already holds the name: a file, a directory, or a symlink
+    /// (even a dangling one). Nothing was opened, truncated, or followed.
+    Existing,
+}
+
+/// Reserves `target` as a new empty file, but only if it resolves inside
+/// `root`; returns the cleaned in-root path and what was found there.
+///
+/// The reservation is one exclusive create (`O_EXCL` / `CREATE_NEW`), so of
+/// two concurrent callers exactly one sees [`CreateOutcome::Created`], and an
+/// entry that appears first is never truncated or replaced. Missing parent
+/// directories are created under `root`. The handle is closed before
+/// returning, so a Windows program can replace the file afterwards.
+///
+/// Unlike `EffectEngine::ensure_file`, which checks for the file and then
+/// writes it, nothing here can overwrite a name another process claims in
+/// between.
+pub(crate) fn create_new_guarded(root: &Path, target: &Path) -> Result<(PathBuf, CreateOutcome), EffectError> {
+    let normalized = normalize_within(root, target)?;
+    if let Some(parent) = normalized.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| EffectError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&normalized) {
+        Ok(_created) => Ok((normalized, CreateOutcome::Created)),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok((normalized, CreateOutcome::Existing)),
+        // Windows refuses `CREATE_NEW` on an existing directory with "access
+        // denied" rather than "already exists"; any entry holding the name is
+        // still `Existing`.
+        Err(_) if std::fs::symlink_metadata(&normalized).is_ok() => Ok((normalized, CreateOutcome::Existing)),
+        Err(source) => Err(EffectError::Io { path: normalized, source }),
+    }
+}
+
 /// Resolves `target` and verifies it is contained within `root`.
 ///
 /// The deepest existing ancestor is canonicalized so equivalent symlinked
@@ -107,7 +148,7 @@ fn normalize_within(root: &Path, target: &Path) -> Result<std::path::PathBuf, Ef
 /// prefix still makes symlink aliases (`/var` versus `/private/var` on macOS)
 /// comparable and prevents an existing symlink inside the root from redirecting
 /// a new child outside it.
-fn canonicalize_with_missing_tail(path: &Path) -> Option<PathBuf> {
+pub(crate) fn canonicalize_with_missing_tail(path: &Path) -> Option<PathBuf> {
     let mut ancestor = path;
     let mut tail = Vec::<OsString>::new();
     loop {
@@ -286,5 +327,119 @@ mod tests {
 
         assert!(matches!(error, EffectError::OutsideMutationRoot { .. }));
         assert!(!outside.join("new.txt").exists());
+    }
+
+    #[test]
+    fn create_new_makes_an_empty_file_under_missing_parents() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().to_path_buf();
+        let target = root.join("a/b/new.md");
+
+        let (path, outcome) = create_new_guarded(&root, &target).unwrap();
+
+        assert_eq!(outcome, CreateOutcome::Created);
+        assert_eq!(path, target);
+        assert_eq!(std::fs::read(&target).unwrap(), b"");
+    }
+
+    #[test]
+    fn create_new_leaves_an_existing_file_untouched() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().to_path_buf();
+        let target = root.join("kept.md");
+        std::fs::write(&target, b"keep me\r\n  ").unwrap();
+
+        let (_, outcome) = create_new_guarded(&root, &target).unwrap();
+
+        assert_eq!(outcome, CreateOutcome::Existing);
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep me\r\n  ");
+    }
+
+    #[test]
+    fn create_new_reports_a_directory_as_existing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().to_path_buf();
+        let target = root.join("folder");
+        std::fs::create_dir(&target).unwrap();
+
+        let (_, outcome) = create_new_guarded(&root, &target).unwrap();
+
+        assert_eq!(outcome, CreateOutcome::Existing);
+        assert!(target.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_new_does_not_follow_a_symlink_even_a_dangling_one() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().to_path_buf();
+        let real = root.join("real.md");
+        std::fs::write(&real, b"real").unwrap();
+        let live = root.join("live.md");
+        symlink(&real, &live).unwrap();
+        let dangling = root.join("dangling.md");
+        symlink(root.join("absent.md"), &dangling).unwrap();
+
+        assert_eq!(create_new_guarded(&root, &live).unwrap().1, CreateOutcome::Existing);
+        assert_eq!(create_new_guarded(&root, &dangling).unwrap().1, CreateOutcome::Existing);
+        assert_eq!(std::fs::read(&real).unwrap(), b"real");
+        assert!(!root.join("absent.md").exists(), "the dangling link's target was not created");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_new_refuses_a_symlink_that_escapes_the_root_before_creating() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("root");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("redirect")).unwrap();
+
+        let error = create_new_guarded(&root, &root.join("redirect/sub/new.md")).unwrap_err();
+
+        assert!(matches!(error, EffectError::OutsideMutationRoot { .. }));
+        assert!(!outside.join("sub").exists(), "no parent directory was created outside");
+    }
+
+    #[test]
+    fn create_new_outside_the_root_is_refused_and_creates_nothing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = dir.path().join("elsewhere/new.md");
+
+        let error = create_new_guarded(&root, &outside).unwrap_err();
+
+        assert!(matches!(error, EffectError::OutsideMutationRoot { .. }));
+        assert!(!dir.path().join("elsewhere").exists());
+    }
+
+    #[test]
+    fn racing_creators_see_exactly_one_created() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().to_path_buf();
+        let target = root.join("contested/name.md");
+        let barrier = std::sync::Barrier::new(2);
+
+        let outcomes: Vec<CreateOutcome> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..2)
+                .map(|_| {
+                    let (root, target, barrier) = (&root, &target, &barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        create_new_guarded(root, target).unwrap().1
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|handle| handle.join().unwrap()).collect()
+        });
+
+        assert_eq!(outcomes.iter().filter(|outcome| **outcome == CreateOutcome::Created).count(), 1, "{outcomes:?}");
+        assert_eq!(outcomes.iter().filter(|outcome| **outcome == CreateOutcome::Existing).count(), 1, "{outcomes:?}");
     }
 }

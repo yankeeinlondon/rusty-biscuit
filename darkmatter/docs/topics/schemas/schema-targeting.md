@@ -43,9 +43,9 @@ an error that points to `group` as its replacement.
 
 Property conditions use passive SimplifiedSchema types and constraints. A
 condition without `required` allows the property to be absent, but checks its
-value when present. A required concrete type establishes presence. A
-null-admitting type, such as `unknown(required)`, still permits omission and
-cannot establish presence; use `unknown[](required)` when an array must exist.
+value when present. `required` establishes presence on any type: the key
+must be written. `unknown(required)` accepts any written value, `null`
+included; use `unknown[](required)` when the value must also be a list.
 Every possible way to satisfy the complete match must require a property or a
 path match, so a trigger cannot accidentally match every document through
 optional conditions alone. Empty condition mappings are rejected.

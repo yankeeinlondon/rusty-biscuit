@@ -1129,11 +1129,14 @@ fn build_and_run_loop(
         context: Some(prepared_context),
     };
 
-    // Lifecycle writes target the project the run was launched in, not the
-    // repository that happens to hold the prompt: a shared prompt library
-    // (e.g. a git-tracked `~/.claudine`) must still be able to write into the
-    // launch repo.
-    let lifecycle_mutation_root = prep_context.launch_workspace.child_cwd.as_path();
+    // Lifecycle writes may land only inside the caller's launch scope (the
+    // working tree containing the launch directory, else that directory), not
+    // the repository that happens to hold the prompt: a shared prompt library
+    // (e.g. a git-tracked `~/.claudine`) still writes into the launch repo.
+    let lifecycle_mutation_root = claudine::invocation_context::lifecycle_mutation_root(
+        Some(&prep_context.invocation),
+        &loop_prepare_options.file_resolution_context,
+    )?;
     let effect_engine = darkmatter::effects::EffectEngine::builder()
         .mutation_root(lifecycle_mutation_root)
         .auto_rehash(false)
@@ -1461,7 +1464,6 @@ fn build_execution_request(
         yolo: shared.yolo,
         include: shared.include.clone(),
         model: shared.model.clone(),
-        output: shared.output,
         system_prompt_args: system_prompt_args.clone(),
         timeout: shared.timeout.clone(),
         step_timeout: shared.step_timeout.clone(),
@@ -1974,7 +1976,10 @@ fn run_staged_single(
         &bootstrap,
         env_overrides,
         repo_root,
-        prep_context.launch_workspace.child_cwd.as_path(),
+        claudine::invocation_context::lifecycle_mutation_root(
+            Some(&prep_context.invocation),
+            &options.file_resolution_context,
+        )?,
     );
     let term = wrap_terminal();
     let emitter = DefaultLifecycleEmitter;

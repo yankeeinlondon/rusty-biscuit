@@ -463,6 +463,7 @@ mod tests {
             let options = LifecycleParseOptions {
                 is_known_effect: &|_| false,
                 authored: None,
+                authored_values: None,
                 unknown_verbs: UnknownVerbPolicy::Reject,
                 registry: &EventRegistry::new("test"),
             };

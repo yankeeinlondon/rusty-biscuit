@@ -12,6 +12,9 @@
 //!   they are collected, in run order, into the payload's `lifecycle_output`.
 //! - Every step reuses the invocation's one [`ComposeRequest`]: nothing here
 //!   captures a context of its own.
+//! - File-writing actions may write only inside the launch scope's local root
+//!   (the Git working tree containing the launch directory, else that
+//!   directory); relative targets still resolve against the document.
 //! - The first Ctrl-C cancels the run (cleanup still runs, exit 130); a
 //!   second one exits at once.
 
@@ -26,6 +29,7 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Report, Result, eyre};
 use darkmatter::config::registration::RegisteredHostProfile;
+use darkmatter::editor::{EditorHostFacts, EditorOutput, ProcessEditorService};
 use darkmatter::effects::EffectEngine;
 use darkmatter::lifecycle::md_host::{
     self, CommandOutput, MdEvent, MdRunHost, MdRuntimeState, MdStackContext,
@@ -165,6 +169,8 @@ pub(super) struct LifecycleCompose<'a> {
     pub(super) pending_triggers: PendingTriggerWarnings,
     /// When the command started, when timings were asked for.
     pub(super) started: Option<Instant>,
+    /// The document was read from stdin, so an editor cannot read from it.
+    pub(super) stdin_is_input: bool,
 }
 
 /// Runs the lifecycle.
@@ -197,7 +203,7 @@ pub(super) fn run(mut compose: LifecycleCompose<'_>) -> Result<()> {
             // problem in the document.
             Some(sink) if error.cause.is_some() => sink.document_diagnostics(lifecycle_failure_diagnostics(error)),
             Some(sink) => sink.diagnostics(lifecycle_failure_diagnostics(error)),
-            None => effects.status(StatusState::Error, &error.msg),
+            None => effects.status(StatusState::Error, error.msg.as_str()),
         }
     }
     if let (Some(sink), Some(started)) = (sink, started) {
@@ -384,6 +390,7 @@ struct ComposeHost<'a> {
     effects: &'a TerminalEffects<'a>,
     interrupted: Arc<AtomicBool>,
     started: Instant,
+    stdin_is_input: bool,
     composed: Option<(Markdown, ComposeReport)>,
     deferred_report: Option<darkmatter::markdown::reference::validate::ReferenceValidationReport>,
     /// The message of the failure already rendered in full, so the run's end
@@ -398,11 +405,14 @@ impl<'a> ComposeHost<'a> {
         effects: &'a TerminalEffects<'a>,
         interrupted: Arc<AtomicBool>,
     ) -> Self {
+        // The boundary is the caller's launch scope, not the document's
+        // directory, so a document writes the same files under every host.
         let mutation_root = compose
-            .source_path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .map_or_else(|| compose.request.resolution_context().cwd().to_path_buf(), Path::to_path_buf);
+            .request
+            .resolution_context()
+            .launch_magic_scope()
+            .local_root()
+            .to_path_buf();
         let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(bootstrap);
         Self {
             md: compose.md,
@@ -424,6 +434,7 @@ impl<'a> ComposeHost<'a> {
             effects,
             interrupted,
             started: Instant::now(),
+            stdin_is_input: compose.stdin_is_input,
             composed: None,
             deferred_report: None,
             reported: None,
@@ -554,6 +565,9 @@ impl<'a> ComposeHost<'a> {
                 ("compose", compose_error(failure.error))
             })?;
         self.pending_triggers.merge_into(&mut report.warnings);
+        if let Some(checked) = &self.deferred_report {
+            report.warnings.retain(|warning| !super::reference_check_reported(warning, checked));
+        }
         if let Some(sink) = self.document.sink {
             sink.warnings(&report.warnings);
             if let Some(perf_report) = &report.perf {
@@ -604,6 +618,12 @@ impl MdRunHost for ComposeHost<'_> {
         let interrupted = Arc::clone(&self.interrupted);
         let probe = move || interrupted.load(Ordering::SeqCst);
         let timing = LifecycleTiming::from_instants(self.started, Some(self.started), Instant::now());
+        // A data output owns both streams for its one result; otherwise
+        // stdout carries the document, so an editor's output goes to stderr.
+        let editor = ProcessEditorService::new(EditorHostFacts {
+            output: if self.document.sink.is_some() { EditorOutput::Structured } else { EditorOutput::MarkdownDocument },
+            stdin_reserved: self.stdin_is_input,
+        });
         let context = MdStackContext {
             request: &self.request,
             source_path: &self.source_path,
@@ -616,6 +636,7 @@ impl MdRunHost for ComposeHost<'_> {
             output: self.effects,
             timing: &timing,
             interrupted: &probe,
+            editor: Some(&editor),
         };
         md_host::evaluate(&context, &self.config, &event)
     }

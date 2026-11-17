@@ -64,13 +64,14 @@ const CELLS: &[Cell] = &[
     cell("n absent", Remove("n"), ValidationFails),
     cell("n null", Set("n", " null"), ValidationFails),
     cell("n duplicate", Duplicate("n"), ParseFails),
-    // optional `maybe`: absence and an explicit null are both valid.
+    // optional `maybe`: absence and an explicit null are both valid; an
+    // absent value is never written as `null`.
     // Composition materializes an absent declared property as null, so the
     // two are distinct only in the (unchanged) source; no number is invented.
     cell(
         "maybe absent",
         Remove("maybe"),
-        Composes("7||02134|On|true", || vec![("maybe", Some(Value::Null))]),
+        Composes("7||02134|On|true", || vec![("maybe", None)]),
     ),
     cell(
         "maybe null",
@@ -82,7 +83,7 @@ const CELLS: &[Cell] = &[
     cell(
         "zip absent",
         Remove("zip"),
-        Composes("7|2||On|false", || vec![("zip", Some(Value::Null)), ("flag", Some(json!("On")))]),
+        Composes("7|2||On|false", || vec![("zip", None), ("flag", Some(json!("On")))]),
     ),
     cell(
         "flag null",
@@ -99,7 +100,7 @@ const CELLS: &[Cell] = &[
     cell(
         "values absent",
         Remove("values"),
-        Composes("7|2|02134|On|false", || vec![("values", Some(Value::Null))]),
+        Composes("7|2|02134|On|false", || vec![("values", None)]),
     ),
     cell("values scalar", Set("values", " 5"), ValidationFails),
     cell("values duplicate", Duplicate("values"), ParseFails),
@@ -112,7 +113,7 @@ const CELLS: &[Cell] = &[
     cell(
         "meta absent",
         Remove("meta"),
-        Composes("7|2|02134|On|false", || vec![("meta", Some(Value::Null))]),
+        Composes("7|2|02134|On|false", || vec![("meta", None)]),
     ),
     cell("meta nested duplicate", DuplicateLine("level: 3"), ParseFails),
     // numeric admission: a native number no `f64` holds exactly, or that is

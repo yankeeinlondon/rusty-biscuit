@@ -141,6 +141,10 @@ pub(super) enum StepOutcome {
         agent_perf: Option<crate::perf::AgentExecutionPerf>,
         compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
         tasks: Vec<SequenceTaskResult>,
+        /// Failures that did not decide the step, such as a nested
+        /// container's `failure` event refusing its own action after a child
+        /// failed. Reported after the step's own failure line.
+        secondary: Vec<claudine::composition::lifecycle::context::LifecycleErrorInfo>,
     },
     Interrupted {
         agent_perf: Option<crate::perf::AgentExecutionPerf>,
@@ -220,6 +224,7 @@ pub(super) fn run_sequence_steps(
         let interrupted_step = matches!(outcome, StepOutcome::Interrupted { .. });
         let skipped = matches!(outcome, StepOutcome::Skipped);
 
+        let mut secondary = Vec::new();
         let (success, error, error_snapshot, providers, agent_perf, compose_perf, tasks) =
             match outcome {
             StepOutcome::Succeeded {
@@ -234,15 +239,19 @@ pub(super) fn run_sequence_steps(
                 agent_perf,
                 compose_perf,
                 tasks,
-            } => (
-                false,
-                Some(message),
-                snapshot,
-                Vec::new(),
-                agent_perf,
-                compose_perf,
-                tasks,
-            ),
+                secondary: also,
+            } => {
+                secondary = also;
+                (
+                    false,
+                    Some(message),
+                    snapshot,
+                    Vec::new(),
+                    agent_perf,
+                    compose_perf,
+                    tasks,
+                )
+            }
             StepOutcome::Interrupted {
                 agent_perf,
                 compose_perf,
@@ -296,6 +305,12 @@ pub(super) fn run_sequence_steps(
             emit_step_skipped(step_index, total_steps);
         } else if !run.silent {
             emit_step_status(run, step_index, total_steps, success, &error, &providers);
+            let subject = format!("step {}/{}", step_index + 1, total_steps);
+            for info in &secondary {
+                claudine::composition::lifecycle::report::report_container_failure(
+                    &claudine::composition::DefaultLifecycleEmitter, &log::terminal(), &subject, info,
+                );
+            }
             emit_group_task_breakdown(&tasks);
         }
 
@@ -423,9 +438,21 @@ fn run_one_step(
     };
     let step_document = run.for_document(&step_prep_context, &step_compose);
     let run = &step_document;
-    // A guarded task is decided at its turn, before anything of it composes.
+    // A guarded task is decided at its turn, before anything of it composes,
+    // against the values of the document that declares its row.
     if let Some(task) = run.graph.steps.get(step_index).and_then(|s| s.task.as_ref()) {
-        match task_run::root_step_guard(run, &run.plan.steps[step_index].name, task, live.markdown.frontmatter().as_map(), &set_overrides, runtime_state) {
+        let declaring = match referenced_root_document(run, &live) {
+            Some(path) => match run.graph.authored_document(path) {
+                Ok(values) => Some(values),
+                Err(error) => return StepOutcome::failed(&error),
+            },
+            None => None,
+        };
+        let guarded = match &declaring {
+            Some(values) => task_run::root_step_guard(run, &run.plan.steps[step_index].name, task, values, &set_overrides, runtime_state),
+            None => task_run::root_step_guard(run, &run.plan.steps[step_index].name, task, live.markdown.frontmatter().as_map().iter(), &set_overrides, runtime_state),
+        };
+        match guarded {
             Ok(true) => {}
             Ok(false) => return StepOutcome::Skipped,
             Err(error) => return StepOutcome::failed(&error),
@@ -442,6 +469,10 @@ fn run_one_step(
         Ok(composed) => composed,
         Err(error) => return StepOutcome::failed(&error),
     };
+    let referenced_values = match judge_referenced_root_document(run, &live, &composed.prepared) {
+        Ok(values) => values,
+        Err(error) => return StepOutcome::failed(&error),
+    };
 
     // A step that declared an executable runs it *instead of* the document
     // body; the composition above still happened, because the task's `with`,
@@ -451,6 +482,7 @@ fn run_one_step(
             run,
             task,
             &composed.prepared,
+            referenced_values,
             &jit::reserved_overlay(run.plan, step_index),
             &env_overrides,
             target.as_ref(),
@@ -541,6 +573,7 @@ fn run_one_step(
             agent_perf: outcome.agent_perf,
             compose_perf,
             tasks: Vec::new(),
+            secondary: Vec::new(),
         },
         Err(error) => StepOutcome::Failed {
             message: error.to_string(),
@@ -551,8 +584,55 @@ fn run_one_step(
             agent_perf: None,
             compose_perf,
             tasks: Vec::new(),
+            secondary: Vec::new(),
         },
     }
+}
+
+/// The whole document a root `sequence: child.yaml` names, when the step's
+/// row is declared there rather than in the invoked document `live`; `None`
+/// for the invoked document's own list and for a selection of a data file
+/// (no document scope).
+fn referenced_root_document<'p>(
+    run: &'p SequenceRunContext<'_>,
+    live: &ResolvedCompositionSource,
+) -> Option<&'p std::path::Path> {
+    let scope = run.plan.document_scope.as_deref()?;
+    let canonical = |path: &std::path::Path| biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
+    (canonical(&scope.declaring_path) != canonical(&live.resolved_path)).then_some(scope.declaring_path.as_path())
+}
+
+/// Judge the whole document a root `sequence: child.yaml` names by its own
+/// schema, under the layers this step composed with (setters, runtime writes,
+/// its overlay), as a directly run document is judged at each step, and
+/// return its prepared values: the state the step's row runs in, as it would
+/// run in that document directly or nested.
+///
+/// The step's own composition judged only the invoking document, which merely
+/// names the list. Nothing is done, and `None` returned, when the invoked
+/// document declares its own list, or when the list is a selection of a data
+/// file (no document scope).
+///
+/// ## Errors
+///
+/// The referenced document's preparation errors, naming that document:
+/// [`CompositionError::SchemaValidation`] or
+/// [`CompositionError::MissingProperties`].
+#[allow(clippy::result_large_err)]
+fn judge_referenced_root_document(
+    run: &SequenceRunContext<'_>,
+    live: &ResolvedCompositionSource,
+    prepared: &claudine::composition::PreparedComposition,
+) -> Result<Option<serde_json::Map<String, Value>>, CompositionError> {
+    let Some(declaring) = referenced_root_document(run, live) else { return Ok(None) };
+    let mut options = prepared.input_layers.apply_to(claudine::composition::PrepareOptions::new(
+        prepared.input_layers.file_resolution_context.clone(),
+    ));
+    options.prepared_context = Some(prepared.compose_context.clone());
+    options.defer_schema_verdict = false;
+    run.graph
+        .prepare_whole_document(declaring, options, Some(&run.prep_context.invocation))
+        .map(|prepared| Some(prepared.values))
 }
 
 /// Compose a step, prompting once for required properties an earlier step was
@@ -638,7 +718,6 @@ fn build_body_request(
         yolo: shared.yolo,
         include: shared.include.clone(),
         model: shared.model.clone(),
-        output: shared.output,
         system_prompt_args: SystemPromptArgs {
             append_file: shared.append_system_prompt.clone(),
             replace_file: shared.replace_system_prompt.clone(),
@@ -694,6 +773,7 @@ impl StepOutcome {
             agent_perf: None,
             compose_perf: None,
             tasks: Vec::new(),
+            secondary: Vec::new(),
         }
     }
 }

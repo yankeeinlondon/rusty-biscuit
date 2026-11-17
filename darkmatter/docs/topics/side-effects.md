@@ -34,6 +34,11 @@ initialize:
 a lifecycle host do not dispatch these operations. Darkmatter owns the
 engine; the host drives it.
 
+The lifecycle [`edit`](./lifecycle/index.md#editing-a-file-edit) action is not
+one of these verbs, but it can also create a file: it creates a missing target
+(and its parent directories) before opening it in the user's editor, under the
+same rules for choosing and checking its target.
+
 This boundary concerns the effects engine. Composition can also execute
 shell directives when enabled; see [the compose command](../cli/compose.md)
 for that separate behavior. Schema validation and editor requests never
@@ -69,9 +74,31 @@ at evaluation, not syntax:
 Both enforced inside Darkmatter, both configured by the host:
 
 1. **Mutation root** — filesystem writes outside the configured root are
-   hard-refused (`EffectError::OutsideMutationRoot`).
+   hard-refused (`EffectError::OutsideMutationRoot`). Containment compares
+   where paths lead on disk: the deepest existing ancestor of a target is
+   canonicalized, so a symlink inside the root that points outside it is
+   refused, and a sibling such as `/work/repo-old` is not inside `/work/repo`.
 2. **Host allowlist** — network effects are refused unless the target host is
    allowed; the allowlist defaults to **deny-all** (`EffectError::HostNotAllowed`).
+
+### Lifecycle targets versus the engine's own paths
+
+The engine and a lifecycle host use paths differently:
+
+| Caller | How a relative path is read | Who checks the root |
+|---|---|---|
+| A lifecycle action (`md compose`, Claudine) | as a [file reference](./file-referencing.md) from the document that wrote the action: an existing file is the one a read would find, a missing one is created where that read looks first (beside the document for `notes.md`) | the lifecycle executor, before anything is opened or created, and the engine again when it writes |
+| A direct caller of `EffectEngine` | joined to the engine's mutation root | the engine |
+
+A lifecycle host builds its engine with the working tree the command was
+launched in as the mutation root: the top level of the Git repository or
+worktree containing the launch directory, or that directory outside a
+repository. The executor hands the engine an absolute, already checked
+target, so the root is only a boundary and never the base of a relative
+path. The full rules, with examples, are in
+[Where file actions write](./lifecycle/index.md#where-file-actions-write).
+A program that drives `EffectEngine` itself keeps the root-relative API:
+`ensure_file("notes.md")` writes `<root>/notes.md`.
 
 ## v1 Catalog (summary)
 

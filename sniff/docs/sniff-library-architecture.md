@@ -144,6 +144,16 @@ WAN IP results are cached per run; call `.force_refresh(true)` to bypass the cac
 
 All constructors return a builder, so you can further adjust with methods like `.commit_count(5)`, `.include_worktrees(false)`, `.include_file_diffs(true)`, or `.refresh_remote_tracking(false)`.
 
+Every request starts by finding the repository that contains the directory, searching upward the way
+`git` does. Only an upward search that finds nothing means "not a repository" (`Ok(None)`). A
+repository that cannot be opened (untrusted ownership, permissions, I/O, corruption) is a
+`SniffError::Git` error. So is a `.git` *file* between the directory and the repository found that
+points at no repository: `git` refuses such a directory, and reporting the enclosing repository
+instead would let a caller that limits writes to the repository root write outside the broken
+checkout. For example, with `outer/` a repository and `outer/inner/.git` reading
+`gitdir: /missing`, discovery from `outer/inner` fails rather than returning `outer/`. A `.git`
+*directory* that is not a repository is skipped, as `git` skips it.
+
 ### RepoRequest
 
 | Constructor | What it includes |
@@ -635,21 +645,24 @@ early stop is used.
 Every subprocess goes through `process::run_with_timeout` or its builder-capable
 `process::run_command_with_timeout` form, which own the deadline, concurrent pipe draining, and
 process-tree termination/reaping. The builder form preserves caller-configured working directories
-and environments. Unix probes run in a dedicated process group;
-Windows probes run in a kill-on-close Job Object. Descendant-held pipe handles therefore cannot
-extend the helper's deadline. **Never poll `try_wait()` over a piped stdout you are not draining** —
-the child blocks in `write()` past one pipe buffer (64 KiB Linux, ~16 KiB macOS), never exits, and
-gets killed at its deadline with its output lost.
+and environments. The process tree is owned by the public `sniff::process::ProcessTree` (a dedicated
+process group on Unix, a kill-on-close Job Object attached before the child runs on Windows), so
+descendant-held pipe handles cannot extend the helper's deadline. **Never poll `try_wait()` over a
+piped stdout you are not draining** — the child blocks in `write()` past one pipe buffer (64 KiB
+Linux, ~16 KiB macOS), never exits, and gets killed at its deadline with its output lost.
 
-**Tree termination is total on Windows and best-effort on Unix.** Job Object membership is inherited
-and kernel-enforced, so nothing escapes. Unix has no equivalent primitive, so the guarantee is
-layered: the process-group kill is absolute for anything still in the group, while a descendant that
-calls `setsid()` is handled best-effort. Such a descendant is kept addressable by sampling the
-child's descendant tree every `DESCENDANT_SAMPLE_INTERVAL` (250ms) *while the child is alive*, so its
-PID survives the reparenting that follows the child's exit; recorded PIDs are re-validated against
-process start time before signaling, so a recycled PID is never hit. The residual gap — a descendant
-that forks *and* `setsid()`s entirely between two samples, whose parent then exits — is not portably
-closable without Linux cgroups or a supervising process.
+What the owner guarantees and where it stops, on each OS, is described in
+[Process trees](./topics/process-trees.md). In short: on Windows nothing escapes once the owner is
+attached; on Unix a descendant that forks *and* `setsid()`s entirely between two descendant samples
+(`DESCENDANT_SAMPLE_INTERVAL`, 250 ms), whose parent then exits, can escape.
+
+The public `sniff::process::ForegroundHandoff` (`process/foreground.rs`) serves other crates' owned
+*interactive* children. On Unix an owned child leads a background process group, which the terminal
+stops when it reads the keyboard; the handoff makes that group the terminal's foreground group from
+the child's `pre_exec` hook and restores the caller's group and `termios` afterwards. It holds
+terminal state only, never a process, and Sniff's own probes do not use it. Its rules (ordering,
+inactive guards, one active handoff per process, restoration and error priority) are in
+[Process trees](./topics/process-trees.md#handing-the-terminal-to-an-interactive-child).
 
 Whether a caller reaches that residual depends on what it runs. Sniff's *detection* probes are a
 fixed, in-tree set of well-known commands, none of which daemonize. The *installation* boundary is
@@ -730,6 +743,83 @@ re-exported by `gix`, so this boundary adds no direct dependency.
 The net effect: the PATH scan runs once instead of eight times, macOS bundle detection runs once instead of eight times, and per-program lookups are HashMap hits rather than `which` invocations.
 
 On Windows, `ExecutableIndex::build()` also populates a `WindowsIndex` holding two HashMaps: `app_paths` (from a HKLM+HKCU registry walk) and `install_roots` (from a one-level directory walk of `Program Files`, `Program Files (x86)`, and `LocalAppData\Programs`). Warm-cache cost: 40–80 ms serial, inside the existing build-once budget. Non-Windows builds do not compile this code.
+
+### Editor Launch Facts and the Display Session
+
+A program that opens "the user's editor" needs three answers before it
+launches anything: does the editor run in the terminal or open a window, how is
+it told to wait until the file is closed, and is there a display for a window
+to appear on. Sniff answers all three, so a caller never keeps its own table
+of editor flags.
+
+**Surface and wait flags.** Every `Editor` variant has an `EditorSurface`
+(`Terminal`, `Gui`, or `Both`) and the arguments that make it block:
+
+```rust
+use sniff::programs::{Editor, EditorSurface};
+
+assert_eq!(Editor::Vim.surface(), EditorSurface::Terminal);
+assert_eq!(Editor::VSCode.wait_args(), &["--wait"]);
+assert_eq!(Editor::Kate.wait_args(), &["--block"]);
+assert!(Editor::Emacs.can_block());   // `Both`: blocks when run in a terminal
+assert!(!Editor::Lapce.can_block());  // GUI editor with no verified wait flag
+```
+
+| Editors | Surface | Wait arguments |
+|---|---|---|
+| Vi, Vim, Neovim, Nano, Helix, Micro, Kakoune, Amp | `Terminal` | none (they block by nature) |
+| Emacs, XEmacs | `Both` | none |
+| VS Code, VSCodium, Sublime Text, Zed, TextMate, BBEdit, and the JetBrains IDEs | `Gui` | `--wait` |
+| Kate | `Gui` | `--block` |
+| Lapce, Geany | `Gui` | none: they return at once, so `can_block()` is `false` |
+
+`can_block()` is `false` only for a GUI editor with no wait arguments. A caller
+that must wait for the user to finish should never launch such an editor.
+
+**Recognizing a configured command.** `Editor::identify(program)` maps one
+program path or name, such as the first word of `$EDITOR`, to an editor:
+
+```rust
+use sniff::programs::Editor;
+
+assert_eq!(Editor::identify("/usr/local/bin/code"), Some(Editor::VSCode));
+assert_eq!(Editor::identify("code.cmd"), Some(Editor::VSCode));     // Windows shim
+assert_eq!(Editor::identify("code-insiders"), Some(Editor::VSCode));
+assert_eq!(Editor::identify("nvim.appimage"), None);               // only .exe/.cmd/.bat/.com are stripped
+assert_eq!(Editor::identify("my-wrapper.sh"), None);               // unknown command
+```
+
+Only the final path component is compared, so a directory with spaces in its
+name is fine; split the command line yourself and pass the program alone. The
+comparison is case-insensitive on Windows and exact elsewhere, and covers each
+editor's binary name, its alternate binary names, and a few extra names that
+discovery does not probe for (`code-insiders`, `helix`). `None` means "unknown
+command", which a caller usually trusts to block.
+
+**Display session.** `sniff::os::detect_display_session()` reports whether a
+GUI program can open a window from this process:
+
+| Host | `DisplaySession` |
+|---|---|
+| macOS, Windows | always `Available` |
+| Linux, WSL1, WSL2 | `Available` when `DISPLAY` or `WAYLAND_DISPLAY` is non-empty, else `Unavailable` |
+| any other OS | `Unavailable` |
+
+```rust
+use sniff::os::{detect_display_session, display_session_from, DisplaySession, OsType, RuntimeEnvironment};
+
+if detect_display_session().is_available() {
+    // a GUI editor can open a window
+}
+
+// The same rule over an explicit environment, for tests:
+let headless = display_session_from(OsType::Linux, RuntimeEnvironment::Wsl2, |_| None);
+assert_eq!(headless, DisplaySession::Unavailable);
+```
+
+Like `current_user_id()`, the display session is produced only on demand. It
+is not part of `OsInfo`, host inventory, `sniff --json`, or any cache, because
+it describes one process's environment rather than the host.
 
 ## Performance Evidence
 

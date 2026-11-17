@@ -193,8 +193,9 @@ fn with_sees_a_preceding_set_frontmatter_in_the_same_stack() {
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
     let harness = Harness::default();
-    // A bare file name so the source resolves against the engine's mutation
-    // root exactly as the `set_frontmatter` target does.
+    // The source lives in the mutation root, so the `set_frontmatter`
+    // target resolves beside it: the active document.
+    let source = dir.path().join("router.md");
     let context = ctx(
         LifecycleSignal::Failure,
         &fm,
@@ -203,7 +204,7 @@ fn with_sees_a_preceding_set_frontmatter_in_the_same_stack() {
         &shell,
         &recorder,
         &harness,
-        Path::new("router.md"),
+        &source,
     );
 
     let outcome = context.execute_event(&config);

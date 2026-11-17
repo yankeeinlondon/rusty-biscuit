@@ -19,6 +19,11 @@ pub(super) struct RootRun<'a> {
     pub(super) approved: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     /// The task graph the first attempt discovered, which every retry runs.
     pub(super) graph: Option<claudine::composition::PreflightGraph>,
+    /// The plan the first attempt filled, which every retry runs.
+    pub(super) plan: Option<claudine::composition::SequencePlan>,
+    /// The caller's setters plus the values the first attempt collected,
+    /// which every retry composes under without asking again.
+    pub(super) collected_overrides: Option<Option<serde_json::Value>>,
     pub(super) pending: Option<ContainerEventDecision>,
     pub(super) child_error: Option<LifecycleErrorInfo>,
     pub(super) proxy_location: Option<claudine::composition::ActionLocation>,
@@ -40,8 +45,17 @@ impl<'a> RootRun<'a> {
         prewarm: claudine::composition::lifecycle::prewarm::PrewarmHandle,
     ) -> Self {
         Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)).with_subject(SubjectKind::RootSequence),
-            stack, runtime, started: false, approved: None, graph: None, pending: None, child_error: None, proxy_location: None,
+            stack, runtime, started: false, approved: None, graph: None, plan: None, collected_overrides: None, pending: None, child_error: None, proxy_location: None,
             frame, checkpoint: None, prewarm }
+    }
+
+    /// Make `values` the root's own values for the events that follow, over
+    /// whatever its live document cell holds; later runtime writes layer
+    /// above them at each event.
+    pub(super) fn refresh_event_values(&self, values: serde_json::Map<String, serde_json::Value>) {
+        if let Some(live) = self.stack.live_frontmatter {
+            live.lock().expect("root frontmatter poisoned").extend(values);
+        }
     }
 
     /// The `loop` values of the pass being run, when the root loops.
@@ -107,7 +121,14 @@ impl<'a> RootRun<'a> {
         Ok(end)
     }
 
+    /// Run `signal`'s event and the catch events it leads to.
+    ///
+    /// `error` is the failure that led here (a failed child, or a setup
+    /// error the caller returns); its producer reports it. A run that ends
+    /// failed reports what its own events recorded beyond it, each failure
+    /// once, so a refused root action is shown without a `failure` stack.
     pub(super) fn event(&mut self, mut signal: LifecycleSignal, mut error: Option<LifecycleErrorInfo>) -> Result<ContainerEventDecision> {
+        let reported = error.clone();
         if !matches!(signal, LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
             && claudine::composition::lifecycle::cancellation::requested()
         {
@@ -158,19 +179,35 @@ impl<'a> RootRun<'a> {
                     };
                     // A refused recovery is a failure: the error is recorded,
                     // and a `finalize` the run already owes still runs.
-                    self.runner.set_error(LifecycleErrorInfo::from_composition_error(&typed));
+                    let info = LifecycleErrorInfo::from_composition_error(&typed);
+                    self.runner.set_error(info.clone());
                     self.runner.execute_event(LifecycleSignal::Finalize, &stack.with_signal(LifecycleSignal::Finalize));
+                    // The returned error reports the refusal itself.
+                    self.report_recorded(&[reported.as_ref(), Some(&info)]);
                     return Err(typed.into());
                 }
                 decision => {
                     if matches!(decision, ContainerEventDecision::Finished { .. }) && self.runner.is_cancelled() {
                         for error in self.runner.secondary_errors() {
-                            self.stack.emitter.emit_warn(&error.msg, self.stack.term);
+                            self.stack.emitter.emit_warn(error.msg.as_str(), self.stack.term);
                         }
+                    } else if matches!(decision, ContainerEventDecision::Finished { failed: true }) {
+                        self.report_recorded(&[reported.as_ref()]);
                     }
                     return Ok(decision);
                 },
             }
+        }
+    }
+
+    /// Report the failures the root's events recorded, except those in
+    /// `reported`, whose producers report them.
+    fn report_recorded(&self, reported: &[Option<&LifecycleErrorInfo>]) {
+        let recorded = self.runner.primary_error().into_iter().chain(self.runner.secondary_errors());
+        for error in recorded.filter(|error| !reported.contains(&Some(*error))) {
+            claudine::composition::lifecycle::report::report_container_failure(
+                self.stack.emitter, self.stack.term, "sequence", error,
+            );
         }
     }
 

@@ -18,7 +18,8 @@
 //!
 //! The provider is a fake `claude` that records the prompt it received and its
 //! launch in the fixture workspace. Lifecycle markers use `append_line`, which
-//! resolves against the fixture repository root.
+//! creates a missing relative target beside the document (here, the fixture
+//! repository root).
 
 use crate::common;
 

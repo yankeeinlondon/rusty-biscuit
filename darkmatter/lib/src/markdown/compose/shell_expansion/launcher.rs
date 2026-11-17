@@ -31,22 +31,28 @@
 //!
 //! ## Cleanup
 //!
+//! The shell's process tree is owned by `sniff::process::ProcessTree` and
+//! terminated once the shell exits or times out, so a profile's background job
+//! cannot outlive the query or hold stdout open. The rules and limits of that
+//! owner on each OS are described in `sniff/docs/topics/process-trees.md`.
+//!
 //! Unix: the shell leads a new session and process group, and the whole group
-//! is killed once the shell exits or times out, so a profile's background job
-//! cannot outlive the query or hold stdout open. A descendant that calls
-//! `setsid` itself leaves the group and is not reached; the reader stops
+//! is killed when the query ends. A descendant that calls `setsid` itself
+//! leaves the group; it is still killed if it was recorded while the shell ran
+//! (recordings start 250 ms after spawn), and otherwise the reader stops
 //! waiting for it after a short grace period rather than blocking the compose.
 //!
-//! Windows: the shell is started without a console window and assigned to a
-//! kill-on-close Job Object, which is terminated when the query ends. The
-//! assignment happens just after spawn, so a descendant created in that
-//! window (before the shell has loaded its runtime) would escape the Job.
+//! Windows: the shell is started suspended and without a console window, is
+//! assigned to a kill-on-close Job Object before it runs, and the Job is
+//! terminated when the query ends, so every descendant is in the Job.
 
 use std::io::Read;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use sniff::process::{CleanupScan, ProcessTree, TreeConfig, WINDOWS_CREATE_NO_WINDOW};
 
 /// Retained stdout. Answers are printed last, so the tail is what is kept.
 const STDOUT_TAIL_LIMIT: usize = 64 * 1024;
@@ -63,18 +69,28 @@ const EOF_GRACE: Duration = Duration::from_millis(100);
 /// ## Returns
 ///
 /// The exit status and the last [`STDOUT_TAIL_LIMIT`] bytes of stdout, or
-/// `None` when the shell could not be spawned or did not exit within
-/// `timeout`.
+/// `None` when the shell could not be spawned, its process tree could not be
+/// owned (the shell is then killed before it runs on Windows), or it did not
+/// exit within `timeout`.
 pub(super) fn run_shell_query(command: &mut Command, timeout: Duration) -> Option<(ExitStatus, Vec<u8>)> {
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    configure_detached(command);
+    // A session, not just a process group: only a new session removes the
+    // controlling terminal (see "Job-control hazard" above). Measured under a
+    // PTY, both the unmodified spawn and a `process_group(0)` variant reach
+    // state `T` within 20ms; the session variant exits normally. A session with
+    // no controlling terminal cannot support job control, so the shell disables
+    // it (warning on the discarded stderr) and still sources its rc files.
+    TreeConfig::session()
+        .windows_creation_flags(WINDOWS_CREATE_NO_WINDOW)
+        .configure(command);
 
     let mut child = command.spawn().ok()?;
-    let tree = match ProcessTree::attach(&child) {
-        Some(tree) => tree,
-        None => {
+    let mut tree = match ProcessTree::attach(&child) {
+        Ok(tree) => tree,
+        Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
+            tracing::warn!(error = %error, "could not take ownership of a login-shell query's process tree");
             return None;
         }
     };
@@ -106,9 +122,14 @@ pub(super) fn run_shell_query(command: &mut Command, timeout: Duration) -> Optio
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL_INTERVAL),
+            Ok(None) if Instant::now() < deadline => {
+                tree.sample();
+                std::thread::sleep(POLL_INTERVAL);
+            }
             Ok(None) | Err(_) => {
-                tree.terminate();
+                if let Err(error) = tree.terminate(CleanupScan::Always) {
+                    tracing::warn!(error = %error, "could not stop a timed-out login-shell query's process tree");
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 break None;
@@ -116,139 +137,16 @@ pub(super) fn run_shell_query(command: &mut Command, timeout: Duration) -> Optio
         }
     };
     // The shell has exited or been killed; nothing it started may outlive the
-    // query or keep stdout open.
-    tree.terminate();
+    // query or keep stdout open. After a timeout the tree is already stopped
+    // and this does nothing.
+    if let Err(error) = tree.terminate(CleanupScan::WhenObserved) {
+        tracing::warn!(error = %error, "could not stop a login-shell query's background processes");
+    }
     let status = status?;
 
     let _ = eof_rx.recv_timeout(EOF_GRACE);
     let stdout = std::mem::take(&mut *tail.lock().unwrap_or_else(|poison| poison.into_inner()));
     Some((status, stdout))
-}
-
-#[cfg(unix)]
-fn configure_detached(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    // `setsid`, not `process_group(0)`: only a new session removes the
-    // controlling terminal. Measured under a PTY, both the unmodified spawn and
-    // the `process_group(0)` variant reach state `T` within 20ms; the `setsid`
-    // variant exits normally. A session with no controlling terminal cannot
-    // support job control, so the shell disables it (warning on the discarded
-    // stderr) and still sources its rc files.
-    //
-    // SAFETY: `pre_exec` runs in the forked child between `fork` and `exec`,
-    // where only async-signal-safe calls are legal. `setsid` is on POSIX's
-    // async-signal-safe list, and nothing else here allocates, locks, or
-    // touches inherited state. `setsid` can only fail with `EPERM` when the
-    // caller is already a process group leader, which a freshly forked child
-    // never is.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-}
-
-#[cfg(windows)]
-fn configure_detached(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    // Never open or focus a console window for a probe.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(any(unix, windows)))]
-fn configure_detached(_command: &mut Command) {}
-
-#[cfg(unix)]
-struct ProcessTree {
-    /// Equal to the shell's PID, because the shell leads its own session.
-    group: libc::pid_t,
-}
-
-#[cfg(unix)]
-impl ProcessTree {
-    fn attach(child: &std::process::Child) -> Option<Self> {
-        libc::pid_t::try_from(child.id()).ok().map(|group| Self { group })
-    }
-
-    fn terminate(&self) {
-        // SAFETY: `kill` with a negative PID signals a process group and has
-        // no memory-safety preconditions. An already-empty group is `ESRCH`.
-        unsafe {
-            libc::kill(-self.group, libc::SIGKILL);
-        }
-    }
-}
-
-#[cfg(windows)]
-struct ProcessTree {
-    job: windows::Win32::Foundation::HANDLE,
-}
-
-#[cfg(windows)]
-impl ProcessTree {
-    fn attach(child: &std::process::Child) -> Option<Self> {
-        use std::os::windows::io::AsRawHandle;
-        use windows::Win32::Foundation::{CloseHandle, HANDLE};
-        use windows::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject,
-        };
-
-        // SAFETY: every handle passed below is either the freshly created Job
-        // or the live child's process handle, both valid for these calls.
-        unsafe {
-            let job = CreateJobObjectW(None, None).ok()?;
-            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            let assigned = SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                std::ptr::from_ref(&info).cast(),
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-            .and_then(|()| AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())));
-            if assigned.is_err() {
-                let _ = CloseHandle(job);
-                return None;
-            }
-            Some(Self { job })
-        }
-    }
-
-    fn terminate(&self) {
-        // SAFETY: `job` stays open until `drop`.
-        unsafe {
-            let _ = windows::Win32::System::JobObjects::TerminateJobObject(self.job, 1);
-        }
-    }
-}
-
-#[cfg(windows)]
-impl Drop for ProcessTree {
-    fn drop(&mut self) {
-        // SAFETY: `job` was created by `attach` and is closed exactly once.
-        // Kill-on-close makes the close a backstop for `terminate`.
-        unsafe {
-            let _ = windows::Win32::Foundation::CloseHandle(self.job);
-        }
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-struct ProcessTree;
-
-#[cfg(not(any(unix, windows)))]
-impl ProcessTree {
-    fn attach(_child: &std::process::Child) -> Option<Self> {
-        Some(Self)
-    }
-
-    fn terminate(&self) {}
 }
 
 #[cfg(all(test, unix))]

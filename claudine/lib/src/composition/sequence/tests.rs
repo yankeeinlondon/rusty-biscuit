@@ -319,7 +319,8 @@ fn external_template_non_object_fails() {
     let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceExternalWrongType(ref msg) if msg.contains("`template`")),
+        matches!(err, CompositionError::SequenceDeclarationShape { ref property, ref message, .. }
+            if property == "template" && message.contains("must be an object, got string")),
         "got: {err}"
     );
 }
@@ -612,10 +613,7 @@ fn an_external_sequence_reference_resolves_under_each_documents_own_map() {
         let context = view.derive_source(&source.resolved_path).unwrap();
         let plan = resolve_sequence_plan_with(
             &source,
-            SequenceSourceOptions {
-                shell_runner: None,
-                file_resolution_context: context.file_resolution_context(),
-            },
+            SequenceSourceOptions::new(context.file_resolution_context()),
         )
         .unwrap()
         .expect("sequence plan");
@@ -2163,10 +2161,7 @@ mod dynamic_sources {
         };
         let plan = resolve_sequence_plan_with(
             &source,
-            SequenceSourceOptions {
-                shell_runner: Some(&runner),
-                file_resolution_context: crate::test_support::process_context(),
-            },
+            SequenceSourceOptions::new(crate::test_support::process_context()).with_shell_runner(&runner),
         )
         .unwrap()
         .unwrap();
@@ -2192,10 +2187,7 @@ mod dynamic_sources {
         };
         let error = resolve_sequence_plan_with(
             &source,
-            SequenceSourceOptions {
-                shell_runner: Some(&runner),
-                file_resolution_context: crate::test_support::process_context(),
-            },
+            SequenceSourceOptions::new(crate::test_support::process_context()).with_shell_runner(&runner),
         )
         .unwrap_err();
         assert!(
@@ -2211,7 +2203,7 @@ mod dynamic_sources {
     }
 }
 
-// -- Phase 4: formal `template` + `$schema` on step state -----------------
+// -- Phase 4: formal `template` + `$state` on step state -----------------
 
 mod formal_documents {
     use super::*;
@@ -2225,9 +2217,9 @@ mod formal_documents {
 
     /// Template values land before generated fields, so a templated key is
     /// ordinary authored state by the time ids and positions are made — and it
-    /// can be validated by `$schema` alongside the authored keys.
+    /// can be validated by `$state` alongside the authored keys.
     #[test]
-    fn templates_apply_before_generated_fields_and_satisfy_the_schema() {
+    fn templates_apply_before_generated_fields_and_satisfy_the_state_declaration() {
         let plan = plan_from(
             r#"kind: sequence
 sequence:
@@ -2239,7 +2231,7 @@ sequence:
     rank: 3
 template:
   desc: "{{ color }}({{ rank }})"
-$schema:
+$state:
   color: string(required)
   rank: number(required)
   desc: string(required)
@@ -2272,17 +2264,17 @@ template:
         assert_eq!(plan.steps[1].state.extra["desc"], json!("generated-two"));
     }
 
-    /// A schema violation names the step index, its generated id, and the
+    /// A `$state` violation names the step index, its generated id, and the
     /// failing property.
     #[test]
-    fn a_schema_violation_reports_the_step_and_property() {
+    fn a_state_violation_reports_the_step_and_property() {
         let error = plan_from(
             r#"kind: sequence
 sequence:
   - name: blue
     color: blue
   - name: red
-$schema:
+$state:
   color: string(required)
 "#,
         )
@@ -2308,7 +2300,7 @@ $schema:
 sequence:
   - name: blue
     config: {}
-$schema:
+$state:
   config: "{ shade: string(required) }"
 "#,
         )
@@ -2323,7 +2315,7 @@ $schema:
         }
     }
 
-    /// The schema judges the *state* portion only: executable and task keys
+    /// `$state` judges the *state* portion only: executable and task keys
     /// are not state and must not be validated as such.
     #[test]
     fn executable_keys_are_excluded_from_state_validation() {
@@ -2333,7 +2325,7 @@ sequence:
   - name: one
     color: blue
     shell: just test
-$schema:
+$state:
   color: string(required)
 "#,
         )
@@ -2815,5 +2807,248 @@ mod json_duplicate_keys {
         fs::write(&path, "version: disk\n").unwrap();
         let loaded = data::load_document_from_text(&path, "version: held\n").unwrap();
         assert_eq!(loaded.value, json!({"version": "held"}));
+    }
+}
+
+/// The Input Robustness Matrix rows for the sequence field, the item list,
+/// and the template map, observed through the public resolver.
+mod robustness_matrix {
+    use super::*;
+
+    fn resolve(dir: &TempDir, sequence: Value) -> Result<Option<SequencePlan>, CompositionError> {
+        let source = make_source(dir, &[("sequence", sequence)], "Prompt");
+        resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
+    }
+
+    /// The index an item-shape error names.
+    fn item_index(error: &CompositionError) -> usize {
+        match error {
+            CompositionError::SequenceNullItem { index } => *index,
+            CompositionError::SequenceInvalid(message) => {
+                let rest = message.strip_prefix("step at index ").unwrap_or_else(|| panic!("{message}"));
+                rest.split_whitespace().next().unwrap().parse().unwrap()
+            }
+            other => panic!("expected an item-shape error, got {other:?}"),
+        }
+    }
+
+    /// A present `sequence:` must be a list or a source string: `null` and
+    /// every other whole-field type fail, while `[]` is a valid empty plan.
+    #[test]
+    fn a_null_or_wrong_typed_sequence_field_fails() {
+        let dir = TempDir::new().unwrap();
+        assert!(resolve(&dir, json!([])).unwrap().unwrap().steps.is_empty());
+        for value in [json!(null), json!(true), json!(4.5), json!({ "name": "a" })] {
+            let error = resolve(&dir, value.clone()).unwrap_err();
+            assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{value}: {error:?}");
+        }
+    }
+
+    /// An authored list is strict: a null, number, boolean, or array item is
+    /// refused whether it sits among valid items or makes up the whole list,
+    /// and the error names the first offending index.
+    #[test]
+    fn strict_lists_refuse_each_non_step_item_by_index() {
+        let dir = TempDir::new().unwrap();
+        for bad in [json!(null), json!(7), json!(false), json!(["nested"])] {
+            let mixed = resolve(&dir, json!(["ok", { "name": "fine" }, bad.clone()])).unwrap_err();
+            assert_eq!(item_index(&mixed), 2, "{bad} among valid items");
+            let whole = resolve(&dir, json!([bad.clone(), bad.clone()])).unwrap_err();
+            assert_eq!(item_index(&whole), 0, "{bad} as the whole list");
+        }
+    }
+
+    /// Selected data is lenient: numbers and booleans become names, nothing
+    /// is dropped, and an item leniency cannot name still fails by index.
+    #[test]
+    fn lenient_data_lists_coerce_scalars_but_never_drop_an_item() {
+        let dir = TempDir::new().unwrap();
+        let data = |contents: &str| {
+            fs::write(dir.path().join("d.json"), contents).unwrap();
+            resolve(&dir, json!("d.json"))
+        };
+        let plan = data("[1, true, \"three\", {\"name\": \"four\"}]").unwrap().unwrap();
+        let names: Vec<&str> = plan.steps.iter().map(|step| step.name.as_str()).collect();
+        assert_eq!(names, ["1", "true", "three", "four"]);
+        assert_eq!(item_index(&data("[\"ok\", [1]]").unwrap_err()), 1);
+        assert_eq!(item_index(&data("[[1], [2]]").unwrap_err()), 0);
+        assert_eq!(item_index(&data("[null, null]").unwrap_err()), 0);
+    }
+
+    /// Template values of any type are data copied into each item; only a
+    /// top-level string default is an expression, so a template-looking
+    /// string inside a list or a map is copied verbatim.
+    #[test]
+    fn template_values_are_copied_as_data_and_only_top_level_strings_render() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("s.yaml"),
+            "kind: sequence\ntemplate:\n  none: null\n  blank: \"\"\n  list: [\"{{ name }}\"]\n  map:\n    inner: \"{{ name }}\"\n  rendered: \"{{ name }}!\"\nsequence:\n  - one\n",
+        )
+        .unwrap();
+        let plan = resolve(&dir, json!("s.yaml")).unwrap().unwrap();
+        let state = &plan.steps[0].state.extra;
+        assert_eq!(state["none"], json!(null));
+        assert_eq!(state["blank"], json!(""));
+        assert_eq!(state["list"], json!(["{{ name }}"]));
+        assert_eq!(state["map"], json!({ "inner": "{{ name }}" }));
+        assert_eq!(state["rendered"], json!("one!"));
+    }
+}
+
+/// The shared document loaders' failure shapes: whole-file YAML
+/// (`load_yaml_document`, `data::load_document_from_text`), the JSON family,
+/// line-delimited records, and Markdown frontmatter at the resolver.
+mod loader_matrix {
+    use super::*;
+
+    fn write(dir: &TempDir, name: &str, text: &str) -> std::path::PathBuf {
+        let path = dir.path().join(name);
+        fs::write(&path, text).unwrap();
+        path
+    }
+
+    /// The YAML cases every whole-file YAML read must refuse: a repeated key
+    /// at the root and inside a declaration, trailing invalid syntax, and a
+    /// second document.
+    const INVALID_YAML: [&str; 4] = [
+        "kind: sequence\nkind: task\nsequence: []\n",
+        "kind: sequence\n$state:\n  color: string\n  color: number\nsequence: []\n",
+        "kind: sequence\nsequence: []\n]\n",
+        "kind: sequence\nsequence: []\n---\nkind: sequence\nsequence: [a]\n",
+    ];
+
+    #[test]
+    fn both_yaml_loaders_refuse_duplicates_trailing_syntax_and_a_second_document() {
+        let dir = TempDir::new().unwrap();
+        for text in INVALID_YAML {
+            let path = write(&dir, "s.yaml", text);
+            assert!(
+                matches!(crate::composition::resolve::load_yaml_document(&path), Err(CompositionError::MarkdownLoad { .. })),
+                "direct: {text}"
+            );
+            assert!(
+                matches!(data::load_document_from_text(&path, text), Err(CompositionError::SequenceExternalLoad { source: SequenceLoadCause::Yaml(_), .. })),
+                "referenced: {text}"
+            );
+        }
+        // Control: the same document with each edit undone loads.
+        let path = write(&dir, "s.yaml", "kind: sequence\n$state:\n  color: string\nsequence: []\n");
+        crate::composition::resolve::load_yaml_document(&path).unwrap();
+        data::load_document(&path).unwrap();
+    }
+
+    /// `key:` with no value is an explicit YAML null, which a declaration
+    /// judges as present: it is a shape error, not an absent declaration,
+    /// whether the YAML document is run directly or referenced.
+    #[test]
+    fn a_bare_yaml_key_is_an_explicit_null_on_every_route() {
+        let dir = TempDir::new().unwrap();
+        let child = write(&dir, "child.yaml", "kind: sequence\n$state:\nsequence: [a]\n");
+        let direct = ResolvedCompositionSource {
+            original_ref: child.display().to_string(),
+            resolved_path: child.clone(),
+            original_text: fs::read_to_string(&child).unwrap(),
+            markdown: crate::composition::resolve::load_yaml_document(&child).unwrap(),
+        };
+        let referenced = make_source(&dir, &[("sequence", json!("child.yaml"))], "Prompt");
+        for source in [&direct, &referenced] {
+            let error = resolve_sequence_plan(source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
+            assert!(
+                matches!(&error, CompositionError::SequenceDeclarationShape { property, message, .. }
+                    if property == "$state" && message.contains("must not be null")),
+                "{}: {error:?}",
+                source.resolved_path.display()
+            );
+        }
+        // Control: the key removed, both routes resolve.
+        fs::write(&child, "kind: sequence\nsequence: [a]\n").unwrap();
+        let direct = ResolvedCompositionSource {
+            markdown: crate::composition::resolve::load_yaml_document(&child).unwrap(),
+            ..direct
+        };
+        for source in [&direct, &referenced] {
+            assert_eq!(resolve_sequence_plan(source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap().steps.len(), 1);
+        }
+    }
+
+    /// A referenced YAML document's invalid text reaches the resolver as the
+    /// loader's typed cause.
+    #[test]
+    fn a_referenced_yaml_documents_duplicate_key_fails_the_resolver() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "child.yaml", INVALID_YAML[1]);
+        let source = make_source(&dir, &[("sequence", json!("child.yaml"))], "Prompt");
+        let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
+        assert!(
+            matches!(&error, CompositionError::SequenceExternalLoad { context, source: SequenceLoadCause::Yaml(_) } if context.contains("child.yaml")),
+            "{error:?}"
+        );
+    }
+
+    /// `.json` and `.json5` share one loader: trailing garbage fails, and
+    /// comments and trailing commas are accepted under both extensions.
+    #[test]
+    fn the_json_family_refuses_trailing_garbage_and_accepts_comments_and_trailing_commas() {
+        let dir = TempDir::new().unwrap();
+        for file in ["d.json", "d.json5"] {
+            let path = write(&dir, file, "{\"sequence\": [\"a\"]} trailing\n");
+            assert!(
+                matches!(data::load_document(&path), Err(CompositionError::SequenceExternalLoad { source: SequenceLoadCause::Json5(_), .. })),
+                "{file}"
+            );
+            let path = write(&dir, file, "// lead\n{\"sequence\": [\"a\", /* inline */ \"b\",],}\n");
+            assert_eq!(data::load_document(&path).unwrap().value, json!({ "sequence": ["a", "b"] }), "{file}");
+        }
+    }
+
+    /// Line-delimited records skip blank lines, and a trailing invalid record
+    /// fails naming its line. A file of records has no root, so it declares
+    /// nothing; a record that writes a declaration key is refused at that
+    /// record rather than applied or dropped.
+    #[test]
+    fn line_delimited_records_skip_blank_lines_and_name_a_trailing_invalid_record() {
+        let dir = TempDir::new().unwrap();
+        let path = write(&dir, "d.jsonl", "{\"name\": \"a\"}\n\n   \n{\"name\": \"b\", \"template\": 1}\n");
+        let source = make_source(&dir, &[("sequence", json!("d.jsonl"))], "Prompt");
+        let resolve = || resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path));
+        assert!(
+            matches!(resolve(), Err(CompositionError::SequenceDeclarationMisplaced { ref property, ref source_path, .. })
+                if property == "[1].template" && source_path.ends_with("d.jsonl")),
+            "{:?}", resolve()
+        );
+        fs::write(&path, "{\"name\": \"a\"}\n\n   \n{\"name\": \"b\", \"kept\": 1}\n").unwrap();
+        let plan = resolve().unwrap().unwrap();
+        let names: Vec<&str> = plan.steps.iter().map(|step| step.name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
+        assert!(plan.document_scope.is_none(), "a file of records owns no declarations");
+
+        fs::write(&path, "{\"name\": \"a\"}\n{\"name\": \n").unwrap();
+        let error = data::load_document(&path).unwrap_err();
+        assert!(error.to_string().contains("d.jsonl"), "{error}");
+        let cause = std::error::Error::source(&error).map(ToString::to_string).unwrap_or_default();
+        assert!(cause.contains("line 2"), "{cause}");
+    }
+
+    /// Markdown frontmatter reaches the same rules at the resolver: a bare
+    /// `$state:` is a present null, and a repeated frontmatter key fails the
+    /// load rather than keeping one of its values.
+    #[test]
+    fn markdown_frontmatter_nulls_and_duplicates_reach_the_resolver() {
+        let dir = TempDir::new().unwrap();
+        let resolve = |text: &str| {
+            let path = write(&dir, "s.md", text);
+            crate::composition::resolve_fixture_source(path.to_str().unwrap())
+                .and_then(|source| resolve_sequence_plan(&source, &crate::test_support::context_for(&path)))
+        };
+        assert_eq!(resolve("---\n$state: {}\nsequence: [a]\n---\nBody\n").unwrap().unwrap().steps.len(), 1);
+        assert!(matches!(
+            resolve("---\n$state:\nsequence: [a]\n---\nBody\n"),
+            Err(CompositionError::SequenceDeclarationShape { ref property, .. }) if property == "$state"
+        ));
+        for text in ["---\n$state: {}\n$state: { a: string }\nsequence: [a]\n---\nBody\n", "---\n$state:\n  a: string\n  a: number\nsequence: [a]\n---\nBody\n"] {
+            let error = resolve(text).unwrap_err();
+            assert!(format!("{error:?}").contains("duplicate entry with key"), "{text}: {error:?}");
+        }
     }
 }

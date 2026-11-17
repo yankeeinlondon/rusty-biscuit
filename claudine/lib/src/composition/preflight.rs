@@ -226,7 +226,11 @@ pub fn resolve_graph_shell_approvals(
         let composed = document.markdown.compose_with(&passive)
             .map_err(|error| discovery_failed(&document.path, error))?.0;
         let effective = super::prepare::frontmatter_to_value(composed.frontmatter());
-        let mut lifecycle = super::lifecycle::parse_lifecycle_config_with_orders(&effective, &document.path, Some(composed.frontmatter()))?;
+        // The document as written is the authored source of its composed
+        // frontmatter: a `no_error` a schema filled is not authored.
+        let authored_values = super::prepare::frontmatter_to_value(document.markdown.frontmatter());
+        let mut lifecycle = super::lifecycle::parse_lifecycle_config_with_orders(
+            &effective, &document.path, Some(composed.frontmatter()), Some(&authored_values))?;
         let mut lifecycle_options = super::PrepareOptions::new(options.resolution_context().clone());
         lifecycle_options.deferred_shell_roots = roots;
         let source = super::ResolvedCompositionSource { original_ref: document.path.display().to_string(),

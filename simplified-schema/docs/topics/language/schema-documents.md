@@ -96,7 +96,7 @@ flowchart TD
 | YAML with `$schema` (informal, or `kind: schema`) that [satisfies its definition](#admission-checking-an-envelope-against-its-definition) | accepted |
 | `kind: yaml-schema`, well formed or not | `NotASchemaDocument` (`SelectedByKind`); [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced), never referenced |
 | `kind: schema` with only `types` | `NotASchemaDocument` (`TypesOnly`); its types still import as `Name@file.yaml` |
-| a recognized envelope its definition rejects (`types: [a, b]`, `description: null`, a misspelled `typed:`) | `SchemaDocument` "the `kind: schema` envelope does not satisfy its definition ..." |
+| a recognized envelope its definition rejects (`types: [a, b]`, `description: ""`, a misspelled `typed:`) | `SchemaDocument` "the `kind: schema` envelope does not satisfy its definition ..." |
 | YAML mapping without `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) |
 | YAML that is not a mapping, or a JSON value that is not an object | `NotASchemaDocument` (`NotAMapping`) |
 | YAML with `$schema` and a key outside `$schema`, `types`, `description`, `categories` (no `kind: schema` or `kind: yaml-schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
@@ -170,11 +170,12 @@ $schema:
     age: number(integer; min(0); suggest(21, 30, 40))
 ```
 
-`description` is text (`""` is allowed). Editors show it when hovering a
-`$schema` value that names the file. A number or boolean is read as its text
-(`description: 123` reads as `"123"`), the same
-[soft conversion](../conversion.md) frontmatter receives; `null`, a list, or a
-mapping is rejected. A mapping with any other top-level key is not this
+`description` is text with content (`""` and whitespace-only text are
+rejected). Editors show it when hovering a `$schema` value that names the
+file. A number or boolean is read as its text (`description: 123` reads as
+`"123"`), the same [soft conversion](../conversion.md) frontmatter receives;
+a list or a mapping is rejected, and `description: null` is the same as
+leaving it out. A mapping with any other top-level key is not this
 envelope (see [Migrating Raw JSON Schema Written in YAML](#migrating-raw-json-schema-written-in-yaml)).
 
 The `$schema` value is the SimplifiedSchema payload. A mapping payload is usable both as a whole-file schema and as the namespace for `Name@fileref` named imports. A sequence payload is a root-level schema union for whole-file use only (it supplies no named-import namespace).
@@ -354,11 +355,12 @@ types:
 
 When a file declares `categories:`, every `category(X)` in its `types` must
 name a listed category, compared exactly (`math` is not `Math`). Without the
-list any name is accepted, and `categories: []` declares that no category is
-allowed. A blank name and a repeated name are schema-load errors naming the
-entry, such as `categories[1]`. `categories` must be a list (a single string
-is not wrapped into one, and `null` is rejected); a number entry is read as
-its text, so `- 5` is the category `5`, while a mapping entry is rejected.
+list any name is accepted; `categories: null` is the same as no list, and an
+empty `categories: []` is rejected. A blank name and a repeated name are
+schema-load errors naming the entry, such as `categories[1]`. `categories`
+must be a list (a single string is not wrapped into one); a number entry is
+read as its text, so `- 5` is the category `5`, while a `null` or mapping
+entry is rejected.
 
 ### Whole-File References and Named Imports
 
@@ -439,10 +441,10 @@ description: |-
     claimed kind must meet.
 $schema:
     kind: literal(yaml-schema; required) -> the document kind that claims this definition
-    description: string(non-null) -> what the kind is for
-    categories: string[](non-null) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
+    description: string(not-empty) -> what the kind is for
+    categories: string[](not-empty) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
     $schema: schema(required; property(kind, type-definition(forms(literal, enum); declared-required))) -> the contract for documents of the claimed kind; its `kind` declaration names the kinds claimed
-    types: schema(mapping; non-null) -> reusable named types for `$schema`; these names are not document properties
+    types: schema(mapping; not-empty) -> reusable named types for `$schema`; these names are not document properties
     $constraints: { closed: true }
 ```
 
@@ -454,11 +456,41 @@ written. Each line is one structural rule:
 | Rule | Written as |
 |---|---|
 | no top-level key beyond those listed | `$constraints: { closed: true }` |
-| `types` is a mapping, not a list or a single reference | `schema(mapping; non-null)` |
-| `description` is text | `string(non-null)` |
-| `categories` is a list of text entries | `string[](non-null)` |
-| `$schema` and `types` are never an explicit `null` | `non-null`, or `required` |
+| `types` is a mapping with at least one entry, not a list or a single reference | `schema(mapping; not-empty)` |
+| `description` is text with content | `string(not-empty)` |
+| `categories` is a non-empty list of text entries | `string[](not-empty)` |
+| an optional `$schema` or `types` may be `null`, which means absent | optional, without `required` |
+| a carrier that the document must write | `required` |
 | a `yaml-schema`'s `$schema` declares a required, non-null `kind` of one or more literal choices | `property(kind, type-definition(forms(literal, enum); declared-required))` |
+
+In `schema.yaml` the first arm writes `$schema: schema(required)` and an
+optional `types: schema(mapping; not-empty)`; the second writes an optional
+`$schema: schema(not-empty)` and `types: schema(mapping; required; not-empty)`.
+
+#### `null` and Empty Carriers
+
+A `null` optional field is the same as leaving it out, while an empty one
+(`""`, `[]`, `{}`) is a written value without content and is rejected where
+the definition says `not-empty`. Every load path (the factories, admission,
+a `$schema` target, and whole-YAML loading) reaches the same verdict:
+
+| Envelope holds | Result |
+|---|---|
+| `description: null`, `categories: null`, or `types: null` beside a `$schema` | accepted; the field is absent |
+| `kind: schema` with `$schema: null` (or a bare `$schema:`) and a `types` mapping | accepted as a `types`-only document |
+| `kind: schema` with `$schema: null` and no usable `types` | rejected: neither payload is present |
+| `kind: schema` with `$schema: {}` | accepted: an empty export |
+| `types: {}`, `description: ""`, or `categories: []` | rejected at that key |
+| an informal envelope (no `kind`) whose `$schema` is `null` | not a schema document: ordinary YAML, as with no `$schema` |
+| `kind: yaml-schema` with `$schema: null` or `$schema: {}` | rejected: the contract is required and must have content |
+
+A `null` *inside* a payload is a declaration, not an absent carrier:
+`$schema: { n: null }` declares a property `n` of the `null` type.
+
+A `kind: schema-trigger` file follows the same rule for its payload: a
+`null` or missing `$schema` makes a matcher-only trigger, and an empty one
+(`{}`, `[]`, or blank text) is refused, by discovery and by whole-YAML
+validation alike.
 
 The definitions' lowered form is loaded from the library's
 [shipped artifact](../shipped-artifacts.md) the first time any envelope is
@@ -475,8 +507,9 @@ clears, so a reset does not discard them.
 Admission uses [soft validation](../validation.md): a metadata value that
 converts without changing its meaning is accepted, exactly as in
 frontmatter. `description: 123` is admitted and read as `"123"`, and a
-category entry `5` as `"5"`. An explicit `null` is rejected wherever the
-definition says `non-null`. The schema declarations themselves, `$schema` and
+category entry `5` as `"5"`. An explicit `null` on an optional field is the
+same as leaving it out, and an empty value is rejected wherever the
+definition says `not-empty`. The schema declarations themselves, `$schema` and
 `types` (mappings, root-union sequences, and reference strings), are never
 converted; they reach the SimplifiedSchema parser exactly as authored.
 
@@ -495,7 +528,7 @@ is reported, in this order:
    reported with the parser's own typed error and token span (message prefix
    `invalid SimplifiedSchema payload` or `invalid named types`); see
    [A rejected definition in a schema document](../diagnostics.md#a-rejected-definition-in-a-schema-document).
-3. **The carrier's own shape**: `types: null`, or `types: [a, b]`.
+3. **The carrier's own shape**: `types: Id` (a single reference), or `types: [a, b]`.
 
 ```yaml
 kind: schema

@@ -628,7 +628,8 @@ frontmatter `$( … )`, a `::shell` line, a shell block, or a lifecycle shell
 step. A lifecycle side effect that may write a file (`append_line`,
 `append_jsonl`, `ensure_file`, `ensure_dir`, a frontmatter mutation such as
 `set_frontmatter`, or `http_post`) empties it too, as soon as it has run and
-whether or not it succeeded, so the next step of the same event reads the
+whether or not it succeeded, and so does an `edit` action once it has created
+its file or launched an editor, so the next step of the same event reads the
 file again:
 
 ```yaml

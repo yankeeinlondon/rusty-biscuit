@@ -83,3 +83,42 @@ fn io_error_includes_kind() {
     let out = render(&err);
     assert_contains_all(&out, &["EditorError", "read temp file", "NotFound"]);
 }
+
+#[test]
+fn configured_editor_cannot_wait_names_the_variable() {
+    let err = EditorError::ConfiguredEditorCannotWait {
+        variable: "EDITOR",
+        value: "geany".into(),
+    };
+    let out = render(&err);
+    assert_contains_all(&out, &["EditorError", "cannot wait", "$EDITOR", "geany"]);
+}
+
+#[test]
+fn no_matching_editor_lists_each_candidate_and_reason() {
+    use darkmatter::editor::{RejectReason, SurfaceRequest};
+    use sniff::programs::EditorSurface;
+
+    let err = EditorError::NoMatchingEditor {
+        requested: SurfaceRequest::Gui,
+        candidates: vec![
+            ("$EDITOR=nvim".into(), RejectReason::SurfaceMismatch(Some(EditorSurface::Terminal))),
+            ("lapce".into(), RejectReason::CannotWait),
+            ("code".into(), RejectReason::NotInstalled),
+        ],
+    };
+    let out = render(&err);
+    assert_contains_all(
+        &out,
+        &["EditorError", "no gui editor found", "$EDITOR=nvim", "terminal editor", "lapce", "cannot wait", "code", "not installed"],
+    );
+}
+
+#[test]
+fn cancelled_names_the_path_and_keeps_saved_bytes() {
+    let err = EditorError::Cancelled {
+        path: PathBuf::from("/tmp/notes.md"),
+    };
+    let out = render(&err);
+    assert_contains_all(&out, &["EditorError", "editing cancelled", "/tmp/notes.md", "kept"]);
+}

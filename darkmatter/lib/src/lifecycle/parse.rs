@@ -62,6 +62,18 @@ pub struct LifecycleParseOptions<'a> {
     /// The authored frontmatter, whose retained mapping order gives a `set:`
     /// mapping its authored key order. `None` falls back to sorted order.
     pub authored: Option<&'a crate::markdown::Frontmatter>,
+    /// The authored counterpart of the value being parsed, when that value
+    /// was completed by a schema first: the frontmatter for
+    /// [`parse_lifecycle_config_with`], the `loop:` object for
+    /// [`parse_loop_concerns_with`]. `None` means the parsed value is itself
+    /// authored.
+    ///
+    /// Completion fills every missing or `null` `no_error` with its default,
+    /// `false`, beside and inside actions alike. Only a flag written here,
+    /// non-null, counts as authored: it alone can conflict with another
+    /// placement, sit beside `then`, or meet `set`. A filled `false` is the
+    /// omitted flag. Key order still comes from [`Self::authored`].
+    pub authored_values: Option<&'a serde_json::Value>,
     /// What a verb outside the lifecycle verb inventory becomes.
     pub unknown_verbs: UnknownVerbPolicy,
     /// The host's events: which frontmatter keys are lifecycle stacks, and
@@ -206,6 +218,8 @@ pub fn parse_lifecycle_config_with(
         AuthoredOrder::at_root(std::sync::Arc::new(frontmatter.mapping_orders().clone()))
     });
 
+    let document_source = AuthoredSource::from_option(options.authored_values);
+
     refuse_renamed_events(fm_obj, source_file, options.registry)?;
     let mut config = LifecycleConfig::default();
     for signal in [
@@ -232,7 +246,12 @@ pub fn parse_lifecycle_config_with(
             source_file,
             options,
         };
-        let nodes = parser.parse_stack(value, &LifecyclePath::root(event), &document_order.child(event))?;
+        let nodes = parser.parse_stack(
+            value,
+            &LifecyclePath::root(event),
+            &document_order.child(event),
+            document_source.child(event),
+        )?;
         if signal == LifecycleSignal::Initialize {
             refuse_initialize_shells(&nodes, source_file)?;
         }
@@ -265,6 +284,7 @@ pub fn parse_lifecycle_config_with(
             loop_obj,
             &LifecyclePath::root(loop_key),
             &document_order.child(loop_key),
+            document_source.child(loop_key),
         )?;
     }
 
@@ -285,7 +305,12 @@ pub fn parse_loop_concerns_with(
         source_file,
         options,
     };
-    parser.parse_loop_concerns(loop_obj, &LifecyclePath::root(property), authored)
+    parser.parse_loop_concerns(
+        loop_obj,
+        &LifecyclePath::root(property),
+        authored,
+        AuthoredSource::from_option(options.authored_values),
+    )
 }
 
 /// Under a host that renamed `composed` or `failed`, the Darkmatter spelling
@@ -372,7 +397,8 @@ pub fn action_type(action: &LifecycleAction) -> Option<ActionType> {
         LifecycleActionKind::Shell(_) => Some(ActionType::Shell),
         LifecycleActionKind::SideEffect(_)
         | LifecycleActionKind::RuntimeSet(_)
-        | LifecycleActionKind::ExpressionFunction(_) => Some(ActionType::Expression),
+        | LifecycleActionKind::ExpressionFunction(_)
+        | LifecycleActionKind::Edit(_) => Some(ActionType::Expression),
         LifecycleActionKind::Ignored(_) => None,
     }
 }
@@ -386,6 +412,7 @@ fn action_verb(action: &LifecycleAction) -> &str {
         LifecycleActionKind::SideEffect(effect) => &effect.verb,
         LifecycleActionKind::RuntimeSet(_) => "set",
         LifecycleActionKind::ExpressionFunction(func) => &func.function,
+        LifecycleActionKind::Edit(_) => "edit",
         LifecycleActionKind::Ignored(ignored) => &ignored.verb,
     }
 }
@@ -398,9 +425,14 @@ pub(crate) fn event_name(registry: &EventRegistry, signal: LifecycleSignal) -> &
 
 /// Parse a task's `setup:`/`teardown:` value into a typed stack rooted at
 /// `property`.
+///
+/// `authored_value` is the authored counterpart of `raw` when `raw` was
+/// completed by a schema first; `None` means `raw` is itself authored (see
+/// [`LifecycleParseOptions::authored_values`]).
 pub fn parse_task_action_stack_with(
     signal: LifecycleSignal,
     raw: &serde_json::Value,
+    authored_value: Option<&serde_json::Value>,
     source_file: &Path,
     property: &str,
     authored: &AuthoredOrder,
@@ -413,7 +445,12 @@ pub fn parse_task_action_stack_with(
     };
     // A stack's whole-value `set` `$( … )` is parsed like any other; sequence
     // preflight approves it, and an unapproved one refuses to run at its turn.
-    parser.parse_stack(raw, &LifecyclePath::root(property), authored)
+    parser.parse_stack(
+        raw,
+        &LifecyclePath::root(property),
+        authored,
+        AuthoredSource::from_option(authored_value),
+    )
 }
 
 /// A `side_effect:` task's `set` stores data; it cannot run a command.
@@ -447,9 +484,13 @@ fn refuse_task_set_shell(action: &LifecycleAction, source_file: &Path) -> Result
 ///
 /// `property` is the source-rooted path of the value itself
 /// (`tasks[0].side_effect`); the action is `{property}.{verb}`.
+/// `authored_value` is the authored counterpart of `raw` when `raw` was
+/// completed by a schema first; `None` means `raw` is itself authored (see
+/// [`LifecycleParseOptions::authored_values`]).
 pub fn parse_single_action_with(
     signal: LifecycleSignal,
     raw: &serde_json::Value,
+    authored_value: Option<&serde_json::Value>,
     source_file: &Path,
     property: &str,
     authored_set_order: Option<&[String]>,
@@ -469,6 +510,7 @@ pub fn parse_single_action_with(
         options,
     };
     parser.reject_removed_keys(map, &path)?;
+    let source = AuthoredSource::from_option(authored_value);
     let verbs = map.keys().filter(|key| key.as_str() != "no_error").count();
     if verbs != 1 {
         return Err(shape_error(
@@ -480,7 +522,9 @@ pub fn parse_single_action_with(
     // The caller holds a `set:` mapping's authored key order directly; every
     // other verb parses as a one-verb bundle.
     let action = match map.get("set") {
-        Some(_) if map.contains_key("no_error") => {
+        // `set` takes no flag, so an authored one, even `null`, is refused; a
+        // completed `false` is not authored.
+        Some(_) if source.has_key(map, "no_error") => {
             return Err(shape_error(
                 source_file,
                 &path.field("no_error"),
@@ -490,7 +534,7 @@ pub fn parse_single_action_with(
         }
         Some(value) => parse_runtime_set(value, source_file, &path.field("set"), authored_set_order)?,
         None => parser
-            .parse_bundle(map, &path, &AuthoredOrder::default())?
+            .parse_bundle(map, &path, &AuthoredOrder::default(), source)?
             .pop()
             .expect("one verb parses to one action"),
     };
@@ -513,11 +557,12 @@ impl StackParser<'_> {
         value: &serde_json::Value,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
+        source: AuthoredSource<'_>,
     ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         match value {
             serde_json::Value::Null => Ok(Vec::new()),
-            serde_json::Value::Array(items) => self.parse_list(items, path, authored, 0),
-            serde_json::Value::Object(map) => self.parse_dictionary(map, path, authored),
+            serde_json::Value::Array(items) => self.parse_list(items, path, authored, source, 0),
+            serde_json::Value::Object(map) => self.parse_dictionary(map, path, authored, source),
             other => Err(shape_error(
                 self.source_file,
                 path,
@@ -536,12 +581,14 @@ impl StackParser<'_> {
     /// is `gate: []`.
     ///
     /// Removed keys are rejected before the iteration controls are filtered
-    /// out, so an old `loop.stack` cannot disappear unnoticed.
+    /// out, so an old `loop.stack` cannot disappear unnoticed. A `no_error`
+    /// not authored (a completed default) is no concern at all.
     fn parse_loop_concerns(
         &self,
         loop_obj: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
+        source: AuthoredSource<'_>,
     ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         // `action`/`actions` at the loop root are iteration controls, so only
         // the other removed keys are checked here, before filtering.
@@ -558,11 +605,7 @@ impl StackParser<'_> {
                 "`when` cannot sit at the `loop:` root; put a guarded item in `gate:`".to_string(),
             ));
         }
-        let concerns: serde_json::Map<String, serde_json::Value> = loop_obj
-            .iter()
-            .filter(|(key, _)| !LOOP_ITERATION_KEYS.contains(&key.as_str()))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+        let concerns = loop_concerns(loop_obj, source);
         if let Some(gate) = concerns.get("gate") {
             if let Some(loose) = concerns.keys().find(|key| key.as_str() != "gate") {
                 return Err(shape_error(
@@ -590,12 +633,12 @@ impl StackParser<'_> {
                     ),
                 ));
             }
-            return self.parse_stack(gate, &gate_path, &authored.child("gate"));
+            return self.parse_stack(gate, &gate_path, &authored.child("gate"), source.child("gate"));
         }
         if concerns.is_empty() {
             return Ok(Vec::new());
         }
-        self.parse_bundle(&concerns, path, authored)
+        self.parse_bundle(&concerns, path, authored, source)
             .map(|actions| actions.into_iter().map(LifecycleNode::Action).collect())
     }
 
@@ -610,6 +653,7 @@ impl StackParser<'_> {
         items: &[serde_json::Value],
         path: &LifecyclePath,
         authored: &AuthoredOrder,
+        source: AuthoredSource<'_>,
         depth: usize,
     ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         let mut nodes = Vec::with_capacity(items.len());
@@ -621,7 +665,7 @@ impl StackParser<'_> {
                     property: directive.to_string(),
                 });
             }
-            for node in self.parse_item(item, &path.index(index), &authored.at(index), depth)? {
+            for node in self.parse_item(item, &path.index(index), &authored.at(index), source.at(index), depth)? {
                 if let LifecycleNode::Action(action) = &node
                     && action.ends_event()
                 {
@@ -640,6 +684,7 @@ impl StackParser<'_> {
         value: &serde_json::Value,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
+        source: AuthoredSource<'_>,
         depth: usize,
     ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         let map = match value {
@@ -659,21 +704,12 @@ impl StackParser<'_> {
             }
         };
         self.reject_removed_keys(map, path)?;
-        if map.is_empty() {
-            return Err(shape_error(self.source_file, path, "a stack item cannot be empty".to_string()));
+        if let Some(rule) = item_keys_rule(map, source) {
+            return Err(rule.shape_error(self.source_file, path));
         }
         let Some(raw_when) = map.get("when") else {
-            for key in ["then", "else"] {
-                if map.contains_key(key) {
-                    return Err(shape_error(
-                        self.source_file,
-                        &path.field(key),
-                        format!("`{key}` requires `when` on the same item"),
-                    ));
-                }
-            }
             return Ok(self
-                .parse_bundle(map, path, authored)?
+                .parse_bundle(map, path, authored, source)?
                 .into_iter()
                 .map(LifecycleNode::Action)
                 .collect());
@@ -693,54 +729,35 @@ impl StackParser<'_> {
         let when = self.parse_when(raw_when, &path.field("when"))?;
 
         let (then, otherwise) = if let Some(raw_then) = map.get("then") {
-            if map.contains_key("no_error") {
-                return Err(shape_error(
-                    self.source_file,
-                    &path.field("no_error"),
-                    "`no_error` cannot sit beside `then`/`else`; put it on the actions in the body"
-                        .to_string(),
-                ));
+            if let Some(rule) = conditional_keys_rule(map, source) {
+                return Err(rule.shape_error(self.source_file, path));
             }
-            if let Some(extra) = map
-                .keys()
-                .find(|key| !matches!(key.as_str(), "when" | "then" | "else"))
-            {
-                return Err(shape_error(
-                    self.source_file,
-                    &path.field(extra.as_str()),
-                    format!(
-                        "a `when` item with `then` cannot also carry the sibling `{extra}`; move it \
-                         into `then`"
-                    ),
-                ));
-            }
-            let then = self.parse_body(raw_then, &path.field("then"), &authored.child("then"), level)?;
+            let then = self.parse_body(
+                raw_then,
+                &path.field("then"),
+                &authored.child("then"),
+                source.child("then"),
+                level,
+            )?;
             let otherwise = match map.get("else") {
-                Some(raw_else) => {
-                    self.parse_body(raw_else, &path.field("else"), &authored.child("else"), level)?
-                }
+                Some(raw_else) => self.parse_body(
+                    raw_else,
+                    &path.field("else"),
+                    &authored.child("else"),
+                    source.child("else"),
+                    level,
+                )?,
                 None => Vec::new(),
             };
             (then, otherwise)
         } else {
-            if map.contains_key("else") {
-                return Err(shape_error(
-                    self.source_file,
-                    &path.field("else"),
-                    "`else` requires `then`; write the true branch under `then`".to_string(),
-                ));
+            if let Some(rule) = guarded_keys_rule(map) {
+                return Err(rule.shape_error(self.source_file, path));
             }
             let mut bundle = map.clone();
             bundle.remove("when");
-            if bundle.keys().all(|key| key == "no_error") {
-                return Err(shape_error(
-                    self.source_file,
-                    path,
-                    "a `when` item needs `then` or sibling actions".to_string(),
-                ));
-            }
             let then = self
-                .parse_bundle(&bundle, path, authored)?
+                .parse_bundle(&bundle, path, authored, source)?
                 .into_iter()
                 .map(LifecycleNode::Action)
                 .collect();
@@ -763,15 +780,18 @@ impl StackParser<'_> {
         value: &serde_json::Value,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
+        source: AuthoredSource<'_>,
         depth: usize,
     ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         let branch = path.to_string();
         let branch = branch.rsplit('.').next().unwrap_or("then");
         match value {
             serde_json::Value::Array(items) if !items.is_empty() => {
-                self.parse_list(items, path, authored, depth)
+                self.parse_list(items, path, authored, source, depth)
             }
-            serde_json::Value::Object(map) if !map.is_empty() => self.parse_dictionary(map, path, authored),
+            serde_json::Value::Object(map) if !source.is_empty(map) => {
+                self.parse_dictionary(map, path, authored, source)
+            }
             serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
                 Err(shape_error(
                     self.source_file,
@@ -797,25 +817,17 @@ impl StackParser<'_> {
         map: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
+        source: AuthoredSource<'_>,
     ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         self.reject_removed_keys(map, path)?;
-        for key in ["when", "then", "else"] {
-            if map.contains_key(key) {
-                return Err(shape_error(
-                    self.source_file,
-                    &path.field(key),
-                    format!(
-                        "a dictionary of verbs never carries `{key}`; write a guarded list item \
-                         (`- when: …`) instead"
-                    ),
-                ));
-            }
+        if let Some(rule) = dictionary_keys_rule(map) {
+            return Err(rule.shape_error(self.source_file, path));
         }
-        if map.is_empty() {
+        if source.is_empty(map) {
             return Ok(Vec::new());
         }
         Ok(self
-            .parse_bundle(map, path, authored)?
+            .parse_bundle(map, path, authored, source)?
             .into_iter()
             .map(LifecycleNode::Action)
             .collect())
@@ -951,31 +963,23 @@ impl StackParser<'_> {
     /// `map` holds verbs plus an optional sibling `no_error`; a caller has
     /// already removed `when`. Several verbs use short form only; one verb may
     /// use long form.
+    ///
+    /// A `no_error` counts only where `source` shows it authored and
+    /// non-null ([`LifecycleParseOptions::authored_values`]); its value is
+    /// read through [`literal_flag`]. A flag written both beside a long form
+    /// and inside it is refused, even when the two agree.
     fn parse_bundle(
         &self,
         map: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
+        source: AuthoredSource<'_>,
     ) -> Result<Vec<LifecycleAction>, LifecycleError> {
-        let sibling_no_error = match map.get("no_error") {
-            None => None,
-            Some(serde_json::Value::Bool(flag)) => Some(*flag),
-            Some(other) => {
-                return Err(shape_error(
-                    self.source_file,
-                    &path.field("no_error"),
-                    format!("`no_error` must be a boolean, got {}", json_type_name(other)),
-                ));
-            }
-        };
+        let sibling_no_error = sibling_flag(map, source).map_err(|rule| rule.shape_error(self.source_file, path))?;
         let verbs: Vec<(&String, &serde_json::Value)> =
             map.iter().filter(|(key, _)| key.as_str() != "no_error").collect();
-        if verbs.is_empty() {
-            return Err(shape_error(
-                self.source_file,
-                path,
-                "`no_error` needs an action beside it".to_string(),
-            ));
+        if let Some(rule) = empty_bundle_rule(&verbs) {
+            return Err(rule.shape_error(self.source_file, path));
         }
         let ignores = |verb: &str| self.options.unknown_verbs.ignores(verb);
         for (verb, _) in &verbs {
@@ -986,13 +990,8 @@ impl StackParser<'_> {
         if map.contains_key("say") && map.contains_key("speak") && !ignores("say") {
             return Err(LifecycleError::LifecycleSayConflict(path.to_string()));
         }
-        if sibling_no_error.is_some() && verbs.len() == 1 && verbs[0].0 == "set" {
-            return Err(shape_error(
-                self.source_file,
-                &path.field("no_error"),
-                "`no_error` does not apply to `set`; a `set` failure always stops the stack"
-                    .to_string(),
-            ));
+        if let Some(rule) = set_flag_rule(map, source, &verbs) {
+            return Err(rule.shape_error(self.source_file, path));
         }
         if verbs.iter().filter(|(verb, _)| is_lifecycle_control_verb(verb) && !ignores(verb)).count() > 1 {
             return Err(LifecycleError::LifecycleMultipleLifecycleActions {
@@ -1022,15 +1021,10 @@ impl StackParser<'_> {
                         ),
                     ));
                 }
-                let (action, inner_no_error) = self.parse_long_form(verb, params, &verb_path)?;
-                if inner_no_error && sibling_no_error.is_some() {
-                    return Err(shape_error(
-                        self.source_file,
-                        &verb_path.field("no_error"),
-                        format!(
-                            "`no_error` is set both beside `{verb}` and inside it; keep one"
-                        ),
-                    ));
+                let (action, inner_no_error) =
+                    self.parse_long_form(verb, params, &verb_path, source.child(verb.as_str()))?;
+                if let Some(rule) = duplicate_flag_rule(verb, inner_no_error, sibling_no_error.is_some()) {
+                    return Err(rule.shape_error(self.source_file, path));
                 }
                 action
             } else {
@@ -1056,12 +1050,14 @@ impl StackParser<'_> {
     }
 
     /// A one-verb long form: `verb: { <params>, no_error? }`. Returns the
-    /// action and whether the map carried its own `no_error`.
+    /// action and whether `source` shows the map's own `no_error` authored
+    /// (non-null); an unauthored one is a completed default and is skipped.
     fn parse_long_form(
         &self,
         verb: &str,
         map: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
+        source: AuthoredSource<'_>,
     ) -> Result<(LifecycleAction, bool), LifecycleError> {
         let property = path.to_string();
         let communication = CommunicationChannel::from_verb(verb).is_some();
@@ -1070,21 +1066,17 @@ impl StackParser<'_> {
         let mut params: Vec<(String, Expr)> = Vec::new();
         for (key, value) in map {
             if key == "no_error" {
-                no_error = Some(match value {
-                    serde_json::Value::Bool(flag) => *flag,
-                    other => {
-                        return Err(LifecycleError::LifecycleActionInvalidLongForm {
+                if source.written(map, "no_error").is_some() {
+                    no_error = literal_flag("no_error", value).map_err(|message| {
+                        LifecycleError::LifecycleActionInvalidLongForm {
                             source_path: self.source_file.to_path_buf(),
-                            property,
+                            property: property.clone(),
                             action: verb.to_string(),
-                            message: format!(
-                                "`no_error` must be a boolean, got {}",
-                                json_type_name(other)
-                            ),
+                            message,
                             source: None,
-                        });
-                    }
-                });
+                        }
+                    })?;
+                }
                 continue;
             }
             if communication && matches!(key.as_str(), "message" | "sound" | "route") {
@@ -1128,6 +1120,29 @@ impl StackParser<'_> {
                     ),
                 });
             }
+            // `edit`'s flags are literals, converted as the schema converts
+            // them; a `null` flag is no value, never `false` by accident.
+            if verb == "edit" && matches!(key.as_str(), "create_new" | "gui") {
+                let flag = literal_flag(&format!("edit.{key}"), value).map_err(|message| {
+                    LifecycleError::LifecycleInvalidArgs {
+                        source_path: self.source_file.to_path_buf(),
+                        property: path.field(key.as_str()).to_string(),
+                        action: verb.to_string(),
+                        message,
+                    }
+                })?;
+                if let Some(flag) = flag {
+                    params.push((key.clone(), Expr::BoolLiteral(flag)));
+                }
+                continue;
+            }
+            // An `edit` target is text: `file: 5` names the file `5`.
+            let value = if verb == "edit" && key == "file" {
+                edit_file_value(value)
+            } else {
+                std::borrow::Cow::Borrowed(value)
+            };
+            let value = value.as_ref();
             // Direct YAML object literals are not parameter values; object
             // data must be passed through a whole-value `{{ ... }}` span.
             if let serde_json::Value::Object(_) = value {
@@ -1156,7 +1171,7 @@ impl StackParser<'_> {
                 no_error: no_error.unwrap_or(false),
                 path: path.clone(),
             },
-            no_error.is_some(),
+            source.written(map, "no_error").is_some(),
         ))
     }
 
@@ -1221,6 +1236,244 @@ fn canonical_rank(verb: &str) -> (u8, u8, String) {
     } else {
         (3, 0, verb.to_string())
     }
+}
+
+/// A placement or branch-shape rule an authored action dictionary breaks:
+/// the message, and the keys leading from the dictionary to the offending
+/// value (none for the dictionary itself).
+///
+/// The parser and passive schema validation ([`placement_rule`]) read these
+/// rules from the same functions, so the two cannot disagree on them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlacementRule {
+    pub(crate) at: Vec<String>,
+    pub(crate) message: String,
+    /// Whether the value has the wrong type rather than the wrong place.
+    pub(crate) mistyped: bool,
+}
+
+impl PlacementRule {
+    fn new(at: &[&str], message: impl Into<String>) -> Self {
+        Self {
+            at: at.iter().map(|key| (*key).to_string()).collect(),
+            message: message.into(),
+            mistyped: false,
+        }
+    }
+
+    fn shape_error(self, source_file: &Path, path: &LifecyclePath) -> LifecycleError {
+        let path = self.at.iter().fold(path.clone(), |path, key| path.field(key));
+        shape_error(source_file, &path, self.message)
+    }
+}
+
+/// Where an action dictionary sits in a lifecycle stack, which decides the
+/// rules [`placement_rule`] applies to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionMapPosition {
+    /// A list item: a bundle, a single action, or a `when` item.
+    Item,
+    /// A stack root or a `then`/`else` body written as a dictionary.
+    Dictionary,
+    /// A `loop:` block, whose loose verbs sit beside its iteration controls.
+    Loop,
+}
+
+/// The first placement or branch-shape rule the authored dictionary `map`
+/// breaks at `position`, in the order the parser checks them, without
+/// parsing any verb: an empty item, `then`/`else` without `when`, a flag or
+/// sibling beside `then`, `else` without `then`, a `when` with nothing to
+/// guard, `when`/`then`/`else` in a dictionary of verbs, a flag that is not
+/// a literal boolean (beside the verbs or inside a single long form), a flag
+/// with no action, a flag on `set`, and a flag written both beside a long
+/// form and inside it.
+///
+/// `authored` is `map`'s authored counterpart ([`AuthoredSource`]): only a
+/// flag it shows written counts as a placement. `provided` says whether the
+/// host parses `verb`'s long form at all; a verb it ignores keeps its value
+/// unread, so its inner flag breaks no rule.
+pub(crate) fn placement_rule(
+    map: &serde_json::Map<String, serde_json::Value>,
+    position: ActionMapPosition,
+    authored: AuthoredSource<'_>,
+    provided: &dyn Fn(&str) -> bool,
+) -> Option<PlacementRule> {
+    let concerns;
+    let bundle = match position {
+        ActionMapPosition::Dictionary => {
+            if let Some(rule) = dictionary_keys_rule(map) {
+                return Some(rule);
+            }
+            if authored.is_empty(map) {
+                return None;
+            }
+            map
+        }
+        ActionMapPosition::Item => {
+            if let Some(rule) = item_keys_rule(map, authored) {
+                return Some(rule);
+            }
+            if !map.contains_key("when") {
+                map
+            } else if map.contains_key("then") {
+                return conditional_keys_rule(map, authored);
+            } else {
+                if let Some(rule) = guarded_keys_rule(map) {
+                    return Some(rule);
+                }
+                concerns = map.iter().filter(|(key, _)| key.as_str() != "when").map(|(key, value)| (key.clone(), value.clone())).collect();
+                &concerns
+            }
+        }
+        ActionMapPosition::Loop => {
+            if map.contains_key("when") || map.contains_key("gate") {
+                return None;
+            }
+            concerns = loop_concerns(map, authored);
+            if concerns.is_empty() {
+                return None;
+            }
+            &concerns
+        }
+    };
+    let sibling = match sibling_flag(bundle, authored) {
+        Ok(sibling) => sibling,
+        Err(mut rule) => {
+            rule.mistyped = true;
+            return Some(rule);
+        }
+    };
+    let verbs: Vec<(&String, &serde_json::Value)> = bundle.iter().filter(|(key, _)| key.as_str() != "no_error").collect();
+    if let Some(rule) = empty_bundle_rule(&verbs).or_else(|| set_flag_rule(bundle, authored, &verbs)) {
+        return Some(rule);
+    }
+    let [(verb, serde_json::Value::Object(params))] = verbs.as_slice() else {
+        return None;
+    };
+    if verb.as_str() == "set" || !provided(verb) {
+        return None;
+    }
+    let inner = authored.child(verb);
+    let value = inner.written(params, "no_error")?;
+    if let Err(message) = literal_flag("no_error", value) {
+        return Some(PlacementRule {
+            at: vec![(*verb).clone(), "no_error".to_string()],
+            message,
+            mistyped: true,
+        });
+    }
+    duplicate_flag_rule(verb, true, sibling.is_some())
+}
+
+/// A list item's keys before anything in it is parsed: it holds something
+/// authored, and `then`/`else` sit only beside `when`.
+fn item_keys_rule(map: &serde_json::Map<String, serde_json::Value>, source: AuthoredSource<'_>) -> Option<PlacementRule> {
+    if source.is_empty(map) {
+        return Some(PlacementRule::new(&[], "a stack item cannot be empty"));
+    }
+    if map.contains_key("when") {
+        return None;
+    }
+    ["then", "else"]
+        .into_iter()
+        .find(|key| map.contains_key(*key))
+        .map(|key| PlacementRule::new(&[key], format!("`{key}` requires `when` on the same item")))
+}
+
+/// A `when` item with `then`: no authored flag and no other sibling beside
+/// the branches. An unauthored `no_error` (a completed default) is not a
+/// sibling.
+fn conditional_keys_rule(map: &serde_json::Map<String, serde_json::Value>, source: AuthoredSource<'_>) -> Option<PlacementRule> {
+    if source.written(map, "no_error").is_some() {
+        return Some(PlacementRule::new(
+            &["no_error"],
+            "`no_error` cannot sit beside `then`/`else`; put it on the actions in the body",
+        ));
+    }
+    map.keys()
+        .find(|key| !matches!(key.as_str(), "when" | "then" | "else" | "no_error"))
+        .map(|extra| {
+            PlacementRule::new(
+                &[extra.as_str()],
+                format!("a `when` item with `then` cannot also carry the sibling `{extra}`; move it into `then`"),
+            )
+        })
+}
+
+/// A `when` item without `then`: no `else`, and at least one action beside
+/// `when` (a flag alone guards nothing).
+fn guarded_keys_rule(map: &serde_json::Map<String, serde_json::Value>) -> Option<PlacementRule> {
+    if map.contains_key("else") {
+        return Some(PlacementRule::new(&["else"], "`else` requires `then`; write the true branch under `then`"));
+    }
+    map.keys()
+        .all(|key| matches!(key.as_str(), "when" | "no_error"))
+        .then(|| PlacementRule::new(&[], "a `when` item needs `then` or sibling actions"))
+}
+
+/// A dictionary of verbs standing for a stack or body never carries
+/// `when`, `then`, or `else`.
+fn dictionary_keys_rule(map: &serde_json::Map<String, serde_json::Value>) -> Option<PlacementRule> {
+    ["when", "then", "else"].into_iter().find(|key| map.contains_key(*key)).map(|key| {
+        PlacementRule::new(
+            &[key],
+            format!("a dictionary of verbs never carries `{key}`; write a guarded list item (`- when: …`) instead"),
+        )
+    })
+}
+
+/// The authored `no_error` beside a bundle's verbs, read as a literal flag.
+fn sibling_flag(map: &serde_json::Map<String, serde_json::Value>, source: AuthoredSource<'_>) -> Result<Option<bool>, PlacementRule> {
+    match source.written(map, "no_error") {
+        None => Ok(None),
+        Some(value) => literal_flag("no_error", value).map_err(|message| PlacementRule::new(&["no_error"], message)),
+    }
+}
+
+/// A flag needs an action beside it.
+fn empty_bundle_rule(verbs: &[(&String, &serde_json::Value)]) -> Option<PlacementRule> {
+    verbs.is_empty().then(|| PlacementRule::new(&[], "`no_error` needs an action beside it"))
+}
+
+/// `set` takes no flag: an authored one, even `null`, is refused; a
+/// completed `false` is not authored.
+fn set_flag_rule(
+    map: &serde_json::Map<String, serde_json::Value>,
+    source: AuthoredSource<'_>,
+    verbs: &[(&String, &serde_json::Value)],
+) -> Option<PlacementRule> {
+    (source.has_key(map, "no_error") && verbs.len() == 1 && verbs[0].0 == "set").then(|| {
+        PlacementRule::new(
+            &["no_error"],
+            "`no_error` does not apply to `set`; a `set` failure always stops the stack",
+        )
+    })
+}
+
+/// A flag written both beside a long form and inside it is refused, even
+/// when the two agree.
+fn duplicate_flag_rule(verb: &str, inner: bool, sibling: bool) -> Option<PlacementRule> {
+    (inner && sibling).then(|| {
+        PlacementRule::new(
+            &[verb, "no_error"],
+            format!("`no_error` is set both beside `{verb}` and inside it; keep one"),
+        )
+    })
+}
+
+/// A `loop:` block's lifecycle concerns: every key but the iteration
+/// controls, and its `no_error` only where it is authored.
+fn loop_concerns(
+    loop_obj: &serde_json::Map<String, serde_json::Value>,
+    source: AuthoredSource<'_>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let authored_no_error = source.written(loop_obj, "no_error").is_some();
+    loop_obj
+        .iter()
+        .filter(|(key, _)| !LOOP_ITERATION_KEYS.contains(&key.as_str()))
+        .filter(|(key, _)| authored_no_error || key.as_str() != "no_error")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
 }
 
 fn shape_error(source_file: &Path, path: &LifecyclePath, message: String) -> LifecycleError {
@@ -1457,6 +1710,77 @@ fn is_safe_path_segment(key: &str) -> bool {
         && key
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// The authored counterpart of the value a [`StackParser`] walks, positioned
+/// at the same node.
+///
+/// A host may parse a value a schema completed first: every missing or
+/// `null` `no_error` then holds its default, `false`. This cursor tells the
+/// parser which flags the author wrote. [`AuthoredOrder`] carries key order
+/// only and cannot tell an authored `null` from a filled `false`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum AuthoredSource<'v> {
+    /// The parsed value is itself authored.
+    Input,
+    /// The authored value at this node; `None` where nothing was authored.
+    At(Option<&'v serde_json::Value>),
+}
+
+impl<'v> AuthoredSource<'v> {
+    /// `None` is the parsed value itself; `Some` its authored counterpart.
+    pub(crate) fn from_option(value: Option<&'v serde_json::Value>) -> Self {
+        value.map_or(Self::Input, |value| Self::At(Some(value)))
+    }
+
+    /// The cursor at mapping key `key` of the current node.
+    pub(crate) fn child(self, key: &str) -> Self {
+        match self {
+            Self::Input => Self::Input,
+            Self::At(value) => Self::At(value.and_then(|value| value.as_object()?.get(key))),
+        }
+    }
+
+    /// The cursor at list element `index` of the current node.
+    pub(crate) fn at(self, index: usize) -> Self {
+        match self {
+            Self::Input => Self::Input,
+            Self::At(value) => Self::At(value.and_then(|value| value.as_array()?.get(index))),
+        }
+    }
+
+    /// The parsed value of `key` in `parsed` (the current node), when the
+    /// author wrote it non-null; a written value the completion did not keep
+    /// is read as authored.
+    fn written<'p>(self, parsed: &'p serde_json::Map<String, serde_json::Value>, key: &str) -> Option<&'p serde_json::Value>
+    where
+        'v: 'p,
+    {
+        let parsed_value = parsed.get(key).filter(|value| !value.is_null());
+        match self {
+            Self::Input => parsed_value,
+            Self::At(authored) => {
+                let authored: &'p serde_json::Value =
+                    authored.and_then(|value| value.get(key)).filter(|value| !value.is_null())?;
+                Some(parsed_value.unwrap_or(authored))
+            }
+        }
+    }
+
+    /// Whether `parsed` (the current node) holds nothing the author wrote:
+    /// no key, or only a `no_error` that is not authored ([`Self::written`]).
+    fn is_empty(self, parsed: &serde_json::Map<String, serde_json::Value>) -> bool {
+        parsed.keys().all(|key| key == "no_error") && self.written(parsed, "no_error").is_none()
+    }
+
+    /// Whether the author wrote `key` in the current node at all, `null`
+    /// included.
+    fn has_key(self, parsed: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
+        match self {
+            Self::Input => parsed.contains_key(key),
+            Self::At(authored) => authored.and_then(|value| value.get(key)).is_some(),
+        }
+    }
 }
 
 use indexmap::IndexMap;

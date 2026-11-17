@@ -154,21 +154,24 @@ pub enum PropertyDef {
 }
 
 impl PropertyDef {
-    /// Whether this property is effectively required: some atom marks it
-    /// `required` and its whole value does not admit null.
+    /// Whether this property is required: some atom marks it `required`,
+    /// written, inherited from a named type, or hoisted from a union arm.
+    ///
+    /// `required` is a presence contract only: the key must be written (or
+    /// supplied by a default). It is independent of [`Self::admits_null`],
+    /// which decides whether a written `null` satisfies the value type, so
+    /// `null(required)` and `[number(required), null]` are both required.
     ///
     /// This is the one presence calculation shared by lowering, trigger
-    /// matching, optional-property materialization, completion metadata, and
-    /// phase projection. Property-level unions hoist `required` from any arm,
-    /// but a union with a `null` or `unknown` arm is never required, whatever
-    /// its arms, a named type, or `eager`/`generated` say. Expects a
-    /// **resolved** definition: an unresolved reference never admits null.
+    /// matching, completion metadata, and composition. Phase projection keeps
+    /// it for value typing and decides only parent `required` membership.
+    /// Expects a **resolved** definition, whose inherited markers are already
+    /// on its atoms.
     pub fn is_required(&self) -> bool {
-        let marked = match self {
+        match self {
             Self::Single(atom) => atom.marks_required(),
             Self::Union(atoms) => atoms.iter().any(PropertyAtom::marks_required),
-        };
-        marked && !self.admits_null()
+        }
     }
 
     /// Whether the property's whole value admits null: a scalar `null` or
@@ -181,27 +184,6 @@ impl PropertyDef {
             Self::Single(atom) => atom.admits_null(),
             Self::Union(atoms) => atoms.iter().any(PropertyAtom::admits_null),
         }
-    }
-
-    /// Whether some atom carries the `non-null` marker.
-    pub fn marks_non_null(&self) -> bool {
-        match self {
-            Self::Single(atom) => atom.marks_non_null(),
-            Self::Union(atoms) => atoms.iter().any(PropertyAtom::marks_non_null),
-        }
-    }
-
-    /// The message of a `non-null` declared over a value that admits null
-    /// (`null | string(non-null)`, `unknown(non-null)`), if this definition
-    /// has one. Expects a definition whose references are resolved; an
-    /// unresolved reference never admits null, so the resolver repeats the
-    /// check after expansion.
-    pub fn non_null_problem(&self) -> Option<String> {
-        (self.marks_non_null() && self.admits_null()).then(|| {
-            "`non-null` cannot mark a type that admits null (`null`, `unknown`, or a union with \
-             such an alternative); drop `non-null` or the null-admitting alternative"
-                .to_string()
-        })
     }
 
     /// Whether any atom supplies a property default.
@@ -218,9 +200,9 @@ impl PropertyDef {
 
     /// Checks the invariants of this definition's options that the parser
     /// checks for an authored definition: at most one `suggest`, distinct
-    /// `function` overloads, valid `narrows` clauses, and no `non-null` over
-    /// a value that admits null. Template-type resolution repeats them on a
-    /// definition a returned type was substituted into.
+    /// `function` overloads, and valid `narrows` clauses. Template-type
+    /// resolution repeats them on a definition a returned type was
+    /// substituted into.
     ///
     /// ## Errors
     ///
@@ -231,7 +213,7 @@ impl PropertyDef {
             Self::Single(atom) => std::slice::from_ref(atom),
             Self::Union(atoms) => atoms.as_slice(),
         };
-        match super::grammar::union_invariant_problem(arms, true) {
+        match super::grammar::union_invariant_problem(arms) {
             Some(problem) => Err(problem.into_error(property)),
             None => Ok(()),
         }
@@ -834,31 +816,22 @@ impl PropertyAtom {
         self.constraints.iter().chain(self.array_constraints.iter())
     }
 
-    /// Whether this atom, standing alone as a property, is effectively
-    /// required: it carries a `required` marker and its whole value does not
-    /// admit null (see [`PropertyDef::is_required`]).
+    /// Whether this atom, standing alone as a property, is required: it
+    /// carries a `required` marker, written, inherited, or hoisted from a
+    /// union type's arms. Null admission does not cancel it (see
+    /// [`PropertyDef::is_required`]).
     pub fn is_required(&self) -> bool {
-        self.marks_required() && !self.admits_null()
+        self.marks_required()
     }
 
     /// Whether this atom carries a `required` marker, written, inherited, or
-    /// hoisted from a union type's arms, regardless of null admission.
+    /// hoisted from a union type's arms.
     pub(crate) fn marks_required(&self) -> bool {
         self.property_constraints()
             .any(|constraint| matches!(constraint, Constraint::Required))
             || self
                 .union_arms()
                 .is_some_and(|arms| arms.iter().any(PropertyAtom::marks_required))
-    }
-
-    /// Whether this atom carries a `non-null` marker in either constraint
-    /// list, or on a union type's arms.
-    pub fn marks_non_null(&self) -> bool {
-        self.property_constraints()
-            .any(|constraint| matches!(constraint, Constraint::NonNull))
-            || self
-                .union_arms()
-                .is_some_and(|arms| arms.iter().any(PropertyAtom::marks_non_null))
     }
 
     /// Whether this atom's whole value admits null: a non-array `null` or
@@ -1102,13 +1075,6 @@ pub enum Constraint {
     /// The property must be present.
     Required,
 
-    /// `non-null`: the property may be omitted, but a present value is never
-    /// `null`. A presence marker like [`Constraint::Required`], read from
-    /// either constraint list. Declaring it on a type whose whole value
-    /// admits null (`null`, `unknown`, or a union with such an alternative)
-    /// is a schema error.
-    NonNull,
-
     /// Default value (emitted as JSON Schema `default`).
     Default(serde_json::Value),
 
@@ -1145,7 +1111,12 @@ pub enum Constraint {
     /// Maximum length in Unicode code points.
     MaxLen(usize),
 
-    /// Disallow empty/whitespace-only strings.
+    /// `not-empty`: a written value must have content. Rejects `""` and
+    /// whitespace-only text (strings, `yaml`, `json`, and declaration text),
+    /// `[]` (lists, the same bound as `min(1)`), and `{}` (objects and
+    /// mappings). It never rejects `null`: an optional property's `null` is
+    /// unset. A schema error on `number`, `boolean`, `null`, and `unknown`,
+    /// which have no "empty".
     NotEmpty,
 
     /// ECMA-262 regex the value must match.
@@ -1421,7 +1392,6 @@ impl Constraint {
     pub fn keyword(&self) -> &'static str {
         match self {
             Constraint::Required => "required",
-            Constraint::NonNull => "non-null",
             Constraint::Default(_) => "default",
             Constraint::Generated => "generated",
             Constraint::Deferred => "deferred",
@@ -1655,23 +1625,28 @@ mod tests {
     }
 
     #[test]
-    fn null_admitting_whole_values_are_never_required() {
+    fn required_marks_presence_independently_of_null_admission() {
         for ty in [SimplifiedType::Null, SimplifiedType::Unknown] {
             let def = PropertyDef::Single(required(ty));
-            assert!(def.admits_null() && !def.is_required(), "{ty:?}(required)");
+            assert!(def.admits_null() && def.is_required(), "{ty:?}(required)");
+            assert!(!PropertyDef::Single(PropertyAtom::bare(ty)).is_required(), "bare {ty:?}");
         }
         let nullable_union = PropertyDef::Union(vec![
             required(SimplifiedType::String),
             PropertyAtom::bare(SimplifiedType::Null),
         ]);
-        assert!(nullable_union.admits_null() && !nullable_union.is_required());
+        assert!(nullable_union.admits_null() && nullable_union.is_required(), "hoisted from an arm");
         let mut postfixed = PropertyAtom::bare(SimplifiedType::Object);
         postfixed.ty = TypeExpr::Union(vec![
             required(SimplifiedType::String),
             PropertyAtom::bare(SimplifiedType::Unknown),
         ]);
-        postfixed.constraints.push(Constraint::Required);
-        assert!(!PropertyDef::Single(postfixed).is_required(), "postfixed union with `unknown`");
+        assert!(postfixed.admits_null() && postfixed.is_required(), "postfixed union with `unknown`");
+        let unmarked = PropertyDef::Union(vec![
+            PropertyAtom::bare(SimplifiedType::String),
+            PropertyAtom::bare(SimplifiedType::Null),
+        ]);
+        assert!(!unmarked.is_required());
 
         // Item nullability and child nullability leave the container required.
         for ty in [SimplifiedType::Null, SimplifiedType::Unknown] {

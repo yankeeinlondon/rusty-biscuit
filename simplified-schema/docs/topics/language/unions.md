@@ -27,11 +27,13 @@ $schema:
 
 **Hoisting.** `required`, `eager`, and `default(...)` are property-level — they
 are extracted from whichever arm declares them and applied to the property as a
-whole. `required` on any arm makes the property required, unless another arm
-is `null` or `unknown` (see [Null-Admitting Properties](types.md#null-admitting-properties));
+whole. `required` on any arm makes the property required, also when another
+arm is `null` or `unknown`: that arm lets a written `null` through, but the key
+must still be written (see [Null-Admitting Properties](types.md#null-admitting-properties)).
 `eager` on any arm makes a supplied value launch-validated without requiring it. Convention is to
 place them on the first arm. Differing
-`default(...)` values on multiple arms is a compile-time error.
+`default(...)` values on multiple arms is a compile-time error (see
+[Defaults in Unions](#defaults-in-unions)).
 
 ```yaml
 $schema:
@@ -48,6 +50,88 @@ A property-level union may mix a `literal` arm with any other atom — something
 $schema:
     width: [literal(auto), "number(min(1))"]   # the keyword `auto` or a positive number
 ```
+
+### Defaults in Unions
+
+A default is a fill-in for a property that has no value, never part of
+choosing an arm. `retries: number(default(3))` makes the property's
+effective type `number`, not `number | null`, without making it required.
+The same holds in a union, whether the default sits on one arm of a property
+union or on one arm of a [root union](#root-level-unions):
+
+- **Defaults are collected from every arm.** When the property is missing or
+  `null`, its default is applied before any arm is matched, so the arms are
+  then judged on the completed value.
+- **At most one default per property.** Equal defaults on several arms count
+  as one. Different defaults for one property are a schema error as soon as
+  the schema is lowered or prepared, used or not: on the arms of a
+  property-level union, a `SchemaError::Convert` naming the property; on
+  object arms (a root union, or a union of inline objects), a
+  `SchemaError::ConflictingDefaults` naming the object's location and each
+  `default` keyword. The order of the arms never picks one.
+- **A default on one arm is enough.** It fills the property whichever arm
+  then matches:
+
+  ```yaml
+  $schema:
+    - timeout: number(default(3))   # design time: number | string
+    - timeout: string               # runtime: 3 when timeout is unset or null
+  ```
+
+- **A default outside a union must suit one of its arms.** A default
+  declared beside a union (a common property next to a root union, or a
+  named type layered with another whose arms describe the same key) is
+  checked against the union as a group when it is used: at least one arm
+  must accept it as written. An arm that does not mention the property
+  accepts it if it can hold the object the property is in; a scalar or
+  list arm (such as a `string` shorthand) and a closed object arm that does
+  not name the property cannot, so they do not count. Here `{}` would lack whichever child each arm requires, so
+  `{ x-settings: {} }` is an invalid default at `x-settings.options`:
+
+  ```yaml
+  types:
+    Parent:
+      options: object(default({}))
+    Nested:
+      - options: "{ enabled: boolean(required; default(true)) }"
+      - options: "{ mode: string(required) }"
+  $schema:
+    '<starting::x->': Parent
+    '<ending::-settings>': Nested
+  ```
+
+- **Matching still uses the values.** Because the default is applied before
+  matching, an arm that excludes the property (`timeout: null`) or is
+  [closed](objects-and-named-types.md#closed-roots-closed) without it rejects
+  every value that received the default. Excluding keys is how arms are made
+  exclusive, but a defaulted key cannot be one of them:
+
+  ```yaml
+  $schema:
+    - timeout: number(default(3))
+      retries: null
+    - retries: number
+      timeout: null
+  ```
+
+  `{}` completes to `{ timeout: 3 }` and matches the first arm. `{ retries: 5 }`
+  also receives `timeout: 3`, so it fails the first arm's `retries: null` and
+  the second arm's `timeout: null`, and is rejected. Drop the default, or move
+  it to a property every arm accepts.
+
+A discriminated root union applies every arm's defaults too. With
+
+```yaml
+$schema:
+  - kind: literal(post; required)
+    title: string(required; default(untitled))
+  - kind: literal(page; required)
+    slug: string(required; default(home))
+```
+
+`{ kind: page }` completes to `{ kind: page, title: untitled, slug: home }`
+and matches the `page` arm, since a root mapping is open; `{ kind: essay }`
+still fails both discriminants.
 
 ### The `|` Operator and Grouping
 
@@ -122,6 +206,19 @@ parameter, which cannot carry `?`. Names must be unique; they are
 documentation and never change which calls bind. `void` stands alone, and
 `parameters()` is an error. Omission is not null: `age?: number` may be left
 out but rejects `null`, while `age?: number | null` allows both.
+
+Arguments are positional, so they do not follow the property rule that a
+missing key and `null` are the same value. With
+`parameters(name: string, age?: number)`:
+
+| Call | Result |
+|---|---|
+| `greet("Ada")` | binds: the optional `age` is left out |
+| `greet("Ada", 36)` | binds |
+| `greet("Ada", null)` | type error: `age` does not declare `\| null` |
+
+The properties inside an object-typed argument follow the property rules: a missing key and `null` are the same value, and
+`required` asks whether the key was written.
 
 **Inline examples.** `example(CALL => RESULT)` shows a call and its expected
 result. `CALL` is a Darkmatter function-call expression. `RESULT` is a
@@ -371,10 +468,10 @@ $schema:
 - `required` and `generated` declared on any arm hoist to the property that
   holds the reference, whether that property is the union (`U`, `U(eager)`) or
   a list of it (`U[]`), just as they do for a property-level union. Markers
-  written at the use site add to them. A union with a `null` or `unknown` arm
-  is the exception: `U` and `U(required)` stay optional (see
-  [Null-Admitting Properties](types.md#null-admitting-properties)), while `U[]` is a
-  list and keeps its markers.
+  written at the use site add to them. A `null` or `unknown` arm does not
+  cancel them: `U(required)` still needs the key, and a written `null` is
+  accepted by that arm (see
+  [Null-Admitting Properties](types.md#null-admitting-properties)).
 - `generated` keeps its [usual meaning](types.md#universal-constraints): it adds the
   `x-darkmatter-generated` annotation and removes the property from the static
   `required` list. It supplies no value.
@@ -403,8 +500,9 @@ $schema:
   through the Rust API) gives that list to the containing list as its
   default. Multiple inherited and use-site defaults must be equal;
   conflicting defaults fail schema preparation.
-- Darkmatter's composition inserts a required property's default into the
-  composed value only; it never writes a default into the authored file.
+- Darkmatter's composition inserts a property's default, required or not,
+  into the composed value only; it never writes a default into the authored
+  file.
 
 #### Lowering
 

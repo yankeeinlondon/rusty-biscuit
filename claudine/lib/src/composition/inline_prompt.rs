@@ -184,18 +184,16 @@ use simplified_schema::SchemaPhase;
     }
 
     #[test]
-    fn null_admitting_whole_values_are_optional_at_completion() {
-        // Darkmatter's shared presence: a `required` on `null`, `unknown`, or
-        // a union with a `null` arm has no effect; a list of nulls and an
-        // object with a nullable child stay required.
+    fn null_admitting_required_values_are_required_at_completion() {
+        // Darkmatter's shared presence: `required` asks only that the key be
+        // written, so it holds on `null`, `unknown`, and a union with a
+        // `null` arm, as on a list of nulls and an object with a nullable
+        // child.
         let schema = launch_schema(
             "---\n$schema:\n  nothing: null(required)\n  anything: unknown(eager; required)\n  alias: any(required)\n  maybe:\n    - string(required)\n    - 'null'\n  nulls: null[](required)\n  holder: '{ c: null }(required)'\nprompt: p\n---\n",
         );
         let header = build_inline_prompt_header(Path::new("/tmp/d.md"), Some(&schema), &json!({}));
-        for optional in ["nothing", "anything", "alias", "maybe"] {
-            assert_eq!(completion_cell(&header, optional), "optional", "{optional}");
-        }
-        for required in ["nulls", "holder"] {
+        for required in ["nothing", "anything", "alias", "maybe", "nulls", "holder"] {
             assert_eq!(completion_cell(&header, required), "required", "{required}");
         }
     }

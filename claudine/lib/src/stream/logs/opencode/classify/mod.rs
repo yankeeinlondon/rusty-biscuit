@@ -159,7 +159,7 @@ pub(super) fn error_context(record: &OpenCodeLogRecord) -> Option<String> {
 /// these records arrive as the headline followed by an escaped JS stack trace
 /// and a `cause=` restatement of the same message — hundreds of frames burying
 /// the sentence that identifies the failure. Cut at whichever marker comes
-/// first, then apply the same char-boundary-safe cap the JSON summarizer uses.
+/// first; the headline itself is kept whole.
 fn error_headline(error: &str) -> String {
     let error = error.trim();
     let error = error.strip_prefix('"').unwrap_or(error);
@@ -170,13 +170,7 @@ fn error_headline(error: &str) -> String {
         .flatten()
         .min()
         .unwrap_or(error.len());
-    let headline = error[..end].trim().trim_end_matches('"').trim();
-
-    if headline.chars().count() > 300 {
-        let truncated: String = headline.chars().take(297).collect();
-        return format!("{truncated}...");
-    }
-    headline.to_string()
+    error[..end].trim().trim_end_matches('"').trim().to_string()
 }
 
 pub(super) fn strip_ansi(line: &str) -> String {

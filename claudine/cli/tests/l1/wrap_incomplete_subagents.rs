@@ -55,8 +55,8 @@ enum TaskEnding {
     /// Both tasks stopped, then both re-reported as completed under the same
     /// provider IDs. A later success for the *same ID* clears the earlier stop.
     StoppedThenCompleted,
-    /// Twelve stopped tasks with names long enough that the 240-character
-    /// lifecycle headline cannot possibly list them all.
+    /// Twelve stopped tasks with names long enough that listing them all makes
+    /// the lifecycle headline far longer than 240 characters.
     ManyLongNamedStops,
 }
 
@@ -296,12 +296,11 @@ fn a_later_success_for_the_same_task_id_clears_the_stop() {
     );
 }
 
-/// The concise headline is clamped to 240 characters; the machine record is
-/// not. Prove the two diverge in exactly that direction — the JSONL row keeps
-/// every fact the headline had to drop, and the full terminal diagnostic keeps
-/// every task name too.
+/// A long incomplete-task headline is never shortened: the lifecycle
+/// `err.msg`, the JSONL machine record, and the terminal diagnostic all name
+/// every task.
 #[test]
-fn display_truncation_never_reaches_the_machine_record() {
+fn the_headline_and_the_machine_record_both_name_every_task() {
     let (fixture, md_file) =
         replay_fixture("truncated-subagents", TaskEnding::ManyLongNamedStops);
 
@@ -315,7 +314,7 @@ fn display_truncation_never_reaches_the_machine_record() {
     let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     let trace = lifecycle_trace(&fixture);
 
-    // The lifecycle headline obeys the shared hygiene contract …
+    // The lifecycle headline names every task, in declaration order …
     let headline = trace
         .iter()
         .find(|line| line.starts_with("failure-msg="))
@@ -323,21 +322,21 @@ fn display_truncation_never_reaches_the_machine_record() {
         .trim_start_matches("failure-msg=")
         .to_string();
     assert!(
-        headline.chars().count() <= 240,
-        "the headline must stay within the 240-character budget; got {} chars: {headline}",
-        headline.chars().count()
-    );
-    assert!(
         headline.starts_with("12 sub-agent tasks did not complete"),
         "the headline must carry the incomplete count; got {headline:?}"
     );
-    let named_in_headline = (0..LONG_NAMED_STOP_COUNT)
-        .filter(|index| headline.contains(&long_task_name(*index)))
-        .count();
+    let positions: Vec<usize> = (0..LONG_NAMED_STOP_COUNT)
+        .map(|index| {
+            headline
+                .find(&format!("{} (", long_task_name(index)))
+                .unwrap_or_else(|| panic!("task {index} missing from the headline: {headline}"))
+        })
+        .collect();
     assert!(
-        named_in_headline < LONG_NAMED_STOP_COUNT,
-        "this test is vacuous unless the headline actually had to truncate; it named all {LONG_NAMED_STOP_COUNT}: {headline}"
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "tasks out of declaration order: {headline}"
     );
+    assert!(!headline.contains('…'), "the headline was shortened: {headline}");
 
     // … while the machine record keeps every fact.
     let extra = last_session_end_extra(&fixture);
@@ -353,7 +352,7 @@ fn display_truncation_never_reaches_the_machine_record() {
         );
     }
 
-    // … and so does the unbudgeted terminal diagnostic.
+    // … and so does the terminal diagnostic.
     for index in 0..LONG_NAMED_STOP_COUNT {
         assert!(
             plain.contains(&long_task_name(index)),

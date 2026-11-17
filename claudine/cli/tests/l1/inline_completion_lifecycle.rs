@@ -967,11 +967,13 @@ mod sequence_task_with_satisfies_the_referenced_documents_completion_schema {
     }
 }
 
-/// AC9a / AC13, inline half: a required-but-not-eager property whose authored
-/// expression legitimately resolves to `null` never prompts and never blocks
-/// launch. The agent runs, and the gap is reported by the completion verdict.
+/// A required-but-not-eager property whose authored expression resolves to
+/// `null`: launch does not demand the property, but the value written for it
+/// is still judged by its declared type, and `null` is not a string, so the
+/// inline launch is refused before the agent runs. (An *omitted* non-eager
+/// property is deferred to completion instead.)
 #[test]
-fn a_conditional_required_property_never_blocks_an_inline_launch() {
+fn a_conditional_required_property_resolved_to_null_fails_the_inline_launch() {
     let source = concat!(
         "---\n",
         "$schema:\n",
@@ -1009,17 +1011,12 @@ fn a_conditional_required_property_never_blocks_an_inline_launch() {
 
     assert_eq!(
         fs::read_to_string(&calls).unwrap_or_default().len(),
-        1,
-        "inline mode must launch rather than prompt or refuse; stderr:\n{}",
+        0,
+        "the launch is refused before the agent runs; stderr:\n{}",
         stderr_of(&assert)
     );
     let stderr = stderr_of(&assert);
-    assert!(stderr.contains("foo"), "the verdict must name the gap:\n{stderr}");
-    let written = fixture.document_text();
-    assert!(
-        written.contains("Agent wrote this."),
-        "the artifact survives a completion-schema failure:\n{written}"
-    );
+    assert!(stderr.contains("foo"), "the refusal names the property:\n{stderr}");
 
     // Supplying `spec` lets the document's own expression fill `foo`, and the
     // identical run succeeds.

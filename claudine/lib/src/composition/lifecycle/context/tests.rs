@@ -682,8 +682,8 @@ fn timing_from_instants_omits_total_ms_without_run_start() {
 
 /// `err.msg` feeds TTS, webhooks, and desktop notifications verbatim, so it is
 /// hygiened at the *constructor*, not at each producer. The nastiest input a
-/// producer can hand over — multi-line, escape-bearing, and far over the cap —
-/// must still come out usable.
+/// producer can hand over — multi-line, escape-bearing, and long — must come
+/// out as one escape-free line that keeps every word.
 #[test]
 fn err_msg_is_hygiened_for_a_hostile_action_failure() {
     let hostile = format!(
@@ -696,15 +696,14 @@ fn err_msg_is_hygiened_for_a_hostile_action_failure() {
     assert!(!msg.is_empty());
     assert!(!msg.contains('\u{1b}'), "escape bytes survived: {msg:?}");
     assert!(!msg.contains('\n') && !msg.contains('\r'), "not one line: {msg:?}");
-    assert!(msg.chars().count() <= 240, "over cap ({}): {msg:?}", msg.chars().count());
-    assert!(msg.contains("boom"), "headline lost: {msg:?}");
+    assert_eq!(msg, format!("boom second line third line {}", "x".repeat(500)));
 }
 
 /// The same hygiene contract, asserted over every constructor that can reach
 /// `err.msg` — a typed error of each registered kind plus the facet-less
 /// action-failure path.
 #[test]
-fn every_err_msg_producer_is_single_line_escape_free_and_capped() {
+fn every_err_msg_producer_is_single_line_and_escape_free() {
     let cases: Vec<(&str, LifecycleErrorInfo)> = vec![
         (
             "claudine",
@@ -747,18 +746,13 @@ fn every_err_msg_producer_is_single_line_escape_free_and_capped() {
             "`{name}` is multi-line: {:?}",
             info.msg
         );
-        assert!(
-            info.msg.chars().count() <= 240,
-            "`{name}` exceeds the cap: {:?}",
-            info.msg
-        );
     }
 }
 
 /// The provider attempt cascade keeps its ratified precedence and its
-/// budget-reserved `(attempt N)` suffix: the constructor's hygiene pass is
-/// idempotent over an already-hygiened `failure_message`, so re-running it
-/// cannot re-truncate or re-order the cascade's choice.
+/// `(attempt N)` suffix intact: the constructor's hygiene pass is idempotent
+/// over an already-hygiened `failure_message`, so re-running it cannot alter
+/// the cascade's choice.
 #[test]
 fn provider_failure_message_precedence_survives_the_constructor() {
     let outcome = crate::harness::AttemptOutcome {
@@ -882,4 +876,36 @@ fn from_error_or_action_prefers_facets_and_falls_back_to_the_verb() {
     let value = untyped.to_value();
     assert_eq!(value["variant"], json!("materialize"));
     assert_eq!(value["kind"], json!("LifecycleAction"));
+}
+
+/// A refusal under a long root keeps its complete text in `err.msg`, in the
+/// serialized snapshot, and in a snapshot restored into a live diagnostic.
+#[test]
+fn a_long_edit_refusal_keeps_its_complete_text_in_err_msg() {
+    let temp = std::env::temp_dir();
+    let root = temp.join("a-project-directory-with-a-fifty-character-name-xy");
+    let target = temp.join("an-outside-directory-with-a-fifty-character-name-x").join("refused-target-file.md");
+    let error = CompositionError::LifecycleEditFailed {
+        source_path: root.join("doc.md"),
+        property: "start[0].edit".to_string(),
+        target: target.clone(),
+        error: Box::new(darkmatter::editor::EditError::Containment(
+            darkmatter::effects::EffectError::OutsideMutationRoot { path: target.clone(), root: root.clone() },
+        )),
+    };
+
+    let info = LifecycleErrorInfo::from_composition_error(&error);
+
+    let full = info.msg.as_str();
+    assert!(full.contains(&target.display().to_string()), "names the whole target: {full}");
+    assert!(full.contains(&format!("(root: {})", root.display())), "names the whole root: {full}");
+    assert!(full.chars().count() > 240, "the fixture is longer than the removed 240-character limit: {full}");
+    assert!(!full.contains('…'), "nothing is cut: {full}");
+    assert_eq!(info.to_value()["msg"], json!(full), "`err.msg` projects the complete text");
+    let snapshot = info.snapshot.as_deref().expect("a classified edit failure").clone();
+    assert_eq!(snapshot.message, full);
+    assert_eq!(serde_json::to_value(&snapshot).unwrap()["message"], json!(full), "the complete text is serialized");
+    let restored = crate::diagnostics::RestoredDiagnostic::new(snapshot.clone());
+    assert_eq!(restored.to_string(), full, "a restored diagnostic renders the complete text");
+    assert_eq!(DiagnosticSnapshot::from_diagnostic(&restored), snapshot, "re-projection is still a fixed point");
 }

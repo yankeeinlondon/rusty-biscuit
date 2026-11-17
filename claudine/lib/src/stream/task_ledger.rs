@@ -393,24 +393,14 @@ impl TaskLedger {
 
 /// Operator-facing headline for a run poisoned by incomplete sub-agent work.
 ///
-/// Names as many tasks as the shared 240-character failure-message budget can
-/// hold once [`crate::harness::concise_message`] clamps it; the complete list
-/// always remains in `subagent_outcomes`, which is why truncating here is safe.
+/// Names every incomplete task in declaration order; the message is never
+/// shortened. The structured list also stays in `subagent_outcomes`.
 pub fn incomplete_message(incomplete: &[SubagentOutcome]) -> String {
     compose_message(incomplete, None)
 }
 
-/// Character budget reserved for a displaced provider failure.
-///
-/// The composed message is clamped from the tail, so this reservation is what
-/// keeps the displaced failure — the one fact with no other home once
-/// `error_kind`/`error_message` are overwritten — from being the part that
-/// truncates. Well under the 240-character message budget by construction, so
-/// the task list is always the tail that gives way.
-const PRIOR_FAILURE_CLAUSE_MAX_CHARS: usize = 96;
-
 /// Build the operator headline, optionally naming a displaced provider failure
-/// between the count and the (truncatable) task list.
+/// between the count and the task list.
 fn compose_message(incomplete: &[SubagentOutcome], prior: Option<&str>) -> String {
     let count = incomplete.len();
     let noun = if count == 1 { "task" } else { "tasks" };
@@ -425,39 +415,26 @@ fn compose_message(incomplete: &[SubagentOutcome], prior: Option<&str>) -> Strin
     }
 }
 
-/// Render the provider failure this finalization displaces, bounded so it
-/// cannot crowd every task name out of the composed headline.
+/// Render the complete provider failure this finalization displaces.
 ///
-/// The provider's text is hygiened *before* the clamp, so the cut can never
-/// land inside an escape sequence and leave its tail as visible garbage.
+/// `kind` and `message` are normalized before the blank check, so a message
+/// made only of escapes or whitespace counts as absent rather than leaving a
+/// dangling `after provider failure:`.
 ///
 /// Returns `None` when neither a non-blank kind nor a non-blank message
 /// exists — there is nothing to displace, so the headline carries no clause.
 fn prior_failure_clause(kind: Option<&str>, message: Option<&str>) -> Option<String> {
-    fn present(value: Option<&str>) -> Option<&str> {
-        value.map(str::trim).filter(|text| !text.is_empty())
+    fn present(value: Option<&str>) -> Option<String> {
+        value
+            .map(crate::harness::concise_message)
+            .filter(|text| !text.is_empty())
     }
-    let clause = match (present(kind), present(message)) {
-        (Some(kind), Some(text)) => format!("after provider failure {kind}: {text}"),
-        (Some(kind), None) => format!("after provider failure {kind}"),
-        (None, Some(text)) => format!("after provider failure: {text}"),
-        (None, None) => return None,
-    };
-    Some(clamp_chars(
-        &crate::harness::concise_message(&clause),
-        PRIOR_FAILURE_CLAUSE_MAX_CHARS,
-    ))
-}
-
-/// Clamp to `budget` characters, reserving one for the ellipsis so the result
-/// never exceeds it.
-fn clamp_chars(text: &str, budget: usize) -> String {
-    if text.chars().count() <= budget {
-        return text.to_string();
+    match (present(kind), present(message)) {
+        (Some(kind), Some(text)) => Some(format!("after provider failure {kind}: {text}")),
+        (Some(kind), None) => Some(format!("after provider failure {kind}")),
+        (None, Some(text)) => Some(format!("after provider failure: {text}")),
+        (None, None) => None,
     }
-    let mut clamped: String = text.chars().take(budget.saturating_sub(1)).collect();
-    clamped.push('…');
-    clamped
 }
 
 #[cfg(test)]

@@ -221,6 +221,7 @@ under a test feature, and a production binary ignores the variable entirely.
 |----------|---------------|--------------|
 | `CLAUDINE_TEST_DESKTOP_NOTIFICATION=stall` | `test-fixtures` | holds every desktop notification open before any host backend |
 | `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT=<path>` | `test-fixtures` | writes the diagnostic selected for a top-level error to `<path>` as JSON |
+| `CLAUDINE_TEST_LIFECYCLE_HOLD=<prefix>` | `test-fixtures` | holds a lifecycle `info: terminal-lifecycle-test-hold` action in process: writes `<prefix>.reached`, then waits (at most 60 s) until `<prefix>.release` exists, so a keypress can be aimed at in-process lifecycle work while Claudine holds the terminal |
 | `CLAUDINE_TEST_DRAIN_STARTED=<path>` | `terminal-tests` | creates `<path>` once the exit drain's interrupt ladder is in place, so a press can be aimed at the drain |
 | `CLAUDINE_TEST_TEARDOWN_HOLD=<path>` | `terminal-tests` (Unix) | holds the process-group teardown open until `<path>.release` exists |
 

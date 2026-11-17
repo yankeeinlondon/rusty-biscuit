@@ -225,11 +225,13 @@ impl HostLifecycleProfile {
     }
 
     /// The host's parse options, with `authored` giving `set:` mappings their
-    /// authored key order.
+    /// authored key order. The parsed value is read as authored
+    /// ([`LifecycleParseOptions::authored_values`] is `None`).
     pub fn parse_options<'a>(&'a self, authored: Option<&'a Frontmatter>) -> LifecycleParseOptions<'a> {
         LifecycleParseOptions {
             is_known_effect: &*self.is_known_effect,
             authored,
+            authored_values: None,
             unknown_verbs: self.unknown_verbs.clone(),
             registry: &self.registry,
         }

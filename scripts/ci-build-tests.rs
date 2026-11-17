@@ -915,6 +915,8 @@ fn the_javascript_publisher_reads_a_fixture_generated_from_this_report() {
 /// once per call (see [`wrapper_for_run`]), and once per process under
 /// `cargo test`: every Cargo here takes the target directory's lock, so a
 /// build per call queued each test of a parallel suite behind all the others'.
+/// Under Nextest the run's build is normally the setup script's, whose path
+/// arrives as `BISCUIT_CI_BUILD_SHIPPED`.
 ///
 /// `pub(crate)` because the archive fixtures drive the same shipped binary; a
 /// second resolver would be a second chance to test something other than what
@@ -959,7 +961,8 @@ fn profile_dir() -> PathBuf {
 }
 
 /// The binary one Nextest run shares: the first of its tests to take the lock
-/// builds it, and every later one reads the handle that test recorded. Sources
+/// links the setup script's build (or builds it, when no setup script named
+/// one), and every later one reads the handle that test recorded. Sources
 /// cannot change under a run without staling the test binary itself, so one
 /// build per run is as fresh as one per test.
 fn wrapper_for_run(links: &Path, run: &str) -> PathBuf {
@@ -974,7 +977,12 @@ fn wrapper_for_run(links: &Path, run: &str) -> PathBuf {
             return recorded;
         }
     }
-    let built = build_shipped_wrapper(links, &format!("run-{run}"));
+    // The run's setup script already built it (`_ci_build_for_tests`). A Cargo
+    // call here would be a no-op that still waits on the target directory's lock.
+    let built = match env::var_os("BISCUIT_CI_BUILD_SHIPPED").map(PathBuf::from) {
+        Some(binary) if binary.is_file() => private_handle(links, &format!("run-{run}"), &binary),
+        _ => build_shipped_wrapper(links, &format!("run-{run}")),
+    };
     fs::write(&record, built.to_string_lossy().as_bytes()).expect("recording the ci-build handle");
     built
 }

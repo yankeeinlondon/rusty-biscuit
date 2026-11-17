@@ -362,6 +362,17 @@ pub const CODES: &[CodeSpec] = &[
         detail: &["group", "leg", "cause"],
     },
     CodeSpec {
+        // A lifecycle `edit` could not open its file: no usable editor, no
+        // terminal or display to lend it, a refused or unusable target, or
+        // the editor itself failed. `reason` is the typed cause's text.
+        code: "composition.lifecycle_edit_failed",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Environment,
+        severity_override: None,
+        detail: &["source_path", "property", "target", "reason"],
+    },
+    CodeSpec {
         code: "composition.failed",
         category: Category::Composition,
         disposition: Disposition::Correctable,
@@ -697,8 +708,9 @@ mod tests {
         // plus the pre-spawn provider-overlay pair
         // `provider.overlay_unsupported` / `provider.overlay_failed`
         // (shadow-home fix → Fail closed before spawn) → 49, plus structured
-        // sibling cancellation (`composition.cancelled`) → 50.
+        // sibling cancellation (`composition.cancelled`) → 50, plus the
+        // lifecycle `edit` action's `composition.lifecycle_edit_failed` → 51.
         // This pins the count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 50);
+        assert_eq!(CODES.len(), 51);
     }
 }

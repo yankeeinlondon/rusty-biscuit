@@ -20,7 +20,9 @@ changing it. Darkmatter decides this from the number **as written**:
   accepted;
 - a non-zero number that would become `0` (**underflow**) is rejected;
 - a number too large for an `f64`, or `inf`/`NaN`, is rejected as **not
-  finite**.
+  finite**. One exception is in YAML: an overflowing spelling such as `1e400`
+  is not a YAML number at all, so frontmatter loads it as the text `"1e400"`
+  (see [Frontmatter](#frontmatter)).
 
 | Written | Result | Why |
 | --- | --- | --- |
@@ -66,6 +68,23 @@ Failed to parse frontmatter in doc.md: n: number 9007199254740993 cannot be repr
 Line and column count from the first line inside the frontmatter fences. A
 nested value names its path (`a.b[1]`).
 
+An exponent too large for an `f64` is the exception. YAML does not read
+`n: 1e400` as a number, so the document loads with `n` holding the text
+`"1e400"`. With no schema, or under `string`, it stays that text; under
+`number`, conversion refuses it:
+
+```yaml
+---
+$schema:
+  m: number
+n: 1e400   # loads as the text "1e400"
+m: 1e400   # fails: "1e400" is not of type "number": the number not finite
+---
+```
+
+`.inf` and `.nan`, which YAML does read as numbers, fail the load as shown
+above.
+
 Quoted text is text. Against a `number` property, numeric text is converted,
 and text whose number cannot be admitted fails validation with the reason:
 
@@ -93,8 +112,8 @@ invalid standalone schema document `n.json`: /properties/n/maximum: number 90071
 ```
 
 A JSON number too large for an `f64` (`1e400`) is not valid JSON to the
-loader, so the file is reported as neither a SimplifiedSchema nor a JSON
-Schema.
+`.json` loader, so the file is reported as neither a SimplifiedSchema nor a
+JSON Schema.
 
 ## Expression literals
 

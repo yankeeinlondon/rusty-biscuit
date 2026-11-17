@@ -2421,7 +2421,9 @@ mod side_effect_tasks {
             dir.path(),
             json!({ "name": "alpha", "side_effect": { "ensure_dir": ["made-here"] } }),
         );
-        let fixture = Fixture::build(dir, &source).unwrap();
+        // A relative target is created beside the authoring document, so the
+        // boundary must contain the fixture directory.
+        let fixture = Fixture::build(dir, &source).unwrap().mutating_its_directory();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
         let runtime = Arc::new(RuntimeState::new());
@@ -2622,6 +2624,30 @@ mod side_effect_tasks {
             "a rejected side effect must not emit: {:?}",
             recorder.events(),
         );
+    }
+
+    #[test]
+    fn an_edit_side_effect_is_refused_without_opening_or_creating_anything() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("notes.md");
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "side_effect": { "edit": { "file": target.to_string_lossy(), "gui": true } } }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(
+            failure_message(&outcome).contains("`edit` opens an editor and is not a task side effect"),
+            "{}",
+            failure_message(&outcome),
+        );
+        assert!(!target.exists(), "a refused `edit` creates nothing");
+        assert!(recorder.events().is_empty(), "{:?}", recorder.events());
     }
 
     #[test]
@@ -6772,3 +6798,18 @@ mod referenced_documents;
 
 #[path = "tests/group_freshness.rs"]
 mod group_freshness;
+
+#[path = "tests/inline_check.rs"]
+mod inline_check;
+
+#[path = "tests/stale_admission.rs"]
+mod stale_admission;
+
+#[path = "tests/referenced_owner_schema.rs"]
+mod referenced_owner_schema;
+
+#[path = "tests/declaration_writes.rs"]
+mod declaration_writes;
+
+#[path = "tests/authoring_documents.rs"]
+mod authoring_documents;

@@ -554,7 +554,25 @@ fn scripts_manifest() -> PathBuf {
 /// not build its sibling, so an existing file may be stale), take the path
 /// Cargo reports, and exec a private link so a concurrent rebuild by another
 /// test process cannot swap the file out from under this build.
+///
+/// Under Nextest the run's `build-ci-build` setup script has already built it
+/// and names it in `BISCUIT_CI_BUILD_SHIPPED`; a Cargo call here would be a
+/// no-op that still queues on the scripts target directory's lock behind every
+/// other fixture build of the run.
 fn wrapper_in(scratch: &Path) -> PathBuf {
+    let private = scratch.join(format!("ci-build{}", std::env::consts::EXE_SUFFIX));
+    let link = |built: &Path| {
+        if fs::hard_link(built, &private).is_err() {
+            fs::copy(built, &private).expect("copying ci-build");
+        }
+    };
+    match std::env::var_os("BISCUIT_CI_BUILD_SHIPPED").map(PathBuf::from) {
+        Some(shipped) if shipped.is_file() => {
+            link(&shipped);
+            return private;
+        }
+        _ => {}
+    }
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let output = Command::new(cargo)
         .args(["build", "--message-format=json-render-diagnostics"])
@@ -570,10 +588,7 @@ fn wrapper_in(scratch: &Path) -> PathBuf {
         .filter(|message| message["reason"] == "compiler-artifact" && message["target"]["name"] == "ci-build")
         .find_map(|message| message["executable"].as_str().map(PathBuf::from))
         .expect("cargo reports the ci-build executable");
-    let private = scratch.join(format!("ci-build{}", std::env::consts::EXE_SUFFIX));
-    if fs::hard_link(&built, &private).is_err() {
-        fs::copy(&built, &private).expect("copying ci-build");
-    }
+    link(&built);
     private
 }
 

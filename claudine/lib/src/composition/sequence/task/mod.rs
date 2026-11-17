@@ -129,7 +129,7 @@ impl TaskDiagnostic {
         }
     }
 
-    /// The concise message, as `err.msg` reads it.
+    /// The normalized, unshortened message, as `err.msg` reads it.
     pub fn message(&self) -> &str {
         &self.info.msg
     }
@@ -398,13 +398,14 @@ pub fn evaluate_task_guard(task: &PreflightTask, context: &StackExecutionContext
 }
 
 /// The values a root sequence step's guard reads before the step composes:
-/// the document's authored frontmatter as stored text, under `overrides`
-/// (caller setters, runtime writes, and the reserved overlay).
-pub fn step_guard_frontmatter(
-    authored: &darkmatter::markdown::FrontmatterMap,
+/// the authored frontmatter of the document that declares the step's row,
+/// as stored text, under `overrides` (caller setters, runtime writes, and the
+/// reserved overlay).
+pub fn step_guard_frontmatter<'a>(
+    authored: impl IntoIterator<Item = (&'a String, &'a Value)>,
     overrides: &Map<String, Value>,
 ) -> Map<String, Value> {
-    let mut state: Map<String, Value> = authored.iter()
+    let mut state: Map<String, Value> = authored.into_iter()
         .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
     state.extend(overrides.iter().map(|(key, value)| (key.clone(), value.clone())));
     state
@@ -523,7 +524,17 @@ impl TaskExecution<'_> {
 
     /// Run a task whose `when:` guard the caller already evaluated as true.
     pub fn run_admitted(&self) -> TaskOutcome {
-        self.run_validated(None)
+        self.in_task_document(|execution| execution.run_validated(None))
+    }
+
+    /// Run `body` in the task's authoring document
+    /// ([`Self::in_authoring_document`]): a task read from its own file runs
+    /// its guard, stages, and values beside that file, whichever stack the
+    /// caller handed it.
+    fn in_task_document(&self, body: impl FnOnce(&TaskExecution<'_>) -> TaskOutcome) -> TaskOutcome {
+        self.in_authoring_document(&self.task.origin_path, body).unwrap_or_else(|error| {
+            self.unstarted_outcome(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error)))
+        })
     }
 
     /// Evaluate the task's `when:` guard at its turn: against the task's
@@ -550,12 +561,12 @@ impl TaskExecution<'_> {
     }
 
     fn run_guarded(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
-        match self.guard() {
-            Ok(true) => self.run_validated(validated),
-            Ok(false) => self.unstarted_outcome(TaskStatus::Succeeded, None),
-            Err(error) => self.unstarted_outcome(TaskStatus::Failed,
+        self.in_task_document(|execution| match execution.guard() {
+            Ok(true) => execution.run_validated(validated),
+            Ok(false) => execution.unstarted_outcome(TaskStatus::Succeeded, None),
+            Err(error) => execution.unstarted_outcome(TaskStatus::Failed,
                 Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error))),
-        }
+        })
     }
 
     /// The outcome of a task that never started: a skipped one (`error` is
@@ -576,6 +587,16 @@ impl TaskExecution<'_> {
     }
 
     fn run_validated(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
+        // An inline container's `$schema`, as its file reads now, is judged
+        // once its guard admitted it and before its run opens: a refusal
+        // starts nothing, not even its `initialize`, and the enclosing
+        // container handles a failed task.
+        if let PreflightAction::Sequence(sequence) = &self.task.action
+            && let Err(error) = self.admit_inline_container(sequence, self.runtime.map(std::sync::Arc::as_ref))
+        {
+            return self.unstarted_outcome(TaskStatus::Failed,
+                Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error)));
+        }
         let started = Instant::now();
         let mutations_before = self.mutation_snapshot();
 
@@ -877,6 +898,12 @@ impl TaskExecution<'_> {
     }
 
     fn validate_task(&self) -> Result<ValidatedTask, CompositionError> {
+        self.in_authoring_document(&self.task.origin_path, |execution| execution.validate_in_document())?
+    }
+
+    /// [`Self::validate_task`] against a stack already rebound to the task's
+    /// authoring document.
+    fn validate_in_document(&self) -> Result<ValidatedTask, CompositionError> {
         let mut task = self.task.clone();
         self.graph.settle_task_shell_modes(&mut task);
         let execution = TaskExecution { task: &task, ..*self };
@@ -1165,9 +1192,12 @@ impl TaskExecution<'_> {
             self.dry_run_note(&format!("rendered (dry-run): would run `{action}`"));
             return PrimaryOutcome::withheld();
         }
+        // A task's action comes from the sequence data as written; no schema
+        // completed it, so it is its own authored value.
         let parsed = match parse_single_action_with_order(
             LifecycleSignal::Start,
             action,
+            None,
             &self.task.origin_path,
             &self.task.diagnostic.action_property,
             authored_set_order,
@@ -1246,6 +1276,7 @@ impl TaskExecution<'_> {
             Some(value) => parse_task_action_stack_with_order(
                 signal,
                 value,
+                None,
                 &self.task.origin_path,
                 &self.stack_property(stage),
                 &self.task.authored.child(stage.key()),
@@ -1440,7 +1471,7 @@ impl TaskExecution<'_> {
     fn evaluate_with(&self) -> Result<Map<String, Value>, CompositionError> {
         let mut evaluated = Map::new();
         for (key, value) in &self.task.with {
-            if reserved::is_reserved_state_key(key) {
+            if reserved::is_reserved_state_key(key) || reserved::is_declaration_write(key) {
                 return Err(CompositionError::SequenceTaskWithReserved {
                     task: self.label(),
                     key: key.clone(),
@@ -1513,12 +1544,15 @@ impl TaskExecution<'_> {
     /// `group` only inside an established group. A group's own `variables`
     /// resolve before its scope is entered, so they never read `group`, and no
     /// group's variables reach a later step.
+    ///
+    /// File references read from the stack's authoring document: the task's
+    /// file for its own values, the group's file for its `variables`.
     fn resolve_value(&self, value: &Value, field: &str) -> Result<Value, CompositionError> {
         if !contains_interpolation(value) {
             return Ok(value.clone());
         }
         let resolution = super::super::document_expression_resolution_context(
-            &self.task.origin_path,
+            self.stack.source_path,
             self.stack.prepared_context,
             self.stack.file_resolution_context,
             self.stack.ctx_base_dir,
@@ -1592,6 +1626,71 @@ impl TaskExecution<'_> {
         self.interrupt
             .is_some_and(|flag| flag.load(Ordering::SeqCst))
             || crate::composition::lifecycle::cancellation::requested()
+    }
+
+    /// The file-resolution context of `document`, the file that authored a
+    /// stack (a task file, a referenced sequence or group), to pair with that
+    /// document as the stack's `source_path`: the stack's own when it already
+    /// describes `document`, else one derived from the invocation.
+    ///
+    /// Lifecycle targets resolve beside the document that authored them, in
+    /// that document's own tree: the caller's tree may not contain a document
+    /// from a shared library, or may spell the same directory differently
+    /// (a symlinked launch path against a canonical reference). The derived
+    /// context keeps the invocation's launch scope, so the mutation boundary
+    /// stays the caller's root.
+    ///
+    /// With no invocation to derive from (a library caller that wired
+    /// none), the stack's context is returned unchanged. Paired with
+    /// `document` it still resolves beside `document`, because the executor
+    /// judges every target in `for_source(source_path)`; a document outside
+    /// that context's tree is then refused by resolution, never resolved
+    /// beside the caller.
+    ///
+    /// ## Errors
+    ///
+    /// The invocation's failure to build `document`'s context.
+    fn authoring_context(
+        &self,
+        document: &std::path::Path,
+    ) -> Result<std::borrow::Cow<'_, biscuit_file::FileResolutionContext>, CompositionError> {
+        use crate::invocation_context::InvocationContextError;
+        let own = self.stack.file_resolution_context;
+        if own.source_path() == Some(document) {
+            return Ok(std::borrow::Cow::Borrowed(own));
+        }
+        let Some(invocation) = self.document else { return Ok(std::borrow::Cow::Borrowed(own)) };
+        match invocation.derive_source(document) {
+            Ok(source) => Ok(std::borrow::Cow::Owned(source.file_resolution_context().clone())),
+            Err(InvocationContextError::ResolutionContext(error)) => Err(CompositionError::ResolutionContext(error)),
+            Err(error @ InvocationContextError::SourceWithoutParent(_)) => Err(CompositionError::SequenceInvalid(error.to_string())),
+        }
+    }
+
+    /// Run `body` with this execution's stack rebound to `document`: its
+    /// `source_path` and its [`Self::authoring_context`] together, so every
+    /// expression, file target, and active-document comparison in the stack
+    /// reads the document that authored it. The stack is reused when it
+    /// already describes `document`.
+    ///
+    /// ## Errors
+    ///
+    /// The [`Self::authoring_context`] failure; `body` does not run.
+    fn in_authoring_document<R>(
+        &self,
+        document: &std::path::Path,
+        body: impl FnOnce(&TaskExecution<'_>) -> R,
+    ) -> Result<R, CompositionError> {
+        let context = self.authoring_context(document)?;
+        if self.stack.source_path == document && matches!(context, std::borrow::Cow::Borrowed(_)) {
+            return Ok(body(self));
+        }
+        let stack = StackExecutionContext {
+            source_path: document,
+            file_resolution_context: &context,
+            ..self.stack.with_signal(self.stack.signal)
+        };
+        Ok(body(&TaskExecution { stack: &stack, ..*self }))
     }
 
     /// The task's authored `name:`, falling back to its generated label.
@@ -1744,6 +1843,7 @@ fn describe_action(action: &LifecycleAction) -> String {
         }
         LifecycleActionKind::SideEffect(effect) => format!("`{}` is a side effect", effect.verb),
         LifecycleActionKind::RuntimeSet(_) => "`set` is a side effect".to_string(),
+        LifecycleActionKind::Edit(_) => "`edit` opens an editor and is not a task side effect".to_string(),
         // Claudine's parse profile rejects unknown verbs, so it never
         // produces an ignored action.
         LifecycleActionKind::Ignored(ignored) => format!("`{}` is not a lifecycle verb", ignored.verb),

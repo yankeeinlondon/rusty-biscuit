@@ -45,7 +45,7 @@ holds, exit codes, Ctrl-C), read [Lifecycle Error Handling](./error-handling.md)
 
 | Event | Fires when | `err` |
 |---|---|---|
-| `initialize` | First. After the shell-free frontmatter bootstrap, before the body is read, the shell audit, and composition | unavailable |
+| `initialize` | First. After the shell-free frontmatter bootstrap, before the body is read, schema validation, the shell audit, and composition; its effects stay done if validation then refuses the document | unavailable |
 | `composed` | Composition and preflight both succeeded | unavailable |
 | `failed` | Composition or preflight failed, or an `initialize` error was raised; under some hosts also a refusal before the host's own work started | available |
 | `cancelled` | The run was interrupted (Ctrl-C) | depends on the run: the cancellation cause |
@@ -143,9 +143,40 @@ of a supported verb are errors. A dictionary at an event root cannot carry
 evaluated, such as a command returning a nonzero status. It does not suppress
 an expression error or grant permission to execute a command. It belongs
 inside a named action, as above, or beside the verbs of a compact dictionary,
-where it applies to each eligible action. Do not write both forms on one
-action, or place it beside a conditional's `then`/`else`. It never applies to
-`set`: a failed mutation stops the stack.
+where it applies to each eligible action. Do not place it beside a
+conditional's `then`/`else`. It never applies to `set`, which refuses the key
+(even `no_error: null`): a failed mutation stops the stack.
+
+The flag is a literal, read when the stack is parsed and never evaluated:
+
+| Written | Read as |
+|---|---|
+| omitted, or `null` | `false` |
+| `true`, `false` | itself |
+| boolean-like text: `"yes"`, `"no"`, `"on"`, `"off"`, `"1"`, `"0"`, any letter case | `true` or `false`, by the shared [conversion rules](../../../../simplified-schema/docs/topics/conversion.md#type-coercion) |
+| a native number (`1`), a list, a mapping, or a `{{ … }}` template | error: `` `no_error` must be a boolean `` |
+
+**Write the flag in one place.** Writing it both inside an action's long form
+and beside it is an error, even when the two agree:
+
+```yaml
+composed:
+    - edit: { file: notes.md, no_error: true }
+      no_error: true     # error: `no_error` is set both beside `edit` and inside it
+```
+
+`md compose` refuses that document before any event fires, and `md schema
+validate` and DMLS report the same error at the inner flag. They also report
+the other placement errors the parser refuses: a flag beside `then`, a flag
+on `set` (even `null`), and a `when` with nothing to guard.
+
+A **filled default** is a different thing. Schema validation completes every
+place an action can carry the flag with `no_error: false`, so
+`{ edit: { file: notes.md } }` gains `false` both beside and inside the long
+form. A filled value is never a placement: it never conflicts with a flag you
+wrote, never sits beside `then`, never gives `set` a flag, and never adds an
+action or changes how many verbs an item holds. Only a value you wrote, other
+than `null`, counts as yours.
 
 Omitting an ordinary event, writing `null`, or giving it `[]` or `{}` means
 no actions. An explicitly written `then` or `else` body must contain an action;
@@ -178,12 +209,17 @@ types it allows.
 
 | Type | Verbs `md` runs | Examples |
 |---|---|---|
-| `expression` | `set`, side-effect verbs (such as `ensure_file`), expression functions | `set: { stage: "done" }` |
+| `expression` | `set`, side-effect verbs (such as `ensure_file`), expression functions, [`edit`](#editing-a-file-edit) | `set: { stage: "done" }` |
 | `communicate` | `stdout`, `stderr`, `info`, `warn`, `success`, `message` | `info: "composed {{ title }}"` |
 | `flow` | `stop`, `skip`, `error` | `error: "CHANGELOG.md is missing"` |
 | `shell` | `shell` | `shell: "git status --short"` |
 
-A flow directive must be the last item in its list.
+A flow directive must be the last item in its list. `edit` is an `expression`
+action even though it starts a program: it launches the user's editor through
+a dedicated launcher, never through a shell, so it is allowed in `initialize`
+and needs no shell approval. In a compact dictionary it runs with the other
+`expression` verbs in ascending name order: after `set`, communication, and
+`shell`, and before the flow directive.
 
 ### Invariants every host keeps
 
@@ -383,6 +419,463 @@ never run them:
 - the library's compose API, unless the caller drives a run.
 
 `md compose` has no dry-run mode; `--shell` is its only report-only mode.
+
+None of these surfaces launches an editor for an [`edit`](#editing-a-file-edit)
+action or creates its file or directories. They still check its shape and
+types. Within a run, an `edit` in a branch that is not taken never chooses an
+editor or touches the disk, although the branch's actions are still validated.
+
+## Where file actions write
+
+This section covers every lifecycle action that writes a file: the seven
+frontmatter writers (`set_frontmatter`, `merge_frontmatter`,
+`delete_frontmatter`, `increment_frontmatter`, `decrement_frontmatter`,
+`append_frontmatter`, `prepend_frontmatter`), both forms of `ensure_file`,
+`ensure_dir`, `append_line`, `append_jsonl`, and [`edit`](#editing-a-file-edit).
+Every host follows the same rules, `md compose` and Claudine alike.
+
+Two different directories decide where a write lands:
+
+| | What it is | What it decides |
+|---|---|---|
+| **The base** | the folder of the document that wrote the action (the launch directory for a document piped on stdin) | where a relative path such as `notes.md` points |
+| **The mutation root** | the working tree you launched the command in | whether the write is allowed at all |
+
+The mutation root is the top level of the Git repository (or linked worktree)
+that contains the directory you ran the command from. Outside a repository it
+is that directory itself. It is captured once when the command starts and
+never changes during the run: not for a transcluded or `prep`/`proxy`
+document, a sequence member, a loop iteration, or a retry. Launching from a
+package directory inside a monorepo still gives the monorepo's top level; a
+linked worktree gives its own top level, never the main checkout. If
+`md compose` cannot read the repository it was launched in (a damaged `.git`,
+for example), the run fails before any file action rather than guessing a
+root.
+
+The root is only a boundary. It is never used as the base of a relative path.
+
+### Choosing the target: resolve, then check
+
+Each file action picks its target in two steps:
+
+```mermaid
+flowchart TD
+    A["file operand, e.g. notes.md"] --> U{"a URL?"}
+    U -- yes --> R1["refused: nothing fetched or written"]
+    U -- no --> B["resolve it like a read<br/>from the authoring document"]
+    B --> C{"does a file exist?"}
+    C -- yes --> D["target = the file the read would find"]
+    C -- no --> E["target = the first place the read would look"]
+    D & E --> F{"inside the mutation root?"}
+    F -- no --> R2["refused: nothing opened, created, or written"]
+    F -- yes --> G["run the action on that one target"]
+```
+
+1. **Resolve the operand as a [file reference](../file-referencing.md).**
+   An existing file is the one a read of the same text would find. For a
+   bare name such as `notes.md`, that is the document's folder first and
+   then the repository root; for `./notes.md`, only the document's folder;
+   for a prefixed reference such as `&/docs/plan.md`, that prefix's roots. A
+   missing file is created at the first place the read would look, which for
+   a bare or `./` name is beside the document.
+2. **Check the target against the mutation root.** A target outside it is
+   refused before any parent directory is created, any document is loaded,
+   or any editor starts. A refused target is never skipped in favor of
+   another candidate.
+
+The check compares where paths really lead on disk, not how they are
+spelled: a symlink inside the root that points outside it is refused, and so
+is a sibling directory whose name merely starts with the root's name
+(`/work/repo-old` is not inside `/work/repo`). A `../` path that stays inside
+the root works; one that climbs out of the document's file tree is refused by
+the file-reference rules before the root is checked. The refusal names the
+target and the root:
+
+```text
+refusing to write outside the mutation root: /Users/me/notes.md (root: /Users/me/proj)
+```
+
+The command reports this line whole, in its terminal output and in the JSON
+diagnostic alike, however long the paths are, and a later event reads the same
+complete line as `err.msg`.
+
+### A prompt in a subfolder
+
+A prompt at `~/proj/prompts/new-spec.md`, run from `~/proj`, where
+`~/proj/specs/auth.md` already exists:
+
+| Action in `initialize` | Result |
+|---|---|
+| `edit: specs/auth.md` | opens the existing `~/proj/specs/auth.md` (the repository-root candidate) |
+| `ensure_file: ["specs/auth.md", "# Auth"]` | the same file; it exists, so nothing is written |
+| `append_line: ["specs/auth.md", "reviewed"]` | appends to `~/proj/specs/auth.md` |
+| `ensure_file: ["specs/new.md", "# New"]` | creates `~/proj/prompts/specs/new.md` (beside the prompt) |
+| `ensure_file: ["{{ ctx.cwd }}/specs/new.md", "# New"]` | creates `~/proj/specs/new.md` |
+| `edit: "~/notes.md"` | refused: outside `~/proj` |
+
+Because writes resolve exactly like reads, a bare name means the same file
+for both. If `prompts/notes.md` is missing but `~/proj/notes.md` exists,
+`edit: notes.md` opens the repository-root file, just as `::file notes.md`
+would read it. Write `./notes.md` to pin the document's folder for both.
+
+### A shared prompt from another repository
+
+The root comes from where you ran the command, not from where the prompt is
+stored. A prompt kept in a shared library outside your working tree can
+write into your project through an absolute path, usually built from
+`ctx.cwd`, but it cannot write beside itself:
+
+```yaml
+# ~/shared-prompts/release.md, run from ~/proj
+initialize:
+    - ensure_file: ["{{ ctx.cwd }}/CHANGELOG.md", "# Changelog"]   # writes ~/proj/CHANGELOG.md
+    - append_line: ["release-log.md", "started"]                   # refused: ~/shared-prompts is outside ~/proj
+```
+
+The same holds when you launch outside any repository and the prompt lives
+inside one: the launch directory is the root.
+
+### Operands that name no file
+
+- **A URL** is refused before anything is fetched or written.
+- **A recursive `%` reference that matches nothing** is refused: its search
+  folders are never used as a new file's name.
+- **An environment-variable reference** follows its value: if `NOTES`
+  expands to an absolute path, `{{NOTES}}/today.md` is an absolute target. A
+  lifecycle operand is interpolated before it is read as a reference, so
+  write it with triple braces, which produce the literal `{{NOTES}}`:
+
+  ```yaml
+  initialize:
+      - ensure_file: ["{{{NOTES}}}/today.md", "# Today"]
+  ```
+
+### Moving from root-relative creation
+
+Earlier releases created a missing bare name such as `notes.md` at the
+mutation root, and `md compose` used the composed document's own folder as
+that root. Now a missing bare name is created beside the document, and the
+root is your working tree. To keep a file at the top of your project, name it
+with an absolute path such as `{{ ctx.cwd }}/notes.md` (or `&/notes.md` for a
+prompt stored in the same repository). To make sure a name never falls back
+to a repository-root file, write `./notes.md`.
+
+The mutation root limits lifecycle file actions only. It does not sandbox an
+approved `shell` command or what the editor itself writes.
+
+## Editing a file: `edit`
+
+The `edit` action opens a named file in your editor and waits until you close
+it; then the stack carries on with its next action. Use it when a run should
+pause for a person to write something. The typical case is a "create" prompt:
+it computes where a new file belongs, refuses to overwrite one that is already
+there, and opens the new file for you to fill in.
+
+```yaml
+fqn: "{{ ctx.cwd }}/specs/new-widget/spec.md"
+initialize:
+    - when: file_exists(fqn)
+      then:
+        - warn: "The spec already exists: {{ fqn }}"
+        - skip
+      else:
+        - edit:
+            file: "{{ fqn }}"
+            create_new: true
+        - info: "The spec is ready at {{ fqn }}"
+        - skip
+```
+
+On the first run the file is missing, so the `else` branch creates
+`specs/new-widget/spec.md` (and its parent directories), opens it in your
+editor, and waits. When you save and close the editor, `info` prints and
+`skip` ends the run without composing anything. On a second run the file
+exists, the `warn` branch runs, and no editor opens.
+
+Two details make this example robust:
+
+- **The path is absolute.** `ctx.cwd` is the directory the command was
+  launched from, so `file_exists` and `edit` name the same file wherever the
+  prompt itself is stored.
+- **`create_new: true` is the real guarantee.** `file_exists` only chooses the
+  friendly branch; another process could create the file between the check
+  and the edit. `create_new` makes the action fail, without opening an editor,
+  if anything holds the name by the time it creates the file.
+
+`edit` does not compose the edited file, evaluate its contents, add it to the
+frontmatter, or return its contents as a value. It also does not end the event
+or the run: pair it with `skip` (as above) or `stop` when that is what you
+want.
+
+### Writing an `edit`
+
+The short form names the file. A list with one item is the same thing:
+
+```yaml
+initialize:
+    - edit: "{{ fqn }}"          # the computed path
+    - edit: ["{{ fqn }}"]        # identical
+    - edit: notes.md             # a file literally named notes.md
+```
+
+The operand is interpolated once, like any lifecycle operand, so a bare word
+is a file name, not a property lookup: `edit: fqn` opens a file called `fqn`.
+
+The long form adds options:
+
+```yaml
+initialize:
+    - edit:
+        file: "{{ fqn }}"
+        create_new: true
+        gui: false
+        no_error: true
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `file` | required | The file to open. Any local [file reference](../file-referencing.md) form is accepted. |
+| `create_new` | `false` | `true` requires the action to create the file: if anything (a file, a directory, a symlink) already holds the name, the action fails before an editor opens and the entry is left untouched. With `false`, an existing file is opened and a missing one is created. |
+| `gui` | omitted | `true` accepts only a GUI editor, `false` only a terminal editor; omitted or `null` accepts either. See [Which editor opens](#which-editor-opens). |
+| `no_error` | `false` | Continue the stack when the edit fails; see [When an `edit` fails](./error-handling.md#when-an-edit-fails). |
+
+The target is mandatory and must name a file:
+
+- The path must be non-blank. Whitespace inside a non-blank path is kept.
+- A native number or boolean names the file spelled by its text, as any
+  `string` value converts: `edit: 5` opens `5`, `edit: true` opens `true`,
+  `edit: 2.5` opens `2.5`. A `{{ … }}` template whose whole result is a
+  number or boolean is still an error.
+- A bare `edit`, `edit: null`, `edit: []`, a list with two items, a long form
+  without `file` (or with `file: null`), and unknown fields are errors.
+  `null` supplies no target, so it is never "no edit".
+
+The flags follow the same literal rules as `no_error`: `true`/`false` or
+boolean-like text (`"yes"`, `"off"`) converts; omitting a flag or writing
+`null` takes its default (`create_new` and `no_error` are `false`, and `gui`
+has no preference); a native number, a list, a mapping, or a `{{ … }}`
+template is an error. The flags are never evaluated, while the file name is
+an interpolated operand.
+
+`md compose`, `md schema validate`, and the DMLS language server report the
+same problems, located at the same property.
+
+```yaml
+initialize:
+    - edit: { file: notes.md, gui: "yes" }   # valid: a GUI editor
+    - edit: { file: notes.md, gui: null }    # valid: either kind of editor
+    - edit: { file: notes.md, gui: 1 }       # error at `gui`: must be a boolean, got number
+    - edit: "   "                            # error: the path must not be blank
+    - edit: null                             # error: no target
+```
+
+`edit` is a lifecycle action only. There is no `edit()` function for `{{ }}`
+expressions, and the action can appear in any event (including `initialize`)
+and inside `then`/`else` branches. When a message must follow the edit, put it
+in its own list item rather than beside `edit` in a compact dictionary, where
+communication runs first.
+
+### Which editor opens
+
+`edit` chooses an editor the same way [`md edit`](../../cli/edit.md#how-the-editor-is-chosen)
+does: `$EDITOR`, then `$VISUAL`, then the first installed editor from a
+built-in list. Because the action waits for the editor to close, it only
+chooses an editor it can wait for: a terminal editor, a GUI editor launched
+with its wait flag (`code --wait`, `kate --block`), or a command it does not
+recognize (such as your own wrapper script), which is trusted to wait. A GUI
+editor that has no wait flag (Geany, Lapce) is never chosen.
+
+`gui` narrows the choice to one kind of editor. Resolution walks the same
+order and skips every candidate of the other kind. Two kinds of candidate
+never match an explicit `gui`, because Darkmatter cannot prove which surface
+they will use: editors that can run either way (Emacs opens a window when a
+display exists and runs in the terminal otherwise) and unrecognized commands.
+With `gui` set, the built-in list is searched even when `$EDITOR` or `$VISUAL`
+is set, since you asked for a kind of editor they do not provide.
+
+```text
+EDITOR=nvim  VISUAL=code
+edit: { file: notes.md }              -> nvim notes.md        (ordinary order)
+edit: { file: notes.md, gui: true }   -> code --wait notes.md
+edit: { file: notes.md, gui: false }  -> nvim notes.md
+
+EDITOR=emacs  (VISUAL unset)
+edit: { file: notes.md, gui: false }  -> the first installed terminal editor, such as nvim
+```
+
+When nothing matches, the action fails with a message naming the kind of
+editor requested and every candidate checked, with the reason each one was
+passed over.
+
+### What the host must provide
+
+The editor that was chosen, not the `gui` option, decides what the running
+process must provide. A terminal editor borrows the terminal the command runs
+in; a GUI editor draws in its own window and only needs a desktop to draw on.
+An unrecognized command, and an editor such as Emacs chosen without `gui`,
+are treated as terminal editors, the cautious choice.
+
+| | Terminal editor | GUI editor |
+|---|---|---|
+| Interactive terminal | required: stdin and stdout are terminals, the command runs in the terminal's foreground, and under `md compose` stderr is a terminal too | not required |
+| Display session | not required | required: on Linux and WSL2, `DISPLAY` or `WAYLAND_DISPLAY` is set; macOS and Windows are assumed to have one |
+| The editor's stdin | the terminal | empty |
+| The editor's output | the terminal (under `md compose`, through stderr, so the composed document on stdout stays clean) | `md compose` in Markdown mode: stderr; with a data output: discarded |
+| `md compose --output json` (or another data output) | refused | allowed |
+| A document piped to `md compose` on stdin | refused: stdin is not yours to type into | allowed |
+| A member of a parallel group (Claudine) | refused: it has no terminal of its own | allowed |
+| Cancellation | stops the editor and everything it started | stops only the waiting client; see [Cancellation](#cancellation) |
+
+Only one terminal editor can use the terminal at a time; a second one is
+refused. Every check above, and the choice of editor, happens before anything
+is created, so a refusal leaves no new file or directory behind.
+
+Redirecting the composed document is the case most likely to surprise you:
+
+```sh
+md compose new-spec.md > out.md   # a terminal editor is refused: stdout is not a terminal
+md compose new-spec.md            # works
+```
+
+Set `gui: true` when the run's streams cannot be lent to a terminal editor.
+
+### Creating the file
+
+`file` is read as a [file reference](../file-referencing.md): relative,
+absolute, and prefixed forms such as `&docs/plan.md` all work, and a URL is
+refused without fetching anything.
+
+- **Where it resolves.** The target is chosen like every file action's, as
+  described in [Where file actions write](#where-file-actions-write): an
+  existing file is the one a read of the same text would find, and a missing
+  one is created where that read would look first, so a missing `notes.md` is
+  created beside the document.
+- **The mutation root.** Every target, including an absolute path, must lie
+  inside the mutation root, the working tree the command was launched in; a
+  symlink that leads outside it is refused too. The example above therefore
+  works wherever the prompt is stored, because `ctx.cwd` is inside the root,
+  while a relative path in a prompt kept outside your working tree is
+  refused.
+- **A missing file** is created empty, together with any missing parent
+  directories. The creation is exclusive: if another process creates the name
+  first, nothing is overwritten. Without `create_new`, the action then opens
+  that file as an existing one; with `create_new: true`, it fails.
+- **An existing regular file** is opened as it is; its bytes are not touched
+  before the editor starts.
+- **A directory or another non-regular entry** at the path fails the action.
+
+The editor receives the absolute path as a single argument, so spaces, shell
+metacharacters, and a leading dash in the name reach it unchanged. Exclusive
+creation only reserves the name: it does not lock the file against other
+programs while you edit it.
+
+### Waiting and returning
+
+The action blocks until the editor exits. A terminal editor takes over the
+terminal for that time, and the host gets it back, with its settings
+restored, before the next action runs.
+
+The edit succeeds when the editor exits with status 0 and the path is still a
+regular file inside the mutation root. An unchanged or empty file is a
+success, and so is an editor that saves by replacing the file. Whatever the
+editor saved is kept byte for byte: the action does not read, trim, compose,
+or re-hash it, and never rolls it back, even when the action fails.
+
+The next action sees the edit. A later `file_exists`, `load_data`, or other
+file read in the same run reads the file again rather than a value cached
+before the editor opened. Frontmatter values that were already evaluated are
+not recomputed.
+
+```yaml
+initialize:
+    - edit: todo.yaml
+    - info: "{{ length(load_data('todo.yaml', 'string[]')) }} items"   # counts what you just saved
+```
+
+A failed edit stops the stack, like any failed action, unless `no_error` is
+set. The failures, and which ones `no_error` can suppress, are listed in
+[When an `edit` fails](./error-handling.md#when-an-edit-fails). Quitting the
+editor with an error status (Vim's `:cq`, for example) is therefore a way to
+abort the rest of the stack; `no_error: true` removes that option, so keep it
+for edits that are truly optional.
+
+```mermaid
+flowchart TD
+    A[edit reached] --> R[choose the editor:<br/>EDITOR, VISUAL, built-in list,<br/>filtered by gui]
+    R -->|none matches| F[the action fails]
+    R --> H[check the host:<br/>terminal or display]
+    H -->|not eligible| F
+    H --> C[create or open the target]
+    C -->|outside the root, URL,<br/>name taken under create_new,<br/>not a regular file| F
+    C --> L[launch the editor<br/>on the absolute path]
+    L -->|could not start| F
+    L --> W{wait}
+    W -->|run cancelled| K[stop the editor;<br/>the run is cancelled]
+    W -->|nonzero exit| F
+    W -->|exit 0| T[recheck the target]
+    T -->|deleted, not a regular file,<br/>or outside the root| F
+    T -->|still a regular file| N[next action]
+    F -->|no_error| N
+    F --> S[the stack stops;<br/>the error routes as usual]
+```
+
+### Cancellation
+
+A run can be cancelled while the editor is open: `md compose` receives an
+interrupt signal, or, under Claudine, a sibling fails in a group. While a
+terminal editor holds the terminal, a Ctrl-C you type goes to the editor, not
+to `md`; an interrupt sent to the `md` process itself still cancels the run.
+
+On Linux and macOS a terminal editor runs in a process group of its own, so
+`md` lends it the terminal's foreground while it runs and takes the terminal
+back, with its settings, once the editor has exited. How that works, and when
+nothing is lent (no terminal, or `md` running as a background job), is
+described in
+[Process trees: handing the terminal to an interactive child](../../../../sniff/docs/topics/process-trees.md#handing-the-terminal-to-an-interactive-child).
+Two failures belong to that step: the terminal cannot be lent (operation
+`prepare the terminal`; nothing is started), or it cannot be given back after
+an edit that otherwise succeeded (`restore the terminal`). After any other
+failure a restoration problem is only logged, and the first failure is the
+one reported. A GUI editor is never lent the terminal.
+
+The action stops only processes it started, never an editor that was already
+running:
+
+- **A terminal editor** is started as the root of its own process tree: a
+  process group on Linux and macOS, a Windows Job object on Windows. On
+  cancellation the group is sent `SIGTERM`, then `SIGKILL` after two seconds
+  if anything is left; on Windows the job is terminated. The host then takes
+  the terminal back and restores its settings. Unsaved changes in the editor
+  are lost, and the editor may leave a recovery file (such as Vim's `.swp`),
+  which the action does not remove.
+- **A GUI editor** is only partly owned. What the action starts is the
+  waiting client (`code --wait`, for example). Stopping it ends the wait, but
+  the editor's window may stay open with the file, and you can still save
+  after the run has ended. Use `gui: false` when you need cancellation to stop
+  the editing session completely.
+
+Either way, bytes saved before the cancellation and a file the action created
+are kept. The next action never runs, even with `no_error`, and the run is
+reported as cancelled (exit 130 under `md compose`). An `edit` reached after
+cancellation, in `cancelled` or in the `finalize` that follows it, does not
+open an editor and fails.
+
+On Windows, a successful edit releases the job without closing what is left in
+it, so a GUI editor window that the waiting client started stays open. If
+Windows cannot keep that window running, it is closed, the edit still
+succeeds, and a warning says the editor was closed after the edit; under
+`--deny all` that warning blocks like any other. How the editor's process
+tree is owned and released on each OS is described in
+[Process trees](../../../../sniff/docs/topics/process-trees.md).
+
+### `edit` compared with similar features
+
+| Feature | What it does | How `edit` differs |
+|---|---|---|
+| Claudine's wrapper `--edit` (`claudine claude --edit`) | Opens a temporary file and uses what you write as the agent's prompt | `edit` opens a named file in place and returns nothing; the file is not used as a prompt or composed |
+| [`md edit`](../../cli/edit.md) | Opens a file from the command line and prints its path | Same editor choice, but `md edit` fails on a file left empty and removes a file it created; `edit` accepts an empty file and never removes one |
+| `stop` | Ends the current event's stack | `edit` returns to the next action; quitting the editor with an error is what stops the stack |
+| `skip` in `initialize` | Ends the run without composing or running `finalize` | `edit` never skips anything; follow it with `skip` when the run should end there |
 
 ## Hosts
 

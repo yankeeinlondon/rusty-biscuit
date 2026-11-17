@@ -255,6 +255,26 @@ impl PrepareOptions {
         self.schema_caller_records()
     }
 
+    /// Resolve the document's own authored values through `document`, the
+    /// declaring document's context, while every caller value keeps the
+    /// origin it was supplied under.
+    ///
+    /// Without captured records, a setter's origin is derived from the
+    /// context these options held until now, so it is fixed here, before
+    /// that context is replaced.
+    #[must_use]
+    pub(crate) fn resolving_document_from(mut self, document: biscuit_file::FileResolutionContext) -> Self {
+        if self.caller_input_records.is_empty() {
+            self.caller_input_records = darkmatter::markdown::compose::caller_input_records_for_overrides(
+                self.set_overrides.as_ref(),
+                &self.file_resolution_context,
+                self.file_ref_fallback_dir.as_deref(),
+            );
+        }
+        self.file_resolution_context = document;
+        self
+    }
+
     /// Options that prepare against `file_resolution_context`, with every
     /// other setting empty.
     pub fn new(file_resolution_context: biscuit_file::FileResolutionContext) -> Self {
@@ -1296,6 +1316,67 @@ pub fn read_selection_hints(
     super::parse_selection_hints_from_frontmatter(frontmatter).ok()
 }
 
+/// Compose `source`'s document values alone, for a sequence document's
+/// owner preparation ([`crate::composition::sequence::document`]).
+///
+/// The canonical assembly narrowed to the frontmatter surface, with frontmatter
+/// `$( … )` expansion disabled, so nothing runs and the body is never read: a
+/// value that a shell produces keeps its authored text. Caller layers, schema
+/// coercion and defaults, and interpolation apply as they would to the
+/// document's full preparation. The returned composition carries no prompt,
+/// lifecycle, or selection hints and is never launched; the schema layer
+/// ([`crate::composition::schema`]) judges it like any other.
+pub(super) fn prepare_values_on(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    mode: CompositionMode,
+) -> Result<PreparedComposition, CompositionError> {
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
+    let mut ctx = derive_compose_context(source, &options);
+    for (key, value) in &options.env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
+    }
+    let schema_phase = match mode {
+        CompositionMode::ChainedDocument => None,
+        CompositionMode::InlineFrontmatterPrompt => Some(SchemaPhase::Launch),
+    };
+    let compose_opts = canonical_compose_options(source, &ctx, &options, schema_phase)
+        .only_frontmatter_surface()
+        .disable(darkmatter::markdown::compose::ComposeOperation::FrontmatterShellExpansion)
+        .with_pre_approved_commands(
+            darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new(),
+        );
+    let request = prepared_request(compose_opts, &options)?;
+    let input_layers = super::CallerInputLayers::from_options(&options);
+    let (composed, report) =
+        recording_triggers(source.markdown.compose_with_warnings(&request), &source.resolved_path, &options)?;
+    let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, schema_phase, &request)?;
+    Ok(PreparedComposition {
+        mode,
+        entry: DocumentEntryReason::Direct,
+        schema_verdict_deferred: options.defer_schema_verdict,
+        resolved_path: source.resolved_path.clone(),
+        source_repo_root: options.source_repo_root.clone(),
+        prompt: String::new(),
+        effective_frontmatter,
+        selection_hints: EffectiveSelectionHints::default(),
+        closure: CompositionClosurePlan::Direct,
+        launch_schema,
+        lifecycle: super::lifecycle::LifecycleConfig::default(),
+        deferred_lifecycle_keys: sorted_deferred_keys(&report),
+        compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
+        input_layers,
+        compose_context: ctx,
+        document_epoch: options.document_epoch,
+    })
+}
+
 fn prepare_direct_on(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
@@ -1631,10 +1712,15 @@ fn effective_surface(
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
+    // The schema completed `effective_frontmatter` (a `loop:` block's
+    // `no_error` defaults); its authored values tell the parser which flags
+    // were written.
+    let authored_values = authored_lifecycle_values(source, options);
     let mut lifecycle = super::lifecycle::parse_lifecycle_config_with_orders(
         effective_frontmatter,
         &source.resolved_path,
         Some(composed.frontmatter()),
+        Some(&authored_values),
     )?;
     // A nested span in a single-pass lifecycle literal can never interpolate;
     // reject it here, before any provider or lifecycle event runs.
@@ -1848,6 +1934,25 @@ fn reject_removed_sequence_reads_in_source(
 }
 
 /// Convert a `Frontmatter` to a `serde_json::Value::Object`.
+/// The values a composition's lifecycle was written with: the source
+/// document's frontmatter with the caller's proxy overlay and layered
+/// overrides applied, as they stand before the schema completes them. It is
+/// the authored source of every lifecycle parse of the completed frontmatter
+/// ([`darkmatter::lifecycle::LifecycleParseOptions::authored_values`]): a
+/// `no_error` the completion filled is not in it.
+pub(super) fn authored_lifecycle_values(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+) -> serde_json::Value {
+    let mut authored_values = frontmatter_to_value(source.markdown.frontmatter());
+    if let serde_json::Value::Object(values) = &mut authored_values {
+        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
+        overrides.extend(&options.layered_overrides());
+        values.extend(overrides.values().clone());
+    }
+    authored_values
+}
+
 pub(super) fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::Value {
     serde_json::Value::Object(
         fm.as_map()
@@ -1914,16 +2019,12 @@ pub fn validate_document_shell_late_values(
                 None => error,
             }
         })?;
-    let mut authored_values = frontmatter_to_value(source.markdown.frontmatter());
-    if let serde_json::Value::Object(values) = &mut authored_values {
-        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
-        overrides.extend(&options.layered_overrides());
-        values.extend(overrides.values().clone());
-    }
+    let authored_values = authored_lifecycle_values(source, options);
     let authored = super::lifecycle::parse_lifecycle_config_with_orders(
         &authored_values,
         &source.resolved_path,
         Some(source.markdown.frontmatter()),
+        None,
     )?;
     let mut has_shell = false;
     for signal in super::lifecycle::LifecycleSignal::ALL {

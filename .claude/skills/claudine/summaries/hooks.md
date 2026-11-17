@@ -5,7 +5,7 @@ Lifecycle hooks matter to Claudine because they are where a provider-specific ag
 Claudine's normalized lifecycle model exists to make those provider differences usable. The canonical lifecycle model names 16 lifecycle moments:
 
 | Canonical event      | Meaning                                                |
-|----------------------|--------------------------------------------------------|
+| -------------------- | ------------------------------------------------------ |
 | `session_start`      | Session started, resumed, or cleared                   |
 | `session_end`        | Session ended or terminated                            |
 | `before_prompt`      | User prompt submitted before the agent processes it    |
@@ -46,7 +46,7 @@ Claude's payloads are rich and consistent. Most events carry `session_id`, `tran
 Claude is also one of the strongest providers for control:
 
 | Capability                  | Claude support                                    |
-|-----------------------------|---------------------------------------------------|
+| --------------------------- | ------------------------------------------------- |
 | Block prompt                | Yes, `UserPromptSubmit` and `UserPromptExpansion` |
 | Block tool before execution | Yes, `PreToolUse`                                 |
 | Mutate tool input           | Yes, `updatedInput` for supported schema fields   |
@@ -79,7 +79,7 @@ Codex configuration can be JSON (`hooks.json`) or inline TOML under `config.toml
 Claudine mapping is straightforward for most events:
 
 | Codex event         | Canonical event      |
-|---------------------|----------------------|
+| ------------------- | -------------------- |
 | `SessionStart`      | `session_start`      |
 | `UserPromptSubmit`  | `before_prompt`      |
 | `PreToolUse`        | `before_tool`        |
@@ -108,7 +108,7 @@ Configuration is JSON under Gemini settings: system defaults, user settings, pro
 Claudine maps Gemini well, but Gemini reveals a canonical gap:
 
 | Gemini event          | Canonical event  | Fit                 |
-|-----------------------|------------------|---------------------|
+| --------------------- | ---------------- | ------------------- |
 | `SessionStart`        | `session_start`  | Good                |
 | `SessionEnd`          | `session_end`    | Good, async cleanup |
 | `BeforeAgent`         | `before_prompt`  | Good                |
@@ -132,7 +132,7 @@ Goose events include session start/end, prompt submit, generic pre/post tool, po
 Only two Goose events are blockable:
 
 | Goose event  | Control                                                          |
-|--------------|------------------------------------------------------------------|
+| ------------ | ---------------------------------------------------------------- |
 | `PreToolUse` | Can permanently deny a tool call                                 |
 | `Stop`       | Can prevent a turn from ending and ask the agent to keep working |
 
@@ -145,7 +145,7 @@ Configuration is plugin-scoped rather than a central provider settings hook map.
 Claudine can map Goose events, but many collapse into the same canonical events:
 
 | Goose event                                            | Canonical event |
-|--------------------------------------------------------|-----------------|
+| ------------------------------------------------------ | --------------- |
 | `SessionStart`                                         | `session_start` |
 | `SessionEnd`                                           | `session_end`   |
 | `UserPromptSubmit`                                     | `before_prompt` |
@@ -171,7 +171,7 @@ Configuration is narrower than most providers. The documented default file is `~
 Claudine mapping is reasonable but mostly observational:
 
 | Kimi event                    | Canonical event  |
-|-------------------------------|------------------|
+| ----------------------------- | ---------------- |
 | `SessionStart`                | `session_start`  |
 | `SessionEnd`                  | `session_end`    |
 | `UserPromptSubmit`            | `before_prompt`  |
@@ -194,7 +194,7 @@ OpenCode is structurally different from the command-hook providers. Its hook sup
 OpenCode has two distinct hook mechanisms:
 
 | Mechanism             | Shape                                                                                                                                                     | Control                                                 |
-|-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | Dedicated named hooks | In-process functions such as `tool.execute.before`, `chat.params`, `shell.env`, and `tool.definition` receive typed inputs plus a mutable `output` object | Can mutate pending behavior; some can block by throwing |
 | Catch-all event hook  | `event({ event: { id, type, properties } })` receives event-bus notifications                                                                             | Observe-only and fire-and-forget                        |
 
@@ -207,7 +207,7 @@ Payloads are provider-native TypeScript objects rather than stdin JSON. Event-bu
 OpenCode's mutating surfaces are broad:
 
 | Hook                                   | Canonical fit                    | Mutation / control                                                                       |
-|----------------------------------------|----------------------------------|------------------------------------------------------------------------------------------|
+| -------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------- |
 | `chat.message`                         | `before_prompt`                  | Mutates `output.message` / `output.parts`; throwing may abort, call site unconfirmed     |
 | `chat.params`                          | `before_model`                   | Mutates temperature, topP, topK, max output tokens, and provider options                 |
 | `chat.headers`                         | `before_model`                   | Mutates provider request headers                                                         |
@@ -229,7 +229,7 @@ Configuration is split between local plugin files and JSONC config that loads pl
 Claudine mapping is broad but lossy:
 
 | OpenCode native area                                                           | Canonical event                                                                 |
-|--------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
 | `config` plugin hook                                                           | `session_start` or provider-specific initialization metadata                    |
 | `dispose` plugin hook                                                          | `session_end` or provider-specific finalization metadata                        |
 | `session.created`                                                              | `session_start`                                                                 |
@@ -259,7 +259,7 @@ Payloads include common fields (`session_id`, `transcript_path`, `cwd`, `hook_ev
 Qwen supports several control channels:
 
 | Capability                     | Qwen support                                                             |
-|--------------------------------|--------------------------------------------------------------------------|
+| ------------------------------ | ------------------------------------------------------------------------ |
 | Block prompt                   | Yes, via top-level `decision` on `UserPromptSubmit`                      |
 | Block or deny pre-tool         | Yes, via `hookSpecificOutput.permissionDecision` or exit `2`             |
 | Mutate tool input              | Yes, via `updatedInput`                                                  |
@@ -278,7 +278,7 @@ For command hooks, exit `0` means success and stdout is parsed as JSON. Exit `2`
 The per-event decision contract is not one uniform field:
 
 | Qwen event                                                                                                                      | Decision carrier                        | Effect                                                                                       |
-|---------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------|----------------------------------------------------------------------------------------------|
+| ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `PreToolUse`                                                                                                                    | `hookSpecificOutput.permissionDecision` | `deny` cancels the tool; `allow`/`ask` affect permission flow; `updatedInput` mutates input  |
 | `PermissionRequest`                                                                                                             | `hookSpecificOutput.decision.behavior`  | `allow` or `deny`; may carry `updatedInput`, `updatedPermissions`, `message`, or `interrupt` |
 | `PostToolUse`                                                                                                                   | top-level `decision`                    | `block` is post-action feedback only; it cannot undo the tool                                |
@@ -295,7 +295,7 @@ Qwen does not provide dedicated hook-management subcommands; the `qwen hooks` co
 Claudine mapping is strong, with two important lossy areas: post-compaction has no first-class canonical event, and todo lifecycle events are not first-class lifecycle events.
 
 | Qwen event           | Canonical event      | Notes                                                                                            |
-|----------------------|----------------------|--------------------------------------------------------------------------------------------------|
+| -------------------- | -------------------- | ------------------------------------------------------------------------------------------------ |
 | `SessionStart`       | `session_start`      | Preserve `source` (`startup`, `resume`, `clear`, `compact`)                                      |
 | `SessionEnd`         | `session_end`        | Preserve `reason`                                                                                |
 | `UserPromptSubmit`   | `before_prompt`      | Blockable; preserve `prompt`                                                                     |
@@ -336,7 +336,7 @@ Both Pi and Kilo reinforce the same design lesson as OpenCode: rich in-process h
 The providers and researched candidates fall into five capability tiers.
 
 | Tier                               | Providers / candidates      | Shape                                                                            |
-|------------------------------------|-----------------------------|----------------------------------------------------------------------------------|
+| ---------------------------------- | --------------------------- | -------------------------------------------------------------------------------- |
 | Rich blocking and mutation         | Claude, Gemini, Qwen, Codex | Native hooks can block prompts/tools/turns and sometimes mutate tool/model input |
 | Simple block/observe command hooks | Goose, Kimi                 | Shell hooks, mostly allow/block, little or no mutation                           |
 | In-process plugin extension        | OpenCode                    | Mutable TypeScript plugin hooks plus event bus observation                       |
@@ -348,7 +348,7 @@ Payload shapes vary by provider family. Claude/Codex/Gemini/Qwen converge on JSO
 Blocking semantics are not portable without provider-specific interpretation:
 
 | Provider | Important blocking nuance                                                                         |
-|----------|---------------------------------------------------------------------------------------------------|
+| -------- | ------------------------------------------------------------------------------------------------- |
 | Claude   | `Stop` block means continue; post-tool block cannot undo side effects                             |
 | Codex    | `Stop`/`SubagentStop` block means continue; tool hook coverage is incomplete                      |
 | Gemini   | `AfterAgent` deny retries; `AfterTool` can hide result but not undo execution                     |
@@ -365,7 +365,7 @@ Return-value semantics are likewise provider-specific. Some use process exit cod
 Configuration formats also vary:
 
 | Provider | Configuration model                                                                                  |
-|----------|------------------------------------------------------------------------------------------------------|
+| -------- | ---------------------------------------------------------------------------------------------------- |
 | Claude   | JSON settings files across user/project/local/managed scopes                                         |
 | Codex    | `hooks.json`, inline TOML, managed config, plugin-bundled hooks, trust review                        |
 | Gemini   | JSON settings plus extension hooks and `/hooks` controls                                             |
@@ -386,7 +386,7 @@ The model should, however, be treated as a normalization layer, not as a lossles
 The strongest canonical mappings are:
 
 | Canonical event                    | Provider support quality                                                            |
-|------------------------------------|-------------------------------------------------------------------------------------|
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
 | `before_tool`                      | Strong across nearly all researched providers                                       |
 | `after_tool`                       | Strong, but post-tool blocking means feedback/replacement, not undo                 |
 | `tool_error`                       | Common in Goose, Kimi, Qwen, and tool-result payloads elsewhere                     |

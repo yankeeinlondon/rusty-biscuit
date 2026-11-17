@@ -12,6 +12,8 @@ mod common;
 #[cfg(feature = "test-fixtures")]
 mod level2_cicd_styling;
 #[cfg(feature = "test-fixtures")]
+mod level2_foreground_handoff;
+#[cfg(feature = "test-fixtures")]
 mod level2_git_status_styling;
 #[cfg(feature = "test-fixtures")]
 mod level2_lockfile_rendering;

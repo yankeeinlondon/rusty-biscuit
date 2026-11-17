@@ -1412,7 +1412,7 @@ fn lifecycle_from_markdown(markdown: &str) -> Result<LifecycleConfig, Compositio
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     );
-    super::super::parse_lifecycle_config_with_orders(&fm, dummy_path(), Some(md.frontmatter()))
+    super::super::parse_lifecycle_config_with_orders(&fm, dummy_path(), Some(md.frontmatter()), None)
 }
 
 #[test]

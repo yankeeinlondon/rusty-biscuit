@@ -442,11 +442,23 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     frontmatter_shell_hover(ctx, offset)
 }
 
+/// Hover on a `::file` / `::url` `interpolate=` option. The `false` sentence
+/// is the author's ruled wording; keep it verbatim.
+const INTERPOLATE_OPTION_HOVER: &str = "**`interpolate`** — whether the included file's prose is interpolated.\n\n\
+`interpolate=false`: interpolation in this file will not be interpolated but instead kept as literal text. \
+Its frontmatter, directive targets, option values, `when=` conditions, and `::shell` commands still evaluate.\n\n\
+Omitted or `null` means `true`. Every file this inclusion brings in inherits `false`; \
+a nested `interpolate=true` cannot re-enable it and adds no warning.";
+
 /// Hover describing a directive's semantics and (for a file target) its
 /// resolved target; for `::shell`, the parsed command and policy verdict, and
 /// the local type of a `{{ }}` hole under the cursor that a guard narrows.
 fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let directive = directives::directive_at(ctx.text, offset)?;
+    if let Some(option) = directives::interpolate_option_at(&directive, offset) {
+        let end = option.value.as_ref().map_or(option.key.span.end, |value| value.span.end);
+        return Some(markup_hover(ctx, option.key.span.start..end, INTERPOLATE_OPTION_HOVER.to_string()));
+    }
     let info = directives::info_for(directive.kind)?;
     let mut lines = vec![format!("**`{}`** — {}", info.keyword, info.summary)];
 
@@ -866,9 +878,21 @@ fn unknown_directive_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic
     }
 }
 
-/// Option keys a directive family does not recognize.
+/// Option keys a directive family does not recognize, and recognized
+/// options whose value composition would reject.
 fn malformed_option_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     for directive in directives::directives(ctx.text) {
+        for (span, reason) in directives::invalid_interpolate_options(ctx.text, &directive) {
+            if let Some(range) = ctx.source_map.byte_range_to_lsp(span) {
+                out.push(diagnostic(
+                    range,
+                    DiagnosticSeverity::ERROR,
+                    code::DIRECTIVE_INVALID_OPTION_VALUE,
+                    source::COMPOSE,
+                    reason,
+                ));
+            }
+        }
         for option in &directive.options {
             if directives::option_recognized(directive.kind, &option.key.value) {
                 continue;

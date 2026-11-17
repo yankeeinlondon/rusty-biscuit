@@ -246,8 +246,10 @@ fn a_malformed_auto_steer_value_fails_before_pi_is_launched() {
 
 #[test]
 fn a_malformed_configured_value_fails_before_pi_is_launched() {
-    let rig = Rig::new("pi-rpc-auto-config-null");
-    crate::common::write(&rig.fixture.home().join(".claudine/config.yaml"), r#"{ "steering": { "automatic": { "enabled": null } } }"#);
+    // `null` is an unset value (the default `true`), so the malformed value
+    // is a wrong type.
+    let rig = Rig::new("pi-rpc-auto-config-malformed");
+    crate::common::write(&rig.fixture.home().join(".claudine/config.yaml"), r#"{ "steering": { "automatic": { "enabled": "maybe" } } }"#);
     let output = rig.run("repeat");
     assert!(!output.status.success(), "{}", describe(&output));
     assert!(rig.argv(1).is_none(), "Pi must not be launched: {}", describe(&output));

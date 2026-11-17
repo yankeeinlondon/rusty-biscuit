@@ -50,13 +50,6 @@ pub(crate) use self::resolve::{
     require_prompt_present, resolve_model_source,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OutputFormat {
-    Json,
-    Text,
-    Stream,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PromptDelivery {
     Stdin(String),
@@ -187,40 +180,6 @@ impl PromptSource {
     /// (inline delivery OR inherited stdin).
     pub(crate) fn has_prompt_or_stdin(&self) -> bool {
         !matches!(self, Self::None)
-    }
-}
-
-impl std::fmt::Display for OutputFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OutputFormat::Json => write!(f, "json"),
-            OutputFormat::Text => write!(f, "text"),
-            OutputFormat::Stream => write!(f, "stream"),
-        }
-    }
-}
-
-impl std::str::FromStr for OutputFormat {
-    type Err = String;
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "json" => Ok(OutputFormat::Json),
-            "text" => Ok(OutputFormat::Text),
-            "stream" | "stream-json" => Ok(OutputFormat::Stream),
-            _ => Err(format!(
-                "unknown output format '{s}'; expected json, text, or stream"
-            )),
-        }
-    }
-}
-
-impl From<claudine::composition::OutputFormat> for OutputFormat {
-    fn from(value: claudine::composition::OutputFormat) -> Self {
-        match value {
-            claudine::composition::OutputFormat::Json => Self::Json,
-            claudine::composition::OutputFormat::Text => Self::Text,
-            claudine::composition::OutputFormat::Stream => Self::Stream,
-        }
     }
 }
 
@@ -403,16 +362,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
         model: &str,
     ) -> Option<String> {
         apply::apply_model(self.provider(), args, env_overrides, model)
-    }
-
-    // -- Universal --output flag ---------------------------------------------
-
-    /// Map the universal `--output <format>` to provider-specific flags.
-    ///
-    /// Default implementation reads from the central catalog's
-    /// [`OutputFormatSupport`] list.
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        apply::apply_output_format(self.provider(), args, format)
     }
 
     // -- Universal --system-prompt flag --------------------------------------
@@ -788,7 +737,6 @@ pub(crate) fn validate_argv_flags_before_separator(binary: &str, args: &[String]
 mod tests {
     use super::*;
 
-    mod apply_output_format;
     mod apply_yolo;
     mod native_output;
     mod overlay_strategy;

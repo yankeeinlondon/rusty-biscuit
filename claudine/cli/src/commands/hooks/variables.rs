@@ -112,10 +112,8 @@ pub(super) fn run_variables() -> Result<()> {
     log::data(&format!(" {}", example_header.render(&term)));
     log::data("");
     let example = Prose::new(
-        r#"<dim>  {
-    "type": "speak",
-    "message": "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
-  }</dim>"#,
+        r#"<dim>  - speak:
+      message: "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"</dim>"#,
     );
     log::data(&example.render(&term));
     log::data("");

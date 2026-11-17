@@ -27,7 +27,7 @@ pub const OWNER: &str = "simplified-schema";
 /// This library's preparation revision. Increment it whenever lowering or
 /// admission changes what the envelope definitions prepare to, then run
 /// `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 2;
+pub const PREPARATION_REVISION: u32 = 3;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "simplified-schema/lib/generated/shipped.json";

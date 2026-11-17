@@ -119,6 +119,7 @@ impl MdRunHost for RecordingHost<'_> {
             output: self.log,
             timing: &self.timing,
             interrupted: &probe,
+            editor: None,
         };
         md_host::evaluate(&context, self.config, &event)
     }

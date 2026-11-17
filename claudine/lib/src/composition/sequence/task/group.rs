@@ -71,10 +71,22 @@ impl TaskExecution<'_> {
         use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
 
         let before = self.runtime.map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        let runtime = Arc::new(RuntimeState::from_snapshot(before));
+        let runtime = Arc::new(RuntimeState::from_sequence_snapshot(before));
         let live = Mutex::new(self.stack.live_frontmatter_snapshot()
             .unwrap_or_else(|| self.stack.frontmatter.clone()));
-        let private_stack = self.stack.with_private_cells(&runtime, Some(&live));
+        // The group's events, gate, loop cap, and legs read its own document:
+        // its path and that document's context travel together. Its reread
+        // (`prepare_nested_group`) resolves the reference from the calling
+        // task's, so reads `self.stack`.
+        let own_context = match self.authoring_context(&group.origin_path) {
+            Ok(context) => context,
+            Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+        };
+        let private_stack = StackExecutionContext {
+            source_path: &group.origin_path,
+            file_resolution_context: &own_context,
+            ..self.stack.with_private_cells(&runtime, Some(&live))
+        };
         let execution = TaskExecution { runtime: Some(&runtime), stack: &private_stack, ..*self };
         let context = LifecycleRuntimeContext {
             settings: self.stack.settings, messaging: self.stack.messaging, term: self.stack.term,
@@ -83,7 +95,7 @@ impl TaskExecution<'_> {
         };
         let mut runner = ContainerRunner::new(LifecycleRunGuard::new(
             &group.lifecycle, &context, self.stack.emitter)).with_subject(SubjectKind::Group);
-        let mut frame = match self.open_loop(group.loop_config.as_deref(), LoopResultKind::Group, self.stack.frontmatter, &runtime) {
+        let mut frame = match execution.open_loop(group.loop_config.as_deref(), LoopResultKind::Group, self.stack.frontmatter, &runtime) {
             Ok(frame) => frame,
             Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
         };
@@ -123,7 +135,7 @@ impl TaskExecution<'_> {
                     } else {
                         let (fresh, graph) = super::super::preflight::prepare_nested_group(
                             self.task, group, &state, context, self.stack.file_resolution_context,
-                            self.graph.nested_sources(),
+                            self.graph.nested_sources(), self.document,
                         )?;
                         self.verify_nested_graph(&graph)?;
                         fresh
@@ -534,6 +546,10 @@ impl TaskExecution<'_> {
                         };
                         let _cancellation_scope = cancellations[index].enter();
                         let _prep_scope = prep_scope.enter();
+                        // Members share the parent's terminal, so none may
+                        // lend it to a terminal editor; a fresh thread would
+                        // otherwise start permitted.
+                        let _terminal_denied = darkmatter::editor::deny_terminal_in_this_thread();
                         let task = &group.tasks[index];
                         let started = Instant::now();
                         // Each concurrent task takes its own palette entry, so

@@ -33,6 +33,10 @@ a transcluded child is covered in
   title: Second   # error: duplicate entry with key "title"
   ```
 
+  The error's line and column point at the start of the mapping that holds
+  the duplicate, not at the second key: a duplicate inside `meta:` is reported
+  where `meta`'s first entry begins.
+
 - Values become strings, numbers, booleans, `null`, lists, and mappings. A
   [schema](./schemas/definition.md) can then check and convert them.
 

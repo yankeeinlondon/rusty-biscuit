@@ -282,6 +282,16 @@ Body: {{ note }}
 
 composes to `Body: fixed {{ area }}`.
 
+### Reusing a document that shows expressions
+
+Triple braces are for text you write in the document being composed. When you transclude a page you do not want to edit, such as a `docs/` page that explains `{{ name }}` in plain prose, write `interpolate=false` on the inclusion instead:
+
+```md
+::file ../../topics/interpolation.md interpolate=false
+```
+
+The included page's prose keeps every `{{ … }}` and `{{{ … }}}` exactly as written: nothing is evaluated, no undeclared-name warning is reported, and triple braces are not reduced to two. The page's fenced code stays literal even if it sets `interpolate_code_blocks: true`. Its frontmatter and directive inputs still evaluate. See [the `interpolate` option](../transclusion/block-transclusion.md#options-and-conditionals) for the value table and inheritance rules.
+
 ## Inserted Text Is Data
 
 Every authored span is scanned **once**. The text an expression returns, a file read (`frontmatter(...)`), a shell command's output, a literal's output, a decoded [literal token](#literal-tokens), and a caller's data override are data: Darkmatter never scans them again for `{{ … }}`, `{{{ … }}}`, a whole-value `$( … )`, or a body directive (`::shell`, `::shell-block`, `::file`, `::code`, `::url`, `::block`). This holds in frontmatter, in the body, and in transcluded children, which receive their parent's composed values as data.

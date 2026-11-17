@@ -1,126 +1,162 @@
-//! The one normalization pipeline for *formal* sequence documents.
+//! The one normalization pipeline for authored sequence lists.
 //!
-//! A formal sequence document is a root carrying the `sequence:` list together
-//! with the optional `template:` and `$schema:` keys. Two entry paths reach that
-//! root — `claudine sequence steps.yaml` invokes it directly, while
-//! `sequence: steps.yaml` reaches it from another document through
-//! [`super::source`] — and both funnel through [`normalize_formal_plan`]. That
-//! single funnel is what makes the spec's "both entry modes accept the identical
-//! document shape" true rather than aspirational.
+//! An authored list's owner is the document whose root carries the
+//! `sequence:` list together with the optional `template:` and `$state:`
+//! declarations ([`super::declarations`]). Its root `$schema` is the document
+//! schema and is not read here. The owner may be a Markdown or YAML document
+//! invoked directly (`claudine sequence steps.yaml`), or a whole document
+//! another one references (`sequence: steps.yaml`, through [`super::source`]);
+//! every route funnels through [`normalize_formal_plan`], which is what makes
+//! "every entry mode accepts the identical document shape" true rather than
+//! aspirational.
 //!
 //! Order inside the pipeline is load-bearing: scalar shorthand expands first so
 //! `- blue` can carry template defaults, the template fills in next so a
 //! templated key is ordinary authored state, generated fields (`id`, `index`,
-//! `is_first`, …) are inserted by [`normalize_plan`] after that, and `$schema`
-//! validates the finished state last.
+//! `is_first`, …) are inserted by [`normalize_plan_at`] after that, and `$state`
+//! validates the finished state last. `$state` is prepared before any row is
+//! read, once, so a malformed declaration fails an empty list too.
 
 use std::path::Path;
 
 use serde_json::{Map, Value};
 
-use super::super::error::{CompositionError, SequenceLoadCause};
-use super::super::json_util::json_type_name;
-use super::super::resolve::is_yaml_source;
-use super::super::types::ResolvedCompositionSource;
+use super::super::error::CompositionError;
+use super::declarations::{self, PreparedSequenceSchema};
 use super::expr::{DocumentFrontmatter, SourceExpressionLookup, render_interpolated};
 use super::model::{SequencePlan, SequenceSource};
-use super::normalize::normalize_plan;
-use super::reserved;
+use super::normalize::normalize_plan_at;
 
-/// The keys a formal sequence document may carry beside its `sequence:` list.
+/// The declarations a formal sequence document carries beside its
+/// `sequence:` list, as authored.
 #[derive(Default, Clone, Copy)]
 pub struct FormalKeys<'a> {
     /// The document's `template:` map: defaults merged into every step.
     pub template: Option<&'a Map<String, Value>>,
-    /// The document's `$schema`, applied to each step's normalized *state*.
-    pub schema: Option<&'a Value>,
+    /// The document's `$state`, applied to each step's normalized *state*.
+    pub state_schema: Option<&'a Value>,
 }
 
-/// Whether `source` is a formal sequence document invoked directly.
-///
-/// A YAML source's root mapping *is* its frontmatter, so an inline `sequence:`
-/// list there means the document Claudine is composing and the document
-/// defining the steps are one and the same — and its `template:`/`$schema:`
-/// belong to [`normalize_formal_plan`], not to the composition frontmatter.
-/// A Markdown document's frontmatter is a composition frontmatter that happens
-/// to declare a sequence, so its `$schema` keeps describing the document.
-pub fn is_direct_formal_document(source: &ResolvedCompositionSource) -> bool {
-    is_yaml_source(&source.resolved_path)
-        && source
-            .markdown
-            .frontmatter()
-            .as_map()
-            .get("sequence")
-            .is_some_and(Value::is_array)
-}
-
-/// Read the formal keys off a document root, validating `template`'s shape.
+/// Read the formal declarations off the root of the document at
+/// `source_path`, judging their placement and shape
+/// ([`declarations::root_declarations`]).
 ///
 /// ## Errors
 ///
-/// Returns [`CompositionError::SequenceExternalWrongType`] when `template` is
-/// present but is not a mapping.
-pub fn formal_keys(root: &Map<String, Value>) -> Result<FormalKeys<'_>, CompositionError> {
+/// The `SequenceDeclaration*` placement and shape errors, and
+/// [`CompositionError::SequenceReservedTemplateKey`].
+pub fn formal_keys<'a>(root: &'a Map<String, Value>, source_path: &Path) -> Result<FormalKeys<'a>, CompositionError> {
     if let Some(value) = root.get("fail_fast") {
-        return Err(super::grammar::removed_task_key("fail_fast", value, std::path::Path::new("<sequence>")));
+        return Err(super::grammar::removed_task_key("fail_fast", value, source_path));
     }
-    let template = match root.get("template") {
-        Some(Value::Object(map)) => Some(map),
-        Some(other) => {
-            return Err(CompositionError::SequenceExternalWrongType(format!(
-                "`template` must be an object, got {}",
-                json_type_name(other)
-            )));
-        }
-        None => None,
-    };
+    let declarations = declarations::root_declarations(root, source_path)?;
     Ok(FormalKeys {
-        template,
-        schema: root.get("$schema"),
+        template: declarations.template,
+        state_schema: declarations.state,
     })
 }
 
-/// Normalize a formal document's item list into a [`SequencePlan`].
+/// The document that declares an authored list, as the formal pipeline
+/// reads it.
+pub struct FormalOwner<'a> {
+    /// The owner's declarations ([`formal_keys`]).
+    pub keys: FormalKeys<'a>,
+    /// The file that declares the list. Its context resolves `$state` and
+    /// anchors `template:` expressions, and it names the file in a
+    /// declaration or state failure.
+    pub declaring_path: &'a Path,
+    /// The list's property path within that file (`sequence`), which locates
+    /// task-grammar diagnostics.
+    pub list_property: &'a str,
+    /// The owner's values, which `template:` expressions read below each
+    /// item's own fields.
+    pub values: &'a dyn DocumentFrontmatter,
+}
+
+/// Normalize an owner's authored item list into a [`SequencePlan`].
 ///
-/// `invocation_path` is the document that *ran* the sequence — it seeds the
-/// `sequence_id` payload and anchors template expressions. `document_path` is
-/// the document that *declared* the steps; the two differ only when the formal
-/// document was referenced, and it is `document_path` that names the file in a
-/// schema-load failure. `globals` are the invoking document's frontmatter,
-/// shadowed by each item's own fields during template rendering.
+/// `invocation_path` is the document that *ran* the sequence: it seeds the
+/// `sequence_id` payload. Everything else about the list comes from `owner`,
+/// which differs from the invoking document only when the list was read from
+/// a referenced whole document.
 ///
 /// ## Errors
 ///
-/// Returns the typed [`CompositionError`] variants raised by template
-/// evaluation, by [`normalize_plan`], and by step-state schema validation.
-#[allow(clippy::too_many_arguments)]
+/// Returns the typed [`CompositionError`] variants raised by `$state`
+/// preparation, template evaluation, [`normalize_plan_at`], and step-state
+/// validation.
 pub fn normalize_formal_plan(
     items: Vec<Value>,
-    keys: FormalKeys<'_>,
+    owner: FormalOwner<'_>,
     source: SequenceSource,
     invocation_path: &Path,
-    document_path: &Path,
-    globals: &dyn DocumentFrontmatter,
     document_fail_fast: bool,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<SequencePlan, CompositionError> {
+    // The contract is resolved before any row is read: a malformed or
+    // unloadable `$state` fails an empty list too, and it resolves once
+    // however many rows it judges.
+    let state_schema = owner
+        .keys
+        .state_schema
+        .map(|declaration| {
+            let property = super::preflight::property_child(
+                list_property_owner(owner.list_property), declarations::STATE_KEY,
+            );
+            PreparedSequenceSchema::prepare(declaration, owner.declaring_path, &property, file_resolution_context)
+        })
+        .transpose()?;
+    normalize_formal_plan_prepared(items, owner, state_schema.as_ref(), source, invocation_path, document_fail_fast, file_resolution_context)
+}
+
+/// The owner path of a list authored at `list_property`: empty for a root
+/// `sequence`, `sequence[1]` for `sequence[1].sequence`.
+fn list_property_owner(list_property: &str) -> &str {
+    list_property.strip_suffix("sequence").map_or("", |owner| owner.strip_suffix('.').unwrap_or(owner))
+}
+
+/// [`normalize_formal_plan`] with the owner's `$state` already prepared
+/// (`state_schema`), so a caller that keeps prepared declarations across
+/// rereads of an unchanged owner does not resolve it again.
+///
+/// ## Errors
+///
+/// As [`normalize_formal_plan`], less `$state` preparation.
+pub(crate) fn normalize_formal_plan_prepared(
+    items: Vec<Value>,
+    owner: FormalOwner<'_>,
+    state_schema: Option<&PreparedSequenceSchema>,
+    source: SequenceSource,
+    invocation_path: &Path,
+    document_fail_fast: bool,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<SequencePlan, CompositionError> {
+    let FormalOwner { keys, declaring_path, list_property, values } = owner;
+
     // Shorthand expansion is scoped to the templated case: without a template
-    // there is nothing to merge into, and `normalize_plan` reads a bare scalar
-    // and a `{name: …}` object as the same step anyway.
+    // there is nothing to merge into, and `normalize_plan_at` reads a bare
+    // scalar and a `{name: …}` object as the same step anyway.
     let items = match keys.template {
         Some(template) => {
             let items = expand_scalar_shorthand(items);
-            apply_template(template, items, globals, invocation_path, file_resolution_context)?
+            apply_template(template, items, values, declaring_path, file_resolution_context)?
         }
         None => items,
     };
 
-    let plan = normalize_plan(&items, source, invocation_path, document_fail_fast)?;
+    let plan = normalize_plan_at(&items, source, invocation_path, document_fail_fast, list_property)?;
 
-    if let Some(schema) = keys.schema {
-        validate_state_schema(&plan, schema, document_path, file_resolution_context)?;
+    if let Some(schema) = state_schema {
+        schema.validate_states(&plan, list_property)?;
     }
     Ok(plan)
+}
+
+/// Whether filling `keys`' template reads the owner's values at all: only a
+/// string default is an expression; any other default is a literal.
+#[must_use]
+pub fn template_reads_values(keys: &FormalKeys<'_>) -> bool {
+    keys.template.is_some_and(|template| template.values().any(Value::is_string))
 }
 
 /// Expand `- blue` shorthand into `{name: blue}` so a scalar step is an
@@ -146,42 +182,32 @@ fn expand_scalar_shorthand(items: Vec<Value>) -> Vec<Value> {
 
 /// Merge a formal document's `template:` defaults into every item.
 ///
-/// A template key never overwrites a value the item already defines. A string
+/// The template's keys were judged with its shape
+/// ([`declarations::root_declarations`]). A template key never overwrites a value the item already defines. A string
 /// value is rendered through the Darkmatter expression engine with the item's
-/// fields shadowing the invoking document's frontmatter; any other value is a
-/// literal default and is copied verbatim — `template: { rank: 42 }` is the
-/// `'<string>': any` shape the spec asks for, not a type error.
+/// fields shadowing the owner's values, and resolving file references from
+/// `declaring_path`; any other value is a literal default and is copied
+/// verbatim — `template: { rank: 42 }` is the `'<string>': any` shape the
+/// spec asks for, not a type error.
 fn apply_template(
     template: &Map<String, Value>,
     items: Vec<Value>,
-    globals: &dyn DocumentFrontmatter,
-    invocation_path: &Path,
+    values: &dyn DocumentFrontmatter,
+    declaring_path: &Path,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Vec<Value>, CompositionError> {
-    for key in template.keys() {
-        if reserved::is_reserved_state_key(key) {
-            return Err(CompositionError::SequenceReservedTemplateKey(key.clone()));
-        }
-    }
-
     items
         .into_iter()
         .map(|item| {
             let Some(step_map) = item.as_object() else {
                 return Ok(item);
             };
-            let lookup = SourceExpressionLookup::new(globals, file_resolution_context, invocation_path)
-                .with_item(step_map);
-
             let mut new_map = step_map.clone();
             for (key, value) in template {
                 if new_map.contains_key(key) {
                     continue;
                 }
-                let filled = match value {
-                    Value::String(raw) => render_interpolated(raw, &lookup)?,
-                    literal => literal.clone(),
-                };
+                let filled = fill_template_default(value, step_map, values, declaring_path, file_resolution_context)?;
                 new_map.insert(key.clone(), filled);
             }
             Ok(Value::Object(new_map))
@@ -189,63 +215,24 @@ fn apply_template(
         .collect()
 }
 
-/// Validate every step's normalized state against the document's `$schema`.
+/// One `template:` default filled for `item`: a string renders against the item's fields over `values`, resolving file
+/// references from `declaring_path`; any other value is copied.
 ///
-/// Only the state portion is validated: executable and task keys are not state
-/// and were already partitioned out during normalization. The schema is applied
-/// through the ordinary Darkmatter document validator by presenting each state
-/// as a frontmatter-shaped document, so `$schema` behaves identically here and
-/// on a normal composition source.
-fn validate_state_schema(
-    plan: &SequencePlan,
-    schema: &Value,
-    document_path: &Path,
+/// ## Errors
+///
+/// The template's evaluation error.
+pub(crate) fn fill_template_default(
+    default: &Value,
+    item: &Map<String, Value>,
+    values: &dyn DocumentFrontmatter,
+    declaring_path: &Path,
     file_resolution_context: &biscuit_file::FileResolutionContext,
-) -> Result<(), CompositionError> {
-    let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new(
-        file_resolution_context.for_source(document_path),
-    );
-
-    let load_failure = |source: SequenceLoadCause| CompositionError::SequenceExternalLoad {
-        context: biscuit_file::to_portable_string(document_path),
-        source,
-    };
-
-    for step in &plan.steps {
-        let mut frontmatter = darkmatter::markdown::Frontmatter::new();
-        frontmatter
-            .insert("$schema", schema.clone())
-            .map_err(|e| load_failure(SequenceLoadCause::Frontmatter(Box::new(e))))?;
-        let Value::Object(state) = step.state.to_value() else {
-            unreachable!("StepState::to_value always produces an object");
-        };
-        for (key, value) in state {
-            frontmatter
-                .insert(&key, value)
-                .map_err(|e| load_failure(SequenceLoadCause::Frontmatter(Box::new(e))))?;
+) -> Result<Value, CompositionError> {
+    match default {
+        Value::String(raw) => {
+            let lookup = SourceExpressionLookup::new(values, file_resolution_context, declaring_path).with_item(item);
+            render_interpolated(raw, &lookup)
         }
-
-        let markdown = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");
-        let report = schemas
-            .validate(&markdown)
-            .map_err(|e| load_failure(SequenceLoadCause::Schema(Box::new(e))))?;
-
-        if let Some(problem) = report.problems.first() {
-            // A top-level missing property has no pointer of its own, so it is
-            // named; every other problem, including a field missing inside a
-            // value, keeps its instance pointer (the message names the field).
-            let property = match &problem.property {
-                Some(name) if problem.path.is_empty() => name.clone(),
-                _ => problem.path.clone(),
-            };
-            return Err(CompositionError::SequenceStateSchemaViolation {
-                index: step.index,
-                id: step.state.id.clone(),
-                property,
-                message: problem.message.clone(),
-            });
-        }
+        literal => Ok(literal.clone()),
     }
-
-    Ok(())
 }

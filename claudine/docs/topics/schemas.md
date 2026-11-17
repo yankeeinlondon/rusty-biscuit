@@ -116,7 +116,7 @@ but a document they accept can still be rejected by the parser (see
 | [`document.yaml`](../../schemas/document.yaml) | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that both `claudine.yaml` and `inline-compose.yaml` import, so the two triggers declare them identically |
 | [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model` (exactly the documents identified as Claudine's); types `initialize`, `cancelled`, and `finalize` on those documents; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
-| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
+| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, `$state`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
 Three of the eight are triggers; the other five are libraries. A library
 reaches a document only through a trigger's imports, so the eight files work
@@ -263,7 +263,7 @@ model: sonnet
 | `communicate` | `say`, `speak`, `effect`, `message`, `notify`, `stderr`, `stdout`, `info`, `warn`, `success` |
 | `flow` | `stop`, `skip`, `error`, `proxy`, `retry`, `resume`, `defer`, `break`, `prep` |
 | `shell` | `shell` |
-| `expression` | `set`, plus every Darkmatter side-effect verb (`set_frontmatter`, `append_line`, …) and expression function |
+| `expression` | `set`, `edit`, plus every Darkmatter side-effect verb (`set_frontmatter`, `append_line`, …) and expression function |
 
 An event's type says which action types it allows:
 
@@ -437,9 +437,11 @@ loop:
 The schema types a single action with the action categories (`communicate`,
 `flow`, `shell`, `expression`), each of which holds one verb; their
 `uncounted-keys` constraint leaves `when` and `no_error` out of that one-key
-count. The schema does not check where `when` may sit beside an action: a
-`when` in a whole event or body dictionary passes the schema, and the
-lifecycle parser refuses it. A conditional is different, see below.
+count. Where `when` may sit is one of the lifecycle parser's placement rules,
+which schema validation applies too (see
+[Placement rules are judged as the parser judges them](#placement-rules-are-judged-as-the-parser-judges-them)):
+a `when` in a whole event or body dictionary is refused by both. A
+conditional is different, see below.
 
 A **dictionary bundle** puts several verbs in one mapping, optionally guarded
 by `when` and softened by `no_error`. A bundle takes **short forms only**; it
@@ -524,7 +526,26 @@ initialize:
 ```
 
 A conditional requires `when` and `then`, allows `else`, and takes no sibling
-verb or `no_error`, at any depth. An `else` without `then` is a schema error.
+verb, at any depth. An `else` without `then` is a schema error, and so is a
+`when` with nothing to guard (`- when: "fm.x"` alone). A `no_error` you write
+beside `then` is refused, `false` included: the flag belongs on the actions in
+the body. A `null` flag is no flag, so it passes:
+
+```yaml
+start:
+    - when: "fm.x"
+      then: [{ info: "a" }]
+      no_error: null    # valid: a null flag is no flag
+    - when: "fm.x"
+      then: [{ info: "a" }]
+      no_error: false   # invalid: no flag beside `then`
+    - when: "fm.x"         # invalid: `when` guards nothing
+```
+
+The conditional types still declare `no_error: literal(false)`: completion
+fills `no_error: false` at every place an action could sit, conditionals
+included, and that filled flag must not make a valid document invalid. It is
+not a flag you wrote, so it is never refused.
 
 The schema has **no depth limit**. The parser allows conditionals five levels
 deep and rejects a sixth with `LifecycleStackInvalidShape`, naming the path of
@@ -624,8 +645,42 @@ a five-level stack is valid in every event of every container.
 A task's `when:` is typed by shape only: non-empty text.
 
 A referenced sequence or group file (`sequence: "@tasks.yaml"`) is not
-Markdown, so no schema judges it; the task parser checks it when the
-sequence is prepared.
+Markdown, so no trigger schema judges it; the task parser checks it when the
+sequence is prepared. A referenced sequence document's own `$schema` and
+`$state` still apply to it.
+
+### Sequence declarations
+
+A sequence document has two schema keys with different scopes. Its root
+`$schema` is the document schema, exactly as in any other document: it types
+the document's properties and caller inputs, in YAML and Markdown alike. Its
+root `$state` types each step's normalized state in the document's inline
+`sequence:` list. `sequence.yaml` declares `$state` with the shared `schema`
+type, so the editor checks and completes it like a `$schema`, and declares
+`template` as an object:
+
+```yaml
+kind: sequence
+$schema:
+    reviewer: string(required)        # the document's input
+$state:
+    color: string(required)           # every step's state
+template:
+    desc: "{{ color }}"
+sequence:
+    - { name: blue, color: blue }
+```
+
+On a task, `sequence-types.yaml` declares `$schema`, `$state`, and `template`
+as an inline nested sequence's own options: `$state` and `template` for its
+children, and `$schema` as a check of the values the container sees at its
+turn. Because a task object is open and one type covers every task, the
+schema cannot tell an inline container from a `shell:` task; the task parser
+refuses the three keys anywhere but beside an inline `sequence: [ … ]`, and
+refuses a root `$state` or `template` beside a file reference, expression, or
+shell source. A group object is closed, so the schema reports them there
+too. See [Sequences → Sequence documents](flow-control/sequences.md#sequence-documents-schema-state-and-template)
+for what each declaration does and when it is checked.
 
 ### Keeping recursive schemas small and quick to validate
 
@@ -705,9 +760,7 @@ before anything runs:
   last in its list, and at most one directive per bundle; `prep` returns, so
   another item may follow it
 - `skip` only in `initialize`
-- no `when` beside the actions of a root or body dictionary, or at the
-  `loop:` root, and `gate:` never beside loose loop verbs (a conditional's
-  `then` in such a dictionary is a schema error too)
+- no `when` at the `loop:` root, and `gate:` never beside loose loop verbs
 - the five-level conditional nesting limit, in every event, including a
   guarded bundle (`when` beside verbs, such as `- { when: "fm.x", stop: null }`)
   placed inside a fifth-level `when`, which the parser counts as a sixth level
@@ -720,6 +773,32 @@ before anything runs:
 
 Passing the schema, in the editor or at launch, is therefore not proof that a
 lifecycle stack can execute.
+
+### Placement rules are judged as the parser judges them
+
+Some lifecycle rules are about where you wrote something rather than what
+type it has. JSON Schema cannot express them, so schema validation runs the
+lifecycle parser's own rules on every action dictionary it types. The editor
+and the launch check therefore report these as schema problems, at the
+offending key, with the parser's message:
+
+| You wrote | Why it is refused |
+| --- | --- |
+| `- { when: "fm.x", then: [stop], no_error: false }` | a flag belongs on the actions in the body |
+| `- { info: { text: hi, no_error: true }, no_error: true }` | one flag, two places; keep one, even when they agree |
+| `- { set: { done: true }, no_error: null }` | `set` takes no flag, not even `null` |
+| `- { when: "fm.x" }` | the `when` guards nothing |
+| `start: { when: "fm.x", info: hi }` | a dictionary of verbs never carries `when`; use a guarded list item |
+| `- { ensure_file: { file: a.md, no_error: 1 } }` | a flag is a boolean or text such as `"yes"`, never a number |
+
+Only flags you wrote count. Before validation the schema fills
+`no_error: false` wherever an action can sit, beside `then` and both beside
+and inside a long form included, and those filled flags are never a second
+placement or a flag on `set`. The launch check knows which flags those are,
+because it reads the document as you wrote it (with any proxy `with:` overlay
+and `--set` values) beside the completed frontmatter, exactly as the parser
+does.
+
 
 The reverse also holds: the parser does not type-check a literal operand, so
 `pr_list: three` passes the parser. The schema rejects it, and because the
@@ -894,6 +973,51 @@ binding failure; it softens only a failure of the effect itself.
 executed yet (**planned**). The schema reads `prep: null` as
 absent, so that spelling is left to the parser, which rejects it.
 
+### `edit`
+
+`edit` opens a file in the caller's editor (see
+[Edit Actions](flow-control/lifecycle.md#edit-actions)). It is a hand-written
+lifecycle verb, not a catalog function, so its shapes are
+`edit-short@darkmatter:lifecycle` and `edit-long@darkmatter:lifecycle`, and
+Claudine lists it by name. It is an `expression` action, so every event
+admits it, `initialize` and `cancelled` included, as do bundles and `loop:`
+verb keys; a bundle takes the short form only. The schema accepts it in
+`cancelled` because the parser does, but it never opens an editor there: an
+`edit` reached after cancellation fails when it runs.
+
+| Form | Shape |
+|---|---|
+| short | a non-blank file name, or a one-item array holding one: `edit: "{{ fqn }}"`, `edit: ["{{ fqn }}"]` |
+| long | `{ file, create_new, gui, no_error }`, closed; `file` is a required non-blank file name, and `create_new`, `gui`, and `no_error` are literal flags |
+
+The schema, `md schema validate`, and the editor's language server apply the
+lifecycle parser's own rules to `edit`, so they accept and refuse exactly what
+the parser does. A number or boolean file name is read as its text. A flag
+takes a YAML boolean or Boolean-like text (`"yes"`, `"false"`), and `null` is
+the same as leaving it out (`create_new` and `no_error` then default to
+`false`; `gui` lets either kind of editor open). A number, any other text,
+and a `{{ … }}` template are refused for a flag, because flags are never
+evaluated:
+
+```yaml
+initialize:
+    - edit: "{{ fqn }}"                         # valid
+    - edit: { file: "{{ fqn }}", create_new: true, gui: false }   # valid
+    - edit: 5                                   # valid: opens the file named `5`
+    - edit: { file: notes.md, gui: "yes" }      # valid: Boolean-like text converts
+    - edit: { file: notes.md, create_new: null } # valid: the same as leaving it out
+    - edit: "   "                               # invalid: blank
+    - edit: null                                # invalid: names no file (also bare `edit` and `edit: []`)
+    - edit: { file: notes.md, gui: 1 }          # invalid: a number is not a flag
+    - edit: { file: notes.md, gui: "{{ fm.gui }}" } # invalid: flags are literal
+    - edit: { path: notes.md }                  # invalid: unknown parameter
+```
+
+A flag or `file` error is reported at the parameter itself
+(`initialize[0].edit.gui`); a short-form error at the action. A file name
+computed by a `{{ … }}` template is not known until the event runs, so it is
+checked then.
+
 ### Where each check runs
 
 A lifecycle action passes four checks on its way to running. The first two
@@ -916,9 +1040,12 @@ The diagram orders the checks by what they can see, not strictly by when
 they run: at launch, Claudine parses every stack before `initialize` and
 reaches the schema verdict after it (see
 [Composition → Claudine's trigger schemas](composition.md#claudines-trigger-schemas-in-the-launch-verdict)).
-Either failure stops the launch before `start` and the provider. Validation
-and editor requests never run an action: no expression is evaluated, no
-effect is dispatched, and no shell is started.
+Either failure stops the launch before `start` and the provider. A schema
+refusal does not undo `initialize`: whatever its actions already did (a
+file created, frontmatter set, an editor session) stands, so an invalid
+document is not one that ran nothing. Validation and editor requests never
+run an action: no expression is evaluated, no effect is dispatched, and no
+shell is started.
 
 ### What Claudine adds to expression checking
 
@@ -1001,7 +1128,13 @@ hand-written walk.
 
 Every Claudine property is optional, and the schema reads an explicit `null`
 as absent. Some readers are stricter: `loop`, the four timeouts,
-and `prompt` reject an explicit `null` when the document is parsed. A few
+and `prompt` reject an explicit `null` when the document is parsed. Lifecycle
+events are completed like any value, so a `no_error` you left out holds its
+default, `false`, once the schema stage has filled in defaults; the parser
+still treats it as unwritten. A `loop:` block is the exception: the schema
+judges it but fills nothing into it, so the effective block is exactly what
+you wrote. An unwritten `no_error` in its gate still
+reads `false`, from the lifecycle parser. A few
 properties are declared only so the editor
 can describe them:
 

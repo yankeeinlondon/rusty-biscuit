@@ -12,6 +12,7 @@ import "../just/notify.just"
 import "../just/ai.just"
 import "../just/spec.just"
 import "../just/devops.just"
+import "../just/skills.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -111,7 +112,7 @@ test-l2 *args="":
     @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
     @echo -e "{{ DIM }}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{ RESET }}"
     @echo
-    @just _test_l2_all "{{ LIBRARY }} --features terminal-tests; {{ CLI }} --features terminal-tests; {{ DMLS }} --features terminal-tests" {{ args }}
+    @just _test_l2_all "{{ LIBRARY }} --features terminal-tests; {{ CLI }} --features terminal-tests,test-fixtures; {{ DMLS }} --features terminal-tests" {{ args }}
 
 # darkmatter Level-3 tests
 test-l3 *args="":
@@ -553,6 +554,12 @@ regen-lifecycle-schema:
 
 readme:
     _readme_files darkmatter
+
+# Publish Darkmatter's caller skills (`docs/use-skills/use-darkmatter`,
+# `use-dmls`) into this host's user skill directory (`dest` overrides
+# `~/.claude/skills`).
+publish-skills dest="":
+    @just _publish_use_skills "{{ dest }}"
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 

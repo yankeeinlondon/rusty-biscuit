@@ -477,6 +477,8 @@ fn walk_action<'a>(
             LifecycleControlAction::Stop | LifecycleControlAction::Skip => {}
         },
         LifecycleActionKind::Communication(comm) => operand(prefix.field("text"), &comm.text),
+        // `create_new` and `gui` are literal booleans, never operands.
+        LifecycleActionKind::Edit(edit) => operand(prefix.field("file"), &edit.file),
         LifecycleActionKind::Shell(shell) => {
             operand(prefix.field("command"), &shell.command);
             if let Some(on_error) = &shell.on_error {

@@ -70,6 +70,9 @@ pub(super) fn run_step_task(
     run: &SequenceRunContext<'_>,
     task: &PreflightTask,
     prepared: &PreparedComposition,
+    // The prepared values of the whole document a root `sequence:` reference
+    // names, which its rows run in instead of the invoked document's.
+    referenced: Option<serde_json::Map<String, Value>>,
     overlay: &Value,
     env_overrides: &BTreeMap<String, String>,
     target: Option<&ResolvedExecutionTarget>,
@@ -78,7 +81,7 @@ pub(super) fn run_step_task(
     // The step's composition run, which the task and its prompt document join.
     step_run: &RunEvidence,
 ) -> StepOutcome {
-    let frontmatter = effective_frontmatter(prepared);
+    let frontmatter = referenced.unwrap_or_else(|| effective_frontmatter(prepared));
     let state = match EffectiveStateBuilder::new()
         .with_frontmatter(frontmatter.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
         .with_allow_ctx_override(true)
@@ -93,6 +96,7 @@ pub(super) fn run_step_task(
                 agent_perf: None,
                 compose_perf,
                 tasks: Vec::new(),
+                secondary: Vec::new(),
             };
         }
     };
@@ -105,10 +109,26 @@ pub(super) fn run_step_task(
     let prewarm = TaskStackPrewarm::new(run, &frontmatter);
     prewarm.submit(&run.prep_context.invocation, task, &task_context);
 
-    // A task stack mutates relative to the document that authored the task,
-    // including when that document lives outside the sequence repository.
-    let mutation_root = task.origin_dir.clone();
-    let engine = EffectEngine::builder().mutation_root(&mutation_root).build();
+    // Relative targets resolve against the document that authored the task,
+    // but writes stay inside the caller's launch scope, even when that
+    // document lives outside it.
+    let mutation_root = match claudine::invocation_context::lifecycle_mutation_root(
+        Some(&run.prep_context.invocation),
+        task_source_context.file_resolution_context(),
+    ) {
+        Ok(root) => root,
+        Err(error) => {
+            return StepOutcome::Failed {
+                message: error.to_string(),
+                snapshot: DiagnosticSnapshot::select(&error).map(Box::new),
+                agent_perf: None,
+                compose_perf,
+                tasks: Vec::new(),
+                secondary: Vec::new(),
+            };
+        }
+    };
+    let engine = EffectEngine::builder().mutation_root(mutation_root).build();
     let emitter = DefaultLifecycleEmitter;
     let settings = claudine::composition::sequence::task::task_playback_settings();
     let messaging = claudine::messaging::RuntimeMessagingSettings {
@@ -207,7 +227,7 @@ pub(super) fn run_step_task(
             message: outcome
                 .error
                 .as_ref()
-                .map_or_else(|| "task failed".to_string(), |d| d.message().to_string()),
+                .map_or_else(|| "task failed".to_string(), |d| d.info.msg.clone()),
             // The task diagnostic already carries the projection `err.*` reads;
             // reuse it rather than re-deriving a second, possibly divergent one.
             snapshot: outcome
@@ -217,6 +237,7 @@ pub(super) fn run_step_task(
             agent_perf,
             compose_perf,
             tasks,
+            secondary: outcome.secondary_errors.into_iter().map(|d| d.info).collect(),
         },
     }
 }
@@ -227,11 +248,11 @@ pub(super) fn run_step_task(
 /// override layers (caller setters, runtime writes, the reserved overlay),
 /// the runtime cell's `seq`, and the enclosing loop's `loop` values.
 #[allow(clippy::result_large_err)]
-pub(super) fn root_step_guard(
+pub(super) fn root_step_guard<'a>(
     run: &SequenceRunContext<'_>,
     step_name: &str,
     task: &PreflightTask,
-    authored: &darkmatter::markdown::FrontmatterMap,
+    authored: impl IntoIterator<Item = (&'a String, &'a Value)>,
     overrides: &composition::LayeredOverrides,
     runtime_state: &std::sync::Arc<RuntimeState>,
 ) -> Result<bool, CompositionError> {
@@ -254,7 +275,12 @@ pub(super) fn root_step_guard(
         .invocation
         .derive_source(&task.origin_path)
         .expect("resolved task document always has a parent directory");
-    let engine = EffectEngine::builder().mutation_root(&task.origin_dir).build();
+    let engine = EffectEngine::builder()
+        .mutation_root(claudine::invocation_context::lifecycle_mutation_root(
+            Some(&run.prep_context.invocation),
+            source_context.file_resolution_context(),
+        )?)
+        .build();
     let emitter = DefaultLifecycleEmitter;
     let settings = claudine::composition::sequence::task::task_playback_settings();
     let messaging = claudine::messaging::RuntimeMessagingSettings { user: None, repo: None };
@@ -739,6 +765,39 @@ impl<'a> WrapperPromptRunner<'a> {
     }
 }
 
+impl WrapperPromptRunner<'_> {
+    /// The caller records a prompt task's document composes under: its
+    /// `with` values, supplied from the file that authored them, below the
+    /// step's own caller records. A key a runtime write or the reserved
+    /// overlay replaces keeps no record, since the value it now reads is not
+    /// the caller's.
+    fn task_caller_records(
+        &self,
+        document: &InvocationContext,
+        request: &PromptTaskRequest,
+    ) -> darkmatter::markdown::compose::CallerInputRecords {
+        let with_source_context = document
+            .derive_source(&request.with_origin_path)
+            .expect("a preflight task always has an authoring source");
+        let mut caller_input_records =
+            claudine::composition::CallerInputLayers::from_caller_overrides(
+                Some(Value::Object(request.with.clone())),
+                with_source_context.file_resolution_context().clone(),
+            )
+            .caller_input_records;
+        caller_input_records.extend(self.run.compose.caller_input_records.clone());
+        if let Some(runtime) = &request.runtime {
+            for key in runtime.mutation_keys() {
+                caller_input_records.remove(&key);
+            }
+        }
+        for key in claudine::composition::sequence::reserved::ROOT_OVERLAY_KEYS {
+            caller_input_records.remove(*key);
+        }
+        caller_input_records
+    }
+}
+
 /// `env` with `AGENT`/`MODEL` naming `target`; with no target, neither.
 fn identity_env(
     mut env: BTreeMap<String, String>,
@@ -782,7 +841,11 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         )?;
         let source_context = document.derive_source(&source.resolved_path)
             .expect("resolved prompt document always has a parent directory");
+        // The barrier judges the task's `with` files from their author, as
+        // the run that follows does.
+        let caller_input_records = self.task_caller_records(document, request);
         let mut context = self.run.compose.for_referenced_document(request.inline_compose, &source_context);
+        context.caller_input_records = &caller_input_records;
         context.lifecycle_group = request.lifecycle_group.clone();
         context.invocation = document;
         context.run_evidence = request.run_evidence.as_ref();
@@ -922,24 +985,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         let prompt_source_context = document
             .derive_source(&source.resolved_path)
             .expect("resolved prompt document always has a parent directory");
-        let with_source_context = document
-            .derive_source(&request.with_origin_path)
-            .expect("a preflight task always has an authoring source");
-        let mut caller_input_records =
-            claudine::composition::CallerInputLayers::from_caller_overrides(
-                Some(Value::Object(request.with.clone())),
-                with_source_context.file_resolution_context().clone(),
-            )
-            .caller_input_records;
-        caller_input_records.extend(self.run.compose.caller_input_records.clone());
-        if let Some(runtime) = &request.runtime {
-            for key in runtime.mutation_keys() {
-                caller_input_records.remove(&key);
-            }
-        }
-        for key in claudine::composition::sequence::reserved::ROOT_OVERLAY_KEYS {
-            caller_input_records.remove(*key);
-        }
+        let caller_input_records = self.task_caller_records(&document, request);
         // A document with its own `loop:` repeats here exactly as `compose`
         // repeats it. The body of a container's own document is not that: its
         // loop is the container's.
@@ -1030,7 +1076,6 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             yolo: shared.yolo,
             include: shared.include.clone(),
             model: shared.model.clone(),
-            output: shared.output,
             system_prompt_args: SystemPromptArgs {
                 append_file: shared.append_system_prompt.clone(),
                 replace_file: shared.replace_system_prompt.clone(),

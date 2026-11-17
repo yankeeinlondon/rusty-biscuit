@@ -152,6 +152,7 @@ pub(crate) mod fs_capability;
 pub(crate) mod host_tools;
 pub(crate) mod incomplete_subagents;
 pub(crate) mod lifecycle_set_corpus;
+pub(crate) mod mutation_paths;
 #[cfg(unix)]
 pub(crate) mod launch_recorder;
 pub(crate) mod owned_value_options;
@@ -365,6 +366,16 @@ impl CliProcessFixture {
 
     pub fn bin_dir(&self) -> &Path {
         &self.bin_dir
+    }
+
+    /// Install `claudine-fake-echo` as the fixture's `echo`, for a sequence
+    /// whose templated `shell: "echo {{ … }}"` must run on Windows too, where
+    /// `echo` is a `cmd` builtin and template commands never run in a shell.
+    #[cfg(feature = "test-fixtures")]
+    pub fn install_echo(&self) {
+        let target = self.bin_dir.join(format!("echo{}", std::env::consts::EXE_SUFFIX));
+        std::fs::copy(biscuit_test_harness::bin_exe!("claudine-fake-echo"), &target)
+            .unwrap_or_else(|error| panic!("install fake echo at {}: {error}", target.display()));
     }
 
     pub fn initialize_repository(&self) {

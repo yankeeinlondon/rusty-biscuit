@@ -11,6 +11,7 @@ fn options(unknown_verbs: UnknownVerbPolicy) -> LifecycleParseOptions<'static> {
     LifecycleParseOptions {
         is_known_effect: &|_| true,
         authored: None,
+        authored_values: None,
         unknown_verbs,
         registry: super::registry::tests::agent_host(),
     }
@@ -197,4 +198,5 @@ fn md_parses_its_own_spellings_and_leaves_host_only_keys_as_data() {
     assert!(config.stack(LifecycleSignal::Loop).is_empty());
 }
 
+mod authored_flags;
 mod overloads;

@@ -20,11 +20,12 @@ pub struct ValidationSuccess<'input> {
     pub value: Cow<'input, Value>,
     /// Non-fatal findings from resolving the schema.
     pub advisories: Vec<SchemaAdvisory>,
-    /// Required properties that were absent and passed through their
-    /// `default(...)`, in validator order. Empty for an unconditional pass.
-    /// Soft validation has inserted them into `value`; strict validation
-    /// leaves `value` as the input, so the caller decides whether to apply
-    /// them.
+    /// The defaults default preparation applied: each missing or `null`
+    /// property, required or not, that declares a `default(...)`, in walk
+    /// order (see [`crate::defaults`]). Empty when no default applies, which
+    /// may still be a value accepted only after conversion. Soft validation
+    /// has applied them to `value`; strict validation leaves `value` as the
+    /// input, so the caller decides whether to apply them.
     pub defaults: Vec<AppliedDefault>,
 }
 
@@ -61,10 +62,11 @@ pub enum ValidationFailure {
     /// judged: it does not lower to JSON Schema (a function-typed property),
     /// `jsonschema` rejects the lowered form, or it names a file an in-memory
     /// schema cannot read. Validation of every value fails the same way until
-    /// the schema changes. Also a defect the value exposed in the schema's
-    /// defaults: an absent required property whose default breaks its own
-    /// definition, or union arms whose defaults complete the value
-    /// differently (see [`crate::defaults`]).
+    /// the schema changes. Also a defect in the schema's defaults: different
+    /// defaults for one property across union arms (every value fails),
+    /// different defaults from the patterns or catch-alls selecting a key the
+    /// value needed a default for, or a default the value needed that breaks
+    /// its own definition (see [`crate::defaults`]).
     Unprepared {
         /// Why preparation failed; shared, so repeated validations report the
         /// one error the schema holds.

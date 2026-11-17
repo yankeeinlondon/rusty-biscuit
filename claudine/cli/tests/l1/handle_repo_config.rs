@@ -30,9 +30,10 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         "actions": {
             "session_start": [
                 {
-                    "type": "report",
-                    "handler": {
-                        "format": "json"
+                    "report": {
+                        "handler": {
+                            "format": "json"
+                        }
                     }
                 }
             ]
@@ -88,9 +89,10 @@ fn handle_logs_wrapper_package_context_from_env() {
         "actions": {
             "session_start": [
                 {
-                    "type": "report",
-                    "handler": {
-                        "format": "json"
+                    "report": {
+                        "handler": {
+                            "format": "json"
+                        }
                     }
                 }
             ]

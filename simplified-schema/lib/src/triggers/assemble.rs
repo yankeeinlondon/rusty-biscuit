@@ -725,7 +725,7 @@ pub struct PayloadMemoCounts {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::triggers::PayloadMemoTally;
+/// use simplified_schema::triggers::PayloadMemoTally;
 ///
 /// let pass = PayloadMemoTally::start();
 /// {

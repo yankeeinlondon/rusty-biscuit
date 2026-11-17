@@ -221,12 +221,11 @@ pub(crate) fn property_matches(frontmatter: &Value, name: &str, atom: &PropertyA
             !required
         }
         Some(v) => {
-            // A present null is treated like an absent value (SimplifiedSchema
-            // nullable semantics): required fails, guard passes, and
-            // `non-null`, which keeps the key optional but rejects null,
-            // defeats.
+            // A present null meets `required` (the key is written) and then
+            // must satisfy the value type: a null-admitting type accepts it,
+            // and an optional property reads it as unset.
             if v.is_null() {
-                return !required && !atom.marks_non_null();
+                return atom.admits_null() || !required;
             }
             type_conforms(atom, v)
         }
@@ -326,8 +325,8 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
                         let v = map.get(name);
                         match v {
                             None => {
-                                // Guard/pass unless the union is effectively
-                                // required (a marked arm and no null-admitting arm).
+                                // Guard/pass unless the union is required
+                                // (some arm carries the marker).
                                 if def.is_required() {
                                     return false;
                                 }
@@ -335,7 +334,7 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
                             }
                             Some(val) => {
                                 if val.is_null() {
-                                    if def.is_required() || def.marks_non_null() {
+                                    if !def.admits_null() && def.is_required() {
                                         return false;
                                     }
                                     continue;
@@ -364,7 +363,7 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
                         }
                     }
                     Some(val) if val.is_null() => {
-                        if is_required(atom) || atom.marks_non_null() {
+                        if !atom.admits_null() && is_required(atom) {
                             return false;
                         }
                     }
@@ -463,7 +462,14 @@ fn constraint_holds(constraint: &Constraint, value: &Value) -> bool {
         Constraint::Min(n) => value.as_f64().is_some_and(|x| x >= *n),
         Constraint::Max(n) => value.as_f64().is_some_and(|x| x <= *n),
         Constraint::Integer => value.as_f64().is_some_and(|x| x.fract() == 0.0),
-        Constraint::NotEmpty => value.as_str().is_some_and(|s| !s.trim().is_empty()),
+        // Content, judged by the written value's own shape: non-blank text,
+        // or a non-empty mapping or list (an object or a declaration).
+        Constraint::NotEmpty => match value {
+            Value::String(text) => !text.trim().is_empty(),
+            Value::Object(map) => !map.is_empty(),
+            Value::Array(items) => !items.is_empty(),
+            _ => false,
+        },
         // `Unique`, item/key-count constraints are array/object-level and
         // checked in `array_constraints_hold` / object walks; they are no-ops
         // on a scalar value.
@@ -532,6 +538,7 @@ fn array_constraints_hold(atom: &PropertyAtom, items: &[Value]) -> bool {
                 true
             }
             Constraint::MinItems(n) => items.len() >= *n,
+            Constraint::NotEmpty => !items.is_empty(),
             Constraint::MaxItems(n) => items.len() <= *n,
             _ => true,
         };
@@ -542,9 +549,9 @@ fn array_constraints_hold(atom: &PropertyAtom, items: &[Value]) -> bool {
     true
 }
 
-/// The shared effective presence ([`PropertyAtom::is_required`]): a marker
-/// after `[]` counts, a union type's arms count, and a whole value that admits
-/// null (`null`, `unknown`, or a union with such an arm) is never required.
+/// The shared presence ([`PropertyAtom::is_required`]): a marker after `[]`
+/// counts, and a union type's arms count. A null-admitting value stays
+/// required; only a written `null` satisfies it.
 fn is_required(atom: &PropertyAtom) -> bool {
     atom.is_required()
 }
@@ -740,16 +747,28 @@ mod tests {
     }
 
     #[test]
-    fn non_null_guard_passes_when_absent_and_defeats_on_null() {
-        let conditions = loaded("title: string(non-null)");
+    fn not_empty_guard_passes_when_absent_or_null_and_defeats_on_empty_values() {
         let detached = PathSubject::detached();
+        let tags = loaded("tags: string[](not-empty)");
+        assert!(tags.matches(&frontmatter(&[]), &detached));
+        assert!(tags.matches(&frontmatter(&[("tags", json!(["a"]))]), &detached));
+        assert!(!tags.matches(&frontmatter(&[("tags", json!([]))]), &detached));
+        let declares = loaded("declares: schema(mapping; not-empty)");
+        assert!(declares.matches(&frontmatter(&[("declares", json!({ "a": "string" }))]), &detached));
+        assert!(!declares.matches(&frontmatter(&[("declares", json!({}))]), &detached));
+        let conditions = loaded("title: string(not-empty)");
         assert!(conditions.matches(&frontmatter(&[]), &detached));
+        assert!(conditions.matches(&frontmatter(&[("title", Value::Null)]), &detached));
         assert!(conditions.matches(&frontmatter(&[("title", json!("x"))]), &detached));
-        assert!(!conditions.matches(&frontmatter(&[("title", Value::Null)]), &detached));
+        assert!(!conditions.matches(&frontmatter(&[("title", json!("  "))]), &detached));
         assert!(!conditions.matches(&frontmatter(&[("title", json!(1))]), &detached));
-        let nested = loaded("meta: '{ title: string(non-null) }'");
-        assert!(nested.matches(&frontmatter(&[("meta", json!({}))]), &detached));
-        assert!(!nested.matches(&frontmatter(&[("meta", json!({ "title": null }))]), &detached));
+    }
+
+    #[test]
+    fn the_removed_non_null_marker_is_refused_in_a_condition() {
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("title: string(non-null)").expect("yaml");
+        let error = crate::triggers::grammar::parse_match_conditions(&yaml).expect_err("`non-null` is refused");
+        assert!(error.to_string().contains("`non-null` is no longer supported"), "{error}");
     }
 
     #[test]
@@ -987,14 +1006,26 @@ mod tests {
     }
 
     #[test]
-    fn presence_follows_the_shared_effective_calculation() {
+    fn presence_follows_the_shared_calculation() {
         let detached = PathSubject::detached();
-        // `unknown(required)` and `null(required)` are satisfied by absence.
+        // `unknown(required)` and `null(required)` need the key written; a
+        // written `null` satisfies both.
         for ty in [SimplifiedType::Unknown, SimplifiedType::Null] {
             let expr = prop("p", ty, vec![Constraint::Required]);
-            assert!(matches(&expr, &frontmatter(&[]), &detached), "{ty:?} absent");
+            assert!(!matches(&expr, &frontmatter(&[]), &detached), "{ty:?} absent");
+            assert_eq!(
+                first_defeat(&expr, &frontmatter(&[]), &detached).as_deref(),
+                Some("`p` is required but absent")
+            );
             assert!(matches(&expr, &frontmatter(&[("p", Value::Null)]), &detached), "{ty:?} null");
         }
+        // A required non-null type rejects a written `null`; an optional one
+        // reads it as unset.
+        let number = prop("n", SimplifiedType::Number, vec![Constraint::Required]);
+        assert!(!matches(&number, &frontmatter(&[("n", Value::Null)]), &detached));
+        let optional = prop("n", SimplifiedType::Number, vec![]);
+        assert!(matches(&optional, &frontmatter(&[("n", Value::Null)]), &detached));
+        assert!(matches(&optional, &frontmatter(&[]), &detached));
         // A `required` written after `[]` is a gate; a present non-list fails.
         let steps = MatchExpr::Property {
             name: "steps".into(),

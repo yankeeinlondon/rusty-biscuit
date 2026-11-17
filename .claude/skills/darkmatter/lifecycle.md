@@ -44,6 +44,108 @@ pages with the behavior.
 - `lifecycle_boundary/{engine,profiles,publisher}.rs` are a test-only
   prototype run driven by the production registry; its registration tests
   live in `protocol_tests.rs`.
+- A parser-owned verb that is neither flow control nor a catalog entry (today
+  only `edit`, `LifecycleActionKind::Edit`) is listed once in
+  `signatures.rs::LIFECYCLE_ONLY_VERBS`; `is_known_lifecycle_verb`,
+  `all_lifecycle_verbs`, `template_operands`, the source map's long form, and
+  the schema projection's collision check (`hand_owner`) read it. Never
+  register such a verb as an expression function or side effect
+  (`lib/tests/l1/lifecycle_edit_action.rs` asserts it). A new
+  `LifecycleActionKind` needs an arm in `action_type`/`action_verb`
+  (`parse.rs`), `walk_action` (`validate.rs`), `execute_action_inner`, and
+  Claudine's `describe_action` (`sequence/task/mod.rs`); the wildcard walkers
+  (preflight, shell templates, `action_writes`) treat it as inert.
+- `edit` runs in `executor.rs::dispatch_edit` through the host's
+  `LifecycleHost::editor()` (`None`, the default, fails the action as
+  `EditError::Unsupported`; `md compose` fills `MdStackContext::editor` with a
+  `ProcessEditorService` per event: `Structured` under a data output, else
+  `MarkdownDocument`, `stdin_reserved` when the document came from stdin;
+  Claudine's host lends one built at each edit, see the `claudine` skill's
+  architecture page, and maps `EditFailed` to `LifecycleEditFailed`).
+  A non-string/blank `file` and any cancellation are unsuppressible
+  evaluation failures; everything else is a dispatch failure classified as
+  `LifecycleRunFailure::EditFailed` (`no_error` applies). The cancellation
+  probe is `cancellation::cause_with`, never `requested_with`, which is false
+  inside the `CleanupScope` every terminal event runs in. The target resolves
+  through `mutation_target`, the one helper `resolve_effect_path` also uses
+  (the seven `*_frontmatter` verbs included, resolved once and mirrored into
+  live state by `PathIdentity` of the resolved target), with URLs refused
+  first: an existing file by the reference contract, a missing one at its
+  first candidate (beside the document for a bare relative name; an
+  unmatched `%` is refused), then `ensure_within` against the engine's
+  mutation root before anything is opened or created. The root is only the
+  boundary, never a base. Every host (`md compose` and every Claudine
+  route: compose, wrapper, staged boot, loop harness, sequence container,
+  task, step guard) builds its `EffectEngine` with the request context's
+  `launch_magic_scope().local_root()` (the working tree containing the
+  launch directory, else that directory), so a prompt in a sibling library
+  can edit a `{{ ctx.cwd }}` path but not a file beside itself. The resolver
+  derives the document context from `inputs.file_resolution_context`, so a
+  host running a stack for another document (Claudine's referenced sequences
+  and groups) must pass that document's own context, keeping the launch
+  scope, or the reference fails as "does not contain the resolution source".
+  Failure messages are folded to one escape-free line (`concise_message`)
+  and never shortened, so `err.msg`, `DiagnosticSnapshot::message`, and
+  every report (`report_diagnostics::lifecycle_failure_diagnostics`,
+  `md compose`'s status line, Claudine's run and step errors) carry the same
+  complete text; delivery adapters (speech, messaging, notifications) fit it
+  to their channel. `edit` keeps its reason-first wording because it reads
+  better. Terminal-editor success is provable only in L2
+  (`cli/tests/level2/level2_edit_action.rs`); L1 process tests use the fake
+  editor installed as `code` (GUI, `--wait`) with `DISPLAY` set.
+- The editor seam is `darkmatter::editor::EditorService` (`edit(&EditRequest)
+  -> EditOutcome`; `Sync`). A host registers one by overriding
+  `LifecycleHost::editor()`; the stock implementation is
+  `ProcessEditorService::new(EditorHostFacts { output, stdin_reserved })`,
+  which checks in order: cancelled → resolve (`resolve_editor`, never a
+  non-blocking editor; `gui` constrains the surface) → eligibility (a
+  terminal editor needs an interactive terminal no one else holds and is
+  refused on a thread under `editor::deny_terminal_in_this_thread()`, which
+  Claudine's parallel members enter) → containment → `create_new_guarded`
+  → launch → recheck. Errors are `EditError` (cancellation is
+  `EditError::Editor(EditorError::Cancelled)`, test with `is_cancelled()`).
+  `EditOutcome::attempted` turns true at the first create or launch; the
+  executor then calls `host.side_effect_attempted()` once so cached reads
+  are dropped. The service owns the editor's process tree with Sniff's
+  `sniff::process::ProcessTree` (own process group on Unix, kill-on-close Job
+  Object assigned before the editor runs on Windows) and polls
+  `EditRequest::cancelled` every 20 ms; cancellation terminates the tree
+  (Unix `SIGTERM`, `EDITOR_TERMINATE_GRACE`, then `SIGKILL`) and reaps it
+  before returning. On Unix a terminal editor with inherited stdin also runs
+  under `sniff::process::ForegroundHandoff`, restored explicitly after the
+  editor is reaped (details in [library-surfaces.md](library-surfaces.md)). When Windows cannot release a finished editor's tree,
+  `EditOutcome::warning` carries the text and the executor passes it to
+  `LifecycleEffects::warn` once; the edit still succeeds. Contract:
+  [process trees](../../../sniff/docs/topics/process-trees.md); Windows
+  specifics are in the `os` skill.
+- `edit` is a lifecycle-only verb, never a catalog entry: schema projection
+  (`hand_owner`) fails generation when a catalog function or effect is named
+  `edit`. Its schema types (`edit-short`/`edit-long` in
+  `darkmatter/schemas/partials/lifecycle.yaml`, flags
+  `boolean(default(false))` / `gui: boolean`) are backed by the parser's own
+  rules: `markdown/schemas/bound_operands.rs::report_refused_targets` applies
+  `action_shape.rs::{edit_target_problem, edit_flag_problem}` (which the
+  parser also calls, over `edit_file_value` and `literal_flag`), so
+  `md schema validate`, DMLS, and `md compose` agree: `edit: 5` opens `"5"`,
+  `gui: "yes"` is `true`, a null flag is unset, and `edit: null`, `gui: 1`, or
+  a template flag is refused.
+- Authored flag origin: hosts that parse a schema-completed value pass the
+  pre-completion value as `LifecycleParseOptions::authored_values` (`md`
+  parses the authored document, so `None`). Only a non-null authored
+  `no_error` is a placement; two placements fail even when equal; a filled
+  `false` never conflicts, meets `then`, creates a verb, or gives `set` a flag;
+  `set` refuses any authored `no_error`, `null` included
+  (`lifecycle/tests/authored_flags.rs`). Those placement and branch-shape
+  rules are `parse.rs`'s `PlacementRule` helpers, shared with schema
+  validation through `placement_rule` (see `schema.md`); add a new
+  placement rule there, never as a second check in one of them.
+- `initialize` runs before schema validation; a schema refusal is a
+  composition failure (`failed`, `finalize`) and `initialize`'s effects stay.
+  CLI cells that must prove "no effect on refusal" put the marker in
+  `composed` (`cli/tests/l1/compose_loader_wiring.rs`). Passive surfaces (DMLS,
+  `md schema validate`, hover, completion) never run a stack, so they never
+  create a target or launch an editor (`dmls/tests/l1/no_side_effects.rs`,
+  `edit_action_editor.rs`).
 - Never add a hand-maintained list of lifecycle event keys or late roots;
   derive it from the host's `EventRegistry`.
 - Lifecycle operands evaluate lazy functions in

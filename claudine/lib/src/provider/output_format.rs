@@ -5,22 +5,15 @@
 //! entrypoints. The data lives on each [`ProviderInfo`](super::ProviderInfo)
 //! as `&'static [OutputFormatSupport]` and `&'static [EntrypointSpec]`.
 //!
-//! [`OutputFormat`] mirrors the values understood by the universal
-//! `--output` flag and intentionally re-exports the same lowercase
-//! representation used by `claudine::composition::OutputFormat` so that
-//! downstream code can translate between the two without bespoke logic.
+//! Claudine reads this data to ask each provider for its richest structured
+//! stream; it never forwards a caller-chosen format.
 
 use serde::Serialize;
 
 use crate::provider_id::OutputFormatSelector;
 
-/// Universal output-format identifier shared by composition and wrapper
-/// catalog data.
-///
-/// The discriminants line up with `claudine::composition::OutputFormat`
-/// (text/json/stream) and the CLI's wrapper-side `OutputFormat`. The lib
-/// crate retains its own copy here so the provider catalog stays free of
-/// composition-specific types.
+/// A non-interactive output format a provider offers, as recorded in the
+/// provider catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputFormat {
@@ -34,8 +27,7 @@ pub enum OutputFormat {
 
 impl OutputFormat {
     /// Returns the canonical lowercase identifier (`"text"`, `"json"`,
-    /// `"stream"`) used by the composition layer and the CLI's universal
-    /// `--output` flag.
+    /// `"stream"`).
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Text => "text",
@@ -49,7 +41,7 @@ impl OutputFormat {
 /// in non-interactive mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct OutputFormatSupport {
-    /// The universal output format identifier this entry maps from.
+    /// The format this entry describes.
     pub format: OutputFormat,
     /// The provider's native name for this format (e.g. `"stream-json"`,
     /// `"jsonl"`, `"schema-json"`).

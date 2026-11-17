@@ -184,6 +184,10 @@ cross-check *args:
 cross-check-refresh *args:
     @./scripts/cross-check-refresh.sh {{ args }}
 
+# run Level 1 tests for the rule `just init` uses to keep or reinstall monorepo CLIs
+init-test:
+    @./scripts/ensure-repo-cli-tests.sh
+
 # run Level 1 tests for the clone-pruning rules cross-check and cross-check-refresh share
 cross-check-test:
     @./scripts/cross-check-hosts-tests.sh
@@ -571,9 +575,18 @@ cp:
 # On native Windows, run scripts\init.ps1 instead of invoking this recipe
 # directly: just needs bash AND cygpath on PATH before it can run any recipe,
 # so the "no shell environment" check has to happen outside just.
-init: _ensure-native-bash
+#
+# Monorepo CLIs already on PATH and built within the last 30 days are kept
+# (scripts/ensure-repo-cli.sh); `just init --rebuild` reinstalls them all.
+init *args="": _ensure-native-bash
     #!/usr/bin/env bash
     set -euo pipefail
+    for arg in {{ args }}; do
+        if [[ "$arg" != "--rebuild" ]]; then
+            echo "just init: unknown argument '$arg' (supported: --rebuild)" >&2
+            exit 2
+        fi
+    done
     echo -e "Initializing the {{ RED }}rusty-biscuit{{ RESET }} monorepo"
     echo
 
@@ -597,14 +610,17 @@ init: _ensure-native-bash
     # pnpm itself comes from _ensure-ci-tools above.
     pnpm install --frozen-lockfile
     echo
-    (cd sniff && just install)
+
+    echo -e "{{ BOLD }}Monorepo CLIs{{ RESET }}"
+    ensure=(bash scripts/ensure-repo-cli.sh {{ args }})
+    "${ensure[@]}" sniff sniff
     sniff runtime
-    (cd biscuit-hash && just install)
-    (cd biscuit-terminal && just install)
-    (cd darkmatter && just install)
-    (cd playa && just install)
-    (cd biscuit-speaks && just install)
-    (cd claudine && just install)
+    "${ensure[@]}" bh biscuit-hash
+    "${ensure[@]}" bt biscuit-terminal
+    "${ensure[@]}" md darkmatter
+    "${ensure[@]}" playa playa
+    "${ensure[@]}" so-you-say biscuit-speaks
+    "${ensure[@]}" claudine claudine
 
 # "Accidental WSL" guard. Must be a LINEWISE recipe: just runs shebang recipes
 # through the cygpath-translated interpreter (Cygwin/Git Bash), but linewise
@@ -1116,10 +1132,13 @@ _ensure-kache:
     # today. Already on the serving device → that IS the store (still pinned in
     # the config file; spec §2 ruling); otherwise the probe's cascade
     # candidate. A doctor failure here makes placement undecidable — same skip
-    # bucket as any other pre-activation failure.
+    # bucket as any other pre-activation failure. `config-source`, not
+    # `report`: only the doctor store is read here, and `report` would also
+    # re-run the clone checks and the macOS passthrough probe (a codesign)
+    # that steps (1), (2), and (5) already own.
     report_out=""
     report_rc=0
-    report_out="$(./scripts/kache-host.sh report 2>&1)" || report_rc=$?
+    report_out="$(./scripts/kache-host.sh config-source 2>&1)" || report_rc=$?
     if [[ $report_rc -ne 0 ]]; then
         kache_off "kache doctor failed after install ($(sed -n 's/^kache-host: error=//p' <<<"$report_out" | head -1)) — store placement is undecidable."
     fi
@@ -1233,7 +1252,8 @@ _ensure-kache:
         for ((i = 0; i < tries; i++)); do
             read_daemon || true
             [[ "$daemon_running" == "yes" && "$daemon_version" == "$installed" ]] && return 0
-            sleep 1
+            # No sleep after the last read: nothing reads the state again.
+            ((i + 1 < tries)) && sleep 1
         done
         return 1
     }
@@ -1480,10 +1500,11 @@ install-kache binary_only="false":
 
 # The durable guard. Init's verdict is point-in-time, but the worktree base
 # can be configured — or re-pointed — after activation and binaries can be
-# replaced, so this recipe re-checks the facts through the script init used
-# (`scripts/kache-host.sh report`): the store is whatever `kache doctor`
-# resolves (never a reconstruction — the pre-2026-09-23 recipe guessed from
-# KACHE_DIR and reported false verdicts), plus the checkout/worktree-base
+# replaced, so this recipe re-checks the facts through the script init uses,
+# in its `report` subcommand (`scripts/kache-host.sh report`): the store is
+# whatever `kache doctor` resolves (never a reconstruction — the
+# pre-2026-09-23 recipe guessed from KACHE_DIR and reported false verdicts),
+# plus the checkout/worktree-base
 # device check, init's clone check re-run from that store, the macOS
 # env-passthrough result, the daemon (service installed, running, same version
 # as the binary), and the user config's `local_store` pin and `ignore_env`.

@@ -66,6 +66,7 @@
 //! assert!(matches!(expr, Expr::Ternary { .. }));
 //! ```
 
+pub(crate) mod active_inputs;
 mod evaluator;
 #[cfg(test)]
 mod fatality_characterization;

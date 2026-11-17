@@ -7,6 +7,37 @@ description: Use when working in the claudine/ package area or with the Claudine
 
 Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes **16 lifecycle events** across **10 providers** (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, Kilo, Pi, and Antigravity) into a single configuration model, fires **6 action types** — TTS, sound effects, logging, shell commands, reports, and blocking calls — when those events fire, synchronizes skills/commands/agents/scripts between providers, manages a provider-agnostic MCP catalog plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
 
+## Golden rule: CLI arguments are order independent
+
+Claudine parses and consumes **all** of a command line (options, key-value
+setters, switches) and only then acts. Where a Claudine argument sits never
+changes what it means. A command line whose meaning depends on position is a
+bug: fix it, never document it as behavior.
+
+- Every option Claudine declares on a command is Claudine's wherever it
+  appears before the first `--`, before or after the prompt or file, on the
+  provider wrappers (`claudine claude …`) and the composition commands alike.
+  These mean the same thing:
+
+  ```sh
+  claudine claude -m opus --dry-run "fix the bug"
+  claudine claude "fix the bug" --dry-run -m opus
+  ```
+- The first `--` is the only boundary. Everything after it belongs to the
+  provider, verbatim, even a token that matches a Claudine option name
+  (`claudine claude "hi" -- --output-format json`).
+- `--help`/`-h` anywhere before `--` shows help and exits 0, over any other
+  argument or usage error. The remaining arguments only choose which help
+  (for example, the subcommand's). Help never needs configuration.
+- A Claudine option is never forwarded to the provider because of where it
+  was written. In particular `-o`/`--output` is refused in every position and
+  never reaches the provider.
+- Which tokens Claudine owns comes from the clap definitions, never from a
+  hand-maintained list; a drift test keeps the two equal.
+
+Load [argv-normalization](../../../claudine/docs/topics/argv-normalization.md)
+before changing argument parsing.
+
 Lifecycle `say`/`speak`/`effect` and hook `speak`/`sound_effect` audio is
 fire-and-forget after durable publication to Playa's private per-user queue.
 Lifecycle audio is published in stack order: put `effect` before `say` to hear it first.
@@ -48,15 +79,26 @@ audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#spe
 `dispatch/loader.rs`): both files are YAML judged strictly by
 `claudine/schemas/claudine-config.yaml` (`include_str!`, prepared with
 Darkmatter's shipped sources so `permissions@darkmatter:config` resolves; not
-part of the trigger bundle or shipped artifact). Schema defaults are inserted
-before serde reads `ClaudineConfig` (no top-level serde defaults;
-`ClaudineConfig::default()` is the projection of `{}`); `RepoOverrideConfig`
-keeps presence-sensitive serde defaults and gets nothing inserted. Errors are
+part of the trigger bundle or shipped artifact). Schema defaults are inserted,
+replacing an absent or `null` value alike, before serde reads `ClaudineConfig`
+(no top-level serde defaults; `ClaudineConfig::default()` is the projection of
+`{}`); `RepoOverrideConfig`'s overrides declare no default and read absent and
+`null` as unset (`config/wire.rs::{null_as_default, null_entries_unset}`;
+`active_messenger` is `Option<String>`). Actions and messenger routes are
+one-key mappings in the file (`- bash: { command: … }`,
+`team: { slack: { channel_id: … } }`); `config/wire.rs`'s serde adapters on
+the `actions` and `configurations` fields turn them into the internally tagged
+`HookAction`/`MessengerProviderConfig`, which keep their tagged serialization
+everywhere else. A flat (`type:`/`provider:`) entry is refused by `load.rs`
+with its keyed spelling, and `json_conversion` rewrites it (`wire::upgrade_flat`). Errors are
 `ClaudineError::ConfigInvalid`/`ConfigConversion` with file:line:column and
 JSON pointer. A legacy `config.json` beside a canonical
 `<base>/.claudine/config.yaml` is converted by the temporary
 `json_conversion` module through Darkmatter's `ConfigTransaction` and
-migration receipt. Event and provider maps list their keys explicitly.
+migration receipt. Event and provider maps list their keys explicitly; the
+shared default engine treats an entry selected by `patternProperties` or a
+catch-all as a property like any other, so a pattern-keyed map's existing
+`null` entry would take its own default and its values their child defaults.
 
 **Configuration writes** (`config/persist.rs`): nothing serializes a whole
 config any more. Every writer hands `persist` per-path `YamlEdit`s, applied
@@ -66,8 +108,8 @@ the scope's schema plus `ClaudineConfig::validate` before replacement
 `edit_config` takes explicit edits (setters); `save_changes(path, scope,
 opened, edited)` diffs two serialized values (`changed_edits`: mappings
 recurse while the file holds a mapping, sequences/scalars are replaced whole,
-a lost key is removed or set `null` when it came from a default) — the config
-TUI keeps `App::opening_config`/`opening_repo_config` for this;
+a lost key is removed when the file writes it, left alone when it came from a
+default) — the config TUI keeps `App::opening_config`/`opening_repo_config` for this;
 `initialize_config(path, scope, defaults, chosen)` is setup's form, always
 creating a missing file from `initial_text(scope)`. Edits that already hold
 are dropped, so an unchanged save starts no transaction. A user file spelling
@@ -102,8 +144,8 @@ is a warning). User docs:
 **`tts` in `~/.claudine/config.yaml`** (`config/tts.rs::TtsValue`) is `true`,
 `false`, or an object whose keys are all optional: `provider` (absent = default
 provider, as `true`), `voice` (string or `{ male, female }`), `gender`
-(`female` default), `prewarm` (default `true`). Explicit `null` is rejected
-(`present` deserializer), unknown keys are rejected. `bridge_tts_settings` maps
+(`female` default), `prewarm` (default `true`, inserted by the schema).
+Explicit `null` is the same as absent; unknown keys are rejected. `bridge_tts_settings` maps
 it to `GlobalSettings { tts, tts_prewarm }`; read the switch only through
 `TtsValue::prewarm_enabled`.
 
@@ -128,7 +170,12 @@ bundle expands in a fixed canonical order at parse time. Every retired spelling
 `CompositionError::RemovedGrammar` with a replacement hint. The directive
 verbs live in one list (`signatures.rs::LIFECYCLE_CONTROL_VERBS`); `prep` is
 the one directive that returns (`LifecycleControlAction::returns`), so it is
-exempt from the last-item rule. A loop `gate:` is never `null` or `{}`. The parser,
+exempt from the last-item rule. `edit` (open a file in the user's editor
+and wait) is a parser-owned expression action beside `prep` and
+`ensure_file`, typed in every expression slot, all three bundles, and both
+loop arms; it is never a task side effect, and a parallel group member may
+run only a GUI editor (each member thread enters
+`darkmatter::editor::deny_terminal_in_this_thread()`). A loop `gate:` is never `null` or `{}`. The parser,
 executor, run accounting, catch protocol, and control admission live in
 `darkmatter::lifecycle` (see the `darkmatter` skill's `lifecycle.md`); Claudine
 re-exports them at their old paths and adapts them: `effects.rs`
@@ -183,6 +230,44 @@ it over the retained proxy overlay (retry wins a shared key). The retried
 attempt's preflight read only looks at it and `materialize_harness_prompt`
 consumes it, so it applies to exactly one transition; resume and proxy
 adoption clear it.
+
+**Authored lifecycle flags.** The schema stage fills `no_error: false` (and
+`edit.create_new: false`) everywhere an action can sit, so the completed
+frontmatter is parsed with its authored counterpart
+(`LifecycleParseOptions::authored_values`): a flag counts only where the
+author wrote it non-null, so a filled one is never a second placement, never
+gives `set` a flag, and never makes an empty stack/item/body non-empty.
+Claudine's authored source is `prepare.rs::authored_lifecycle_values` (source
+frontmatter plus proxy overlay and layered overrides); sequence task
+`side_effect:`/`setup:`/`teardown:` stacks parse as authored (`None`). A
+`null` flag is omitted everywhere (`start: { no_error: null }` is an empty
+stack), except on `set`, which refuses any authored flag. Flags read through
+Darkmatter's `literal_flag` (boolean or Boolean-like text; never a number or
+template). Conditionals declare `no_error: literal(false)` in
+`schemas/{action,lifecycle}.yaml` so the closed arms accept the filled flag;
+an authored one there is still refused by schema validation, which runs the
+parser's placement rules on the authored value (Darkmatter's
+`bound_operands.rs`, `parse.rs::placement_rule`). `post_shell_validate` judges
+the completed frontmatter with `EffectiveSchema::validate_completed(…,
+authored_lifecycle_values)`, and the completion verdict with `Value::Null`
+(nothing authored); a bare `validate(&Value)` judges its input as authored, so
+never hand it a completed lifecycle. Tests:
+`lib/tests/l1/claudine_schemas.rs::{single_action_placement_rules_are_judged_alike_by_schema_and_parser, *_in_every_family}`.
+`loop` is a deferred lifecycle key (`PreparedComposition::deferred_lifecycle_keys
+== ["loop"]`): the schema stage judges it but inserts nothing, and an unwritten
+gate `no_error` reads `false` from the parser. Tests:
+`composition/lifecycle/tests/grammar.rs::no_error_must_be_a_boolean_in_both_homes`,
+`prepare/service/tests.rs::a_loop_document_prepares_as_authored_and_an_invalid_loop_flag_is_refused`.
+
+**Launch keeps the declared type.** `SchemaPhase::Launch` relaxes presence for
+non-eager `required` properties but not their type: an omitted one is
+`Deferred`, while one written or resolved as `null` is judged by its type (a
+`string(required)` holding `null` refuses the inline launch;
+`defaults_tests.rs::launch::a_supplied_null_or_wrong_type_is_judged_by_type_at_launch`).
+Direct `compose` still promotes a required top-level `null` to
+`MissingProperties` (`classify.rs::promote_null_required_to_missing`).
+Defaults fill missing or `null` values whether or not the property is required
+(`PropertyState::Defaulted`).
 
 **One loop for every primitive.** `looping/frame.rs::LoopFrame` is the
 nearest-loop frame, allocated before `initialize` (which reads pass 1's
@@ -268,6 +353,28 @@ home read also needs its `context_construction_guard.rs` allowance. Because
 `CliProcessFixture` sets `HOME` and `USERPROFILE`, user-tier and
 `~/.claudine` fixtures run on Windows too: do not gate them `cfg(unix)` for the
 home.
+
+Every lifecycle `EffectEngine` in `cli/src` takes its mutation root from
+`claudine::invocation_context::lifecycle_mutation_root(invocation, context)`,
+never `launch_magic_scope().local_root()` directly: it refuses a retained
+failed launch discovery (`CompositionError::LaunchRepositoryUnreadable`,
+`io.read_failed`) so the launch-directory fallback is used only after a
+successful observation of no working tree. A direct wrapper's memory-file
+harness (empty lifecycle) passes `None`. Tests:
+`invocation_context::tests::lifecycle_mutation_root_*`,
+`cli/tests/l1/lifecycle_mutation_root.rs` (one row per host family).
+
+A lifecycle action failure that no error return carries is shown through
+`claudine::composition::lifecycle::report`, never an ad hoc `emit_warn`:
+`warn_tolerated_action_error` for a document event other than
+`initialize`/`start` and for every loop gate (`run_loop_gate`, shared by all
+four looping owners), `report_container_failure` for the root sequence's
+recorded failures (`RootRun::report_recorded`, skipping the error its producer
+already reported) and a step's `TaskOutcome.secondary_errors`. Both report
+the complete `err.msg` (`LifecycleErrorInfo::msg`), which is never shortened
+(run, step, and setup errors read it too). Tests:
+`cli/tests/l1/lifecycle_refusal_reports.rs`,
+`lib/src/composition/looping/engine/tests/gate_action_errors.rs`.
 
 Every Claudine composition of a document starts from
 `composition::compose_options_with_context` (canonical preparation, the
@@ -393,7 +500,9 @@ primitive tasks; terminal event placeholders require templates. The graph's
 clones share settled authorization; a reread graph is settled only against the
 original invocation's approval, never by prompting. Root retries pass the same
 closed membership into graph approval; rebuilding the graph cannot reopen approval,
-and the retry runs the first attempt's graph (`RootRun::graph`). Nested preparation
+and the retry runs the first attempt's graph (`RootRun::graph`); its approval walk is
+`reread_preflight_graph_with_invocation` (`refresh = true`: nested rows read as
+authored, so a `$state` edited on disk never retypes frozen rows). Nested preparation
 (`prepare_nested_sequence`/`prepare_nested_group`) rereads container events and
 `variables` but keeps the frozen node's children and order; an unchanged source
 is parsed once per invocation (`PreflightGraph::nested_sources`, compared by text), and so is each referenced
@@ -413,7 +522,134 @@ may themselves be containers. Groups reject `execution:` (concurrency is implici
 unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 `failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
 Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
-grammar. Container `loop:` (group object, sequence-document root, inline
+grammar. Sequence declarations live in `composition/sequence/declarations.rs`:
+a root's `$state`/`template` and an inline container task's
+`$schema`/`$state`/`template` are judged by key presence (null included) for
+placement (only beside that owner's inline `sequence: [ … ]`; never on a
+group object) and shape before any row is read, so an empty list still
+fails. A root `$schema` is the document schema, never a declaration.
+`PreparedSequenceSchema` resolves a `$state` once per owner (no triggers,
+no baseline) and judges rows passively. Every authored inline list (YAML root or
+Markdown frontmatter) goes through `formal::normalize_formal_plan` with a
+`FormalOwner` (declaring path, list property, owner values); template
+expressions resolve from the declaring file. Composition reads the view
+`resolve.rs::composition_view`/`without_formal_sequence_keys` (root
+`$state`/`template` and inline containers' `$schema`/`$state`/`template`
+dropped, applied by the preparation service too); declaration readers use
+`reload_authored_source`. Owner values come from
+`sequence/document.rs::prepare_sequence_document_values` (frontmatter only,
+shells disabled, body unread, judged through `schema::PrepareMode::Values`)
+when `SequenceSourceOptions::with_compose_context` is set and the template
+has a string default; otherwise authored values under the setters. A whole
+referenced document fills its template from its own values under the
+setters (and the root's `initialize` writes), never the referrer's, in both
+`source.rs::plan_referenced_sequence` and `inputs.rs::walk_referenced`; the
+research fleets pass `research_prompt` to their shared rosters through a
+root `initialize` `set`. It sets `SequencePlan::document_scope`, whose `declaring_path` is where the root's rows resolve their references (`Loader::walk_plan`, `inputs.rs::walk_referenced`), so a root reference behaves as a direct or nested run; a data selection has no scope and reads as the root's. A prompt task's `with:` files resolve from `PromptReference::with_origin` in passive approval and from `PromptTaskRequest::with_origin_path` in the step barrier and the run (`task_run.rs::task_caller_records`). A container-start reread (`prepare_nested_{sequence,group}`) resolves through the task's `InvocationContext`, as the launch walk did. The preflight `Loader` normalizes every
+inline nested list through the same pipeline
+(`formal::normalize_formal_plan_prepared`: the task's own `template`/`$state`,
+and the prepared values of its owner, `Loader::owner_template_values`: the
+invoking document or the whole referenced document the walk is inside,
+taken from discovery's `InputOwner::values` after discovery, else prepared
+once per owner, and only for a string template; never the step view
+`step_frontmatter`, whose authored values miss defaults and derived values) and prepares an inline container's `$schema` into
+`PreflightSequence::inline_schema` (a check only: never a document schema,
+input, or provider hint). Prepared declarations are cached in `NestedSources`
+by file and property, invalidated by declaration or schema-file bytes
+(`Work::SequenceSchemaPrepare`). A nested reread (`prepare_nested_sequence`,
+`load_sequence_with(…, refresh = true)`) rejudges declarations, the check, and
+events, discovers commands from the reread rows as authored (no template, no
+`$state`), and keeps the frozen plan and steps. `Loader::refresh` carries that
+reading to every container the reread loads, at any depth, and
+`prepare_nested_group` sets it too, so an edited `$state` deep in a reread
+file never retypes frozen rows (`cli/tests/l1/sequence_frozen_graph.rs`). Document inputs are found
+before the graph by `preflight/inputs.rs::discover_sequence_inputs`
+(`SequenceInputInventory`: owners root/root-reference/nested with their
+`Document` missing entries and prepared values, prompts, inline containers,
+template references left pending by a missing input), which reuses the
+`Loader`'s reference and cycle machinery; a non-root owner (and `owner_values`
+with `SequenceSourceOptions::with_invocation`) prepares under its own derived
+context (`Loader::source_context_for`, swapped in by
+`PrepareOptions::resolving_document_from`), so its authored file values resolve
+from its folder while setters keep the caller's origin; `build_preflight_graph_after_discovery`
+reuses its parses (and takes the real `CallerInputLayers`). The CLI builds no
+plan before `initialize`: `commands/sequence.rs` judges root declarations and
+inline item grammar, allocates the token (`normalize::allocate_sequence_id`),
+and hands `RootSequence` to `execute_sequence`; the first attempt's
+`phase1c::prepare_root_plan` discovers (setters plus `initialize` writes),
+collects with a shared `asked` set (progress-bounded, Phase 1c too), fills
+the plan (`with_sequence_id`), and `RootRun::{plan, collected_overrides}`
+keep it for retries. Discovery runs `leaving_verdicts()`: an owner's own
+non-missing preparation failure is recorded (`failed_owners`), not raised, so
+graph, provider, and Phase 1c errors keep their order; the root's is left to
+Phase 1c, any other's (or an empty root's) is raised by `recheck_owners`
+after provider selection. The root's own missing inputs are left to Phase 1c
+(step headings) unless another owner is missing, a reference is pending, or
+the root is empty. Phase 1c's per-step probes compose against the root's
+`RuntimeState` snapshot (its `initialize` writes; `None` in a dry run), as
+the first step does at its turn, so an `initialize` write satisfies a
+required root input on every route. An inline container's `$schema` is judged in
+`TaskExecution::run_validated` (`task/sequence.rs::admit_inline_container`;
+state + setters + runtime writes) after `when:` and before the run opens,
+against the declaration as the file reads then
+(`preflight::reread_inline_check`: the task's own declarations only, through
+the `NestedSources` declaration cache; children and approval stay frozen),
+and again at each `start` reread (including the first, after `initialize`);
+a container proxy judges the approved check (a whole-document target has
+none); a refusal at admission is an unstarted
+failure (no container event runs), one at a `start` reread blocks the started
+container, and a dry run only names it. User docs:
+[Sequences → Sequence documents](topics/flow-control/sequences.md#sequence-documents-schema-state-and-template).
+A whole referenced document is prepared at run time, never read as authored:
+`task/sequence.rs::referenced_owner_values` (its events' and children's base
+state) calls `PreflightGraph::prepare_whole_document` (the file as it reads
+now, through the `NestedSources` memo; its derived context via
+`document::owner_resolution`) under `PreflightGraph::caller_layers` (recorded
+by `build_preflight_graph_after_discovery`; bare `user_setters` otherwise)
+plus runtime writes as data. Before `initialize` the verdict is deferred; at
+each `start` reread (nested, leg, task file, loop pass, retry, container
+proxy) the document's `$schema` judges, and a refusal blocks the started
+container; a dry run only prepares. A root `sequence: child.yaml` is judged
+at each root step after the step composes
+(`cli/.../iterate.rs::judge_referenced_root_document`, the step's
+`input_layers` and `compose_context`), where the direct control is judged;
+its prepared values are the state the step's row runs in (`run_step_task`'s
+`referenced`), and its authored values the row's `when:` reads
+(`PreflightGraph::authored_document`), never the invoking root's. A
+container proxy's `start` reread (`prepare_nested_sequence`, task origin ==
+frozen whole document) reads its target as a reference to itself, so the
+target's root `$schema` stays its document schema, never an inline check.
+A directly run root's events read prepared values too (CLI
+`sequence/mod.rs::root_event_values`, verdict withheld): before
+`initialize` under the setters, and at each `start` again with collected
+values and runtime writes as data (`RootRun::refresh_event_values` layers
+them into the live cell). Preflight shell early binding reads each owner's
+prepared values (`Loader::prepared_view` → `layer_prepared_values`:
+`Loader::prepared_owner_values`, shared with `owner_template_values`, over
+the authored view; a templated key the preparation changed takes its
+prepared value unless it reads, transitively, a late root, `env`, the
+target identity (`ctx.agent`/`ctx.model`, `shape::first_target_identity_root`,
+so a `with:` hint through it stays circular), a `$(…)` key, `agent`/`model`,
+or a key some `set` writes, in which case it stays
+authored and joins the view's late keys, so its command is a template) for the root
+events, the root steps' seed (`seed_steps`; a root `sequence: child.yaml`
+seeds from the child, and `owner_schema` types none of its rows), and a
+referenced document's events and children. Each replaced key's authored
+value travels with its view (`Loader::step_authored`/`seed_authored`,
+installed, swapped, and restored beside `step_frontmatter`/`step_seed`;
+a root step drops the keys its reserved overlay sets), so provider
+prediction follows a `with:` read through the whole authored chain. Tests: lib
+`task/tests/referenced_owner_schema.rs` (proxy target cases included),
+`preflight/tests/prepared_shell_values.rs` (routes × builders), CLI
+`sequence_referenced_state.rs` (routes, controls, empty, loop, prepared
+values, direct/root-reference/nested agreement). Graph root rows are still located `tasks[i]`; the inventory
+uses the authored `sequence[i]`. Every value route refuses a
+declaration write through `reserved::declaration_written_by` (root of a
+dotted path): setters (`commands/sequence.rs`), `with:`, template keys, and
+runtime `set`, which only a sequence cell refuses
+(`RuntimeState::{new_sequence,from_sequence_snapshot}`; `new`/`from_snapshot`
+stay permissive for ordinary documents, so a group branch must use the
+sequence constructor). Container `loop:` (group object, sequence-document root, inline
 nested sequence task) is validated by `sequence/grammar.rs::container_loop`
 and frozen on `PreflightSequence`/`PreflightGroup.loop_config`
 (`PreflightLoop`, config plus location; the gate goes into the container's
@@ -448,13 +684,21 @@ Sibling cancellation uses `composition.cancelled` with `err.detail.group`,
 explicitly inherit `lifecycle::cancellation::CancellationToken` scopes. Keep
 terminal execution on `LifecycleRunGuard::run_event_stack`: its cleanup scope
 allows terminal actions to finish after cancellation while preserving repeat
-interrupt grace. Lifecycle shell exact/template dispatch shares task shells'
-owned process trees, except on Unix while Claudine holds its terminal's
-foreground (`task/shell.rs::holds_terminal_foreground`): an inherited-terminal
-child in a group of its own is stopped by `SIGTTIN`/`SIGTTOU` forever (a
-nested `claudine compose` from `shell: just commit` hung this way), so it runs
-in Claudine's group and only the direct child is terminated on cancellation.
-Regression: `cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`.
+interrupt grace. Task shells and lifecycle shell exact/template dispatch own
+their process trees through Sniff's `sniff::process::ProcessTree`
+([process trees](../../../sniff/docs/topics/process-trees.md)). On Unix a
+lifecycle command also takes the terminal's foreground through
+`sniff::process::ForegroundHandoff` (`task/shell.rs::run_owned_lifecycle_command`),
+or an inherited-terminal child in a group of its own is stopped by
+`SIGTTIN`/`SIGTTOU` forever (a nested `claudine compose` from
+`shell: just commit` hung this way). A foreground command's `SIGINT` end or
+exit 130 marks the run interrupted, and `StackExecutionContext::stops_on_interrupt`
+then ends `initialize`/`start`/`loop` before their next action. A second
+concurrent lifecycle command fails before spawn (`WouldBlock` →
+`ShellRunError::Spawn`), and `settle_lifecycle_command` lets a restore failure
+fail only an exit-0 command. Without the foreground, SIGINT is `-1` and 130 an
+ordinary code. Regressions: `cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`,
+`task/shell/lifecycle_tests.rs`, `lifecycle/executor/tests/interrupt_stops.rs`.
 Container events use
 `lifecycle::runtime::ContainerRunner` and `LifecycleRunGuard`; root initialize
 precedes static preflight, nested preparation is just in time. Retry preserves
@@ -536,9 +780,16 @@ task's provider from its own `agent` (`PreflightTask.provider`, computed in
 `composition/sequence/preflight/providers.rs` without running or composing
 anything; a literal hint is classified before any state is built, so only a
 document hint that reads an expression builds `PredictionStateBuild` state;
-`ProviderPrediction.dependencies` is per task, so `defer_runtime_written`
-moves both `agent` and `model` to launch when either reads a runtime-written
-key) and keys every task by its graph `TaskIdentity`. The CLI
+`ProviderPrediction.dependencies` is per task and per owner, recorded at
+construction: one `DependencyScope` closure for the hint over the scope that
+evaluates it (a `with:` value over the step view, following
+`HintLayers::step_authored` in place of prepared values; a document value
+over the document under the setters, where an un-set `with:` key has no
+value), plus a `feeds` closure in step scope for each `with:` key a document
+closure reads. Names never cross owners, so a prompt's literal `choice` is
+not a sequence's derived `choice`. `defer_runtime_written` moves both
+`agent` and `model` to launch when either reaches a runtime-written key;
+`preflight/tests/provider_dependencies.rs` covers the placements) and keys every task by its graph `TaskIdentity`. The CLI
 (`wrap/sequence/providers.rs`) turns predictions into per-task targets
 (own / enclosing-document fallback / decided at launch / unresolved), fails an
 unusable static hint with `SequenceTaskProviderSelection` before any task
@@ -816,12 +1067,13 @@ The `claudine` library's modules and what each owns are in
 
 The `claudine` binary provides interactive setup, hook inspection, event handling, shared-resource management, MCP management, log reporting, provider wrapping, and Markdown composition. Output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), formatted with biscuit-terminal components. Provider names accept fuzzy matching (exact → prefix → contains), so `cl` resolves to `claude`. Full reference: [cli-reference.md](cli-reference.md).
 
-Composition help (`compose`/`inline-compose`/`sequence` `-h`) is selected
-from the original argv in `main.rs::run`, before normalization and the
-ownership partition, and rendered from the same clap model normal parsing
-builds (`build_cli_command`); help before the command is the grouped overview,
-help after `--` is the provider's. Direct wrappers keep their custom help;
-other subcommands use clap's injected help. See
+Composition and wrapper help (`-h`/`--help` anywhere before the first `--`)
+is selected from the original argv in `main.rs::run` by `argv::select_help`,
+before normalization, the ownership passes, the `--output` refusal, and
+configuration loading; composition help is rendered from the same clap model
+normal parsing builds (`build_cli_command`), wrapper help by
+`print_wrapper_help`. Help before the command is the grouped overview, help
+after `--` is the provider's; other subcommands use clap's injected help. See
 [CLI Pre-Parsing](topics/cli-pre-parsing.md#composition-help-is-selected-first).
 
 Every command group and the cross-cutting behaviors (schema validation,

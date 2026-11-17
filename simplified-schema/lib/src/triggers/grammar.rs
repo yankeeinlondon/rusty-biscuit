@@ -602,8 +602,8 @@ fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>,
 /// examples, provide defaults, mark generated values, or otherwise consult
 /// state outside the candidate value. Allowed: `required`, `enum` members,
 /// `literal` value equality, `pattern`, length/range, item-count, key-count,
-/// structural purity constraints (`integer`, `not-empty`, `unique`),
-/// `non-null`, and the `schema` / `type-definition` declaration options.
+/// structural purity constraints (`integer`, `not-empty`, `unique`), and
+/// the `schema` / `type-definition` declaration options.
 pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
     matches!(
         constraint,
@@ -628,8 +628,6 @@ pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
             | Constraint::MaxKeys(_)
             | Constraint::NotEmpty
             | Constraint::Unique
-            // `non-null` only judges whether a present value is null.
-            | Constraint::NonNull
             // The declaration options judge the carried declaration
             // parse-only, as the lowered meta-type keywords do.
             | Constraint::Mapping

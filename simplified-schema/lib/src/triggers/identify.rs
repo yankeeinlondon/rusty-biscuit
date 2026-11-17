@@ -77,14 +77,15 @@ impl std::error::Error for IdentifyTooBroad {}
 ///
 /// `owned` holds the top-level names the caller owns (for Darkmatter: its
 /// baseline properties, events, and globals). A positive property condition
-/// that is effectively required ([`PropertyAtom::is_required`], so a
-/// nullable or `unknown` atom never counts) on a name outside `owned` is a
-/// witness. `all:` (and the top-level list) needs one witnessing child;
+/// that requires its key ([`PropertyAtom::is_required`]) with a type that
+/// does not admit `null` ([`PropertyAtom::admits_null`], so a nullable or
+/// `unknown` atom never counts) on a name outside `owned` is a witness. `all:` (and the top-level list) needs one witnessing child;
 /// every `group:` alternative must witness; `min-match: n` witnesses only
 /// when `n` is greater than the number of children without a witness, so
 /// any `n` children that hold include one. `none:` and `$path` supply none.
 ///
 /// [`PropertyAtom::is_required`]: crate::simplified::PropertyAtom::is_required
+/// [`PropertyAtom::admits_null`]: crate::simplified::PropertyAtom::admits_null
 ///
 /// ## Errors
 ///
@@ -105,7 +106,9 @@ fn unwitnessed(expr: &MatchExpr, owned: &BTreeSet<String>, field: &str) -> Optio
     let refuse = |message: &str| Some(IdentifyTooBroad { field: field.to_string(), message: message.to_string() });
     match expr {
         MatchExpr::Property { name, atom } => {
-            if !atom.is_required() {
+            // `required` is presence only: a type that admits `null` is
+            // met by a `null` value, which identifies nothing.
+            if !atom.is_required() || atom.admits_null() {
                 refuse(&format!("does not require `{name}` to be present and non-null"))
             } else if owned.contains(name) {
                 refuse(&format!("requires only `{name}`, which the caller owns"))

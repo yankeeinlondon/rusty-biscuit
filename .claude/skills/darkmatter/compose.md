@@ -66,12 +66,12 @@ Failures are
 setter's value keeps `dm.schema.*`, names the setter, and has no position.
 
 1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing an authored whole-value `$(...)` are deferred to pass 2; each string is scanned once (see [Inserted Text Is Data](#inserted-text-is-data))
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Converts** values to their declared types at every declared depth through the shared coercion engine (default-on, e.g. the string `"true"` → real boolean; each top-level property commits on its own) and writes the converted values back into frontmatter, skipping pending values. Before converting it inserts the default of each absent required property (never into the source file; inserted paths become data; see schema.md "Required defaults"). The passive call check (`call_precheck.rs`) runs before this stage and before frontmatter interpolation. Each pass gets a `schema_validation::PendingDeferral` saying what a later stage will resolve: `BeforeShell` defers an authored whole-value `$(...)` key (even after pass 1 interpolated its arguments), a problem whose own path (or nearest existing ancestor) holds an authored `{{ }}` template the schema did not already accept as `deferred` (`schemas::awaits_rendering`, shared with `validate_with_options(Defer)` and Claudine's launch pre-validation; a literal sibling's problem, and an unknown or missing key on a collection, are always reported; `PendingDeferral::defers_problem`), and the `provisional_keys` a non-deferring pass 1 (shell discovery) resolved from a command's unexpanded text; `$(...)` text anywhere else is never expanded and is judged now. Other data (a data override, an expression result, a decoded literal token) is never pending. Deferral applies only when frontmatter shell expansion is enabled (or `defer_shell_pending_schema_problems`); when it is disabled every problem fails fast. After shell expansion and interpolation pass 2, `run_with_registry` runs again against the same effective schema (document, baseline, matched triggers) and judges the resolved values with `PendingDeferral::Final` (nothing deferred). The only opt-out is `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (set by Claudine's `canonical_compose_options`, whose `prepare_*_with_schema` re-validates and drops invalid optionals): then, unless `trigger_schemas` is on, compose runs only `verify_projection_stability` and `validate_typed_shell_values`. **Trap:** never gate this pass on `trigger_schemas` alone — `--disable schema-triggers` removes trigger schemas, not the document/baseline verdict on resolved values
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Converts** values to their declared types at every declared depth through the shared coercion engine (default-on, e.g. the string `"true"` → real boolean; each top-level property commits on its own) and writes the converted values back into frontmatter, skipping pending values. Before converting it inserts the default of every missing or `null` property, required or optional (never into the source file; inserted paths become data; a declared but unwritten property without a default gains no key; see schema.md "Composition and validation"). The passive call check (`call_precheck.rs`) runs before this stage and before frontmatter interpolation. Each pass gets a `schema_validation::PendingDeferral` saying what a later stage will resolve: `BeforeShell` defers an authored whole-value `$(...)` key (even after pass 1 interpolated its arguments), a problem whose own path (or nearest existing ancestor) holds an authored `{{ }}` template the schema did not already accept as `deferred` (`schemas::awaits_rendering`, shared with `validate_with_options(Defer)` and Claudine's launch pre-validation; a literal sibling's problem, and an unknown or missing key on a collection, are always reported; `PendingDeferral::defers_problem`), and the `provisional_keys` a non-deferring pass 1 (shell discovery) resolved from a command's unexpanded text; `$(...)` text anywhere else is never expanded and is judged now. Other data (a data override, an expression result, a decoded literal token) is never pending. Deferral applies only when frontmatter shell expansion is enabled (or `defer_shell_pending_schema_problems`); when it is disabled every problem fails fast. After shell expansion and interpolation pass 2, `run_with_registry` runs again against the same effective schema (document, baseline, matched triggers) and judges the resolved values with `PendingDeferral::Final` (nothing deferred). The only opt-out is `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (set by Claudine's `canonical_compose_options`, whose `prepare_*_with_schema` re-validates and drops invalid optionals): then, unless `trigger_schemas` is on, compose runs only `verify_projection_stability` and `validate_typed_shell_values`. **Trap:** never gate this pass on `trigger_schemas` alone — `--disable schema-triggers` removes trigger schemas, not the document/baseline verdict on resolved values
 3. **Frontmatter Shell Expansion** - top-level frontmatter values whose *authored source* is a whole-value `$(cmd)` execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
 4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
 5. **Text Replacement** - `replace:` frontmatter replaces literal strings
 6. **Page Blocks** - `::block`/`::end-block` conditional regions
-7. **Interpolation** - `{{ variable }}` expressions expand to values
+7. **Interpolation** - `{{ variable }}` expressions expand to values; under an inclusion with an effective `interpolate=false` only active directive inputs evaluate and prose stays literal (see [`interpolate=` on `::file` / `::url`](#interpolate-on-file--url-internals))
 8. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
 9. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
 
@@ -219,7 +219,9 @@ content fragment. `for_document` scans every frontmatter string at any depth
 interpolation-literal masking and date/time aliases. The body follows body
 interpolation's executable-span rule: a mention inside a fenced or indented
 code block demands nothing unless the document sets
-`interpolate_code_blocks: true`. `all`, `contains`, `iter`, and `union` support
+`interpolate_code_blocks: true`. Exception: under an effective
+`interpolate=false` inclusion only active directive inputs demand anything
+(`for_document_with`, see "`interpolate=` on `::file` / `::url`"). `all`, `contains`, `iter`, and `union` support
 explicit orchestration without exposing the population modules. Date/time is
 always present in a requirements set.
 
@@ -886,6 +888,88 @@ strings to numbers.
 {{ has_skill("rust") }}      // true when a skill directory exists in user or local roots
 {{ has_local_skill("rust") }} // true when a skill directory exists in local roots only
 ```
+
+### `interpolate=` on `::file` / `::url` (internals)
+
+- One validator, `directives_api::parse_interpolate_value(decoded,
+  was_quoted)`, serves the parser and DMLS: unquoted `null` is the default,
+  boolean words go through `simplified_schema::numeric::parse_boolean_word`,
+  a quoted `"null"` and anything else is a located `ParseDirective` error.
+  `::code` never intercepts the key (unknown-option warning, unvalidated).
+- `BlockOptions.interpolate` stores the resolved local value (`true` for
+  absent/`null`/true words). `BlockOptions::default()` is hand-written so
+  prologue/epilogue children inherit rather than disable.
+- `ComposeOptions.prose_interpolation` (`ProseInterpolation`, crate-private,
+  never set by a root request) is folded only by
+  `transclusion::effective_prose_interpolation`, inside
+  `engine::directive_child_request`, which also applies the directive's
+  `replace=` one-off map and parent-wins mode. Every included child's request
+  comes from it: `inherited_child_options`/`markdown_child_options` (local
+  `::file`, prologue/epilogue, `as_markdown`) and `remote_child_options`
+  (remote `::file`/`::url` and remote prologue/epilogue), on the execution,
+  preflight, and reference-graph paths alike. The graph builds `::file`,
+  prologue, and epilogue children with `markdown_child_options` and the
+  parent's prepared effective state, and evaluates `when=` from the prepared
+  (resolved) frontmatter; only `::toc-linking` targets and fragment targets
+  outside the graph use `accepted_child_options`, which inherits no state and
+  clears the inclusion's replacement inputs. A child path that bypasses these
+  helpers disagrees with composition. A `::toc-linking` target's prepared
+  headings are never the authority for the anchors it generates: like
+  composition, `graph.rs::generate_toc_link_references` links raw headings,
+  and records those slugs per generated reference id and target (copies of
+  one holder share ids; `PreparedHeadingSnapshot::record_toc_reference`);
+  fragment validation
+  checks those references against them (`toc_slugs_for`), while authored
+  links (including literal prologue/epilogue links, which also carry
+  `toc_synthesized`) keep the prepared headings. Both identities hash the actual child
+  request: the composed-child cache key in `render_markdown_transclusion`
+  combines `cache::hashing::options_hash` of the child request with the
+  parent's (so a self-inclusion never waits on its own in-flight entry), and
+  the preflight `visited` dedup (`collect.rs::visited_key`) takes the child
+  request's `compose_cache_fingerprint()` and adds the starting-frontmatter digest and the
+  `InheritedDiscovery` digest, so one child reached under two settings,
+  value sets, or replacement maps is walked under each, and an ancestor
+  marker (`\0walking`) ends a self-inclusion whose values change on every
+  level.
+- Every inclusion prepares its own graph node, and `NodeId` names a prepared
+  copy, not a file: `ReferenceAnalysisRuntime::prepared_copy_id` gives a copy
+  whose references or insertions differ from every earlier copy of the file
+  `{path} (n)`, and an equal copy the first equal copy's id. Insertions select
+  children by that id (flattening, followed JSON, file tree, Mermaid/DOT); the
+  file tree attaches an issue's label only to the record it describes
+  (`ReferenceIssue::describes`: reference id, `included_via` trail, and
+  target), because `::map`/`::filter` copies from one directive line share
+  both id and trail.
+  Source identity (`source_to_id`, canonical path) stays the key for raw
+  loads, the dependency manifest, cycle detection, and prepared heading
+  slugs. Never select a prepared child by its source.
+- A directive's `set` overlay is applied by one function,
+  `transclusion::apply_directive_set_overlay`, on every path that loads an
+  included child: local and remote (`RemoteFile`) execution, the preflight
+  walk's local and remote branches, and the reference graph's `::file`
+  child. Every path also records the overlay's data leaves from
+  `child_inherited_origin(..).frontmatter_data` (a remote or graph child
+  replaces the parent's, which describe the parent). Prologue/epilogue and
+  `as_markdown` children have no directive `set`; `::toc-linking` accepts
+  none; the graph never fetches a remote child. It is in both identity encoders; `parameters_identity` and the `compose:`
+  child cache key also carry it, so a normal and an `interpolate=false` use
+  of one file never share a composed result.
+- Suppression reads one classifier,
+  `interpolation::active_inputs::{active_input_ranges, mask_prose}`: an
+  authored directive line from its keyword on (whole line, because the
+  directive tokenizer splits a target like `./{{ lang }}.rs`), a
+  `::disclosure`/`::details` line's option values, and a `::shell-block`
+  body are active; everything else, code blocks included, is prose. Body
+  interpolation (`inline::interpolation::run_stage`) declines non-active
+  spans through its `SpanSelection` (a declined literal token is not a
+  failure, a declined `{{{ … }}}` keeps three braces) and ignores
+  `interpolate_code_blocks`. The passive surfaces take the same flag: the
+  call precheck's body scan, `ContextRequirements::for_document_with`,
+  `DeferredCapabilities::for_document_with`,
+  `remote::discover_remote_urls_from_expressions_with`, and the preflight
+  walk's `authored_expressions` (ICMP and `as_markdown` literals). A masked
+  body has lost its Markdown structure: scan it plain, never with
+  code-region detection. `ComposeOptions::prose_enabled()` is the read.
 
 ### Code Region Protection
 
@@ -1595,14 +1679,20 @@ darkmatter/lib/src/
 - **Discovery boundary.** Passive `analyze_collection_blocks` runs no handlers
   or I/O. `analyze_collection_blocks_report` returns the same first defect
   with the recovered sources authored before it; the call precheck feeds
-  those into its authored-order prefix, so a static rejection keeps them. Preflight (`preflight/collect.rs`, with `reference/graph.rs` for
-  reference validation) enumerates sources and
-  evaluates only the dependency slice for targets; selection, sort and
-  prefix are never evaluated. Child edges are keyed by authored site,
+  those into its authored-order prefix, so a static rejection keeps them. Preflight (`preflight/collect.rs`)
+  enumerates sources condition-blind (a discovery budget: every gate and
+  item) and evaluates only the dependency slice for targets; selection,
+  sort and prefix are never evaluated. Child edges are keyed by authored site,
   iteration path and explicit-parameter identity; a graph-backed request
   never late-approves a new target. Local-dependent shell holes are
-  `Deferred` and `TemplateRequired`. `reference/graph.rs` must not run the
-  normal `CollectionBlocks` operation (double execution).
+  `Deferred` and `TemplateRequired`. Reference preparation
+  (`reference/graph.rs::prepare_content`) is the opposite: it runs the
+  ordinary `CollectionBlocks` traversal (gates, selection, sort, prefix,
+  on its own root run's budget) so each copy it checks is one composition
+  keeps, never with `ShellExpansion`, and `build_node` judges a copy's
+  `when=` through `SiteLookup` over the prepared `ScopeRanges`. A
+  condition-blind expansion there would check filtered-out items and every
+  `::block` gate, and report references composition never produces.
 - **Diagnostics.** `dm.collection.*`, `dm.expression.invalid_callback`,
   `dm.iteration.{visit,expansion}_limit`; located diagnostics carry `span` and
   `iteration_path`. Engine and precheck sites name the body under a `document`

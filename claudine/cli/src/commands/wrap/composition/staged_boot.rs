@@ -114,8 +114,9 @@ impl StagedLifecycleRuntime {
         mutation_root: &Path,
     ) -> Self {
         let (settings, messaging) = lifecycle_settings(&bootstrap.lifecycle, repo_root);
-        // `mutation_root` is the launch workspace, not `repo_root` (the prompt's
-        // repository): lifecycle writes belong to the project being worked on.
+        // `mutation_root` is the caller's launch-scope root, not `repo_root`
+        // (the prompt's repository): lifecycle writes belong to the project
+        // being worked on.
         let effect_engine = EffectEngine::builder()
             .mutation_root(mutation_root)
             .auto_rehash(false)

@@ -144,17 +144,28 @@ failed), `MissingSchema`, `Frontmatter`, and `Schema`.
 ## Validating
 
 `validate_strict` and `validate_soft` behave exactly as on a prepared schema
-(see [Strict and Soft Validation](./validation.md)): strict judges the value
-as written, soft converts first, and an absent `required` property with a
-`default(...)` passes through its default, listed in the success's
-`defaults`. An accepted value is borrowed from the input unless soft
-validation converted it or inserted a default.
+(see [Strict and Soft Validation](./validation.md)). Both first apply
+defaults: every missing or `null` property that declares a `default(...)`,
+required or not, is filled in a candidate, and each one is listed in the
+success's `defaults`. Strict then judges that candidate without converting
+anything and returns your value borrowed; soft converts what it may and
+returns a copy holding the defaults and conversions. An accepted value is
+borrowed from the input unless soft validation converted it or applied a
+default.
+
+```rust
+let schema = SimplifiedSchema::try_from("$schema:\n  retries: number(default(3))\n")?;
+let input = json!({ "retries": null });
+assert_eq!(schema.validate_strict(&input)?.defaults.len(), 1);        // input unchanged
+assert_eq!(schema.validate_soft(&input)?.value["retries"], json!(3)); // completed copy
+```
 
 The object prepares itself on first validation and keeps that preparation
 until a layering call changes the definition. A schema that cannot be
-prepared (a function-typed property has no JSON Schema form, or content that
-names another file) fails every validation with
-`ValidationFailure::Unprepared`, carrying the one shared error.
+prepared (a function-typed property has no JSON Schema form, content that
+names another file, or different defaults for one property across union
+arms) fails every validation with `ValidationFailure::Unprepared`, carrying
+the one shared error.
 
 A [template](./language/slots.md), a schema holding `{{ … }}` slots, is
 accepted by every factory and inspected and exported as authored, but it is
@@ -267,7 +278,11 @@ table as authored.
 
 - `to_json_schema()` returns the lowered Draft 2020-12 JSON Schema that
   validation uses (shared, not copied). A function-typed property has no JSON
-  Schema form; the export fails with the lowerer's located error.
+  Schema form; the export fails with the lowerer's located error, and so does
+  a schema with different defaults for one property across union arms. Required properties stay in `required` and each
+  default is a plain `default` annotation, so a third-party validator applies
+  no default (see
+  [Exported JSON Schema does not apply defaults](./validation.md#exported-json-schema-does-not-apply-defaults)).
 - `to_simplified_yaml()` writes the schema back as one SimplifiedSchema
   document in its authored envelope (a `yaml-schema` keeps
   `kind: yaml-schema`). Named types are written by name, so a

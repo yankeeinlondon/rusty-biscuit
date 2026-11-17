@@ -60,14 +60,12 @@ pub mod bundle;
 pub mod classify;
 pub mod findings;
 pub mod globals;
-mod launch_defaults;
 pub mod shipped;
 mod status_render;
 pub mod supplied;
 pub mod translate;
 
 pub use classify::*;
-use launch_defaults::complete_launch_defaults;
 pub use findings::{TriggerFindings, TriggerWarning};
 pub use status_render::{
     description_suffix, escape_schema_prose, render_optional_line, render_required_line,
@@ -233,12 +231,40 @@ pub fn prepare_inline_with_schema_selecting(
     prepare_with_schema(source, options, PrepareMode::Inline(Some(select)))
 }
 
+/// The document values of a sequence owner, judged with the same
+/// categorization and drop-and-retry rules as a full preparation in `mode`,
+/// without reading the body or running a shell
+/// ([`crate::composition::sequence::document::prepare_sequence_document_values`]).
+///
+/// ## Errors
+///
+/// As [`prepare_direct_with_schema`] (or [`prepare_inline_with_schema`] for an
+/// inline `mode`), minus the body-only failures.
+pub(crate) fn prepare_values_with_schema(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    mode: CompositionMode,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_with_schema(source, options, PrepareMode::Values(mode))
+}
+
 /// The preparation a schema-aware entry runs (and reruns after dropping an
 /// invalid optional), with its identity selector, if any.
 #[derive(Clone)]
 pub(super) enum PrepareMode<'s> {
     Direct(PromptSource, Option<&'s ResolvedIdentitySelector<'s>>),
     Inline(Option<&'s ResolvedIdentitySelector<'s>>),
+    /// A sequence owner's document values in this composition mode: the
+    /// frontmatter surface only, with shells left unexpanded.
+    Values(CompositionMode),
+}
+
+impl PrepareMode<'_> {
+    /// Whether this preparation judges at the inline launch phase rather
+    /// than as a direct compose.
+    pub(super) fn is_inline(&self) -> bool {
+        matches!(self, Self::Inline(_) | Self::Values(CompositionMode::InlineFrontmatterPrompt))
+    }
 }
 
 fn prepare_with_schema(
@@ -259,6 +285,7 @@ fn prepare_with_schema_verdict(
 ) -> Result<PreparedComposition, CompositionError> {
     let mut dropped: Vec<DroppedOptional> = Vec::new();
     let file_ref_fallback_dir = options.file_ref_fallback_dir.clone();
+    let authored = super::prepare::authored_lifecycle_values(source, &options);
     let prepared = match run_prepare(source, options.clone(), &mode) {
         Ok(prepared) => prepared,
         Err(err) => handle_compose_error(source, options, &mode, err, &mut dropped)?,
@@ -267,7 +294,7 @@ fn prepare_with_schema_verdict(
     // the same typed error / drop-and-retry rules so values that became
     // invalid (or now satisfy the schema) after `$(...)` expansion are
     // judged on their final form.
-    post_shell_validate(source, prepared, dropped, &mode, file_ref_fallback_dir.as_deref())
+    post_shell_validate(source, prepared, dropped, &mode, file_ref_fallback_dir.as_deref(), &authored)
 }
 
 fn run_prepare(
@@ -280,6 +307,7 @@ fn run_prepare(
             prepare_direct_with_prompt_selecting(source, options, prompt_source.clone(), *select)
         }
         PrepareMode::Inline(select) => prepare_inline_selecting(source, options, *select),
+        PrepareMode::Values(mode) => super::prepare::prepare_values_on(source, options, *mode),
     }
 }
 
@@ -296,6 +324,7 @@ fn post_shell_validate(
     mut dropped: Vec<DroppedOptional>,
     _mode: &PrepareMode<'_>,
     _file_ref_fallback_dir: Option<&std::path::Path>,
+    authored: &serde_json::Value,
 ) -> Result<PreparedComposition, CompositionError> {
     // No `$schema` (or a deferred read that could not prepare it) → no
     // validation work to do. The retained launch schema is the one resolved
@@ -315,17 +344,11 @@ fn post_shell_validate(
         && source.markdown.frontmatter().as_map().contains_key("$schema");
 
     let judge = |instance: &serde_json::Value| -> Result<ValidationReport, CompositionError> {
-        let mut report = match phase {
-            Some(phase) => effective.validate_for_phase(instance, phase).map_err(|error| {
-                schema_error_to_composition_error(
-                    &source.resolved_path,
-                    error.to_string(),
-                    Some(&error),
-                )
-            })?,
-            None => effective.validate(instance),
-        };
-        complete_launch_defaults(&effective, phase, instance, &mut report);
+        // The instance is completed; its lifecycle flags count as written
+        // only where the author wrote them, as the lifecycle parser reads them.
+        let mut report = effective.validate_completed(instance, authored, phase).map_err(|error| {
+            schema_error_to_composition_error(&source.resolved_path, error.to_string(), Some(&error))
+        })?;
         if trigger_declared_only {
             report.problems.retain(|problem| {
                 top_level_pointer_segment(&problem.path).is_some_and(|name| {
@@ -918,7 +941,7 @@ fn pre_validate_verdict(
     // without ever deferring it as a template.
     let mut instance = raw_instance.clone();
     normalize_file_array_values(&mut instance, Some(&effective));
-    let mut report = effective
+    let report = effective
         .validate_stored(&instance, &PositionMap::new(), phase)
         .map_err(|error| {
             schema_error_to_composition_error(
@@ -927,7 +950,6 @@ fn pre_validate_verdict(
                 Some(&error),
             )
         })?;
-    complete_launch_defaults(&effective, phase, &instance, &mut report);
     if report.valid {
         return Ok(PreValidatedSchema {
             source,

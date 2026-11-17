@@ -121,8 +121,8 @@ pub fn with_document_fallback(diagnostics: &mut [Diagnostic], document: Option<&
     }
 }
 
-/// A reported reference-validation `issue` as a shared record. A missing
-/// local target takes its kind's recovery code
+/// A reported reference-validation `issue` as a shared record. A missing or
+/// empty local target takes its kind's recovery code
 /// ([`missing_reference_code`](super::policy::missing_reference_code)).
 ///
 /// `source` is never `None`. A document with no authored positions (built in
@@ -130,7 +130,7 @@ pub fn with_document_fallback(diagnostics: &mut [Diagnostic], document: Option<&
 /// column.
 pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
     let code = match issue.code {
-        ReferenceIssueCode::MissingLocalTarget => {
+        ReferenceIssueCode::MissingLocalTarget | ReferenceIssueCode::EmptyTarget => {
             super::policy::missing_reference_code(issue.kind).unwrap_or(REFERENCE_FAILURE_CODE)
         }
         _ => REFERENCE_FAILURE_CODE,
@@ -286,7 +286,7 @@ fn config_problem_source(problem: &crate::config::load::ConfigProblem) -> Diagno
 
 /// The diagnostics of a failed lifecycle event: its Darkmatter cause's
 /// ([`error_diagnostics`]) when it has one, otherwise one
-/// [`LIFECYCLE_FAILURE_CODE`] record with the failure's message.
+/// [`LIFECYCLE_FAILURE_CODE`] record carrying the failure's complete `err.msg`.
 pub fn lifecycle_failure_diagnostics(failure: &crate::lifecycle::LifecycleErrorInfo) -> Vec<Diagnostic> {
     match &failure.cause {
         Some(cause) => error_diagnostics(cause),

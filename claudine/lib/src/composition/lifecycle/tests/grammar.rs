@@ -581,8 +581,13 @@ fn inner_and_sibling_no_error_are_ambiguous_even_when_they_agree() {
 }
 
 #[test]
-fn no_error_must_be_a_yaml_boolean_in_both_homes() {
-    let error = parse_err(json!({ "start": [{ "shell": "x", "no_error": "true" }] }));
+fn no_error_must_be_a_boolean_in_both_homes() {
+    // Boolean-like text converts through the shared engine; a native number
+    // never becomes a boolean.
+    let config = parse_lifecycle_config(&json!({ "start": [{ "shell": "x", "no_error": "true" }] }), dummy_path())
+        .expect("boolean-like text is a flag");
+    assert!(matches!(&config.stack(LifecycleSignal::Start)[0], LifecycleNode::Action(action) if action.no_error));
+    let error = parse_err(json!({ "start": [{ "shell": "x", "no_error": 0 }] }));
     assert_eq!(shape_property(&error), "start[0].no_error");
     let error = parse_err(json!({ "start": [{ "shell": { "command": "x", "no_error": 1 } }] }));
     let CompositionError::LifecycleActionInvalidLongForm { property, .. } = error else {

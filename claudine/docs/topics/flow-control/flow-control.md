@@ -4,33 +4,85 @@ kind: canonical-documentation
 
 # Flow Control
 
-Claudine runs three _executable primitives_: a markdown **document**, a **group** of tasks, and a **sequence** of steps. For any of them, Claudine lets the markdown (or YAML) author change the natural flow of execution through [lifecycle events](./lifecycle.md).
+Claudine has three main _executable primitives_: 
 
-This page explains the directives and when to use each one. For edge cases and the exact runtime rules, see the [Flow Control Reference](flow-control-reference.md).
+- [**compose**](claudine/docs/topics/composition.md#direct-composition)
+- [**inline-compose**](claudine/docs/topics/composition.md#inline-composition)
+- and [**sequence**](./sequences.md)
+
+Each of these primitives provides [lifecycle events](./lifecycle.md) that Markdown/YAML authors can use to take actions at various parts of the pipeline. The actions an author can add fit into three buckets:
+
+- **Messaging / Communication** (_send messages to desktop notifications, popular chat platforms_)
+- **Mutations** (_mutate ENV variables, files, network resources, etc._)
+- and **Flow Control Directives**
+
+This document focuses exclusively on flow control directives; what directives are available and how to use them.
+
+> **Note:** for edge cases and the exact runtime rules, see the [Flow Control Reference](flow-control-reference.md).
 
 ## An Example
 
-A prompt asks an agent to write a file. The agent sometimes reports success without writing it, so the document checks for the file and sends the agent back to finish:
+Let's start our discussion of flow control by giving a real example. Imagine that:
+
+- you have created a Claudine prompt -- `build-release-notes.md` -- to build release notes
+- Claudine will _compose_ your prompt -- `claudine compose build-release-notes.md` -- and the result of this composition will be passed to an Agent session for completion.
+- The agent then interacts with the underlying LLM model until the agent believes it has completed the work
+- Rather than fully trusting the agent to evaluate "done", your goal is to validate that that work was actually saved to the file it was supposed to be saved to.
 
 ```yaml
 ---
-prompt: "Write the release notes to @output/RELEASE.md"
 success:
   - when: "!file_exists('@output/RELEASE.md')"
     then:
+      - warn: "The agent mistakenly thought the {{ctx.this}} prompt had completed but the release file was not actually written to the filesystem. Resuming this session."
       - resume: "You finished without writing @output/RELEASE.md. Please create it now."
+    else:
+      - info: "The release notes have been successfully created!"
 ---
+Write the release notes to @output/RELEASE.md
 ```
 
-The pieces:
+Let's evaluate this example:
 
-- `success` is the **event**. It fires when the agent finishes without an error. Its value is an ordered list of **items**, which Claudine runs top to bottom when the event fires.
-- `when` is a condition, written as a Darkmatter expression. The actions under `then` run only when it is true; an optional `else` holds the actions for false. An item with no `when` always runs.
-- `resume` is the flow-control directive. It continues the same agent session with a follow-up message.
+- `success` is a **lifecycle event**
+    - It fires when the agent finishes without an error
+    - All lifecycle events are designed to receive an ordered list of **actions**, which Claudine executes top to bottom when the event fires
+- An action can be made _conditional_ with the use of `when`/`then`/`else` (see [Lifecycle Events](./lifecycle.md) for more details)
+- `warn` is a messaging action that will render a warning message to the callers terminal (in an interactive session) as well as add this warning to the sessions log
+- `resume` is a flow-control directive
+    - flow control directives are a _kind_ of action that redirects Claudine's **execution flow** 
+    - the `resume` directive tells Claudine that the recently completed session with the agent should be _resumed_ by passing in another prompt to the end of the prompt 
+    - this is handy for non-interactive sessions which -- _by default_ -- finish as soon as the agent determines it is done
+    - but in our example, we were able to employ a deterministic check and determine that in fact the task was not completed
+    - by _resuming_ (versus retrying or just failing to complete the work) we are able to have the agent pickup the follow on prompt with all context already cached
 
-[Lifecycle — Writing an Event](lifecycle.md#writing-an-event) covers the whole grammar: lists, dictionaries, `when`/`then`/`else`, and nesting.
+> **Note:** had we placed the `warn` action _after_ the `resume` the `warn` action would have never been called because flow control directives -- _with the notable exception of `prep`_ -- do not exhibit "re-entry" (e.g., actions _after_ a flow control event are never executed because the execution flow has been diverted). If you are using the [DMLS](darkmatter/dmls/README.md) LSP you will be warned when a document has this type of "dead code".
 
-## The directives
+So at a high level, we can think of the typical _flow_ for the `build-release-notes.md` prompt as:
+
+```mermaid
+flowchart LR
+    compose[/compose/]
+    agent[/agent loop/]
+    initialize --> compose --> start --> agent --> success --> finalize
+
+    agent --> failure
+    failure --> finalize
+```
+
+However, by adding the flow control event, we've allowed for a variant flow on the "happy path" during the **success** lifecycle event:
+
+```mermaid
+flowchart LR
+    compose[/compose/]
+    agent[/agent loop/]
+    initialize --> compose --> start --> agent --> success --> file
+    file@{ shape: diamond, label: "file exists" }
+    file --> |yes| finalize
+    file --> |no| start
+```
+
+## Flow Control Directives
 
 | Directive | What it does |
 |-----------|--------------|
@@ -44,9 +96,26 @@ The pieces:
 | [`break`](#break) | Leaves the nearest enclosing loop, optionally with an exit code. |
 | [`prep`](#prep) | Runs another executable primitive to prepare the environment, then returns control to the caller. |
 
-Directives marked **planned** are part of the documented design and do not run yet. `defer` waits on scheduling in the `rendezvous` daemon; it is already parsed and validated like every other directive, so a malformed one is reported before anything runs, and reaching a valid one fails the event with a typed `LifecycleDeferNotImplemented` error, never a silent skip or a `stop`.
+> The `defer` directive is not implemented yet; it waits on scheduling in the `rendezvous` daemon; it is already parsed and validated like every other directive, so a malformed one is reported before anything runs, and reaching a valid one fails the event with a typed `LifecycleDeferNotImplemented` error, never a silent skip or a `stop`.
 
-## Rules that apply to every directive
+## Shared Flow Control Rules
+
+### Flow Control Actions Conclude Lifecycle Events
+
+When a flow control directive is _executed_ it branches execution elsewhere so -- with the exception of `prep` (which has re-entry) -- the lifecycle event is concluded.
+
+For instance:
+
+```yaml
+failure:
+  - when: "err.category == 'cap'"
+    then:
+      - warn: "Usage cap reached, handing off to Codex"   # runs first
+      - proxy: "@prompts/feature-codex.md"                # then ends the event
+```
+
+- in this example the `proxy` flow control action is called which transfers execution to a new prompt
+- no actions _after_ the the `proxy` call 
 
 **A directive ends the whole event, except `prep`.** When a directive runs, nothing after it runs, in its own list or in any list that encloses it: a `retry` inside a nested `else` ends the event just as a `retry` at the top does. That is why an unconditional directive must be the **last** item in its list (a `when` item never counts as unconditional), and why a dictionary of verbs can hold at most one directive. `prep` is a call that returns, so items may follow it, even unconditionally; in a dictionary it still counts as the one directive and runs after the dictionary's other verbs. Put any messages you want to show *before* an ending directive:
 
@@ -83,7 +152,7 @@ failure:
           delay: "30s"
 ```
 
-Values are literal text. To insert a variable or expression, wrap it in `{{ … }}`, for example `resume: "Fix the {{ err.code }} error"`. [Lifecycle — Action Forms](lifecycle.md#action-forms) covers both forms in detail.
+Values are literal text. To insert a variable or expression, wrap it in `\{{ … }}`, for example `resume: "Fix the \{{ err.code }} error"`. [Lifecycle — Action Forms](lifecycle.md#action-forms) covers both forms in detail.
 
 ## `stop`
 
@@ -256,7 +325,7 @@ success:
         label: "phase-{{ iteration }}"
 ```
 
-`with:` values are evaluated once, in the current document, when the directive fires, and the target receives the results as data: text an agent wrote stays text there, even if it contains `{{ … }}` or `$( … )`. Values the caller passed on the command line (`--set key=value`) still win over `with:`. The overlay applies only to this target and is not passed on to further handoffs. The [reference](flow-control-reference.md#passing-values-with-with) covers types, precedence, errors, and the security model.
+`with:` values are evaluated once, in the current document, when the directive fires, and the target receives the results as data: text an agent wrote stays text there, even if it contains `{{{ … }}}` or `$( … )`. Values the caller passed on the command line (`--set key=value`) still win over `with:`. The overlay applies only to this target and is not passed on to further handoffs. The [reference](flow-control-reference.md#passing-values-with-with) covers types, precedence, errors, and the security model.
 
 | Parameter | Required | Meaning |
 |-----------|----------|---------|
@@ -307,7 +376,7 @@ success:
 A `break` fired from `finalize` or from the loop gate never re-runs cleanup.
 
 ```mermaid
-flowchart TD
+flowchart LR
     B[Child fires break] --> F[Child runs finalize once]
     F --> G{Concurrent group on the path?}
     G -->|yes| W[Wait for every leg to settle]
@@ -355,7 +424,7 @@ initialize:
 
 **The target runs as an invocation of its own**, in the same process (never a spawned `claudine`): its own `initialize`, schema check, shell approval, runtime layer, output accumulator, and output. A document target runs like `compose`, or like `inline-compose` when its frontmatter `prompt:` is a string; a sequence document or YAML sequence file runs like `claudine sequence`. Running a `kind: group` file as a target is **planned**; today the call fails with the sequence command's "not directly executable" error. The target path resolves relative to the document that authored the directive.
 
-**What goes in.** The caller's setters and its `loop`, `seq`, and `group` roots do not reach the target. The `with:` overlay becomes the target's only caller values, as data: a `{{ … }}` the caller produced is never evaluated again.
+**What goes in.** The caller's setters and its `loop`, `seq`, and `group` roots do not reach the target. The `with:` overlay becomes the target's only caller values, as data: a `{{{ … }}}` the caller produced is never evaluated again.
 
 **What comes back:** only what the target wrote to disk. The caller sees it through fresh file reads or its next preparation. The target's frontmatter, loop frames, and `set` writes never merge back, and its output is reported under the target, not appended to the caller's `seq.outputs`.
 
@@ -374,7 +443,7 @@ initialize:
 | `target` | **yes** | The document or sequence to run first. This is the short-form value. |
 | `with` | no | Frontmatter values for the target, as for `proxy`. Long form only. |
 
-The accepted spellings are `prep: "@target.md"` and the long form `prep: { target, with, no_error }`. The target must be a non-empty string (a file reference or a whole-value `{{ … }}`); a missing, empty, numeric, or list target is an error. `with` follows `proxy.with` exactly: omitted means no overlay, `with: {}` is an explicit empty overlay, and `null`, a string, or a list is an error. A `prep` in `initialize` is not a shell, so it passes the shell-free check while a `shell` beside it is still refused. An unconditional `prep` may be followed by other items.
+The accepted spellings are `prep: "@target.md"` and the long form `prep: { target, with, no_error }`. The target must be a non-empty string (a file reference or a whole-value `{{{ … }}}`); a missing, empty, numeric, or list target is an error. `with` follows `proxy.with` exactly: omitted means no overlay, `with: {}` is an explicit empty overlay, and `null`, a string, or a list is an error. A `prep` in `initialize` is not a shell, so it passes the shell-free check while a `shell` beside it is still refused. An unconditional `prep` may be followed by other items.
 
 ## Choosing a directive
 

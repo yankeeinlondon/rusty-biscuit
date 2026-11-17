@@ -47,7 +47,7 @@ Interactive setup wizard for initial configuration. Walks through 4 phases:
 3. **Action Defaults** — global interview (logging `all/some/none`, then input-needed actions)
 4. **Write & Register** — saves `~/.claudine/config.yaml` and registers hooks with each provider
 
-Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings.
+Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings, from the in-memory bindings; the saved file lists only events that have actions, because the schema refuses an empty event list (`action[](not-empty)`; the test-only `commands/init/mod.rs::write_init_config` filters them the same way).
 
 ```bash
 claudine init [OPTIONS]
@@ -513,7 +513,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
 | `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
 | `--stall-timeout <DURATION>` | OpenCode-only stalled-generation backstop (live-but-dead retry-churn guard); built-in `10m`, `0s` disables. Inert config on non-OpenCode providers. See [Timeouts](topics/timeouts.md#opencode-stalled-generation-backstop) |
-| `-o, --output <FORMAT>` | Set output format (json, text, stream) |
+| `-o, --output <TARGET>` | Hidden and refused: any value exits 2 before anything runs (`cli/src/args.rs::refuse_output_option`, called first in `main.rs::dispatch`). See [Output](topics/output.md) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
 | `--use <ID[,ID...]>` | Add specific MCP catalog IDs or aliases and enable MCP composition |
@@ -530,6 +530,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 
 ### Wrapper Behavior
 
+- **Order independence**: every flag above is Claudine's wherever it appears before the first `--`, before or after the prompt (`claudine claude "fix it" -m opus` = `claudine claude -m opus "fix it"`). `argv::hoist_wrapper_options` (`cli/src/argv/wrapper_options.rs`) moves them ahead of the first positional before clap, using `OwnedFlags::for_wrapper` (derived from `WrapperArgs` plus root globals; drift test in `argv/wrapper_options/tests.rs`). There is no hand-written extractor; `flags::consume_passthrough_separator` only removes the user's `--`. Short clusters and attached short values are split (`-yojson` → `-y -o json`) because the lenient wrapper parse (`ignore_errors`) would otherwise drop them into the passthrough. A value option without a value before `--` fails with exit 2 (`missing value for '-m'`); `main.rs::exit_code_before_runtime` maps `PartitionError` and `MissingWrapperOptionValue` to `args::EXIT_USAGE`. `-h`/`--help` anywhere before `--` is answered by `argv::select_help` before configuration loads (`HelpDestination::Wrapper` → `print_wrapper_help`), winning over the `--output` refusal.
 - **Dry-run executable independence**: provider wrappers render the planned
   command using the profile's executable name without resolving it on `PATH`;
   the provider need not be installed. Live runs still validate the executable

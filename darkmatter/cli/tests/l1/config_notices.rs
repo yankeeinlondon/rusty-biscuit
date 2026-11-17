@@ -188,15 +188,6 @@ fn assert_refused_naming(name: &str, config: &str, also_named: fn(&Path) -> Vec<
     );
 }
 
-#[test]
-fn a_null_network_outranks_an_exact_host() {
-    assert_refused_naming("config-network-null-host", "permissions:\n  network: null\n", |_| vec!["/permissions/network".into()]);
-}
-
-#[test]
-fn null_permissions_outrank_an_exact_host() {
-    assert_refused_naming("config-permissions-null-host", "permissions: null\n", |_| vec!["/permissions".into()]);
-}
 
 #[test]
 fn a_missing_permissions_reference_outranks_an_exact_host() {
@@ -207,9 +198,21 @@ fn a_missing_permissions_reference_outranks_an_exact_host() {
 
 #[test]
 fn omitted_permissions_fetch_an_exact_host() {
-    let (_fixture, output, requests) = compose_with_exact_host("config-permissions-omitted-host", "{}\n");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert_fetched("config-permissions-omitted-host", "{}\n");
+}
+
+/// A `null` is the same as leaving the key out: its default applies.
+#[test]
+fn null_permissions_and_a_null_network_fetch_an_exact_host_as_if_omitted() {
+    assert_fetched("config-permissions-null-host", "permissions: null\n");
+    assert_fetched("config-network-null-host", "permissions:\n  network: null\n");
+}
+
+/// The run composed the loopback `::file` with one request.
+fn assert_fetched(name: &str, config: &str) {
+    let (_fixture, output, requests) = compose_with_exact_host(name, config);
+    assert!(output.status.success(), "{config:?}: {}", String::from_utf8_lossy(&output.stdout));
     let value = data_value(&output, include_str!("../../schemas/output/compose.yaml"));
     assert!(value["document"].as_str().is_some_and(|text| text.contains("Remote child.")), "{value:#}");
-    assert_eq!(requests, 1);
+    assert_eq!(requests, 1, "{config:?}");
 }

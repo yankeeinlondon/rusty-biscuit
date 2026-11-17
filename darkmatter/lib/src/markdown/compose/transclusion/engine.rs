@@ -1212,7 +1212,20 @@ impl<'a> TransclusionEngine<'a> {
                         ))
                     })?;
 
+                // The directive's `set` values reach a remote child exactly as
+                // they reach a local one: written over its authored
+                // frontmatter before anything reads it.
+                apply_directive_set_overlay(&mut child, &directive_options);
+
                 let child_source = ComposeSource::Url(url.clone());
+
+                // The fetched body is scanned for what it reaches before the
+                // child's request (`remote_child_options`) exists, so the
+                // directive's `interpolate=` is folded here too.
+                let prose_interpolation =
+                    effective_prose_interpolation(options.prose_interpolation, &directive_options);
+                let prose_enabled =
+                    prose_interpolation == crate::markdown::compose::context::options::ProseInterpolation::Enabled;
 
                 // Eagerly register any remote URLs the fetched document itself
                 // references, so the child pipeline's point-of-use waits land on
@@ -1237,9 +1250,10 @@ impl<'a> TransclusionEngine<'a> {
                     }
 
                     if options.is_enabled(ComposeOperation::Interpolation) {
-                        for entry in remote::discover_remote_urls_from_expressions(
+                        for entry in remote::discover_remote_urls_from_expressions_with(
                             child.content(),
                             &child_source,
+                            prose_enabled,
                         ) {
                             child_catalog.add(entry);
                         }
@@ -1256,14 +1270,12 @@ impl<'a> TransclusionEngine<'a> {
                 };
                 let child_context = child_runtime.context_epoch.context_for_source(
                     state.context(),
-                    &crate::markdown::compose::ContextRequirements::for_document(&child),
+                    &crate::markdown::compose::ContextRequirements::for_document_with(&child, prose_enabled),
                     options.context_authority(),
                 );
                 child_runtime.record_context_groups(child_context.capture_requirements());
-                let mut child_options =
-                    options.clone().derive(|options| options.with_request_context(child_context));
-                child_options.source = child_source;
-                child_options.source_opening = None;
+                let mut child_options = remote_child_options(options, &directive_options, url.clone())
+                    .derive(|options| options.with_request_context(child_context));
                 // Recursive graph reuse for remote children: hand the child its
                 // OWN preflight sub-node (whose edges point at grandchildren) so
                 // its transclusion stage reuses grandchild URL/path resolution
@@ -1598,19 +1610,33 @@ impl<'a> TransclusionEngine<'a> {
         // inherit it.
         let mut child = runtime.load_markdown(path)?;
         apply_directive_set_overlay(&mut child, directive_options);
+        let child_prose_enabled = effective_prose_interpolation(options.prose_interpolation, directive_options)
+            == crate::markdown::compose::context::options::ProseInterpolation::Enabled;
         let child_context = runtime.context_epoch.context_for_source(
             state.context(),
-            &crate::markdown::compose::ContextRequirements::for_document(&child),
+            &crate::markdown::compose::ContextRequirements::for_document_with(&child, child_prose_enabled),
             options.context_authority(),
         );
 
         // ── Core compose (cacheable via single-flight) ─────────────
+        // The child's request carries this directive's `replace=` inputs and
+        // folded prose setting, so its fingerprint identifies the result: two
+        // inclusions differing only in those inputs never share an entry. The
+        // parent's fingerprint stays in the key too: it names the including
+        // document, so a self-inclusion's nested copy never waits on its own
+        // in-flight entry before the cycle check stops it.
+        let child_request =
+            markdown_child_options(options, state.data(), directive_options, path, opening.cloned())
+                .derive(|options| options.with_request_context(child_context.clone()));
         let overlay_hash = cache::hashing::set_overlay_hash(
             directive_options.set_object.as_ref(),
             &directive_options.set_properties,
         );
         let options_hash = cache::hashing::combine_options_overlay_hash(
-            cache::hashing::options_hash(options),
+            cache::hashing::combine_options_overlay_hash(
+                cache::hashing::options_hash(options),
+                cache::hashing::options_hash(&child_request),
+            ),
             overlay_hash,
         );
         // The opening reference can give the child a different tree root, so
@@ -1638,8 +1664,10 @@ impl<'a> TransclusionEngine<'a> {
             crate::markdown::compose::OverrideOrigin::Authored => 0,
             crate::markdown::compose::OverrideOrigin::Data => 1,
         };
+        // Also covered by `options_hash`; kept as an explicit key segment.
+        let prose = u8::from(!child_prose_enabled);
         let cache_key = format!(
-            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}:{opening_hash:016x}:{overlay_origin}",
+            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}:{opening_hash:016x}:{overlay_origin}:{prose}",
             cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
             state_identity.state_hash,
             context_hash,
@@ -1653,9 +1681,7 @@ impl<'a> TransclusionEngine<'a> {
         let outcome = cache_handle.get_or_compute_compose_outcome(
             &cache_key,
             || {
-                let mut child_options =
-                    markdown_child_options(options, state.data(), directive_options, &path_buf, opening.cloned())
-                        .derive(|options| options.with_request_context(child_context.clone()));
+                let mut child_options = child_request.clone();
                 // Recursive graph reuse: hand the child its OWN preflight
                 // sub-node (whose edges point at grandchildren), so the child's
                 // transclusion stage reuses grandchild target resolution too.
@@ -1860,9 +1886,11 @@ impl<'a> TransclusionEngine<'a> {
 /// Applies a `::file` directive's `set` overlay to the child's authored
 /// frontmatter.
 ///
-/// Composition and pre-flight discovery both call this, so the child a
-/// directive composes is the child its commands were approved for. The overlay
-/// never reaches grandchildren through the child's options.
+/// Composition, pre-flight discovery, and reference-graph preparation call
+/// this for local and remote children alike, so the child a directive composes
+/// is the child its commands were approved for and its references checked
+/// against. The overlay never reaches grandchildren through the child's
+/// options.
 pub(crate) fn apply_directive_set_overlay(
     child: &mut Markdown,
     directive_options: &transclusion::BlockOptions,
@@ -1893,6 +1921,23 @@ pub(crate) fn markdown_child_options(
     inherited_child_options(parent, parent_data, directive_options).with_accepted_source_file(path.to_path_buf(), opening)
 }
 
+/// The prose-interpolation setting a child composes under.
+///
+/// Disabled when the parent is disabled or the directive wrote
+/// `interpolate=false`: a nested `interpolate=true` never re-enables what an
+/// ancestor disabled, and the fold reaches only this inclusion's branch.
+pub(crate) fn effective_prose_interpolation(
+    parent: crate::markdown::compose::context::options::ProseInterpolation,
+    directive: &transclusion::BlockOptions,
+) -> crate::markdown::compose::context::options::ProseInterpolation {
+    use crate::markdown::compose::context::options::ProseInterpolation;
+    if parent == ProseInterpolation::DisabledByInclusion || !directive.interpolate {
+        ProseInterpolation::DisabledByInclusion
+    } else {
+        ProseInterpolation::Enabled
+    }
+}
+
 /// The inputs every nested child (a `::file` child or `as_markdown` content)
 /// inherits from the document that nests it, before the child's source is
 /// chosen.
@@ -1919,21 +1964,57 @@ pub(crate) fn inherited_child_options(
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
 
+    let mut child_options = directive_child_request(parent, directive_options);
+    child_options.external_state = Some(Value::Object(inherited));
+    child_options.inherited_origin = child_inherited_origin(directive_options);
+    child_options
+}
+
+/// The options a remote Markdown child (a `::file` or `::url` target fetched
+/// over HTTP) composes with.
+///
+/// A remote child inherits none of its parent's effective state, but takes
+/// the same per-inclusion inputs a local child does
+/// ([`directive_child_request`]), so composition and pre-flight discovery
+/// replace and interpolate its text alike.
+pub(crate) fn remote_child_options(
+    parent: &crate::markdown::compose::ComposeRequest,
+    directive_options: &transclusion::BlockOptions,
+    url: url::Url,
+) -> crate::markdown::compose::ComposeRequest {
+    let mut child_options = directive_child_request(parent, directive_options).with_source_url(url);
+    let origin = child_inherited_origin(directive_options);
+    child_options.inherited_origin.one_off_replace = origin.one_off_replace;
+    // The overlay's data leaves, as a local child records them; the parent's
+    // own describe the parent's frontmatter.
+    child_options.inherited_origin.frontmatter_data = origin.frontmatter_data;
+    child_options
+}
+
+/// `parent` with one inclusion's own inputs applied: its `replace=` option
+/// (a one-off map, or parent-wins precedence; neither is inherited from the
+/// inclusion of `parent`) and its folded prose setting.
+///
+/// Every child request is derived through this, so the request a cache key or
+/// discovery identity is taken from is the one the child composes with.
+fn directive_child_request(
+    parent: &crate::markdown::compose::ComposeRequest,
+    directive_options: &transclusion::BlockOptions,
+) -> crate::markdown::compose::ComposeRequest {
     let one_off = match &directive_options.replace {
         transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
         _ => None,
     };
-    let mut child_options = parent.clone().derive(|options| {
+    let prose_interpolation = effective_prose_interpolation(parent.prose_interpolation, directive_options);
+    parent.clone().derive(|options| {
         options
             .with_replace_parent_wins(matches!(
                 directive_options.replace,
                 transclusion::ReplaceOption::ParentWins
             ))
             .with_one_off_replace(one_off)
-    });
-    child_options.external_state = Some(Value::Object(inherited));
-    child_options.inherited_origin = child_inherited_origin(directive_options);
-    child_options
+            .with_prose_interpolation(prose_interpolation)
+    })
 }
 
 /// Origin of what a transcluded child receives from the directive that
@@ -2005,6 +2086,62 @@ mod tests {
         assert!(new_content.contains("###### Section"));
         assert!(new_content.contains("**Deep**"));
         assert_eq!(warnings.len(), 1);
+    }
+
+    mod prose_interpolation_fold {
+        use super::super::{effective_prose_interpolation, inherited_child_options};
+        use crate::markdown::compose::context::options::ProseInterpolation;
+        use crate::markdown::compose::transclusion::{BlockOptions, parse_directives};
+        use crate::markdown::compose::{ComposeOptions, SharedFrontmatter, test_request_in};
+
+        fn directive(line: &str) -> BlockOptions {
+            let ctx = biscuit_terminal::errors::SourceContext::new(
+                std::path::PathBuf::from("/parent.md"),
+                std::path::PathBuf::from("parent.md"),
+                std::sync::Arc::from(line),
+            );
+            parse_directives(line, ctx).expect("directive parses").remove(0).options
+        }
+
+        #[test]
+        fn disabled_iff_the_parent_is_disabled_or_the_directive_writes_false() {
+            use ProseInterpolation::{DisabledByInclusion, Enabled};
+            let plain = directive("::file ./a.md");
+            let off = directive("::file ./a.md interpolate=false");
+            let on = directive("::file ./a.md interpolate=true");
+            assert_eq!(effective_prose_interpolation(Enabled, &plain), Enabled);
+            assert_eq!(effective_prose_interpolation(Enabled, &on), Enabled);
+            assert_eq!(effective_prose_interpolation(Enabled, &off), DisabledByInclusion);
+            assert_eq!(effective_prose_interpolation(DisabledByInclusion, &plain), DisabledByInclusion);
+            // A nested `interpolate=true` never re-enables what an ancestor disabled.
+            assert_eq!(effective_prose_interpolation(DisabledByInclusion, &on), DisabledByInclusion);
+            assert_eq!(effective_prose_interpolation(DisabledByInclusion, &off), DisabledByInclusion);
+            // Prologue and epilogue children use the default options, so they inherit.
+            assert_eq!(effective_prose_interpolation(DisabledByInclusion, &BlockOptions::default()), DisabledByInclusion);
+            assert_eq!(effective_prose_interpolation(Enabled, &BlockOptions::default()), Enabled);
+        }
+
+        #[test]
+        fn the_single_child_derivation_folds_without_touching_the_parent() {
+            let root = tempfile::tempdir().expect("tempdir");
+            let context = biscuit_file::FileResolutionContext::from_snapshot(
+                root.path().to_path_buf(),
+                None,
+                std::collections::HashMap::new(),
+            );
+            let parent = test_request_in(ComposeOptions::new(), context);
+            let data = SharedFrontmatter::default();
+
+            let off = inherited_child_options(&parent, &data, &directive("::file ./a.md interpolate=false"));
+            assert_eq!(off.prose_interpolation, ProseInterpolation::DisabledByInclusion);
+            assert_eq!(parent.prose_interpolation, ProseInterpolation::Enabled, "never escapes to the parent");
+
+            let sibling = inherited_child_options(&parent, &data, &directive("::file ./b.md"));
+            assert_eq!(sibling.prose_interpolation, ProseInterpolation::Enabled, "never reaches a sibling");
+
+            let grandchild = inherited_child_options(&off, &data, &directive("::file ./c.md interpolate=true"));
+            assert_eq!(grandchild.prose_interpolation, ProseInterpolation::DisabledByInclusion);
+        }
     }
 
     /// Finding 35.2 regression coverage.

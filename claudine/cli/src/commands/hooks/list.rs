@@ -782,7 +782,7 @@ mod tests {
             r#"{
   "actions": {
     "human_in_the_loop": [
-      { "type": "sound_effect", "effect": "bell<x>" }
+      { "sound_effect": { "effect": "bell<x>" } }
     ]
   }
 }"#,

@@ -11,7 +11,7 @@
 //! | Surface | Checked when | Not checked |
 //! |---|---|---|
 //! | frontmatter `{{ … }}` (every authored string leaf) | frontmatter interpolation is enabled | `exclude_keys`, data leaves (inherited or `--data`), literal tokens, `{{{ … }}}` |
-//! | body `{{ … }}` | body interpolation is enabled | fenced/indented code (unless `interpolate_code_blocks`), `{{{ … }}}`, literal tokens |
+//! | body `{{ … }}` | body interpolation is enabled | fenced/indented code (unless `interpolate_code_blocks`), `{{{ … }}}`, literal tokens; under an `interpolate=false` inclusion, everything but directive inputs |
 //! | `::block when="…"` | page blocks are enabled | |
 //! | `::file`/`::code` `when=…` | a transclusion stage is enabled | |
 //! | `::map`/`::filter` gates and callbacks | collection blocks are enabled | |
@@ -51,6 +51,8 @@
 //! nothing a parent inserts is the parent's syntax.
 
 use super::body_origin::BodyOrigin;
+use super::context::options::ProseInterpolation;
+use super::interpolation::active_inputs::{active_input_ranges, intersects_active};
 use super::conditions::ConditionError;
 use super::context::report::{ExpressionOrigin, WarningIdentity, WarningSubject};
 #[cfg(doc)]
@@ -751,11 +753,19 @@ fn check_body(
     }
 
     if options.call_check_covers(ComposeOperation::Interpolation) && body.contains("{{") {
-        let scan = if super::inline::interpolation::resolve_interpolate_code_blocks(markdown, options) {
+        // Prose an `interpolate=false` inclusion keeps as written is never
+        // evaluated, so its sample calls are not checked; its directive inputs
+        // are, and `interpolate_code_blocks` cannot re-enable code blocks.
+        let active = (options.prose_interpolation == ProseInterpolation::DisabledByInclusion)
+            .then(|| active_input_ranges(body, None));
+        let mut scan = if active.is_none() && super::inline::interpolation::resolve_interpolate_code_blocks(markdown, options) {
             ExpressionFinder::scan_plain(body)
         } else {
             ExpressionFinder::new(body).scan()
         };
+        if let Some(active) = &active {
+            scan.expressions.retain(|location| intersects_active(active, &(location.start..location.end)));
+        }
         let mut record = |found: Found<'_, '_>| {
             advisories.record(found.checks, found.incomplete, BODY_RANK, found.offset, None, None);
             let offset = found.offset;

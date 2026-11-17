@@ -38,6 +38,10 @@ sequence:
 Nested containers execute recursively. An empty nested list returns an empty
 array and still runs its container lifecycle. Only an inline list can carry container lifecycle events
 on its task; a reference carries those events in its referenced document.
+The same holds for the container declarations `$schema`, `$state`, and
+`template:`: an inline list's task may declare them, and a referenced
+document declares its own (see
+[Each sequence owns its own declarations](#each-sequence-owns-its-own-declarations)).
 
 A container's `loop:` goes in one of three places: on a group object beside
 `tasks:`, at a sequence document's root beside `sequence:`, or on an inline
@@ -82,7 +86,8 @@ when the root declares its own `local_value`. Values reach a referenced
 sequence the way they reach a referenced prompt document. Lowest precedence
 first:
 
-1. the referenced document's own properties
+1. the referenced document's own properties, as its `$schema` prepares them
+   (see below)
 2. invocation setters (`--set`, shorthand `key=value`)
 3. runtime writes made so far, by the caller or by the sequence itself
 
@@ -90,6 +95,131 @@ The caller's authored frontmatter is not among them: a property only the root
 declares reads as `null` inside the referenced sequence. To pass a value down,
 write it at run time with `set`, or supply it with `--set`. A `set` inside the
 referenced sequence is a runtime write, so the caller sees it afterward.
+
+This holds however the document is reached: run directly, named by the root's
+own `sequence: child.yaml`, as a nested task, a group leg, a `kind: task`
+file, or as the target of a container `proxy`. A step authored in
+`child.yaml` reads `child.yaml`'s values everywhere: its `when:` guard, its
+`shell` command (both when pre-flight approves it and when it runs), and the
+state its task runs in. Given `sub/child.yaml`:
+
+```yaml
+kind: sequence
+rank: 1
+sequence:
+    - name: show
+      shell: "echo {{ rank }}"
+```
+
+`claudine sequence sub/child.yaml`, a root holding `rank: 9` and
+`sequence: sub/child.yaml`, and a root holding `rank: 9` and
+`sequence: [{ name: n, sequence: sub/child.yaml }]` all print `1`. A step
+that reads a property only the root defines fails pre-flight as missing on
+every route, as it does when the child runs directly.
+
+A referenced document's `$schema` describes that document: its required
+properties are caller inputs, collected with the root's (see
+[Requiring caller input](#requiring-caller-input)), and its values are
+converted before its `template:` reads them. Its `template:` reads the same
+three layers and nothing else, so a key none of them defines stays undefined
+and the template's own fallback applies. Given `sub/child.yaml`:
+
+```yaml
+kind: sequence
+template:
+    who: "{{ reviewer || 'none' }}"
+sequence:
+    - name: work
+      shell: "echo {{ seq.who }}"
+```
+
+a root that writes `reviewer: leaked` and references `sub/child.yaml` prints
+`none`, exactly as running the child directly does. To parameterize a shared
+step list from the document that references it, write the value in the root's
+`initialize`, a runtime write the referenced template reads:
+
+```yaml
+---
+sequence: "@claudine/docs/research/_provider-tasks.yaml"
+initialize:
+    - set:
+          research_prompt: "@claudine/docs/research/hooks/_research.md"
+---
+```
+
+A dry run fires no lifecycle events, so under `--dry-run` that write is not
+made and the template reads nothing for it. Supply the value as a setter to
+preview such a sequence (`research_prompt=…`); in a real run the
+`initialize` write, the higher layer, still wins.
+
+A referenced document is prepared, and judged by its own `$schema`, each time
+it runs, not only when the sequence launches. Its events and steps read its
+**prepared** values: a schema default fills a property the document leaves
+unset, and a value is converted to the type the schema declares. A directly
+run document's own events read its prepared values the same way: its
+`initialize` reads them under the caller's values (a required input may still
+be missing then, and `initialize` may supply it), and each `start` prepares
+them again with every value written or collected since, so a derived
+property an `initialize` write feeds reads the new value from `start` on.
+Pre-flight binds a `shell` command to the same prepared values, so
+`shell: "echo {{ who }}"` under `$schema: { who: string(default(ada)) }` is
+approved, and runs, as `echo ada` on every route. The schema
+then judges the three layers as they stand at that moment, so a value an
+earlier task wrote is checked too. Given `sub/check.yaml`:
+
+```yaml
+kind: sequence
+$schema:
+    rank: number(required)
+rank: 1
+sequence:
+    - name: observe
+      shell: echo observed
+```
+
+a root that runs `- { name: change, side_effect: { set: { rank: bad } } }`
+and then references `sub/check.yaml` fails naming `/rank` and
+`sub/check.yaml`, and `observe` never runs, exactly as running the child
+directly with the same write does. When the check runs depends on how the
+document is reached:
+
+| Reached as | Judged |
+| --- | --- |
+| A nested task, a group leg, or a `kind: task` file | When the container starts: after its own `initialize`, so that event can still supply or correct a value; again at each loop pass and retry |
+| A root `sequence: child.yaml` | At each root step, as a directly run document is |
+
+A refusal fails the referenced document before any of its rows run. A started
+container still runs its `failure` and `finalize` events, and the enclosing
+sequence handles the failed task as it handles any other. A document with no
+rows is judged all the same. No check runs between the rows of one pass: a
+value a row writes is judged at the next entry. This is a different thing
+from an inline container's `$schema`, which is only a check and never
+converts or defaults a value (see
+[Sequence documents](#sequence-documents-schema-state-and-template)).
+
+A relative file value is resolved from the folder of the file that wrote it.
+If `nested/child.yaml` declares `spec: file(required;eager)` and writes
+`spec: work/spec.md`, Claudine looks for `nested/work/spec.md`, wherever the
+root that references it lives. A setter such as `spec=notes/spec.md` is
+resolved from the directory the caller supplied it in.
+
+The references its steps make follow the same rule. Given `sub/child.yaml`
+beside `sub/draft.md` and `sub/brief.md`:
+
+```yaml
+kind: sequence
+sequence:
+    - name: draft
+      prompt: ./draft.md          # sub/draft.md
+      with:
+          brief: ./brief.md       # sub/brief.md, if draft.md types it as a file
+```
+
+`./draft.md` and `./brief.md` resolve in `sub/`, and so do a step's `task:`,
+`sequence:`, and `group:` files, whether you run `sub/child.yaml` directly,
+name it from a root (`sequence: sub/child.yaml`), or nest it as a task. A
+root that names a whole document this way still runs its rows as the root's
+own steps, numbered and in the child's order.
 
 This applies when the reference names a whole sequence document: a Markdown
 file with `sequence:`, or a `kind: sequence` YAML, JSON, or JSON5 file,
@@ -446,6 +576,9 @@ Rejected with a typed error naming the offending key:
   data; `params` is not on this list, so it is ordinary step data
 - generated state keys — `id`, `is_first`, `is_last`, `index`, `count`, `previous`, `next`, `outputs`, `run_id`
 - runtime roots — `seq`, `group`, `loop`
+- sequence declarations — `$state` and `template`, and `$schema` on any step
+  but an inline container's task; they are a typed placement error (see
+  [Where declarations may appear](#where-declarations-may-appear))
 
 ## Sources
 
@@ -553,46 +686,347 @@ For example, a clean repository can legitimately make
 `sequence: "{{ ctx.dirty_files }}"` empty. The root command reports that it
 resolved to zero steps and succeeds unless its own lifecycle fails.
 
-### Formal sequence documents
+### Sequence documents: `$schema`, `$state`, and `template:`
 
-A YAML file using the `sequence:` property is a *formal* sequence document. It
-may add `template:` (values merged into every step, with the item's own fields
-in scope) and `$schema:`.
+A sequence document is any document whose `sequence:` property holds its
+steps: a Markdown file with `sequence:` in its frontmatter, or a YAML file
+(`kind: sequence`, or any YAML file with a root `sequence:` list). Three root
+keys describe it, and each has its own scope:
+
+| Key | What it describes | When it is judged |
+|---|---|---|
+| `$schema` | the **document**: its own properties and the inputs its caller supplies | while the document is prepared, before any step runs |
+| `$state` | each **step's state** in this document's inline `sequence:` list | when the list is normalized, after `template:` fills it |
+| `template:` | values merged into every step of this document's inline list | when the list is normalized |
+
+All three work the same way in YAML and Markdown, and whether the document is
+run directly or referenced from another sequence.
 
 ```yaml
 kind: sequence
+$schema:
+    reviewer: string(required) -> who signs off on the colors
+$state:
+    color: string(required) -> the color being evaluated
+    rank: number(required)  -> a 1-5 ranking, 5 being best
+    desc: string(required)
+template:
+    desc: "{{ color }}({{ rank }})"
 sequence:
     - name: blue
       color: blue
       rank: 5
-template:
-    desc: "{{ color }}({{ rank }})"
-$schema:
-    color: string(required) -> the color being evaluated
-    rank: number(required)  -> a 1-5 ranking, 5 being best
-    desc: string(required)
 ```
+
+Here `reviewer` is a caller input: `claudine sequence colors.yaml
+reviewer=ada` runs, and without it Claudine asks for it (on a terminal) or
+reports it as missing (see [Requiring caller input](#requiring-caller-input)).
+Every step must carry `color`, `rank`, and `desc`; a step without one fails
+validation, and a required `$state` field never becomes a request for caller
+input. The same document as Markdown frontmatter:
+
+```yaml
+---
+$schema:
+    reviewer: string(required)
+$state:
+    color: string(required)
+template:
+    desc: "{{ color }} for {{ reviewer }}"
+sequence:
+    - { name: blue, color: blue }
+---
+```
+
+> **`$schema` used to type the steps.** Before `$state` existed, a YAML
+> sequence document's root `$schema` was applied to each step's state and was
+> never checked against the document. It now describes the document in YAML
+> exactly as it always did in Markdown. Nothing warns about the change: a file
+> that relied on the old reading either fails, because the document lacks the
+> step fields its `$schema` requires, or passes by accident. To keep typing
+> the steps, rename the key to `$state`.
+
+#### How a list is normalized
 
 Normalization runs in a fixed order: scalar shorthand (`- blue`) expands to
 `{name: blue}` first, then `template:` fills in, then the generated fields
-(`id`, `index`, `is_first`, …), and `$schema` validates the finished state last.
-So `desc` is ordinary authored state by the time `id` and `index` are made, and
-a `template:` default reaches a scalar step exactly as it reaches an object one.
-A schema failure names the step index, its id, and the failing property path.
+(`id`, `index`, `is_first`, …) are added, and `$state` validates the finished
+state last. So `desc` is ordinary authored state by the time `id` and `index`
+are made, and a `template:` default reaches a scalar step exactly as it
+reaches an object one. Executable keys and task options (`prompt`, `with`,
+`when`, …) are not part of the state `$state` judges.
+
+A `$state` failure names the step's zero-based index, its id, the failing
+property, and which declaration it failed:
+
+```text
+sequence step 0 (`a`) failed schema validation at `color`: "color" is a
+required property (`$state` of `sequence` in /work/root.md)
+```
+
+Validation is passive: `$state` reports problems but never changes the
+step. A default it declares is not written into the state, and a value is not
+converted: a step holding `"3"` where `$state` says `number` passes, as
+numeric text does for any schema, and keeps the text `"3"`.
 
 A `template:` value is `any`, not just a string: a **string** is interpolated
-with the item's fields in scope, and any **other** value (`rank: 5`, a list, a
-map) is a literal default. A default never overwrites a value the item already
-carries.
+and any **other** value (`rank: 5`, a list, a map) is a literal default. A
+default never overwrites a value the step already carries. A string template
+reads, lowest precedence first:
 
-> **One shape, both entry modes.** `template:` and `$schema:` behave identically
-> whether the file is **referenced** (`sequence: formal.yaml`) or invoked
-> **directly** (`claudine sequence formal.yaml`) — both routes share a single
-> normalization pipeline. In particular the root `$schema` is always the *step
-> state* schema; on a directly invoked document it is not also validated as that
-> document's own frontmatter schema. Parity is pinned by
-> `a_formal_document_normalizes_identically_through_both_entry_paths` in
-> `cli/tests/l1/sequence_sources_cli.rs`.
+1. the owning document's **prepared** values: its own properties, after its
+   `$schema` has converted them (a `file(eager)` value is the resolved path)
+   and its derived properties have been computed;
+2. invocation setters (`--set`, `key=value`);
+3. runtime writes the root's `initialize` made;
+4. the step's own fields, which shadow all of the above.
+
+```yaml
+kind: sequence
+$schema:
+    spec: file(required;eager) -> the specification to complete
+plan: "{{ dirname(spec) + '/plan.md' }}"
+template:
+    plan_file: "{{ plan }}"          # the derived value, computed from the converted `spec`
+sequence:
+    - name: draft
+      prompt: ./draft.md
+```
+
+A relative file in a `$state` reference (`$state: ./types.yaml`), a named
+import (`Step@./types.yaml`), or a template's file read resolves from the
+folder of the document that declares it, not from the folder you run
+`claudine` in and not from a referring document's folder.
+
+`$state` accepts every form `$schema` does: an inline mapping, a file
+reference, a named-type import, or a union of these. A malformed or
+unloadable declaration is an error even when the list is empty:
+
+```text
+sequence declaration `$state` (/work/d.yaml) could not be loaded: could not
+resolve $schema reference `nope`
+```
+
+#### Each sequence owns its own declarations
+
+Nothing is inherited. A parent's `$state` and `template:` reach only the
+parent's **immediate** steps, and its `$schema` describes only the parent
+document:
+
+- a nested container step is one of the parent's steps, so the parent's
+  `$state` judges that step's own state (its `name` and any data written on
+  it) but never the container's children;
+- a referenced sequence document is judged by its own root `$schema` and
+  `$state`, and filled by its own `template:`;
+- an inline nested `sequence:` task may declare its own `$schema`, `$state`,
+  and `template:` beside its list, as it may declare lifecycle events and
+  `loop:`.
+
+```yaml
+kind: sequence
+$schema:
+    spec: file(required) -> the spec being completed
+sequence:
+    - name: rank-colors
+      $state:                 # types blue's state, not rank-colors' own
+          color: string(required)
+          rank: number(required)
+      sequence:
+          - name: blue
+            color: blue
+            rank: 5
+            prompt: ./rank.md
+    - name: ship
+      shell: just ship        # not judged by rank-colors' `$state`
+```
+
+An inline container's `$state` and `template:` behave like a root's: they
+fill and type the container's own children, and a template reads the
+enclosing document's **prepared** values (the same list as above: defaults
+applied, derived properties computed, values converted), then the setters
+and the root's `initialize` writes, then the child's own fields. This holds
+wherever the container sits: directly in a document, as a group leg, in a
+`kind: task` file, or inside a whole document another one references, whose
+own prepared values it then reads. A value that is absent, or written as
+`null`, takes its `$schema` default:
+
+```yaml
+kind: sequence
+$schema:
+    reviewer: string(default(ada))
+sequence:
+    - name: nested
+      $state:
+          who: string(required)
+      template:
+          who: "{{ reviewer }}"   # `ada`, from the default
+      sequence:
+          - name: work
+            shell: "echo {{ seq.who }}"
+```
+
+#### An inline container's `$schema` is a check at its turn
+
+An inline container's `$schema` does not declare new caller inputs. It is a
+check of the values the container can see **when it is reached**: the
+enclosing document's values, the caller's setters, and every runtime `set`
+written so far, including by earlier tasks. So an earlier task can supply
+what a later container requires:
+
+```yaml
+sequence:
+    - name: choose
+      side_effect: { set: { reviewer: ada } }
+    - name: review
+      $schema: { reviewer: string(required) }
+      initialize: [{ say: "{{ reviewer }} is reviewing" }]
+      sequence:
+          - name: sign
+            prompt: ./sign.md
+```
+
+At the container's turn, its `when:` guard is evaluated first; a false guard
+skips both the check and the container. Otherwise the check runs before the
+container's `initialize`, against the declaration **as its file reads at that
+moment**: if an earlier task edited the container's `$schema` on disk, the
+edited check decides, not the one the sequence started with. If it fails, the
+container never opens: none of its events or children run, and the failure is
+the task's, handled by the enclosing container's `failure` stack like any
+other failed task. Tasks that already ran keep their effects. An edit that
+leaves the declaration malformed fails the same way, with the declaration
+error (`invalid sequence declaration …`) instead of a check failure.
+
+```yaml
+sequence:
+    - name: tighten           # rewrites `rank: number` below to `rank: number(max(0))`
+      shell: ./tighten.sh
+    - name: review            # refused here, before `initialize`, when `rank` is 1
+      $schema: { rank: number }
+      initialize: [{ say: "reviewing" }]
+      sequence:
+          - name: sign
+            prompt: ./sign.md
+```
+
+Only the container's own declarations are read again at this point. Its
+children and their order stay those the sequence planned, and no command
+approval is reopened.
+
+```text
+step 2/2 failed: sequence container `tasks[1]` (/work/inl.md) failed its
+`$schema` check at `reviewer`: "reviewer" is a required property
+```
+
+The check judges a copy: a default or conversion it would apply is
+discarded, and it never changes the values later tasks read or replaces the
+enclosing document's `$schema`. It runs again at each `start` of the
+container (the first one, after `initialize` has written; a retry; the next
+loop pass) against the declaration as it is on disk then and the values of
+that moment. A failure there is a failure of the
+started container, so its `blocked` and `failure` events run.
+
+#### Where declarations may appear
+
+`$state` and `template:` declare an **authored inline list**. On a document
+whose `sequence:` is a file reference, an expression, or a `$( … )` shell
+source, they are a typed placement error; write them inside the referenced
+document, beside its list:
+
+```text
+`$state` is not accepted here (/work/b.yaml): `$state` declares the
+document's own inline `sequence:` list; this document's `sequence:` is not
+a list, so put `$state` in the referenced whole document, beside its list
+```
+
+On a task, `$schema`, `$state`, and `template:` are accepted only beside an
+inline `sequence: [ … ]`, including one in a group leg or a `kind: task`
+file. On a `prompt:`, `shell:`, `side_effect:`, `task:`, or body-only step,
+on a task whose `sequence:` is a reference, or on a group object, they are a
+typed placement error. A root `$schema` is always the document schema, so it
+is accepted beside any `sequence:` source.
+
+The declarations are written in the document, never supplied as values.
+Naming `$state` or `template` (or a path under them) in a setter, a prompt
+task's `with:`, a runtime `set`, or a `template:` key is a typed error; a
+`template:` key may not set `$schema` either:
+
+```text
+`template` is not accepted here (/work/c.yaml): `template` is a sequence
+declaration, and a setter supplies values, not declarations; write
+`template` in the document, beside its inline `sequence:` list
+```
+
+Declarations are kept out of ordinary composition. A document's `$state`
+and `template:`, and an inline container's `$schema`, `$state`, and
+`template:`, are never interpolated with the document's frontmatter, so
+`template: { desc: "{{ color }}" }` waits for each step to supply `color`.
+The root `$schema` stays in composition: it is the document's schema.
+
+#### Empty lists
+
+An empty list still has a document. `sequence: []` loads its `$state` and
+`template:` (a malformed one fails), and its `$schema` is judged, so a
+missing required input or a wrong-typed value fails before the container's
+`start`. A valid empty sequence runs its lifecycle and returns `[]`.
+
+#### Data selections are not documents
+
+A reference with an `-> offset` or `::operator` suffix selects data, not a
+document. It reads the frontmatter of the document that authored the
+reference, like an inline list, and never activates the selected file's
+`$schema`, `$state`, `template:`, or lifecycle. Foreign data keeps the
+lenient rules in [Strictness depends on provenance](#strictness-depends-on-provenance).
+
+#### From authored file to running steps
+
+```mermaid
+flowchart TD
+    A[Read the authored document] --> B[Judge declaration shape and placement<br/>root and every inline item]
+    B --> C[Root initialize<br/>shell-free]
+    C --> D[Prepare each owning document<br/>root and referenced: its schema, its values]
+    D --> E{Inputs missing?}
+    E -->|terminal| F[Ask once for every owner]
+    E -->|no terminal| G[Report every missing input<br/>then blocked, finalize]
+    F --> H
+    E -->|none| H[Fill templates and validate $state<br/>per owner, immediate steps only]
+    H --> I[Build the task graph and approve every command]
+    I --> J[Each task at its turn: when: guard]
+    J -->|false| K[skipped]
+    J -->|true| L[Inline container: $schema check]
+    L -->|fails| M[task failure<br/>enclosing failure stack]
+    L -->|passes| N[Container initialize, start, frozen children]
+```
+
+Two kinds of check appear in this flow:
+
+- **Syntax checks** (step B, and the graph build in step I) judge each
+  declaration's shape, placement, and loadability for every container,
+  including one behind a false `when:` that will never run. They fail before
+  any task starts.
+- **Value checks** judge values: the root and referenced documents'
+  `$schema` (steps D–E), every owner's `$state` (step H), and an inline
+  container's `$schema` at its turn (step L).
+
+What has already happened when a check fails:
+
+- A failure in steps D–I comes after the root's `initialize`, so the root's
+  `blocked` and `finalize` stacks run. No `start` runs, no task starts, and no
+  provider launches.
+- An inline container's check failure (step L) comes after every earlier
+  task, whose effects stand. The container's own events do not run.
+
+#### Templates are filled once
+
+Templates are filled when the task graph is built (step H), and the result
+is part of the frozen graph described in [Phase 2](#phase-2--just-in-time-composition).
+Runtime writes the root's `initialize` made are seen; writes by later tasks
+never refill a template, and neither does an edit to the file on disk. A
+retry, a loop pass, or a nested container's reread keeps the planned ids and
+template-filled state, and a reread never applies a `$state` or `template:`
+that was edited on disk after the graph was built to rows already planned.
+What a reread does pick up is described there: container events, `variables`,
+and the inline `$schema` check, judged at the next entry without reopening
+command approval.
 
 The retired external `kind: sequence` + `list:` form is **gone**. Use
 `sequence:`.
@@ -630,8 +1064,11 @@ Claudine walks the **entire task graph**:
   `$( … )`) is predicted as written, with nothing evaluated. Prediction runs
   nothing and composes nothing. Each step's status line names the provider that
   ran. See [`claudine sequence` → Choosing providers](../../cli/sequence.md#choosing-providers).
-- **Schemas validate and missing properties aggregate** across all steps and all
-  referenced prompt documents, with one interactive collection pass.
+- **Schemas validate and missing properties aggregate** across all steps, all
+  referenced prompt documents, and every owning sequence document (the root
+  and each referenced one), with one interactive collection pass. Each owner's
+  `template:` is filled and its `$state` checked as the graph is built; see
+  [Sequence documents](#sequence-documents-schema-state-and-template).
 - **Every shell command is approved before the first step** — `shell:` tasks,
   lifecycle `shell` actions and whole-value `set` `$( … )` values,
   and the `::shell` and `$( … )` commands of every referenced document, across
@@ -656,7 +1093,13 @@ Claudine walks the **entire task graph**:
   A placeholder reading a value an earlier step produces — `seq.outputs`, `loop`,
   or, inside a group, `group` — is a **late value**: it is not read at
   preflight, and its command is approved only by its shape in any task. A step
-  value or a prompt task's `with` entry derived from one is late too. Every other
+  value or a prompt task's `with` entry derived from one is late too. A
+  document value derived from other document values (`name: ada`,
+  `greeting: "hi {{ name }}"`) is read as the document prepares it, so a
+  first-task `echo {{ greeting }}` is approved and runs as `echo hi ada`.
+  When a derived value could still change before its command runs (it
+  reads `env`, a `$( … )` value, `agent` or `model`, or a value a lifecycle
+  or side-effect `set` writes), it is late as well. Every other
   value a command reads (template values, caller values, `fm.*`,
   `ctx.*`, `env.*`) is read now, and a `null` fails preflight before step 1. A
   lifecycle global that never exists at approval (`err`, `timing`, `current`,
@@ -1099,8 +1542,12 @@ Review the current changes.
 
 A `side_effect` task resolves file-touching effects relative to the document
 that authored the task. An externalized `task:` or `group:` file therefore
-uses its own directory and repository, even when referenced from another
-repository.
+resolves relative paths from its own directory, even when referenced from
+another repository, while every write must still stay inside the working
+tree Claudine was launched in (see
+[Where file actions write](./lifecycle.md#where-file-actions-write)). A
+shared task file outside your project writes into it through an absolute
+path, never beside itself.
 
 ### Shell tasks
 
@@ -1118,6 +1565,23 @@ Every command gets a **30s** default timeout, overridable with `timeout:` as a
 duration (`45s`, `2m`) — a bare integer is rejected because the unit is part of
 the grammar, and `0s` is rejected rather than read as unbounded. A task passes
 when every command exits `0`. Stdout is concatenated in declaration order.
+
+Each command owns its process tree, so a timeout, a Ctrl-C, or a failing
+sibling also stops the background processes the command started. What that
+covers on each OS is described in
+[Process trees](../../../../sniff/docs/topics/process-trees.md).
+
+A task command is not interactive: its stdin is empty and its stdout is
+captured, so it never takes the terminal, and a Ctrl-C you type reaches
+Claudine, which stops the task. A command that must prompt belongs in a
+lifecycle `shell:` action instead, which runs on Claudine's terminal and holds
+its foreground while it runs (see
+[Shell Actions](lifecycle.md#shell-actions)):
+
+```yaml
+start:
+  - shell: "just commit"
+```
 
 Caller values (`key=value`, `--set`) are plain names to `shell:` commands and
 to authored step data, in the first task and in later ones, so
@@ -1165,6 +1629,10 @@ group:
 - **No interactivity** — a late required property becomes a task *failure*
   inside a parallel group, never a TTY prompt: N concurrent tasks cannot share
   one terminal. Serial contexts keep the standard interactive collection.
+  For the same reason a lifecycle `edit` in a task's events may open only a
+  graphical editor (`code --wait`); a terminal editor such as `vim` fails the
+  action before the file is created. Write `edit: { file: …, gui: true }` in
+  a leg. See [Lifecycle → Edit Actions](lifecycle.md#edit-actions).
 - **Write-back collisions** — two tasks whose `prompt` documents are
   inline-compose targets of the same file (or of the sequence source itself) is a
   typed **preflight** error. Racing write-backs are never legal.
@@ -1226,6 +1694,7 @@ What a dry run shows instead of doing:
 | `side_effect:` task | Rendered with its authored action and arguments, templates unresolved: `` rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}` ``. It never writes a file or applies a runtime `set`. |
 | `loop:` | The body is visited once with pass 1's `loop.*` values: `` `loop` previews one pass (dry-run); repetition is not evaluated: until `<expr>`, max N ``. No gate, condition, or action is evaluated. |
 | Task `when:` | Shown, not evaluated: `` `<name>` runs when `<expr>` (not evaluated in a dry run) ``; the task is rendered. |
+| Inline container `$schema` | Shown, not evaluated: `` `<container>` checks its `$schema` at its turn (not evaluated in a dry run) ``. Its syntax is still checked, and the root's and referenced documents' `$schema`, every `$state`, and missing inputs are judged as in a live run. |
 | Lifecycle events | None fire. |
 | `prep` | Targets do not run; a literal target is listed as `prep target @helper.md (not run in a dry run)`. |
 
@@ -1249,14 +1718,82 @@ event is turned back on.
 ## Requiring caller input
 
 A document declaring `required` schema properties it does not define is asking
-the caller for them. Well-designed sequences front-load that interaction, and
-Claudine helps two ways:
+the caller for them. That includes the sequence document itself: its root
+`$schema` declares the inputs its caller supplies, in YAML as in Markdown.
+
+```yaml
+# complete.yaml
+kind: sequence
+$schema:
+    spec: file(required;eager) -> the specification to complete
+plan: "{{ dirname(spec) + '/plan.md' }}"
+sequence:
+    - name: planning
+      sequence:
+          - name: plan
+            when: "!file_exists(plan)"
+            prompt: ./plan.md
+            with: { plan: "{{ plan }}" }
+```
+
+`claudine sequence complete.yaml spec=work/spec.md` (or with the setter
+before the file; argument order does not matter) resolves `spec` from the
+directory you ran it in, converts it, derives `plan` from it, and the
+`planning` step reads both.
+
+Well-designed sequences front-load that interaction, and Claudine helps two
+ways:
 
 1. Preflight approves **all** shell expansion across the entire sequence before
    the first step starts — including commands in conditional blocks that will
    never run. No exceptions. Once the sequence starts, nothing stops to ask.
-2. Missing required properties aggregate across every step and every referenced
-   prompt document into one interactive collection pass.
+2. Missing required properties aggregate across every step, every referenced
+   prompt document, and every sequence document that owns steps (the root and
+   each referenced sequence, reached directly, through a nested container, or
+   through a group leg) into one interactive collection pass. An empty
+   sequence's document is judged too.
+
+Collection runs after the root's shell-free `initialize`, so a value its
+`set` writes counts as supplied. It prepares each document passively: no
+lifecycle event, shell command, or provider runs while requirements are
+gathered. Without a terminal, Claudine reports every missing input at once
+and exits with status 1, after the root's `blocked` and `finalize` stacks:
+
+```text
+Missing required schema properties in 2 documents of the sequence.
+
+Document /work/root.md
+  - `topic`: string — what is reviewed
+
+Document /work/lists/child.yaml (`sequence[0].sequence`)
+  - `reviewer`: string — who signs off
+```
+
+A referenced document's entry names the property path that reached it.
+A value the root's `initialize` writes counts on every route: the root's own
+steps, an empty root, and a document the root or one of its containers
+references. Given
+
+```yaml
+kind: sequence
+$schema:
+    who: string(required)
+initialize:
+    - set: { who: ada }
+sequence:
+    - name: work
+      shell: "echo {{ who }}"
+```
+
+`claudine sequence root.yaml` prints `ada`, and nothing is reported missing.
+A dry run fires no `initialize`, so under `--dry-run` the same file reports
+`who` missing; supply it as a setter (`who=ada`) to preview it.
+
+When only the root is missing inputs and it has steps that compose a prompt,
+the report lists them under those steps instead (`Step 1: p (/work/f.md)`),
+because each such step composes with the root's frontmatter. Two kinds of requirement never ask the caller:
+a required `$state` field (a step that lacks it fails validation), and an
+inline container's `$schema`, which is checked at the container's turn.
 
 Claudine cannot guarantee that runtime mutations satisfy every later step. If
 just-in-time validation still finds a required property missing, the normal

@@ -1,7 +1,8 @@
 //! A required property with a resolved `default(...)` is answered by the
 //! default, never by interactive collection, in direct compose and at
 //! `inline-compose`'s launch phase alike. A refused default blocks as a
-//! schema error; an optional default stays metadata.
+//! schema error; an optional default, and a default for a written `null`, are
+//! inserted too.
 
 use super::*;
 use crate::composition::CompositionMode;
@@ -88,28 +89,40 @@ fn an_absent_required_property_without_a_default_is_still_collected() {
 }
 
 #[test]
-fn an_optional_default_is_neither_collected_nor_inserted() {
+fn an_optional_default_is_inserted_without_collection() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, "---\n$schema:\n  n: number(default(3))\n---\nbody\n");
 
     pre_validate(&source, CompositionMode::ChainedDocument).expect("an optional property is never collected");
     let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
 
-    assert!(prepared.effective_frontmatter.get("n").is_none(), "{:?}", prepared.effective_frontmatter);
-    assert_eq!(state(&status(&source, CompositionMode::ChainedDocument), "n"), PropertyState::Missing);
+    assert_eq!(prepared.effective_frontmatter["n"], serde_json::json!(3), "composition inserts the default");
+    assert_eq!(state(&status(&source, CompositionMode::ChainedDocument), "n"), PropertyState::Defaulted);
 }
 
 #[test]
-fn an_explicit_null_is_judged_by_type_and_not_defaulted() {
+fn an_explicit_null_takes_the_default() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, "---\n$schema:\n  n: number(required; default(3))\nn: null\n---\nbody\n");
+
+    pre_validate(&source, CompositionMode::ChainedDocument).expect("the default replaces the written null");
+    let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
+
+    assert_eq!(prepared.effective_frontmatter["n"], serde_json::json!(3));
+    assert_eq!(state(&status(&source, CompositionMode::ChainedDocument), "n"), PropertyState::Defaulted);
+}
+
+#[test]
+fn an_explicit_null_without_a_default_is_judged_by_type() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, "---\n$schema:\n  n: number(required)\nn: null\n---\nbody\n");
 
     let err = pre_validate(&source, CompositionMode::ChainedDocument).unwrap_err();
 
     assert!(
         matches!(&err, CompositionError::SchemaValidation { problems, message, .. }
             if problems == &["/n"] && message.contains("null is not of type")),
-        "got {err:?}"
+        "the written null meets `required` and fails the type: {err:?}"
     );
     assert_eq!(state(&status(&source, CompositionMode::ChainedDocument), "n"), PropertyState::Invalid);
 }
@@ -178,8 +191,9 @@ mod launch {
 
     #[test]
     fn a_refused_default_of_a_non_eager_property_blocks_at_launch() {
-        // The launch projection does not require `n`, so only the unphased
-        // contract, which composition fills from, sees its default.
+        // The launch projection does not require `n`, but default
+        // preparation ignores `required`, so the launch verdict refuses the
+        // default once.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -192,5 +206,44 @@ mod launch {
             "n",
         );
         assert_eq!(state(&status(&source, CompositionMode::InlineFrontmatterPrompt), "n"), PropertyState::Invalid);
+    }
+
+    /// At launch a non-eager required property may still be missing, but a
+    /// value that was supplied is judged by its declared type: a written
+    /// `null` meets `required` and fails `number`, and so does text.
+    #[test]
+    fn a_supplied_null_or_wrong_type_is_judged_by_type_at_launch() {
+        for written in ["null", "abc"] {
+            let dir = TempDir::new().unwrap();
+            let source = make_source(
+                &dir,
+                &format!("---\n$schema:\n{PROMPT}  count: number(required)\nprompt: hi\ncount: {written}\n---\nbody\n"),
+            );
+
+            let err = pre_validate(&source, CompositionMode::InlineFrontmatterPrompt).unwrap_err();
+            assert!(
+                matches!(&err, CompositionError::SchemaValidation { problems, .. } if problems == &["/count"]),
+                "count: {written}: {err:?}"
+            );
+            assert_eq!(
+                state(&status(&source, CompositionMode::InlineFrontmatterPrompt), "count"),
+                PropertyState::Invalid,
+                "count: {written}"
+            );
+        }
+    }
+
+    /// The same missing value is deferred to the agent at launch and is a
+    /// missing property when the whole contract applies.
+    #[test]
+    fn a_missing_non_eager_required_value_is_deferred_at_launch_and_missing_when_composed() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &format!("---\n$schema:\n{PROMPT}  count: number(required)\nprompt: hi\n---\nbody\n"));
+
+        pre_validate(&source, CompositionMode::InlineFrontmatterPrompt).expect("left for the agent at launch");
+        assert_eq!(state(&status(&source, CompositionMode::InlineFrontmatterPrompt), "count"), PropertyState::Deferred);
+
+        let err = pre_validate(&source, CompositionMode::ChainedDocument).unwrap_err();
+        assert_eq!(missing_names(err), ["count"]);
     }
 }

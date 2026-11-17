@@ -81,7 +81,7 @@ $schema:
 
 A **constraint** is the a way to further _constrain_ a base type. There are some constraints that are available to _all_ types and others which can only be used with a subset of types:
 
-- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](../../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties))
+- `required` -  can be used for any property and indicates that the property's key must be written (or supplied by a `default(...)`). It says nothing about `null` on its own: a written `null` meets `required` and is then judged by the type, so `number(required)` rejects `n: null` while `unknown(required)` accepts it (see [Strict and Soft Validation](../../../../simplified-schema/docs/topics/validation.md))
 - `length` - can be used with _some_ types like `string` or any array type but would not be allowed with a type like `boolean`
 
 For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints) but here's an update of our example that takes advantage of constraints:
@@ -95,15 +95,16 @@ $schema:
 
 #### Defaults, optional values, and runtime presence
 
-Properties are optional unless their definition includes `required`. An
-unbound optional property therefore remains nullable at a use site, including
-when its definition contains `default(...)`: the default of an optional
-property is metadata and is never applied as a runtime value. Only `required`
-or a concrete non-null frontmatter/caller binding establishes that a property
-is non-null.
+Properties are optional unless their definition includes `required`. A
+missing key and a written `null` are the same value, `null`, so an unbound
+optional property with no default is nullable at a use site. A `required`
+property, a property with a non-null `default(...)`, or a concrete non-null
+frontmatter or caller binding makes it non-null.
 
-A `required` property that also declares a `default(...)` may be left out.
-Validation accepts the document and reports the default it relied on, and
+A property that declares a `default(...)` takes it when the value is missing
+or `null`, whether or not it is `required`, and a `required` property with a
+default may be left out. Validation accepts the document and reports the
+default it relied on, and
 `md compose` writes the default into the composed frontmatter before anything
 reads it, so the body and later frontmatter values see it:
 
@@ -116,17 +117,18 @@ Say {{ greeting }}
 ```
 
 composes to `Say hello`. The default is applied only to the composed result;
-the source file is never edited. It counts only when the property is absent:
-an explicit `greeting: null` is judged by the declared type, and a default
+the source file is never edited. An explicit `greeting: null` takes the default
+too; any other written value, including `""` or `false`, wins. A default
 inside an object applies only when that object is present. Expressions treat
 the property as present, so no null guard is needed. A default that does not
 satisfy its own definition is reported as a problem at the schema's
 `default(...)`, with no line or column in the document. See
-[Required Properties with a Default](../../inline/schema-validation.md#required-properties-with-a-default).
+[Properties with a Default](../../inline/schema-validation.md#properties-with-a-default).
 
 This distinction matters when an expression supplies a directive target. DMLS
 warns about an unguarded whole-value target such as `::file {{log}}` when
-`log` is optional. Bind `log`, declare it `file(required)`, or guard the use
+`log` is optional and has no default. Bind `log`, declare it `file(required)`,
+give it a default, or guard the use
 with `::block when="file_exists(log)"`.
 
 #### Descriptors
@@ -257,18 +259,18 @@ types:
 ```
 
 Do not define the variant as `draft_owner: owner`: an alias inherits
-`required` again. A union with `null` does make it optional:
-`draft_owner: [owner, null]` accepts `null`, an omitted value, or a valid
-`owner` (see [Null-Admitting Properties](../../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties)).
+`required` again. A union with `null` does not make it optional either:
+`draft_owner: [owner, null]` accepts a written `null` or a valid `owner`, but
+the arm's `required` still applies to the property, so the key must be
+written.
 
 An inherited `generated` keeps its usual meaning. It does not create a value
 provider. Checking an authored document, as `md schema validate` and DMLS do,
 accepts a missing generated property even when it is required, because the host
 supplies the value later. Runtime checks use two phases: launch requires an
 inherited `required` value immediately only when it is also `eager`;
-completion requires it after the work finishes. Supplied values are checked
-at both phases. A type that admits `null` remains optional regardless of
-these markers. See [Universal Constraints](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints).
+completion requires it after the work finishes. Supplied values, including a
+written `null`, are checked against the type at both phases. See [Universal Constraints](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints).
 
 To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
 

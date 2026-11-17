@@ -23,14 +23,14 @@ protect:
     git_destructive: false
 actions:
   human_in_the_loop:
-    - type: sound_effect
-      effect: doorbell
+    - sound_effect:
+        effect: doorbell
 ```
 
 ```yaml
 # {repo-root}/.claudine/config.yaml
 canonical_provider: codex
-active_messenger: null   # no messaging in this repository
+active_messenger: team   # the user's route named `team`
 ```
 
 ## How a file is read
@@ -65,30 +65,117 @@ flowchart TD
 
 ## Defaults and inheritance
 
-An absent user setting takes the schema's default (`logging: true`,
-`protect: true`, `prompt_for_missing: true`, the guard thresholds, …). An
-explicit `null` is an error for a setting with a default; for an optional
-setting (`messenger`, `preferred_agent`, `canonical_provider`,
-`exit_expressions`, and optional fields inside actions or routes) `null`
-means the same as leaving it out.
+An explicit `null` is the same value as leaving the key out, at every level
+of both files. An absent or `null` user setting takes the schema's default
+(`logging: true`, `protect: true`, `prompt_for_missing: true`, the guard
+thresholds, `tts.prewarm: true`, `steering.automatic.enabled: true`, …); an
+optional setting without a default (`messenger`, `preferred_agent`,
+`canonical_provider`, `exit_expressions`, and optional fields inside actions
+or routes) is simply unset. An event whose action list or matcher is `null`
+has none.
 
-A repository setting is an override, so nothing is inserted into a repository
-file: an absent override inherits the user's value. The repository accepts
-`canonical_provider`, `actions`, `matchers`, `active_messenger`,
-`exit_expressions`, `guard_settings`, `steering`, and `permissions`.
+```yaml
+logging: null        # same as leaving it out: `true`
+steering:
+  automatic: null    # same as leaving it out: `enabled: true`
+actions:
+  session_start: null   # no actions for this event
+```
+
+Every default is filled in, including the defaults of optional settings
+inside a value you wrote. What a command reads is the completed value, not
+the text of the file:
+
+| You write | Claudine reads |
+|---|---|
+| `tts: { provider: say }` | `tts: { provider: say, gender: female, prewarm: true }` |
+| `steering: {}` | `steering: { automatic: { enabled: true } }` |
+| (no `steering` key) | `steering: { automatic: { enabled: true } }` |
+
+Earlier releases filled only the required defaults, so the same files read
+as `{ provider: say, gender: female }` and `steering: { automatic: {} }`, and
+an unwritten `prewarm` or `enabled` was treated as on by the code that read
+it. The switches behave the same; the difference is visible to anything
+that inspects the loaded configuration, such as an editor's completion or a
+library caller.
+
+An event's action list and matcher, when written, must say something in
+either file: `session_start: []` and `session_start: ""` are errors. Leave
+the event out, or write `null`, for an event with no actions; a file that
+still lists one as `[]` fails to load until that line is deleted.
+
+A repository setting is an override, so a repository file declares no
+defaults of its own: an absent or `null` override inherits the user's value.
+The repository accepts `canonical_provider`, `actions`, `matchers`,
+`active_messenger`, `exit_expressions`, `guard_settings`, `steering`, and
+`permissions`.
 
 | Repository value | Effect |
 |---|---|
-| `active_messenger` absent | the user's `messenger.active_config` |
-| `active_messenger: null` | messaging off in this repository |
+| `active_messenger` absent or `null` | the user's `messenger.active_config` |
 | `active_messenger: team` | the user's route named `team` |
-| `actions.<event>` / `matchers.<event>` | replace the user's entry for that event |
+| `actions.<event>` / `matchers.<event>` | replace the user's entry for that event; `null` keeps the user's entry |
 | `guard_settings` | replaces the user's whole setting; `null` inherits |
-| `steering` | must be a mapping; `null` is an error |
+| `steering.automatic.enabled` | `true` or `false` overrides the user's value; absent or `null` inherits it |
 
-Two values are never written for you even though they default to on:
-`tts.prewarm` and `steering.automatic.enabled`. Leaving them out means "on,
-unless another layer says otherwise".
+An override that is written must say something: an empty `actions: {}`,
+`matchers: {}`, `steering: {}`, or `steering: { automatic: {} }` is an error
+(leave the key out instead).
+
+A repository cannot turn messaging off. Earlier releases read
+`active_messenger: null` as "no messaging in this repository"; it now
+inherits the user's route like an absent key, and `claudine config` no
+longer offers a "(disabled)" choice for the repository. For the same reason
+a repository cannot clear an event's actions (`[]` is an error and `null`
+inherits); it can only replace them with other actions.
+
+## Actions and messenger routes
+
+An action and a messenger route are each a mapping with one key that names
+its kind and holds that kind's fields, so each kind's defaults live under its
+own key:
+
+```yaml
+actions:
+  session_start:
+    - sound_effect: { effect: doorbell }      # volume and speed default to 1.0
+    - bash: { command: ./notify.sh }
+  turn_complete:
+    - report: {}                              # no fields to set
+messenger:
+  active_config: team
+  configurations:
+    team:
+      slack: { channel_id: C012345ABC }       # bot_token_env defaults to SLACK_BOT_TOKEN
+    alerts:
+      discord_webhook: {}                     # webhook_url_env defaults to DISCORD_WEBHOOK_URL
+```
+
+An entry with no key, two keys, an unknown kind, or `null` in place of the
+fields is an error. Earlier releases wrote the kind as a field
+(`- type: bash` beside `command:`, `provider: slack` beside `channel_id:`);
+such a `config.yaml` fails to load, and the message spells each entry in the
+keyed form, at that entry's location:
+
+```yaml
+actions:
+  session_start:
+    - type: bash          # the earlier flat form
+      command: ./notify.sh
+```
+
+```text
+… at /actions/session_start/0: an action is now written as a mapping keyed by its kind, not with `type:`; write `{ bash: { command: "./notify.sh" } }`
+```
+
+Replace each flagged entry with the spelling the message gives. Kinds are
+written in snake_case (`discord_webhook`, `slack_webhook`), and the message
+already converts a hyphenated `provider: slack-webhook`. Only the file
+format changed: the Rust types `HookAction` and `MessengerProviderConfig`
+and their own serialized form (`type:` / `provider:` tags) are unchanged for
+library callers. The action fields are listed in
+[Configuring Actions](configuring-actions.md#action-types) and the route
+fields in [Messaging Configuration](configuring-actions.md#provider-configs).
 
 ## Permissions
 
@@ -206,7 +293,8 @@ flowchart TD
   directory; leave it there.
 - **What a change means.** A changed list (an event's actions, for example) is
   written as a whole. A setting you cleared is removed from the file; if the
-  file never wrote it (its value was a default), it is written as `null`.
+  file never wrote it (its value was a default), nothing is written, because
+  the default applies again either way.
   Removing a repository file's last setting leaves `{}`; the editor never
   deletes a configuration file.
 - **Nothing to save writes nothing.** When no setting changed, the file is not
@@ -217,8 +305,7 @@ flowchart TD
   with the line and column it would have had. A failure to take the lock within
   two seconds, or to replace the file, is reported the same way.
 - **New files.** A missing user file is created from the schema's defaults (the
-  same values an empty `{}` file would take; `tts.prewarm` and
-  `steering.automatic.enabled` are left out) plus the values setup chose. A
+  same values an empty `{}` file would take) plus the values setup chose. A
   repository file is created only when there is an override to write, and it
   holds only that override. Running setup again with the same choices leaves
   the file byte-for-byte unchanged.
@@ -232,14 +319,17 @@ configuration at either canonical location handles the legacy file first:
 
 | Files in the `.claudine` directory | Result |
 |---|---|
-| `config.json` only | written to `config.yaml` with the same values, then `config.json` is renamed `config.json.bak`; one notice names both files and says JSON5 comments were not carried over |
+| `config.json` only | written to `config.yaml` with the same values, actions and messenger routes rewritten in the [keyed form](#actions-and-messenger-routes) (a hyphenated kind such as `slack-webhook` becomes `slack_webhook`), then `config.json` is renamed `config.json.bak`; one notice names both files and says JSON5 comments were not carried over |
 | `config.yaml` only | used |
 | both | `config.yaml` is used; a warning says `config.json` is ignored |
 | a pre-2026 per-provider `config.json` | renamed `config.json.bak` and ignored |
 
 A conversion that fails (unreadable file, invalid JSON5, a duplicated key, a
 number that cannot be kept exactly, or a value the schema refuses) leaves
-`config.json` untouched, writes nothing, and stops with an error naming it. An
+`config.json` untouched, writes nothing, and stops with an error naming it.
+The schema judges the converted, keyed value, so an empty event list
+(`"session_start": []`) in the old file is refused like one in `config.yaml`;
+delete it from `config.json` and load again. An
 existing `config.json.bak` is never overwritten: if it holds the same bytes the
 unchanged `config.json` is simply removed; if it differs, the conversion stops
 and keeps both files.

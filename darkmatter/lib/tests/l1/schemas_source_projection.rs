@@ -1256,10 +1256,11 @@ fn standalone_documents_without_a_definition_failure_return_none() {
         // Valid payloads, including the YAML null type and an empty object.
         "kind: schema\ntypes:\n  slug: string(min(1))\n",
         "kind: schema\ntypes:\n  nothing:\n  empty: {}\n",
-        "kind: schema\ntypes: {}\n",
         "$schema:\n  - a: string\n",
         "$schema: ./types.yaml\n",
-        // Unrecognized documents.
+        // Unrecognized documents, including a null `$schema`, which is no
+        // export.
+        "$schema:\n",
         "title: string(min(nope))\n",
         "$schema:\n  slug: string(min(nope))\nother: 1\n",
         "kind: note\ntypes:\n  slug: string(min(nope))\n",
@@ -1293,7 +1294,6 @@ fn outer_envelope_and_declaration_shape_failures_return_none() {
         // Declaration shapes: payload and root-union arms of the wrong type,
         // an empty root union, and a remote reference.
         "$schema: 7\n",
-        "$schema:\n",
         "$schema: []\n",
         "$schema: [7]\n",
         "$schema:\n  - https://example.com/types.yaml\n",

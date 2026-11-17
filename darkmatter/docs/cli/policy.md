@@ -67,6 +67,16 @@ A recovered problem is still reported, carrying its code: on stderr in a Markdow
 run, and in `diagnostics` in a [data output](./data-contracts.md). Without the
 allowance the problem fails the command.
 
+A hyperlink or image with an **empty** target (`[text]()`, `![alt]()`) carries the
+same code but only warns, quoting the link, so it needs no allowance. Denying the
+recovery (`--deny missing-hyperlinks`, `--deny missing-image-refs`), its code, or
+`all` makes that warning fail the command:
+
+```sh
+md compose doc.md                              # warns: hyperlink `[Expression Engine]()` has no target
+md compose doc.md --deny missing-hyperlinks    # fails, status 1
+```
+
 `--allow all` turns on every recovery above. It never grants a host and never
 authorizes a shell command: shell approval and host consent are separate.
 

@@ -5,14 +5,14 @@ description: |-
 $schema:
     # a schema must define the `$schema` or `types` property but optionally can do both
     - kind: literal(schema; required) -> the document kind that claims this definition
-      description: string(non-null) -> what the schema is for
-      categories: string[](non-null) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
+      description: string(not-empty) -> what the schema is for
+      categories: string[](not-empty) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
       $schema: schema(required) -> the exported document schema (an inline mapping or union, or a reference to a schema file)
-      types: schema(mapping; non-null) -> reusable named types; these names are not document properties
+      types: schema(mapping; not-empty) -> reusable named types; these names are not document properties
       $constraints: { closed: true }
     - kind: literal(schema; required) -> the document kind that claims this definition
-      description: string(non-null) -> what the schema is for
-      categories: string[](non-null) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
-      $schema: schema(non-null) -> the exported document schema (an inline mapping or union, or a reference to a schema file)
-      types: schema(mapping; required) -> reusable named types; these names are not document properties
+      description: string(not-empty) -> what the schema is for
+      categories: string[](not-empty) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
+      $schema: schema(not-empty) -> the exported document schema (an inline mapping or union, or a reference to a schema file)
+      types: schema(mapping; required; not-empty) -> reusable named types; these names are not document properties
       $constraints: { closed: true }

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use biscuit_file::{FileReference, FileResolutionContext};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
 use super::super::error::{CompositionError, SequenceLoadCause};
@@ -24,6 +24,7 @@ use super::expr::{DocumentFrontmatter, SourceExpressionLookup};
 use super::formal;
 use super::grammar::{SequenceReference, SourceOperator};
 use super::model::{SequencePlan, SequenceSource};
+use super::SequenceSourceOptions;
 use super::normalize::normalize_plan_at;
 
 /// Resolve an external sequence reference string to an absolute existing path.
@@ -67,19 +68,26 @@ pub fn resolve_sequence_reference(
 /// `invocation_path` is the resolved path of the document that referenced this
 /// file; it seeds the `sequence_id` payload so the token stays keyed to the
 /// invocation, not the data file. `frontmatter` is that document's frontmatter,
-/// available to `template` expressions as globals.
+/// which a `::map`/`::name`/`::template` operator reads below each item. A
+/// whole referenced document is its own owner: its `template:` reads its own
+/// values under the caller's inputs in `options`, never `frontmatter`, so a
+/// key neither defines stays undefined.
+///
+/// ## Errors
+///
+/// The load, selection, and normalization errors of the source.
 pub fn load_referenced_sequence(
     reference: &SequenceReference,
     path: &Path,
     invocation_path: &Path,
     frontmatter: &dyn DocumentFrontmatter,
     document_fail_fast: bool,
-    file_resolution_context: &FileResolutionContext,
+    options: &SequenceSourceOptions<'_>,
 ) -> Result<SequencePlan, CompositionError> {
     let loaded = data::load_document(path)?;
     plan_referenced_sequence(
         reference, path, &loaded.value, Arc::new(loaded.orders), invocation_path,
-        frontmatter, document_fail_fast, file_resolution_context,
+        frontmatter, document_fail_fast, options,
     )
 }
 
@@ -94,8 +102,9 @@ pub(crate) fn plan_referenced_sequence(
     invocation_path: &Path,
     frontmatter: &dyn DocumentFrontmatter,
     document_fail_fast: bool,
-    file_resolution_context: &FileResolutionContext,
+    options: &SequenceSourceOptions<'_>,
 ) -> Result<SequencePlan, CompositionError> {
+    let file_resolution_context = options.file_resolution_context();
     let format = SourceFormat::for_path(path);
 
     if let Some(offset) = &reference.offset
@@ -128,15 +137,24 @@ pub(crate) fn plan_referenced_sequence(
             return Err(super::grammar::removed_task_key("fail_fast", value, path));
         }
         super::grammar::validate_sequence_root(root, path)?;
+        let authored: Arc<Map<String, Value>> = Arc::new(
+            root.iter().map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect(),
+        );
+        let keys = formal::formal_keys(root, path)?;
+        let own = super::document::owner_values(&authored, &keys, options, Some(path), || {
+            whole_document_source(path, root, &orders).map(std::borrow::Cow::Owned)
+        })?;
+        // Only the document's own values and the caller's inputs: the
+        // referrer's `frontmatter` never enters them (it serves the data
+        // operators above), so a key neither defines stays undefined.
+        let values = Arc::new(own);
         let mut plan = formal::normalize_formal_plan(
             items,
-            formal::formal_keys(root)?,
+            formal::FormalOwner { keys, declaring_path: path, list_property: "sequence", values: &*values },
             SequenceSource::External {
                 path: path.to_path_buf(),
             },
             invocation_path,
-            path,
-            frontmatter,
             document_fail_fast,
             file_resolution_context,
         )?;
@@ -145,6 +163,12 @@ pub(crate) fn plan_referenced_sequence(
         // element for element. Data read through either of those is reshaped
         // before it becomes a step list and keeps canonical order instead.
         plan.authored = AuthoredOrder::new(orders, "/sequence");
+        plan.document_scope = Some(Arc::new(super::document::SequenceDocumentScope {
+            declaring_path: path.to_path_buf(),
+            property: "sequence".into(),
+            authored,
+            values,
+        }));
         return Ok(plan);
     }
 
@@ -157,6 +181,39 @@ pub(crate) fn plan_referenced_sequence(
         document_fail_fast,
         reference.offset.as_deref().unwrap_or(""),
     )
+}
+
+/// The whole document at `path`, whose parsed `root` (and authored `orders`)
+/// the caller holds, as a composition source for its owner preparation.
+///
+/// A Markdown document is reread, so its frontmatter keeps its own positions;
+/// its body is never composed for values. A data document's root becomes the
+/// frontmatter of a document with no body, as a directly invoked YAML file's
+/// does ([`crate::composition::load_yaml_document`]).
+pub(crate) fn whole_document_source(
+    path: &Path,
+    root: &Map<String, Value>,
+    orders: &darkmatter::markdown::MappingOrders,
+) -> Result<crate::composition::ResolvedCompositionSource, CompositionError> {
+    let load_error = |source| CompositionError::MarkdownLoad {
+        path: path.to_path_buf(),
+        source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
+    };
+    let markdown = if data::is_markdown(path) {
+        darkmatter::markdown::Markdown::try_from(path).map_err(load_error)?
+    } else {
+        let mut frontmatter = darkmatter::markdown::Frontmatter::new();
+        for (key, value) in root {
+            frontmatter.insert(key, value.clone()).map_err(load_error)?;
+        }
+        darkmatter::markdown::Markdown::with_frontmatter(frontmatter.with_mapping_orders(orders.clone()), "")
+    };
+    Ok(crate::composition::ResolvedCompositionSource {
+        original_ref: path.to_string_lossy().into_owned(),
+        resolved_path: path.to_path_buf(),
+        original_text: markdown.loaded_text().map(str::to_owned).unwrap_or_default(),
+        markdown,
+    })
 }
 
 /// `JSONL` or `NDJSON`, for the offset-unsupported error.

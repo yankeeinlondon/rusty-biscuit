@@ -10,9 +10,11 @@
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::directives_api::{
-    BlockScanError, DarkmatterBlock, DirectiveKind, ParsedDirective, scan_darkmatter_blocks,
-    scan_darkmatter_directives,
+    BlockScanError, DarkmatterBlock, DirectiveKind, DirectiveOption, ParsedDirective,
+    parse_interpolate_value, scan_darkmatter_blocks, scan_darkmatter_directives,
 };
+use darkmatter::markdown::compose::expression::ExpressionFinder;
+use darkmatter::markdown::span::SourceSpan;
 use darkmatter::markdown::render_tree::disclosure_scan::{DisclosureParse, scan_disclosures};
 
 /// One entry in the directive-name completion and hover catalog.
@@ -176,9 +178,12 @@ pub fn is_collection(kind: DirectiveKind) -> bool {
 /// option (empty slice → no validation).
 pub fn option_keys(kind: DirectiveKind) -> &'static [&'static str] {
     match kind {
-        DirectiveKind::File | DirectiveKind::Code | DirectiveKind::Url => {
-            &["when", "quotation", "disclosure", "replace", "exclude", "set"]
+        DirectiveKind::File | DirectiveKind::Url => {
+            &["when", "quotation", "disclosure", "replace", "exclude", "set", "interpolate"]
         }
+        // `::code` has no `interpolate` option, so the editor flags it as the
+        // library does.
+        DirectiveKind::Code => &["when", "quotation", "disclosure", "replace", "exclude", "set"],
         DirectiveKind::Block | DirectiveKind::ShellBlock => &["when"],
         DirectiveKind::Map | DirectiveKind::Filter => COLLECTION_OPTIONS,
         _ => &[],
@@ -188,10 +193,68 @@ pub fn option_keys(kind: DirectiveKind) -> &'static [&'static str] {
 /// Enum-like completion values for a boolean-valued option key.
 pub fn option_values(key: &str) -> Option<&'static [&'static str]> {
     match key {
-        "quotation" | "disclosure" | "replace" => Some(&["true", "false"]),
+        "quotation" | "disclosure" | "replace" | "interpolate" => Some(&["true", "false"]),
         "sort-order" => Some(&["asc", "desc"]),
         _ => None,
     }
+}
+
+/// Whether `kind` accepts the `interpolate=` option (`::file` and `::url`).
+pub fn accepts_interpolate(kind: DirectiveKind) -> bool {
+    matches!(kind, DirectiveKind::File | DirectiveKind::Url)
+}
+
+/// The `interpolate` option of `directive` whose key or value span contains
+/// `offset`, when the directive accepts the option.
+pub fn interpolate_option_at(directive: &ParsedDirective, offset: usize) -> Option<&DirectiveOption> {
+    if !accepts_interpolate(directive.kind) {
+        return None;
+    }
+    directive.options.iter().find(|option| {
+        option.key.value == "interpolate" && {
+            let end = option.value.as_ref().map_or(option.key.span.end, |value| value.span.end);
+            option.key.span.start <= offset && offset <= end
+        }
+    })
+}
+
+/// Each invalid `interpolate` option on a `::file` / `::url` line of
+/// `source`, with the span to report and the reason.
+///
+/// The reason comes from the library's [`parse_interpolate_value`], the
+/// validator composition uses, so the editor and `md compose` reject the same
+/// spellings. A missing value (`interpolate` or `interpolate=`) is reported at
+/// the key; any other invalid value at the value. Every occurrence is
+/// validated, as composition does; a repeated valid one is not a problem.
+///
+/// A value holding a `{{ … }}` expression (found by the scanner body
+/// interpolation uses) is not judged: composition evaluates it before the
+/// option is parsed, and only its result can be validated.
+pub fn invalid_interpolate_options(source: &str, directive: &ParsedDirective) -> Vec<(SourceSpan, String)> {
+    if !accepts_interpolate(directive.kind) {
+        return Vec::new();
+    }
+    directive
+        .options
+        .iter()
+        .filter(|option| option.key.value == "interpolate")
+        .filter_map(|option| {
+            let Some(value) = option.value.as_ref().filter(|value| !value.span.is_empty()) else {
+                return Some((
+                    option.key.span.clone(),
+                    "'interpolate=' requires a value: true or false".to_string(),
+                ));
+            };
+            if !ExpressionFinder::find_all_plain(&value.value).is_empty() {
+                return None;
+            }
+            let raw = source.get(value.span.clone()).unwrap_or_default();
+            let was_quoted = raw.starts_with(['\'', '"']);
+            parse_interpolate_value(&value.value, was_quoted)
+                .err()
+                .map(|reason| (value.span.clone(), reason))
+        })
+        .collect()
 }
 
 /// Whether `key` is accepted by `kind` (dotted `set.<name>` and `--flag` forms
@@ -265,6 +328,21 @@ mod tests {
         assert!(option_recognized(DirectiveKind::Shell, "anything"));
         // The collection grammar reports its own unknown options.
         assert!(option_recognized(DirectiveKind::Map, "bogus"));
+    }
+
+    #[test]
+    fn interpolate_is_an_option_of_file_and_url_but_not_code() {
+        assert!(option_recognized(DirectiveKind::File, "interpolate"));
+        assert!(option_recognized(DirectiveKind::Url, "interpolate"));
+        assert!(!option_recognized(DirectiveKind::Code, "interpolate"));
+        assert!(option_keys(DirectiveKind::File).contains(&"interpolate"));
+        assert!(!option_keys(DirectiveKind::Code).contains(&"interpolate"));
+        // `::code` keeps every other transclusion option.
+        for key in ["when", "quotation", "disclosure", "replace", "exclude", "set"] {
+            assert!(option_recognized(DirectiveKind::Code, key), "{key}");
+            assert!(option_recognized(DirectiveKind::Url, key), "{key}");
+        }
+        assert_eq!(option_values("interpolate"), Some(&["true", "false"][..]));
     }
 
     #[test]

@@ -437,19 +437,22 @@ fn definition_presence_and_annotations_move_to_each_use() {
 }
 
 #[test]
-fn a_nullable_union_definition_is_never_required() {
+fn a_nullable_union_definition_keeps_a_use_site_required() {
     let dir = TempDir::new().expect("tempdir");
     let resolved = resolve_inline(
         dir.path(),
         "link: [null, \"{ next: link(required) }\"]\nroot: link(required)\n",
     )
     .expect("resolves");
-    assert!(resolved.json_schema.get("required").is_none(), "{}", resolved.json_schema);
+    // `root` must be written, and every `next` too; `null` meets both.
+    assert_eq!(resolved.json_schema["required"], json!(["root"]), "{}", resolved.json_schema);
     let validator = validator(&resolved);
-    for instance in [json!({}), json!({"root": null}), json!({"root": {"next": {"next": null}}})] {
+    for instance in [json!({"root": null}), json!({"root": {"next": {"next": null}}})] {
         assert!(validator.is_valid(&instance), "{instance}");
     }
-    assert!(!validator.is_valid(&json!({"root": {"next": 3}})));
+    for instance in [json!({}), json!({"root": {}}), json!({"root": {"next": 3}})] {
+        assert!(!validator.is_valid(&instance), "{instance}");
+    }
 }
 
 #[test]

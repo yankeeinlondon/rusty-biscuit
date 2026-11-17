@@ -197,21 +197,42 @@ fn the_former_preferred_agent_name_is_read_and_both_names_are_refused() {
     rejected("both names", "/favorite_agent", Some(json!("gemini")));
 }
 
-/// Explicit `null`: an optional setting reads as absent; a setting with a
-/// default refuses it.
+/// Explicit `null` is the same value as an absent key: an optional setting
+/// reads as absent and a setting with a default takes it.
 #[test]
-fn null_is_absent_only_for_optional_settings() {
-    for key in ["messenger", "preferred_agent", "canonical_provider", "exit_expressions"] {
-        let config = loads(key, &edited(&user_control(), &format!("/{key}"), Some(Value::Null)));
-        let value = serde_json::to_value(&config).unwrap();
-        assert!(value.get(key).is_none(), "{key}: null reads as absent");
+fn null_reads_as_absent_for_every_setting() {
+    let keys = user_control().as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        let pointer = format!("/{key}");
+        let null = serde_json::to_value(loads(&format!("{key} null"), &edited(&user_control(), &pointer, Some(Value::Null)))).unwrap();
+        let absent = serde_json::to_value(loads(&format!("{key} absent"), &edited(&user_control(), &pointer, None))).unwrap();
+        assert_eq!(null, absent, "{key}: null reads as absent");
     }
-    for key in [
-        "tts", "logging", "protect", "actions", "matchers", "models", "default_sounds", "prompt_for_missing",
-        "harvest_unmatched", "guard_settings", "steering", "permissions",
-    ] {
-        rejected(&format!("{key} null"), &format!("/{key}"), Some(Value::Null));
+}
+
+/// A default that replaces a `null` is reported like one that fills an absent
+/// key, and the document as written keeps its `null`; Darkmatter's
+/// `permissions` stays as written.
+#[test]
+fn a_null_replaced_by_a_default_is_reported_and_the_authored_document_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
+    std::fs::write(&path, "logging: null
+steering:
+  automatic:
+    enabled: null
+permissions: null
+").unwrap();
+    let document = claudine::config::load::read_document(&path, claudine::config::schema::ConfigScope::User).unwrap();
+    assert_eq!(document.authored["logging"], Value::Null);
+    assert_eq!(document.authored.pointer("/steering/automatic/enabled"), Some(&Value::Null));
+    assert_eq!(document.effective["logging"], json!(true));
+    assert_eq!(document.effective.pointer("/steering/automatic/enabled"), Some(&json!(true)));
+    let reported: Vec<String> = document.defaults.iter().map(|default| default.path.segments().join(".")).collect();
+    for path in ["logging", "steering.automatic.enabled"] {
+        assert!(reported.iter().any(|reported| reported == path), "{path} reported: {reported:?}");
     }
+    assert_eq!(document.effective["permissions"], Value::Null, "Darkmatter's block is kept as written");
 }
 
 /// The shared validators, walked once each: absent, null, wrong whole type,
@@ -222,7 +243,9 @@ fn shared_validators_take_the_full_shape_walk() {
     let at = "/guard_settings/repetition/max_repeats";
     let absent = loads("number absent", &edited(&user_control(), at, None));
     assert_eq!(absent.guard_settings.repetition.max_repeats, 30, "the schema default fills a written parent");
-    for (cell, value) in [("null", json!(null)), ("string", json!("30")), ("negative", json!(-1)), ("fraction", json!(1.5))] {
+    let null = loads("number null", &edited(&user_control(), at, Some(Value::Null)));
+    assert_eq!(null.guard_settings.repetition.max_repeats, 30, "the schema default replaces null");
+    for (cell, value) in [("string", json!("30")), ("negative", json!(-1)), ("fraction", json!(1.5))] {
         rejected(&format!("number {cell}"), at, Some(value));
     }
     // Enum: empty and unknown members.
@@ -231,22 +254,24 @@ fn shared_validators_take_the_full_shape_walk() {
     }
     // Mapping: an empty one is explicit.
     assert!(loads("mapping empty", &edited(&user_control(), "/default_sounds", Some(json!({})))).default_sounds.success.is_none());
-    // Sequence (`action[]`): empty is explicit, never absent.
+    // Sequence (`action[](not-empty)`): an empty event list is refused.
     let at = "/actions/session_start";
-    let empty = loads("sequence empty", &edited(&user_control(), at, Some(json!([]))));
-    assert_eq!(empty.actions[&claudine::events::AgenticEvent::SessionStart].len(), 0);
-    rejected("sequence null", at, Some(Value::Null));
+    rejected("sequence empty", at, Some(json!([])));
+    let null = loads("sequence null", &edited(&user_control(), at, Some(Value::Null)));
+    assert!(!null.actions.contains_key(&claudine::events::AgenticEvent::SessionStart), "a null event list is no actions");
     rejected("sequence wrong type", at, Some(json!({})));
     rejected("sequence one wrong element", "/actions/session_start/1", Some(json!(5)));
     rejected("sequence all wrong", at, Some(json!([1, "x"])));
     // Dictionary (`<string>` routes).
     let at = "/messenger/configurations";
     rejected("dictionary one wrong element", "/messenger/configurations/team", Some(json!("slack")));
-    rejected("dictionary null", at, Some(Value::Null));
+    rejected("dictionary null element", "/messenger/configurations/team", Some(Value::Null));
+    let null = edited(&edited(&user_control(), at, Some(Value::Null)), "/messenger/active_config", None);
+    assert!(loads("dictionary null", &null).messenger.unwrap().configurations.is_empty(), "null takes the default `{{}}`");
     let empty = edited(&edited(&user_control(), at, Some(json!({}))), "/messenger/active_config", None);
     assert!(loads("dictionary empty", &empty).messenger.unwrap().configurations.is_empty());
     // A list of strings.
-    rejected("string list element", "/actions/before_tool/1/args/0", Some(json!(1)));
+    rejected("string list element", "/actions/before_tool/1/call/args/0", Some(json!(1)));
 }
 
 #[test]
@@ -255,13 +280,27 @@ fn nested_variants_keep_their_accepted_shapes() {
     let single = loads("voice single", &edited(&user_control(), "/tts/voice", Some(json!("Alex"))));
     assert!(matches!(&single.tts, TtsValue::Config(tts) if tts.voice == Some(VoiceSelection::Single("Alex".into()))));
     rejected_within("voice half pair", "/tts/voice", Some(json!({ "male": "Daniel" })), "/tts");
-    rejected_within("tts provider null", "/tts/provider", Some(Value::Null), "/tts");
+    let null = loads("tts provider null", &edited(&user_control(), "/tts/provider", Some(Value::Null)));
+    assert!(matches!(&null.tts, TtsValue::Config(tts) if tts.provider.is_none()), "a null provider auto-detects");
+    let prewarm = loads("tts prewarm absent", &edited(&user_control(), "/tts/prewarm", None));
+    assert!(matches!(&prewarm.tts, TtsValue::Config(tts) if tts.prewarm == Some(true)), "the schema default is in place");
     let defaulted = loads("tts gender absent", &edited(&user_control(), "/tts/gender", None));
     assert!(matches!(&defaulted.tts, TtsValue::Config(tts) if tts.gender == claudine::config::Gender::Female));
     // Messenger routes.
-    rejected_within("route unknown provider", "/messenger/configurations/alerts/provider", Some(json!("telegram")), "/messenger/configurations/alerts");
-    rejected_within("route missing field", "/messenger/configurations/alerts/channel_id", None, "/messenger/configurations/alerts");
-    rejected_within("route foreign field", "/messenger/configurations/alerts/recipient", Some(json!("x")), "/messenger/configurations/alerts");
+    rejected_within(
+        "route unknown provider",
+        "/messenger/configurations/alerts",
+        Some(json!({ "telegram": { "channel_id": "123" } })),
+        "/messenger/configurations/alerts",
+    );
+    rejected_within("route missing field", "/messenger/configurations/alerts/discord/channel_id", None, "/messenger/configurations/alerts");
+    rejected_within("route foreign field", "/messenger/configurations/alerts/discord/recipient", Some(json!("x")), "/messenger/configurations/alerts");
+    rejected_within(
+        "route flat form",
+        "/messenger/configurations/alerts",
+        Some(json!({ "provider": "discord", "channel_id": "123" })),
+        "/messenger/configurations/alerts",
+    );
     // Protect rules and custom patterns.
     for (cell, pointer, value) in [
         ("unknown rule group", "/protect/rules/everything", Some(json!(false))),
@@ -284,14 +323,20 @@ fn action_and_model_variants_keep_their_accepted_shapes() {
         panic!("sound effect")
     };
     assert_eq!((*volume, *speed), (1.0, 1.0), "action defaults come from the schema");
-    rejected_within("unknown action type", "/actions/session_start/0/type", Some(json!("shout")), "/actions/session_start/0");
-    rejected_within("action missing field", "/actions/session_start/0/effect", None, "/actions/session_start/0");
+    rejected_within("unknown action type", "/actions/session_start/0", Some(json!({ "shout": { "effect": "doorbell" } })), "/actions/session_start/0");
+    rejected_within("action missing field", "/actions/session_start/0/sound_effect/effect", None, "/actions/session_start/0");
+    rejected_within(
+        "action flat form",
+        "/actions/session_start/0",
+        Some(json!({ "type": "sound_effect", "effect": "doorbell" })),
+        "/actions/session_start/0",
+    );
     rejected("unknown event", "/actions/at_lunch", Some(json!([])));
     for mapper in [json!({ "type": "json_object" }), json!({ "type": "exit_code" }), json!({ "type": "regex", "pattern": "(?P<decision>\\w+)" })] {
-        loads("mapper variant", &edited(&user_control(), "/actions/before_tool/1/mapper", Some(mapper)));
+        loads("mapper variant", &edited(&user_control(), "/actions/before_tool/1/call/mapper", Some(mapper)));
     }
-    rejected_within("mapper unknown type", "/actions/before_tool/1/mapper/type", Some(json!("xml")), "/actions/before_tool/1");
-    rejected_within("timeout negative", "/actions/before_tool/1/timeout_ms", Some(json!(-5)), "/actions/before_tool/1");
+    rejected_within("mapper unknown type", "/actions/before_tool/1/call/mapper/type", Some(json!("xml")), "/actions/before_tool/1");
+    rejected_within("timeout negative", "/actions/before_tool/1/call/timeout_ms", Some(json!(-5)), "/actions/before_tool/1");
     // Model overrides.
     let models = loads("model mode absent", &edited(&user_control(), "/models/claude/mode", None));
     assert_eq!(models.models[&claudine::provider::Provider::Claude].mode(), ModelOverrideMode::Add);
@@ -314,8 +359,10 @@ fn sound_rule_guard_and_steering_paths_are_typed() {
     rejected("volume bytes", "/guard_settings/volume/max_bytes", Some(json!("1MB")));
     rejected("repetition unknown", "/guard_settings/repetition/posture", Some(json!("strict")));
     // Steering.
-    rejected("steering enabled null", "/steering/automatic/enabled", Some(Value::Null));
-    rejected("steering automatic null", "/steering/automatic", Some(Value::Null));
+    for at in ["/steering/automatic/enabled", "/steering/automatic", "/steering"] {
+        let null = loads(&format!("{at} null"), &edited(&user_control(), at, Some(Value::Null)));
+        assert_eq!(null.steering.automatic.enabled, Some(true), "{at}: null takes the user default `true`");
+    }
 }
 
 #[test]
@@ -341,11 +388,19 @@ fn a_repository_file_overrides_only_what_it_writes() {
     assert!(!merged.guard_settings.repetition.enabled);
     assert_eq!(merged.guard_settings.repetition.max_repeats, 30, "a written repository parent takes its child defaults");
 
-    // `active_messenger`: absent inherits, null disables, an unknown route fails.
+    // `active_messenger`: absent and null inherit, an unknown route fails.
     let (_dir, absent) = load_with_repository(&user_control(), &edited(&repository_control(), "/active_messenger", None));
     assert_eq!(absent.unwrap().messenger.unwrap().active_config.as_deref(), Some("alerts"));
     let (_dir, null) = load_with_repository(&user_control(), &edited(&repository_control(), "/active_messenger", Some(Value::Null)));
-    assert_eq!(null.unwrap().messenger.unwrap().active_config, None);
+    assert_eq!(null.unwrap().messenger.unwrap().active_config.as_deref(), Some("alerts"), "null inherits");
+
+    // A null override of a per-event map inherits the user's entries.
+    let (_dir, null) = load_with_repository(&user_control(), &edited(&repository_control(), "/actions", Some(Value::Null)));
+    let user_actions = loads("control", &user_control()).actions;
+    assert_eq!(null.unwrap().actions, user_actions, "null actions inherit");
+    let (_dir, null) =
+        load_with_repository(&user_control(), &edited(&repository_control(), "/matchers/session_end", Some(Value::Null)));
+    assert_eq!(null.unwrap().matchers, loads("control", &user_control()).matchers, "a null matcher inherits");
     let (_dir, unknown) =
         load_with_repository(&user_control(), &edited(&repository_control(), "/active_messenger", Some(json!("nowhere"))));
     assert!(matches!(unknown, Err(ClaudineError::ConfigValidation(_))), "{unknown:?}");
@@ -376,7 +431,7 @@ fn a_repository_file_accepts_only_its_override_keys() {
         let (_dir, result) = load_with_repository(&user_control(), &edited(&repository_control(), &format!("/{key}"), Some(value)));
         assert_located(&format!("repository {key}"), result, &format!("/{key}"));
     }
-    for (key, value) in [("steering", Value::Null), ("actions", Value::Null), ("guard_settings", json!(5)), ("canonical_provider", json!("nope"))] {
+    for (key, value) in [("steering", json!({})), ("actions", json!({})), ("guard_settings", json!(5)), ("canonical_provider", json!("nope"))] {
         let (_dir, result) = load_with_repository(&user_control(), &edited(&repository_control(), &format!("/{key}"), Some(value)));
         assert_located(&format!("repository {key}"), result, &format!("/{key}"));
     }
@@ -423,4 +478,74 @@ fn problems_name_the_file_line_and_pointer() {
     let text = error.to_string();
     assert!(text.contains(&format!("{}:4:", path.display())), "{text}");
     assert!(text.contains("/protect"), "{text}");
+}
+
+/// A configuration root that holds nothing (blank, comment-only, or an
+/// explicit `null`) is refused in either scope; only `{}` keeps every default.
+#[test]
+fn a_blank_or_null_root_is_refused_in_either_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let user_path = dir.path().join("config.yaml");
+    let repository_path = dir.path().join("repo/.claudine/config.yaml");
+    std::fs::create_dir_all(repository_path.parent().unwrap()).unwrap();
+    for text in ["null\n", "~\n", "# nothing written\n", "   \n"] {
+        std::fs::write(&user_path, text).unwrap();
+        match load_claudine_config(Some(&user_path), None) {
+            Err(ClaudineError::ConfigInvalid { problems }) => {
+                assert!(problems.iter().any(|problem| problem.pointer.is_empty()), "user {text:?}: {problems:?}");
+                assert!(problems.iter().all(|problem| problem.file.as_deref() == Some(user_path.as_path())), "{problems:?}");
+            }
+            other => panic!("user {text:?}: expected a ConfigInvalid at the root, got {other:?}"),
+        }
+        std::fs::write(&repository_path, text).unwrap();
+        match load_repo_override_config(&repository_path) {
+            Err(ClaudineError::ConfigInvalid { problems }) => {
+                assert!(problems.iter().any(|problem| problem.pointer.is_empty()), "repository {text:?}: {problems:?}");
+            }
+            other => panic!("repository {text:?}: expected a ConfigInvalid at the root, got {other:?}"),
+        }
+    }
+}
+
+/// The YAML loader's own refusals reach the configuration caller located:
+/// the whole-YAML matrix lives in simplified-schema, so one duplicate key and
+/// one malformed document are enough here. A duplicate key is located at
+/// the mapping that holds it, the position the YAML parser reports.
+#[test]
+fn a_duplicate_key_or_malformed_yaml_is_a_located_problem() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
+    for (cell, text, lines, needle) in [
+        ("duplicate key", "logging: true\nprotect:\n  enabled: true\n  enabled: false\n", 2..=4, "\"enabled\""),
+        ("malformed", "logging: true\nprotect: [true\n", 2..=3, "YAML"),
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let Err(ClaudineError::ConfigInvalid { problems }) = load_claudine_config(Some(&path), None) else {
+            panic!("{cell}: refused");
+        };
+        assert_eq!(problems.len(), 1, "{cell}: {problems:?}");
+        let problem = &problems[0];
+        assert_eq!(problem.file.as_deref(), Some(path.as_path()), "{cell}");
+        assert!(problem.line.is_some_and(|line| lines.contains(&line)) && problem.column.is_some(), "{cell}: {problem:?}");
+        assert!(problem.message.contains(needle), "{cell}: {problem:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{cell}: the file is untouched");
+    }
+}
+
+/// A repository's per-event matcher override, like its action override, must
+/// override something: `matchers: {}` is refused, a written matcher replaces
+/// the user's for its event alone.
+#[test]
+fn a_repository_matcher_override_is_nonempty_and_replaces_per_event() {
+    let (_dir, empty) = load_with_repository(&user_control(), &edited(&repository_control(), "/matchers", Some(json!({}))));
+    assert_located("repository matchers {}", empty, "/matchers");
+    let (_dir, blank) =
+        load_with_repository(&user_control(), &edited(&repository_control(), "/matchers/session_end", Some(json!(""))));
+    assert_located("repository matcher \"\"", blank, "/matchers/session_end");
+
+    let repository = edited(&repository_control(), "/matchers/before_tool", Some(json!("Read")));
+    let (_dir, merged) = load_with_repository(&user_control(), &repository);
+    let matchers = merged.unwrap().matchers;
+    assert_eq!(matchers[&claudine::events::AgenticEvent::BeforeTool], "Read", "the repository's matcher replaces the user's");
+    assert_eq!(matchers[&claudine::events::AgenticEvent::SessionEnd], "true");
 }

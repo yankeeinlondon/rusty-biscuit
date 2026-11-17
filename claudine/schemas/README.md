@@ -33,7 +33,7 @@ and commit the regenerated artifacts (see
 | `document.yaml` | library (`kind: schema`) | the document metadata (`prompt`, `hash`, `last_updated`) that `claudine.yaml` and `inline-compose.yaml` both import |
 | `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model` (the keys `claudine-document.yaml` identifies); types `initialize`, `cancelled`, and `finalize` for those documents, but never selects on them alone because the `md` host owns them too; types Darkmatter's `composed` and `failed` as errors that name `start` and `blocked` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
-| `sequence.yaml` | trigger (`kind: schema-trigger`) | applies the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`) to a document with a non-null `sequence` |
+| `sequence.yaml` | trigger (`kind: schema-trigger`) | applies the sequence document's catalog (`sequence`, `template`, `$state`, and the removed root `fail_fast`) to a document with a non-null `sequence` |
 | `claudine-document.yaml` | identifying trigger (`kind: schema-trigger`) | matches a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model`, which makes it a Claudine document; its payload is empty. The `darkmatter-host` manifest Claudine publishes names it as `identify`. It is not part of the embedded trigger bundle, so Claudine's own launch never uses it |
 | `claudine-config.yaml` | library (`kind: schema`) | the user (`user-config`) and repository (`repository-config`) configuration files, `~/.claudine/config.yaml` and `{repo-root}/.claudine/config.yaml`; imports Darkmatter's `permissions` type. Compiled into Claudine's loader on its own, not part of the trigger bundle; see [Configuration files](../docs/topics/configuration.md) |
 | `review.yaml` | standalone schema (`$schema`) | the schema of a specification review document |
@@ -94,3 +94,12 @@ step data. Executable exclusivity, unique leg names, container-event
 placement, and removed task keys remain parser-validated. The document
 catalog (`claudine.yaml`) is selected by a non-null `sequence` but does not
 declare it; `sequence.yaml` is its only declaration.
+
+A sequence document's root `$schema` is its document schema, as in any
+document; `sequence.yaml` declares `$state` (typed `schema`), the schema of
+each step's state in the document's inline list, and `template`. On a task,
+`sequence-types.yaml` declares `$schema` (a check at the container's turn),
+`$state`, and `template` as an inline nested sequence's own options. The open
+task type cannot tell an inline container from another task, so the parser
+refuses these keys anywhere but beside an inline `sequence: [ … ]`. See
+[Schemas → Sequence declarations](../docs/topics/schemas.md#sequence-declarations).

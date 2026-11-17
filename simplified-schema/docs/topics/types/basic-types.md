@@ -14,7 +14,7 @@ We will not cover the constraints that are common to _all_ types but let's make 
     - this can be useful as metadata to downstream consumers like [DMLS](darkmatter/docs/topics/dmls.md) which can now auto-complete these suggestions for users but also knows that _any_ **string** is a valid type for the property with this type
     - this kind of _constraint_ doesn't strictly "constrain" the type but it provides context and examples to consumers when a downstream system leverages this metadata
 - `default(val)`
-    - the `default(val)` constraint, like `suggest`, is not _strictly speaking_ a "constraint" but instead metadata for downstream consumers. In this case the metadata indicates what the default value for a variable that is not defined (e.g., `null`)
+    - the `default(val)` constraint, like `suggest`, is not _strictly speaking_ a "constraint": it never narrows the type. Instead it supplies the value a property takes when it is left out or set to `null`, whether or not the property is `required` (see [`default(value)`](../global-type-constraints.md#defaultvalue))
 - `min(#)` _and_ `max(#)`
     - we often want to constrain how long (or short) a string is allowed to be (in characters)
     - the `min` and `max` constraints allow us to use one or both to apply these constraints.
@@ -47,6 +47,7 @@ We will not cover the constraints that are common to _all_ types but let's make 
     - a normal "string" type can be any string and that includes an _empty_ string
     - adding the `not-empty` constraint makes an _empty_ string invalid
     - it also invalidates a string that _only_ contains whitespace
+    - it never rejects `null` or a missing key: those mean "not set", so add `required` when the key must be written
 
 ### `number`
 

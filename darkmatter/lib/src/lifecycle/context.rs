@@ -78,9 +78,9 @@ pub struct LifecycleErrorInfo {
     /// instead (see [`Self::to_value`]).
     pub variant: String,
 
-    /// The concise, notification-safe message of the *selected* diagnostic —
-    /// single-line, escape-free, and length-clamped, because this string feeds
-    /// TTS, outbound messaging routes, and desktop notifications verbatim.
+    /// The complete, single-line, escape-free message of the *selected*
+    /// diagnostic; no length limit. Delivery adapters (TTS, outbound
+    /// messaging, desktop notifications) fit it to their destination.
     ///
     /// It is the effective diagnostic's `Display`, not the wrapper's and not
     /// its multi-line rendered block. Equal to `snapshot.message` when the
@@ -178,7 +178,7 @@ impl StdError for LifecycleCause {
 
 impl LifecycleErrorInfo {
     /// Build from the diagnostic `catalog` selects for `error`'s chain,
-    /// labeled `kind`/`variant`, falling back to `error`'s own concise prose
+    /// labeled `kind`/`variant`, falling back to `error`'s own normalized prose
     /// when the chain has none.
     pub fn from_selection_with(
         catalog: &dyn DiagnosticCatalog,
@@ -188,15 +188,17 @@ impl LifecycleErrorInfo {
     ) -> Self {
         match catalog.select(error) {
             Some(snapshot) => Self::from_snapshot(kind, variant, snapshot),
-            None => Self {
-                kind,
-                variant,
-                msg: concise_message(&error.to_string()),
-                snapshot: None,
-                property: None,
-                reason: LifecycleEvaluationReason::Expression,
-                cause: None,
-            },
+            None => {
+                Self {
+                    kind,
+                    variant,
+                    msg: concise_message(&error.to_string()),
+                    snapshot: None,
+                    property: None,
+                    reason: LifecycleEvaluationReason::Expression,
+                    cause: None,
+                }
+            }
         }
     }
 
@@ -247,9 +249,9 @@ impl LifecycleErrorInfo {
     /// `err.origin` project alongside the legacy aliases. A generic action verb
     /// stays facet-less.
     ///
-    /// `msg` passes through [`concise_message`], so a hand-built message here
-    /// cannot reach TTS or a webhook multi-line or escape-bearing. The pass is
-    /// idempotent, so text that already went through it is unchanged.
+    /// `msg` passes through [`concise_message`]: normalized to one
+    /// escape-free line, not shortened. The pass is idempotent, so text that
+    /// already went through it is unchanged.
     pub fn from_action_failure_with(
         catalog: &dyn DiagnosticCatalog,
         verb: impl Into<String>,
@@ -270,7 +272,7 @@ impl LifecycleErrorInfo {
     }
 
     /// Wrap an already-projected [`DiagnosticSnapshot`], mirroring `err.msg`
-    /// from the snapshot's own concise message so the two never diverge.
+    /// from the snapshot's own message so the two never diverge.
     pub fn from_snapshot(kind: &'static str, variant: String, snapshot: DiagnosticSnapshot) -> Self {
         Self {
             kind,

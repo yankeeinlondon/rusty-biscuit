@@ -173,6 +173,22 @@ biscuit-contract's InferenceError is a ratified cross-package contract with a St
 
 [[allow]]
 shape = "format_context"
+file = "lib/src/config/wire.rs"
+symbol = "actions::deserialize"
+tag = "retained"
+reason = """
+A serde adapter: `Deserializer::Error::custom` accepts only `Display`, so the cause cannot be kept as a source. `message` is the adapter's own prose (`Family::untag` returns `Result<Value, String>`), and `error` is the inner `serde_json::Error` of the tagged action, prefixed with the entry's key path. The load path judges the file by the schema first, so this message is reached only by documents that bypass it."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/config/wire.rs"
+symbol = "routes::deserialize"
+tag = "retained"
+reason = """
+As `actions::deserialize`: a serde adapter whose `Error::custom` accepts only `Display`. `message` is the adapter's own prose and `error` the inner `serde_json::Error` of the tagged route, prefixed with the route's key path."""
+
+[[allow]]
+shape = "format_context"
 file = "lib/src/composition/looping/config.rs"
 symbol = "parse_on_rate_limit"
 tag = "retained"
@@ -242,14 +258,6 @@ symbol = "load_validated_frontmatter"
 tag = "retained"
 reason = """
 The signals research corpus reads hand-authored YAML describing external documents. The failure is authoring prose about a research file, not a Claudine operation, and the subcommand is maintainer-facing."""
-
-[[allow]]
-shape = "formatted_report"
-file = "cli/src/commands/wrap/mod.rs"
-symbol = "run_provider_wrapper_inner"
-tag = "retained"
-reason = """
-`impl FromStr for OutputFormat { type Err = String }` (`lib/src/composition/types.rs`) — the error is prose at its origin, so `eyre!(e)` faithfully transports an already-unstructured value rather than collapsing a typed one. Typing `OutputFormat::Err` is the real fix and is a separate, additive change."""
 
 [[allow]]
 shape = "to_string_collapse"

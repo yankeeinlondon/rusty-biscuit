@@ -4,6 +4,7 @@
 
 - Categories
 - Usage
+- Editor launch facts
 - macOS App Bundle Fallback
 - Windows Fallback Chain
 - CLI Subcommands
@@ -44,6 +45,28 @@ for editor in &programs.editors {
     println!("{}: {}", editor.display_name(), editor.description());
 }
 ```
+
+## Editor launch facts
+
+`programs/enums/editor_traits.rs` holds `EDITOR_TRAITS`, indexed by
+`*editor as usize` like `EDITOR_INFO` (a count test guards both). It stays out
+of `ProgramInfo` on purpose: `ProgramInfo` is shared and serialized, so editor
+facts there would change every category's shape.
+
+- `Editor::surface()` → `EditorSurface::{Terminal, Gui, Both}`;
+  `wait_args()` (`--wait`, Kate `--block`); `can_block()` is false only for a
+  GUI editor with no wait args (Lapce, Geany).
+- `Editor::identify(program)` compares the final path component of one
+  program token (callers split `$EDITOR` first), stripping only
+  `.exe/.cmd/.bat/.com`, against binary name, alternates, and
+  `identify_also`; case-insensitive only under `cfg(windows)`.
+- Adding an `Editor` variant: add its `EDITOR_TRAITS` row in the same position
+  and its arm in the test's wildcard-free `expected` match.
+- Sniff is the only editor-flag table; consumers (Darkmatter's editor module)
+  must not keep their own.
+- The display session (`sniff::os::detect_display_session`, `os/display.rs`)
+  is the GUI-availability companion: macOS/Windows always available,
+  Linux/WSL by non-empty `DISPLAY`/`WAYLAND_DISPLAY`. On-demand only.
 
 ## macOS App Bundle Fallback
 

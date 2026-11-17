@@ -459,9 +459,9 @@ it were a named type defined in the slot's own schema file, and then the
 written suffix is applied by the named-type rules: a returned union joins a
 surrounding union, `[]` makes an array of it, and a default or constraint
 that disagrees with the suffix fails (`SuffixConflict`), as do invariants the
-merge breaks, such as `non-null` over a nullable type (`InvalidExpansion`).
-`(required)` over `"null"`, `"unknown"`, or a union with a nullable
-alternative stays optional.
+merge breaks, such as a second `suggest(...)` list in one union
+(`InvalidExpansion`). `(required)` over `"null"`, `"unknown"`, or a union with
+a nullable alternative demands the key, and a written `null` is accepted.
 
 **What returned data may not do.** The rules keep returned data from running
 anything or bypassing a check:
@@ -526,7 +526,7 @@ schema is produced.
 | `ReachableSlot` | the host returned `"Person@./types.yaml"` and `Person` holds a slot |
 | `PatternRejected` | the host returned `"string(pattern('(?=a)'))"` |
 | `SuffixConflict` | `"{{ t }}(pattern('^a'))"` and the host returned `"boolean"`, which takes no pattern |
-| `InvalidExpansion` | `"{{ t }}(non-null)"` and the host returned `"string \| null"` |
+| `InvalidExpansion` | `"{{ t }} \| string(suggest(a))"` and the host returned `"string(suggest(b))"`, a second suggestion list |
 
 A read the host's `template_reads` refuses is not one of these: it is
 `SlotResolutionError::Refused`, so a caller can tell "needs a grant" apart

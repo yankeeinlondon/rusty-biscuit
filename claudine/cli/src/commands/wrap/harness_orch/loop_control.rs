@@ -225,7 +225,7 @@ pub(crate) fn run_harness_loop(
     let result = match run_harness_loop_inner(ctx) {
         Err(error) if claudine::composition::lifecycle::cancellation::requested() => {
             let info = LifecycleErrorInfo::from_error_or_action("cancelled_setup", error.as_ref());
-            lifecycle_guard.emitter().emit_warn(&info.msg, term);
+            lifecycle_guard.emitter().emit_warn(info.msg.as_str(), term);
             return Ok((130, None, None, None));
         }
         result => result?,
@@ -329,9 +329,24 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             .prompt_state
             .repository_root_or(run.repo_root)
             .map(Path::to_path_buf);
-        // Lifecycle writes land in the launch workspace, not the prompt's own
-        // repository (they differ when the prompt comes from a shared library).
-        let mutation_root = run.child_cwd.to_path_buf();
+        // Lifecycle writes stay inside the caller's launch scope, not the
+        // prompt's own repository (they differ when the prompt comes from a
+        // shared library).
+        //
+        // A direct wrapper's memory-file harness hosts no lifecycle (its guard
+        // is built over an empty configuration), so a failed launch discovery
+        // must not stop that provider run; every composition route reaching
+        // here already passed this check in `construct_lifecycle_runtime`.
+        let checked_invocation = if run.lifecycle_guard.config().is_empty() {
+            None
+        } else {
+            run.prompt_state.invocation_context.as_ref()
+        };
+        let mutation_root = claudine::invocation_context::lifecycle_mutation_root(
+            checked_invocation,
+            run.prompt_state.file_resolution_context(),
+        )?
+        .to_path_buf();
         let effect_engine = EffectEngine::builder()
             .mutation_root(&mutation_root)
             .auto_rehash(false)

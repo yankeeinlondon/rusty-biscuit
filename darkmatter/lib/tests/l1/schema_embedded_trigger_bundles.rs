@@ -547,7 +547,8 @@ enum Outcome {
     Applies,
     /// Not a trigger: the file contributes nothing.
     Unclassified,
-    /// `$schema: {}`: the trigger loads and contributes no constraints.
+    /// The trigger loads and contributes no constraints. No cell expects it:
+    /// an empty `$schema` is refused, and seeing it means that refusal broke.
     EmptyPayload,
     /// No `$schema`: the trigger loads and layers no schema at all.
     MatcherOnly,
@@ -596,7 +597,7 @@ fn walk(cells: &[(&str, String, Outcome)]) {
 
 #[test]
 fn the_trigger_envelope_matrix_holds_for_block_yaml() {
-    use Outcome::{Applies, EmptyPayload, Invalid, MatcherOnly, Unclassified};
+    use Outcome::{Applies, Invalid, MatcherOnly, Unclassified};
     let kind = "kind: schema-trigger\n";
     let match_ = "match:\n  prompt: string(required)\n";
     let schema = "$schema:\n  model: string\n";
@@ -626,11 +627,11 @@ fn the_trigger_envelope_matrix_holds_for_block_yaml() {
         ),
         ("match trailing", doc(kind, "match:\n  prompt: string(required)\n}\n", schema), Invalid),
         ("$schema absent", doc(kind, match_, ""), MatcherOnly),
-        ("$schema null", doc(kind, match_, "$schema: null\n"), Invalid),
+        ("$schema null", doc(kind, match_, "$schema: null\n"), MatcherOnly),
         ("$schema wrong type", doc(kind, match_, "$schema: 42\n"), Invalid),
         ("$schema one element wrong", doc(kind, match_, "$schema:\n  model: string\n  bad: 42\n"), Invalid),
         ("$schema every element wrong", doc(kind, match_, "$schema:\n  a: 42\n  b: true\n"), Invalid),
-        ("$schema empty mapping", doc(kind, match_, "$schema: {}\n"), EmptyPayload),
+        ("$schema empty mapping", doc(kind, match_, "$schema: {}\n"), Invalid),
         ("$schema empty string", doc(kind, match_, "$schema: \"\"\n"), Invalid),
         ("$schema empty sequence", doc(kind, match_, "$schema: []\n"), Invalid),
         ("$schema duplicate", doc(kind, match_, "$schema:\n  model: string\n  model: number\n"), Invalid),
@@ -642,7 +643,7 @@ fn the_trigger_envelope_matrix_holds_for_block_yaml() {
 
 #[test]
 fn the_trigger_envelope_matrix_holds_for_json_syntax() {
-    use Outcome::{Applies, EmptyPayload, Invalid, MatcherOnly, Unclassified};
+    use Outcome::{Applies, Invalid, MatcherOnly, Unclassified};
     let kind = r#""kind": "schema-trigger""#;
     let match_ = r#""match": {"prompt": "string(required)"}"#;
     let schema = r#""$schema": {"model": "string"}"#;
@@ -679,11 +680,11 @@ fn the_trigger_envelope_matrix_holds_for_json_syntax() {
         ),
         ("match trailing", doc(&[kind, r#""match": {"prompt": "string(required)"}}"#, schema]), Unclassified),
         ("$schema absent", doc(&[kind, match_, ""]), MatcherOnly),
-        ("$schema null", doc(&[kind, match_, r#""$schema": null"#]), Invalid),
+        ("$schema null", doc(&[kind, match_, r#""$schema": null"#]), MatcherOnly),
         ("$schema wrong type", doc(&[kind, match_, r#""$schema": 42"#]), Invalid),
         ("$schema one element wrong", doc(&[kind, match_, r#""$schema": {"model": "string", "bad": 42}"#]), Invalid),
         ("$schema every element wrong", doc(&[kind, match_, r#""$schema": {"a": 42, "b": true}"#]), Invalid),
-        ("$schema empty mapping", doc(&[kind, match_, r#""$schema": {}"#]), EmptyPayload),
+        ("$schema empty mapping", doc(&[kind, match_, r#""$schema": {}"#]), Invalid),
         ("$schema empty string", doc(&[kind, match_, r#""$schema": """#]), Invalid),
         ("$schema empty sequence", doc(&[kind, match_, r#""$schema": []"#]), Invalid),
         (

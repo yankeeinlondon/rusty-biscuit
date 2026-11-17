@@ -568,6 +568,22 @@ pub enum CompositionError {
         source: std::io::Error,
     },
 
+    /// Repository discovery at the launch directory failed, so a lifecycle
+    /// run cannot know the caller's working tree and does not run. Only a
+    /// successful observation of no working tree lets the launch directory
+    /// bound lifecycle writes instead.
+    #[error(
+        "lifecycle actions cannot run: repository discovery at the launch directory {} failed: {source}",
+        launch_dir.display()
+    )]
+    LaunchRepositoryUnreadable {
+        /// The directory Claudine was launched from.
+        launch_dir: PathBuf,
+        /// The retained discovery failure.
+        #[source]
+        source: std::sync::Arc<sniff::SniffError>,
+    },
+
     /// The composition target file lacks required read/write permissions.
     ///
     /// Carries the unboxed [`std::io::Error`] the read+write open probe raised,
@@ -1514,6 +1530,26 @@ pub enum CompositionError {
         snapshot: Option<Box<DiagnosticSnapshot>>,
     },
 
+    /// A lifecycle `edit` action could not open its file, or its editor
+    /// failed. The reason comes before the target: lifecycle messages are
+    /// clamped to one short line, and most reasons already name the target.
+    #[error(
+        "`{property}` could not edit the file: {} ({source_path})",
+        edit_failure_detail(error, target),
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleEditFailed {
+        /// The file whose stack ran the action.
+        source_path: PathBuf,
+        /// The authored path of the action, e.g. `initialize[0].edit`.
+        property: String,
+        /// The resolved file the action was to open.
+        target: PathBuf,
+        /// The typed cause.
+        #[source]
+        error: Box<darkmatter::editor::EditError>,
+    },
+
     /// A `prep` call would re-enter a document with an active call or handoff
     /// (a self-call, or A calling B calling A), or exceed the hop limit.
     #[error(
@@ -1964,15 +2000,90 @@ pub enum CompositionError {
         index: usize,
     },
 
-    /// A step's normalized state failed the sequence document's `$schema`.
+    /// A step's normalized state failed its owner's `$state` schema.
+    ///
+    /// `index` is zero-based within the owning list, so `source_path` and
+    /// `container` (the list's authored path: `sequence`, or
+    /// `sequence[1].sequence` for a nested container) are what tell two
+    /// owners' step 0 apart.
     #[error(
-        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message}"
+        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message} \
+         (`$state` of `{container}` in {source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
     )]
     SequenceStateSchemaViolation {
         /// Zero-based step index.
         index: usize,
         /// The step's generated id.
         id: String,
+        /// The failing property path.
+        property: String,
+        /// The validation message.
+        message: String,
+        /// The file declaring the `$state` (and the list it types).
+        source_path: PathBuf,
+        /// The authored path of the typed list in `source_path`.
+        container: String,
+    },
+
+    /// A sequence declaration (`$schema`, `$state`, or `template`) written
+    /// where no inline list owns it, or supplied through a value route.
+    #[error(
+        "`{property}` is not accepted here ({source_path}): {hint}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationMisplaced {
+        /// The file holding the declaration, or the document a value route
+        /// targeted.
+        source_path: PathBuf,
+        /// The authored path of the declaration (`sequence[0].$state`).
+        property: String,
+        /// Where the declaration belongs instead.
+        hint: String,
+    },
+
+    /// A sequence declaration has a shape its key never accepts (a `null`
+    /// `$state`, an empty union, a non-mapping `template`, …).
+    #[error(
+        "invalid sequence declaration `{property}` ({source_path}): {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationShape {
+        /// The file holding the declaration.
+        source_path: PathBuf,
+        /// The authored path of the declaration.
+        property: String,
+        /// What is wrong with it.
+        message: String,
+    },
+
+    /// A well-shaped schema declaration failed to parse or resolve (an
+    /// unparsable type string, a missing referenced file, a bad import).
+    #[error(
+        "sequence declaration `{property}` ({source_path}) could not be loaded: {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceDeclarationLoad {
+        /// The file holding the declaration.
+        source_path: PathBuf,
+        /// The authored path of the declaration.
+        property: String,
+        /// The schema layer's typed failure.
+        #[source]
+        source: Box<simplified_schema::SchemaError>,
+    },
+
+    /// The values an inline sequence container sees at its turn failed its
+    /// own `$schema` check, so the container never opened.
+    #[error(
+        "sequence container `{container}` ({source_path}) failed its `$schema` check at `{property}`: {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    SequenceContainerSchemaViolation {
+        /// The file declaring the container.
+        source_path: PathBuf,
+        /// The container task's authored path (`sequence[1]`).
+        container: String,
         /// The failing property path.
         property: String,
         /// The validation message.
@@ -2322,8 +2433,8 @@ pub enum CompositionError {
     /// tree could not be established, so it was killed without running.
     ///
     /// Fail-closed by design: the per-command deadline and the runaway guards
-    /// are only enforceable against an owned tree (a Unix process group, a
-    /// Windows Job Object), so a command that could only be given
+    /// are only enforceable against a tree owned by Sniff's process-tree
+    /// owner, so a command that could only be given
     /// direct-child cleanup is refused rather than run degraded.
     #[error("command `{command}` in {task} could not be isolated into an owned process tree: {source}")]
     SequenceTaskShellIsolation {
@@ -2364,7 +2475,8 @@ pub enum CompositionError {
     /// one of the executor-owned `seq`, `group`, and `loop` views.
     #[error(
         "`with.{key}` in {task} targets a reserved key; generated step fields and \
-         `seq`, `group`, and `loop` are executor-owned"
+         `seq`, `group`, and `loop` are executor-owned, and the sequence declarations \
+         `$state` and `template` are not values"
     )]
     SequenceTaskWithReserved {
         /// A label locating the task.
@@ -2410,18 +2522,18 @@ pub enum CompositionError {
         failure_count: usize,
     },
 
-    /// One or more sequence steps have missing required schema properties
-    /// and Interactive Mode is not allowed.
+    /// One or more sequence steps or sequence documents have missing
+    /// required schema properties and Interactive Mode is not allowed.
     ///
     /// Aggregated so the user can fix the full sequence in a single edit
-    /// pass instead of discovering each step's gaps one at a time.
+    /// pass instead of discovering each owner's gaps one at a time.
     #[error(
-        "sequence schema validation failed for {failure_count} step(s); missing required properties"
+        "sequence schema validation failed for {failure_count} step(s) or document(s); missing required properties"
     )]
     SequenceMissingProperties {
-        /// Per-step missing-property records in execution order.
-        failures: Vec<SequenceMissingPropertiesStep>,
-        /// Number of steps that reported missing properties.
+        /// Missing-property records in discovery order.
+        failures: Vec<SequenceMissingPropertiesEntry>,
+        /// Number of entries that reported missing properties.
         failure_count: usize,
     },
 
@@ -3470,6 +3582,14 @@ impl DroppedOptionalSource {
 }
 
 /// Render a reference-cycle chain as `a.md → b.yaml → a.md`.
+/// An `edit` failure's reason, naming the target only when the reason does
+/// not already.
+fn edit_failure_detail(error: &darkmatter::editor::EditError, target: &Path) -> String {
+    let reason = error.to_string();
+    let target = target.display().to_string();
+    if reason.contains(&target) { reason } else { format!("{reason} ({target})") }
+}
+
 fn render_reference_chain(chain: &[PathBuf]) -> String {
     chain
         .iter()
@@ -3506,17 +3626,38 @@ pub struct TaskTimeoutContext {
     pub raw: String,
 }
 
-/// Per-step missing-property record for [`CompositionError::SequenceMissingProperties`].
+/// Who owes the missing properties of one
+/// [`CompositionError::SequenceMissingProperties`] entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SequenceMissingSubject {
+    /// A root step's prompt document.
+    Step {
+        /// 1-based step number.
+        number: usize,
+        /// Display name of the step.
+        name: String,
+    },
+    /// A sequence document that owns a step list: the invoked root, or a
+    /// whole document a `sequence:` references. It may have no steps at all,
+    /// so it is never given a step number.
+    Document {
+        /// The container property path of the reference that reached it
+        /// (`sequence[1].sequence`); empty for the invoked root.
+        property: String,
+    },
+}
+
+/// One owner's missing-property record for
+/// [`CompositionError::SequenceMissingProperties`].
 ///
-/// Carries the same fields as a single-step [`CompositionError::MissingProperties`]
-/// so the CLI can render each step's report without having to re-validate.
+/// Carries the same fields as a single-document
+/// [`CompositionError::MissingProperties`] so the CLI can render each report
+/// without having to re-validate.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SequenceMissingPropertiesStep {
-    /// 1-based step number.
-    pub step: usize,
-    /// Display name of the step.
-    pub step_name: String,
-    /// The prompt file whose schema declared the missing properties.
+pub struct SequenceMissingPropertiesEntry {
+    /// The step or sequence document the properties are missing from.
+    pub subject: SequenceMissingSubject,
+    /// The file whose schema declared the missing properties.
     pub source_path: PathBuf,
     /// Missing properties in declaration order.
     pub missing: Vec<MissingProperty>,
@@ -3683,7 +3824,7 @@ impl CompositionError {
             .as_ref()
             .and_then(|snapshot| snapshot.detail.get("message"))
             .and_then(Value::as_str)
-            .unwrap_or(&info.msg)
+            .unwrap_or(info.msg.as_str())
             .to_string();
         Self::LifecycleEvaluationError {
             source_path: source_path.into(),

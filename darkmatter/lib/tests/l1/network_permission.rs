@@ -369,9 +369,10 @@ async fn slot_and_composition_reads_decide_alike() {
 //
 // Every URL surface (`::file`, `::code`, a read-side expression, a schema
 // slot) under one configuration and the exact per-run host `127.0.0.1`.
-// An invalid `permissions` block (any shape of `network`, or any other
-// invalid part of the block) is a located configuration error and no
-// request; a valid `allow`/`deny`, or an omitted block, fetches.
+// An invalid `permissions` block (any non-null shape of `network` that is
+// not `allow`/`deny`, or any other invalid part of the block) is a located
+// configuration error and no request; a valid `allow`/`deny`, or an omitted
+// block, fetches. A `null` is the same as leaving the key out.
 
 /// The four URL surfaces, each reading `server`'s `/rows.json`.
 fn url_surfaces(server: &MockServer) -> [(&'static str, String); 4] {
@@ -438,12 +439,10 @@ macro_rules! invalid_configuration_rows {
 }
 
 invalid_configuration_rows! {
-    network_null_outranks_an_exact_host: "permissions:\n  network: null\n", &["/permissions/network"];
     network_number_outranks_an_exact_host: "permissions:\n  network: 123\n", &["/permissions/network"];
     network_list_outranks_an_exact_host: "permissions:\n  network: []\n", &["/permissions/network"];
     network_empty_string_outranks_an_exact_host: "permissions:\n  network: \"\"\n", &["/permissions/network"];
     network_unknown_word_outranks_an_exact_host: "permissions:\n  network: sometimes\n", &["/permissions/network"];
-    null_permissions_outrank_an_exact_host: "permissions: null\n", &["/permissions"];
     an_invalid_file_read_entry_outranks_an_exact_host: "permissions:\n  file-read: [123]\n", &["/permissions/file-read"];
     an_invalid_shell_rule_outranks_an_exact_host: "permissions:\n  shell-commands: [frobnicate echo]\n", &["/permissions/shell-commands"];
     a_missing_permissions_reference_outranks_an_exact_host: "permissions: ./missing.yaml\n", &["missing.yaml"];
@@ -462,4 +461,14 @@ async fn valid_deny_fetches_every_surface_for_an_exact_host() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn omitted_permissions_fetch_every_surface_for_an_exact_host() {
     assert_fetches("{}\n").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_null_network_fetches_every_surface_for_an_exact_host_as_if_omitted() {
+    assert_fetches("permissions:\n  network: null\n").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn null_permissions_fetch_every_surface_for_an_exact_host_as_if_omitted() {
+    assert_fetches("permissions: null\n").await;
 }

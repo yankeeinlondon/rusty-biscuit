@@ -14,6 +14,7 @@ fn stack_action_sees_prior_set_frontmatter() {
     .unwrap();
     let fm = map(json!({"status": "pending"}));
     let (dir, engine) = temp_engine();
+    let source = dir.path().join("t.md");
     std::fs::write(
         dir.path().join("t.md"),
         "---\nstatus: pending\n---\nbody\n",
@@ -22,8 +23,8 @@ fn stack_action_sees_prior_set_frontmatter() {
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
     let harness = Harness::default();
-    // `source_path` is the bare file name so it resolves against the engine
-    // mutation root identically to the `set_frontmatter` target.
+    // The source lives in the mutation root, so the `set_frontmatter`
+    // target resolves beside it: the active document.
     let context = ctx(
         LifecycleSignal::Success,
         &fm,
@@ -32,7 +33,7 @@ fn stack_action_sees_prior_set_frontmatter() {
         &shell,
         &recorder,
         &harness,
-        Path::new("t.md"),
+        &source,
     );
     let outcome = context.execute_event(&config);
     assert_eq!(outcome, LifecycleEventOutcome::default());
@@ -64,6 +65,7 @@ fn frontmatter_mutation_in_start_is_visible_to_later_events() {
     let live = std::sync::Mutex::new(base.clone().into());
 
     let (dir, engine) = temp_engine();
+    let source = dir.path().join("t.md");
     std::fs::write(dir.path().join("t.md"), "---\nstatus: pending\n---\nbody\n").unwrap();
     let shell = MockShell::new(0);
     let harness = Harness::default();
@@ -79,7 +81,7 @@ fn frontmatter_mutation_in_start_is_visible_to_later_events() {
             &shell,
             &recorder,
             &harness,
-            Path::new("t.md"),
+            &source,
         );
         let outcome = context.execute_event(&config);
         assert_eq!(outcome, LifecycleEventOutcome::default());
@@ -98,7 +100,7 @@ fn frontmatter_mutation_in_start_is_visible_to_later_events() {
             &shell,
             &recorder,
             &harness,
-            Path::new("t.md"),
+            &source,
         );
         context.execute_event(&config);
         assert_eq!(
@@ -118,7 +120,7 @@ fn frontmatter_mutation_in_start_is_visible_to_later_events() {
             &shell,
             &recorder,
             &harness,
-            Path::new("t.md"),
+            &source,
         );
         context.execute_event(&config);
         assert_eq!(
@@ -145,6 +147,7 @@ fn without_live_cell_later_event_resolves_against_its_own_base() {
     .unwrap();
 
     let (dir, engine) = temp_engine();
+    let source = dir.path().join("t.md");
     std::fs::write(dir.path().join("t.md"), "---\nstatus: pending\n---\nbody\n").unwrap();
     let shell = MockShell::new(0);
     let harness = Harness::default();
@@ -162,10 +165,12 @@ fn without_live_cell_later_event_resolves_against_its_own_base() {
             &shell,
             &recorder,
             &harness,
-            Path::new("t.md"),
+            &source,
         );
-        context.execute_event(&config);
+        assert_eq!(context.execute_event(&config), LifecycleEventOutcome::default());
     }
+    // The write landed, so the control below is not vacuous.
+    assert!(std::fs::read_to_string(dir.path().join("t.md")).unwrap().contains("running"));
 
     // success: a fresh single-event context with the ORIGINAL base sees the
     // original value, proving the None path carries no cross-event state.
@@ -179,7 +184,7 @@ fn without_live_cell_later_event_resolves_against_its_own_base() {
         &shell,
         &recorder,
         &harness,
-        Path::new("t.md"),
+        &source,
     );
     context.execute_event(&config);
     assert_eq!(

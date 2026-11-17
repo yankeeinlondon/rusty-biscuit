@@ -331,7 +331,7 @@ Two different things can carry constraints:
 - **The definition you write** carries the constraints of the type it describes,
   as in `"string(min(1))[]"` or `"tuple([string, number]; required)"`.
 - **The `type-definition` declaration** in a `$schema` takes only the universal
-  `required`, `non-null`, `eager`, `default(...)`, and `generated`, plus three
+  `required`, `not-empty`, `eager`, `default(...)`, and `generated`, plus three
   options that narrow which definitions it accepts: `forms(...)`,
   `declared-required`, and `container`. Combine them with `;`:
   `type-definition(container; declared-required)`.
@@ -522,9 +522,11 @@ composed: "md-stack@darkmatter:md-lifecycle -> actions run after the document co
 Each event takes a list of actions or a dictionary of verbs, and a list item
 can be a `when`/`then`/`else` conditional. md's profile is deliberately
 tolerant, because the baseline is prepared for every document: a stack is
-typed three conditional levels deep, a `then`/`else` body below that is
-accepted loosely, and side-effect and expression-function arguments are not
-typed; the lifecycle parser still checks all of it when the stack runs. A
+typed three conditional levels deep, a `then`/`else` body below that is not
+typed, and side-effect and expression-function arguments are not typed. The
+lifecycle parser checks all of it when the stack runs, and validation already
+applies the parser's placement rules at every depth (see
+[Placement rules](#placement-rules-at-every-depth)). A
 host profile built from the `lifecycle` partial can do more: Claudine's
 stacks are recursive, typed at every depth, and type every generated verb's
 arguments (see [The two lifecycle partials](#the-two-lifecycle-partials)). A
@@ -535,7 +537,7 @@ list item in md's profile is one of:
 | a communicate verb: `stdout`, `stderr`, `info`, `warn`, `success`, `message` | `info: done` or `info: { text: done }` | short form (a string) or closed long form |
 | a flow verb: `stop`, `skip`, `error` | `error: { reason: no title }` | short or closed long form |
 | `shell` (not in `initialize`) | `shell: ./publish.sh` | short or long form |
-| `set`, a side effect, or an expression function | `set: { status: done }` | the key is checked, its arguments are left to the parser |
+| `set`, a side effect, or an expression function | `set: { status: done }` | the key is checked, its arguments are left to the parser; a `no_error` in its long form must still be a boolean |
 | a dictionary of verbs (a bundle) | `{ info: hi, when: draft }` | short forms plus `when` and `no_error` |
 | a conditional | `when: draft` with `then:` / `else:` | `when` is an `expression` |
 | a bare zero-argument verb | `- stop` | a string; completion suggests md's bare verbs |
@@ -561,10 +563,62 @@ initialize:
     - shell: ./prepare.sh            # schema error: no shell in initialize
 ```
 
+#### Placement rules at every depth
+
+Some mistakes are about where a key sits rather than what it holds, and
+the lifecycle parser refuses them before a stack runs. Validation reports
+the same ones, at the same places, so the editor and `md schema validate`
+show them before `md compose` does.
+
 `then` and `else` share one pattern key in md conditionals, which keeps the
-baseline small enough to prepare for every document. Two consequences: only
-the lifecycle parser, not the schema, requires `then`, and the editor does not
-complete `then`/`else` inside these stacks.
+baseline small enough to prepare for every document. As a consequence the
+editor does not complete `then`/`else` inside these stacks. The types alone
+would not require `then` either, but validation also runs the lifecycle
+parser's placement rules on every action dictionary, so these are reported
+just as `md compose` refuses them:
+
+```yaml
+composed:
+    - when: draft                    # error: the `when` guards nothing
+    - when: draft
+      else: [stop]                   # error: `else` requires `then`
+    - when: draft
+      then: [stop]
+      no_error: false                # error: put the flag on the actions in `then`
+    - set: { status: done }
+      no_error: null                 # error: `set` takes no flag
+```
+
+A `no_error: false` that schema completion fills in beside `then` (or beside
+`set`) is not yours and is never reported. A stack a caller supplies in place
+of yours (a `--set` value, or a host's override) is judged by the flags
+written in it, never by the ones it replaced, and a stack a transcluded
+document inherits from the document that includes it is judged there, once.
+
+These rules hold below the third conditional level too, where md's profile
+stops typing: every list item and dictionary of verbs in a deeper
+`then`/`else` body is judged the same way, including a `no_error` that is
+not a boolean inside the long form of an md verb, a side effect, or an
+expression function:
+
+```yaml
+composed:
+    - when: a
+      then:
+          - when: b
+            then:
+                - when: c
+                  then:                          # level 4 and below: not typed
+                      - when: d                  # error: the `when` guards nothing
+                      - info: { text: hi, no_error: 1 }   # error: not a boolean
+                      - say: { text: hi, no_error: 1 }    # valid: md never reads `say`
+```
+
+Below level 3 nothing else is typed: a misspelled long form of an md verb
+or a `shell` in `initialize` there is reported by `md compose`, not by
+validation. Neither md's profile nor Claudine's limits how deep conditionals
+nest; the parser allows five levels and refuses a sixth when the stack is
+parsed.
 
 The baseline types only md's own event names. A key that only another host
 gives meaning, such as Claudine's `start` or `blocked`, is ordinary untyped
@@ -1602,7 +1656,7 @@ instead; see [Validating from the Library](#validating-from-the-library).
 |-----------------------|---------------------------------------------------------------------------------------------------------------------|
 | `DarkmatterSchemas`   | Top-level entry point. Holds the request's file-resolution context, an optional baseline, and the LRU validator cache. |
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's winning declaration: document, referenced file, trigger, or baseline; see [Embedded trigger bundles](#embedded-trigger-bundles) for reading a trigger's source). |
-| `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`) + `defaults: Vec<AppliedDefault>`: the absent required properties the verdict accepted through their `default(...)`, in validator order (parents before children, declaration order, ascending array index); empty for an unconditional pass. Validation never inserts them into the caller's value. |
+| `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`) + `defaults: Vec<AppliedDefault>`: every `default(...)` the verdict applied to a missing or `null` value, required or optional, in validator order (parents before children, declaration order, ascending array index); empty when no default applied. Validation never inserts them into the caller's value. |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
 | `PreparationSummary`  | What the effective-schema resolution behind `DarkmatterSchemas::validate_summarized` found, returned beside its report: its `layers` and `has_schema()`, which is `false` when no baseline, trigger, or `$schema` applied. |
 | `SchemaLayers`        | Which layers an effective schema merged: `document` (the document's own `$schema`), `triggers` (the matching `TriggerSource`s that layered a payload), and `baseline`. Read from `PreparationSummary::layers` or `EffectiveSchema::layers()`. |
@@ -2053,10 +2107,11 @@ $schema: docs.yaml
 
 Property conditions reuse SimplifiedSchema type expressions. A condition
 without `required` is a guard: absence is allowed, but a present value of the
-wrong type defeats the match. `required` makes it a presence gate, except on
-a [null-admitting](../../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties) type: `steps: unknown(required)`
-is only a guard and cannot satisfy the vacuity rule below, while
-`steps: unknown[](required)` is a gate that requires a list. Match-safe
+wrong type defeats the match. `required` makes it a presence gate on every
+type: the key must be written, and its value must match. `steps:
+unknown(required)` is satisfied by any written value, `null` included, and
+counts toward the vacuity rule below; `steps: unknown[](required)` also
+requires the value to be a list. Match-safe
 constraints are limited to structural types plus pure constraints such as
 `required`, `enum`, `pattern`, length/range, item-count, and key-count.
 Stateful or phase-specific constraints (`eager`, imports, `example`,
@@ -2090,10 +2145,11 @@ child of a combinator: `none: [{}]` would otherwise make the trigger
 unmatchable, and `all: [{}, …]` would hide a dropped condition. A load error
 names the field it is about, from `match` down: `` `match[1].group[0]` ``.
 
-Use a concrete type for a presence gate, such as `prompt: string(required)`
-or `steps: unknown[](required)`. `unknown(required)` and its alias
-`any(required)` admit omission and null, so neither establishes presence.
-A concrete type also limits which non-null values select the trigger:
+Any `required` condition is a presence gate: `prompt: string(required)`,
+`steps: unknown[](required)`, and `steps: unknown(required)` (alias
+`any(required)`) all need the key written. `unknown(required)` accepts any
+written value, `null` included. A concrete type also limits which values
+select the trigger:
 `steps: unknown[](required)` does not match `steps: false`. Write the type for
 the values that the target document actually accepts.
 

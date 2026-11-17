@@ -58,6 +58,13 @@
 //! `[[bin]]` and reads the records back with
 //! [`argv_recorder::read_argv_records`].
 //!
+//! ## Fake editor
+//!
+//! [`fake_editor`] is the body of a native fake text editor driven by
+//! environment variables (record its arguments, write or atomically replace
+//! the target, hold until killed, spawn a child); a consuming package wraps it
+//! in a thin `[[bin]]` and points `EDITOR` at that binary.
+//!
 //! ## Consolidated test layout
 //!
 //! [`test_layout`] is the layout gate for a package that declares its test
@@ -70,6 +77,7 @@ pub mod archive_guard;
 pub mod argv_recorder;
 pub mod backend;
 pub mod evidence;
+pub mod fake_editor;
 pub mod spool;
 pub mod test_layout;
 

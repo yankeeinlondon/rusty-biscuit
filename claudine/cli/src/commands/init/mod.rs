@@ -190,7 +190,8 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: Default::default(),
-        steering: Default::default(),
+        // The schema projection of an unset section (`enabled: true`).
+        steering: ClaudineConfig::default().steering,
         permissions: None,
     };
 
@@ -298,19 +299,26 @@ fn write_with_darkmatter_setup(repo_scope: bool, config: &ClaudineConfig) -> Res
 /// differs from the schema's defaults; a repository file gets only the
 /// repository overrides setup manages (its actions). Either keeps every other
 /// key and comment of an existing file.
+/// Writes the wizard's configuration. An event bound to no action is left
+/// out of the file: an event's action list must not be empty
+/// (`action[](not-empty)`), and leaving it out means the same thing. The
+/// in-memory bindings keep every event, which hook registration reads.
 fn write_init_config(
     repo_scope: bool,
     config: &ClaudineConfig,
     path: &std::path::Path,
 ) -> claudine::error::Result<SaveOutcome> {
+    let actions: HashMap<AgenticEvent, Vec<HookAction>> =
+        config.actions.iter().filter(|(_, actions)| !actions.is_empty()).map(|(event, actions)| (*event, actions.clone())).collect();
     if repo_scope {
         let overrides = RepoOverrideConfig {
-            actions: config.actions.clone(),
+            actions,
             ..RepoOverrideConfig::default()
         };
         persist::initialize_config(path, ConfigScope::Repository, &RepoOverrideConfig::default(), &overrides)
     } else {
-        persist::initialize_config(path, ConfigScope::User, &ClaudineConfig::default(), config)
+        let written = ClaudineConfig { actions, ..config.clone() };
+        persist::initialize_config(path, ConfigScope::User, &ClaudineConfig::default(), &written)
     }
 }
 
@@ -521,7 +529,8 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: Default::default(),
-        steering: Default::default(),
+        // The schema projection of an unset section (`enabled: true`).
+        steering: ClaudineConfig::default().steering,
         permissions: None,
     })
 }
@@ -635,7 +644,8 @@ mod tests {
             harvest_unmatched: false,
             exit_expressions: None,
             guard_settings: Default::default(),
-            steering: Default::default(),
+            // The schema projection of an unset section (`enabled: true`).
+        steering: ClaudineConfig::default().steering,
             permissions: None,
         }
     }
@@ -785,23 +795,30 @@ mod tests {
         let original = "# team\ncanonical_provider: codex\npermissions:\n  network: deny\n";
         std::fs::write(&path, original).unwrap();
 
-        write_init_config(true, &config_with_actions(vec![(AgenticEvent::SessionStart, vec![])]), &path).unwrap();
+        let sound = HookAction::SoundEffect { effect: "doorbell".to_string(), volume: 1.0, speed: 1.0, when: None };
+        let config = config_with_actions(vec![(AgenticEvent::SessionStart, vec![sound]), (AgenticEvent::TurnComplete, vec![])]);
+        write_init_config(true, &config, &path).unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.starts_with(original), "{text}");
-        assert!(load_repo_override_config(&path).unwrap().unwrap().actions.contains_key(&AgenticEvent::SessionStart));
+        let actions = load_repo_override_config(&path).unwrap().unwrap().actions;
+        assert!(actions.contains_key(&AgenticEvent::SessionStart));
+        assert!(!actions.contains_key(&AgenticEvent::TurnComplete), "an event with no action is not written");
     }
 
     #[test]
     fn user_init_loads_back_as_the_defaults_plus_its_values() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
-        let config = config_with_actions(vec![(AgenticEvent::SessionStart, vec![])]);
+        let sound = HookAction::SoundEffect { effect: "doorbell".to_string(), volume: 1.0, speed: 1.0, when: None };
+        let config = config_with_actions(vec![(AgenticEvent::SessionStart, vec![sound]), (AgenticEvent::TurnComplete, vec![])]);
 
         write_init_config(false, &config, &path).unwrap();
 
         let loaded = load_claudine_config(Some(&path), None).unwrap();
-        assert_eq!(serde_json::to_value(&loaded).unwrap(), serde_json::to_value(&config).unwrap());
+        let mut expected = config.clone();
+        expected.actions.remove(&AgenticEvent::TurnComplete);
+        assert_eq!(serde_json::to_value(&loaded).unwrap(), serde_json::to_value(&expected).unwrap());
     }
 
     #[test]

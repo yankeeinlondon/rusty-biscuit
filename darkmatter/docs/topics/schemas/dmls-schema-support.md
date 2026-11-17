@@ -434,6 +434,7 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 The severity policy follows one guiding principle: *diagnose edit-time problems, not compose-time ones*. A document is a template; values arrive at compose time via CLI `--set`, seeds, `$(...)` expansion, or an interactive prompt. So:
 
 - a `required` key that is absent is **not** flagged by default — it is expected to be injected at launch (`schema.strict` re-enables it)
+- a key whose `default(...)` fills it, because it is missing or written as `null`, is never missing, even in strict mode, and expressions read it as present; a default that breaks its own definition is reported at its inline `$schema` declaration (or at the `$schema` value that references its file), and the document is not changed
 - a value holding a deferred `{{ … }}` or `$(...)` construct is not type-checked; its type is unknowable until the value is real
 - `unknown_key` is a warning by default and an error in strict mode
 
@@ -578,14 +579,14 @@ While *authoring a schema* — inside an inline `$schema` value, a `type-definit
 - `alphanumeric` options inside `alphanumeric(` before the first `;`, leaving out the options already written there; after the `;`, only constraints
 - definition scaffolds: `{}`, `[]`, and `Name@./types.yaml`
 - constraint keywords from the [`SimplifiedSchema` Constraints](./schema-constraints.md) catalog, **filtered by the subject type's accepted-constraint list** — `min(` is not offered under a `boolean`, and the postfix `[](...)` list offers only the array-level constraint surface
-- keys of a schema object's `$constraints:` mapping, leaving out the keys already written there: a declaration's root (or a root-union arm) is offered `min-keys`, `max-keys`, `uncounted-keys`, and `closed`, and a property's object is also offered `required`, `non-null`, and `generated`. A flag is inserted with its only value (`closed: true`); a counted key leaves its value to you (`min-keys: `)
+- keys of a schema object's `$constraints:` mapping, leaving out the keys already written there: a declaration's root (or a root-union arm) is offered `min-keys`, `max-keys`, `uncounted-keys`, `closed`, and `not-empty`, and a property's object is also offered `required` and `generated`. A flag is inserted with its only value (`closed: true`); a counted key leaves its value to you (`min-keys: `)
 
   ```yaml
   $schema:
     title: string
     $constraints:
       min-keys: 1
-      # completion here offers max-keys, uncounted-keys, closed
+      # completion here offers max-keys, uncounted-keys, closed, not-empty
   ```
 - `$schema` file references (`./schema.yaml` scaffolds plus workspace paths)
 

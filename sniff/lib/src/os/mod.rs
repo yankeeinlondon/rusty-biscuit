@@ -24,6 +24,7 @@ use crate::performance;
 use crate::request::OsRequest;
 
 // Submodules
+mod display;
 mod distro;
 mod locale;
 mod package_manager;
@@ -35,6 +36,7 @@ mod working_processes;
 mod windows_timezone_map;
 
 // Re-export all public types for API stability
+pub use display::{DisplaySession, detect_display_session, display_session_from};
 pub use distro::{
     LinuxDistro, LinuxFamily, detect_linux_distro, infer_linux_family, parse_lsb_release_content,
     parse_os_release_content, parse_system_release_content,

@@ -21,7 +21,7 @@ use darkmatter::markdown::compose::{ComposeOptions, OverrideLayer, OverrideOrigi
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
-use super::sequence::reserved::ROOT_OVERLAY_KEYS;
+use super::sequence::reserved::{self, ROOT_OVERLAY_KEYS};
 
 /// The output member name within the sequence runtime root.
 pub const OUTPUTS_KEY: &str = "outputs";
@@ -42,6 +42,16 @@ pub enum RuntimeMutationError {
     ReservedKey {
         /// The refused key.
         key: String,
+    },
+    /// During sequence execution, the target writes a sequence declaration
+    /// (`$state`, `template`, or a path under one). A runtime write supplies a
+    /// value, never a change to the plan.
+    #[error("`{key}` writes the sequence declaration `{declaration}`, which `set` cannot change")]
+    DeclarationKey {
+        /// The refused key.
+        key: String,
+        /// The declaration it would replace.
+        declaration: &'static str,
     },
     /// Darkmatter refused the key shape (empty, or a dotted path — v1 `set`
     /// writes top-level keys only).
@@ -76,6 +86,10 @@ pub struct RuntimeSnapshot {
 #[derive(Debug, Default)]
 pub struct RuntimeState {
     inner: Mutex<RuntimeSnapshot>,
+    /// Whether this cell belongs to a sequence execution, where a write to a
+    /// sequence declaration is refused. An ordinary document run's cell keeps
+    /// accepting a root `template` or `$state` as plain data.
+    sequence: bool,
 }
 
 impl RuntimeState {
@@ -93,7 +107,28 @@ impl RuntimeState {
     pub fn from_snapshot(snapshot: RuntimeSnapshot) -> Self {
         Self {
             inner: Mutex::new(snapshot),
+            sequence: false,
         }
+    }
+
+    /// Create an empty cell for a sequence execution, which refuses writes
+    /// to the sequence declarations ([`reserved::SEQUENCE_DECLARATION_KEYS`]).
+    pub fn new_sequence() -> Self {
+        Self::from_sequence_snapshot(RuntimeSnapshot::default())
+    }
+
+    /// [`Self::from_snapshot`] for a branch of a sequence execution (a group
+    /// leg's private buffer), keeping its declaration refusal.
+    pub fn from_sequence_snapshot(snapshot: RuntimeSnapshot) -> Self {
+        Self {
+            inner: Mutex::new(snapshot),
+            sequence: true,
+        }
+    }
+
+    /// Whether this cell belongs to a sequence execution.
+    pub fn is_sequence(&self) -> bool {
+        self.sequence
     }
 
     /// Install a child position without publishing it as frontmatter.
@@ -216,8 +251,10 @@ impl RuntimeState {
     ///
     /// ## Errors
     ///
-    /// [`RuntimeMutationError::ReservedKey`] for a reserved overlay/generated
-    /// key, [`RuntimeMutationError::Effect`] for an empty or dotted key.
+    /// [`RuntimeMutationError::ReservedKey`] for a reserved overlay key,
+    /// [`RuntimeMutationError::DeclarationKey`] for a sequence declaration in
+    /// a sequence execution, [`RuntimeMutationError::Effect`] for an empty or
+    /// dotted key.
     pub fn set(
         &self,
         engine: &EffectEngine,
@@ -250,6 +287,11 @@ impl RuntimeState {
         for (key, value) in updates {
             if ROOT_OVERLAY_KEYS.contains(&key.as_str()) {
                 return Err(RuntimeMutationError::ReservedKey { key: key.clone() });
+            }
+            if self.sequence
+                && let Some(declaration) = reserved::declaration_written_by(key)
+            {
+                return Err(RuntimeMutationError::DeclarationKey { key: key.clone(), declaration });
             }
             engine.set(&mut validated, key, value.clone())?;
         }

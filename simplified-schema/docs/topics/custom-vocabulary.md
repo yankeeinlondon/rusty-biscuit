@@ -26,10 +26,14 @@ validator:
 - **accepts less** where the library uses an annotation to *relax* a check:
   a `{{ … }}` template under `x-darkmatter-deferred` is judged as text against
   the declared type, so it fails a `number`;
+- **applies no defaults**: `default` is a standard annotation that fills
+  nothing, so `{}` fails a property declared `number(required; default(3))`,
+  and an optional `n: null` stays `null` where this library would
+  [apply the default](./validation.md#exported-json-schema-does-not-apply-defaults);
 - still enforces everything standard the lowering emits beside them: `type`,
   `pattern`, bounds, `required`, `enum`, `const`, `prefixItems`,
-  `additionalProperties`, and so on. A
-  [`non-null`](./language/types.md#non-null-properties) property and a
+  `additionalProperties`, and so on. [`not-empty`](./language/types.md#empty-values-not-empty)
+  (`pattern`, `minItems`, `minProperties`) and a
   [closed root](./language/objects-and-named-types.md#closed-roots-closed)
   lower to standard JSON Schema only, so any validator enforces them.
 

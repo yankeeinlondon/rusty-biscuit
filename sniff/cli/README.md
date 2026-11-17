@@ -262,16 +262,12 @@ rather than an ordinary install failure. The timeout warning is rendered after
 the failure status and before any retry prompt, so you see it before deciding
 whether to try another installation method.
 
-A timed-out install may leave a **partial install** behind. On Unix, killing
-the installer's process tree is best-effort: everything in the installer's
-process group is terminated, but a descendant that forks and calls `setsid()`
-between sniff's samples escapes that group and can keep running — and keep
-modifying your system — after sniff has reported the timeout. Third-party
-package managers and remote shell installers do sometimes fork and detach, so
-treat a reported timeout as "state unknown" and re-check with
-`sniff software <category>` before retrying. On Windows the installer is
-confined to a kill-on-close Job Object, so termination is enforced by the
-kernel and nothing escapes.
+A timed-out install may leave a **partial install** behind: on Unix a
+descendant that forks and calls `setsid()` between sniff's samples can escape
+cleanup and keep modifying your system, so treat a timeout as "state unknown"
+and re-check with `sniff software <category>` before retrying. On Windows the
+installer runs in a kill-on-close Job Object attached before it starts, so
+nothing it starts escapes ([process trees](../docs/topics/process-trees.md)).
 
 **Software Output:**
 

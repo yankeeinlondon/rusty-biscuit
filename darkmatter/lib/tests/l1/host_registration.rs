@@ -330,7 +330,7 @@ fn a_missing_import_of_a_trigger_refuses_the_registration() {
 #[test]
 fn an_invalid_trigger_refuses_the_registration() {
     for text in [
-        "kind: schema-trigger\nmatch: {}\n$schema: {}\n",
+        "kind: schema-trigger\nmatch: {}\n",
         "kind: schema\ntypes: {}\n",
         "kind: schema-trigger\nmatch:\n    gadget: string(required)\n$schema:\n    gadget: nope@./library.yaml\n",
     ] {
@@ -388,9 +388,9 @@ fn a_bad_or_stale_facts_artifact_refuses_the_registration() {
 #[test]
 fn an_identifying_trigger_on_md_owned_keys_is_too_broad() {
     for identify in [
-        "kind: schema-trigger\nmatch:\n    initialize: object(required)\n$schema: {}\n",
-        "kind: schema-trigger\nmatch:\n    group:\n        - widget: object(required)\n        - composed: object(required)\n$schema: {}\n",
-        "kind: schema-trigger\nmatch:\n    group:\n        - widget: object(required)\n        - $path: \"**/*.md\"\n$schema: {}\n",
+        "kind: schema-trigger\nmatch:\n    initialize: object(required)\n",
+        "kind: schema-trigger\nmatch:\n    group:\n        - widget: object(required)\n        - composed: object(required)\n",
+        "kind: schema-trigger\nmatch:\n    group:\n        - widget: object(required)\n        - $path: \"**/*.md\"\n",
     ] {
         let fixture = Fixture::new();
         fixture.write("host/schemas/identify.yaml", identify);

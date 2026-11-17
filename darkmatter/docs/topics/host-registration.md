@@ -96,7 +96,8 @@ The schema of the envelope ships with Darkmatter
 ## The identifying trigger
 
 A host's schemas apply only to documents its identifying trigger matches. It
-is an ordinary `schema-trigger`; its `$schema` payload may be empty:
+is an ordinary `schema-trigger`; it needs no payload, so it can leave
+`$schema` out:
 
 ```yaml
 # ./schemas/identify.yaml
@@ -105,7 +106,6 @@ match:
     group:
         - widget: object(required)
         - gadget: string(required)
-$schema: {}
 ```
 
 Every alternative must require at least one non-null top-level key that the

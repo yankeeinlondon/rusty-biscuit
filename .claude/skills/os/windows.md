@@ -297,7 +297,44 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   non-fatal and degrade to terminating the child alone, as `windows_wait_loop`
   does. Code that spawns through a Job behaves differently under
   `just cross-check` than in an interactive session; check `IsProcessInJob`
-  before blaming the code.
+  before blaming the code. That degrade-to-direct-child fallback is
+  `windows_wait_loop`'s provider policy only: Sniff's shared
+  `ProcessTree::attach` reports the assignment failure and every caller fails
+  closed, so on such a host an owned spawn fails rather than running unowned
+  ([process trees](../../../sniff/docs/topics/process-trees.md)).
+- **The lifecycle `edit` launcher on Windows** (`darkmatter/lib/src/editor/launch.rs`,
+  using `sniff::process::ProcessTree`) differs from Unix in three ways:
+  - *Job assignment before the editor runs.* The editor is spawned
+    suspended, assigned to a kill-on-close Job, and only then resumed, so
+    nothing it starts escapes the Job. If assignment fails
+    (`ProcessTree::attach` returns an error) the editor is killed and the
+    edit fails; it does not degrade the way `windows_wait_loop` does. A
+    successful edit clears kill-on-close before closing the Job
+    (`ProcessTree::release`), so a GUI window the waiting client started
+    stays open; if clearing fails, the Job is closed (the editor with it)
+    and the edit still succeeds with a warning. Cancellation terminates the
+    Job (no grace period). See
+    [process trees](../../../sniff/docs/topics/process-trees.md).
+  - *Shared console.* There is no foreground handoff
+    (`sniff::process::ForegroundHandoff` is always inactive off Unix): a terminal editor shares the host's console
+    and is not given its own process group. A Ctrl-C the console turns into
+    `CTRL_C_EVENT` reaches the host too, so `md compose`'s `ctrlc` handler
+    (or Claudine's console handler) records an interrupt and the launcher's
+    20 ms poll terminates the Job, cancelling the run. On Unix the same
+    press reaches only the editor. An editor that turns off processed input
+    reads Ctrl-C as a key and nobody is interrupted. Claudine's lifecycle
+    shells get the same inactive guard; they start with
+    `CREATE_NEW_PROCESS_GROUP`, whose group ignores `CTRL_C_EVENT` by
+    default, so a typed Ctrl-C is handled by Claudine's console handler
+    rather than by the command.
+  - *`.cmd` shims.* The resolver looks the configured token up with Sniff's
+    `find_program` (the `which` crate, honoring `PATHEXT`), so `EDITOR=code`
+    becomes the full `...\bin\code.cmd` path and `Editor::identify` strips
+    `.cmd` to add `--wait`. `Command::new` on that path runs it through
+    `cmd.exe` with std's batch quoting; a bare `Command::new("code")` would
+    look only for `code.exe`. The batch-argument limit above applies to the
+    target path. No test launches a real `.cmd` editor; the fake editor is
+    installed as `code.exe`.
 - **`io::Error::from(windows::core::Error)` keeps the HRESULT as the raw OS
   error**, so a missing file reports `0x80070002` with an uncategorized kind,
   never `NotFound`. Before branching on `ErrorKind`, unwrap a `FACILITY_WIN32`

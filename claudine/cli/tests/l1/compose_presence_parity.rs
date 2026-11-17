@@ -1,11 +1,10 @@
-//! Claudine's launch and completion gates follow Darkmatter's effective
-//! presence end to end (acceptance criterion 12 of
-//! `2026-10-16-core-schema-types`): through a real `claudine compose`, a
-//! null-admitting whole value (`null`, `unknown`, a union with a `null` arm)
-//! is optional whatever its `required` marker, while a concrete `required`
-//! property and a required list of `unknown` items stay required. A value
-//! that fails a nullable union's concrete arm is handled as any invalid
-//! optional value is (dropped with a warning).
+//! Claudine's launch and completion gates follow Darkmatter's presence end
+//! to end: through a real `claudine compose`, `required` asks only whether
+//! the key was written. A null-admitting type (`null`, `unknown`, a union
+//! with a `null` arm) accepts a written `null` but never cancels `required`;
+//! a concrete `required` property and a required list of `unknown` items
+//! reject `null` as a wrong type. A value that fails an *optional* nullable
+//! union's concrete arm is dropped with a warning.
 //!
 //! Each row launches a stub provider that records that it ran, so the row
 //! shows which gate decided: a launch-gate failure never starts the provider;
@@ -24,6 +23,7 @@ const SCHEMA: &str = concat!(
     "  c: ['string(required; min(3))', 'null']\n",
     "  d: 'string(required)'\n",
     "  e: 'unknown[](required)'\n",
+    "  f: ['string(min(3))', 'null']\n",
 );
 
 #[cfg(unix)]
@@ -100,26 +100,29 @@ macro_rules! presence_rows {
 const CLEAR_AT_START: &str = "start:\n    - {set: {a: null, b: null, c: null}}\n";
 
 presence_rows! {
-    // Control row: every concrete requirement met, every nullable omitted.
-    null_admitting_properties_may_be_omitted:
-        "d: present\ne: []\n" => Outcome::Succeeded, None::<&str>;
+    // Control row: every requirement met, the null-admitting ones by `null`.
     null_admitting_properties_may_be_explicitly_null:
         "a: null\nb: null\nc: null\nd: present\ne: [1, x, null]\n" => Outcome::Succeeded, None::<&str>;
+    // A null-admitting type does not make its key optional.
+    null_admitting_required_properties_must_be_written:
+        "d: present\ne: []\n" => Outcome::FailedAtLaunch, Some("missing properties");
     // Direct `compose` has no agent to supply a property, so its launch gate
-    // already demands every effectively required one.
+    // already demands every required one.
     an_omitted_required_string_fails_before_launch:
-        "e: []\n" => Outcome::FailedAtLaunch, Some("missing properties");
+        "a: null\nb: null\nc: null\ne: []\n" => Outcome::FailedAtLaunch, Some("missing properties");
     an_omitted_required_unknown_list_fails_before_launch:
-        "d: present\n" => Outcome::FailedAtLaunch, Some("missing properties");
+        "a: null\nb: null\nc: null\nd: present\n" => Outcome::FailedAtLaunch, Some("missing properties");
     nullables_cleared_by_start_pass_completion:
-        &format!("a: 1\nb: x\nc: abc\nd: present\ne: []\n{CLEAR_AT_START}") => Outcome::Succeeded, None::<&str>;
+        &format!("a: null\nb: x\nc: abc\nd: present\ne: []\n{CLEAR_AT_START}") => Outcome::Succeeded, None::<&str>;
     a_required_string_cleared_by_start_fails_completion:
-        "d: present\ne: []\nstart:\n    - {set: {d: null}}\n" => Outcome::FailedAtCompletion, Some("completion schema");
+        "a: null\nb: null\nc: null\nd: present\ne: []\nstart:\n    - {set: {d: null}}\n" => Outcome::FailedAtCompletion, Some("completion schema");
     a_required_unknown_list_cleared_by_start_fails_completion:
-        "d: present\ne: []\nstart:\n    - {set: {e: null}}\n" => Outcome::FailedAtCompletion, Some("completion schema");
+        "a: null\nb: null\nc: null\nd: present\ne: []\nstart:\n    - {set: {e: null}}\n" => Outcome::FailedAtCompletion, Some("completion schema");
     // Claudine's consumer policy for an invalid *optional* value: it is
-    // dropped with a warning rather than failing the run. The nullable union
-    // is optional, so `ab` (rejected by Darkmatter's validator) is dropped.
-    a_short_value_in_a_nullable_union_is_dropped_as_optional:
-        "c: ab\nd: present\ne: []\n" => Outcome::Succeeded, Some("dropped optional schema property `c`");
+    // dropped with a warning rather than failing the run.
+    a_short_value_in_an_optional_nullable_union_is_dropped:
+        "a: null\nb: null\nc: null\nd: present\ne: []\nf: ab\n" => Outcome::Succeeded, Some("dropped optional schema property `f`");
+    // A required one is not dropped: the run fails before launch.
+    a_short_value_in_a_required_nullable_union_fails_before_launch:
+        "a: null\nb: null\nc: ab\nd: present\ne: []\n" => Outcome::FailedAtLaunch, None::<&str>;
 }

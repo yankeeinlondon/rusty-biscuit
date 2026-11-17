@@ -69,8 +69,7 @@ fn the_identifying_trigger_is_admitted_and_is_the_key_by_type_cross_product() {
     let parsed = envelope(text);
     assert!(admit_identifying_trigger(&parsed.conditions, md_owned_names()).is_ok());
     assert_eq!(parsed.conditions, cross_product(&IDENTIFYING_KEYS), "one alternative per key and non-null type");
-    let payload = parsed.payload.as_ref().and_then(|payload| payload.as_mapping());
-    assert!(payload.is_some_and(|payload| payload.is_empty()), "identification adds no types: {payload:?}");
+    assert!(parsed.payload.is_none(), "identification adds no types: {:?}", parsed.payload);
 
     // Claudine's runtime never applies or runs anything through it.
     let embedded = claudine::composition::schema::bundle::CLAUDINE_SCHEMA_FILES;

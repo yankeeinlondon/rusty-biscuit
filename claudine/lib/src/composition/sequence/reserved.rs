@@ -25,13 +25,30 @@ pub const EXECUTABLE_KEYS: &[&str] = &["prompt", "shell", "side_effect", "group"
 /// `loop` is an inline nested sequence's loop;
 /// [`super::grammar::validate_task_grammar`] rejects it on every other task
 /// before options are partitioned.
+///
+/// `$schema`, `$state`, and `template` are an inline nested sequence's own
+/// declarations ([`SEQUENCE_DECLARATION_KEYS`] plus its check-only `$schema`);
+/// they are extracted as options so a parent never reads them as step data,
+/// and [`super::declarations`] refuses them beside any other source.
 pub const TASK_OPTION_KEYS: &[&str] = &[
     "name", "with", "timeout", "operation", "flow", "when", "loop",
     "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize",
+    "$schema", "$state", "template",
 ];
 
+/// The declarations a sequence owner carries beside its inline list: the
+/// step-state schema and the template defaults.
+///
+/// They describe the plan, never a value, so no value route may write them:
+/// not a step's state, a template default, a sequence setter, a prompt task's
+/// `with:`, or a runtime `set` during sequence execution
+/// ([`is_declaration_write`]). Root `$schema` is not one of them: it is the
+/// document schema and follows the ordinary document rules.
+pub const SEQUENCE_DECLARATION_KEYS: &[&str] = &["$state", "template"];
+
 /// Fields generated onto every `step_state`. Authors may declare them in a
-/// `$schema` with `generated`, but may never provide or override a value.
+/// `$state` schema with `generated`, but may never provide or override a
+/// value.
 pub const GENERATED_STATE_KEYS: &[&str] =
     &["id", "sequence_id", "is_first", "is_last", "index", "count", "run_id", "previous", "next", "outputs"];
 
@@ -55,18 +72,42 @@ pub fn is_task_option_key(key: &str) -> bool {
 }
 
 /// Whether `key` is forbidden as an *authored state* key: a generated state
-/// field or a root overlay key. Executable and task-option keys are excluded
-/// here — they are extracted as the task, not rejected — so this is the exact
-/// predicate for "an arbitrary state key collides with a reserved name".
+/// field, a root overlay key, or a sequence declaration. Executable and
+/// task-option keys are excluded here — they are extracted as the task, not
+/// rejected — so this is the exact predicate for "an arbitrary state key
+/// collides with a reserved name".
 pub fn is_reserved_state_key(key: &str) -> bool {
-    GENERATED_STATE_KEYS.contains(&key) || ROOT_OVERLAY_KEYS.contains(&key)
+    GENERATED_STATE_KEYS.contains(&key)
+        || ROOT_OVERLAY_KEYS.contains(&key)
+        || SEQUENCE_DECLARATION_KEYS.contains(&key)
+}
+
+/// The declaration a value write would replace, if any: `key` itself or the
+/// root of a dotted (`template.desc`) or indexed (`$state[0]`) destination.
+///
+/// The one predicate behind every value route's refusal (sequence setters,
+/// `with:`, runtime `set`), so a route cannot write a declaration through a
+/// nested path the others refuse.
+pub fn declaration_written_by(key: &str) -> Option<&'static str> {
+    SEQUENCE_DECLARATION_KEYS.iter().copied().find(|declaration| {
+        key.strip_prefix(declaration)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('.') || rest.starts_with('['))
+    })
+}
+
+/// Whether writing `key` would replace a sequence declaration
+/// ([`declaration_written_by`]).
+pub fn is_declaration_write(key: &str) -> bool {
+    declaration_written_by(key).is_some()
 }
 
 /// The task-option keys that are meaningful for a given executable. A task
 /// declaring an option outside this set is a typed authoring error rather than
 /// a silently-ignored field (spec → *Task Resolution and Lifecycle Semantics*).
 ///
-/// Lifecycle events and `loop` apply only to inline sequence containers; every
+/// Lifecycle events, `loop`, and the declarations apply only to inline
+/// sequence containers (the task grammar refuses them beside a sequence
+/// reference, which shares this executable); every
 /// task may carry a `when` guard. External task
 /// references may carry a leg name; their target still supplies the executable
 /// and its options.
@@ -77,6 +118,9 @@ pub fn allowed_task_options(field: ExecutableField) -> &'static [&'static str] {
         ExecutableField::SideEffect => &["name", "when"],
         ExecutableField::Group => &["name", "when"],
         ExecutableField::Task => &["name", "when"],
-        ExecutableField::Sequence => &["name", "when", "loop", "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"],
+        ExecutableField::Sequence => &[
+            "name", "when", "loop", "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize",
+            "$schema", "$state", "template",
+        ],
     }
 }

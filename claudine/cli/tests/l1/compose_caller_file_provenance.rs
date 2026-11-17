@@ -327,7 +327,8 @@ fn a_proxied_retry_rematerializes_from_the_original_caller_record() {
         &router,
         &["spec=cases/original/spec.md"],
     );
-    let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
+    // A missing relative `events.log` is created beside the document that authors the action.
+    let events = std::fs::read_to_string(fixture.cwd().join("prompts/events.log")).unwrap();
 
     assert_eq!(
         events
@@ -372,7 +373,8 @@ fn a_proxied_resume_rematerializes_from_the_original_caller_record() {
         .assert()
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
-    let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
+    // A missing relative `events.log` is created beside the document that authors the action.
+    let events = std::fs::read_to_string(fixture.cwd().join("prompts/events.log")).unwrap();
     let provider_events = std::fs::read_to_string(fixture.home().join("provider-events")).unwrap();
 
     assert_eq!(
@@ -416,7 +418,8 @@ fn a_proxied_loop_reuses_the_same_materialized_caller_identity() {
         &router,
         &["spec=cases/original/spec.md"],
     );
-    let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
+    // A missing relative `events.log` is created beside the document that authors the action.
+    let events = std::fs::read_to_string(fixture.cwd().join("prompts/events.log")).unwrap();
     assert_eq!(
         events
             .lines()
@@ -467,7 +470,8 @@ fn a_sequence_prompt_task_proxy_reads_the_invocation_wide_caller_file() {
         .assert()
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
-    let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
+    // A missing relative `events.log` is created beside the document that authors the action.
+    let events = std::fs::read_to_string(package.join("events.log")).unwrap();
     assert!(
         events.contains("sequence=caller"),
         "events:\n{events}\nstderr:\n{stderr}"
@@ -515,7 +519,8 @@ fn sequence_task_with_and_cli_file_inputs_keep_distinct_authoring_origins() {
         .assert()
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
-    let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
+    // A missing relative `events.log` is created beside the document that authors the action.
+    let events = std::fs::read_to_string(package.join("prompts/events.log")).unwrap();
     assert!(
         events.contains("mixed=caller:task"),
         "events:\n{events}\nstderr:\n{stderr}"

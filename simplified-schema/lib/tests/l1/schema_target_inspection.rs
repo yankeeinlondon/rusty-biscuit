@@ -119,9 +119,12 @@ fn description_is_kept_only_when_it_is_a_nonblank_string() {
     );
     // A leading comment block is not a description.
     assert_eq!(inspect("s.yaml", "# Not this.\n$schema:\n  a: string\n").description, None);
-    // `null` and a list are not strings: the envelope's definition rejects
-    // the file.
-    for line in ["description: null\n", "description: [a]\n"] {
+    // A `null` description is unset.
+    let null = inspect("s.yaml", "description: null\n$schema:\n  a: string\n");
+    assert!(null.classification.is_ok(), "{:?}", null.classification);
+    assert_eq!(null.description, None);
+    // Blank text and a list fail the envelope's `string(not-empty)`.
+    for line in ["description: \"  \"\n", "description: [a]\n"] {
         let inspection = inspect("s.yaml", &format!("{line}$schema:\n  a: string\n"));
         assert!(matches!(inspection.classification, Err(SchemaError::SchemaDocument { .. })), "{line}");
         assert_eq!(inspection.description, None);

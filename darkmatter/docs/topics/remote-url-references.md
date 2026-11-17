@@ -71,15 +71,15 @@ read as a policy refusal, whatever the target), and a cached body is served
 only when the host is allowed now.
 
 When the `permissions` block is invalid (any part of it: a bad `network`
-value such as `null` or `sometimes`, an invalid `file-read` or
-`shell-commands` entry, `permissions: null`, or a reference to a missing
-file), no URL is fetched, not even one whose host the run names with
-`--allow host=HOST`. The read fails with a message that names the
-configuration file, line, and setting, and no request is sent. Only a valid
-`deny` (or an absent setting, which means `deny`) lets a run's host through.
+value such as `sometimes` or `123`, an invalid `file-read` or
+`shell-commands` entry, or a reference to a missing file), no URL is
+fetched, not even one whose host the run names with `--allow host=HOST`.
+The read fails with a message that names the configuration file, line, and
+setting, and no request is sent. Only a valid `deny` (or an absent or
+`null` setting, which takes the default `deny`) lets a run's host through.
 
 ```bash
-# ~/.darkmatter.yaml says `permissions: {network: null}`
+# ~/.darkmatter.yaml says `permissions: {network: sometimes}`
 md compose doc.md --allow host=example.com
 # fails: remote read denied for host 'example.com': … the configuration is
 # invalid: ~/.darkmatter.yaml:2:12 at `/permissions/network`: …

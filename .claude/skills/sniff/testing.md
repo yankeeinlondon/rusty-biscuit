@@ -7,6 +7,14 @@ audits. The package-area recipes and the clippy caveat are in
 The CLI's `test-fixtures` feature is L2-only. Ordinary local L1 leaves it off;
 `just test-l2` and CI's reusable all-tier build enable it.
 
+Real controlling-terminal evidence for `process::ForegroundHandoff` lives in
+`cli/tests/level2/level2_foreground_handoff.rs`, which drives the
+`foreground_handoff_fixture` helper binary (`test-fixtures` only) through each
+mode in its own detached tmux pane. Foreground ownership is read with `ps -o
+pgid= -o tpgid=` from outside the pane, because a `ps` run by the pane's own
+interactive shell becomes the foreground job itself. The scripted-syscall unit
+tests in `lib/src/process/foreground/tests.rs` cannot prove a transfer.
+
 Test-suite audits and performance evidence for this area run through the
 shared `tools/test-audit` tool with
 `sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json`, which keeps the
@@ -70,9 +78,8 @@ objects through an in-memory pack and its churn commits without restaging
 the tree (identical commit IDs, about 2 s instead of 6.5 s on Windows).
 
 On macOS the dominant L1 costs are per process, so a `LazyLock` cannot share
-them: the first CoreAudio call sets up the audio HAL, and that setup is
-serialized across processes (about 0.75 s each on Ken's Mac, so four tests
-started together each took about 4 s and, in the old suite, 6–9 s), and
+them: the first CoreAudio call sets up the audio HAL, which reads the main
+bundle and so lists the test executable's directory (see below), and
 `NetworkRequest::full()` (the `detect_network()` and `DetectionPlan`/`SniffConfig`
 default) issues a live WAN IP request bounded at 2 s per endpoint. A test that
 does not assert audio devices or the WAN address requests
@@ -86,3 +93,10 @@ config's skip flags. The full default path keeps exactly these live callers:
 `hardware::audio` detection tests, and
 `hardware::tests::test_detect_hardware_full_includes_gpu_on_macos`; add another
 only when it asserts what those calls return.
+On macOS the five CoreAudio callers among them (all but the network test) run
+one at a time in the `sniff-macos-coreaudio` nextest test group and get the
+`coretext-small-bundle` setup script (both in `.config/nextest.toml`). Most of
+the HAL setup is `CFBundleGetMainBundle` listing `target/debug/deps`
+(800,000+ entries): 3.1 s alone and 6 s in a package run without the script,
+0.6–0.9 s with it, which points the main bundle at `/usr/bin`. A new live audio
+caller joins both filters, which must stay equal.

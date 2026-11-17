@@ -9,7 +9,7 @@
 //!
 //! | Files present | Result |
 //! |---|---|
-//! | `config.json` only | written to `config.yaml` (same values), then `config.json` renamed to `config.json.bak`; one notice names both and says comments were not kept |
+//! | `config.json` only | written to `config.yaml` (same values, with flat actions and routes rewritten keyed), then `config.json` renamed to `config.json.bak`; one notice names both and says comments were not kept |
 //! | `config.yaml` only | used |
 //! | both | `config.yaml` is used; a warning says `config.json` is ignored |
 //! | a pre-2026 per-provider `config.json` | renamed to `.bak` and ignored |
@@ -143,11 +143,14 @@ pub(crate) fn prepare_scope(yaml_path: &Path, scope: ConfigScope, notices: &mut 
         return Ok(ScopeState::Ready);
     }
 
-    let value = parse_legacy(&bytes, &json_path).map_err(conversion_error)?;
+    let mut value = parse_legacy(&bytes, &json_path).map_err(conversion_error)?;
     if migration::is_old_format(&value) {
         migration::backup_old_config(&json_path)?;
         return Ok(ScopeState::LegacyFormatIgnored);
     }
+    // A legacy file spells actions and routes flat (`type: bash`); the YAML
+    // file is written, and judged, in the keyed form.
+    super::wire::upgrade_flat(&mut value);
     convert(&value, &bytes, &json_path, yaml_path, &backup_path, scope, notices)
 }
 

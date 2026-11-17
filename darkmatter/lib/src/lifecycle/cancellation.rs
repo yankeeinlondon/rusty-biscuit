@@ -47,7 +47,8 @@ impl CancellationCause {
             ),
             Self::SiblingFailure { group, leg, error } => {
                 let mut info = error.clone();
-                info.msg = format!("group `{group}` leg `{leg}` failed: {}", error.msg);
+                let leg_failed = format!("group `{group}` leg `{leg}` failed: ");
+                info.msg = format!("{leg_failed}{}", error.msg);
                 info.snapshot = catalog
                     .snapshot_for_code("composition.cancelled", info.msg.clone())
                     .map(|mut snapshot| {

@@ -17,6 +17,7 @@ mod claudine_schemas_matrix;
 mod claudine_trigger_selection_parity;
 mod collection_host_compat;
 mod config_json_conversion;
+mod config_keyed_entries;
 mod config_schema_matrix;
 mod container_schema_recursion;
 mod darkmatter_setup;

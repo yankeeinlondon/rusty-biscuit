@@ -19,9 +19,10 @@
 # item may be a conditional, so every family's cycle runs stack -> item[] ->
 # conditional -> then/else -> stack through child values, and `entry`, which
 # is not recursive, is inlined at both of its references. A root or body
-# dictionary's `when` beside its actions passes the schema, as a bundle's did
-# before single-action dictionaries were typed; the lifecycle parser alone
-# refuses it.
+# dictionary's `when` beside its actions passes these types, as a bundle's
+# did before single-action dictionaries were typed; validation refuses it
+# with the lifecycle parser's own placement rules, which it applies to every
+# action dictionary.
 #
 # A loop's loose verb keys are a bundle of short forms (`loop-bundle`) or a
 # single action in either form (`loop-single`, typed like a category), beside
@@ -51,6 +52,7 @@ types:
         when: "expression(required) -> the condition choosing then or else"
         then: "stack(required) -> the actions to run when the condition holds"
         else: "stack -> the actions to run when it does not"
+        no_error: "literal(false) -> filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
     initialize-stack:
         - initialize-item[]
         - initialize-entry
@@ -67,6 +69,7 @@ types:
         when: "expression(required) -> the condition choosing then or else"
         then: "initialize-stack(required) -> the actions to run when the condition holds"
         else: "initialize-stack -> the actions to run when it does not"
+        no_error: "literal(false) -> filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"
     loop-action: "{ op: enum(increment, decrement, set, append, prepend, merge; required), prop: string(not-empty; required), value: unknown }"
     loop-action-entry:
         - string
@@ -90,7 +93,7 @@ types:
             - "interpolation@./action.yaml -> a cap such as {{ cap }}, resolved once before the loop starts"
         on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
         gate: "stack -> the lifecycle stack run after each iteration; never beside loose verb keys"
-        no_error: "boolean -> keep the loop running when one of the loose actions fails"
+        no_error: "boolean(default(false)) -> keep the loop running when one of the loose actions fails"
         say: say-short@darkmatter:lifecycle
         speak: speak-short@darkmatter:lifecycle
         effect: effect-short@darkmatter:lifecycle
@@ -110,6 +113,7 @@ types:
         defer: defer-short@darkmatter:lifecycle
         break: break-short@darkmatter:lifecycle
         prep: prep-short@darkmatter:lifecycle
+        edit: edit-short@darkmatter:lifecycle
         shell: shell-short@darkmatter:lifecycle
         set: set-short@darkmatter:lifecycle
         append_frontmatter: append_frontmatter-short@darkmatter:lifecycle
@@ -257,7 +261,7 @@ types:
             - "number(integer; min(1)) -> the most iterations to run"
             - "interpolation@./action.yaml -> a cap such as {{ cap }}, resolved once before the loop starts"
         on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
-        no_error: "boolean -> keep the loop running when one of the loose actions fails"
+        no_error: "boolean(default(false)) -> keep the loop running when one of the loose actions fails"
         say:
             - say-short@darkmatter:lifecycle
             - say-long@darkmatter:lifecycle
@@ -315,6 +319,9 @@ types:
         prep:
             - prep-short@darkmatter:lifecycle
             - prep-long@darkmatter:lifecycle
+        edit:
+            - edit-short@darkmatter:lifecycle
+            - edit-long@darkmatter:lifecycle
         shell:
             - shell-short@darkmatter:lifecycle
             - shell-long@darkmatter:lifecycle
@@ -725,3 +732,4 @@ types:
         when: "expression(required) -> the condition choosing then or else"
         then: "cancelled-stack(required) -> the actions to run when the condition holds"
         else: "cancelled-stack -> the actions to run when it does not"
+        no_error: "literal(false) -> filled by the default; `no_error` belongs on the actions in the body, and the parser refuses one written here"

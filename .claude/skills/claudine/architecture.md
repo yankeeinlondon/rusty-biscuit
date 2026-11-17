@@ -366,7 +366,7 @@ All dispatch surfaces that evaluate expressions against an `EventMeta` share the
 
 ### Config Merge Strategy
 
-User config (`ClaudineConfig`) is the full source of truth; repo config (`RepoOverrideConfig`) is an optional overlay where every field is `Option`-like. Per-event `actions` replace user-level actions per canonical event (a repo entry for `BeforeTool` fully replaces the user's `BeforeTool` actions; events not present in the repo config fall through to user). `canonical_provider` overrides when set. `messenger_override` uses three-state semantics: absent = inherit, `null` = disable, object = override. Global toggles (`logging`, `protect`, `preferred_agent`, etc.) live only in the user config.
+User config (`ClaudineConfig`) is the full source of truth; repo config (`RepoOverrideConfig`) is an optional overlay where every field is `Option`-like. Per-event `actions` replace user-level actions per canonical event (a repo entry for `BeforeTool` fully replaces the user's `BeforeTool` actions; events not present in the repo config fall through to user). `canonical_provider` overrides when set. `active_messenger` is `Option<String>`: absent or `null` inherits the user's `messenger.active_config`, a name selects one of the user's routes, and there is no disable state (`config/merge.rs`). Every repository override reads absent and `null` alike as unset (`config/wire.rs::{null_as_default, null_entries_unset}`), and the schema refuses an empty one (`(not-empty)`). Global toggles (`logging`, `protect`, `preferred_agent`, etc.) live only in the user config.
 
 ## Configuration Schema
 
@@ -388,7 +388,7 @@ pub struct ClaudineConfig {
 pub struct RepoOverrideConfig {
     pub canonical_provider: Option<Provider>,
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
-    pub messenger_override: /* three-state: absent / null / object */,
+    pub active_messenger: Option<String>, // absent or null inherits
     // ...other optional overrides
 }
 ```
@@ -643,7 +643,18 @@ checks, and DMLS's `nested_span.rs` mirrors its path spelling.
   adapter: bindings, `set` commits, loop `break`, `prep`, shell policy,
   failure classification), evaluates a
   reached guard once, runs only the selected body, and the first directive
-  ends the whole event. Audio is published in list position (no
+  ends the whole event. `edit` is Darkmatter's (`dispatch_edit`); Claudine
+  only lends it `lifecycle/editor.rs::EDITOR_SERVICE` through
+  `LifecycleHost::editor`, a `ProcessEditorService` built per edit whose
+  output is always `EditorOutput::Terminal` (Claudine's stdout carries no
+  structured result of its own, so eligibility follows only the probe).
+  Parallel group members enter `deny_terminal_in_this_thread()` in
+  `sequence/task/group.rs`, so only GUI editors run there. Failures map to
+  `CompositionError::LifecycleEditFailed` (`composition.lifecycle_edit_failed`,
+  which needs a corpus entry in `cli/tests/l1/error_guards.rs`); a
+  `side_effect:` task refuses `edit`. No Claudine timeout bounds a lifecycle
+  stack, so only an interrupt or a sibling's failure cancels an open editor.
+  Audio is published in list position (no
   `audio_phases`). Darkmatter's `run_guard.rs::LifecycleRunGuard::emit_signal`
   (the drop safety net) emits only root, unguarded, literal communication.
 - **Run guard and runtime.** `LifecycleRunGuard` (the one terminal slot,

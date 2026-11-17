@@ -23,7 +23,7 @@ the layer maintainable as the CLI surface grows.
 ```mermaid
 flowchart LR
     A["std::env::args_os()"] --> CI["completion::maybe_complete<br/>(COMPLETE=&lt;shell&gt; exits here)"]
-    CI --> H{"argv::select_composition_help<br/>(original argv)"}
+    CI --> H{"argv::select_help<br/>(original argv)"}
     H -- "help before the command" --> HR["grouped root help"]
     H -- "help after the command" --> HC["that command's clap help"]
     HR --> X["exit 0"]
@@ -52,24 +52,31 @@ flowchart LR
 ```
 
 `main.rs` collects argv once. Before anything rewrites it,
-`argv::select_composition_help` decides whether the invocation is a help
-request for a composition command (see
+`argv::select_help` decides whether the invocation is a help
+request for a composition or wrapper command (see
 [Composition help is selected first](#composition-help-is-selected-first)).
-Otherwise the argv goes to `argv::normalize`, and the same normalized vector
-serves the `--plain` pre-scan and every subsequent clap parse pass. Library
+Otherwise the argv goes to `argv::normalize`, then through the composition
+partition and `argv::hoist_wrapper_options` (see
+[Argv Normalization → Wrapper option ownership](argv-normalization.md#wrapper-option-ownership)),
+and that vector serves the `--plain` pre-scan and every subsequent clap parse
+pass. Library
 code never touches argv and therefore never pre-parses.
 
 ### Composition help is selected first
 
-A help request for `compose`, `inline-compose`, or `sequence` is answered
-from the argv exactly as typed, before normalization, the ownership
-partition, configuration, tracing, or any composition work:
+A help request for `compose`, `inline-compose`, `sequence`, or a provider
+wrapper (`claudine claude …`) is answered from the argv exactly as typed,
+before normalization, the ownership passes, the `--output` refusal,
+configuration, tracing, or any composition work. Help wins over every other
+argument and usage error and exits 0:
 
 ```sh
 claudine compose -h                       # compose's own help
 claudine compose missing.md --gemini --help   # compose's own help; no file is read
 claudine --help compose prompt.md         # the grouped root overview
 claudine compose prompt.md -- --help      # not help: forwarded to the provider
+claudine claude "fix it" -o json --help   # the claude wrapper's help, exit 0
+claudine claude "fix it" -- --help        # not help: forwarded to Claude
 ```
 
 The selector finds the command the same way the rest of the pre-parser does
@@ -77,7 +84,8 @@ The selector finds the command the same way the rest of the pre-parser does
 the first command-shaped token decides), then takes the first exact `-h` or
 `--help` before the first literal `--`. Before the command it means the
 grouped root overview; after it, the command's own screen, rendered by
-clap from the same command model normal parsing uses (`build_cli_command`).
+clap from the same command model normal parsing uses (`build_cli_command`),
+or for a wrapper by `print_wrapper_help`.
 Exact `--plain` on either side of the command disables color. The process
 exits 0 through `shutdown::exit_before_runtime`.
 
@@ -85,10 +93,11 @@ Selection never validates the other tokens. That is the point: an unknown
 provider, a missing option value, malformed `--set` JSON, or conflicting
 switches would otherwise fail in the partition or in clap before help could
 be shown. Tokens are compared exactly, so `name=--help`, `--help=x`, and
-`-hh` are not help. Three things leave the argv to the ordinary path:
-completion mode (`COMPLETE` set, or the `__complete` command), a root
-`-V`/`--version` before the command and before any help token, and a help
-token only after `--`, which belongs to the provider.
+`-hh` are not help. Help takes precedence over `-V`/`--version` in either
+order: `claudine --version compose --help` shows composition help.
+Completion mode (`COMPLETE` set, or the `__complete` command) and a help
+token only after `--`, which belongs to the provider, leave the argv to the
+ordinary path.
 
 ## Pre-parsing stage
 
@@ -142,11 +151,12 @@ The normalizer never mutates argv when any of the following hold:
    rather than rewriting its bytes.
 4. **Argv with fewer than two elements** — nothing downstream needs
    parsing.
-5. **Non-composition subcommands** — Rules 1 and 4 are gated to the
-   composition trio. Wrapper subcommands (`claude`, `codex`, `gemini`,
-   `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`, `antigravity`) and every
-   other subcommand pass through unchanged. Rule 2 remains flag-driven so
-   `--provider` resolution works regardless of subcommand.
+5. **Gated rules** — Rules 1 and 4 are gated to the composition trio.
+   Rule 2 remains flag-driven so `--provider` resolution works regardless of
+   subcommand. These are rewrite rules only: on a wrapper subcommand every
+   option the wrapper declares is still Claudine's anywhere before `--`
+   (`argv::hoist_wrapper_options` moves it ahead of the prompt), so no
+   Claudine-looking token before `--` passes through to a provider.
 
 ## Clap parsing stage
 
@@ -190,8 +200,8 @@ Several properties of the clap surface shape the pre-parser's rules:
   wrappers, at every depth (`compose`, `budget grant`, `mcp alias`), gets an
   injected `--help` / `-h` of clap's own help action, which clap handles
   before required-argument validation. Direct wrappers keep their own help
-  screen instead. For the composition commands, help is selected from the
-  original argv before clap runs at all (see
+  screen instead. For the composition and wrapper commands, help is selected
+  from the original argv before clap runs at all (see
   [Composition help is selected first](#composition-help-is-selected-first)),
   because the partition or an invalid option beside the help token could
   otherwise fail first.
@@ -315,9 +325,9 @@ failure instead of a silent forwarding bug.
 Rules 1 and 4 are gated to composition subcommands. Rule 2 is
 flag-driven and applies anywhere `--provider` appears. Expanding a
 rule's scope — e.g. firing Rule 1 on wrapper subcommands — breaks
-wrapper passthrough: a user typing `claudine claude --gemini file.md`
-is sending `--gemini` to the child CLI, and Rule 1 would silently
-rewrite it to `--provider gemini` inside the child's argv.
+wrapper passthrough: `--gemini` is not a wrapper option, so a user typing
+`claudine claude --gemini file.md` is sending it to the child CLI, and Rule 1
+would silently rewrite it to `--provider gemini` inside the child's argv.
 
 Keep the gate narrow. If another subcommand exhibits the same shape as
 the composition trio, add it explicitly to `COMPOSITION_SUBCOMMANDS`
@@ -337,7 +347,7 @@ provider as options, without the `--`, ahead of any separator the provider
 profile adds before the first message:
 
 ```sh
-claudine pi "hello" -i -- --offline   # launches: pi --offline -- hello
+claudine pi "hello" -i -- --offline   # launches: pi --offline -- hello (-i is Claudine's)
 claudine codex -- --edit --version    # launches: codex --edit --version
                                       # (Claudine's editor stays closed)
 ```

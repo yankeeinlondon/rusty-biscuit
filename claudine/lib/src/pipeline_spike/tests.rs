@@ -94,6 +94,7 @@ mod prediction {
                 with_origin: Path::new("/spike/seq.md"),
                 task_property: "sequence[0]",
                 step_frontmatter: &step,
+                step_authored: &empty,
                 caller_setters: &empty,
                 sequence_path: Path::new("/spike/seq.md"),
             };

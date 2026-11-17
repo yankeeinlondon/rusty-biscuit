@@ -567,7 +567,7 @@ impl<'a, H: LifecycleRunHost> LifecycleRunGuard<'a, H> {
                 LifecycleEventOutcome::default()
             };
             for warning in self.cleanup_warnings(EvaluationMode::CancellationCleanup, &cleanup) {
-                self.host.effects().warn(&warning.msg);
+                self.host.effects().warn(warning.msg.as_str());
             }
         }
         true

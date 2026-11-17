@@ -77,3 +77,22 @@ fn a_sibling_failure_reports_the_group_and_leg() {
     assert_eq!(info.msg, "group `checks` leg `lint` failed: boom");
     assert!(info.snapshot.is_none());
 }
+
+/// `edit` asks [`cause_with`], not [`requested_with`]: terminal events run
+/// inside a cleanup scope, where `requested_with` is always false, so it
+/// would let an editor open after a cancellation; `cause_with` still sees
+/// the cause there and refuses.
+#[test]
+fn inside_cleanup_a_cause_is_still_visible_to_cause_with_but_not_requested_with() {
+    let token = CancellationToken::default();
+    let _scope = token.enter();
+    let _cleanup = CleanupScope::enter();
+    assert_eq!(cause_with(|| false), None, "control: a healthy run has no cause in cleanup");
+
+    token.cancel(sibling());
+
+    assert_eq!(cause_with(|| false), Some(sibling()));
+    assert!(!requested_with(|| false));
+    assert_eq!(cause_with(|| true), Some(sibling()), "the worker's own cause outranks the interrupt");
+    assert!(!requested_with(|| true));
+}

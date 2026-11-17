@@ -90,6 +90,10 @@ pub enum Work {
     /// A file a group start reread to decide whether its sources changed
     /// since the audit walk captured them.
     FreshnessSourceReads,
+    /// A sequence declaration (`$state`, or an inline container's `$schema`)
+    /// resolved into a schema by preflight: once per owner revision, not per
+    /// row and not per reread of an unchanged owner.
+    SequenceSchemaPrepare,
 }
 
 impl Work {
@@ -117,6 +121,7 @@ impl Work {
         Work::ReferencedDocumentParse,
         Work::ReferencedDocumentNodes,
         Work::FreshnessSourceReads,
+        Work::SequenceSchemaPrepare,
     ];
 }
 

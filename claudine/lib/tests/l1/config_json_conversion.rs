@@ -48,6 +48,15 @@ fn assert_refused(cell: &str, text: &str) {
     }
     assert_eq!(read(&scope.json()), text.as_bytes(), "{cell}: the source is untouched");
     assert!(!scope.yaml().exists() && !scope.backup().exists(), "{cell}: nothing was published");
+    assert_eq!(entries(&scope.dir), ["config.json"], "{cell}: no YAML, backup, receipt, or temporary file is left");
+}
+
+/// The names in `dir`, sorted.
+fn entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> =
+        std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    names
 }
 
 #[test]
@@ -71,9 +80,46 @@ fn the_legacy_fixture_converts_to_the_same_values_as_the_yaml_fixture() {
     assert_eq!(read(&scope.backup()), json5.as_bytes(), "the unchanged source is the backup");
     assert!(!scope.json().exists());
     assert!(!receipt_path(&scope.yaml()).unwrap().exists(), "cleanup finished");
+    // The transaction's lock file stays, as it does after every locked write.
+    assert_eq!(
+        entries(&scope.dir),
+        ["config.json.bak", "config.yaml", "config.yaml.darkmatter-lock"],
+        "no receipt or temporary file is left"
+    );
 
     let again = load_claudine_config_with_notices(Some(&scope.yaml()), None).unwrap();
     assert!(again.notices.is_empty(), "a repeated load converts nothing");
+
+    // The flat JSON5 actions and routes are written keyed.
+    let written: serde_json::Value =
+        biscuit_file::serde_yaml_ng::from_str(&String::from_utf8(read(&scope.yaml())).unwrap()).unwrap();
+    assert_eq!(written["actions"]["session_start"][0], serde_json::json!({ "sound_effect": { "effect": "doorbell" } }));
+    assert_eq!(written["actions"]["before_tool"][1]["call"]["mapper"], serde_json::json!({ "type": "json_field", "field": "decision" }));
+    assert_eq!(
+        written["messenger"]["configurations"]["hook"],
+        serde_json::json!({ "discord_webhook": { "webhook_url_env": "MY_DISCORD_URL" } }),
+        "the hyphenated flat provider is written with its one keyed spelling"
+    );
+}
+
+#[test]
+fn a_converted_file_round_trips_through_a_save() {
+    let scope = Scope::new();
+    std::fs::write(scope.json(), include_str!("../config/user-control.json5")).unwrap();
+    let opened = load_claudine_config(Some(&scope.yaml()), None).unwrap();
+    let mut edited = opened.clone();
+    edited.actions.insert(
+        claudine::events::AgenticEvent::TurnError,
+        vec![claudine::actions::HookAction::Bash { command: "echo".into(), params: String::new(), when: None }],
+    );
+    claudine::config::persist::save_changes(&scope.yaml(), claudine::config::schema::ConfigScope::User, &opened, &edited).unwrap();
+    let reread = load_claudine_config(Some(&scope.yaml()), None).unwrap();
+    assert_eq!(serde_json::to_value(&reread).unwrap(), serde_json::to_value(&edited).unwrap());
+    let text = String::from_utf8(read(&scope.yaml())).unwrap();
+    assert!(text.contains("turn_error:") && text.contains("- bash:"), "the new list is written keyed: {text}");
+    let unchanged = load_claudine_config(Some(&scope.yaml()), None).unwrap();
+    claudine::config::persist::save_changes(&scope.yaml(), claudine::config::schema::ConfigScope::User, &reread, &unchanged).unwrap();
+    assert_eq!(String::from_utf8(read(&scope.yaml())).unwrap(), text, "a second read/write/read changes nothing");
 }
 
 #[test]
@@ -94,6 +140,9 @@ fn malformed_legacy_files_are_refused_and_kept() {
     assert_refused("wrong root", "[1, 2]");
     assert_refused("scalar root", "\"x\"");
     assert_refused("schema refusal", "{ logging: \"yes\" }");
+    assert_refused("unknown flat action", "{ actions: { session_start: [{ type: \"shout\" }] } }");
+    assert_refused("flat action missing a field", "{ actions: { session_start: [{ type: \"bash\" }] } }");
+    assert_refused("flat route unknown provider", "{ messenger: { configurations: { a: { provider: \"telegram\" } } } }");
     assert_refused("not JSON5", "{ logging: ");
 }
 
@@ -105,6 +154,23 @@ fn a_duplicate_key_is_located() {
         panic!("refused")
     };
     assert_eq!((problems[0].line, problems[0].pointer.as_str()), (Some(3), "/logging"));
+}
+
+/// A nested duplicate names the member's own pointer and the line and column
+/// of its second spelling.
+#[test]
+fn a_nested_duplicate_member_is_located_at_its_second_spelling() {
+    let scope = Scope::new();
+    let text = "{\n  guard_settings: {\n    volume: { max_lines: 1, max_lines: 2 },\n  },\n}\n";
+    std::fs::write(scope.json(), text).unwrap();
+    let Err(ClaudineError::ConfigConversion { problems }) = load_claudine_config(Some(&scope.yaml()), None) else {
+        panic!("refused")
+    };
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    let problem = &problems[0];
+    assert_eq!(problem.pointer, "/guard_settings/volume/max_lines");
+    assert_eq!((problem.line, problem.column), (Some(3), Some(29)), "{problem:?}");
+    assert_eq!(entries(&scope.dir), ["config.json"], "nothing was published");
 }
 
 #[test]

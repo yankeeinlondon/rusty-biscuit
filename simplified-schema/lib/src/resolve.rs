@@ -3019,7 +3019,6 @@ impl ImportEngine<'_> {
                     path,
                     Use { as_arm, force_inline },
                 )?;
-                self.check_non_null_use(&expanded, path)?;
                 return Ok(expanded);
             }
             TypeExpr::Primitive(p) => TypeExpr::Primitive(p),
@@ -3061,47 +3060,6 @@ impl ImportEngine<'_> {
         }
         (*list, *origins) = existing.into_iter().unzip();
         Ok(ExpandedDef::Single(Box::new(atom), provenance))
-    }
-
-    /// Rejects a `non-null` use of a named type whose value admits null
-    /// (`Opt(non-null)` for `Opt: string | null`), which the grammar cannot
-    /// see before the reference is resolved. A use kept as a reference reads
-    /// null admission from its definition's summary; the first pass, which
-    /// has none, defers the check to the final pass.
-    fn check_non_null_use(&self, expanded: &ExpandedDef, path: &SchemaSourcePath) -> Result<(), SchemaError> {
-        let message = match expanded {
-            ExpandedDef::Single(atom, _) if !atom.marks_non_null() => None,
-            ExpandedDef::Single(atom, _) => match (&atom.ty, atom.is_array) {
-                (TypeExpr::Ref(key), false) => {
-                    let admits_null = self
-                        .summaries
-                        .as_ref()
-                        .and_then(|summaries| summaries.get(key))
-                        .is_some_and(|summary| summary.admits_null);
-                    if admits_null {
-                        // The reference stands for a null-admitting value,
-                        // which `null` represents for the shared check.
-                        let mut value = (**atom).clone();
-                        value.ty = TypeExpr::Primitive(SimplifiedType::Null);
-                        PropertyDef::Single(value).non_null_problem()
-                    } else {
-                        None
-                    }
-                }
-                _ => PropertyDef::Single((**atom).clone()).non_null_problem(),
-            },
-            ExpandedDef::Union(arms) if !arms.iter().any(PropertyAtom::marks_non_null) => None,
-            ExpandedDef::Union(arms) => PropertyDef::Union(arms.clone()).non_null_problem(),
-        };
-        match message {
-            None => Ok(()),
-            Some(message) => Err(SchemaError::Grammar {
-                property: path.to_string(),
-                message,
-                span: 0..0,
-                related: Vec::new(),
-            }),
-        }
     }
 
     /// The schema file declaring each default of `schema` (authored, not
@@ -4411,7 +4369,7 @@ fn apply_union_postfix(
 fn is_union_marker(constraint: &Constraint) -> bool {
     matches!(
         constraint,
-        Constraint::Required | Constraint::NonNull | Constraint::Generated | Constraint::Eager
+        Constraint::Required | Constraint::Generated | Constraint::Eager
     )
 }
 
@@ -4422,6 +4380,7 @@ fn is_array_container_constraint(constraint: &Constraint) -> bool {
         constraint,
         Constraint::MinItems(_)
             | Constraint::MaxItems(_)
+            | Constraint::NotEmpty
             | Constraint::Unique
             | Constraint::Default(_)
             | Constraint::Example(_)
@@ -4562,7 +4521,6 @@ fn is_flag(constraint: &Constraint) -> bool {
             | Constraint::Unique
             | Constraint::Eager
             | Constraint::Required
-            | Constraint::NonNull
             | Constraint::Generated
     )
 }
@@ -5477,9 +5435,11 @@ mod tests {
         assert_eq!(failure.path.to_string(), "types.entry");
         let span = failure.authored_span.or(failure.value_span).expect("located failure");
         assert!(source[span].contains("invalid("));
-        for types in ["[]", "string", "null"] {
+        for types in ["[]", "string", "{}"] {
             assert!(parse_standalone_schema_document(&format!("$schema: {{}}\ntypes: {types}\n"), "contract.yaml").is_err());
         }
+        // A null optional `types` table is absent.
+        assert!(parse_standalone_schema_document("$schema: {}\ntypes: null\n", "contract.yaml").is_ok());
     }
 
     #[cfg(feature = "file")]

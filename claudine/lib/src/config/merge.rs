@@ -9,7 +9,8 @@ use crate::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
 /// - `actions`: per-event replacement — if repo defines actions for an event,
 ///   that vector fully replaces the user's entry for the same event.
 /// - `matchers`: per-event replacement — same as `actions`.
-/// - `active_messenger`: repo overrides user's active config key only.
+/// - `active_messenger`: repo overrides user's active config key only; an
+///   unset (absent or `null`) one keeps the user's.
 /// - `exit_expressions`: repo replaces user's declaration (the resolver
 ///   in `runaway::resolve_exit_expressions` interprets the repo's combine
 ///   mode; here we just hand the repo's value through as the resolved
@@ -35,10 +36,10 @@ pub(crate) fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverride
     }
 
     // active_messenger: repo overrides the active config key only
-    if let Some(override_value) = &repo.active_messenger
+    if let Some(route) = &repo.active_messenger
         && let Some(messenger) = &mut user.messenger
     {
-        messenger.active_config = override_value.clone();
+        messenger.active_config = Some(route.clone());
     }
 
     // exit_expressions: repo declaration replaces user's when present.
@@ -163,7 +164,7 @@ mod tests {
         };
 
         let repo = RepoOverrideConfig {
-            active_messenger: Some(Some("work".to_string())),
+            active_messenger: Some("work".to_string()),
             ..Default::default()
         };
 
@@ -176,23 +177,22 @@ mod tests {
     }
 
     #[test]
-    fn merge_repo_override_disables_messenger_with_null() {
-        let mut user = ClaudineConfig {
-            messenger: Some(ClaudineMessengerConfig {
-                active_config: Some("personal".to_string()),
-                configurations: std::collections::HashMap::new(),
-            }),
-            ..Default::default()
-        };
+    fn an_absent_or_null_repo_active_messenger_keeps_the_users_route() {
+        for document in [serde_json::json!({}), serde_json::json!({ "active_messenger": null })] {
+            let mut user = ClaudineConfig {
+                messenger: Some(ClaudineMessengerConfig {
+                    active_config: Some("personal".to_string()),
+                    configurations: std::collections::HashMap::new(),
+                }),
+                ..Default::default()
+            };
+            let repo = RepoOverrideConfig::from_repository_document(document.clone()).expect("valid repository file");
+            assert_eq!(repo.active_messenger, None, "{document}");
 
-        let repo = RepoOverrideConfig {
-            active_messenger: Some(None),
-            ..Default::default()
-        };
+            merge_repo_override(&mut user, &repo);
 
-        merge_repo_override(&mut user, &repo);
-
-        assert_eq!(user.messenger.as_ref().unwrap().active_config, None);
+            assert_eq!(user.messenger.as_ref().unwrap().active_config.as_deref(), Some("personal"), "{document}");
+        }
     }
 
     #[test]

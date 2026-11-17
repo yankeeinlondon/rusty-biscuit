@@ -276,26 +276,31 @@ fn a_fallback_schema_naming_a_trigger_file_is_refused() {
     assert!(matches!(result, Err(SchemaError::TriggerSchemaReferenced { .. })), "{result:?}");
 }
 
-// ── Definition fields wired to the `non-null` validator ────────────────────
+// ── Definition fields wired to the `not-empty` validator ───────────────────
 
 #[test]
-fn null_metadata_and_payloads_fail_the_shipped_definitions_on_their_line() {
+fn null_metadata_is_unset_and_empty_values_fail_the_shipped_definitions_on_their_line() {
     let fixture = Fixture::new();
     let document = fixture.package().join("def.yaml");
     let base = "kind: yaml-schema\n$schema:\n    kind: literal(thing; required)\n";
     let control = validated(fixture.validate(&document, base));
     assert!(control.report.valid, "{:?}", control.report.problems);
-    for field in ["description", "categories", "types"] {
-        let validation = validated(fixture.validate(&document, &format!("{base}{field}: null\n")));
+    for (field, empty) in [("description", "''"), ("categories", "[]"), ("types", "{}")] {
+        let unset = validated(fixture.validate(&document, &format!("{base}{field}: null\n")));
+        assert!(unset.report.valid, "{field}: null is unset: {:?}", unset.report.problems);
+        let validation = validated(fixture.validate(&document, &format!("{base}{field}: {empty}\n")));
         let problem = &validation.report.problems[0];
         assert_eq!(problem.line, Some(4), "{field}: {problem:?}");
     }
+    // A yaml-schema's export is required, so a null one is still refused.
     let validation = validated(fixture.validate(&document, "kind: yaml-schema\n$schema: null\n"));
     assert_eq!(validation.report.problems[0].line, Some(2), "{:?}", validation.report.problems);
 
+    // A trigger's null payload is a matcher-only trigger; an empty one is not.
     let trigger = "kind: schema-trigger\nmatch:\n    a: string(required)\n";
     assert!(validated(fixture.validate(&document, trigger)).report.valid);
-    let validation = validated(fixture.validate(&document, &format!("{trigger}$schema: null\n")));
+    assert!(validated(fixture.validate(&document, &format!("{trigger}$schema: null\n"))).report.valid);
+    let validation = validated(fixture.validate(&document, &format!("{trigger}$schema: {{}}\n")));
     assert_eq!(validation.report.problems[0].line, Some(4), "{:?}", validation.report.problems);
 }
 

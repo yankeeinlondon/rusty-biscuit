@@ -61,7 +61,7 @@ pub const OWNER: &str = "darkmatter";
 /// what the shipped sources prepare to (catalog resolution, baseline
 /// lowering, kind-definition or function-catalog loading, a record's shape),
 /// then run `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 3;
+pub const PREPARATION_REVISION: u32 = 4;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "darkmatter/lib/generated/shipped.json";

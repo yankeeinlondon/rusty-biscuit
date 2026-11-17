@@ -21,8 +21,9 @@
 //! - [`prepared`] and [`outcome`]: a schema compiled once ([`Prepared`]) and
 //!   its strict and soft validation, which return
 //!   `Result<`[`ValidationSuccess`]`, `[`ValidationFailure`]`>`;
-//! - [`defaults`]: the defaults of absent required properties, the one walk
-//!   [`Prepared`] and a host's compiled schema share;
+//! - [`defaults`]: default preparation, the compiled [`DefaultPlan`] that
+//!   fills missing and `null` properties, which [`Prepared`] and a host's
+//!   compiled schema share;
 //! - [`schema`]: the [`SimplifiedSchema`] object, which builds from content
 //!   or a file, validates strictly or softly without a compile step, layers,
 //!   answers type queries, and exports;
@@ -92,7 +93,7 @@ pub(crate) use note_work;
 
 pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use claims::{ClaimCause, ClaimProblem, claimed_values};
-pub use defaults::{AppliedDefault, DefaultPreparation};
+pub use defaults::{AppliedDefault, DefaultPlan, DefaultPreparation};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::{
     CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
@@ -158,15 +159,15 @@ pub use validation::{
 /// next validation does its schema work cold.
 ///
 /// Cleared: the shared, conversion, completion-alternative, and
-/// example-target validator caches; the conversion-plan, format-validator,
-/// example-artifact, emitted-pattern, named-type parse, root-arm, and
-/// default-supplier caches. A host
+/// example-target validator caches; the conversion-plan, default-plan, format-validator,
+/// example-artifact, emitted-pattern, named-type parse, and root-arm caches. A host
 /// clears its own memos beside this call. The shipped artifact registry (the
 /// envelope definitions) is kept.
 #[doc(hidden)]
 pub fn reset_process_caches() {
     validate::SHARED_VALIDATOR_CACHE.clear();
     coerce::reset_process_caches();
+    defaults::reset_process_caches();
     completion::reset_process_caches();
     example::reset_process_caches();
     json_shape::reset_process_caches();

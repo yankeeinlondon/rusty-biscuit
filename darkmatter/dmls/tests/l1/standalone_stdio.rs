@@ -305,7 +305,7 @@ fn the_built_server_validates_and_completes_policies_without_schema_files() {
 /// routes in memory).
 #[test]
 fn yaml_document_diagnostics_reach_a_stdio_client() {
-    const DOCUMENT: &str = "kind: schema\ndescription: [a, b]\ntypes: {}\n";
+    const DOCUMENT: &str = "kind: schema\ndescription: [a, b]\ntypes:\n  Id: string\n";
     let fixture = tempfile::tempdir().expect("fixture root");
     let fixture_root = biscuit_file::canonicalize_simplified(fixture.path()).expect("canonical fixture root");
     for name in ["cwd", "home", "config", "cache", "data"] {
