@@ -183,6 +183,7 @@ Each row has a reason, a construct, the reference as written, and a location.
 | Reason | Meaning |
 |---|---|
 | `file not found` | a local target does not exist |
+| `no target` | the target is empty, as in `[text]()`; the reference column quotes the link |
 | `no matching heading` | a `#fragment` names no heading in its document |
 | `malformed URL` | the URL does not parse |
 | `unreachable` | a remote check failed |

@@ -9,6 +9,7 @@
 
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 use serial_test::serial;
@@ -20,13 +21,15 @@ use test_toolkit::fake_editor::{
 #[cfg(unix)]
 use test_toolkit::fake_editor::FAKE_EDITOR_IGNORE_TERM;
 
+#[cfg(unix)]
+use crate::editor_support::kill_pid;
 use crate::editor_support::{
-    ScopedEnv, editor_dir, install_fake_editor, kill_pid, process_alive, resolved, wait_for_file, wait_for_pids,
+    ScopedEnv, editor_dir, install_fake_editor, process_alive, resolved, wait_for_file, wait_for_pids,
     wait_until_dead,
 };
-use darkmatter::editor::{
-    EDITOR_TERMINATE_GRACE, EditorError, LaunchIo, LaunchOptions, LaunchOutput, LaunchPlan, LaunchStdin,
-};
+#[cfg(unix)]
+use darkmatter::editor::EDITOR_TERMINATE_GRACE;
+use darkmatter::editor::{EditorError, LaunchIo, LaunchOptions, LaunchOutput, LaunchPlan, LaunchStdin};
 use sniff::programs::EditorSurface;
 
 fn owned<'a>(io: LaunchIo, cancelled: &'a dyn Fn() -> bool) -> LaunchOptions<'a> {

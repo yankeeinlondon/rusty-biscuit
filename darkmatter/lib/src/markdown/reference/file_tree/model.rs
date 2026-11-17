@@ -226,6 +226,7 @@ fn build_issue_map(report: &ReferenceValidationReport) -> IssueMap<'_> {
     for issue in &report.issues {
         let suffix = match issue.code {
             ReferenceIssueCode::MissingLocalTarget => Some("[missing]".to_string()),
+            ReferenceIssueCode::EmptyTarget => Some("[no target]".to_string()),
             ReferenceIssueCode::InvalidUrl => Some("[invalid url]".to_string()),
             ReferenceIssueCode::UnsupportedScheme => Some("[unsupported]".to_string()),
             ReferenceIssueCode::RemoteUnreachable => Some("[unreachable]".to_string()),

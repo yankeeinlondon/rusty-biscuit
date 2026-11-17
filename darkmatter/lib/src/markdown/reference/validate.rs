@@ -188,12 +188,23 @@ impl ReferenceIssue {
     /// differ only in their targets. The target comparison follows how
     /// validation spells `reference_display`: the raw target, or only its path
     /// when the path itself is missing.
+    /// An [`ReferenceIssueCode::EmptyTarget`] spells the whole construct
+    /// instead, because its target says nothing.
     pub(crate) fn describes(&self, record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> bool {
         self.reference_id == record.id
             && self.included_via == trail
             && record.target.raw().is_none_or(|raw| {
-                self.reference_display == raw || self.reference_display == split_path_fragment(raw).0
+                self.reference_display == raw
+                    || self.reference_display == split_path_fragment(raw).0
+                    || (self.code == ReferenceIssueCode::EmptyTarget && raw.trim().is_empty())
             })
+    }
+
+    /// Whether this is a warning a composition reports: a target that is
+    /// missing or empty but does not fail the document unless denied.
+    pub fn is_reported_warning(&self) -> bool {
+        self.severity == ReferenceSeverity::Warning
+            && matches!(self.code, ReferenceIssueCode::MissingLocalTarget | ReferenceIssueCode::EmptyTarget)
     }
 }
 
@@ -226,6 +237,8 @@ impl Serialize for ReferenceIssue {
 pub enum ReferenceIssueCode {
     /// Local file target does not exist.
     MissingLocalTarget,
+    /// The target is empty, as in `[text]()`.
+    EmptyTarget,
     /// URL is syntactically invalid.
     InvalidUrl,
     /// Remote URL returned an error or timed out.
@@ -260,6 +273,7 @@ impl ReferenceIssueCode {
     pub fn reason_phrase(self) -> &'static str {
         match self {
             Self::MissingLocalTarget => "file not found",
+            Self::EmptyTarget => "no target",
             Self::MissingFragmentTarget => "no matching heading",
             Self::InvalidUrl => "malformed URL",
             Self::RemoteUnreachable => "unreachable",
@@ -417,8 +431,13 @@ fn validate_graph_contents(
                     continue;
                 }
 
-                // Check for fragment in local path (e.g., "./other.md#section")
                 let raw_str = raw.to_string_lossy();
+                if raw_str.trim().is_empty() {
+                    report.issues.push(empty_target(record, trail));
+                    continue;
+                }
+
+                // Check for fragment in local path (e.g., "./other.md#section")
                 let (path_part, fragment) = split_path_fragment(&raw_str);
                 let resolved_path = validate_local_path(
                     &path_part,
@@ -758,6 +777,44 @@ fn validate_local_path(
             report.references_valid += 1;
             Ok(None)
         }
+    }
+}
+
+/// The issue for `record`, whose target is empty.
+///
+/// A hyperlink or image with no target still renders its text, so it only
+/// warns (a caller's policy may deny it); any other construct has nothing to
+/// load and is an error. The message quotes the construct, because its empty
+/// target cannot identify it.
+fn empty_target(record: &ReferenceRecord, trail: &[ReferenceTrailStep]) -> ReferenceIssue {
+    use super::types::ReferenceSyntax;
+    let text = |key: &str| record.attributes.get(key).and_then(|value| value.as_str()).unwrap_or_default();
+    let construct = match record.origin.syntax {
+        ReferenceSyntax::MarkdownLink => format!("[{}]()", text("display")),
+        ReferenceSyntax::MarkdownImage => format!("![{}]()", text("alt")),
+        ReferenceSyntax::HtmlAnchor => format!("<a href=\"\">{}</a>", text("display")),
+        syntax => syntax.construct_phrase().trim_start_matches("in ").to_string(),
+    };
+    let (message, severity) = match record.kind {
+        ReferenceKind::Hyperlink | ReferenceKind::Image => (
+            format!(
+                "{} `{construct}` has no target",
+                record.origin.syntax.construct_phrase().trim_start_matches("in ")
+            ),
+            ReferenceSeverity::Warning,
+        ),
+        _ => (format!("`{construct}` has no target"), ReferenceSeverity::Error),
+    };
+    ReferenceIssue {
+        code: ReferenceIssueCode::EmptyTarget,
+        message,
+        severity,
+        kind: record.kind,
+        reference_display: construct,
+        reference_id: record.id.clone(),
+        origin: record.origin.clone(),
+        included_via: trail.to_vec(),
+        detail: None,
     }
 }
 
@@ -1293,6 +1350,31 @@ mod tests {
                 .iter()
                 .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget)
         );
+    }
+
+    #[test]
+    fn empty_link_and_image_targets_warn_and_quote_the_construct() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source_path = dir.path().join("source.md");
+        std::fs::write(&source_path, "").unwrap();
+
+        let md = Markdown::new("[Expression Engine]()\n\n![a pic]()\n")
+            .with_source(ComposeSource::File(source_path));
+        let report = validate(&md, &validation_options_at(dir.path())).unwrap();
+
+        let displays: Vec<_> = report
+            .issues
+            .iter()
+            .map(|issue| (issue.code, issue.severity, issue.reference_display.as_str()))
+            .collect();
+        assert_eq!(
+            displays,
+            [
+                (ReferenceIssueCode::EmptyTarget, ReferenceSeverity::Warning, "[Expression Engine]()"),
+                (ReferenceIssueCode::EmptyTarget, ReferenceSeverity::Warning, "![a pic]()"),
+            ]
+        );
+        assert!(report.issues.iter().all(ReferenceIssue::is_reported_warning));
     }
 
     #[test]

@@ -121,8 +121,8 @@ pub fn with_document_fallback(diagnostics: &mut [Diagnostic], document: Option<&
     }
 }
 
-/// A reported reference-validation `issue` as a shared record. A missing
-/// local target takes its kind's recovery code
+/// A reported reference-validation `issue` as a shared record. A missing or
+/// empty local target takes its kind's recovery code
 /// ([`missing_reference_code`](super::policy::missing_reference_code)).
 ///
 /// `source` is never `None`. A document with no authored positions (built in
@@ -130,7 +130,7 @@ pub fn with_document_fallback(diagnostics: &mut [Diagnostic], document: Option<&
 /// column.
 pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
     let code = match issue.code {
-        ReferenceIssueCode::MissingLocalTarget => {
+        ReferenceIssueCode::MissingLocalTarget | ReferenceIssueCode::EmptyTarget => {
             super::policy::missing_reference_code(issue.kind).unwrap_or(REFERENCE_FAILURE_CODE)
         }
         _ => REFERENCE_FAILURE_CODE,

@@ -202,6 +202,7 @@ fn create_new_refuses_an_occupied_name_without_launching() {
     std::fs::write(&file, b"keep\r\n").unwrap();
     let folder = workspace.root.join("folder");
     std::fs::create_dir(&folder).unwrap();
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut occupied = vec![file.clone(), folder];
     #[cfg(unix)]
     {
@@ -317,6 +318,7 @@ fn the_target_is_rechecked_after_the_editor_exits() {
     std::fs::write(&outside, b"outside").unwrap();
 
     type Swap = fn(&Path, &Path);
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut swaps: Vec<(&str, Swap, Expected)> = vec![(
         "directory",
         |target, _| {

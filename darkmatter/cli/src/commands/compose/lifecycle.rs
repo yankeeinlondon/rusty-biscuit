@@ -537,6 +537,9 @@ impl<'a> ComposeHost<'a> {
                 ("compose", compose_error(failure.error))
             })?;
         self.pending_triggers.merge_into(&mut report.warnings);
+        if let Some(checked) = &self.deferred_report {
+            report.warnings.retain(|warning| !super::reference_check_reported(warning, checked));
+        }
         if let Some(sink) = self.document.sink {
             sink.warnings(&report.warnings);
             if let Some(perf_report) = &report.perf {

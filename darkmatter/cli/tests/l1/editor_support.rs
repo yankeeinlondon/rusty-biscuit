@@ -147,7 +147,3 @@ pub fn process_alive(pid: u32) -> bool {
     String::from_utf8_lossy(&output.stdout).contains(&pid.to_string())
 }
 
-#[cfg(windows)]
-pub fn kill_pid(pid: u32) {
-    let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
-}

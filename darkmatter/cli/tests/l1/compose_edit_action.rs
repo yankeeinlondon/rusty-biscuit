@@ -243,6 +243,7 @@ fn a_name_taken_after_the_check_fails_create_new_and_opens_without_it() {
 fn a_create_new_name_held_by_a_directory_or_symlink_fails_without_launch() {
     let run = EditRun::new("edit-occupied", "code");
     std::fs::create_dir_all(run.cwd().join("dir.md")).unwrap();
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut names = vec!["dir.md"];
     #[cfg(unix)]
     {

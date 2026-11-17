@@ -92,6 +92,7 @@ prepared body, for code that walks the graph; authored positions are in
 | Code | Severity | Meaning |
 |------|----------|---------|
 | `MissingLocalTarget` | Error | Local file does not exist |
+| `EmptyTarget` | Warning for a hyperlink or image, Error otherwise | The target is empty, as in `[text]()`; the issue's reference quotes the construct |
 | `InvalidUrl` | Error | URL is syntactically malformed |
 | `RemoteUnreachable` | Error | HTTP check failed or timed out |
 | `RemoteDisallowed` | Info | Remote validation disabled, cannot verify |

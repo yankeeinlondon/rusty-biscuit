@@ -595,6 +595,9 @@ pub fn run_compose(
         compose_error(failure.error)
     })?;
     pending_triggers.merge_into(&mut report.warnings);
+    if let Some(checked) = &deferred_report {
+        report.warnings.retain(|warning| !reference_check_reported(warning, checked));
+    }
     if let Some(sink) = sink {
         sink.warnings(&report.warnings);
         if let Some(perf_report) = &report.perf {
@@ -763,7 +766,8 @@ pub(crate) enum ReferenceCheck {
 /// interpolation inside transclusion targets resolves as it will compose.
 ///
 /// An error `policy` does not recover refuses the document, and so does a
-/// reported issue its blocking policy selects.
+/// reported issue its blocking policy selects. A missing target the policy
+/// recovers (by default, see `DEFAULT_RECOVERIES`) is reported as a warning.
 ///
 /// The check is passive: body `::shell` directives stay unexpanded, because
 /// running one here would be an effect ahead of the shell-approval walk and
@@ -784,7 +788,16 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
 
     let passive = request.clone().map_options(ComposeOptions::for_reference_check);
     let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&passive));
-    let report = md.validate_references(val_options).map_err(compose_error)?;
+    let mut report = md.validate_references(val_options).map_err(compose_error)?;
+    // A missing target the policy recovers is reported as a warning;
+    // `md validate refs`, which has no policy, keeps it an error.
+    for issue in report.issues.iter_mut().filter(|issue| {
+        issue.severity == ReferenceSeverity::Error
+            && issue.code == ReferenceIssueCode::MissingLocalTarget
+            && recovers_missing(policy, issue.kind)
+    }) {
+        issue.severity = ReferenceSeverity::Warning;
+    }
     let has_errors = report.issues.iter().any(|i| i.severity == ReferenceSeverity::Error);
     if report
         .issues
@@ -793,21 +806,20 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
     {
         return Ok(ReferenceCheck::Refused(report));
     }
-    // Warnings (such as a missing link inside inserted data) never fail the
-    // run unless denied; report them after the content.
-    let has_warnings = report
-        .issues
-        .iter()
-        .any(|i| i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget);
+    // Warnings (a missing link inside inserted data, a link with an empty
+    // target) never fail the run unless denied; report them after the content.
+    let has_warnings = report.issues.iter().any(|i| i.is_reported_warning());
     let blocking = policy.blocking_policy();
     let blocked = report.issues.iter().any(|issue| {
         let severity = match issue.severity {
             ReferenceSeverity::Error => Severity::Error,
-            ReferenceSeverity::Warning if issue.code == ReferenceIssueCode::MissingLocalTarget => Severity::Warning,
+            ReferenceSeverity::Warning if issue.is_reported_warning() => Severity::Warning,
             // Not reported, so never blocking.
             ReferenceSeverity::Warning | ReferenceSeverity::Info => return false,
         };
-        let code = (issue.code == ReferenceIssueCode::MissingLocalTarget).then(|| missing_reference_code(issue.kind)).flatten();
+        let code = matches!(issue.code, ReferenceIssueCode::MissingLocalTarget | ReferenceIssueCode::EmptyTarget)
+            .then(|| missing_reference_code(issue.kind))
+            .flatten();
         blocking.blocks(code, severity)
     });
     if blocked {
@@ -1069,6 +1081,23 @@ pub(crate) fn preflight_blocked(
     }
 }
 
+/// Whether `warning`, a transclusion composition removed because its target
+/// is missing, repeats an issue the reference check `checked` already
+/// reported, which carries the authored position and construct.
+pub(crate) fn reference_check_reported(
+    warning: &darkmatter::markdown::compose::ComposeWarning,
+    checked: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+) -> bool {
+    use darkmatter::markdown::compose::policy::MISSING_TRANSCLUSION_CODE;
+    use darkmatter::markdown::reference::types::ReferenceKind;
+    warning.code.as_deref() == Some(MISSING_TRANSCLUSION_CODE)
+        && checked.issues.iter().any(|issue| {
+            issue.kind == ReferenceKind::Transclusion
+                && issue.is_reported_warning()
+                && warning.message.contains(issue.reference_display.as_str())
+        })
+}
+
 /// The compose warnings and deferred validation issues, on stderr after the
 /// content.
 pub(crate) fn report_compose_diagnostics(
@@ -1105,22 +1134,30 @@ pub(crate) fn report_compose_diagnostics(
 }
 
 /// The report's warnings, one row each: compose's reference view lists errors
-/// only, so a warning (a missing link inside text an expression inserted) is
-/// reported line by line, located at the construct that inserted the text.
+/// only, so a warning (a missing link inside text an expression inserted, a
+/// link with an empty target) is reported line by line at its authored
+/// position, naming the transcluded file it is in.
 pub(crate) fn render_reference_warnings(
     report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
     term: &biscuit_terminal::terminal::Terminal,
 ) -> String {
     use biscuit_terminal::components::prose::Prose;
-    use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
     let mut rendered = String::new();
-    for issue in report.issues.iter().filter(|i| {
-        i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
-    }) {
-        let location = issue.origin.authored.as_ref().map_or_else(
-            || "inside inserted text".to_string(),
-            |authored| format!("line {}, column {}, inside inserted text", authored.line, authored.column),
-        );
+    for issue in report.issues.iter().filter(|i| i.is_reported_warning()) {
+        let mut location = issue
+            .origin
+            .authored
+            .as_ref()
+            .map(|authored| {
+                let inserted = if authored.inserted { ", inside inserted text" } else { "" };
+                format!("line {}, column {}{inserted}", authored.line, authored.column)
+            })
+            .unwrap_or_else(|| "inside inserted text".to_string());
+        if !issue.included_via.is_empty()
+            && let Some(path) = issue.origin.source.document_path()
+        {
+            location = format!("{}, {location}", path.display());
+        }
         let markup = format!(
             "{} <dim>({location})</dim>",
             Prose::escape_text_outside_code_spans(&issue.message),
