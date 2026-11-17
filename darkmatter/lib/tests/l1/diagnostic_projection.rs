@@ -80,6 +80,7 @@ fn a_record_with_no_reference_details_omits_those_fields() {
         reference_details: None,
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     };
 
     assert_eq!(

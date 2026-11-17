@@ -8,11 +8,12 @@
 #
 # This payload declares only the sequence keys. `$state` and `template` are
 # declarations of the document's own inline list; the sequence parser refuses
-# them beside a reference or dynamic source, which this open schema cannot say. The document's lifecycle
-# events and `loop` select claudine.yaml whenever they are set, and that
-# trigger types them; declaring them here as well would compile every event
-# stack twice. The payload declares no required property and leaves the
-# document open, so a body step's frontmatter data is kept.
+# them beside a reference or dynamic source, which this open schema cannot say.
+# A non-null `sequence` also selects claudine.yaml, which types the document's
+# lifecycle events, `loop`, and the rest of Claudine's controls; declaring them
+# here as well would compile every event stack twice. The payload declares no
+# required property and leaves the document open, so a body step's frontmatter
+# data is kept.
 kind: schema-trigger
 match:
     group:

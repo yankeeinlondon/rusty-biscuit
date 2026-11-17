@@ -47,7 +47,6 @@ struct Selects {
 
 const NONE: Selects = Selects { claudine: false, inline: false, sequence: false };
 const CLAUDINE: Selects = Selects { claudine: true, inline: false, sequence: false };
-const SEQUENCE: Selects = Selects { claudine: false, inline: false, sequence: true };
 const CLAUDINE_AND_SEQUENCE: Selects = Selects { claudine: true, inline: false, sequence: true };
 
 /// The schema verdict a document must get.
@@ -257,7 +256,7 @@ fn frozen_lib_review() {
     assert_shipped(&Shipped {
         label: "lib/tests/fixtures/frozen_prompts/prompts/review.md",
         text: include_str!("../fixtures/frozen_prompts/prompts/review.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -348,7 +347,7 @@ fn frozen_cli_implement() {
     assert_shipped(&Shipped {
         label: "cli/tests/fixtures/frozen_prompts/prompts/implement.md",
         text: include_str!("../../../cli/tests/fixtures/frozen_prompts/prompts/implement.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -370,7 +369,7 @@ fn frozen_cli_review_loop() {
     assert_shipped(&Shipped {
         label: "cli/tests/fixtures/frozen_prompts/prompts/review-loop.md",
         text: include_str!("../../../cli/tests/fixtures/frozen_prompts/prompts/review-loop.md"),
-        selects: SEQUENCE,
+        selects: CLAUDINE_AND_SEQUENCE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -381,7 +380,7 @@ fn frozen_cli_review() {
     assert_shipped(&Shipped {
         label: "cli/tests/fixtures/frozen_prompts/prompts/review.md",
         text: include_str!("../../../cli/tests/fixtures/frozen_prompts/prompts/review.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -752,7 +751,7 @@ fn research_model_serving_api_standards_research() {
     assert_shipped(&Shipped {
         label: "docs/research/model-serving-api-standards/_research.md",
         text: include_str!("../../../docs/research/model-serving-api-standards/_research.md"),
-        selects: SEQUENCE,
+        selects: CLAUDINE_AND_SEQUENCE,
         schema: Valid,
         parser: ACCEPTS,
     });

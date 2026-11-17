@@ -2,10 +2,10 @@
 //! host's lifecycle.
 //!
 //! A document's lifecycle stacks are analyzed under one [`LifecycleHost`]:
-//! the host lifecycle profile recorded beside a host catalog in the
-//! document's schema roots
-//! ([`darkmatter::markdown::schemas::catalog::host_lifecycle_profiles`]), or
-//! the `md` host ([`md_host::registry`]) when no catalog records one. Its
+//! the lifecycle of the host the document's selected host view names
+//! ([`crate::overlay::hosts::HostView`]): a registered host's profile, the
+//! profile recorded beside a legacy host catalog in the document's schema
+//! roots, or the `md` host ([`md_host::registry`]). Its
 //! registry decides which root frontmatter keys are stacks, and its parse
 //! options which verbs carry expression operands. An expression inside the
 //! value of a root key the registry resolves to one of its events reads that
@@ -28,7 +28,7 @@ use darkmatter::lifecycle::error::LifecycleError;
 use darkmatter::markdown::compose::expression::{
     Availability, BindingView, ParseError, SpannedExpr, is_reserved_namespace,
 };
-use darkmatter::markdown::schemas::catalog::{GlobalCatalog, HostLifecycleDiscovery};
+use darkmatter::markdown::schemas::catalog::GlobalCatalog;
 use darkmatter::markdown::span::SourceSpan;
 
 use crate::overlay::expressions::{self, ScalarProjection};
@@ -48,34 +48,23 @@ impl LifecycleHost {
         Self { registry: md_host::registry().clone(), profile: None, incomplete: Vec::new() }
     }
 
-    /// The first host lifecycle profile in the document's schema roots, in
-    /// [`host_catalogs`](darkmatter::markdown::schemas::catalog::host_catalogs)
-    /// order. Without one, the `md` host, plus each catalog's reason its
-    /// artifact could not be trusted ([`Self::incomplete`]); without a
-    /// resolution context, the `md` host alone.
-    ///
-    /// Discovery is lazy: no catalog or artifact after the first usable
-    /// profile is read.
+    /// The lifecycle host of the document's selected host view
+    /// ([`HostView`](crate::overlay::hosts::HostView)): a registered host's
+    /// profile, a legacy root catalog's first usable profile (or the `md`
+    /// host with each catalog's reason its artifact could not be trusted,
+    /// [`Self::incomplete`]), or the `md` host. Reads nothing: the view was
+    /// selected when the document's schema was prepared.
     pub fn for_document(ctx: &crate::providers::DocumentContext) -> Self {
-        let Ok(context) = ctx.file_context() else {
-            return Self::md();
-        };
-        Self::first_usable(darkmatter::markdown::schemas::catalog::host_lifecycle_profiles(context))
+        ctx.host_view().lifecycle().clone()
     }
 
-    /// The first usable profile `discoveries` yields, taking nothing after
-    /// it; without one, the `md` host with every reason in order.
-    fn first_usable(discoveries: impl IntoIterator<Item = HostLifecycleDiscovery>) -> Self {
-        let mut incomplete = Vec::new();
-        for discovery in discoveries {
-            match discovery.profile {
-                Ok(profile) => {
-                    return Self { registry: profile.registry().clone(), profile: Some(profile), incomplete: Vec::new() };
-                }
-                Err(reason) => incomplete.push(reason),
-            }
+    /// The host of `profile`, or the `md` host with `incomplete`'s reasons
+    /// when there is none.
+    pub(crate) fn of(profile: Option<Arc<HostLifecycleProfile>>, incomplete: Vec<String>) -> Self {
+        match profile {
+            Some(profile) => Self { registry: profile.registry().clone(), profile: Some(profile), incomplete: Vec::new() },
+            None => Self { incomplete, ..Self::md() },
         }
-        Self { incomplete, ..Self::md() }
     }
 
     /// The host's event registry.
@@ -483,13 +472,11 @@ mod tests {
         path
     }
 
-    /// The host is the first usable profile, and nothing of a later
-    /// candidate is read; with none usable, every reason is kept in order.
+    /// A legacy view's host is the first usable profile in root order; with
+    /// none usable, every reason is kept in order.
     #[test]
-    fn the_host_is_the_first_usable_profile_and_nothing_after_it_is_read() {
+    fn the_legacy_host_is_the_first_usable_profile() {
         use darkmatter::lifecycle::host_profile::lifecycle_artifact_path;
-        use darkmatter::markdown::schemas::catalog::discovery_probe::DiscoveryProbe;
-        use darkmatter::markdown::schemas::catalog::host_lifecycle_profiles;
 
         let dir = tempfile::TempDir::new().expect("temp dir");
         let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
@@ -501,23 +488,19 @@ mod tests {
         let unusable = host_catalog(&schemas, "a.yaml", false);
         let winner = host_catalog(&schemas, "b.yaml", true);
         let later = host_catalog(&schemas, "c.yaml", true);
-        let probe = DiscoveryProbe::install();
 
-        let host = LifecycleHost::first_usable(host_lifecycle_profiles(&context));
-        assert_eq!(host.registry().host(), "test");
-        assert!(host.incomplete().is_empty());
-        let reads = probe.take_reads();
-        assert!(reads.contains(&unusable) && reads.contains(&winner), "{reads:?}");
-        assert!(!reads.contains(&later) && !reads.contains(&lifecycle_artifact_path(&later)), "{reads:?}");
+        let view = crate::overlay::hosts::HostView::unregistered(&context);
+        assert_eq!(view.lifecycle().registry().host(), "test");
+        assert!(view.lifecycle().incomplete().is_empty());
 
         std::fs::remove_file(lifecycle_artifact_path(&winner)).expect("remove artifact");
         std::fs::remove_file(lifecycle_artifact_path(&later)).expect("remove artifact");
-        let host = LifecycleHost::first_usable(host_lifecycle_profiles(&context));
-        assert_eq!(host.registry().host(), "md");
+        let view = crate::overlay::hosts::HostView::unregistered(&context);
+        assert_eq!(view.lifecycle().registry().host(), "md");
         let artifacts: Vec<_> = [&unusable, &winner, &later]
             .into_iter()
             .map(|catalog| format!("the lifecycle artifact `{}` is absent", lifecycle_artifact_path(catalog).display()))
             .collect();
-        assert_eq!(host.incomplete(), artifacts);
+        assert_eq!(view.lifecycle().incomplete(), artifacts);
     }
 }

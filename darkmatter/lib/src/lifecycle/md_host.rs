@@ -126,6 +126,46 @@ pub fn authors_lifecycle(frontmatter: &Value) -> bool {
         .is_some_and(|map| registry().authored_event_keys().iter().any(|key| map.contains_key(*key)))
 }
 
+// ── A document another host identifies ───────────────────────────────────
+
+/// The `md` events `host` fires under the same name: Darkmatter's events
+/// `host` does not rename (for Claudine, `initialize`, `cancelled`, and
+/// `finalize`), in Darkmatter's order. These are the only stacks `md` runs on
+/// a document `host` identifies.
+pub fn shared_event_keys(host: &EventRegistry) -> Vec<&'static str> {
+    super::registry::CoreEvent::ALL
+        .into_iter()
+        .filter(|event| host.id(event.darkmatter_name()).is_some_and(|id| host.core_event(id) == Some(*event)))
+        .map(super::registry::CoreEvent::darkmatter_name)
+        .collect()
+}
+
+/// The execution-only frontmatter of a document `host` identifies: its
+/// [shared events](shared_event_keys) alone. Every other key is left out,
+/// so `md` never parses the host's own events, its renamed spellings of
+/// `composed` and `failed` (the host's schema owns and rejects those), or
+/// any task as a stack of its own.
+pub fn execution_projection(frontmatter: &Value, host: &EventRegistry) -> Value {
+    let shared = shared_event_keys(host);
+    Value::Object(
+        frontmatter
+            .as_object()
+            .map(|map| {
+                map.iter().filter(|(key, _)| shared.contains(&key.as_str())).map(|(key, value)| (key.clone(), value.clone())).collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// The top-level keys composition defers on a document `host` identifies:
+/// every event key `host` registers, shared or host-only. Their values are
+/// event-time actions, never compose-time data, so no interpolation pass
+/// evaluates them. `md`'s own `composed` and `failed` are not deferred: they
+/// are ordinary frontmatter the host's schema judges.
+pub fn foreign_deferred_keys(host: &EventRegistry) -> Vec<String> {
+    host.authored_event_keys().into_iter().map(str::to_string).collect()
+}
+
 /// Parses and statically validates a root document's lifecycle under the
 /// `md` profile, before anything runs.
 ///
@@ -357,6 +397,33 @@ impl MdRuntimeState {
     }
 }
 
+impl MdStackHost<'_> {
+    /// `view` plus every global the request declares unavailable (a
+    /// registered host's roots on a document that host identifies,
+    /// [`ComposeOptions::with_selected_host`](crate::markdown::compose::ComposeOptions::with_selected_host)),
+    /// so a stack reading one fails as composition would, instead of reading
+    /// an absent document property. `md` supplies no host value, so a host
+    /// global with any other availability is not added.
+    fn with_unavailable_host_globals(&self, view: Arc<BindingView>) -> Arc<BindingView> {
+        let Some(globals) = self.request.options().host_globals.as_ref() else {
+            return view;
+        };
+        let added: Vec<_> = globals
+            .view()
+            .globals()
+            .filter(|global| matches!(global.availability(), Availability::Unavailable(_)))
+            .filter(|global| view.global(global.root()).is_none())
+            .collect();
+        if added.is_empty() {
+            return view;
+        }
+        let builder = view.globals().chain(added).fold(BindingView::builder(view.scope().clone()), |builder, global| {
+            builder.declare(global.root(), global.description(), global.availability().clone())
+        });
+        builder.build().map_or(view, Arc::new)
+    }
+}
+
 /// The executor's [`LifecycleHost`] for one `md` event.
 pub struct MdStackHost<'a> {
     /// The event being evaluated.
@@ -385,6 +452,7 @@ impl LifecycleHost for MdStackHost<'_> {
             .id_of(self.signal)
             .map(|id| registry().globals(id).clone())
             .unwrap_or_else(|| Arc::new(BindingView::baseline()));
+        let view = self.with_unavailable_host_globals(view);
         let entries = view
             .globals()
             .map(|global| {

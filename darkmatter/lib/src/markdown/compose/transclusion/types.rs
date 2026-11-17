@@ -710,10 +710,10 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     "remote transclusion disabled",
                 ))
                 .body(format!(
-                    "The URL <cyan>{}</cyan> was blocked by policy.",
+                    "The URL <cyan>{}</cyan> was not fetched: the composing program turned remote transclusion off.",
                     Prose::escape_text(url)
                 ))
-                .hint("Enable <dim>allow_remote: true</dim> in frontmatter or CLI options."),
+                .hint("Remote transclusion is an option of the program composing this document; `md compose` enables it, and the `network` permission then decides each fetch."),
 
             TransclusionError::RemoteFetchFailed { url, reason } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TransclusionError", "remote fetch failed"))

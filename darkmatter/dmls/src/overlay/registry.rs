@@ -325,7 +325,7 @@ impl SchemaRootSource for BufferedRoots<'_> {
 /// another (`/private/var/…`), even after the folder itself was deleted. The
 /// last component is kept as written: a deleted or not-yet-created file has
 /// no canonical form of its own.
-fn normalized(path: &Path) -> PathBuf {
+pub(crate) fn normalized(path: &Path) -> PathBuf {
     let mut rest = Vec::new();
     let mut current = path;
     while let (Some(parent), Some(name)) = (current.parent(), current.file_name()) {

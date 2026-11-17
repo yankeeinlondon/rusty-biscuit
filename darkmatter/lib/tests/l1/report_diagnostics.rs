@@ -42,6 +42,10 @@ fn failure(dir: &Path, name: &str, content: &str) -> (PathBuf, Box<ComposeFailur
     (path, result.err().unwrap_or_else(|| panic!("{name} fails")))
 }
 
+fn same_file(left: &Path, right: &Path) -> bool {
+    biscuit_file::canonicalize_simplified(left).unwrap() == biscuit_file::canonicalize_simplified(right).unwrap()
+}
+
 fn located(file: &Path, line: usize, column: usize) -> Option<DiagnosticSource> {
     Some(DiagnosticSource::at(Some(file.to_path_buf()), line, column))
 }
@@ -123,6 +127,7 @@ fn a_warning_keeps_its_record_or_its_code() {
                 reference_details: None,
                 data_location: None,
                 grants_needed: None,
+                schema_default: None,
             }
         );
     }
@@ -142,6 +147,47 @@ fn a_failed_composition_keeps_the_warnings_it_reported() {
     let request = crate::request_support::request_at(dir.path(), options_in(dir.path(), &path));
     let plain = Markdown::try_from(path.as_path()).unwrap().compose_with(&request).expect_err("same failure");
     assert_eq!(plain.to_string(), failure.error.to_string());
+}
+
+/// A fail-fast `::toc-linking` or `::file-links` failure names the document
+/// that holds the directive: a transcluded child's names the child, even after the
+/// composed document is given as the fallback, and the root's names the root.
+#[test]
+fn a_toc_or_file_links_failure_names_the_document_holding_it() {
+    use darkmatter::markdown::compose::report_diagnostics::with_document_fallback;
+    // Fail-fast, so the recoverable stages fail instead of warning.
+    let strict_failure = |dir: &Path, name: &str, content: &str| {
+        let (path, result) = compose(dir, name, content, |options| options.with_fail_fast(true));
+        (path, result.err().unwrap_or_else(|| panic!("{name} fails")))
+    };
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("x.md"), "# X\n").unwrap();
+    for (case, directive) in [("toc", "::toc-linking ./x.md level=h9"), ("file-links", "::file-links --dir ./nope")] {
+        let child = dir.path().join(format!("{case}-child.md"));
+        std::fs::write(&child, format!("# Child\n\nText.\n\n{directive}\n")).unwrap();
+        let (root, failed) = strict_failure(dir.path(), &format!("{case}-root.md"), &format!("# Root\n\n::file ./{case}-child.md\n"));
+        let mut diagnostics = error_diagnostics(&failed.error);
+        with_document_fallback(&mut diagnostics, Some(&root));
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("{case}: one record: {diagnostics:#?}");
+        };
+        let file = diagnostic.source.as_ref().and_then(|source| source.file.as_deref());
+        assert!(file.is_some_and(|file| same_file(file, &child)), "{case}: the child's own file: {diagnostic:#?}");
+
+        let (root, failed) = strict_failure(dir.path(), &format!("{case}-own.md"), &format!("# Root\n\nText.\n\n{directive}\n"));
+        let diagnostics = error_diagnostics(&failed.error);
+        let file = diagnostics[0].source.as_ref().and_then(|source| source.file.as_deref());
+        assert!(file.is_some_and(|file| same_file(file, &root)), "{case}: the root's own file: {diagnostics:#?}");
+
+        // A document known only by a context identity names no file.
+        let path = dir.path().join(format!("{case}-host.md"));
+        let request = crate::request_support::request_at(dir.path(), options_in(dir.path(), &path).with_fail_fast(true));
+        let generated = Markdown::from(format!("# Root\n\nText.\n\n{directive}\n"))
+            .with_context_identity(PathBuf::from(format!("<prompt of {}>", path.display())));
+        let failed = generated.compose_with_warnings(&request).err().unwrap_or_else(|| panic!("{case}: the identity fails"));
+        let diagnostics = error_diagnostics(&failed.error);
+        assert_eq!(diagnostics[0].source, None, "{case}: an identity is never published: {diagnostics:#?}");
+    }
 }
 
 /// A policy stop reports the warnings before the stop, then the blocking one,

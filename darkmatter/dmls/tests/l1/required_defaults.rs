@@ -225,3 +225,84 @@ fn a_refused_default_in_a_referenced_schema_is_reported_at_the_reference() {
     assert_eq!(refused[0]["range"]["end"]["line"], json!(line), "{refused:#?}");
     session.shutdown();
 }
+
+/// A file default that is well-formed but cannot be resolved once the
+/// completed value is judged (a `vault:` reference with no vault configured)
+/// belongs to the default: it is ranged at the declaration and its data names
+/// the default. A missing eager default target, like an authored one, is
+/// left to `md`.
+#[test]
+fn an_unresolvable_file_default_is_attributed_to_its_declaration() {
+    let declaration = "file(required; eager; default(vault:note.md))";
+    let text = format!("---\n$schema:\n  title: string\n  doc: {declaration}\n  absent: file(required; eager; default(./gone.md))\ntitle: Plan\n---\n\nbody\n");
+    let workspace = LspWorkspace::new();
+    let mut session = Session::open(&workspace, &text);
+    let diagnostics = session.diagnostics();
+
+    let attributed: Vec<&Value> =
+        diagnostics.iter().filter(|diagnostic| diagnostic["data"]["schema_default"].is_object()).collect();
+    assert_eq!(attributed.len(), 1, "{diagnostics:#?}");
+    let (line, start) = position(&text, declaration, 0);
+    assert_eq!(attributed[0]["range"]["start"], json!({ "line": line, "character": start }), "{attributed:#?}");
+    assert_eq!(
+        attributed[0]["data"]["schema_default"],
+        json!({ "path": "doc", "schema_location": "/properties/doc/default" }),
+        "{attributed:#?}"
+    );
+    assert!(attributed[0]["message"].as_str().unwrap().contains("schema default"), "{attributed:#?}");
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic["data"]["instance_path"] != json!("/absent")),
+        "a missing eager target is not an editor error: {diagnostics:#?}"
+    );
+    session.shutdown();
+}
+
+/// A default a `Name@file` import supplies is ranged at the importing
+/// declaration, and its data names the file that declares the default.
+#[test]
+fn an_imported_file_default_names_the_type_file_that_declares_it() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(
+        workspace.path().join("types.yaml"),
+        "kind: schema\ntypes:\n  Doc: file(required; eager; default(vault:note.md))\n",
+    )
+    .unwrap();
+    let declaration = "Doc@./types.yaml";
+    let text = format!("---\n$schema:\n  doc: {declaration}\n---\n\nbody\n");
+    let mut session = Session::open(&workspace, &text);
+    let diagnostics = session.diagnostics();
+
+    let attributed: Vec<&Value> =
+        diagnostics.iter().filter(|diagnostic| diagnostic["data"]["schema_default"].is_object()).collect();
+    assert_eq!(attributed.len(), 1, "{diagnostics:#?}");
+    let (line, start) = position(&text, declaration, 0);
+    assert_eq!(attributed[0]["range"]["start"], json!({ "line": line, "character": start }), "{attributed:#?}");
+    let named = attributed[0]["data"]["schema_default"]["schema_file"].as_str().expect("the type file is named");
+    assert!(std::path::Path::new(named).ends_with("types.yaml"), "{attributed:#?}");
+    assert!(attributed[0]["message"].as_str().unwrap().contains("types.yaml"), "{attributed:#?}");
+    session.shutdown();
+}
+
+/// An existing entry a pattern key selects is completed with its required
+/// child's default, so only the control `r` (required, no default) is
+/// reported missing.
+#[test]
+fn a_required_default_beneath_a_pattern_key_is_present() {
+    let text = "---\n$schema: ./defaults.yaml\nx-build: {}\n---\n\nRetries {{ x-build.retries }}\n";
+    let workspace = LspWorkspace::new();
+    std::fs::write(
+        workspace.path().join("defaults.yaml"),
+        "$schema:\n  \"<starting::x->\": \"{ retries: number(required; default(3)) }\"\n  r: number(required)\n",
+    )
+    .unwrap();
+    let mut session = Session::open(&workspace, text);
+    let diagnostics = session.diagnostics();
+
+    let missing: Vec<(&str, &Value)> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!(MISSING_REQUIRED))
+        .map(|diagnostic| (diagnostic["message"].as_str().unwrap(), &diagnostic["data"]["instance_path"]))
+        .collect();
+    assert_eq!(missing, [("\"r\" is a required property", &json!(""))], "the default answers `x-build.retries`: {diagnostics:#?}");
+    session.shutdown();
+}

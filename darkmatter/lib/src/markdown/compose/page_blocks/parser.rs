@@ -56,12 +56,14 @@ pub(crate) fn parse_page_blocks_in(
                 ctx: Box::new(ctx.clone()),
                 line,
                 message: format!("Unexpected content after ::end-block: '{content}'"),
+                note: None,
             }
         }
         other => PageBlockError::ParseDirective {
             ctx: Box::new(ctx.clone()),
             line: other.line(),
             message: other.to_string(),
+            note: other.note(),
         },
     })?;
 
@@ -183,6 +185,7 @@ fn parse_block_options(
                 ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
+                note: None,
             })?;
         cursor.skip_ws();
         cursor
@@ -191,6 +194,7 @@ fn parse_block_options(
                 ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
+                note: None,
             })?;
         cursor.skip_ws();
         let value = cursor
@@ -199,6 +203,7 @@ fn parse_block_options(
                 ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
+                note: None,
             })?;
 
         match key.as_str() {

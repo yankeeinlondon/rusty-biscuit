@@ -1111,6 +1111,7 @@ impl ProviderEnv {
             profile: &self.profile,
             overlay: None,
             resolution: &resolution,
+            host: None,
         };
         let json = |value: serde_json::Value| value.to_string();
         let mut diagnostics: Vec<String> = self

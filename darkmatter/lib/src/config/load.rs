@@ -37,7 +37,7 @@ use simplified_schema::{AppliedDefault, SchemaError, ValidationFailure, Validati
 use sniff::filesystem::git::{CommittedEntry, CommittedTreeSnapshot};
 
 use super::migration_receipt::content_hash;
-use super::permissions::{PermissionPolicy, RepositoryLayers};
+use super::permissions::{PermissionPolicy, PolicyLayer, RepositoryLayers};
 use super::schema::{CONFIG_FILE_NAME, ConfigScope, contract, permissions_contract};
 
 pub(crate) use reference::follow_on_disk;
@@ -188,6 +188,9 @@ pub struct Registration {
     pub declared_in: PathBuf,
     #[allow(missing_docs)]
     pub revision: ConfigRevision,
+    /// The 1-based line and character column of the entry in
+    /// [`Self::declared_in`], when known.
+    pub at: Option<(usize, usize)>,
 }
 
 /// The valid registrations of the user file and the repository working
@@ -345,6 +348,23 @@ impl ConfigSnapshot {
         let mut projected = Self::assemble(context, tree, self.mode, self.user_bytes.clone())?;
         projected.diagnostics.splice(0..0, migrated);
         Ok(projected)
+    }
+
+    /// [`Self::with_repository_projection`] read only, whatever this
+    /// snapshot's mode: no legacy file is migrated, and one is reported
+    /// instead. For a passive reader inside a writing CLI (host selection),
+    /// which must not write.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::load_captured`].
+    pub fn with_passive_repository_projection(
+        &self,
+        context: &FileResolutionContext,
+        repository: Option<&CommittedTreeCapture>,
+    ) -> Result<Self, ConfigError> {
+        let tree = captured_tree(context, repository)?;
+        Self::assemble(context, tree, ConfigLoadMode::Passive, self.user_bytes.clone())
     }
 
     fn assemble(
@@ -804,6 +824,103 @@ pub(crate) fn observe_file(
     Observe { context, portable: &portable }.file(bytes, path, revision, scope)
 }
 
+/// The repository-scope policy layer of one committed policy file at the
+/// absolute `path` inside `root` (`bytes`, `None` when the commit has no
+/// file there), judged as [`ConfigSnapshot::load`] judges `HEAD`: its inline
+/// block, or the block its reference names in `tree`, with the repository
+/// defaults in place, and every target it followed.
+///
+/// With `whole_config` the file is a `.darkmatter.yaml`, judged whole
+/// against the repository contract. Without it the file belongs to another
+/// program (Claudine's `.claudine/config.yaml`) and only its top-level
+/// `permissions` value is judged; the rest is that program's.
+///
+/// ## Errors
+///
+/// As [`ConfigSnapshot::load`]: a file or block that fails, or a reference
+/// that cannot be followed. Never a default in place of a failure.
+pub(crate) fn committed_layer(
+    context: &FileResolutionContext,
+    tree: &CommittedTreeSnapshot,
+    root: &Path,
+    path: &Path,
+    bytes: Option<&[u8]>,
+    whole_config: bool,
+) -> Result<(PolicyLayer, Vec<ConfigDependency>), ConfigError> {
+    let portable = context.portable_variables();
+    let observe = Observe { context, portable: &portable };
+    let revision = ConfigRevision::RepositoryHead;
+    let projected;
+    let bytes = match bytes {
+        Some(bytes) if !whole_config => {
+            let text = std::str::from_utf8(bytes).map_err(|_| {
+                ConfigError::unlocated(ConfigErrorKind::Syntax, path, revision, "the file is not valid UTF-8".into())
+            })?;
+            let loaded = load_yaml_document(text, path).map_err(|error| {
+                ConfigError::unlocated(ConfigErrorKind::Syntax, path, revision, error.to_string())
+            })?;
+            let Value::Object(document) = loaded.json else {
+                return Err(ConfigError::unlocated(
+                    ConfigErrorKind::NotAMapping,
+                    path,
+                    revision,
+                    "the configuration is not a mapping".into(),
+                ));
+            };
+            // JSON is YAML: the one setting, alone, judged as a whole file.
+            let mut alone = serde_json::Map::new();
+            if let Some(value) = document.get("permissions") {
+                alone.insert("permissions".to_string(), value.clone());
+            }
+            projected = serde_json::to_vec(&Value::Object(alone)).unwrap_or_default();
+            Some(projected.as_slice())
+        }
+        other => other,
+    };
+    let file = observe.file(bytes, path, revision, ConfigScope::Repository)?;
+    let mut dependencies = vec![dependency(revision, path, bytes)];
+    // The path the reference spells, which a committed link may redirect
+    // without changing either target.
+    if let Ok(PermissionsSetting::Reference(reference)) = &file.permissions {
+        dependencies.push(ConfigDependency {
+            revision,
+            path: super::permissions::lexically_normal(&reference.base_dir.join(&reference.reference)),
+            content_hash: None,
+            referenced_from: Some(path.to_path_buf()),
+        });
+    }
+    let layer = observe.layer(&file, reference::Where::Head { root, tree }, &mut dependencies)?;
+    Ok((layer, dependencies))
+}
+
+/// Types the permissions block `value` of `scope` (defaults already in
+/// place) with the loader's own entry checks; `path` names it in errors.
+///
+/// ## Errors
+///
+/// A [`ConfigError`] naming every invalid entry, or the value when it is not
+/// an inline block.
+pub(crate) fn typed_block(
+    context: &FileResolutionContext,
+    value: &Value,
+    path: &Path,
+    scope: ConfigScope,
+) -> Result<ScopePermissions, ConfigError> {
+    let portable = context.portable_variables();
+    let observe = Observe { context, portable: &portable };
+    let locate = |_: &[String]| None;
+    let setting = SettingContext { path, revision: ConfigRevision::RepositoryHead, scope, locate: &locate };
+    match observe.permissions(value, Some(value), &setting)? {
+        PermissionsSetting::Inline(block) => Ok(block),
+        PermissionsSetting::Reference(_) => Err(ConfigError::unlocated(
+            ConfigErrorKind::InvalidSetting,
+            path,
+            ConfigRevision::RepositoryHead,
+            "the default `permissions` is a reference, not a block".into(),
+        )),
+    }
+}
+
 /// Judges the `permissions` block of `text`, the whole file at `path`, as
 /// a writer's candidate: for a configuration file (`whole_config`) the whole
 /// document against `scope`'s contract, for a reference's target only its
@@ -960,6 +1077,7 @@ fn registrations(
                 index,
                 declared_in: context.path.to_path_buf(),
                 revision: context.revision,
+                at: (context.locate)(&entry_path("register", index)),
             }),
         }
     }
@@ -1086,7 +1204,7 @@ fn byte_range(loaded: &LoadedYaml, segments: &[String]) -> Option<Range<usize>> 
 }
 
 /// The 1-based line and character column of byte `offset` in `text`.
-fn line_column(text: &str, offset: usize) -> (usize, usize) {
+pub(super) fn line_column(text: &str, offset: usize) -> (usize, usize) {
     let offset = offset.min(text.len());
     let before = &text[..text.floor_char_boundary(offset)];
     let line = before.matches('\n').count() + 1;

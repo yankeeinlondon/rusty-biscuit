@@ -78,6 +78,7 @@ fn parse_opener_params(
                 message: format!("Invalid flag syntax '{flag}'. {hint}"),
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                 source_file: None,
+                note: None,
             });
         }
 
@@ -90,6 +91,7 @@ fn parse_opener_params(
                     message: e,
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
+                    note: None,
                 });
             }
         };
@@ -107,6 +109,7 @@ fn parse_opener_params(
                     ),
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
+                    note: None,
                 });
             }
             let hint = wrong_style_hint(&key);
@@ -115,6 +118,7 @@ fn parse_opener_params(
                 message: format!("Expected '=' after '{key}'. {hint}"),
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                 source_file: None,
+                note: None,
             });
         }
 
@@ -129,6 +133,7 @@ fn parse_opener_params(
                     message: e.message,
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
+                    note: None,
                 });
             }
         };
@@ -143,6 +148,7 @@ fn parse_opener_params(
                 ),
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                 source_file: None,
+                note: None,
             });
         }
 
@@ -191,6 +197,7 @@ fn parse_opener_params(
                         ),
                         excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                         source_file: None,
+                        note: None,
                     });
                 }
             },
@@ -205,6 +212,7 @@ fn parse_opener_params(
                         ),
                         excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                         source_file: None,
+                        note: None,
                     });
                 }
             },
@@ -214,6 +222,7 @@ fn parse_opener_params(
                     message: format!("Unknown shell block option: '{key}'"),
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
+                    note: None,
                 });
             }
         }
@@ -263,6 +272,7 @@ fn parse_code_pair(
             message: format!("{key} value must be in format \"N,text\" where N is an exit code"),
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
             source_file: None,
+            note: None,
         });
     };
 
@@ -276,6 +286,7 @@ fn parse_code_pair(
             message: format!("Invalid exit code '{code_str}' in {key}. Expected an integer."),
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
             source_file: None,
+            note: None,
         }),
     }
 }
@@ -293,6 +304,7 @@ fn parse_string_pair(
             message: format!("{key} value must be in format \"find,text\""),
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
             source_file: None,
+            note: None,
         });
     };
 

@@ -397,6 +397,7 @@ impl<'a> Session<'a> {
             profile: &self.profile,
             overlay: None,
             resolution: &resolution,
+            host: None,
         };
         self.registry.references(&ctx, offset, false).len()
     }

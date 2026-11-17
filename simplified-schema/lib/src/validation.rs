@@ -78,6 +78,12 @@ pub struct ValidationProblem {
     /// Caller-owned resolution context retained when projection, rather than
     /// ordinary document validation, produced the file-reference failure.
     pub caller_file: Option<CallerFileReferenceProvenance>,
+    /// The schema default that supplied the value this problem is about, at
+    /// or above [`path`](Self::path): no authored text holds such a value, so
+    /// the problem has no line or column and belongs to the default
+    /// ([`crate::defaults::attribute_problems`]). `None` for a problem about
+    /// an authored value.
+    pub default: Option<crate::AppliedDefault>,
 }
 
 impl ValidationProblem {

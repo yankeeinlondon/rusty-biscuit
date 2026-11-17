@@ -104,7 +104,8 @@ struct Column {
 const ACTION_PROBES: (&str, &str) = ("start: [{ info: hi }]", "start: [{ inf0: hi }]");
 const LIFECYCLE_PROBES: (&str, &str) = (
     "start: [{ when: \"a\", then: [{ when: \"b\", then: [{ when: \"c\", then: [stop] }] }] }]",
-    "initialize: [{ shell: x }]",
+    // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+    "agent: claude\ninitialize: [{ shell: x }]",
 );
 
 /// The field no longer constrains the probes: both are valid.
@@ -259,7 +260,8 @@ const COLUMNS: &[Column] = &[
         // trigger.
         outcomes: [UNCONSTRAINED, UNCONSTRAINED, Error, Error, Error, Error, Error, Error],
     },
-    // A trigger condition operand: the `start: string(required)` alternative.
+    // A trigger condition operand: the `start: string(required)` alternative,
+    // after the five `sequence` alternatives.
     Column {
         name: "trigger_condition_operand",
         file: "claudine.yaml",

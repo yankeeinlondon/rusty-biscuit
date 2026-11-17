@@ -595,6 +595,7 @@ fn assert_editor_requests_run_no_actions(
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         let diagnostics = registry.diagnostics(&ctx);
         if name == "nullable.md" {

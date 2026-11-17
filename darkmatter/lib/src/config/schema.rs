@@ -84,21 +84,38 @@ pub(crate) fn permissions_contract(scope: ConfigScope) -> &'static SimplifiedSch
 
 /// Prepares the object type `name` of a host program's compiled-in
 /// configuration schema (`source`, cited as `virtual_path`) as a closed root
-/// contract. Imports written as `Name@darkmatter:<stem>`, such as
-/// [`PERMISSIONS_TYPE_REFERENCE`], resolve among Darkmatter's shipped
-/// documents; nothing is read from disk, so the empty context it resolves in
-/// names no file.
+/// contract: [`resolve_host_config_type`], compiled.
 ///
 /// ## Errors
 ///
-/// A [`SchemaError::SchemaDocument`] when `source` is not a schema document
-/// with a named-type table holding an object type `name`, or the error that
-/// expanding or lowering it raised.
+/// As [`resolve_host_config_type`].
 pub fn prepare_host_config_type(
     source: &str,
     virtual_path: &str,
     name: &str,
 ) -> Result<simplified_schema::Prepared, simplified_schema::SchemaError> {
+    let resolved = resolve_host_config_type(source, virtual_path, name)?;
+    simplified_schema::Prepared::new(std::sync::Arc::new(resolved.json_schema), None, shipped_only_context())
+}
+
+/// Resolves the object type `name` of a compiled-in configuration schema
+/// (`source`, cited as `virtual_path`) as a root schema, keeping its
+/// simplified form, so an editor can describe its properties, defaults, and
+/// docs. Imports written as `Name@darkmatter:<stem>`, such as
+/// [`PERMISSIONS_TYPE_REFERENCE`], resolve among Darkmatter's shipped
+/// documents; nothing is read from disk, so the empty context it resolves in
+/// names no file, and the result has no file dependency.
+///
+/// ## Errors
+///
+/// A [`SchemaError::SchemaDocument`](simplified_schema::SchemaError::SchemaDocument)
+/// when `source` is not a schema document with a named-type table holding an
+/// object type `name`, or the error that expanding or lowering it raised.
+pub fn resolve_host_config_type(
+    source: &str,
+    virtual_path: &str,
+    name: &str,
+) -> Result<simplified_schema::resolve::ResolvedSchema, simplified_schema::SchemaError> {
     use simplified_schema::{PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError, SchemaRoot, TypeExpr};
     use std::path::{Path, PathBuf};
 
@@ -121,7 +138,7 @@ pub fn prepare_host_config_type(
         }
         _ => return Err(unusable(format!("{virtual_path} has no object type `{name}`"))),
     };
-    let context = biscuit_file::FileResolutionContext::from_snapshot(PathBuf::new(), None, Default::default());
+    let context = shipped_only_context();
     let expansion = crate::markdown::schemas::resolve::expand_named_types_with_locals(
         &SchemaRoot::Single(shape),
         Some(&table),
@@ -130,8 +147,26 @@ pub fn prepare_host_config_type(
         &[],
         &context,
     )?;
-    let lowered = simplified_schema::to_json_schema_with_definitions(&expansion.schema, &expansion.definitions)?;
-    simplified_schema::Prepared::new(std::sync::Arc::new(lowered), None, context)
+    let json_schema = simplified_schema::to_json_schema_with_definitions(&expansion.schema, &expansion.definitions)?;
+    Ok(simplified_schema::resolve::ResolvedSchema {
+        simplified: Some(expansion.schema),
+        definitions: expansion.definitions,
+        json_schema,
+        origin: simplified_schema::SchemaOrigin::document(),
+        imports: Vec::new(),
+        examples: Vec::new(),
+        referenced_files: Vec::new(),
+        searched: Vec::new(),
+        advisories: Vec::new(),
+        default_files: simplified_schema::resolve::DefaultFiles::new(),
+    })
+}
+
+/// The empty context a compiled-in schema is expanded and compiled in: its
+/// imports resolve only among Darkmatter's shipped documents, so it names no
+/// file.
+fn shipped_only_context() -> biscuit_file::FileResolutionContext {
+    biscuit_file::FileResolutionContext::from_snapshot(std::path::PathBuf::new(), None, Default::default())
 }
 
 fn selected(name: &str, cell: &'static OnceLock<SimplifiedSchema>) -> &'static SimplifiedSchema {

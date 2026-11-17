@@ -473,6 +473,14 @@ pub(crate) fn prepare_schemas(
             *trigger_registry = Some(registry.clone());
         }
     }
+    // Registration is its own trigger source, judged in the source's own
+    // context; `--disable schema-triggers` turns it off with the roots, and a
+    // caller's own host options are never replaced.
+    if options.trigger_schemas
+        && let Some(hosts) = options.applied_registered_hosts()
+    {
+        schemas = schemas.with_registered_hosts(std::sync::Arc::clone(hosts));
+    }
 
     Ok(PreparedSchemas {
         schemas: Some(schemas),
@@ -527,7 +535,9 @@ pub(crate) fn prepare_schemas(
 /// Each is also pushed onto `filled`, which holds every default this
 /// document's composition has inserted so far, an earlier pass's included:
 /// the verdict reads it to tell a filled lifecycle flag from an authored one
-/// ([`authored_view`]).
+/// ([`authored_view`]), and since the frontmatter holds the defaults from
+/// then on, a later verdict's problem with one of them is attributed to its
+/// schema default through it, never to an authored position.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
@@ -641,6 +651,7 @@ pub(crate) fn run_with_registry(
         }
         report = judge(schemas, markdown, filled)?;
     }
+    simplified_schema::defaults::attribute_problems(&mut report.problems, &applied_defaults(filled));
 
     for advisory in &report.advisories {
         compose_report.add_schema_advisory(advisory, consumer);
@@ -656,16 +667,29 @@ pub(crate) fn run_with_registry(
     let defer_shell_pending = options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
         || options.defer_shell_pending_schema_problems;
     let fm_map = markdown.frontmatter().as_map();
+    let authored_frontmatter = std::cell::OnceCell::new();
     let composition_independent: Vec<_> = report
         .problems
         .iter()
         .filter(|p| {
-            // DM1b: problems referencing a deferred (excluded) key are not
-            // user-schema violations — the caller owns those keys' validation.
+            // DM1b: a deferred (excluded) key is never rendered here. A caller
+            // that runs the document's events owns their validation and judges
+            // them later. A caller composing a registered host's document
+            // (`with_selected_host`) runs no host event, so nothing judges
+            // them later: this verdict keeps their problems, setting aside
+            // only what `md schema validate` sets aside as awaiting rendering.
             if let Some(name) = top_level_pointer_segment(&p.path)
                 && options.exclude_keys.contains(&name)
             {
-                return false;
+                return options.selected_host().is_some()
+                    && !crate::markdown::schemas::pending_rendering_sets_aside(
+                        p,
+                        &name,
+                        authored_frontmatter.get_or_init(|| {
+                            serde_json::Value::Object(fm_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                        }),
+                        &report.deferred,
+                    );
             }
             // Caller-originated files were materialized against their
             // invocation-fixed launch context above. A target document may
@@ -716,11 +740,12 @@ pub(crate) fn run_with_registry(
     let authored_copies = projection.authored_copies(fm_map, options);
     if !authored_copies.is_empty() {
         let origins = schemas.caller_origins().clone().without_supplied_values();
-        let problems: Vec<_> = judge(&schemas.clone().with_caller_origins(origins), markdown, filled)?
+        let mut problems: Vec<_> = judge(&schemas.clone().with_caller_origins(origins), markdown, filled)?
             .problems
             .into_iter()
             .filter(|problem| authored_copies.contains(&problem.path))
             .collect();
+        simplified_schema::defaults::attribute_problems(&mut problems, &applied_defaults(filled));
         if !problems.is_empty() {
             return Err(MarkdownError::SchemaValidationFailed {
                 path,
@@ -791,6 +816,16 @@ pub(crate) struct FilledDefault {
     path: Vec<ValuePathSegment>,
     /// Whether it replaced a written `null` rather than a missing key.
     replaced_null: bool,
+    /// The default itself, which a later verdict's problem with it is
+    /// attributed to.
+    applied: simplified_schema::AppliedDefault,
+}
+
+/// The defaults in `filled` that filled a missing key, which
+/// [`simplified_schema::defaults::attribute_problems`] attributes problems to;
+/// one that replaced a written `null` sits under the author's key.
+fn applied_defaults(filled: &[FilledDefault]) -> Vec<simplified_schema::AppliedDefault> {
+    filled.iter().filter(|default| !default.replaced_null).map(|default| default.applied.clone()).collect()
 }
 
 /// The frontmatter of `markdown` as written, before composition filled any
@@ -932,7 +967,7 @@ fn insert_defaults(
             continue;
         }
         let path = value_path(fm_map, segments);
-        filled.push(FilledDefault { path: path.clone(), replaced_null });
+        filled.push(FilledDefault { path: path.clone(), replaced_null, applied: applied.clone() });
         inserted.push(path);
         wrote = true;
     }
@@ -2387,6 +2422,7 @@ fn caller_projection_failure(
                 origin: origin.clone(),
                 candidate,
             }),
+            default: None,
         }),
     }
 }
@@ -3253,6 +3289,7 @@ mod tests {
                 offending_properties: Vec::new(),
                 file_reference: None,
                 caller_file: None,
+                default: None,
             };
             deferral.defers_problem(&problem, &[], &frontmatter, &data)
         };

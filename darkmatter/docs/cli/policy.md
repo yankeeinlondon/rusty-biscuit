@@ -333,7 +333,7 @@ command rules either:
 - **`permissions.file-read` pre-approves file reads.** A file it matches is
   read without asking; by default that is a file with a common data or text
   extension beside the schema, or anywhere in its repository. See
-  [Configuration](../topics/configuration.md#permissions) for the list and
+  [Permissions](../topics/permissions.md#file-read) for the list and
   [How a file read is decided](../topics/schemas/schema-slots.md#how-a-file-read-is-decided)
   for the order of the checks.
 - **On a terminal**, any other read is asked about with a numbered prompt:

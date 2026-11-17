@@ -348,6 +348,7 @@ impl Oracle {
             // assembling one would prepare schemas the oracle does not judge.
             overlay: None,
             resolution: &resolution,
+            host: None,
         };
         let offset = source_map.lsp_to_byte(position).expect("position inside the document");
         normalize_locations(self.registry.references(&ctx, offset, include_declaration))
@@ -423,6 +424,7 @@ impl Oracle {
             profile: &self.profile,
             overlay: None,
             resolution: &resolution,
+            host: None,
         };
         let mut out: Vec<(u32, String, String)> = dmls::providers::wiki::diagnostics(&ctx)
             .into_iter()

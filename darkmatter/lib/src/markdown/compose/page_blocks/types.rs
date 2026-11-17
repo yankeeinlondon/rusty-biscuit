@@ -6,11 +6,15 @@ use std::ops::Range;
 #[derive(Debug, thiserror::Error)]
 pub enum PageBlockError {
     /// Failed to parse a page block directive.
-    #[error("Failed to parse page block at line {line}: {message}")]
+    #[error("Failed to parse page block at line {line}: {message}{}", super::super::block_pairs::note_suffix(note))]
     ParseDirective {
         ctx: Box<biscuit_terminal::errors::SourceContext>,
         line: usize,
+        /// The reason, without a line.
         message: String,
+        /// Another line the reason refers to, counted like `line` (such as
+        /// where a region a closer misses was opened).
+        note: Option<String>,
     },
 
     /// Encountered `::end-block` without a matching `::block`.
@@ -50,10 +54,13 @@ impl biscuit_terminal::errors::BlockError for PageBlockError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            PageBlockError::ParseDirective { ctx, line, message } => StatusBlock::new(StatusState::Error)
+            PageBlockError::ParseDirective { ctx, line, message, note } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("PageBlockError", "directive parse failed"))
                 .body(vec![
-                    Prose::new(format!("<dim>Message:</dim> {message}")),
+                    Prose::new(format!(
+                        "<dim>Message:</dim> {message}{}",
+                        super::super::block_pairs::note_suffix(note)
+                    )),
                     ctx.excerpt_prose(*line, 1, "md"),
                 ])
                 .hint("Opening syntax: <cyan>::block when=\"expr\"</cyan> — close with <cyan>::end-block</cyan>."),

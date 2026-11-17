@@ -29,7 +29,9 @@ extension.
 - Keep network access deny-all by default. Route every allowed remote read or
   write through `biscuit_file::FetchPolicy`: exact-host consent, or the
   configured `network: allow` projected by `config::network::NetworkPermission`
-  (`FetchPolicy::allow_all()`, never a wildcard host).
+  (`FetchPolicy::allow_all()`, never a wildcard host). An invalid
+  `permissions` block (`NetworkPermission::Invalid`) refuses every URL with
+  its configuration error before any per-run host or approval is consulted.
 - Keep schema `{{ … }}` slots passive by default. Only an explicit resolution
   through a `SlotSession` (`DarkmatterSchemas::resolve_template`) evaluates
   them, after every slot is admitted; nothing ever validates against a
@@ -66,6 +68,9 @@ definitions away from their references or replace them with placeholders.
 | Terminal rendering options | [terminal.md](terminal.md) |
 | Frontmatter model, shared views, literal tokens, in-place leaf edits, plain-YAML edits (`yaml_edit`) | [frontmatter.md](frontmatter.md) |
 | `.darkmatter.yaml` schema, `ConfigSnapshot` loading, locked config writes | [library-surfaces.md](library-surfaces.md), `docs/topics/configuration.md` |
+| Permission policy: `config::permissions::PermissionPolicy` (built once per `ConfigSnapshot` from the user layer plus the repository's `HEAD` and working-copy layers; an exclusion in any layer wins, otherwise user allows or both repository layers allow; `network: allow` only when every layer says so), saving an "always allow" entry (`config::permissions::persist::save_user_approval`, user scope only, through `ConfigTransaction`) | `docs/topics/permissions.md` |
+| Host registration: `darkmatter-host` manifests, `config::registration` profiles, host selection (`RegisteredHosts`, `select`, `HostSelection`), the registered trigger layer, `md compose` of a foreign document (`ComposeOptions::with_selected_host`, `RegisteredHostProfile::analysis_globals`, `md_host::{shared_event_keys, execution_projection, foreign_deferred_keys}`), `dm.host.*` codes, a host's setup adding its own `register` entry (`config::init::register_manifest`, deduplicated by `config::registration::manifest_identity`; Claudine publishes its revision with `claudine::composition::registration` first), DMLS's per-document host view (`dmls/src/overlay/hosts.rs`, see [dmls.md](dmls.md)) | `docs/topics/host-registration.md` |
+| Permission-widening comparison for CI (`config::widening`: `compare_revisions`, `WideningInputs` from `.github/ci/permission-inputs.json`, the `permission_widening` example the trusted CI job builds from the base commit, whose `--render` mode composes `.github/ci/permission-report.md` into the pull-request comment; commits read through `sniff`'s `committed_tree_at`, never checked out; resolution reuses `load::committed_layer`/`typed_block`, so a loader change is a checker-input change) | `docs/topics/configuration.md` ("The Cloned-Repository Risk"), repo `docs/topics/ci-cd.md` ("Permission-change report") |
 | Error/status block conventions | [errors.md](errors.md) |
 | `md clean`/DMLS formatting rules and frontmatter repair | [cleanup.md](cleanup.md) |
 | Document comparison | [comparison.md](comparison.md) |
@@ -144,6 +149,13 @@ A whole `.yaml`/`.yml` document is validated by
 `DarkmatterSchemas::validate_yaml_document` (claimed `kind` > root `$schema` >
 none, no baseline or triggers) over a per-context `KindRegistry`; read
 [schema.md](schema.md#whole-yaml-documents) first.
+DMLS routes the four configuration paths (`.darkmatter.yaml`,
+`.claudine/config.yaml` under the captured home or repo root, by
+`PathIdentity`) before that selection: `dmls/src/config_contracts.rs`
+resolves the scope type (`config::schema::resolve_host_config_type`; Claudine's
+schema is `include_str!`'d, never the claudine crate) and
+`DarkmatterSchemas::prepare_configuration_contract` makes a
+`Route::Configuration` contract whose `kind`/`$schema` are data.
 Ownership: the `simplified-schema` crate owns all three shipped definitions
 (`simplified-schema/schemas/{schema,yaml-schema,schema-trigger}.yaml`),
 envelope admission, triggers (`simplified_schema::triggers`), schema roots

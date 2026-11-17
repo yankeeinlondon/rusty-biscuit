@@ -232,3 +232,43 @@ exit 0
         "stderr should contain tracing init timing; got: {plain}"
     );
 }
+
+/// R2-F2 control: a sequence composes an initialized step at its turn, inside
+/// the `step N` window, so its composition (here outlasting everything prepared
+/// before `initialize`) never lands in a window that closed earlier.
+#[cfg(unix)]
+#[test]
+fn sequence_perf_initialized_step_composition_nests_under_its_step() {
+    let fixture = CliProcessFixture::named("sequence-perf-initialized-step");
+    fixture.seed_user_config();
+    common::write_shell_permissions(fixture.home(), "exact sleep 0.1\n");
+
+    // The step is an inline prompt task: its `prompt` is what it composes.
+    let step_file = fixture.cwd().join("step.md");
+    fs::write(
+        &step_file,
+        "---\nprompt: |\n  Update the body.\n\n  ::shell sleep 0.1\ninitialize:\n  - {stdout: initialized}\n---\n# Body\n",
+    )
+    .unwrap();
+    let md_file = fixture.cwd().join("seq.md");
+    fs::write(&md_file, "---\nsequence:\n  - name: one\n    prompt: step.md\n---\nSequence\n").unwrap();
+    common::InlineAgentStub::new(&step_file)
+        .body("Replacement body\n")
+        .install(fixture.bin_dir(), "goose");
+
+    let output = fixture
+        .command()
+        .args(["sequence", "--goose", "--perf", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "{plain}");
+    let report = &plain[plain.find("Performance").unwrap_or_else(|| panic!("report missing:\n{plain}"))..];
+    let step = report
+        .find("step 1: one")
+        .unwrap_or_else(|| panic!("step missing:\n{report}"));
+    assert!(
+        report[step..].contains("composition"),
+        "the step's composition nests under its step:\n{report}"
+    );
+}

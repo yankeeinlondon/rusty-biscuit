@@ -604,8 +604,8 @@ impl<'a> SiteScope<'a> {
 /// was loaded, never the current text, into which values were interpolated.
 pub(crate) fn authored_context(markdown: &crate::markdown::Markdown, authored_body: Option<&str>) -> SourceContext {
     markdown.loaded_source_context_for_errors().unwrap_or_else(|| {
-        let path = std::path::PathBuf::from("unknown");
-        SourceContext::new(path.clone(), path, authored_body.unwrap_or_default())
+        let display = std::path::PathBuf::from("unknown");
+        SourceContext::new(markdown.unfiled_context_absolute(), display, authored_body.unwrap_or_default())
     })
 }
 

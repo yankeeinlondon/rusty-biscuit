@@ -561,8 +561,10 @@ impl RemoteFetchRuntime {
         Ok(ProviderPermit { runtime: self })
     }
 
-    /// Checks whether a URL is allowed by policy, returning a
-    /// `RemoteReadError::DeniedByPolicy` if not.
+    /// Checks whether a URL is allowed by policy, returning
+    /// `RemoteReadError::InvalidConfiguration` when the configured `network`
+    /// permission is invalid (whatever hosts the run allows) and
+    /// `RemoteReadError::DeniedByPolicy` when the host is not allowed.
     pub fn check_allowed(&self, url: &Url) -> Result<(), RemoteReadError> {
         let host = url
             .host_str()
@@ -570,21 +572,18 @@ impl RemoteFetchRuntime {
                 url: url.to_string(),
                 reason: "missing host".to_string(),
             })?;
-        if self.inner.policy.is_allowed(host) {
-            Ok(())
-        } else {
-            {
-                let mut stats = self.inner.stats.lock().unwrap();
-                stats.policy_denials += 1;
-            }
-            Err(match self.inner.network.config_error() {
-                Some(error) => RemoteReadError::InvalidConfiguration {
-                    host: host.to_string(),
-                    message: error.to_string(),
-                },
-                None => RemoteReadError::DeniedByPolicy { host: host.to_string() },
-            })
-        }
+        // The configuration error outranks a per-run `--allow host=HOST`:
+        // an invalid policy never yields a permissive result.
+        let refusal = match self.inner.network.config_error() {
+            Some(error) => RemoteReadError::InvalidConfiguration {
+                host: host.to_string(),
+                message: error.to_string(),
+            },
+            None if self.inner.policy.is_allowed(host) => return Ok(()),
+            None => RemoteReadError::DeniedByPolicy { host: host.to_string() },
+        };
+        self.inner.stats.lock().unwrap().policy_denials += 1;
+        Err(refusal)
     }
 
     /// Registers a URL and starts an eager fetch on the Tokio runtime.

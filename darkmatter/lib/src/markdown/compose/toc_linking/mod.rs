@@ -100,6 +100,7 @@ pub(crate) fn resolve_target_chain(
             line: directive.line,
             failure,
             glob_hint: failure.zip(directive.targets.first()).and_then(|(failure, target)| failure.glob_hint(target)),
+            document: None,
         }),
     }
 }

@@ -61,6 +61,7 @@ fn with_document<R>(root: &Path, path: &Path, text: &str, f: impl FnOnce(&Docume
         profile: &profile,
         overlay: overlay.as_ref(),
         resolution: &resolution,
+        host: None,
     };
     f(&ctx)
 }

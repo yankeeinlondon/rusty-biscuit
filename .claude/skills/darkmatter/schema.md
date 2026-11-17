@@ -289,6 +289,10 @@ Defaults: `EffectiveSchema::validate_instance` judges the candidate
 defaults, conversion, defaults again, as `Prepared::validate_soft`;
 `converted_candidate`/`complete`), with this schema's validators, nested
 templates, and `SHARED_VALIDATOR_CACHE`; never add a second defaulting walk.
+An `accepts_as_is` value still goes through `complete` (which keeps the fast
+path only when `alternatives_supply_defaults` is false): a union arm that
+accepts it as written and another that accepts it completed is
+`AmbiguousDefaults`, never an early pass.
 `ValidationReport::defaults` lists them; the caller's value is never touched
 (`data_copy` converts the default-completed candidate, then withdraws each applied default, so `md set` never writes one). An engine error
 becomes one `ConstraintViolation` problem at the property, `schema_path` = the
@@ -300,6 +304,16 @@ more; it returns the inserted paths and the pipeline marks them data in
 `FrontmatterProvenance`. Pass 1 interpolation runs before this, so only pass 2
 and later see a default. Preparation runs on every value, valid or not; never
 reintroduce an "accepted as written" shortcut before it.
+Provenance of an inserted default: `complete` fills each `AppliedDefault::origin`
+from `default_files` (a `Name@file` import's declaring file), else `origins`
+(top-level key); `validate_instance` calls `defaults::attribute_problems` after
+`locate_all`, and composition, whose verdicts see defaults already inserted,
+keeps every default it inserted across both passes (`filled_defaults` in the
+pipeline, each `FilledDefault` carrying its `AppliedDefault`) and attributes the
+final problems with them. `report_diagnostics` projects
+`ValidationProblem::default` as `Diagnostic::schema_default`
+(`SchemaDefaultOrigin`, in every output schema); DMLS ranges such a problem at
+the declaration (`refused_default_range`) and adds `data.schema_default`.
 
 Runtime consumers use `SchemaPhase::Launch` and `SchemaPhase::Completion` on
 an already-resolved `EffectiveSchema`. `required` and `eager` are independent
@@ -1141,7 +1155,11 @@ References; Choosing an Arm: Reporting versus Changing Data).
   provenance (root-union arms, `for_yaml_document`, `rewrite.rs`) takes the
   canonical route. A layer's digest must describe its JSON exactly: a new
   post-merge transformation either extends the identity or drops to `None`
-  (canonical). Changing what a merge or projection produces bumps
+  (canonical). A registered host's trigger layer
+  (`DarkmatterSchemas::with_registered_hosts`) uses `registered_digest`: the
+  payload digest with the manifest path, hash, and host revision folded in,
+  so one payload `Arc` can stand under two identities; the `MERGES` memo
+  therefore also compares layer digests. Changing what a merge or projection produces bumps
   `resolve::MERGE_ALGORITHM_REVISION` or `phase::PROJECTION_REVISION`;
   changing the canonical encoding bumps `CANONICAL_IDENTITY_REVISION` and
   Darkmatter's and Claudine's preparation revisions (both store digests). Tests:

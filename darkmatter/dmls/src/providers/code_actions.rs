@@ -722,6 +722,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
 
         let diagnostics = crate::providers::dsl::diagnostics(&ctx);

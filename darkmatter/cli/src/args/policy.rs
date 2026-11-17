@@ -127,10 +127,6 @@ pub struct PolicyEntry {
 
 use PolicyCommand::{Clean, Compose, Render, SchemaValidate};
 
-/// The recoveries that apply unless denied: a missing or empty reference
-/// target only warns by default.
-pub const DEFAULT_RECOVERIES: &[&str] = &["missing-hyperlinks", "missing-image-refs", "missing-transclusions"];
-
 /// Every registered identifier.
 pub const POLICY_REGISTRY: &[PolicyEntry] = &[
     PolicyEntry {
@@ -138,21 +134,21 @@ pub const POLICY_REGISTRY: &[PolicyEntry] = &[
         kind: PolicyKind::Recovery,
         commands: &[Compose],
         codes: &[MISSING_HYPERLINK_CODE],
-        summary: "keep the content when a hyperlink target is missing or empty (the default; `--deny` blocks it)",
+        summary: "keep the content when a hyperlink target is missing",
     },
     PolicyEntry {
         id: "missing-image-refs",
         kind: PolicyKind::Recovery,
         commands: &[Compose],
         codes: &[MISSING_IMAGE_CODE],
-        summary: "keep the content when an image target is missing or empty (the default; `--deny` blocks it)",
+        summary: "keep the content when an image target is missing",
     },
     PolicyEntry {
         id: "missing-transclusions",
         kind: PolicyKind::Recovery,
         commands: &[Compose],
         codes: &[MISSING_TRANSCLUSION_CODE],
-        summary: "remove a transclusion directive whose target is missing (the default; `--deny` blocks it)",
+        summary: "remove a transclusion directive whose target is missing",
     },
     PolicyEntry {
         id: "ctx-override",
@@ -567,13 +563,10 @@ impl ResolvedPolicy {
         Ok(policy)
     }
 
-    /// Whether the recovery `id` applies: allowed by name, or, unless denied
-    /// by name, by `--allow all` or by default ([`DEFAULT_RECOVERIES`], which
-    /// `--deny all` turns off).
+    /// Whether the recovery `id` applies: allowed by name, or by `all`
+    /// unless denied by name.
     pub fn recovers(&self, id: &str) -> bool {
-        self.allowed.contains(id)
-            || (!self.denied.contains(id)
-                && (self.allow_all || (!self.deny_all && DEFAULT_RECOVERIES.contains(&id))))
+        self.allowed.contains(id) || (self.allow_all && !self.denied.contains(id))
     }
 
     /// The hosts allowed by `host=HOST`, in first-seen order.

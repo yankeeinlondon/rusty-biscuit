@@ -45,6 +45,7 @@ mod config_migration;
 mod config_migration_receipt;
 mod config_permission_persist;
 mod config_permissions;
+mod config_widening;
 mod config_write;
 mod path_candidates;
 mod compose_expression_failure_contract;
@@ -56,6 +57,7 @@ mod dasherized_identifier_compose;
 mod data_origin;
 mod deferred_positions;
 mod dependency_direction_guard;
+mod directive_error_document;
 mod directive_target_analysis;
 mod empty_package_area;
 mod entry_point_parity;
@@ -77,6 +79,11 @@ mod union_fixtures;
 mod content_policy_fixtures;
 #[path = "../dynamic_slots_fixtures/mod.rs"]
 mod dynamic_slots_fixtures;
+#[path = "../host_fixtures/mod.rs"]
+mod host_fixtures;
+// The in-process `md` lifecycle recorder; only this suite drives a run.
+#[path = "../host_fixtures/recorder.rs"]
+mod host_recorder;
 
 mod absent_property_contract;
 mod plain_corpus;
@@ -139,6 +146,9 @@ mod expression_regression;
 mod expression_strict_equality;
 mod expression_type_scope;
 mod host_functions;
+mod host_registration;
+mod host_selection;
+mod foreign_document_compose;
 #[cfg(feature = "effects-instrumentation")]
 mod design_time_call_check;
 #[cfg(feature = "effects-instrumentation")]

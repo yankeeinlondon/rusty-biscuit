@@ -447,14 +447,19 @@ pub(crate) fn request_schemas(request: &MdRequest) -> Result<DarkmatterSchemas, 
 }
 
 /// [`request_schemas`] for a document in `context`: its own resolution context,
-/// with trigger discovery when it is inside a repository. The caller decides how
-/// to report what discovery skipped.
+/// with trigger discovery when it is inside a repository and the request's
+/// registered hosts. The caller decides how to report what discovery skipped.
 ///
 /// ## Errors
 ///
 /// As [`load_api`], or when trigger discovery fails.
 pub(crate) fn document_schemas(request: &MdRequest, context: biscuit_file::FileResolutionContext) -> Result<DarkmatterSchemas, SchemaError> {
-    discover_document_triggers(request_schemas(request)?.with_file_resolution_context(context))
+    let hosts = request.registered_hosts(&context);
+    let schemas = discover_document_triggers(request_schemas(request)?.with_file_resolution_context(context))?;
+    Ok(match hosts {
+        Some(hosts) => schemas.with_registered_hosts(hosts),
+        None => schemas,
+    })
 }
 
 /// `schemas` with trigger discovery when its context is inside a repository.
@@ -568,7 +573,12 @@ fn validate_one(
         Err(err) => return early(FileOutcome::ParseError(format!("{err:#}")), None),
     };
     let in_repository = document_context.repository_root().is_some();
-    let api = api.clone().with_file_resolution_context(document_context);
+    let hosts = (!no_schema_triggers).then(|| request.registered_hosts(&document_context)).flatten();
+    let mut api = api.clone().with_file_resolution_context(document_context);
+    if let Some(hosts) = hosts {
+        api = api.with_registered_hosts(hosts);
+        request.report_host_diagnostics(&api.registered_selection_for(&md).diagnostics);
+    }
     let (api, mut timings) = if in_repository && !no_schema_triggers {
         match ValidationTimings::record(|| api.with_trigger_discovery()) {
             (Ok(api), discovery) => (api, discovery),
@@ -983,6 +993,15 @@ fn push_problem_bullet(out: &mut String, problem: &ValidationProblem, terminal: 
         );
         push_row(out, &Prose::new(sub_line).render(terminal));
     }
+    // A value a schema default supplied is repaired in the schema, not in
+    // the frontmatter that never held it.
+    if let Some(applied) = problem.default.as_ref() {
+        let sub_line = format!(
+            "        <dim>hint:</dim> {}",
+            Prose::escape_text_outside_code_spans(&darkmatter::markdown::errors::schema_default_repair(applied))
+        );
+        push_row(out, &Prose::new(sub_line).render(terminal));
+    }
 }
 
 /// When `jsonschema` reports a `Required` failure, the message already starts
@@ -1043,7 +1062,7 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             let problems_json: Vec<serde_json::Value> = problems
                 .iter()
                 .map(|p| {
-                    json!({
+                    let mut problem = json!({
                         "path": p.path,
                         "property": p.property,
                         "message": p.message,
@@ -1052,7 +1071,11 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                         "column": p.column,
                         "arm_index": p.arm_index,
                         "description": p.description,
-                    })
+                    });
+                    if let Some(applied) = &p.default {
+                        problem["default"] = applied_default_record(applied);
+                    }
+                    problem
                 })
                 .collect();
             warnings_json.extend(advisories.iter().map(|advisory| {
@@ -1071,10 +1094,7 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                 "problems": problems_json,
             });
             if !defaults.is_empty() {
-                record["defaults"] = defaults
-                    .iter()
-                    .map(|applied| json!({ "path": applied.path.to_string(), "value": applied.value }))
-                    .collect();
+                record["defaults"] = defaults.iter().map(applied_default_record).collect();
             }
             record
         }
@@ -1153,6 +1173,20 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
     // `serde_json/preserve_order`.
     value.sort_all_objects();
     value
+}
+
+/// One default's data record: where it stands in, its value, and where the
+/// schema declares it.
+fn applied_default_record(applied: &AppliedDefault) -> serde_json::Value {
+    let mut record = serde_json::json!({
+        "path": applied.path.to_string(),
+        "value": applied.value,
+        "schema_location": applied.pointer,
+    });
+    if let Some(file) = applied.origin.as_ref().and_then(simplified_schema::SchemaOrigin::file) {
+        record["schema_file"] = file.to_string_lossy().into_owned().into();
+    }
+    record
 }
 
 /// Stable lowercase token for a problem's kind, used in a data output; a YAML

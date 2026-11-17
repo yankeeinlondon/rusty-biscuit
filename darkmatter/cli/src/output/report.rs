@@ -45,6 +45,9 @@ pub struct ReportSink {
     perf: Option<Mutex<Vec<PerfStage>>>,
     lifecycle: Mutex<Vec<LifecycleOutputEntry>>,
     data_runtime: Mutex<Option<DataRuntime>>,
+    /// Where run notices raised after [`Self::new`] go: after the ones it
+    /// took, before the command's own diagnostics.
+    notices_end: usize,
 }
 
 impl ReportSink {
@@ -54,6 +57,7 @@ impl ReportSink {
     #[must_use]
     pub fn new(output: &ResolvedOutput, file: Option<String>, show: bool, perf: bool) -> Self {
         let mut diagnostics = super::take_run_notices();
+        let notices_end = diagnostics.len();
         diagnostics.extend(output.width_warning.as_deref().map(width_warning_diagnostic));
         Self {
             target: output.target,
@@ -67,6 +71,7 @@ impl ReportSink {
             perf: perf.then(|| Mutex::new(Vec::new())),
             lifecycle: Mutex::new(Vec::new()),
             data_runtime: Mutex::new(None),
+            notices_end,
         }
     }
 
@@ -245,11 +250,15 @@ impl ReportSink {
     }
 
     fn into_envelope(self, success: bool) -> DocumentEnvelope {
+        let mut diagnostics = self.diagnostics.into_inner().expect("sink lock");
+        let late = super::take_run_notices();
+        let at = self.notices_end.min(diagnostics.len());
+        diagnostics.splice(at..at, late);
         DocumentEnvelope {
             file: self.file,
             outcome: if success { Outcome::Success } else { Outcome::Failure },
             document: self.document.into_inner().expect("sink lock").filter(|_| success),
-            diagnostics: self.diagnostics.into_inner().expect("sink lock"),
+            diagnostics,
             summary: self.summary.into_inner().expect("sink lock"),
             perf: self.perf.map(|perf| PerfData { stages: perf.into_inner().expect("sink lock") }),
             lifecycle_output: self.lifecycle.into_inner().expect("sink lock"),

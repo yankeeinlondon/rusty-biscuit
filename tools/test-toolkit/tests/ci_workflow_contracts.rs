@@ -4047,7 +4047,7 @@ fn junit_uploads_carry_the_whole_staging_directory_and_its_manifest() {
 
 /// The jobs `ci-gate` folds: every top-level job of `ci.yml` whose failure
 /// must block a merge. The advisory `ci-reporting` is the only job outside it.
-const GATED_JOBS: [&str; 6] = [
+const GATED_JOBS: [&str; 7] = [
     "validation",
     "scope",
     "preflight",
@@ -4060,6 +4060,9 @@ const GATED_JOBS: [&str; 6] = [
     // AC15's planner-vs-sniff contract. It skips on every pull request that
     // cannot move area derivation, and the fold reads `skipped` as a pass.
     "area-drift",
+    // The permission-change report. A failed checker blocks; a change that
+    // may widen is reported on the pull request, never held for an approval.
+    "permission-scope",
 ];
 
 /// Spec §5 / OQ3 Option B, proven in
@@ -5526,13 +5529,14 @@ fn archive_guard_registry_entry() -> String {
 #[test]
 fn a_failing_archive_path_guard_blocks_the_merge_through_the_existing_fold() {
     assert_eq!(
-        10,
+        11,
         TARGET_CI_JOBS.len(),
         "the guard must add NO top-level job beyond the nightly's \
-         `certify-nightly` and `publish-observations`; ci.yml now declares {TARGET_CI_JOBS:?}"
+         `certify-nightly` and `publish-observations` and the permission-change \
+         report; ci.yml now declares {TARGET_CI_JOBS:?}"
     );
     assert_eq!(
-        6,
+        7,
         GATED_JOBS.len(),
         "the guard reaches ci-gate through `area-ci` and adds nothing to its \
          fold; ci-gate now folds {GATED_JOBS:?}"
@@ -6206,6 +6210,7 @@ const NAMING_CONTRACT: [WorkflowNaming; 4] = [
             ("build", None),
             ("area-ci", None),
             ("area-drift", Some("Verify package area mapping")),
+            ("permission-scope", Some("Report permission changes")),
             ("ci-gate", Some("ci-gate")),
             ("certify-nightly", Some("Publish nightly coverage evidence")),
             ("publish-observations", Some("Publish test observations")),
@@ -8880,20 +8885,22 @@ fn top_level_job_ids(file: &str) -> Vec<String> {
         .collect()
 }
 
-/// `ci.yml`'s whole top-level job set. `ci-tooling` and
+/// `ci.yml`'s whole top-level job set. `permission-scope` reports a change
+/// that may widen the repository's committed permissions. `ci-tooling` and
 /// `biscuit-tui-captured-stdout` retired into their owners' package cells and
 /// the advisory `summary` became `ci-reporting`; `build` and `area-drift`
 /// arrived with the single-OS-compile fix; `certify-nightly` publishes a
 /// finished nightly's coverage and sits outside the gate's fold, as does
 /// `publish-observations`, which turns the nightly's hosted cell observations
 /// into notes.
-const TARGET_CI_JOBS: [&str; 10] = [
+const TARGET_CI_JOBS: [&str; 11] = [
     "validation",
     "scope",
     "preflight",
     "build",
     "area-ci",
     "area-drift",
+    "permission-scope",
     "certify-nightly",
     "publish-observations",
     "ci-gate",
@@ -10142,6 +10149,136 @@ fn active_cadence_guidance_agrees_with_the_environment_table() {
          wsl2-ubuntu: {wsl:?}):\n  {}",
         problems.join("\n  ")
     );
+}
+
+/// The permission-change report runs only the BASE commit's code. The
+/// candidate is fetched as objects and never checked out, built, or run; its
+/// one Rust build happens in the trusted checkout outside the workspace, so
+/// no candidate `.cargo` configuration or toolchain file applies.
+#[test]
+fn the_permission_classifier_runs_only_trusted_base_code() {
+    let job = executable_lines(&job_block("ci.yml", "  permission-scope:"));
+    assert!(job.contains("\n    needs: validation\n"), "it reads the reuse decision");
+    assert!(job.contains("REUSED: ${{ needs.validation.outputs.reuse }}"));
+    assert!(
+        job.contains("BASE: ${{ github.event.pull_request.base.sha || github.event.before }}")
+            && job.contains("HEAD: ${{ github.event.pull_request.head.sha || github.sha }}"),
+        "pull requests compare base/head and pushes before/after"
+    );
+    assert!(
+        !job.contains("actions/checkout"),
+        "no workspace checkout: the candidate tree is never materialized"
+    );
+    assert!(
+        job.contains(r#"TRUSTED="$RUNNER_TEMP/permissions-trusted""#),
+        "the trusted checkout lives outside the workspace"
+    );
+    assert!(job.contains(r#"fetch -q --no-tags --depth=1 origin "$BASE" "$HEAD""#));
+    assert!(job.contains(r#"checkout -q --detach "$BASE""#), "only the base is checked out");
+    assert!(!job.contains(r#"checkout -q --detach "$HEAD""#));
+    assert!(job.contains("core.hooksPath /dev/null"), "no hook can run in the trusted checkout");
+    for invocation in [
+        r#"python3 -I "$helper" scope --repository "$TRUSTED""#,
+        r#"python3 -I "$TRUSTED/scripts/ci/permission_scope.py" decide"#,
+    ] {
+        assert!(job.contains(invocation), "the helper runs isolated, from the trusted checkout: `{invocation}`");
+    }
+    assert_eq!(job.matches("python3 -I").count(), 2, "no other Python runs in the job");
+    assert!(
+        job.contains(r#"helper="$TRUSTED/scripts/ci/permission_scope.py""#),
+        "the scope helper is the trusted copy"
+    );
+    assert!(
+        job.contains("if [ ! -f \"$helper\" ]; then\n            echo \"decision=uncompared\""),
+        "a base without the checker is reported as not compared (bootstrap), never as unchanged"
+    );
+    let cargo_steps: Vec<&str> = job.split("\n      - ").filter(|step| step.contains("cargo ") || step.contains("rustup ")).collect();
+    assert_eq!(cargo_steps.len(), 3, "one toolchain step, one checker step, and one report render");
+    for step in cargo_steps {
+        assert!(
+            step.contains("working-directory: ${{ runner.temp }}/permissions-trusted"),
+            "Rust runs only in the trusted checkout: {step}"
+        );
+        assert!(
+            step.contains("if: steps.scope.outputs.decision == 'compare'")
+                || step.contains(r#"if: contains(fromJSON('["widens","narrows","unknown"]'), steps.report.outputs.change)"#),
+            "compile only on a changed input, and render only a real permission change: {step}"
+        );
+    }
+    assert!(job.contains("cargo run -q --locked -p darkmatter --example permission_widening"));
+    assert!(job.contains("RUSTC_WRAPPER: \"\""));
+    assert!(!job.contains("continue-on-error"), "a failed classifier must reach ci-gate as `failure`");
+    assert!(
+        job.contains(r#"*) echo "no scope decision was made" >&2; exit 1 ;;"#),
+        "an unknown decision fails closed"
+    );
+    assert!(!job.contains("\n    outputs:"), "no later job reads the report: the merge is the decision");
+}
+
+/// A change that may widen is reported where the merge is decided: one
+/// comment on the pull request, rewritten on every push. Nothing requests an
+/// approval, and the token can write the comment and nothing else.
+#[test]
+fn a_possible_widening_is_reported_on_the_pull_request_without_an_approval() {
+    let ci = workflow("ci.yml");
+    assert!(!ci.contains("environment: permission-widening"), "no job waits for a deployment approval");
+    let job = executable_lines(&job_block("ci.yml", "  permission-scope:"));
+    assert_eq!(
+        job_permissions(&job_block("ci.yml", "  permission-scope:")),
+        [
+            ("contents".to_owned(), "read".to_owned()),
+            ("actions".to_owned(), "read".to_owned()),
+            ("pull-requests".to_owned(), "write".to_owned()),
+        ],
+        "the report comment is the job's only write"
+    );
+    let report = step_containing(&job, "id: report");
+    assert!(
+        report.contains(r#"PERMISSION_REPORT_DATA="$RUNNER_TEMP/permission-data.json""#),
+        "the trusted script hands the template its data through a file an older copy ignores"
+    );
+    let render = step_containing(&job, "--render ");
+    assert!(
+        render.contains(r#"--render "$TRUSTED/.github/ci/permission-report.md""#),
+        "the comment is composed from the BASE commit's template"
+    );
+    let comment = step_containing(&job, "<!-- permission-report -->");
+    for condition in [
+        "steps.report.outcome == 'success'",
+        "github.event_name == 'pull_request'",
+        "github.event.pull_request.head.repo.full_name == github.repository",
+    ] {
+        assert!(comment.contains(condition), "the comment is written only when `{condition}`");
+    }
+    assert!(
+        comment.contains("--method PATCH") && comment.contains("--method POST"),
+        "one comment per pull request: the marked one is rewritten, or created"
+    );
+    assert!(!comment.contains("exit 1"), "the comment never blocks the merge");
+}
+
+/// Every file the classifier's decision depends on is itself a checker input,
+/// so an attempt to weaken the check is a potential widening.
+#[test]
+fn the_permission_inputs_name_the_gate_itself() {
+    let inputs: serde_json::Value =
+        serde_json::from_str(&read(".github/ci/permission-inputs.json")).expect("the inputs file is JSON");
+    let checker: Vec<&str> = inputs["checker-inputs"]
+        .as_array()
+        .expect("checker-inputs is a list")
+        .iter()
+        .map(|entry| entry.as_str().expect("each input is a path"))
+        .collect();
+    for required in [
+        ".github/ci/permission-inputs.json",
+        ".github/workflows/ci.yml",
+        "scripts/ci/permission_scope.py",
+        ".github/ci/permission-report.md",
+        "darkmatter/lib/examples/permission_widening.rs",
+        "darkmatter/lib/src/config/",
+    ] {
+        assert!(checker.contains(&required), "`{required}` must be a checker input");
+    }
 }
 
 

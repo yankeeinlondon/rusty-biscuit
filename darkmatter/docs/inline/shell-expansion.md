@@ -283,7 +283,7 @@ Error: Command not found: 'ripgrep' (line 7)
 Ensure 'ripgrep' is installed and available on your PATH.
 ```
 
-A misspelled program name usually shows up as the *approval* message instead, because the misspelling has never been approved. The full policy, the built-in blacklist, and the rule format are in [Pre-Flight Shell Approval](./preflight-checks.md); where the rules live and how layers combine is in [Configuration](../topics/configuration.md).
+A misspelled program name usually shows up as the *approval* message instead, because the misspelling has never been approved. The full policy, the built-in blacklist, and the rule format are in [Pre-Flight Shell Approval](./preflight-checks.md); where the rules live and how layers combine is in [Permissions](../topics/permissions.md).
 
 ---
 

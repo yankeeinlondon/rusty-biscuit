@@ -199,4 +199,3 @@ output fails the build.
 - Error rendering reference
 - biscuit-terminal/SKILL.md — Prose grammar
   and `StatusBlock` mechanics.
-- features/_completed/2026-05-08-good-errors/spec.md

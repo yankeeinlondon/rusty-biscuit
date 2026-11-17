@@ -174,6 +174,7 @@ pub fn reset_process_caches() {
     simplified::convert::reset_process_caches();
     resolve::reset_process_caches();
     prepared::reset_process_caches();
+    defaults::reset_process_caches();
     triggers::assemble::reset_process_caches();
     triggers::discovery::reset_process_caches();
     triggers::matcher::reset_thread_caches();

@@ -2023,6 +2023,58 @@ mod template_position {
         }
     }
 
+    /// An inline prompt document's run composes its `prompt`, so the graph
+    /// audit discovers the prompt's command and never its body's: with no
+    /// handler, a discovered body command would fail approval.
+    #[test]
+    fn an_inline_prompt_document_is_audited_on_its_prompt_not_its_body() {
+        let dir = TempDir::new().unwrap();
+        let policy = TempDir::new().unwrap();
+        let step = write_legacy_source(
+            dir.path(),
+            "step.md",
+            &[("prompt", json!("Update the body.\n\n::shell echo from-the-prompt\n"))],
+            "# Body\n\n::shell echo from-the-body\n",
+        );
+        let path = write_legacy_source(dir.path(), "seq.md", &[("sequence", json!([{ "name": "one", "prompt": step }]))], "Body.\n");
+        let graph = legacy_graph_for(&path).unwrap();
+        crate::harness::shell::test_support::write_shell_rules(policy.path(), "exact echo from-the-prompt\n");
+
+        let approved = approve(&graph, &policy).expect("the body's command is not part of the run");
+
+        assert!(approved.contains_exact("echo from-the-prompt"), "{approved:?}");
+        assert!(!approved.contains_exact("echo from-the-body"), "{approved:?}");
+    }
+
+    /// The graph audit's refusal of an inline step's `prompt` command names
+    /// the step file and its `prompt` property, not a line of the generated
+    /// document the step composes.
+    #[test]
+    fn an_inline_prompt_step_refusal_names_the_prompt_property() {
+        let dir = TempDir::new().unwrap();
+        let policy = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("step.md"),
+            "---\nagent: goose\nprompt: |\n  Update the body.\n\n  ::shell echo unpermitted\n---\n# Body\n",
+        )
+        .unwrap();
+        let path = write_legacy_source(dir.path(), "seq.md", &[("sequence", json!([{ "name": "one", "prompt": "step.md" }]))], "Body.\n");
+        let graph = legacy_graph_for(&path).unwrap();
+
+        let error = approve(&graph, &policy).expect_err("no rule permits the prompt's command");
+
+        let message = error.to_string();
+        let CompositionError::ShellApprovalUnavailable { source_file, line, property, .. } = error else {
+            panic!("expected an approval refusal, got {error:?}");
+        };
+        assert_eq!(
+            biscuit_file::canonicalize_simplified(&source_file).unwrap(),
+            biscuit_file::canonicalize_simplified(&dir.path().join("step.md")).unwrap()
+        );
+        assert_eq!((line, property.as_deref()), (0, Some("prompt")), "{message}");
+        assert!(message.contains("step.md (frontmatter `prompt`)"), "{message}");
+    }
+
     /// The first task's command is approved as its resolved bytes; the second
     /// task's, though `out` is known now, only as its typed shape.
     #[test]

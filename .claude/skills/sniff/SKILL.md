@@ -133,7 +133,10 @@ Tests: `filesystem/git/working_state_tests.rs`.
 
 `GitRepo::committed_tree()` pins `HEAD`'s tree in a `Send + Sync` snapshot
 for reading committed bytes (`read_file`, `paths`) after refs move; errors are
-never absence. See "Committed tree snapshot" in the same file.
+never absence. `committed_tree_at(full_hex_id)` pins a named commit instead
+(no ref names, abbreviations, or revision expressions). Darkmatter captures one
+`committed_tree()` per request (`config::load::CommittedTreeCapture`) to read the
+repository's `HEAD` permission layer and schema slots. See "Committed tree snapshot" in the same file.
 
 `filesystem::repo::{PackageNameSource, PackageOwnershipLookup}` support callers
 that need declared identity and repeated file ownership. Check `name_source ==

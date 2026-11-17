@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-13
 total_phases: 9
-phase: 4
+phase: 10
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -168,6 +168,8 @@ packages:
 - messenger
 - biscuit-file
 - claudine-cli
+- repo-deps
+- test-toolkit
 source_files_during_phase_2:
 - claudine/lib/src/composition/schema/classify.rs
 - claudine/lib/src/composition/schema/defaults_tests.rs
@@ -470,370 +472,1392 @@ skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/requests.md
 - .claude/skills/simplified-schema/SKILL.md
 source_files_during_phase_4:
-- "biscuit-file/lib/src/file_reference/fetch.rs"
-- "biscuit-file/lib/tests/l1-fetch/fetch_integration.rs"
-- "claudine/cli/src/commands/compose/prep.rs"
-- "claudine/cli/src/commands/init_wizard.rs"
-- "claudine/cli/src/commands/init/mod.rs"
-- "claudine/cli/src/commands/sequence.rs"
-- "claudine/cli/src/commands/wrap/composition/pipeline.rs"
-- "claudine/cli/src/commands/wrap/harness_orch/loop_control.rs"
-- "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs"
-- "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs"
-- "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs"
-- "claudine/cli/src/commands/wrap/harness_orch/mod.rs"
-- "claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs"
-- "claudine/cli/src/commands/wrap/harness_orch/shell_options.rs"
-- "claudine/cli/src/commands/wrap/harness_orch/types.rs"
-- "claudine/cli/src/commands/wrap/mod.rs"
-- "claudine/cli/src/commands/wrap/sequence/jit.rs"
-- "claudine/cli/src/commands/wrap/sequence/jit/tests.rs"
-- "claudine/cli/src/commands/wrap/sequence/mod.rs"
-- "claudine/cli/src/commands/wrap/sequence/task_run.rs"
-- "claudine/cli/src/commands/wrap/wrapper_stages.rs"
-- "claudine/cli/src/completion/schema_completion/mod.rs"
-- "claudine/cli/src/completion/schema_completion/tests.rs"
-- "claudine/cli/src/output/error_walker/tests.rs"
-- "claudine/cli/tests/common/mod.rs"
-- "claudine/cli/tests/l1/completion_committed_prompt_schema.rs"
-- "claudine/cli/tests/l1/compose_initialize_staged_boot.rs"
-- "claudine/cli/tests/l1/compose_schema_cli.rs"
-- "claudine/cli/tests/l1/contextual_errors.rs"
-- "claudine/cli/tests/l1/ctx_launch_anchor.rs"
-- "claudine/cli/tests/l1/ctx_per_run.rs"
-- "claudine/cli/tests/l1/darkmatter_config_gate.rs"
-- "claudine/cli/tests/l1/error_guards/transport-allow.toml"
-- "claudine/cli/tests/l1/guarded_shell_values.rs"
-- "claudine/cli/tests/l1/implement_plan_commit_message.rs"
-- "claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs"
-- "claudine/cli/tests/l1/level1_approval_order_pty.rs"
-- "claudine/cli/tests/l1/level1_dry_run_pty.rs"
-- "claudine/cli/tests/l1/lifecycle_set_shell_values.rs"
-- "claudine/cli/tests/l1/lifecycle_shell_templates.rs"
-- "claudine/cli/tests/l1/lifecycle_traces.rs"
-- "claudine/cli/tests/l1/preflight_execution_parity.rs"
-- "claudine/cli/tests/l1/sequence_cli.rs"
-- "claudine/cli/tests/l1/sequence_jit.rs"
-- "claudine/cli/tests/l1/sequence_referenced_state.rs"
-- "claudine/cli/tests/l1/sequence_schema.rs"
-- "claudine/cli/tests/l1/sequence_shell_templates.rs"
-- "claudine/cli/tests/l1/shell_approval_prompt.rs"
-- "claudine/cli/tests/l1/shell_missing_values.rs"
-- "claudine/cli/tests/l1/wrap_compose_preflight.rs"
-- "claudine/cli/tests/level2/level2_dry_run_approval_capture.rs"
-- "claudine/cli/tests/level2/level2_lifecycle_control.rs"
-- "claudine/cli/tests/prompts/pr_flow_rehearsal.rs"
-- "claudine/lib/Cargo.toml"
-- "claudine/lib/src/composition/coordinator/tests.rs"
-- "claudine/lib/src/composition/lifecycle/executor.rs"
-- "claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs"
-- "claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs"
-- "claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs"
-- "claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs"
-- "claudine/lib/src/composition/preflight.rs"
-- "claudine/lib/src/composition/preflight/tests.rs"
-- "claudine/lib/src/composition/prepare.rs"
-- "claudine/lib/src/composition/prepare/bootstrap/tests.rs"
-- "claudine/lib/src/composition/schema/classify.rs"
-- "claudine/lib/src/composition/schema/mod.rs"
-- "claudine/lib/src/composition/schema/tests.rs"
-- "claudine/lib/src/composition/schema/translate.rs"
-- "claudine/lib/src/composition/sequence/preflight/mod.rs"
-- "claudine/lib/src/composition/sequence/preflight/tests.rs"
-- "claudine/lib/src/composition/sequence/task/sequence.rs"
-- "claudine/lib/src/composition/sequence/task/templates.rs"
-- "claudine/lib/src/composition/sequence/task/tests.rs"
-- "claudine/lib/src/config/mod.rs"
-- "claudine/lib/src/config/setup.rs"
-- "claudine/lib/src/harness/audit.rs"
-- "claudine/lib/src/harness/error.rs"
-- "claudine/lib/src/harness/mod.rs"
-- "claudine/lib/src/harness/shell.rs"
-- "claudine/lib/src/harness/shell/policy.rs"
-- "claudine/lib/src/harness/shell/tests.rs"
-- "claudine/lib/src/invocation_context/document_tests.rs"
-- "claudine/lib/src/system_prompt/prepare.rs"
-- "claudine/lib/src/system_prompt/prepare/tests.rs"
-- "claudine/lib/tests/l1/darkmatter_setup.rs"
-- "claudine/lib/tests/l1/main.rs"
-- "claudine/lib/tests/l1/shell_permission_parity.rs"
-- "darkmatter/cli/schemas/output/clean.yaml"
-- "darkmatter/cli/schemas/output/code-block.yaml"
-- "darkmatter/cli/schemas/output/compose.yaml"
-- "darkmatter/cli/schemas/output/delta.yaml"
-- "darkmatter/cli/schemas/output/edit.yaml"
-- "darkmatter/cli/schemas/output/get.yaml"
-- "darkmatter/cli/schemas/output/graph.yaml"
-- "darkmatter/cli/schemas/output/hash.yaml"
-- "darkmatter/cli/schemas/output/init.yaml"
-- "darkmatter/cli/schemas/output/list-themes.yaml"
-- "darkmatter/cli/schemas/output/render.yaml"
-- "darkmatter/cli/schemas/output/rm.yaml"
-- "darkmatter/cli/schemas/output/schema-about.yaml"
-- "darkmatter/cli/schemas/output/schema-detect.yaml"
-- "darkmatter/cli/schemas/output/schema-triggers.yaml"
-- "darkmatter/cli/schemas/output/schema-validate.yaml"
-- "darkmatter/cli/schemas/output/set.yaml"
-- "darkmatter/cli/schemas/output/toc.yaml"
-- "darkmatter/cli/schemas/output/validate-refs.yaml"
-- "darkmatter/cli/src/approval.rs"
-- "darkmatter/cli/src/args/cli.rs"
-- "darkmatter/cli/src/args/command.rs"
-- "darkmatter/cli/src/args/output.rs"
-- "darkmatter/cli/src/commands/clean.rs"
-- "darkmatter/cli/src/commands/compose.rs"
-- "darkmatter/cli/src/commands/compose/lifecycle.rs"
-- "darkmatter/cli/src/commands/init.rs"
-- "darkmatter/cli/src/commands/mod.rs"
-- "darkmatter/cli/src/commands/schema/validate.rs"
-- "darkmatter/cli/src/main.rs"
-- "darkmatter/cli/src/request.rs"
-- "darkmatter/cli/tests/common/fixture.rs"
-- "darkmatter/cli/tests/l1/approval_prompt.rs"
-- "darkmatter/cli/tests/l1/collection_blocks.rs"
-- "darkmatter/cli/tests/l1/compose_basic.rs"
-- "darkmatter/cli/tests/l1/compose_data_output.rs"
-- "darkmatter/cli/tests/l1/compose_lifecycle_approval.rs"
-- "darkmatter/cli/tests/l1/compose_lifecycle.rs"
-- "darkmatter/cli/tests/l1/compose_nested_markdown.rs"
-- "darkmatter/cli/tests/l1/compose_schema_enhancements.rs"
-- "darkmatter/cli/tests/l1/compose_shell_template.rs"
-- "darkmatter/cli/tests/l1/compose_shell.rs"
-- "darkmatter/cli/tests/l1/compose_transclusion.rs"
-- "darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs"
-- "darkmatter/cli/tests/l1/dynamic_schema_slots.rs"
-- "darkmatter/cli/tests/l1/expression_recovery.rs"
-- "darkmatter/cli/tests/l1/init_command.rs"
-- "darkmatter/cli/tests/l1/invalid_trigger_warnings.rs"
-- "darkmatter/cli/tests/l1/lifecycle_passive_surfaces.rs"
-- "darkmatter/cli/tests/l1/load_data.rs"
-- "darkmatter/cli/tests/l1/main.rs"
-- "darkmatter/cli/tests/l1/md_process_fixture.rs"
-- "darkmatter/cli/tests/l1/output_commands.rs"
-- "darkmatter/cli/tests/l1/output_envelope.rs"
-- "darkmatter/cli/tests/l1/path_completion.rs"
-- "darkmatter/cli/tests/l1/policy_verbs.rs"
-- "darkmatter/cli/tests/l1/schema_recursive.rs"
-- "darkmatter/cli/tests/l1/schema_triggers.rs"
-- "darkmatter/cli/tests/l1/standalone_baseline.rs"
-- "darkmatter/dmls/src/config/mod.rs"
-- "darkmatter/dmls/src/diagnostics/slots.rs"
-- "darkmatter/dmls/src/overlay/shell.rs"
-- "darkmatter/dmls/src/providers/code_actions.rs"
-- "darkmatter/dmls/src/providers/dsl.rs"
-- "darkmatter/dmls/src/router.rs"
-- "darkmatter/dmls/src/slot_jobs.rs"
-- "darkmatter/dmls/tests/l1/main.rs"
-- "darkmatter/dmls/tests/l1/no_side_effects.rs"
-- "darkmatter/dmls/tests/l1/schema_slots_editor.rs"
-- "darkmatter/dmls/tests/l1/shell_permission_classification.rs"
-- "darkmatter/dmls/tests/l1/undeclared_member.rs"
-- "darkmatter/dmls/tests/l1/zed_extension_contract.rs"
-- "darkmatter/dmls/zed-dmls/extension.toml"
-- "darkmatter/lib/src/config/init.rs"
-- "darkmatter/lib/src/config/load.rs"
-- "darkmatter/lib/src/config/load/error.rs"
-- "darkmatter/lib/src/config/load/reference.rs"
-- "darkmatter/lib/src/config/migration.rs"
-- "darkmatter/lib/src/config/mod.rs"
-- "darkmatter/lib/src/config/network.rs"
-- "darkmatter/lib/src/config/permissions.rs"
-- "darkmatter/lib/src/config/permissions/persist.rs"
-- "darkmatter/lib/src/config/write.rs"
-- "darkmatter/lib/src/lifecycle/executor.rs"
-- "darkmatter/lib/src/lifecycle/executor/host.rs"
-- "darkmatter/lib/src/lifecycle/executor/shell.rs"
-- "darkmatter/lib/src/lifecycle/executor/tests.rs"
-- "darkmatter/lib/src/lifecycle/md_host.rs"
-- "darkmatter/lib/src/lifecycle/md_host/tests.rs"
-- "darkmatter/lib/src/lifecycle/preflight/candidates.rs"
-- "darkmatter/lib/src/lifecycle/shell_template.rs"
-- "darkmatter/lib/src/markdown/compose/context/options.rs"
-- "darkmatter/lib/src/markdown/compose/context/request.rs"
-- "darkmatter/lib/src/markdown/compose/expression/diagnostics.rs"
-- "darkmatter/lib/src/markdown/compose/expression/functions/fs.rs"
-- "darkmatter/lib/src/markdown/compose/expression/read_gate_tests.rs"
-- "darkmatter/lib/src/markdown/compose/expression/read_gate.rs"
-- "darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs"
-- "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs"
-- "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs"
-- "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs"
-- "darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs"
-- "darkmatter/lib/src/markdown/compose/pipeline/mod.rs"
-- "darkmatter/lib/src/markdown/compose/policy.rs"
-- "darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs"
-- "darkmatter/lib/src/markdown/compose/preflight/mod.rs"
-- "darkmatter/lib/src/markdown/compose/remote_fetch.rs"
-- "darkmatter/lib/src/markdown/compose/remote_fetch/error.rs"
-- "darkmatter/lib/src/markdown/compose/remote.rs"
-- "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
-- "darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs"
-- "darkmatter/lib/src/markdown/compose/shell_blocks/types.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/site.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/store.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/template/approval.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs"
-- "darkmatter/lib/src/markdown/compose/shell_expansion/types.rs"
-- "darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs"
-- "darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs"
-- "darkmatter/lib/src/markdown/compose/tests/rendering.rs"
-- "darkmatter/lib/src/markdown/compose/tests/shell.rs"
-- "darkmatter/lib/src/markdown/compose/type_tests.rs"
-- "darkmatter/lib/src/markdown/errors/mod.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/approval_tests.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/cache.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/codes.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/dependencies.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/evaluator.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/grants/legacy.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/grants/matching.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/grants/mod.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/grants/request.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/grants/store.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/grants/tests.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/host.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/mod.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/session_tests.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/session.rs"
-- "darkmatter/lib/src/markdown/schemas/slots/tests.rs"
-- "darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs"
-- "darkmatter/lib/tests/fixtures/permission_parity/cases.json"
-- "darkmatter/lib/tests/l1/alias_lookup_once.rs"
-- "darkmatter/lib/tests/l1/collection_blocks/pipeline.rs"
-- "darkmatter/lib/tests/l1/collection_blocks/provenance.rs"
-- "darkmatter/lib/tests/l1/collection_discovery.rs"
-- "darkmatter/lib/tests/l1/collection_execution.rs"
-- "darkmatter/lib/tests/l1/compose_expression_failure_contract.rs"
-- "darkmatter/lib/tests/l1/compose_member_warnings.rs"
-- "darkmatter/lib/tests/l1/compose_read_set.rs"
-- "darkmatter/lib/tests/l1/composition_defaults.rs"
-- "darkmatter/lib/tests/l1/config_fields.rs"
-- "darkmatter/lib/tests/l1/config_init.rs"
-- "darkmatter/lib/tests/l1/config_load.rs"
-- "darkmatter/lib/tests/l1/config_migration.rs"
-- "darkmatter/lib/tests/l1/config_permission_persist.rs"
-- "darkmatter/lib/tests/l1/config_permissions.rs"
-- "darkmatter/lib/tests/l1/data_origin.rs"
-- "darkmatter/lib/tests/l1/diagnostic_source_provenance.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slot_captures.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slot_precedence.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slot_read_order.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slot_schema_files.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slot_template_triggers.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slot_template_types.rs"
-- "darkmatter/lib/tests/l1/dynamic_schema_slots.rs"
-- "darkmatter/lib/tests/l1/dynamic_slots_fixture_repos.rs"
-- "darkmatter/lib/tests/l1/error_snapshots/shell_expansion.rs"
-- "darkmatter/lib/tests/l1/expression_recovery_data.rs"
-- "darkmatter/lib/tests/l1/expression_recovery_slots.rs"
-- "darkmatter/lib/tests/l1/expression_recovery.rs"
-- "darkmatter/lib/tests/l1/fm_namespace_contract.rs"
-- "darkmatter/lib/tests/l1/frontmatter_surface_projection.rs"
-- "darkmatter/lib/tests/l1/layered_validator_identities.rs"
-- "darkmatter/lib/tests/l1/lifecycle_event_binding.rs"
-- "darkmatter/lib/tests/l1/lifecycle_passive_compose.rs"
-- "darkmatter/lib/tests/l1/literal_token.rs"
-- "darkmatter/lib/tests/l1/load_data_execution.rs"
-- "darkmatter/lib/tests/l1/load_data_options_slots.rs"
-- "darkmatter/lib/tests/l1/load_data_options.rs"
-- "darkmatter/lib/tests/l1/load_data_runtime.rs"
-- "darkmatter/lib/tests/l1/main.rs"
-- "darkmatter/lib/tests/l1/missing_ctx_capture.rs"
-- "darkmatter/lib/tests/l1/network_permission.rs"
-- "darkmatter/lib/tests/l1/permission_parity.rs"
-- "darkmatter/lib/tests/l1/preflight_child_state_parity.rs"
-- "darkmatter/lib/tests/l1/preflight_repository_sigils.rs"
-- "darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs"
-- "darkmatter/lib/tests/l1/reference_provenance.rs"
-- "darkmatter/lib/tests/l1/required_context.rs"
-- "darkmatter/lib/tests/l1/runtime_blocking.rs"
-- "darkmatter/lib/tests/l1/schemas_runtime_parity.rs"
-- "darkmatter/lib/tests/l1/scope_site_conformance.rs"
-- "darkmatter/lib/tests/l1/semantic_results_never_persist.rs"
-- "darkmatter/lib/tests/l1/set_overlay_integration.rs"
-- "darkmatter/lib/tests/l1/shell_block_integration.rs"
-- "darkmatter/lib/tests/l1/shell_child_environment.rs"
-- "darkmatter/lib/tests/l1/shell_expansion_coordinates.rs"
-- "darkmatter/lib/tests/l1/shell_permissions.rs"
-- "darkmatter/lib/tests/l1/shell_result_values.rs"
-- "darkmatter/lib/tests/l1/shell_template_body_guards.rs"
-- "darkmatter/lib/tests/l1/shell_template_discovery.rs"
-- "darkmatter/lib/tests/l1/shell_template_execution.rs"
-- "darkmatter/lib/tests/l1/shell_template_policy.rs"
-- "darkmatter/lib/tests/l1/slot_permissions.rs"
-- "darkmatter/lib/tests/l1/slot_support.rs"
-- "darkmatter/lib/tests/l1/transcluded_shell_failure.rs"
-- "darkmatter/lib/tests/l1/unknown_identifier_warning.rs"
-- "darkmatter/lib/tests/request_support/mod.rs"
+- biscuit-file/lib/src/file_reference/fetch.rs
+- biscuit-file/lib/tests/l1-fetch/fetch_integration.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/init_wizard.rs
+- claudine/cli/src/commands/init/mod.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+- claudine/cli/src/commands/wrap/harness_orch/mod.rs
+- claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+- claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+- claudine/cli/src/commands/wrap/harness_orch/types.rs
+- claudine/cli/src/commands/wrap/mod.rs
+- claudine/cli/src/commands/wrap/sequence/jit.rs
+- claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/cli/src/commands/wrap/wrapper_stages.rs
+- claudine/cli/src/completion/schema_completion/mod.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
+- claudine/cli/src/output/error_walker/tests.rs
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/l1/completion_committed_prompt_schema.rs
+- claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+- claudine/cli/tests/l1/compose_schema_cli.rs
+- claudine/cli/tests/l1/contextual_errors.rs
+- claudine/cli/tests/l1/ctx_launch_anchor.rs
+- claudine/cli/tests/l1/ctx_per_run.rs
+- claudine/cli/tests/l1/darkmatter_config_gate.rs
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- claudine/cli/tests/l1/guarded_shell_values.rs
+- claudine/cli/tests/l1/implement_plan_commit_message.rs
+- claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+- claudine/cli/tests/l1/level1_approval_order_pty.rs
+- claudine/cli/tests/l1/level1_dry_run_pty.rs
+- claudine/cli/tests/l1/lifecycle_set_shell_values.rs
+- claudine/cli/tests/l1/lifecycle_shell_templates.rs
+- claudine/cli/tests/l1/lifecycle_traces.rs
+- claudine/cli/tests/l1/preflight_execution_parity.rs
+- claudine/cli/tests/l1/sequence_cli.rs
+- claudine/cli/tests/l1/sequence_jit.rs
+- claudine/cli/tests/l1/sequence_referenced_state.rs
+- claudine/cli/tests/l1/sequence_schema.rs
+- claudine/cli/tests/l1/sequence_shell_templates.rs
+- claudine/cli/tests/l1/shell_approval_prompt.rs
+- claudine/cli/tests/l1/shell_missing_values.rs
+- claudine/cli/tests/l1/wrap_compose_preflight.rs
+- claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
+- claudine/cli/tests/level2/level2_lifecycle_control.rs
+- claudine/cli/tests/prompts/pr_flow_rehearsal.rs
+- claudine/lib/Cargo.toml
+- claudine/lib/src/composition/coordinator/tests.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+- claudine/lib/src/composition/preflight.rs
+- claudine/lib/src/composition/preflight/tests.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/bootstrap/tests.rs
+- claudine/lib/src/composition/schema/classify.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/composition/schema/translate.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/tests.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/templates.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/lib/src/config/mod.rs
+- claudine/lib/src/config/setup.rs
+- claudine/lib/src/harness/audit.rs
+- claudine/lib/src/harness/error.rs
+- claudine/lib/src/harness/mod.rs
+- claudine/lib/src/harness/shell.rs
+- claudine/lib/src/harness/shell/policy.rs
+- claudine/lib/src/harness/shell/tests.rs
+- claudine/lib/src/invocation_context/document_tests.rs
+- claudine/lib/src/system_prompt/prepare.rs
+- claudine/lib/src/system_prompt/prepare/tests.rs
+- claudine/lib/tests/l1/darkmatter_setup.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/shell_permission_parity.rs
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/init.yaml
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/src/approval.rs
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/output.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/commands/init.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/request.rs
+- darkmatter/cli/tests/common/fixture.rs
+- darkmatter/cli/tests/l1/approval_prompt.rs
+- darkmatter/cli/tests/l1/collection_blocks.rs
+- darkmatter/cli/tests/l1/compose_basic.rs
+- darkmatter/cli/tests/l1/compose_data_output.rs
+- darkmatter/cli/tests/l1/compose_lifecycle_approval.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_nested_markdown.rs
+- darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+- darkmatter/cli/tests/l1/compose_shell_template.rs
+- darkmatter/cli/tests/l1/compose_shell.rs
+- darkmatter/cli/tests/l1/compose_transclusion.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+- darkmatter/cli/tests/l1/expression_recovery.rs
+- darkmatter/cli/tests/l1/init_command.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/cli/tests/l1/lifecycle_passive_surfaces.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/md_process_fixture.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/output_envelope.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/cli/tests/l1/policy_verbs.rs
+- darkmatter/cli/tests/l1/schema_recursive.rs
+- darkmatter/cli/tests/l1/schema_triggers.rs
+- darkmatter/cli/tests/l1/standalone_baseline.rs
+- darkmatter/dmls/src/config/mod.rs
+- darkmatter/dmls/src/diagnostics/slots.rs
+- darkmatter/dmls/src/overlay/shell.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/no_side_effects.rs
+- darkmatter/dmls/tests/l1/schema_slots_editor.rs
+- darkmatter/dmls/tests/l1/shell_permission_classification.rs
+- darkmatter/dmls/tests/l1/undeclared_member.rs
+- darkmatter/dmls/tests/l1/zed_extension_contract.rs
+- darkmatter/dmls/zed-dmls/extension.toml
+- darkmatter/lib/src/config/init.rs
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/load/error.rs
+- darkmatter/lib/src/config/load/reference.rs
+- darkmatter/lib/src/config/migration.rs
+- darkmatter/lib/src/config/mod.rs
+- darkmatter/lib/src/config/network.rs
+- darkmatter/lib/src/config/permissions.rs
+- darkmatter/lib/src/config/permissions/persist.rs
+- darkmatter/lib/src/config/write.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/host.rs
+- darkmatter/lib/src/lifecycle/executor/shell.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/src/lifecycle/preflight/candidates.rs
+- darkmatter/lib/src/lifecycle/shell_template.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/request.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+- darkmatter/lib/src/markdown/compose/preflight/mod.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch/error.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/types.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/store.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/approval.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+- darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+- darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs
+- darkmatter/lib/src/markdown/compose/tests/rendering.rs
+- darkmatter/lib/src/markdown/compose/tests/shell.rs
+- darkmatter/lib/src/markdown/compose/type_tests.rs
+- darkmatter/lib/src/markdown/errors/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/approval_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/codes.rs
+- darkmatter/lib/src/markdown/schemas/slots/dependencies.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/legacy.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/matching.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/request.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/store.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/session_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/src/markdown/schemas/slots/tests.rs
+- darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs
+- darkmatter/lib/tests/fixtures/permission_parity/cases.json
+- darkmatter/lib/tests/l1/alias_lookup_once.rs
+- darkmatter/lib/tests/l1/collection_blocks/pipeline.rs
+- darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+- darkmatter/lib/tests/l1/collection_discovery.rs
+- darkmatter/lib/tests/l1/collection_execution.rs
+- darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+- darkmatter/lib/tests/l1/compose_member_warnings.rs
+- darkmatter/lib/tests/l1/compose_read_set.rs
+- darkmatter/lib/tests/l1/composition_defaults.rs
+- darkmatter/lib/tests/l1/config_fields.rs
+- darkmatter/lib/tests/l1/config_init.rs
+- darkmatter/lib/tests/l1/config_load.rs
+- darkmatter/lib/tests/l1/config_migration.rs
+- darkmatter/lib/tests/l1/config_permission_persist.rs
+- darkmatter/lib/tests/l1/config_permissions.rs
+- darkmatter/lib/tests/l1/data_origin.rs
+- darkmatter/lib/tests/l1/diagnostic_source_provenance.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_captures.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_precedence.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_read_order.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_schema_files.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_triggers.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_types.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+- darkmatter/lib/tests/l1/dynamic_slots_fixture_repos.rs
+- darkmatter/lib/tests/l1/error_snapshots/shell_expansion.rs
+- darkmatter/lib/tests/l1/expression_recovery_data.rs
+- darkmatter/lib/tests/l1/expression_recovery_slots.rs
+- darkmatter/lib/tests/l1/expression_recovery.rs
+- darkmatter/lib/tests/l1/fm_namespace_contract.rs
+- darkmatter/lib/tests/l1/frontmatter_surface_projection.rs
+- darkmatter/lib/tests/l1/layered_validator_identities.rs
+- darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+- darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+- darkmatter/lib/tests/l1/literal_token.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/load_data_options_slots.rs
+- darkmatter/lib/tests/l1/load_data_options.rs
+- darkmatter/lib/tests/l1/load_data_runtime.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/missing_ctx_capture.rs
+- darkmatter/lib/tests/l1/network_permission.rs
+- darkmatter/lib/tests/l1/permission_parity.rs
+- darkmatter/lib/tests/l1/preflight_child_state_parity.rs
+- darkmatter/lib/tests/l1/preflight_repository_sigils.rs
+- darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs
+- darkmatter/lib/tests/l1/reference_provenance.rs
+- darkmatter/lib/tests/l1/required_context.rs
+- darkmatter/lib/tests/l1/runtime_blocking.rs
+- darkmatter/lib/tests/l1/schemas_runtime_parity.rs
+- darkmatter/lib/tests/l1/scope_site_conformance.rs
+- darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+- darkmatter/lib/tests/l1/set_overlay_integration.rs
+- darkmatter/lib/tests/l1/shell_block_integration.rs
+- darkmatter/lib/tests/l1/shell_child_environment.rs
+- darkmatter/lib/tests/l1/shell_expansion_coordinates.rs
+- darkmatter/lib/tests/l1/shell_permissions.rs
+- darkmatter/lib/tests/l1/shell_result_values.rs
+- darkmatter/lib/tests/l1/shell_template_body_guards.rs
+- darkmatter/lib/tests/l1/shell_template_discovery.rs
+- darkmatter/lib/tests/l1/shell_template_execution.rs
+- darkmatter/lib/tests/l1/shell_template_policy.rs
+- darkmatter/lib/tests/l1/slot_permissions.rs
+- darkmatter/lib/tests/l1/slot_support.rs
+- darkmatter/lib/tests/l1/transcluded_shell_failure.rs
+- darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+- darkmatter/lib/tests/request_support/mod.rs
 docs_updated_during_phase_4:
-- "biscuit-file/docs/topics/file-references.md"
-- "biscuit-file/README.md"
-- "claudine/docs/getting-started/index.md"
-- "claudine/docs/topics/completions/shell-completions.md"
-- "claudine/docs/topics/composition.md"
-- "claudine/docs/topics/configuration.md"
-- "claudine/docs/topics/execution-flow.md"
-- "claudine/docs/topics/flow-control/lifecycle.md"
-- "claudine/docs/topics/flow-control/sequences.md"
-- "claudine/docs/topics/pre-flight-checks.md"
-- "claudine/docs/topics/system-prompt.md"
-- "darkmatter/dmls/docs/features.md"
-- "darkmatter/dmls/zed-dmls/README.md"
-- "darkmatter/docs/cli/compose.md"
-- "darkmatter/docs/cli/data-contracts.md"
-- "darkmatter/docs/cli/graph.md"
-- "darkmatter/docs/cli/index.md"
-- "darkmatter/docs/cli/output-and-width.md"
-- "darkmatter/docs/cli/policy.md"
-- "darkmatter/docs/cli/schema.md"
-- "darkmatter/docs/cli/validate.md"
-- "darkmatter/docs/inline/filter.md"
-- "darkmatter/docs/inline/fm-shell-expansion.md"
-- "darkmatter/docs/inline/map.md"
-- "darkmatter/docs/inline/preflight-checks.md"
-- "darkmatter/docs/inline/shell-blocks.md"
-- "darkmatter/docs/inline/shell-expansion.md"
-- "darkmatter/docs/lsp/architecture.md"
-- "darkmatter/docs/lsp/configuration.md"
-- "darkmatter/docs/lsp/features.md"
-- "darkmatter/docs/topics/caching.md"
-- "darkmatter/docs/topics/config-writes.md"
-- "darkmatter/docs/topics/configuration.md"
-- "darkmatter/docs/topics/darkmatter-expressions.md"
-- "darkmatter/docs/topics/lifecycle/index.md"
-- "darkmatter/docs/topics/remote-url-references.md"
-- "darkmatter/docs/topics/schemas/authoring-schemas.md"
-- "darkmatter/docs/topics/schemas/dmls-schema-support.md"
-- "darkmatter/docs/topics/schemas/index.md"
-- "darkmatter/docs/topics/schemas/schema-slots.md"
-- "darkmatter/docs/topics/schemas/schema-triggers.md"
-- "darkmatter/docs/topics/schemas/schema-validation.md"
-- "darkmatter/README.md"
+- biscuit-file/docs/topics/file-references.md
+- biscuit-file/README.md
+- claudine/docs/getting-started/index.md
+- claudine/docs/topics/completions/shell-completions.md
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/execution-flow.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/pre-flight-checks.md
+- claudine/docs/topics/system-prompt.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/dmls/zed-dmls/README.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/graph.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/cli/validate.md
+- darkmatter/docs/inline/filter.md
+- darkmatter/docs/inline/fm-shell-expansion.md
+- darkmatter/docs/inline/map.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/inline/shell-blocks.md
+- darkmatter/docs/inline/shell-expansion.md
+- darkmatter/docs/lsp/architecture.md
+- darkmatter/docs/lsp/configuration.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/topics/config-writes.md
+- darkmatter/docs/topics/configuration.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/remote-url-references.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/index.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/schema-validation.md
+- darkmatter/README.md
 docs_created_during_phase_4:
-- "biscuit-file/docs/topics/fetch.md"
-- "darkmatter/docs/cli/init.md"
+- biscuit-file/docs/topics/fetch.md
+- darkmatter/docs/cli/init.md
 skills_files_updated_during_phase_4:
-- ".claude/skills/biscuit-file/SKILL.md"
-- ".claude/skills/claudine/cli-commands.md"
-- ".claude/skills/claudine/cli-reference.md"
-- ".claude/skills/claudine/SKILL.md"
-- ".claude/skills/darkmatter/cli.md"
-- ".claude/skills/darkmatter/compose.md"
-- ".claude/skills/darkmatter/dmls.md"
-- ".claude/skills/darkmatter/lifecycle.md"
-- ".claude/skills/darkmatter/remote-cache.md"
-- ".claude/skills/darkmatter/schema.md"
-- ".claude/skills/darkmatter/SKILL.md"
-- ".claude/skills/darkmatter/testing.md"
-- ".claude/skills/sniff/remote-and-repository.md"
+- .claude/skills/biscuit-file/SKILL.md
+- .claude/skills/claudine/cli-commands.md
+- .claude/skills/claudine/cli-reference.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/remote-cache.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_5:
+- claudine/lib/generated/shipped.json
+- darkmatter/cli/Cargo.toml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/src/request.rs
+- darkmatter/cli/tests/l1/compose_foreign_documents.rs
+- darkmatter/cli/tests/l1/host_registration.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/mod.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/registration/manifest.rs
+- darkmatter/lib/src/config/registration/selection.rs
+- darkmatter/lib/src/lifecycle/host_profile.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/output/command/data.rs
+- darkmatter/lib/src/markdown/output/command/mod.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/clean.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/host_fixtures/mod.rs
+- darkmatter/lib/tests/host_fixtures/recorder.rs
+- darkmatter/lib/tests/l1/foreign_document_compose.rs
+- darkmatter/lib/tests/l1/host_registration.rs
+- darkmatter/lib/tests/l1/host_selection.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/schemas/darkmatter-host.yaml
+- simplified-schema/lib/src/triggers/discovery.rs
+- simplified-schema/lib/src/triggers/identify.rs
+- simplified-schema/lib/src/triggers/matcher.rs
+- simplified-schema/lib/src/triggers/mod.rs
+- simplified-schema/lib/tests/l1/identifying_triggers.rs
+- simplified-schema/lib/tests/l1/main.rs
+docs_updated_during_phase_5:
+- darkmatter/README.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/topics/configuration.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- simplified-schema/docs/topics/language-core.md
+docs_created_during_phase_5:
+- darkmatter/docs/topics/host-registration.md
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_6:
+- darkmatter/dmls/Cargo.toml
+- darkmatter/dmls/benches/pipeline_work_a3.rs
+- darkmatter/dmls/src/bench.rs
+- darkmatter/dmls/src/config_contracts.rs
+- darkmatter/dmls/src/context.rs
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+- darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+- darkmatter/dmls/src/lib.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/event_views.rs
+- darkmatter/dmls/src/overlay/hosts.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/registry.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/yaml_contract.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/formatting.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs
+- darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+- darkmatter/dmls/src/providers/frontmatter/snapshot_tests.rs
+- darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/dmls/tests/common/mod.rs
+- darkmatter/dmls/tests/common/oracle.rs
+- darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+- darkmatter/dmls/tests/l1/config_contracts.rs
+- darkmatter/dmls/tests/l1/formatting_transaction.rs
+- darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+- darkmatter/dmls/tests/l1/host_registration_watches.rs
+- darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/mapping_only_corpus.rs
+- darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs
+- darkmatter/dmls/tests/l1/registered_host_views.rs
+- darkmatter/dmls/tests/l1/schema_reference_parity.rs
+- darkmatter/dmls/tests/l1/value_hovers.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/schema.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/tests/host_fixtures/mod.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/host_registration.rs
+docs_updated_during_phase_6:
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/docs/lsp/architecture.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/configuration.md
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_7:
+- claudine/cli/src/commands/init_wizard.rs
+- claudine/cli/src/main.rs
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- claudine/cli/tests/l1/host_registration_refresh.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/lib/Cargo.toml
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/registration.rs
+- claudine/lib/src/config/setup.rs
+- claudine/lib/tests/fixtures/claudine-schemas/shell-expansion-in-initialize-set.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-depth3-then.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-list.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-root-dictionary.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-then.md
+- claudine/lib/tests/l1/claudine_identification.rs
+- claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/claudine_schemas_matrix.rs
+- claudine/lib/tests/l1/claudine_trigger_selection_parity.rs
+- claudine/lib/tests/l1/host_publication.rs
+- claudine/lib/tests/l1/installed_registration.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/schemas/claudine-document.yaml
+- claudine/schemas/claudine.yaml
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/lib/src/config/init.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/tests/l1/config_init.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+docs_updated_during_phase_7:
+- claudine/docs/dependencies.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/frontmatter-properties.md
+- claudine/docs/topics/schemas.md
+- claudine/schemas/README.md
+- darkmatter/docs/topics/host-registration.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/module-map.md
+- .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_8:
+- .github/ci/permission-inputs.json
+- .github/workflows/ci.yml
+- darkmatter/lib/examples/permission_widening.rs
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/mod.rs
+- darkmatter/lib/src/config/widening.rs
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+- darkmatter/lib/tests/l1/config_widening.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/main.rs
+- scripts/ci/affected_scope.py
+- scripts/ci/permission_environment.py
+- scripts/ci/permission_scope.py
+- scripts/ci/test_affected_scope.py
+- scripts/ci/test_permission_environment.py
+- scripts/ci/test_permission_scope.py
+- sniff/lib/src/filesystem/git/committed_tree.rs
+- sniff/lib/tests/l1/committed_tree.rs
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_8:
+- .github/ci/README.md
+- darkmatter/docs/topics/configuration.md
+- docs/topics/ci-cd.md
+- sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/sniff/SKILL.md
+- .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_9:
+- darkmatter/lib/src/config/permissions.rs
+docs_updated_during_phase_9:
+- CLAUDE.md
+- claudine/README.md
+- claudine/docs/topics/completions/shell-completions.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/pre-flight-checks.md
+- claudine/docs/topics/schemas.md
+- claudine/lib/README.md
+- darkmatter/README.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/graph.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/validate.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/inline/shell-expansion.md
+- darkmatter/docs/topics/configuration.md
+- darkmatter/docs/topics/lifecycle/host-artifact.md
+- darkmatter/docs/topics/remote-url-references.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- simplified-schema/docs/topics/global-type-constraints.md
+- simplified-schema/docs/topics/validation.md
+docs_created_during_phase_9:
+- darkmatter/docs/topics/permissions.md
+skills_files_updated_during_phase_9:
+- .claude/skills/biscuit-file/SKILL.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/errors.md
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/sniff/SKILL.md
+source_code:
+- .github/ci/permission-inputs.json
+- .github/workflows/ci.yml
+- biscuit-file/lib/src/file_reference/context.rs
+- biscuit-file/lib/src/file_reference/fetch.rs
+- biscuit-file/lib/src/file_reference/mod.rs
+- biscuit-file/lib/src/file_reference/portable/mod.rs
+- biscuit-file/lib/tests/l1-fetch/fetch_integration.rs
+- claudine/cli/src/commands/actions.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/config_tui/app.rs
+- claudine/cli/src/commands/config_tui/mod.rs
+- claudine/cli/src/commands/config_tui/persistence.rs
+- claudine/cli/src/commands/config_tui/persistence_tests.rs
+- claudine/cli/src/commands/config_tui/tabs/tts.rs
+- claudine/cli/src/commands/hooks/list.rs
+- claudine/cli/src/commands/init/mod.rs
+- claudine/cli/src/commands/init/prompts.rs
+- claudine/cli/src/commands/init_wizard.rs
+- claudine/cli/src/commands/link_display.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/uninstall.rs
+- claudine/cli/src/commands/wrap/composition/pipeline.rs
+- claudine/cli/src/commands/wrap/composition/tests.rs
+- claudine/cli/src/commands/wrap/env/mod.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+- claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+- claudine/cli/src/commands/wrap/harness_orch/mod.rs
+- claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+- claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+- claudine/cli/src/commands/wrap/harness_orch/types.rs
+- claudine/cli/src/commands/wrap/mod.rs
+- claudine/cli/src/commands/wrap/runaway_guard.rs
+- claudine/cli/src/commands/wrap/sequence/jit.rs
+- claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+- claudine/cli/src/commands/wrap/sequence/mod.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/cli/src/commands/wrap/wrapper_stages.rs
+- claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/src/completion/schema_completion/mod.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
+- claudine/cli/src/main.rs
+- claudine/cli/src/output/error_walker/tests.rs
+- claudine/cli/src/request.rs
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/common/pty.rs
+- claudine/cli/tests/common/review_screen.rs
+- claudine/cli/tests/common/webhook_listener.rs
+- claudine/cli/tests/common/wrap.rs
+- claudine/cli/tests/l1/agent_cwd.rs
+- claudine/cli/tests/l1/argv_normalization.rs
+- claudine/cli/tests/l1/command_routing.rs
+- claudine/cli/tests/l1/completion_committed_prompt_schema.rs
+- claudine/cli/tests/l1/completion_ownership.rs
+- claudine/cli/tests/l1/completion_perf.rs
+- claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+- claudine/cli/tests/l1/compose_schema_cli.rs
+- claudine/cli/tests/l1/config_yaml_wiring.rs
+- claudine/cli/tests/l1/contamination_probes.rs
+- claudine/cli/tests/l1/contextual_errors.rs
+- claudine/cli/tests/l1/ctx_launch_anchor.rs
+- claudine/cli/tests/l1/ctx_per_run.rs
+- claudine/cli/tests/l1/darkmatter_config_gate.rs
+- claudine/cli/tests/l1/detached_audio.rs
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- claudine/cli/tests/l1/guarded_shell_values.rs
+- claudine/cli/tests/l1/handle_blocking_output.rs
+- claudine/cli/tests/l1/handle_repo_config.rs
+- claudine/cli/tests/l1/home_lookup_round_trip.rs
+- claudine/cli/tests/l1/host_registration_refresh.rs
+- claudine/cli/tests/l1/implement_plan_commit_message.rs
+- claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+- claudine/cli/tests/l1/level1_approval_order_pty.rs
+- claudine/cli/tests/l1/level1_compose_autocomplete_failure_pty.rs
+- claudine/cli/tests/l1/level1_dry_run_pty.rs
+- claudine/cli/tests/l1/level1_inline_compose_mismatch_pty.rs
+- claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs
+- claudine/cli/tests/l1/lifecycle_set_shell_values.rs
+- claudine/cli/tests/l1/lifecycle_shell_templates.rs
+- claudine/cli/tests/l1/lifecycle_traces.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/pi_managed_rpc.rs
+- claudine/cli/tests/l1/preflight_execution_parity.rs
+- claudine/cli/tests/l1/protect_cli.rs
+- claudine/cli/tests/l1/sequence_cli.rs
+- claudine/cli/tests/l1/sequence_jit.rs
+- claudine/cli/tests/l1/sequence_referenced_state.rs
+- claudine/cli/tests/l1/sequence_schema.rs
+- claudine/cli/tests/l1/sequence_shell_templates.rs
+- claudine/cli/tests/l1/shell_approval_prompt.rs
+- claudine/cli/tests/l1/shell_missing_values.rs
+- claudine/cli/tests/l1/skills_integration.rs
+- claudine/cli/tests/l1/tts_prewarm.rs
+- claudine/cli/tests/l1/wrap_compose_agent.rs
+- claudine/cli/tests/l1/wrap_compose_preflight.rs
+- claudine/cli/tests/l1/wrap_ctrl_c_windows.rs
+- claudine/cli/tests/level2/level2_auto_complete_chooser.rs
+- claudine/cli/tests/level2/level2_auto_complete_operation_file.rs
+- claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
+- claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs
+- claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs
+- claudine/cli/tests/level2/level2_file_resolution_capture.rs
+- claudine/cli/tests/level2/level2_inline_compose_mismatch_capture.rs
+- claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs
+- claudine/cli/tests/level2/level2_lifecycle_control.rs
+- claudine/cli/tests/level2/level2_malformed_frontmatter_capture.rs
+- claudine/cli/tests/level2/level2_perf_capture.rs
+- claudine/cli/tests/level2/level2_prompt_reporting_capture.rs
+- claudine/cli/tests/level2/level2_removed_validation_key_capture.rs
+- claudine/cli/tests/level2/level2_schema_parse_capture.rs
+- claudine/cli/tests/level2/level2_sequence_container_ctrl_c.rs
+- claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+- claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+- claudine/cli/tests/prompts/pr_flow_rehearsal.rs
+- claudine/docs/providers/dispatch-inventory.json
+- claudine/lib/Cargo.toml
+- claudine/lib/benches/runtime_hot_paths.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/coordinator/tests.rs
+- claudine/lib/src/composition/error/tests.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+- claudine/lib/src/composition/lifecycle/prewarm/worker.rs
+- claudine/lib/src/composition/lifecycle/tests/tts_settings.rs
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/preflight.rs
+- claudine/lib/src/composition/preflight/tests.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/prepare/bootstrap/tests.rs
+- claudine/lib/src/composition/registration.rs
+- claudine/lib/src/composition/schema/bundle.rs
+- claudine/lib/src/composition/schema/classify.rs
+- claudine/lib/src/composition/schema/defaults_tests.rs
+- claudine/lib/src/composition/schema/findings.rs
+- claudine/lib/src/composition/schema/launch_defaults.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/src/composition/schema/shipped.rs
+- claudine/lib/src/composition/schema/status_render.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/composition/schema/translate.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/tests.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/templates.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/lib/src/config/claudine_config.rs
+- claudine/lib/src/config/claudine_config/tests.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/load.rs
+- claudine/lib/src/config/messaging_block/tests.rs
+- claudine/lib/src/config/mod.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/config/persist_tests.rs
+- claudine/lib/src/config/schema.rs
+- claudine/lib/src/config/schema_tests.rs
+- claudine/lib/src/config/setup.rs
+- claudine/lib/src/config/tts.rs
+- claudine/lib/src/dispatch/deps.rs
+- claudine/lib/src/dispatch/loader.rs
+- claudine/lib/src/dispatch/loader/tests.rs
+- claudine/lib/src/dispatch/runner/speak.rs
+- claudine/lib/src/dispatch/runner/tests.rs
+- claudine/lib/src/dispatch/tests.rs
+- claudine/lib/src/error.rs
+- claudine/lib/src/events/config.rs
+- claudine/lib/src/harness/audit.rs
+- claudine/lib/src/harness/error.rs
+- claudine/lib/src/harness/mod.rs
+- claudine/lib/src/harness/shell.rs
+- claudine/lib/src/harness/shell/policy.rs
+- claudine/lib/src/harness/shell/tests.rs
+- claudine/lib/src/invocation_context.rs
+- claudine/lib/src/invocation_context/document_tests.rs
+- claudine/lib/src/messaging/config.rs
+- claudine/lib/src/signals/harvest.rs
+- claudine/lib/src/steering/automatic.rs
+- claudine/lib/src/steering/automatic/tests.rs
+- claudine/lib/src/system_prompt/prepare.rs
+- claudine/lib/src/system_prompt/prepare/tests.rs
+- claudine/lib/tests/config/repository-control.yaml
+- claudine/lib/tests/config/user-control.json5
+- claudine/lib/tests/config/user-control.yaml
+- claudine/lib/tests/fixtures/claudine-schemas/shell-expansion-in-initialize-set.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-depth3-then.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-list.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-root-dictionary.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-then.md
+- claudine/lib/tests/l1/claudine_identification.rs
+- claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/claudine_schemas_matrix.rs
+- claudine/lib/tests/l1/claudine_trigger_selection_parity.rs
+- claudine/lib/tests/l1/config_json_conversion.rs
+- claudine/lib/tests/l1/config_schema_matrix.rs
+- claudine/lib/tests/l1/darkmatter_setup.rs
+- claudine/lib/tests/l1/host_catalog.rs
+- claudine/lib/tests/l1/host_publication.rs
+- claudine/lib/tests/l1/installed_registration.rs
+- claudine/lib/tests/l1/invalid_trigger_findings.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/path_lookup_guard.rs
+- claudine/lib/tests/l1/shell_permission_parity.rs
+- claudine/lib/tests/l1/shipped_artifacts.rs
+- claudine/schemas/claudine-config.yaml
+- claudine/schemas/claudine-document.yaml
+- claudine/schemas/claudine.yaml
+- darkmatter/cli/Cargo.toml
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/init.yaml
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/src/approval.rs
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/output.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/commands/init.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/commands/trigger_findings.rs
+- darkmatter/cli/src/commands/validate.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/src/render_style.rs
+- darkmatter/cli/src/request.rs
+- darkmatter/cli/tests/common/fixture.rs
+- darkmatter/cli/tests/l1/approval_prompt.rs
+- darkmatter/cli/tests/l1/collection_blocks.rs
+- darkmatter/cli/tests/l1/compose_basic.rs
+- darkmatter/cli/tests/l1/compose_data_output.rs
+- darkmatter/cli/tests/l1/compose_foreign_documents.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_lifecycle_approval.rs
+- darkmatter/cli/tests/l1/compose_nested_markdown.rs
+- darkmatter/cli/tests/l1/compose_schema.rs
+- darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+- darkmatter/cli/tests/l1/compose_shell.rs
+- darkmatter/cli/tests/l1/compose_shell_template.rs
+- darkmatter/cli/tests/l1/compose_transclusion.rs
+- darkmatter/cli/tests/l1/config_notices.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+- darkmatter/cli/tests/l1/expression_recovery.rs
+- darkmatter/cli/tests/l1/host_registration.rs
+- darkmatter/cli/tests/l1/init_command.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/cli/tests/l1/lifecycle_passive_surfaces.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/md_process_fixture.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/output_envelope.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/cli/tests/l1/policy_verbs.rs
+- darkmatter/cli/tests/l1/schema_recursive.rs
+- darkmatter/cli/tests/l1/schema_triggers.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/cli/tests/l1/schema_validate_yaml.rs
+- darkmatter/cli/tests/l1/standalone_baseline.rs
+- darkmatter/dmls/Cargo.toml
+- darkmatter/dmls/benches/pipeline_work_a3.rs
+- darkmatter/dmls/src/bench.rs
+- darkmatter/dmls/src/config/mod.rs
+- darkmatter/dmls/src/config_contracts.rs
+- darkmatter/dmls/src/context.rs
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+- darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+- darkmatter/dmls/src/diagnostics/slots.rs
+- darkmatter/dmls/src/lib.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/event_views.rs
+- darkmatter/dmls/src/overlay/hosts.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/registry.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/shell.rs
+- darkmatter/dmls/src/overlay/yaml_contract.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/formatting.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs
+- darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+- darkmatter/dmls/src/providers/frontmatter/snapshot_tests.rs
+- darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/dmls/tests/common/mod.rs
+- darkmatter/dmls/tests/common/oracle.rs
+- darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+- darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+- darkmatter/dmls/tests/l1/config_contracts.rs
+- darkmatter/dmls/tests/l1/formatting_transaction.rs
+- darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+- darkmatter/dmls/tests/l1/host_registration_watches.rs
+- darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/mapping_only_corpus.rs
+- darkmatter/dmls/tests/l1/no_side_effects.rs
+- darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs
+- darkmatter/dmls/tests/l1/registered_host_views.rs
+- darkmatter/dmls/tests/l1/required_defaults.rs
+- darkmatter/dmls/tests/l1/schema_reference_parity.rs
+- darkmatter/dmls/tests/l1/schema_roots_parity.rs
+- darkmatter/dmls/tests/l1/schema_slots_editor.rs
+- darkmatter/dmls/tests/l1/shell_permission_classification.rs
+- darkmatter/dmls/tests/l1/undeclared_member.rs
+- darkmatter/dmls/tests/l1/value_hovers.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+- darkmatter/dmls/tests/l1/zed_extension_contract.rs
+- darkmatter/dmls/zed-dmls/extension.toml
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/benches/schema_validation.rs
+- darkmatter/lib/examples/permission_widening.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/src/atomic_replace.rs
+- darkmatter/lib/src/config/init.rs
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/load/entries.rs
+- darkmatter/lib/src/config/load/error.rs
+- darkmatter/lib/src/config/load/reference.rs
+- darkmatter/lib/src/config/migration.rs
+- darkmatter/lib/src/config/migration_receipt.rs
+- darkmatter/lib/src/config/mod.rs
+- darkmatter/lib/src/config/network.rs
+- darkmatter/lib/src/config/permissions.rs
+- darkmatter/lib/src/config/permissions/persist.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/registration/manifest.rs
+- darkmatter/lib/src/config/registration/selection.rs
+- darkmatter/lib/src/config/schema.rs
+- darkmatter/lib/src/config/widening.rs
+- darkmatter/lib/src/config/write.rs
+- darkmatter/lib/src/effects/fs_write.rs
+- darkmatter/lib/src/lib.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/host.rs
+- darkmatter/lib/src/lifecycle/executor/shell.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/host_profile.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/src/lifecycle/preflight/candidates.rs
+- darkmatter/lib/src/lifecycle/shell_template.rs
+- darkmatter/lib/src/markdown/cleanup/document.rs
+- darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+- darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+- darkmatter/lib/src/markdown/compose/context/capture/observations.rs
+- darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/context/repository_scope.rs
+- darkmatter/lib/src/markdown/compose/context/request.rs
+- darkmatter/lib/src/markdown/compose/context/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+- darkmatter/lib/src/markdown/compose/preflight/mod.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch/error.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/types.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/store.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/approval.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+- darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+- darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs
+- darkmatter/lib/src/markdown/compose/tests/rendering.rs
+- darkmatter/lib/src/markdown/compose/tests/shell.rs
+- darkmatter/lib/src/markdown/compose/type_tests.rs
+- darkmatter/lib/src/markdown/errors/mod.rs
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/node_edit.rs
+- darkmatter/lib/src/markdown/hash/path_edit.rs
+- darkmatter/lib/src/markdown/output/command/clean.rs
+- darkmatter/lib/src/markdown/output/command/data.rs
+- darkmatter/lib/src/markdown/output/command/mod.rs
+- darkmatter/lib/src/markdown/schemas/about.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/clean.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/roots.rs
+- darkmatter/lib/src/markdown/schemas/schema_files.rs
+- darkmatter/lib/src/markdown/schemas/shipped.rs
+- darkmatter/lib/src/markdown/schemas/slots/approval_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/codes.rs
+- darkmatter/lib/src/markdown/schemas/slots/dependencies.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/legacy.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/matching.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/request.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/store.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/src/markdown/schemas/slots/session_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/tests.rs
+- darkmatter/lib/src/markdown/schemas/tests/reset_process_caches.rs
+- darkmatter/lib/src/markdown/schemas/triggers.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+- darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+- darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+- darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+- darkmatter/lib/src/markdown/schemas/triggers/prepared.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/marks.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/select.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/semantic.rs
+- darkmatter/lib/src/strict_json.rs
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/src/yaml_edit.rs
+- darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs
+- darkmatter/lib/tests/fixtures/permission_parity/cases.json
+- darkmatter/lib/tests/host_fixtures/mod.rs
+- darkmatter/lib/tests/host_fixtures/recorder.rs
+- darkmatter/lib/tests/l1/alias_lookup_once.rs
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+- darkmatter/lib/tests/l1/collection_blocks/pipeline.rs
+- darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+- darkmatter/lib/tests/l1/collection_discovery.rs
+- darkmatter/lib/tests/l1/collection_execution.rs
+- darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+- darkmatter/lib/tests/l1/compose_member_warnings.rs
+- darkmatter/lib/tests/l1/compose_read_set.rs
+- darkmatter/lib/tests/l1/compose_setters.rs
+- darkmatter/lib/tests/l1/composition_defaults.rs
+- darkmatter/lib/tests/l1/config_fields.rs
+- darkmatter/lib/tests/l1/config_init.rs
+- darkmatter/lib/tests/l1/config_load.rs
+- darkmatter/lib/tests/l1/config_migration.rs
+- darkmatter/lib/tests/l1/config_migration_receipt.rs
+- darkmatter/lib/tests/l1/config_permission_persist.rs
+- darkmatter/lib/tests/l1/config_permissions.rs
+- darkmatter/lib/tests/l1/config_widening.rs
+- darkmatter/lib/tests/l1/config_write.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/data_origin.rs
+- darkmatter/lib/tests/l1/deferred_positions.rs
+- darkmatter/lib/tests/l1/diagnostic_source_provenance.rs
+- darkmatter/lib/tests/l1/directive_target_analysis.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_captures.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_precedence.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_read_order.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_schema_files.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_triggers.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_types.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+- darkmatter/lib/tests/l1/dynamic_slots_fixture_repos.rs
+- darkmatter/lib/tests/l1/empty_package_area.rs
+- darkmatter/lib/tests/l1/error_snapshots/shell_expansion.rs
+- darkmatter/lib/tests/l1/expression_recovery.rs
+- darkmatter/lib/tests/l1/expression_recovery_data.rs
+- darkmatter/lib/tests/l1/expression_recovery_slots.rs
+- darkmatter/lib/tests/l1/file_tree_roots.rs
+- darkmatter/lib/tests/l1/fm_namespace_contract.rs
+- darkmatter/lib/tests/l1/foreign_document_compose.rs
+- darkmatter/lib/tests/l1/frontmatter_surface_projection.rs
+- darkmatter/lib/tests/l1/host_registration.rs
+- darkmatter/lib/tests/l1/host_selection.rs
+- darkmatter/lib/tests/l1/kind_semantic_checks.rs
+- darkmatter/lib/tests/l1/layered_validator_identities.rs
+- darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+- darkmatter/lib/tests/l1/lifecycle_passive_compose.rs
+- darkmatter/lib/tests/l1/literal_token.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/load_data_options.rs
+- darkmatter/lib/tests/l1/load_data_options_slots.rs
+- darkmatter/lib/tests/l1/load_data_runtime.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/meta_schema_phase4.rs
+- darkmatter/lib/tests/l1/missing_ctx_capture.rs
+- darkmatter/lib/tests/l1/network_permission.rs
+- darkmatter/lib/tests/l1/path_function_contracts.rs
+- darkmatter/lib/tests/l1/permission_parity.rs
+- darkmatter/lib/tests/l1/preflight_child_state_parity.rs
+- darkmatter/lib/tests/l1/preflight_repository_sigils.rs
+- darkmatter/lib/tests/l1/prepared_trigger_bundles.rs
+- darkmatter/lib/tests/l1/recursive_schema_golden.rs
+- darkmatter/lib/tests/l1/recursive_schema_merge.rs
+- darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs
+- darkmatter/lib/tests/l1/reference_integration.rs
+- darkmatter/lib/tests/l1/reference_provenance.rs
+- darkmatter/lib/tests/l1/request_config.rs
+- darkmatter/lib/tests/l1/request_context_builder.rs
+- darkmatter/lib/tests/l1/required_context.rs
+- darkmatter/lib/tests/l1/runtime_blocking.rs
+- darkmatter/lib/tests/l1/schema_cache_validity.rs
+- darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+- darkmatter/lib/tests/l1/schema_language_ownership_guard.rs
+- darkmatter/lib/tests/l1/schema_phase_validation.rs
+- darkmatter/lib/tests/l1/schema_reference_parity.rs
+- darkmatter/lib/tests/l1/schema_roots.rs
+- darkmatter/lib/tests/l1/schemas_effective_presence.rs
+- darkmatter/lib/tests/l1/schemas_literal_expression.rs
+- darkmatter/lib/tests/l1/schemas_runtime_parity.rs
+- darkmatter/lib/tests/l1/schemas_union_postfix.rs
+- darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+- darkmatter/lib/tests/l1/scope_site_conformance.rs
+- darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+- darkmatter/lib/tests/l1/set_overlay_integration.rs
+- darkmatter/lib/tests/l1/shared_acyclic_consumers.rs
+- darkmatter/lib/tests/l1/shell_block_integration.rs
+- darkmatter/lib/tests/l1/shell_child_environment.rs
+- darkmatter/lib/tests/l1/shell_expansion_coordinates.rs
+- darkmatter/lib/tests/l1/shell_permissions.rs
+- darkmatter/lib/tests/l1/shell_result_values.rs
+- darkmatter/lib/tests/l1/shell_template_body_guards.rs
+- darkmatter/lib/tests/l1/shell_template_discovery.rs
+- darkmatter/lib/tests/l1/shell_template_execution.rs
+- darkmatter/lib/tests/l1/shell_template_policy.rs
+- darkmatter/lib/tests/l1/shipped_artifacts.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/slot_permissions.rs
+- darkmatter/lib/tests/l1/slot_support.rs
+- darkmatter/lib/tests/l1/transcluded_shell_failure.rs
+- darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+- darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+- darkmatter/lib/tests/l1/trigger_input_matrix.rs
+- darkmatter/lib/tests/l1/trigger_match_grammar.rs
+- darkmatter/lib/tests/l1/trigger_payload_load_errors.rs
+- darkmatter/lib/tests/l1/trigger_selection_parity.rs
+- darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+- darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+- darkmatter/lib/tests/l1/validation_contract_parity.rs
+- darkmatter/lib/tests/l1/yaml_document_loading.rs
+- darkmatter/lib/tests/l1/yaml_document_selection.rs
+- darkmatter/lib/tests/l1/yaml_edit.rs
+- darkmatter/lib/tests/l1/yaml_kind_registry.rs
+- darkmatter/lib/tests/request_support/mod.rs
+- darkmatter/schemas/darkmatter-config.yaml
+- darkmatter/schemas/darkmatter-host.yaml
+- darkmatter/schemas/schema-trigger.yaml
+- messenger/lib/src/research/load.rs
+- messenger/lib/tests/research_corpus.rs
+- scripts/ci/affected_scope.py
+- scripts/ci/permission_environment.py
+- scripts/ci/permission_scope.py
+- scripts/ci/test_affected_scope.py
+- scripts/ci/test_permission_environment.py
+- scripts/ci/test_permission_scope.py
+- simplified-schema/lib/examples/validate_person.rs
+- simplified-schema/lib/generated/shipped.json
+- simplified-schema/lib/src/coerce.rs
+- simplified-schema/lib/src/defaults.rs
+- simplified-schema/lib/src/embedded.rs
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/outcome.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/roots.rs
+- simplified-schema/lib/src/shipped/registry.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/slots.rs
+- simplified-schema/lib/src/triggers/assemble.rs
+- simplified-schema/lib/src/triggers/discovery.rs
+- simplified-schema/lib/src/triggers/envelope.rs
+- simplified-schema/lib/src/triggers/finding.rs
+- simplified-schema/lib/src/triggers/grammar.rs
+- simplified-schema/lib/src/triggers/identify.rs
+- simplified-schema/lib/src/triggers/lint.rs
+- simplified-schema/lib/src/triggers/matcher.rs
+- simplified-schema/lib/src/triggers/mod.rs
+- simplified-schema/lib/src/triggers/payload_memo_tests.rs
+- simplified-schema/lib/src/triggers/prepared.rs
+- simplified-schema/lib/src/work_counters.rs
+- simplified-schema/lib/src/yaml_documents/load.rs
+- simplified-schema/lib/src/yaml_documents/marks.rs
+- simplified-schema/lib/src/yaml_documents/mod.rs
+- simplified-schema/lib/src/yaml_documents/registry.rs
+- simplified-schema/lib/src/yaml_documents/select.rs
+- simplified-schema/lib/src/yaml_documents/semantic.rs
+- simplified-schema/lib/tests/l1/declaration_narrowing.rs
+- simplified-schema/lib/tests/l1/envelope_admission.rs
+- simplified-schema/lib/tests/l1/identifying_triggers.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/required_defaults.rs
+- simplified-schema/lib/tests/l1/root_union_assertions.rs
+- simplified-schema/lib/tests/l1/shipped_artifacts.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+- simplified-schema/lib/tests/l1/validation_contract.rs
+- simplified-schema/schemas/schema-trigger.yaml
+- sniff/lib/src/error.rs
+- sniff/lib/src/filesystem/git/committed_tree.rs
+- sniff/lib/src/filesystem/git/mod.rs
+- sniff/lib/src/filesystem/mod.rs
+- sniff/lib/tests/l1/committed_tree.rs
+- sniff/lib/tests/l1/main.rs
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+documentation:
+- .claude/skills/biscuit-file/SKILL.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/architecture.md
+- .claude/skills/claudine/cli-commands.md
+- .claude/skills/claudine/cli-reference.md
+- .claude/skills/claudine/hook-actions.md
+- .claude/skills/claudine/module-map.md
+- .claude/skills/claudine/unified-hooks.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/errors.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/frontmatter.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/remote-cache.md
+- .claude/skills/darkmatter/requests.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/simplified-schema/build-and-guards.md
+- .claude/skills/simplified-schema/schema-documents.md
+- .claude/skills/sniff/SKILL.md
+- .claude/skills/sniff/remote-and-repository.md
+- .github/ci/README.md
+- CLAUDE.md
+- biscuit-file/README.md
+- biscuit-file/docs/topics/fetch.md
+- biscuit-file/docs/topics/file-references.md
+- claudine/README.md
+- claudine/docs/dependencies.md
+- claudine/docs/getting-started/index.md
+- claudine/docs/pipeline.md
+- claudine/docs/topics/automatic-steering.md
+- claudine/docs/topics/completions/shell-completions.md
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/configuring-actions.md
+- claudine/docs/topics/execution-flow.md
+- claudine/docs/topics/file-referencing.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/docs/topics/frontmatter-properties.md
+- claudine/docs/topics/pre-flight-checks.md
+- claudine/docs/topics/protect-service.md
+- claudine/docs/topics/schemas.md
+- claudine/docs/topics/system-prompt.md
+- claudine/lib/README.md
+- claudine/schemas/README.md
+- darkmatter/README.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/dmls/zed-dmls/README.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/graph.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/init.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/cli/validate.md
+- darkmatter/docs/inline/filter.md
+- darkmatter/docs/inline/fm-shell-expansion.md
+- darkmatter/docs/inline/map.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/inline/shell-blocks.md
+- darkmatter/docs/inline/shell-expansion.md
+- darkmatter/docs/lsp/architecture.md
+- darkmatter/docs/lsp/configuration.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/topics/compose-requests.md
+- darkmatter/docs/topics/config-writes.md
+- darkmatter/docs/topics/configuration.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/frontmatter.md
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/docs/topics/lifecycle/host-artifact.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/permissions.md
+- darkmatter/docs/topics/remote-url-references.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/index.md
+- darkmatter/docs/topics/schemas/schema-discovery.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/schema-validation.md
+- darkmatter/docs/topics/yaml-editing.md
+- docs/topics/ci-cd.md
+- simplified-schema/README.md
+- simplified-schema/docs/topics/features.md
+- simplified-schema/docs/topics/global-type-constraints.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/docs/topics/language/types.md
+- simplified-schema/docs/topics/language/unions.md
+- simplified-schema/docs/topics/shipped-artifacts.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- simplified-schema/docs/topics/validation.md
+- sniff/docs/sniff-library-architecture.md
+completed_phase: 9
+implemented: true
 ---
 
 # Configuration, permissions, and host registration implementation plan
@@ -1824,7 +2848,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 9 — Setup completion (sequential)
 
-- [ ] **Implement setup handshake**
+- [x] **Implement setup handshake**
   - Add `md init` command/args/output, new `config/init.rs`, and Claudine's
     shared setup service. Implement Rule 23, with noninteractive services
     behind the existing wizard so tests need no terminal or human input.
@@ -1842,7 +2866,7 @@ never count a private parser assertion as the matrix result.
     interrupted two-file transfer, and `--repo` outside a repository with
     zero writes. Claudine register-entry publication is connected in Phase 7.
 
-- [ ] **Verify permission parity**
+- [x] **Verify permission parity**
   - Exercise the same file, command, template, URL, and exclusion fixtures
     through all three consumers; assert equivalent structured decisions.
     Verify every retired file/API has only temporary migration/test references.
@@ -1854,7 +2878,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 10 — Registration core (parallel)
 
-- [ ] **Prove host identity**
+- [x] **Prove host identity**
   - Own Simplified Schema identifying-trigger admission/matching and tests.
     Implement Rule 25 over the moved AST without changing ordinary triggers.
   - Cover every combinator, shared-only/optional-only/path-only/empty cases,
@@ -1862,7 +2886,7 @@ never count a private parser assertion as the matrix result.
     no filesystem work during proof/matching. Demonstrate Claudine's nine
     keys identify at every non-null YAML type, while shared events alone do not.
 
-- [ ] **Load host profiles**
+- [x] **Load host profiles**
   - Own manifest schema and `config/registration` member loader plus explicit
     lifecycle/facts companion-path adapters. Implement Rule 24 and the input
     matrix, preserving retained reads/import anchors and all hash checks.
@@ -1873,7 +2897,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 11 — Registration consumers (parallel)
 
-- [ ] **Layer host schemas**
+- [x] **Layer host schemas**
   - Own Darkmatter host selection and `DarkmatterSchemas` registered-layer
     integration. Implement Rule 26 with origin inspection and cache identity.
   - Test a same-basename root file overriding an actual declaration without
@@ -1883,7 +2907,7 @@ never count a private parser assertion as the matrix result.
   - Thread selection into compose, validate, clean, and schema inspection
     preparation paths; preserve executable host options supplied by Claudine.
 
-- [ ] **Compose foreign documents**
+- [x] **Compose foreign documents**
   - Own md analysis/runtime separation and CLI notice projection. Implement
     Rule 27 and add an in-process execution/effect recorder fixture.
   - Prove body composition and selected host validation using a foreign
@@ -1899,7 +2923,7 @@ never count a private parser assertion as the matrix result.
 
 ### Validation checkpoint
 
-- [ ] **Verify registered behavior**
+- [x] **Verify registered behavior**
   - Coordinator checkpoint after Wave 11: run registration public matrix,
     layering and CLI contract tests, plus shipped-artifact checks. Verify
     registration performs no install/write/network/prompt/handler effects.
@@ -1908,7 +2932,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 12 — Editor preparation (parallel)
 
-- [ ] **Select editor contracts**
+- [x] **Select editor contracts**
   - Own explicit configuration path selection in `overlay/yaml_document.rs`,
     `overlay/yaml_contract.rs`, and schema preparation/providers. Select the
     shipped user/repo config types by captured path identity before general
@@ -1923,7 +2947,7 @@ never count a private parser assertion as the matrix result.
   - Remove active `shell.policy_path` semantics and return a located retired
     setting diagnostic naming `.darkmatter.yaml`/`permissions.shell-commands`.
 
-- [ ] **Cache selected hosts**
+- [x] **Cache selected hosts**
   - Own `TriggerRegistries`, `AnalysisIdentity`, `LifecycleHost`, and
     provider host-view plumbing. Implement the one coherent selected view
     in Rules 26/28 across `providers/{dsl,frontmatter}.rs`, event views,
@@ -1934,7 +2958,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 13 — Editor invalidation (sequential)
 
-- [ ] **Watch passive inputs**
+- [x] **Watch passive inputs**
   - Extend `workspace/watch.rs` and backend invalidation to configuration,
     references, manifests, revision directories, all schema/catalog/artifact
     dependencies, and captured HEAD. Watch missing paths from existing parents
@@ -1945,7 +2969,7 @@ never count a private parser assertion as the matrix result.
   - Emit `dm.config.missing` as one session notification. Passive configuration
     and legacy-migration diagnostics never launch setup or write files.
 
-- [ ] **Verify editor behavior**
+- [x] **Verify editor behavior**
   - Use existing in-process/provider and hermetic stdio LSP fixtures; add no
     real editor, browser, or OS-focus test. Cover the motivating sequence/start
     example outside the package area, shared-events-only md files, wrong-typed
@@ -1959,7 +2983,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 14 — Claudine publication (parallel)
 
-- [ ] **Publish host revisions**
+- [x] **Publish host revisions**
   - Own new Claudine registration service and embedded revision source table.
     Implement Rule 29 and export the passive config schema alongside the
     manifest members/dependencies. Keep the stable manifest fields exactly
@@ -1974,7 +2998,7 @@ never count a private parser assertion as the matrix result.
     Retain old revisions and prove every published manifest sees one complete
     revision. No manual copied-schema fixture is an installation mechanism.
 
-- [ ] **Narrow Claudine triggers**
+- [x] **Narrow Claudine triggers**
   - Own `claudine/schemas/claudine-document.yaml`, `claudine.yaml` match
     changes, and corresponding bundle/corpus tests. Remove initialize,
     cancelled, and finalize as sole root-trigger selectors; retain their
@@ -1985,7 +3009,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 15 — Launch and setup integration (sequential)
 
-- [ ] **Connect Claudine setup**
+- [x] **Connect Claudine setup**
   - Connect init to publication, permission transfer, and user registration
     insertion in that order. Preserve all existing register entries and
     deduplicate by resolved stable manifest identity. Add repository setup
@@ -1997,7 +3021,7 @@ never count a private parser assertion as the matrix result.
   - Return refresh diagnostics through the existing output path without
     launching init or asking a question in noninteractive operation.
 
-- [ ] **Verify installed integration**
+- [x] **Verify installed integration**
   - In temporary home/repository fixtures, exercise init in both orders,
     repeat setup, launch refresh, old-revision readers, and failure recovery.
     Run md and DMLS against the published revision outside `claudine/`.
@@ -2010,7 +3034,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 16 — Conservative comparison (parallel)
 
-- [ ] **Compare resolved policies**
+- [x] **Compare resolved policies**
   - Add new `darkmatter::config::widening` and
     `darkmatter/lib/examples/permission_widening.rs`, a narrow noninteractive
     checker using the same pinned-tree/config/default/reference code. Inputs
@@ -2034,7 +3058,7 @@ never count a private parser assertion as the matrix result.
     network, symlink/reference target changes, and hostile candidate executable
     files. Tests call the public comparator with fixture revisions.
 
-- [ ] **Prepare environment setup**
+- [x] **Prepare environment setup**
   - Add new `scripts/ci/permission_environment.py`, dry-run by default, with
     explicit `--apply` to configure Rule 31's exact environment. Use GitHub's
     REST API through the existing noninteractive `gh` authentication; never
@@ -2046,7 +3070,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 17 — Workflow integration (sequential)
 
-- [ ] **Gate widening results**
+- [x] **Gate widening results**
   - Add the two jobs in Rule 31. `permission-scope` uses PR base/head IDs;
     pushes compare event-before/head; scheduled/manual runs with no branch
     delta produce no widening work. Fetch immutable objects without running
@@ -2075,7 +3099,7 @@ never count a private parser assertion as the matrix result.
     their existing L1 owner. Add fake-GitHub workflow decision tests for
     unchanged/narrowing/widening/error/missing-environment/bootstrap cases.
 
-- [ ] **Verify CI contract**
+- [x] **Verify CI contract**
   - Run test-toolkit's CI contract tests and the checker/environment tests
     locally through existing owners. Inspect `just ci-local --plan` without
     pushing; confirm changed source/default inputs schedule their owners and
@@ -2088,7 +3112,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 18 — Current documentation (parallel)
 
-- [ ] **Document user behavior**
+- [x] **Document user behavior**
   - Own Darkmatter docs: new `topics/configuration.md` and
     `topics/permissions.md`, replacing obsolete grant-store/whitelist guidance
     in `darkmatter/docs/topics/schemas/schema-slots.md` and
@@ -2102,7 +3126,7 @@ never count a private parser assertion as the matrix result.
     capture, HEAD/worktree policy, setup transfer, and immutable publication.
     Keep READMEs to an overview and links into current docs.
 
-- [ ] **Document host behavior**
+- [x] **Document host behavior**
   - Own Simplified Schema validation/defaults/global-type-constraints docs,
     Darkmatter `schemas/authoring-schemas.md`, and Claudine configuration/
     schema/setup docs. Fill the required/eager/
@@ -2116,7 +3140,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 19 — Acceptance and handoff (sequential)
 
-- [ ] **Run acceptance checks**
+- [x] **Run acceptance checks**
   - Run the affected areas' `just test` and `just lint` recipes against the
     final state: simplified-schema, biscuit-file, sniff, darkmatter, and
     claudine; run root `just test test-toolkit` for CI contracts. Preserve
@@ -2142,7 +3166,7 @@ never count a private parser assertion as the matrix result.
     Do not run `cargo fmt` or unrelated formatting. Fix discovered defects
     in the owning phase's implementation and rerun only affected checks.
 
-- [ ] **Prepare review evidence**
+- [x] **Prepare review evidence**
   - Update this plan's completed checkboxes and the existing implementation
     log. Include the exact acceptance command/results, public matrix coverage,
     installed-host fixture output, policy before/after examples, and all

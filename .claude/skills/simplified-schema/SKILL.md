@@ -25,7 +25,7 @@ feature) depend on it directly.
 | Dotted paths and their pure edits (`property_path.rs`), the command-line value reader (`setter_value.rs`) | Which document and schema a path or value applies to; the nested text editor (`markdown/hash/path_edit.rs`); setter plans (`compose/setters.rs`) |
 | Passive expression syntax (`expression/`), literal-token codec (`pending.rs`) | Expression evaluation and the function registry |
 | The `SimplifiedSchema` facade object (`schema/`) | `schemas::resolve` wrappers that pass `SHIPPED_SOURCES` so `Name@darkmatter:<stem>` resolves |
-| Schema roots (`roots.rs`), triggers (`triggers/`: grammar, envelope, lint, matcher, discovery, assembly, prepared bundles, findings), `EmbeddedSchemaBundle` (`embedded.rs`), the trigger definition (`schemas/schema-trigger.yaml`) | Layering matched trigger payloads into an `EffectiveSchema`; the `triggers.rs` wrappers (`scan`, `scan_with_embedded`, `scan_with_source`, `prepare_trigger_bundle`) that add `SHIPPED_SOURCES` |
+| Schema roots (`roots.rs`), triggers (`triggers/`: grammar, envelope, lint, matcher, discovery, assembly, prepared bundles, findings, and the identifying-trigger proof `identify.rs::{admit_identifying_trigger, identifies}` host registration uses), `EmbeddedSchemaBundle` (`embedded.rs`), the trigger definition (`schemas/schema-trigger.yaml`) | Layering matched trigger payloads into an `EffectiveSchema`; the `triggers.rs` wrappers (`scan`, `scan_with_embedded`, `scan_with_source`, `prepare_trigger_bundle`) that add `SHIPPED_SOURCES` |
 | Whole YAML documents (`yaml_documents/`): the loader, `KindRegistry`, selection, kind checks | The adapter (`yaml_documents/mod.rs`): `kind_host()`, `shipped_kind_registry()`, `YamlContract`, `YamlValidation`, `Route` |
 
 Rule of thumb: if it answers "what does this schema text mean, and does this
@@ -66,6 +66,17 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   annotation there. Never write a second defaulting walk in a host. Read
   [defaults.md](defaults.md) before touching presence, defaults, or
   `not-empty`.
+- **Defaults keep their provenance.** Each `AppliedDefault` carries `pointer`
+  (the `default` keyword's JSON Pointer in the lowered schema) and an `origin`
+  a host fills. A problem the completed value still has at or below an
+  inserted path (an eager file default with no target) is the default's:
+  `defaults::attribute_problems` sets `ValidationProblem::default`, names it in
+  the message, and clears line/column; a host judging its own completed
+  candidate calls it too. Expansion inlines `Name@file` types without their
+  file, so resolution records each imported default's declaring file in
+  `ResolvedSchema::default_files` (`ImportEngine::default_files`, walked over
+  the authored schema after expansion); Darkmatter's `EffectiveSchema` prefers
+  it over the layer origin.
 - **One failure flattening.** `ConversionError::located_failures()` /
   `coercion::locate_failures` (null arms dropped, an arm unreachable only on
   `NoConversion` at the union's path) serves annotation, `partial_copy`, and

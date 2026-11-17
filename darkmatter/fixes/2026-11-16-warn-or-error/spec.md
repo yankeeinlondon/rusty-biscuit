@@ -289,6 +289,15 @@ bullet), `cli/validate.md` (the `no target` reason), `inline/link-validation.md`
    the `use-darkmatter` caller skill lists the `missing-*` entries as `--allow`
    recoveries; the precedence flowchart has no default-recovery branch.
 
+### Backed out on `feat/state-schema` (2026-11-17)
+
+To keep that branch's pull request green, the "Replace under D2" parts of
+`11a909a82` were reverted there: `DEFAULT_RECOVERIES`, the `recovers`
+change, the severity downgrade in `check_references`, and the three help
+summaries. A missing target fails by default again, as before the commit,
+which clears regressions 1–5 above. The "Keep (D1)" parts stay. D2 starts
+from that state.
+
 ### What to do with each change
 
 - **Keep (D1, empty targets):** `EmptyTarget`, `empty_target()`,

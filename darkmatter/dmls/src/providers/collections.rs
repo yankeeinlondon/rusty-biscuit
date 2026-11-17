@@ -607,6 +607,7 @@ mod tests {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
 
         let mut answered = 0usize;

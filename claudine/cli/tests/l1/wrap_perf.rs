@@ -246,6 +246,85 @@ fn composition_setup_and_provider_handoff_order_matches_phase_1_baseline() {
     }
 }
 
+/// Asserts a `--perf` run of an initialized document succeeded and that its
+/// report nests `composition` inside the `prep phase` window. The document's
+/// `::shell sleep 0.1` runs after `initialize`, so the composition outlasts
+/// everything prepared before `initialize`: a prep window closed there holds a
+/// larger child and the debug report panics (exit 101).
+fn assert_initialized_prep_window_holds_composition(output: &std::process::Output) {
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "initialized --perf run must exit 0:\n{stderr}");
+    let report = &stderr[stderr
+        .find("Performance")
+        .unwrap_or_else(|| panic!("performance report missing:\n{stderr}"))..];
+    let prep = report
+        .find("prep phase")
+        .unwrap_or_else(|| panic!("prep phase missing:\n{report}"));
+    let env_setup = report
+        .find("environment setup")
+        .unwrap_or_else(|| panic!("environment setup missing:\n{report}"));
+    let composition = report[prep..]
+        .find("composition")
+        .map(|offset| prep + offset)
+        .unwrap_or_else(|| panic!("composition missing under prep phase:\n{report}"));
+    assert!(
+        composition < env_setup,
+        "composition must nest under prep phase, before environment setup:\n{report}"
+    );
+}
+
+/// R2-F2: an initialized (staged) document keeps its prep window open through
+/// `initialize`, the stabilized reread, and the composition it measures.
+#[cfg(unix)]
+#[test]
+fn initialized_compose_perf_prep_window_contains_composition() {
+    let fixture = CliProcessFixture::named("compose-perf-initialized");
+    fixture.seed_user_config();
+    common::write_shell_permissions(fixture.home(), "exact sleep 0.1\n");
+
+    let md_file = fixture.cwd().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nagent: goose\nprompt: Hi\ninitialize:\n  - {stdout: initialized}\n---\n# Body\n\n::shell sleep 0.1\n",
+    )
+    .unwrap();
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = fixture
+        .command()
+        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_initialized_prep_window_holds_composition(&output);
+}
+
+/// R2-F2: the inline route shares the staged single-document helper; the
+/// command in its `prompt` is what inline composition runs.
+#[cfg(unix)]
+#[test]
+fn initialized_inline_compose_perf_prep_window_contains_composition() {
+    let fixture = CliProcessFixture::named("inline-compose-perf-initialized");
+    fixture.seed_user_config();
+    common::write_shell_permissions(fixture.home(), "exact sleep 0.1\n");
+
+    let md_file = fixture.cwd().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nagent: goose\nprompt: |\n  Update the body.\n\n  ::shell sleep 0.1\ninitialize:\n  - {stdout: initialized}\n---\n# Body\n",
+    )
+    .unwrap();
+    common::InlineAgentStub::new(&md_file)
+        .body("Replacement body\n")
+        .install(fixture.bin_dir(), "goose");
+
+    let output = fixture
+        .command()
+        .args(["inline-compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_initialized_prep_window_holds_composition(&output);
+}
+
 #[cfg(unix)]
 #[test]
 fn compose_perf_stdout_matches_non_perf() {
@@ -474,3 +553,4 @@ fn perf_arg_parsing_includes_clap_time() {
 // ===========================================================================
 // Watchdog fixture tests (Phase 5)
 // ===========================================================================
+

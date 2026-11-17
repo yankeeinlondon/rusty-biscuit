@@ -728,7 +728,7 @@ permissions that never need a question: the files your Darkmatter
 `permissions.file-read` configuration pre-approves (by default, files with a
 common data or text extension beside the schema or anywhere in its
 repository), and URLs your configured `network: allow` permits. See
-[Darkmatter configuration](../../../../darkmatter/docs/topics/configuration.md#permissions).
+[Darkmatter permissions](../../../../darkmatter/docs/topics/permissions.md).
 
 A Tab never asks and never prints. When a read is not pre-approved (a file
 `file-read` does not match or a `!` entry excludes, a URL without network

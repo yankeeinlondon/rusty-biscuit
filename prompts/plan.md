@@ -113,13 +113,11 @@ Your high level task is to convert the following documents into a high confidenc
 ## Closure
 
 - Before saving, re-read the plan as the implementer would: every task must be executable without a decision that is not already written down. Search it for deferral wording ("if", "either", "decide", "choice", "TBD", "revisit", "author review", "as needed") and replace each deferred choice with a rule
-- Save the plan as "{{plan}}"
-
-
 
 - Add frontmatter to the plan document and set:
     - `total_phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
+    - `status` set to "planned"
     - `phase` set this to the starting phase number; usually 1 but may be 0 sometimes
     - `agent` set this to "{{ ctx.agent }}/{{ ctx.model }}"
     - `yolo` set this to "{{ env.YOLO }}"

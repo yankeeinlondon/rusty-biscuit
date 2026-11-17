@@ -124,7 +124,7 @@ fn prepare_under(fixture: &Fixture, invocation: &InvocationContext) -> Prepared 
         file_ref_fallback_dir: Some(invocation.launch_cwd().to_path_buf()),
         ..PrepareOptions::new(source_context.file_resolution_context().clone())
     };
-    let approved = approve_document_shell(&source, &options, &fixture.approval)
+    let approved = approve_document_shell(&source, &options, &fixture.approval, crate::composition::CompositionMode::ChainedDocument)
         .unwrap()
         .approved_commands;
     options.pre_approved_commands = Some(approved.clone());

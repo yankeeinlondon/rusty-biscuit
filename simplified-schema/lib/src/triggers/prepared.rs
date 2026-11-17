@@ -278,6 +278,7 @@ impl PreparedTriggerBundle {
                         advisories: payload.advisories.iter().map(AdvisoryRecord::advisory).collect(),
                         pending: None,
                         digest: Some(digest),
+                        default_files: crate::resolve::DefaultFiles::new(),
                     }))
                 }
             };

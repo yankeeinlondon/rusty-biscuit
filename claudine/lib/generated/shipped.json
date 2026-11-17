@@ -10,7 +10,7 @@
     },
     {
       "identity": "claudine/claudine.yaml",
-      "digest": "5df4cd6615839b0c"
+      "digest": "60a536968edb9af6"
     },
     {
       "identity": "claudine/document.yaml",
@@ -38,14 +38,14 @@
     },
     {
       "identity": "claudine/sequence.yaml",
-      "digest": "f01bcfb63825b1db"
+      "digest": "11fb9f24349fdc0b"
     }
   ],
   "dependencies": [
     {
       "owner": "darkmatter",
       "preparation_revision": 4,
-      "digest": "309162b10e7cb72d"
+      "digest": "e236baae654363db"
     },
     {
       "owner": "simplified-schema",

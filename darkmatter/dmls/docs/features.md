@@ -129,10 +129,19 @@ Darkmatter's **SimplifiedSchema**:
 
 Host support is data-driven. A document selects its schemas through discovered
 triggers, its own `$schema`, or an explicit `[schema.extensions.*]` mapping.
+Each document is analyzed as one host: a host registered in its
+configuration that identifies it (its manifest supplies the schemas, global
+types, functions, and lifecycle), else a legacy host catalog in its schema
+roots, else `md`; see [Host Registration](../../docs/topics/host-registration.md)
+and [The document's host is selected once](./diagnostics.md#the-documents-host-is-selected-once).
+Every file a registration reads (both configuration files, manifests,
+members, JSON artifacts, and the repository's `HEAD`) is watched, so a change
+takes effect without a restart. A missing `~/.darkmatter.yaml` is one
+message per session naming `md init`; DMLS never creates it.
 The host catalog supplies global types, and its lifecycle artifact supplies
-event names and action rules. For Claudine, make the files under
-`claudine/schemas/` available in the document's schema roots; an installed
-Claudine executable alone does not install those editor files. See
+event names and action rules. For Claudine without a registration, make the
+files under `claudine/schemas/` available in the document's schema roots; an
+installed Claudine executable alone does not install those editor files. See
 [Editor Setup](./editors/README.md) for deployment. DMLS interprets these files
 through Darkmatter's library and does not execute Claudine or its actions.
 
@@ -200,11 +209,18 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   the composed `{{ … }}` output with an inertness note, the content produces
   no interpolation diagnostics, and a quick-fix can wrap a spurious malformed
   interpolation into a literal.
-- **Shell awareness** — `::shell` and frontmatter `$()` values hover with an
-  approved / denied / unknown policy verdict, decided passively from the
-  document's captured `permissions.shell-commands` the way `md compose`
-  decides it (never prompting, saving, or approving), and denied built-ins
-  raise a
+- **Shell awareness** — `::shell`, `::shell-block` lines, and frontmatter
+  `$()` values hover with an approved / denied / unknown policy verdict,
+  decided passively from the document's captured `permissions.shell-commands`
+  the way `md compose` decides it (never prompting, saving, or approving).
+  Every rule kind counts, `!` entries included: with
+  `template echo {{ string }}`, `::shell echo {{ title }}` for a declared
+  string `title` hovers approved, while a literal `::shell echo hi` stays
+  unknown. A command holding a `{{ }}` placeholder is judged by its typed
+  shape, since DMLS does not evaluate the placeholder: a `template` rule or a
+  `prefix` rule for every program approves it, an `exact` allow does not, and
+  an `exact` or `template` exclusion naming one of its programs leaves it
+  unknown (the exclusion may match the value). Denied built-ins raise a
   `darkmatter.security.*` diagnostic. A `$()` value's suffixes complete, hover
   with their meaning, and raise `dm.shell.invalid_suffix` when compose would
   reject them. A quoted `$()` value is recognized like an unquoted one. Nothing

@@ -990,6 +990,185 @@ jobs:
           sniff --version
           python3 scripts/ci/test_resolved_plan.py AreaGroupingTests
 
+  # The cloned-repository risk (`darkmatter/docs/topics/configuration.md`):
+  # whoever merges a change that may widen this repository's committed
+  # `permissions` must be told so. This job compares the change and, when it
+  # may widen, keeps one comment on the pull request naming what widens; the
+  # merge itself is the decision, so nothing waits for an approval.
+  # `docs/topics/ci-cd.md` ("Permission-change report") describes it.
+  #
+  # TRUST BOUNDARY. Everything this job runs comes from the BASE commit,
+  # checked out under `$RUNNER_TEMP/permissions-trusted` (outside the
+  # workspace, so no candidate `.cargo/config.toml` or `rust-toolchain.toml`
+  # applies). The candidate commit is fetched as objects only: never checked
+  # out, built, or run. A base that predates the checker (the bootstrap case)
+  # or a missing base cannot be compared, and the report says so.
+  #
+  # Scope: pull requests compare PR base/head, pushes `before`/`after`, and a
+  # schedule or manual run has no branch delta and compares nothing. A push
+  # whose pull request run is reused (same tree, already approved) skips too.
+  # The trusted checker compiles only when `scope` says `compare`; the cheap
+  # path check runs on every pull request and push.
+  permission-scope:
+    name: Report permission changes
+    needs: validation
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      # The report comment only; the job never writes code or checks.
+      pull-requests: write
+    env:
+      RUSTC_WRAPPER: ""
+      EVENT: ${{ github.event_name }}
+      REUSED: ${{ needs.validation.outputs.reuse }}
+      BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Fetch the base checkout and the candidate's objects
+        id: fetch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TRUSTED="$RUNNER_TEMP/permissions-trusted"
+          echo "TRUSTED=${TRUSTED}" >>"$GITHUB_ENV"
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != push ] || [ "$REUSED" = true ]; then
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            echo "No branch delta to compare (${EVENT}, reused=${REUSED})."
+            exit 0
+          fi
+          echo "skip=false" >>"$GITHUB_OUTPUT"
+          case "$BASE" in ""|0000000000000000000000000000000000000000) exit 0 ;; esac
+          git init -q "$TRUSTED"
+          git -C "$TRUSTED" config core.hooksPath /dev/null
+          git -C "$TRUSTED" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -C "$TRUSTED" -c "http.https://github.com/.extraheader=${auth}" \
+            fetch -q --no-tags --depth=1 origin "$BASE" "$HEAD"
+          git -C "$TRUSTED" checkout -q --detach "$BASE"
+      - name: Classify the change
+        id: scope
+        if: steps.fetch.outputs.skip == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper="$TRUSTED/scripts/ci/permission_scope.py"
+          if [ ! -f "$helper" ]; then
+            echo "decision=uncompared" >>"$GITHUB_OUTPUT"
+            echo "reason=the base commit has no trusted checker (bootstrap)" >>"$GITHUB_OUTPUT"
+            echo "The base commit has no trusted checker (bootstrap): nothing can be compared."
+            exit 0
+          fi
+          python3 -I "$helper" scope --repository "$TRUSTED" \
+            --inputs "$TRUSTED/.github/ci/permission-inputs.json" \
+            --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_OUTPUT"
+      - name: Set up the trusted toolchain
+        if: steps.scope.outputs.decision == 'compare'
+        working-directory: ${{ runner.temp }}/permissions-trusted
+        run: rustup show
+      - name: Compare the two commits with the trusted checker
+        id: compare
+        if: steps.scope.outputs.decision == 'compare'
+        working-directory: ${{ runner.temp }}/permissions-trusted
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          cargo run -q --locked -p darkmatter --example permission_widening -- --repository "$TRUSTED" \
+            --inputs "$TRUSTED/.github/ci/permission-inputs.json" \
+            --base "$BASE" --head "$HEAD" >"$RUNNER_TEMP/permission-report.json" || status=$?
+          echo "status=${status}" >>"$GITHUB_OUTPUT"
+      - name: Write the report
+        id: report
+        if: steps.fetch.outputs.skip == 'false'
+        shell: bash
+        env:
+          DECISION: ${{ steps.scope.outputs.decision }}
+          REASON: ${{ steps.scope.outputs.reason }}
+          STATUS: ${{ steps.compare.outputs.status }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/permission-report.md"
+          echo "report=${report}" >>"$GITHUB_OUTPUT"
+          change=none
+          case "$DECISION" in
+            skip) echo "No permission input changed." ;;
+            uncompared)
+              {
+                echo "## Committed permissions were not compared"
+                echo
+                echo "This change could not be compared with its base: ${REASON}." \
+                  "Read any change to \`.darkmatter.yaml\` or \`.claudine/config.yaml\` before merging."
+              } | tee "$report" >>"$GITHUB_STEP_SUMMARY"
+              ;;
+            compare)
+              # The verdict is on stdout; the template's data goes to the file
+              # PERMISSION_REPORT_DATA names. A base whose script predates
+              # `permission_change` prints no such verdict and writes no data,
+              # so nothing is rendered or posted for it.
+              lines="$RUNNER_TEMP/permission-lines.txt"
+              verdict="$(PERMISSION_REPORT_DATA="$RUNNER_TEMP/permission-data.json" \
+                python3 -I "$TRUSTED/scripts/ci/permission_scope.py" decide \
+                --report "$RUNNER_TEMP/permission-report.json" --status "${STATUS:-1}" 2>"$lines")" \
+                || { cat "$lines" >&2; exit 1; }
+              cat "$lines"
+              case "$verdict" in
+                permission_change=widens|permission_change=narrows|permission_change=unknown)
+                  change="${verdict#permission_change=}" ;;
+              esac
+              ;;
+            *) echo "no scope decision was made" >&2; exit 1 ;;
+          esac
+          echo "change=${change}" >>"$GITHUB_OUTPUT"
+      # The comment is composed by Darkmatter from the BASE commit's template
+      # (`.github/ci/permission-report.md`); a composition warning fails it.
+      - name: Render the report
+        if: contains(fromJSON('["widens","narrows","unknown"]'), steps.report.outputs.change)
+        working-directory: ${{ runner.temp }}/permissions-trusted
+        shell: bash
+        env:
+          REPORT: ${{ steps.report.outputs.report }}
+        run: |
+          set -euo pipefail
+          cargo run -q --locked -p darkmatter --example permission_widening -- \
+            --render "$TRUSTED/.github/ci/permission-report.md" --data "$RUNNER_TEMP/permission-data.json" >"$REPORT"
+          cat "$REPORT" >>"$GITHUB_STEP_SUMMARY"
+      # One comment per pull request, found by its marker and rewritten on
+      # every push, so the newest head's report is what the merger reads. A
+      # fork's token cannot write, so a fork's report stays in the summary.
+      - name: Show the report on the pull request
+        if: >-
+          steps.report.outcome == 'success' &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPORT: ${{ steps.report.outputs.report }}
+        run: |
+          set -euo pipefail
+          marker='<!-- permission-report -->'
+          comments="repos/${GITHUB_REPOSITORY}/issues/${PR}/comments"
+          ids="$(gh api --paginate "$comments" --jq ".[] | select(.body | startswith(\"${marker}\")) | .id")"
+          existing="${ids%%$'\n'*}"
+          if [ -s "$REPORT" ]; then
+            body="$(printf '%s\n%s\n\n_Reported for %s._\n' "$marker" "$(cat "$REPORT")" "$HEAD")"
+          elif [ -n "$existing" ]; then
+            body="$(printf '%s\n## No committed permission changes\n\nAs of %s, this pull request does not change committed permissions.\n' "$marker" "$HEAD")"
+          else
+            echo "Nothing to report on the pull request."
+            exit 0
+          fi
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -f body="$body" >/dev/null
+          else
+            gh api --method POST "$comments" -f body="$body" >/dev/null
+          fi
 
   # THE single required branch-protection check: a policy-free fold.
   #
@@ -1048,6 +1227,9 @@ jobs:
       - build
       - area-ci
       - area-drift
+      # The permission-change report. A failed checker blocks: an error
+      # never means "no change".
+      - permission-scope
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -1062,6 +1244,7 @@ jobs:
             build:${{ needs.build.result }}
             area-ci:${{ needs.area-ci.result }}
             area-drift:${{ needs.area-drift.result }}
+            permission-scope:${{ needs.permission-scope.result }}
         run: |
           set -euo pipefail
           blocking=""

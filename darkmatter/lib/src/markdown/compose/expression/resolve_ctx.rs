@@ -478,6 +478,8 @@ impl ResolutionContext {
                 RemoteReadKind::Infrastructure,
                 format!("remote URL {raw:?} could not be fetched"),
             ))),
+            // An invalid configuration keeps its own located message.
+            Err(e) if rf.network().config_error().is_some() => Err(RemoteTextError::Failed(e)),
             // A host the policy refuses is never requested; checking the
             // policy first keeps such a failure from ever being typed
             // `Transport`.

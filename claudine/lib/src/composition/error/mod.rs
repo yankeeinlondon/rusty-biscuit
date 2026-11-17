@@ -83,11 +83,11 @@ impl ShellApprovalFailure {
     /// failures carried inside `PreFlightFailed(String)` before the approval
     /// family was typed — the text is a user-visible surface, and typing the
     /// error is not a licence to reword it.
-    fn message(&self, command: &str, source_file: &Path, line: usize) -> String {
-        let location = if line > 0 {
-            format!("{}:{line}", biscuit_file::to_portable_string(source_file))
-        } else {
-            biscuit_file::to_portable_string(source_file)
+    fn message(&self, command: &str, source_file: &Path, line: usize, property: Option<&str>) -> String {
+        let location = match (line, property) {
+            (1.., _) => format!("{}:{line}", biscuit_file::to_portable_string(source_file)),
+            (0, Some(property)) => format!("{} (frontmatter `{property}`)", biscuit_file::to_portable_string(source_file)),
+            (0, None) => biscuit_file::to_portable_string(source_file),
         };
         match self {
             ShellApprovalFailure::Blacklisted(reason) => {
@@ -103,6 +103,14 @@ impl ShellApprovalFailure {
                  configuration."
             ),
         }
+    }
+}
+
+/// Where [`CompositionError::ShellCommandDenied`] says the command was written.
+fn denied_location(source_file: &Path, line: usize, property: Option<&str>) -> String {
+    match (line, property) {
+        (0, Some(property)) => format!("{}, frontmatter `{property}`", source_file.display()),
+        _ => format!("{}, line {line}", source_file.display()),
     }
 }
 
@@ -269,6 +277,29 @@ pub enum CompositionError {
         /// The underlying structured shell expansion error.
         #[source]
         error: Box<ShellExpansionError>,
+    },
+
+    /// A block or transclusion directive of the body an inline run generates
+    /// from a frontmatter property (its `prompt`) failed, and Darkmatter
+    /// located the failure only in that generated body.
+    ///
+    /// The generated body's lines and text are not the file's, and nothing
+    /// proves which line of the YAML holds the directive, so this names the
+    /// file and the property alone: `message` carries no position. A failing
+    /// `::shell-block` command's own failure is `command`, reported at the
+    /// same property. Its code is the `composition.failed` a `ComposeFailed`
+    /// of the same directive has.
+    #[error("compose failed: {} (frontmatter `{property}`): {message}", biscuit_file::to_portable_string(source_path))]
+    InlinePromptDirectiveFailed {
+        /// The source file the property was authored in.
+        source_path: PathBuf,
+        /// The frontmatter property whose text was composed.
+        property: String,
+        /// Darkmatter's reason, without the generated body's position.
+        message: String,
+        /// A failing block command's shell failure, at `property`.
+        #[source]
+        command: Option<Box<ShellExpansionError>>,
     },
 
     /// No installed providers can run composition.
@@ -658,7 +689,7 @@ pub enum CompositionError {
     /// blacklist hit from a missing handler, so no surface needs its own code.
     ///
     /// [`PreFlightFailed`]: CompositionError::PreFlightFailed
-    #[error("pre-flight shell approval failed: {}", failure.message(command, source_file, *line))]
+    #[error("pre-flight shell approval failed: {}", failure.message(command, source_file, *line, property.as_deref()))]
     ShellApprovalUnavailable {
         /// The authored command that could not be approved.
         command: String,
@@ -666,6 +697,10 @@ pub enum CompositionError {
         source_file: PathBuf,
         /// 1-based line of the command; `0` when the source carries no line.
         line: usize,
+        /// The frontmatter property the command was written in: a `$(...)`
+        /// value, or an inline run's `prompt`, whose commands have no proven
+        /// line. `None` for a body or lifecycle command.
+        property: Option<String>,
         /// Why approval could not be obtained.
         failure: ShellApprovalFailure,
     },
@@ -673,12 +708,15 @@ pub enum CompositionError {
     /// The user denied a shell command during pre-flight approval.
     #[error(
         "Aborted: shell command '{command}' was denied during pre-flight approval \
-         (source: {source_file}, line {line}). No provider session was started."
+         (source: {}). No provider session was started.",
+        denied_location(source_file, *line, property.as_deref())
     )]
     ShellCommandDenied {
         command: String,
         source_file: PathBuf,
         line: usize,
+        /// As [`CompositionError::ShellApprovalUnavailable`]'s `property`.
+        property: Option<String>,
     },
 
     /// A lifecycle frontmatter property has an invalid value.
@@ -4082,6 +4120,9 @@ impl CompositionError {
                 }
                 _ => None,
             },
+            CompositionError::InlinePromptDirectiveFailed { property, .. } => {
+                Some(FrontmatterHighlight::Property(property.clone()))
+            }
             _ => None,
         }
     }

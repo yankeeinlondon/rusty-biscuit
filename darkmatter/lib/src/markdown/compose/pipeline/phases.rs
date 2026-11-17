@@ -385,13 +385,19 @@ impl Markdown {
         };
 
         let toc_directives = if operations.contains(&ComposeOperation::TocLinking) {
-            Some(toc_linking::parse_directives_in(&self.content, data)?)
+            Some(
+                toc_linking::parse_directives_in(&self.content, data)
+                    .map_err(|error| error.with_document(self.error_document()))?,
+            )
         } else {
             None
         };
 
         let file_links_directives = if operations.contains(&ComposeOperation::FileLinks) {
-            Some(file_links::parse_file_links_directives_in(&self.content, data)?)
+            Some(
+                file_links::parse_file_links_directives_in(&self.content, data)
+                    .map_err(|error| error.with_document(self.error_document()))?,
+            )
         } else {
             None
         };
@@ -596,7 +602,7 @@ impl Markdown {
                     // that the span is filled rather than emptied.
                     let mut skipped = ComposeReport::new();
                     skipped.transclusions_skipped = 1;
-                    skipped.add_warning(tolerated_failure_warning(&error));
+                    skipped.add_warning(tolerated_failure_warning(&error, self.generated_identity()));
                     ResolvedTransclusion {
                         order: anchor.order,
                         content: Some(self.fit_notice_to_span(&anchor.target, anchor.notice)),
@@ -724,6 +730,29 @@ impl Markdown {
     }
 }
 
+/// The warning of a tolerated transclusion failure. A target that does not
+/// exist is the missing transclusion its recovery governs. A failure of a
+/// directive in a document whose lines count generated text (`generated` is
+/// its identity) is worded without its line; a child's keeps its own, and
+/// names the child's file. Out of line: the caller's frame recurs once per
+/// nested composition.
+#[inline(never)]
+fn tolerated_failure_warning(error: &MarkdownError, generated: Option<&std::path::Path>) -> ComposeWarning {
+    let failure = error.resolution_failure();
+    let code = (failure == Some(biscuit_file::ResolutionFailure::NoMatch))
+        .then(|| super::super::policy::MISSING_TRANSCLUSION_CODE.to_string());
+    let (message, document) = match error {
+        MarkdownError::TocLinking(toc) if generated.is_some() && toc.document() == generated => (toc.reason(), None),
+        MarkdownError::FileLinks(links) if generated.is_some() && links.document() == generated => (links.reason(), None),
+        MarkdownError::TocLinking(toc) => (error.to_string(), toc.document()),
+        MarkdownError::FileLinks(links) => (error.to_string(), links.document()),
+        error => (error.to_string(), None),
+    };
+    let mut warning = ComposeWarning { code, ..ComposeWarning::new("transclusion", message) }.with_resolution_failure(failure);
+    warning.attribute_to(document);
+    warning
+}
+
 /// Whether a transcluded child's failure must fail the compose instead of
 /// being replaced by a notice.
 ///
@@ -734,17 +763,6 @@ impl Markdown {
 /// bind, which is the document's rejection, not a resolution failure. A child command
 /// missing from the approval set is a broken pre-flight invariant, not a
 /// failure an author can tolerate.
-/// The warning of a tolerated transclusion failure. A target that does not
-/// exist is the missing transclusion its recovery governs. Out of line: the
-/// caller's frame recurs once per nested composition.
-#[inline(never)]
-fn tolerated_failure_warning(error: &MarkdownError) -> ComposeWarning {
-    let failure = error.resolution_failure();
-    let code = (failure == Some(biscuit_file::ResolutionFailure::NoMatch))
-        .then(|| super::super::policy::MISSING_TRANSCLUSION_CODE.to_string());
-    ComposeWarning { code, ..ComposeWarning::new("transclusion", error.to_string()) }.with_resolution_failure(failure)
-}
-
 fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
     matches!(
         error.without_iteration(),

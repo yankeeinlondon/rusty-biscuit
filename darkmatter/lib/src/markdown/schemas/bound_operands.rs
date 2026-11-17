@@ -500,6 +500,7 @@ fn operand_problem(
         offending_properties: Vec::new(),
         file_reference: None,
         caller_file: None,
+        default: None,
     }
 }
 

@@ -57,7 +57,7 @@ impl TaskExecution<'_> {
                     ..self.stack.with_signal(self.stack.signal)
                 };
                 match (TaskExecution { stack: &own_stack, ..*self }).open_loop(sequence.loop_config.as_ref(), LoopResultKind::Sequence, &state, runtime) {
-                    Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut(), &own_stack, base),
+                    Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut(), OwnDocument { stack: &own_stack, base }),
                     Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
                 }
             }
@@ -70,9 +70,9 @@ impl TaskExecution<'_> {
     fn run_sequence_attempts(
         &self, sequence: &PreflightSequence, runtime: &Arc<RuntimeState>, run_id: &str,
         runner: &mut ContainerRunner<'_>, mut frame: Option<&mut LoopFrame>,
-        own_stack: &StackExecutionContext<'_>,
-        mut base: Option<SharedFrontmatter>,
+        own: OwnDocument<'_, '_>,
     ) -> PrimaryOutcome {
+        let OwnDocument { stack: own_stack, mut base } = own;
         let file_resolution_context = own_stack.file_resolution_context;
         let mut signal = LifecycleSignal::Initialize;
         // Taken as each pass enters `start`; a retry of the pass returns here.
@@ -660,4 +660,12 @@ fn layer_onto(live: &mut SharedFrontmatter, values: &SharedFrontmatter) {
             live.insert(key.clone(), value.clone());
         }
     }
+}
+
+/// What a sequence container reads from its own document: the stack its
+/// events, gate, proxy, and children run in, and the document's prepared
+/// values (`None` for an inline list, which reads the caller's).
+struct OwnDocument<'s, 'c> {
+    stack: &'s StackExecutionContext<'c>,
+    base: Option<SharedFrontmatter>,
 }

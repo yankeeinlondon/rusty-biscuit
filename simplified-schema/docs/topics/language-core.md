@@ -56,7 +56,7 @@ flowchart TD
 | `prepared`, `outcome` | `Prepared` (a schema compiled once, with `validate_strict` and `validate_soft`), `ValidationSuccess`, `ValidationFailure`; see [Strict and Soft Validation](./validation.md) |
 | `envelope` | The compiled shipped definitions (`ENVELOPE_DEFINITIONS`: the `kind: schema` and `kind: yaml-schema` envelopes and the `kind: schema-trigger` kind definition) and `admit_envelope_text`, which judges a standalone document against its envelope definition; see [Admission](./language/schema-documents.md#admission-checking-an-envelope-against-its-definition) |
 | `roots` | `SchemaRoots::for_document`, the five schema roots of a document's context (`SCHEMAS_DIR`, package, package area, tree root, `~/schemas`) that bare file names and triggers are looked up in; `SchemaSearchRoot`, `SchemaRootKind` |
-| `triggers` | Schema triggers: the `match` grammar, the `kind: schema-trigger` envelope parser and lint, the matcher, discovery in the schema roots (`scan`, `scan_with_embedded`, `scan_with_source`, `TriggerRegistry`), payload assembly, prepared bundles (`prepare_trigger_bundle`), and the `dm.schema.invalid_trigger` finding (`SCHEMA_INVALID_TRIGGER_CODE`) |
+| `triggers` | Schema triggers: the `match` grammar, the `kind: schema-trigger` envelope parser and lint, the matcher, discovery in the schema roots (`scan`, `scan_with_embedded`, `scan_with_source`, `TriggerRegistry`), payload assembly, prepared bundles (`prepare_trigger_bundle`), the `dm.schema.invalid_trigger` finding (`SCHEMA_INVALID_TRIGGER_CODE`), and identifying triggers (`admit_identifying_trigger`, `identifies`; see [Identifying Triggers](#identifying-triggers)) |
 | `embedded` | Documents compiled into a binary: `EmbeddedDocument`, a host's reserved namespace (`ShippedSources`), and `EmbeddedSchemaBundle`, a host's trigger bundle |
 | `yaml_documents` | Whole YAML documents: the one loader (`load_yaml_document`, `LoadedYamlDocument`), the kinds a context can select (`KindRegistry`, `KindHost`, `ShippedDefinition`), selection by `kind` or root `$schema` (`select`, `Selection`), and the checks of the language's own kinds (`CHECKED_KINDS`) |
 | `validation`, `positions` | `ValidationProblem` and its codes, JSON Pointers, and where a problem sits in its source text (`PositionMap::byte_range`) |
@@ -115,6 +115,71 @@ A host that defines YAML document kinds with
 [`kind: yaml-schema`](./language/schema-documents.md#kind-yaml-schema) files
 prepares an embedded one with `resolve::prepare_embedded_yaml_schema` and
 reads the kinds it claims with `claimed_values(&resolved, "kind")`.
+
+## Identifying Triggers
+
+A host program that registers with Darkmatter names one ordinary
+[`kind: schema-trigger`](../../../darkmatter/docs/topics/schemas/definition.md#repository-trigger-schemas)
+as its identifying trigger: the test that decides a document belongs to that
+host. You admit the trigger once, then ask it about each document:
+
+```rust
+use std::collections::BTreeSet;
+use serde_json::json;
+use simplified_schema::triggers::{
+    PathSubject, admit_identifying_trigger, identifies, parse_trigger_envelope_from_str,
+};
+
+let source = "kind: schema-trigger\nmatch:\n  group:\n    - sequence: object(required)\n    - start: object(required)\n";
+let conditions = parse_trigger_envelope_from_str(source).unwrap().unwrap().conditions;
+let owned: BTreeSet<String> = ["initialize", "finalize"].map(String::from).into();
+
+let trigger = admit_identifying_trigger(&conditions, &owned).unwrap();
+assert!(identifies(&trigger, &json!({ "sequence": 3 }), &PathSubject::detached()));
+assert!(!identifies(&trigger, &json!({ "initialize": {} }), &PathSubject::detached()));
+```
+
+### Admission
+
+`admit_identifying_trigger(conditions, owned)` proves, from the shape of the
+`match:` tree alone, that every way the trigger can hold needs at least one
+top-level key the caller does not own. `owned` is the set of top-level names
+the caller already understands (Darkmatter passes its baseline properties,
+events, and globals), so a key every host shares never identifies one.
+
+A condition supplies a **witness** when it is a property condition that is
+`required`, does not admit null, and names a key outside `owned`. Combinators
+combine witnesses as follows:
+
+| Expression | Witnesses when |
+|---|---|
+| `all:` and the top-level `match:` list | at least one child witnesses |
+| `group:` | every alternative witnesses |
+| `min-match: { count: n, of: [...] }` | `n` is greater than the number of children without a witness, so any `n` children that hold include one |
+| `none:`, `$path` | never |
+| a guard (no `required`), `unknown(required)`, `null(required)` | never |
+
+An expression without a witness is refused with `IdentifyTooBroad`, whose
+code is `dm.host.identify_too_broad` (`IDENTIFY_TOO_BROAD_CODE`). Its `field`
+names the first sub-expression that lacks one, from `match` down: in the
+example above, adding `- initialize: object(required)` as a third `group:`
+alternative is refused at `match[0].group[2]`. `IdentifyTooBroad::hint()`
+gives the repair. Admission is a check of the match tree, not of whether
+the schema can be satisfied, so an expression it cannot prove is refused.
+
+### Identification
+
+`identifies(trigger, frontmatter, subject)` evaluates an admitted trigger
+like ordinary matching, with one difference: a positive `required` property
+condition tests only that the key is present and not null, whatever type it
+declares. `sequence: object(required)` therefore identifies `sequence: 3`,
+`"text"`, `true`, or `[1]`, so the document reaches the host whose schema
+can report the type error. Ordinary `matches` still refuses those values.
+
+Everything else keeps its ordinary meaning: a guard on a wrongly typed value
+defeats the trigger, a condition a `none:` negates keeps its type test, and
+`$path` is judged against the document path in `subject` (a detached subject
+admits no `$path`). Neither function reads a file.
 
 ## Supplied Sources
 

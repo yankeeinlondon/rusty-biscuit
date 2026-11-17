@@ -89,7 +89,7 @@ nowhere else.
 
 ## `ci.yml`'s jobs
 
-`ci.yml` defines exactly 10 top-level jobs, and a contract test
+`ci.yml` defines exactly 11 top-level jobs, and a contract test
 (`ci_defines_exactly_the_surviving_top_level_jobs`) pins the set:
 
 | job | blocks the merge? | what it is for |
@@ -100,7 +100,8 @@ nowhere else.
 | `build` | yes | the native build owners; each builds the archives its plan keys name, serially, after running schematic's fresh-output guard when it builds `schematic-gen` |
 | `area-ci` | yes | one caller identity per selected package area; every package gate lives under it |
 | `area-drift` | yes | checks that the planner's areas match `sniff`; skipped when nothing can move area derivation |
-| `ci-gate` | yes — **the required check** | a policy-free fold of the six above |
+| `permission-scope` | yes | reports whether the change may widen the repository's committed permissions, using only the base commit's trusted code, as one pull-request comment when it may; compiles the checker only when a permission input changed, and fails only when the checker errors |
+| `ci-gate` | yes — **the required check** | a policy-free fold of the seven above |
 | `certify-nightly` | no | publishes successful nightly coverage certifications; failure still fails the scheduled run |
 | `publish-observations` | no | publishes finished nightly cells' observations; failure still fails the scheduled run |
 | `ci-reporting` | no (`continue-on-error: true`) | renders one reader-facing report of the run |

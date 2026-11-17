@@ -280,10 +280,12 @@ pub struct ComposeOptions {
     /// Default: 16.
     pub(crate) max_transclusion_depth: usize,
 
-    /// Whether `::url` remote transclusion is allowed.
+    /// Whether URL targets of `::file`/`::code` and of frontmatter
+    /// `prologue`/`epilogue` may be transcluded.
     ///
-    /// Disabled by default for security. When false, `::url` directives
-    /// are skipped (or error if `fail_fast` is true).
+    /// Off by default; such a target then fails as disabled. On, each fetch
+    /// is still decided by the request's network policy (`network` and the
+    /// run's allowed hosts).
     pub(crate) allow_remote_transclusion: bool,
 
     /// Whether `::file` can include local markdown documents.
@@ -709,6 +711,16 @@ pub struct ComposeOptions {
     /// supplied here, or loaded passively when the request is prepared. Every
     /// clone and derivation shares the one `Arc`.
     pub(crate) config_snapshot: Option<Arc<crate::config::load::ConfigSnapshot>>,
+    /// The request's registered hosts, loaded once from the configuration
+    /// snapshot by the caller. A host that identifies a document layers its
+    /// triggers into the document's schema; without them (Claudine's
+    /// embedded runtime) composition analyzes no registered host.
+    pub(crate) registered_hosts: Option<Arc<crate::config::registration::RegisteredHosts>>,
+    /// The registered host the root document belongs to, when a caller that
+    /// is not that host composes it ([`Self::with_selected_host`]). Its
+    /// analysis globals are [`Self::host_globals`]; unlike a caller's own
+    /// globals they keep the registered layer applied.
+    pub(crate) selected_host: Option<Arc<crate::config::registration::RegisteredHostProfile>>,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -788,6 +800,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("remote_read_config", &self.remote_read_config)
             .field("exclude_keys", &self.exclude_keys)
             .field("host_globals", &self.host_globals)
+            .field("selected_host", &self.selected_host.as_ref().map(|profile| profile.host()))
             .field("name_coercion_keys", &self.name_coercion_keys)
             .field("file_ref_fallback_dir", &self.file_ref_fallback_dir)
             .finish()
@@ -1092,6 +1105,8 @@ impl ComposeOptions {
             data_runtime: None,
             slot_session: None,
             config_snapshot: None,
+            registered_hosts: None,
+            selected_host: None,
             exclude_keys: std::collections::HashSet::new(),
             host_globals: None,
             deferred_shell_roots: Default::default(),
@@ -2263,6 +2278,11 @@ impl ComposeOptions {
     /// dependency analysis so a raw lifecycle subtree cannot leak into an
     /// early-bound value.
     ///
+    /// Schema problems on a deferred key are left to the caller, which
+    /// judges them when it runs the events. Under
+    /// [`with_selected_host`](Self::with_selected_host) no caller runs the
+    /// host's events, so the composition verdict keeps them.
+    ///
     /// Default: empty (no behavior change).
     ///
     /// ## Examples
@@ -2307,6 +2327,9 @@ impl ComposeOptions {
         globals: crate::markdown::compose::expression::HostGlobals,
     ) -> Self {
         self.host_globals = Some(globals);
+        // A caller's own globals are executable host options: they replace a
+        // selected registered host's analysis view.
+        self.selected_host = None;
         self
     }
 
@@ -2516,6 +2539,97 @@ impl ComposeOptions {
         {
             self.remote_fetch = Some(self.build_remote_fetch_runtime());
         }
+    }
+
+    /// Attaches the request's registered hosts, loaded once per request from
+    /// its configuration snapshot
+    /// ([`RegisteredHosts::load`](crate::config::registration::RegisteredHosts::load)).
+    /// The host that identifies a document then layers its matching triggers
+    /// into the document's schema, and [`Self::host_selection_for`] names it.
+    ///
+    /// Options carrying a caller's own host globals
+    /// ([`Self::with_host_globals`]) keep them: registration never replaces
+    /// an executable host's options, and no registered layer is added.
+    #[must_use]
+    pub fn with_registered_hosts(mut self, hosts: Arc<crate::config::registration::RegisteredHosts>) -> Self {
+        self.registered_hosts = Some(hosts);
+        self
+    }
+
+    /// The attached registered hosts.
+    pub fn registered_hosts(&self) -> Option<&Arc<crate::config::registration::RegisteredHosts>> {
+        self.registered_hosts.as_ref()
+    }
+
+    /// The registered hosts that apply to this request's documents: `None`
+    /// when none are attached or the caller supplied its own host globals.
+    pub(crate) fn applied_registered_hosts(&self) -> Option<&Arc<crate::config::registration::RegisteredHosts>> {
+        self.registered_hosts.as_ref().filter(|_| !self.has_caller_host_globals())
+    }
+
+    /// Whether the caller supplied its own host globals
+    /// ([`Self::with_host_globals`]), which opts out of registration.
+    fn has_caller_host_globals(&self) -> bool {
+        self.host_globals.is_some() && self.selected_host.is_none()
+    }
+
+    /// Composes with `profile`'s passive view: the root document is one the
+    /// registered host `profile` identifies, composed by a caller that is not
+    /// that host (`md compose`). The host's globals are declared for analysis
+    /// and typing ([`RegisteredHostProfile::analysis_globals`](crate::config::registration::RegisteredHostProfile::analysis_globals)),
+    /// so a read of one is no undeclared property, and fail as unavailable
+    /// when read; the registered layer keeps applying. Registration supplies
+    /// types, never values or handlers. Keys deferred with
+    /// [`with_exclude_keys`](Self::with_exclude_keys) are still never
+    /// rendered, but their schema problems stay in this composition's
+    /// verdict, as `md schema validate` reports them: nothing later judges a
+    /// host event `md` does not run.
+    ///
+    /// Options that already carry a caller's own host globals
+    /// ([`Self::with_host_globals`], Claudine's executable host) are returned
+    /// unchanged: registration never replaces runtime authority.
+    #[must_use]
+    pub fn with_selected_host(mut self, profile: Arc<crate::config::registration::RegisteredHostProfile>) -> Self {
+        if self.has_caller_host_globals() {
+            return self;
+        }
+        self.host_globals = profile.analysis_globals();
+        self.selected_host = Some(profile);
+        self
+    }
+
+    /// The registered host [`Self::with_selected_host`] attached.
+    pub fn selected_host(&self) -> Option<&Arc<crate::config::registration::RegisteredHostProfile>> {
+        self.selected_host.as_ref()
+    }
+
+    /// The host `source` is analyzed as, judged in `context` (the source's
+    /// own context): [`select`](crate::config::registration::select) over the
+    /// attached registered hosts, then the legacy root catalogs only when no
+    /// registered host identifies it. [`HostSelection::Md`](crate::config::registration::HostSelection::Md)
+    /// when the caller supplied its own host globals. Passive; the selection's
+    /// warnings are returned with it.
+    pub fn host_selection_for(
+        &self,
+        source: &crate::markdown::Markdown,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> crate::config::registration::Selected {
+        if self.has_caller_host_globals() {
+            return crate::config::registration::Selected {
+                selection: crate::config::registration::HostSelection::Md,
+                diagnostics: Vec::new(),
+            };
+        }
+        let document = match source.source() {
+            Some(crate::markdown::compose::ComposeSource::File(path)) => Some(path.as_path()),
+            _ => None,
+        };
+        crate::config::registration::select(
+            self.registered_hosts.as_deref(),
+            &crate::markdown::schemas::frontmatter_as_json(source),
+            document,
+            context,
+        )
     }
 
     /// The supplied (or, once a request holds these options, captured)
@@ -3151,6 +3265,23 @@ fn encode_source_opening(enc: &mut GraphIdentityEncoder, opening: &Option<Source
 
 /// Encodes the configured `network` decision; an invalid configuration
 /// keeps its message, since a refused read reports it.
+/// The registered hosts decide which host schemas judge a document: each
+/// loaded profile's host, manifest, and content revision, in entry order.
+fn encode_registered_hosts(enc: &mut GraphIdentityEncoder, hosts: Option<&crate::config::registration::RegisteredHosts>) {
+    match hosts {
+        Some(hosts) => {
+            enc.tag(1);
+            enc.count(hosts.loaded().profiles.len());
+            for profile in &hosts.loaded().profiles {
+                enc.str(profile.host());
+                enc.path(&profile.manifest().path);
+                enc.str(profile.revision());
+            }
+        }
+        None => enc.tag(0),
+    }
+}
+
 fn encode_network_permission(enc: &mut GraphIdentityEncoder, network: &crate::config::network::NetworkPermission) {
     use crate::config::network::NetworkPermission;
     match network {
@@ -3302,6 +3433,8 @@ impl ComposeOptions {
             // reads, the other whether a command runs or needs approval.
             // Permission enforcement must add each further policy it reads.
             config_snapshot,
+            registered_hosts,
+            selected_host,
             file_ref_fallback_dir,
         } = self;
 
@@ -3665,6 +3798,15 @@ impl ComposeOptions {
         });
         enc.field("network_permission");
         encode_network_permission(&mut enc, &network_permission);
+        enc.field("registered_hosts");
+        encode_registered_hosts(&mut enc, registered_hosts.as_deref());
+        // Encoded only when present, so an option set without one keeps its
+        // historical fingerprint.
+        if let Some(profile) = selected_host {
+            enc.field("selected_host");
+            enc.str(profile.host());
+            enc.str(profile.revision());
+        }
 
         enc.field("defer_shell_pending_schema_problems");
         enc.bool(*defer_shell_pending_schema_problems);
@@ -3795,6 +3937,13 @@ impl ComposeOptions {
         cenc.bool(*allow_remote_transclusion);
         cenc.field("network_permission");
         encode_network_permission(&mut cenc, &network_permission);
+        cenc.field("registered_hosts");
+        encode_registered_hosts(&mut cenc, registered_hosts.as_deref());
+        if let Some(profile) = selected_host {
+            cenc.field("selected_host");
+            cenc.str(profile.host());
+            cenc.str(profile.revision());
+        }
         cenc.field("shell_permissions");
         cenc.str(&shell_permissions);
         cenc.field("allow_local_markdown");

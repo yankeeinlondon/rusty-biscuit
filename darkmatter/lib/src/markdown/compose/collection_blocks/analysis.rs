@@ -272,6 +272,7 @@ fn recovered_source(source: &str, path: Option<&Path>, plan: &RegionPlan, span: 
         reference_details: None,
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     };
     RecoveredSource { kind: plan.kind, reference, span, diagnostic }
 }

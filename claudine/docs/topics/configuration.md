@@ -185,7 +185,22 @@ imports Darkmatter's type rather than declaring it, so the block is checked
 the same way wherever it is written. The value may also be a file reference to
 another YAML file whose own `permissions` holds the block. Claudine keeps the
 block as written; Darkmatter interprets it. See
-[Darkmatter's configuration](../../../darkmatter/docs/topics/configuration.md).
+[Permissions](../../../darkmatter/docs/topics/permissions.md) for what the
+block allows and
+[Darkmatter's configuration](../../../darkmatter/docs/topics/configuration.md)
+for the files that hold it.
+
+In Claudine, `network` decides only what composition may fetch: a `::file` or
+`::code` URL, a `prologue` or `epilogue` URL, and a URL given to a read-side
+function such as `load_data`. With `network: allow` in effect, this prompt
+includes the remote file; with the default `deny`, preparation fails and the
+host is never contacted:
+
+```markdown
+::file https://example.com/guidelines.md
+```
+
+It does not limit the agent's own network access once it runs.
 
 ### Darkmatter's permissions
 
@@ -196,8 +211,14 @@ permission in one place:
 ```yaml
 # ~/.darkmatter.yaml
 permissions: ~/.claudine/config.yaml
-register: []
+register:
+    - ~/.claudine/darkmatter-host.yaml
 ```
+
+The `register` entry is Claudine's host registration: setup publishes it
+before writing either file and adds the entry last, so `md` and DMLS
+recognize Claudine documents anywhere (see
+[The published host registration](schemas.md#the-published-host-registration)).
 
 First-run setup writes Claudine's own file, then Darkmatter's:
 
@@ -291,9 +312,10 @@ flowchart TD
 
 ## Converting a `config.json`
 
-Earlier versions used JSON5 files named `config.json`. While the conversion is
-supported, loading configuration at either canonical location handles the
-legacy file first:
+Earlier versions used JSON5 files named `config.json`. The conversion below is
+temporary: it will be removed a few releases after the move to YAML, and a
+`config.json` left in place after that is no longer read. Until then, loading
+configuration at either canonical location handles the legacy file first:
 
 | Files in the `.claudine` directory | Result |
 |---|---|

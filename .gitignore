@@ -114,3 +114,6 @@ __pycache__/
 # journal and staging) and interrupted atomic-replacement temps
 messenger/.research-state/
 *.publish-tmp
+
+# Darkmatter configuration-write lock (see darkmatter/docs/topics/config-writes.md).
+.darkmatter.yaml.darkmatter-lock

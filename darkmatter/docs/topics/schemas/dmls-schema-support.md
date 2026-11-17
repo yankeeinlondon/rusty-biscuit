@@ -42,7 +42,7 @@ Two principles govern everything in this document:
 DMLS layers schema intelligence onto three authoring experiences:
 
 - **consuming documents** — a Markdown file whose frontmatter is validated, completed, and explained against its effective schema
-- **YAML documents** — a whole `.yaml` / `.yml` file judged by the schema it selects, by its `kind` or a root `$schema` (see [YAML Documents](#yaml-documents))
+- **YAML documents** — a whole `.yaml` / `.yml` file judged by the schema it selects, by its location as a configuration file, its `kind`, or a root `$schema` (see [YAML Documents](#yaml-documents))
 - **authoring schemas** — editing the `$schema` property inline, an external `kind: schema` file, or a trigger envelope, where the schema grammar itself becomes the language being edited
 
 All three are covered below, and the [coverage matrix](#coverage-matrix) gives the honest per-feature scorecard for each.
@@ -161,6 +161,10 @@ interpolation, shell spans) applies to it. DMLS judges it exactly as
 [`md schema validate`](./definition.md#yaml-documents-on-the-command-line)
 does, through the same library entry point, and then projects the result:
 
+- **As a configuration file.** Four exact paths are judged by their
+  configuration contract before anything else is read (see
+  [Configuration files](#configuration-files)). Their `kind` and `$schema`
+  select nothing.
 - **By `kind`.** A top-level `kind` claimed by a `kind: yaml-schema`
   definition (one of the shipped ones, or one in the document's
   [schema roots](./definition.md#schema-roots)) selects that definition, and
@@ -185,6 +189,57 @@ roster_version: 2
 platforms:
     - name: slack
 ```
+
+### Configuration files
+
+A configuration file has no `kind`, so DMLS recognizes it by where it is.
+These four paths, compared exactly against the home directory and the
+repository root DMLS captured for the document, are configuration files:
+
+| Path | Contract |
+|---|---|
+| `~/.darkmatter.yaml` | `user-config` in `darkmatter/schemas/darkmatter-config.yaml` |
+| `<repo-root>/.darkmatter.yaml` | `repository-config` in `darkmatter/schemas/darkmatter-config.yaml` |
+| `~/.claudine/config.yaml` | `user-config` in `claudine/schemas/claudine-config.yaml` |
+| `<repo-root>/.claudine/config.yaml` | `repository-config` in `claudine/schemas/claudine-config.yaml` |
+
+Both schemas are compiled into DMLS, so a Claudine configuration is checked
+even where Claudine is not installed or registered. The contract is the
+same one `md` or Claudine loads the file with: completion offers its keys,
+hover shows each setting's description and default (the two
+`.darkmatter.yaml` scopes differ in their `file-read` default), and a value
+the contract rejects is reported where it is written. For example, in
+`<repo-root>/.claudine/config.yaml`:
+
+```yaml
+logging: false   # dm.schema.unknown_key: only the user file has `logging`
+```
+
+- An authored `kind` or `$schema` in a configuration file is data, not a
+  selector. The contract does not declare either, so each is an unknown key.
+- An empty buffer, such as a file just created in the editor, is judged as an
+  empty mapping: no diagnostic, and completion offers every top-level key.
+  (`md` and Claudine refuse an empty file when they load it; write `{}`.)
+  This holds even before the file's folder exists, for example a
+  `~/.claudine/config.yaml` buffer opened before `~/.claudine/` is created;
+  DMLS never creates the folder.
+- A `register` entry that cannot be used is reported on the file that has
+  the problem, beside the file's own diagnostics (see
+  [Host Registration](../host-registration.md#where-the-warnings-appear)).
+- A file with the same name anywhere else, such as `docs/.darkmatter.yaml`,
+  is an ordinary YAML document, selected by its `kind` or root `$schema`.
+
+Beyond checking the file you are editing, DMLS reads the configuration the
+way `md` does, to know your permissions and registered hosts. It observes
+every file that load depended on: both `.darkmatter.yaml` files (present or
+not), the file a `permissions` reference points at (such as
+`~/.claudine/config.yaml`), every host manifest a `register` entry names and
+the files that manifest names, and the repository's `HEAD`. Editing,
+creating, or deleting any of them, or replacing one atomically by a rename,
+refreshes the documents they serve without a restart. DMLS is a passive
+reader throughout: it never migrates a legacy policy file, prompts, publishes
+a host manifest, or runs anything. See
+[In the editor (DMLS)](../host-registration.md#in-the-editor-dmls).
 
 ### What is reported
 
