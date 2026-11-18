@@ -206,21 +206,28 @@ garbage-collects. Logs to `~/Library/Logs/rusty-biscuit-sweep.log`.
 **Strategy — four escalating passes, most-targeted first:**
 
 ```bash
-rm -rf <target>/*/incremental             # over SWEEP_INCREMENTAL_MAX_GIB (default 15)
+# When their combined size per target exceeds SWEEP_INCREMENTAL_MAX_GIB (default 15):
+rm -rf <target>/*/incremental <target>/*/incremental.kache-auto
 cargo sweep -r --installed      "$root"   # drop artifacts from uninstalled toolchains
 cargo sweep -r --time 14        "$root"   # drop artifacts untouched >14 days
-# only below SWEEP_MIN_FREE_GIB (default 100 GiB):
-cargo sweep -r --maxsize 120GB  "$root"   # LOW-SPACE BACKSTOP, oldest-first
+# Every sweep uses a size cap, oldest-first:
+cargo sweep -r --maxsize 200GB  "$root"
+# Below SWEEP_MIN_FREE_GIB (default 100 GiB), use 120GB instead:
+cargo sweep -r --maxsize 120GB  "$root"
 ```
 
 Plus a `[census]` line logging the 10 largest `target/` dirs before sweeping, and
 `tmutil thinlocalsnapshots` afterwards so freed blocks actually return to the volume.
 
-Passes 2–3 do the routine work (50–100+ GiB per run historically). Pass 4 only
-fires under filesystem pressure. Cargo does not refresh artifact mtimes when it
-reuses them, so applying an oldest-first size cap on a roomy volume can discard
-the active dependency graph and needlessly force the next build to restore or
-recompile it. Set `SWEEP_MIN_FREE_GIB` to tune the floor per host.
+Passes 2–3 do the routine work (50–100+ GiB per run historically). Pass 4 caps
+each target at 200 GB regardless of available disk space, tightening to 120 GB
+below 100 GiB free. Cargo does not refresh artifact mtimes when it reuses them,
+so size-based eviction can discard reusable dependencies and require restores or
+recompilation. The larger unconditional cap limits that cost on roomy volumes
+while preventing unbounded growth. Set `SWEEP_HARD_MAX_SIZE` to tune the
+unconditional cap, `SWEEP_MAX_SIZE` for the pressure cap, and `SWEEP_MIN_FREE_GIB`
+for the free-space floor. These are sweep-time limits; builds can exceed them
+between sweeps.
 
 **Pass 5 — out-of-tree orphans (added 2026-08-02).** Runs once for the host, not per root:
 
@@ -250,6 +257,15 @@ perpetually fresh no matter how stale the work behind them is. On build-linux th
 the whole tree. Size is the only trigger that works, and `cargo-sweep` does not cover this at all.
 Removing the directory costs one non-incremental rebuild of the workspace crates; `deps/` is
 untouched.
+
+The size-triggered pass covers both Cargo's `incremental` directories and Kache's
+managed `incremental.kache-auto` directories. All matching directories within each
+`target` share one `SWEEP_INCREMENTAL_MAX_GIB` budget (default 15 GiB), across
+profiles and cache types. When their combined size exceeds the limit, all those
+incremental directories are removed. For example, 10 GiB in each cache type totals
+20 GiB and triggers cleanup even though neither alone exceeds 15 GiB. Kache's adaptive
+incremental compilation can create managed state even when ordinary Cargo
+incremental directories are absent.
 
 ### Native Windows policy
 
@@ -312,22 +328,22 @@ Both this script and the preflight probe set `MSYS_NO_PATHCONV=1` around
 guest's `/`, into a Windows path before the native tool sees the argument, which
 fails in ways that read as a missing key or a missing mount point.
 
-## Low-space maxsize: **120GB**
+## Target size limits: **200GB**, or **120GB** under disk pressure
 
-- `cargo-sweep`'s size unit is **decimal** and defaults to MB unsuffixed → 120GB = **111.8 GiB**.
+- `cargo-sweep`'s size unit is **decimal** and defaults to MB unsuffixed → 200GB = **186.3 GiB**, 120GB = **111.8 GiB**.
 - Reference: a clean full workspace build+test (`just test`, 72 packages) = **71 G**, already with
   `debug = "line-tables-only"`. So ~41 GiB of headroom above a legitimate pre-release run.
 - Sized from the sweep log, not a guess: single-target reclaims have hit 107 GiB, and live targets
   were observed at 222 G (`darkmatter`) and 135 G (`claudine`).
 - **Do not size a cap from a partial build.** My first estimate of 20GB came from `sniff` (one
   package area only) and would have fought every full build.
-- The cap is conditional on the filesystem falling below 100 GiB free by
-  default. `SWEEP_MIN_FREE_GIB` changes that floor; `SWEEP_MAX_SIZE` changes the
-  emergency cap. On a roomy development volume, ordinary scheduled sweeps
-  preserve reusable artifacts regardless of the target directory's total size.
+- Every sweep applies a 200 GB cap (`SWEEP_HARD_MAX_SIZE`), regardless of free
+  space. Below 100 GiB free (`SWEEP_MIN_FREE_GIB`), it uses the tighter 120 GB
+  cap (`SWEEP_MAX_SIZE`); unreadable free space also selects the tighter cap.
 
-**Revisit when:** the census shows normal working worktrees regularly sitting above ~90 G → raise
-to 150–200GB. If nothing ever approaches 120GB, it can come down.
+**Revisit when:** representative build and edit cycles repeatedly exceed a cap
+and cleanup causes costly rebuilds. Measure the useful working set before
+changing either limit.
 
 ## Other settings, deliberately unchanged
 

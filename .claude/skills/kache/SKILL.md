@@ -42,15 +42,18 @@ sharing across machines and CI. Apache-2.0.
    normally hardlinks restored immutable artifacts. Windows NTFS defaults to independent copies
    because its shared hardlink attributes make the safe hardlink path unsuitable for general
    builds. See [platforms.md](platforms.md).
-2. **It replaces incremental compilation, it doesn't complement it.** kache strips Cargo's
-   incremental rustc flag while the wrapper is active, including under `KACHE_DISABLED=1`. This is
-   the biggest behavioral change on adoption — and the main reason it might be wrong for you. See
-   [when-not-to-use.md](when-not-to-use.md).
+2. **Incremental behavior depends on the Kache version.** Older releases strip Cargo's
+   incremental rustc flag. Kache v1.2.2 enables adaptive incremental compilation by default for
+   changed local crates, using isolated `incremental.kache-auto` state. Do not infer that
+   incremental state is absent merely because Kache is active. `scripts/sweep.sh` applies the
+   one combined size limit per target to this managed state and Cargo's `incremental` directories.
+   Older incremental-disable guidance in the topic pages needs version checking.
 3. **It caches dependencies, not everything.** rlibs, rmetas, dylibs, cdylibs, and proc-macros are
    cacheable. User-facing binaries and test harnesses are skipped by default; link and unsupported
    compiler shapes still pass through. So `target/` continues to grow.
-4. **The store is bounded; `target/` is not.** `local_max_size` + LRU + `gc --max-age` give the
-   store a predictable ceiling. Nothing bounds `target/` except you.
+4. **Store and target budgets are separate.** The repository sweep caps each target at
+   200 GB, or 120 GB below 100 GiB free, independently of the Kache store budget.
+   Targets can grow beyond those limits between sweeps.
 5. **A huge `target/` makes kache slow.** Per-crate file operations degrade badly on enormous
    trees — measured at ~18 s/crate keying on a 957k-file `target/deps`, versus ~30–170 ms on a
    clean one. Target hygiene remains necessary *for speed*, not just disk.
