@@ -128,7 +128,11 @@ pages with the behavior.
   parser also calls, over `edit_file_value` and `literal_flag`), so
   `md schema validate`, DMLS, and `md compose` agree: `edit: 5` opens `"5"`,
   `gui: "yes"` is `true`, a null flag is unset, and `edit: null`, `gui: 1`, or
-  a template flag is refused.
+  a template flag is refused. A whole-value target template is never refused
+  for its type at parse time (`"{{ 5 }}"` passes); `executor.rs::dispatch_edit`
+  passes the evaluated value through the same `edit_file_value`, so a number
+  or boolean result names its text and only null, a collection, or blank text
+  fails at run time, before any launch.
 - Authored flag origin: hosts that parse a schema-completed value pass the
   pre-completion value as `LifecycleParseOptions::authored_values` (`md`
   parses the authored document, so `None`). Only a non-null authored

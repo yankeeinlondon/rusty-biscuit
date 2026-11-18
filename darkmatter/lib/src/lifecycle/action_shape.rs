@@ -703,8 +703,9 @@ fn prep_target(target: Expr, source_file: &Path, property: &str) -> Result<Expr,
     })
 }
 
-/// An `edit` target is a non-blank string or an interpolation. A non-blank
-/// literal is kept byte-for-byte. `property` locates the operand itself: the
+/// An `edit` target is a non-blank text, number, or boolean literal, or an
+/// interpolation; a number or boolean names a file by its text when the
+/// action runs. A non-blank string literal is kept byte-for-byte. `property` locates the operand itself: the
 /// verb for the short form, its `file` key for the long form.
 fn edit_file(file: Expr, source_file: &Path, property: &str) -> Result<Expr, LifecycleError> {
     let Some(message) = edit_file_problem(&file) else {
@@ -718,10 +719,12 @@ fn edit_file(file: Expr, source_file: &Path, property: &str) -> Result<Expr, Lif
     })
 }
 
-/// An authored `edit` target converted as the shared conversion engine
-/// converts a value for a `string` parameter: a YAML number or boolean
-/// becomes its text (`5` → `"5"`, `true` → `"true"`); every other value is
-/// returned as written, for the target rules to judge.
+/// An `edit` target converted as the shared conversion engine converts a
+/// value for a `string` parameter: a number or boolean becomes its text
+/// (`5` → `"5"`, `true` → `"true"`); every other value is returned as
+/// written, for the target rules to judge. The parser applies it to the
+/// authored value and the executor to the value an expression produced, so
+/// `edit: 5` and `edit: "{{ number }}"` with `number: 5` both open `5`.
 pub(crate) fn edit_file_value(value: &serde_json::Value) -> std::borrow::Cow<'_, serde_json::Value> {
     if !matches!(value, serde_json::Value::Number(_) | serde_json::Value::Bool(_)) {
         return std::borrow::Cow::Borrowed(value);
@@ -733,25 +736,20 @@ pub(crate) fn edit_file_value(value: &serde_json::Value) -> std::borrow::Cow<'_,
 }
 
 /// Why the lifecycle parser refuses `file` as an `edit` target, if it does:
-/// a blank literal, or a whole-value template whose literal result is a
-/// number or boolean. An authored YAML number or boolean never reaches this
-/// check as one: [`edit_file_value`] has already made it text.
+/// only a blank literal. A constant number or boolean (`"{{ 5 }}"`) is
+/// accepted, as the authored scalar is, and converted when the action runs.
 pub(crate) fn edit_file_problem(file: &Expr) -> Option<&'static str> {
     match file {
         Expr::StringLiteral(text) if text.trim().is_empty() => Some("`edit.file` must not be blank"),
-        Expr::NumberLiteral(_) => Some("`edit.file` must be a string, got number"),
-        Expr::BoolLiteral(_) => Some("`edit.file` must be a string, got boolean"),
         _ => None,
     }
 }
 
 /// Why the lifecycle parser refuses the authored `edit` target `value`, if it
-/// does, and whether the refusal is a type mismatch rather than a blank value.
-/// Schema validation reports the same verdict at the operand.
-pub(crate) fn edit_target_problem(value: &serde_json::Value) -> Option<(&'static str, bool)> {
-    let converted = edit_file_value(value);
-    let target = action_value_to_expr(&converted).ok()?;
-    edit_file_problem(&target).map(|message| (message, !converted.is_string()))
+/// does. Schema validation reports the same verdict at the operand.
+pub(crate) fn edit_target_problem(value: &serde_json::Value) -> Option<&'static str> {
+    let target = action_value_to_expr(&edit_file_value(value)).ok()?;
+    edit_file_problem(&target)
 }
 
 /// A literal Boolean flag (`no_error`, `edit.create_new`, `edit.gui`) read

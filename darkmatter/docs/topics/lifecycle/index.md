@@ -642,10 +642,13 @@ initialize:
 The target is mandatory and must name a file:
 
 - The path must be non-blank. Whitespace inside a non-blank path is kept.
-- A native number or boolean names the file spelled by its text, as any
-  `string` value converts: `edit: 5` opens `5`, `edit: true` opens `true`,
-  `edit: 2.5` opens `2.5`. A `{{ … }}` template whose whole result is a
-  number or boolean is still an error.
+- A number or boolean names the file spelled by its text, as any `string`
+  value converts: `edit: 5` opens `5`, `edit: true` opens `true`,
+  `edit: 2.5` opens `2.5`. The same holds for a `{{ … }}` template whose
+  whole result is a number or boolean: with `issue: 42` in the frontmatter,
+  `edit: "{{ issue }}"` opens `42`, as does `edit: "{{ 42 }}"`.
+- A template whose result is `null`, a list, a mapping, or blank text is an
+  error when the action runs, and no editor opens.
 - A bare `edit`, `edit: null`, `edit: []`, a list with two items, a long form
   without `file` (or with `file: null`), and unknown fields are errors.
   `null` supplies no target, so it is never "no edit".

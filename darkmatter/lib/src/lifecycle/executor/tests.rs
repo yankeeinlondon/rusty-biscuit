@@ -684,11 +684,41 @@ fn an_editor_failure_is_a_located_dispatch_failure_that_no_error_suppresses() {
     assert_eq!(fixture.host.side_effects_attempted.get(), 1);
 }
 
+/// A number or boolean an expression produces names a file by its text, as
+/// the authored scalar does, in every spelling of the target.
+macro_rules! scalar_result_opens_its_text {
+    ($($name:ident: $value:tt, $action:expr => $file:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            let fixture = Fixture::with_editor(FakeEditor::default());
+
+            let outcome = fixture.run_edit(
+                LifecycleSignal::Success,
+                json!({ "fqn": $value }),
+                json!({ "success": [{ "edit": $action }, { "info": "after" }] }),
+            );
+
+            assert_eq!(outcome, LifecycleEventOutcome::default());
+            let seen = fixture.seen();
+            assert_eq!(seen.len(), 1, "one launch");
+            assert_eq!(seen[0].target, fixture.root().join($file));
+            assert_eq!(fixture.effects.lines(), ["info after"]);
+        }
+    )*};
+}
+
+scalar_result_opens_its_text! {
+    a_number_property_opens_the_file_its_digits_spell: 5, "{{ fqn }}" => "5";
+    a_boolean_property_opens_the_file_its_word_spells: true, "{{ fqn }}" => "true";
+    a_fractional_property_opens_the_file_its_text_spells: 2.5, "{{ fqn }}" => "2.5";
+    a_number_property_in_a_one_item_list_opens_its_text: 5, json!(["{{ fqn }}"]) => "5";
+    a_boolean_property_under_long_form_file_opens_its_text: false, json!({ "file": "{{ fqn }}" }) => "false";
+    a_constant_number_expression_opens_its_text: null, "{{ 7 }}" => "7";
+}
+
 #[test]
-fn a_non_string_or_blank_value_is_an_unsuppressible_evaluation_failure() {
+fn a_null_collection_or_blank_value_is_an_unsuppressible_evaluation_failure() {
     for (value, expected) in [
-        (json!(5), "got number"),
-        (json!(true), "got boolean"),
         (json!(null), "got null"),
         (json!(["a.md"]), "got array"),
         (json!("   "), "non-blank"),

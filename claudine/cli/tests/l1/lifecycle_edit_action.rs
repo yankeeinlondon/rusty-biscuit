@@ -300,26 +300,40 @@ fn compose_edits_inside_the_launch_workspace_from_a_prompt_kept_elsewhere() {
     assert!(!library.join("notes").exists(), "nothing was created beside the prompt");
 }
 
+/// A numeric property named by a whole-value template opens the file its
+/// digits spell, as the native `edit: 5` does.
+#[test]
+fn compose_opens_the_file_a_numeric_property_spells() {
+    let run = EditRun::new("edit-compose-numeric", "code").writing("five");
+    let document = run.write_doc("doc.md", "---\nnumber: 5\ninitialize:\n  - edit: \"{{ number }}\"\n  - skip\n---\nbody\n");
+
+    let output = run.compose(&document, &[]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(run.launched_names(), ["5"], "{}", stderr(&output));
+    assert_eq!(fs::read_to_string(run.cwd().join("5")).unwrap(), "five");
+    assert_eq!(run.provider_launches(), 0);
+}
+
 // Item 2: the motivating workflow through `claudine sequence`.
 
 #[test]
 fn sequence_root_initialize_runs_the_motivating_workflow_before_any_task() {
     let run = EditRun::new("edit-sequence-motivating", "code").writing("spec bytes");
-    // A sequence document's own values are step data, not templates, so the
-    // path is spelled where it is used.
     let document = run.write_doc(
         "ship.md",
         r#"---
+fqn: "{{ ctx.cwd }}/specs/spec.md"
 initialize:
-  - when: file_exists(ctx.cwd + "/specs/spec.md")
+  - when: file_exists(fqn)
     then:
-      - warn: "The spec already exists: {{ ctx.cwd }}/specs/spec.md"
+      - warn: "The spec already exists: {{ fqn }}"
       - skip
     else:
       - edit:
-          file: "{{ ctx.cwd }}/specs/spec.md"
+          file: "{{ fqn }}"
           create_new: true
-      - info: "The spec is ready at {{ ctx.cwd }}/specs/spec.md"
+      - info: "The spec is ready at {{ fqn }}"
       - skip
 sequence:
   - name: work

@@ -584,3 +584,25 @@ fn schema_validate_and_compose_refuse_malformed_operands_alike_without_launch() 
     assert!(!run.cwd().join("notes.md").exists(), "nothing was created");
     assert!(!run.cwd().join("features").exists(), "validation created nothing");
 }
+
+/// A numeric property named by a whole-value template opens the file its
+/// digits spell, as the native `edit: 5` does, and passes schema validation.
+#[test]
+fn a_numeric_property_target_opens_the_file_its_digits_spell() {
+    let run = EditRun::new("edit-numeric-property", "code").writing("five\n");
+    let document = run
+        .fixture
+        .write_file("cwd/numeric.md", "---\nnumber: 5\ninitialize:\n  - edit: \"{{ number }}\"\n  - skip\n---\nbody\n");
+
+    let mut command = run.command();
+    command.args(["schema", "validate"]).arg(&document);
+    let checked = command.output().expect("md runs");
+    assert_eq!(checked.status.code(), Some(0), "{}{}", stdout(&checked), stderr(&checked));
+
+    let output = run.compose(&document, &[]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let target = run.cwd().join("5");
+    assert_eq!(run.launched_target(), canonical(&target));
+    assert_eq!(std::fs::read(&target).unwrap(), b"five\n");
+}

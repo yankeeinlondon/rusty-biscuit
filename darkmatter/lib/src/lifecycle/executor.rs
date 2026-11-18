@@ -72,6 +72,7 @@ use crate::markdown::compose::{
     ResolvedShellValue, SharedFrontmatter, ShellCommandOrigin, ShellExpansionError,
 };
 
+use super::action_shape::edit_file_value;
 use super::actions::{
     CommunicationChannel, EditAction, LifecycleAction, LifecycleActionKind, LifecycleControlAction, LifecycleNode,
     RetryBackoff, RuntimeSet, ShellAction, WithOverlay, WithValue, is_known_side_effect,
@@ -1315,7 +1316,9 @@ impl<'a> StackExecutor<'a> {
 
     /// Open an `edit` action's file in the host's editor and wait for it.
     ///
-    /// A `file` value that is not a non-blank string, and a cancellation
+    /// The evaluated `file` value is converted as an authored target is
+    /// ([`edit_file_value`]): a number or boolean names a file by its text.
+    /// A value that is then not a non-blank string, and a cancellation
     /// (before the editor starts or while it is open), are evaluation
     /// failures that `no_error` never suppresses. Every other failure
     /// (resolution, eligibility, preparation, the editor itself, a host with
@@ -1332,7 +1335,7 @@ impl<'a> StackExecutor<'a> {
         let value = self
             .evaluate_operand(&edit.file, working)
             .map_err(|error| ActionFailure::Evaluation(self.expr_error("edit", error)))?;
-        let raw = match value {
+        let raw = match edit_file_value(&value).into_owned() {
             Value::String(text) if !text.trim().is_empty() => text,
             Value::String(_) => {
                 return Err(ActionFailure::Evaluation(self.action_failure("edit", "`edit` needs a non-blank path")));

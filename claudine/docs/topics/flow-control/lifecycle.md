@@ -1394,7 +1394,9 @@ target names a file by its text, so `edit: 5` opens a file named `5`. A
 bare `edit`, `edit: null`, and `edit: []` name no file and are errors.
 The value is literal text like every action value: `edit: fqn` opens a file
 named `fqn`; write `edit: "{{ fqn }}"` to open the path the `fqn` property
-holds.
+holds. A template result converts like a written target: with `issue: 42`,
+`edit: "{{ issue }}"` opens a file named `42`, while a `null` or list result
+fails when the action runs and no editor opens.
 
 #### Creating a spec from `initialize`
 

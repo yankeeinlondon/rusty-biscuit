@@ -35,6 +35,15 @@ const ACCEPTED: &[&str] = &[
     "{ edit: { file: 5 } }",
     "{ edit: { file: true } }",
     "{ edit: 2.5 }",
+    // So does a constant expression whose result is one, in every spelling.
+    "{ edit: '{{ 5 }}' }",
+    "{ edit: '{{ true }}' }",
+    "{ edit: ['{{ 5 }}'] }",
+    "{ edit: ['{{ true }}'] }",
+    "{ edit: { file: '{{ 5 }}' } }",
+    "{ edit: { file: '{{ true }}' } }",
+    // A property's value is known only when the event fires.
+    "{ edit: ['{{ fqn }}'] }",
     // Boolean-like flag text converts; `null` is no value.
     "{ edit: { file: notes.md, gui: 'yes' } }",
     "{ edit: { file: notes.md, gui: 'true' } }",
@@ -59,6 +68,8 @@ const REFUSED: &[(&str, &str)] = &[
     ("short: empty string", "{ edit: '' }"),
     ("short: blank string", "{ edit: '   ' }"),
     ("short: blank list element", "{ edit: ['  '] }"),
+    ("short: blank constant expression", "{ edit: \"{{ '  ' }}\" }"),
+    ("long: blank constant expression", "{ edit: { file: \"{{ '' }}\" } }"),
     ("short: object element", "{ edit: [{ file: a.md }] }"),
     ("long: file absent", "{ edit: { create_new: true } }"),
     ("long: file null", "{ edit: { file: null } }"),
@@ -146,6 +157,29 @@ fn the_motivating_workflow_passes_schema_validation_and_the_parser() {
     let report = Fixture::new().validate(frontmatter);
     assert!(report.valid, "{:?}", problems(&report));
     assert_eq!(md_parses(frontmatter), Ok(()));
+}
+
+/// A numeric or Boolean property named by a whole-value template passes
+/// both checks in every spelling, as the native scalar beside it does: the
+/// value is converted when the event fires.
+#[test]
+fn a_number_or_boolean_property_target_passes_schema_validation_and_the_parser() {
+    let fixture = Fixture::new();
+    for property in ["number: 5", "flag: true"] {
+        let name = property.split(':').next().expect("a key");
+        for action in [
+            format!("{{ edit: '{{{{ {name} }}}}' }}"),
+            format!("{{ edit: ['{{{{ {name} }}}}'] }}"),
+            format!("{{ edit: {{ file: '{{{{ {name} }}}}' }} }}"),
+        ] {
+            for (frontmatter, _) in placements(&action) {
+                let frontmatter = format!("{property}\n{frontmatter}");
+                let report = fixture.validate(&frontmatter);
+                assert!(report.valid, "the baseline accepts `{frontmatter}`: {:?}", problems(&report));
+                assert_eq!(md_parses(&frontmatter), Ok(()), "md parses `{frontmatter}`");
+            }
+        }
+    }
 }
 
 #[test]
