@@ -1,64 +1,23 @@
 //! Level-2 tests for darkmatter error rendering (OSC 8, gutter style, etc.).
 //!
-//! Shares a single WezTerm pane across tests via [`SHARED_HARNESS`] and uses a
-//! `printf`-emitted sentinel to detect command completion. Spawning a fresh
-//! pane per test would push each test past the nextest slow-test termination
-//! threshold (`slow-timeout = 5s`, `terminate-after = 3` → 15 s).
+//! Uses a completion marker before capturing the pane so parallel tests
+//! leave WezTerm client slots available while their commands run.
 
 use crate::common;
 
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled, shell_path};
-use common::level2::md_shim_word;
+use biscuit_test_harness::{CapturedFrame, shell_path};
+use common::level2::{md_shim_word, run_with_sentinel_env};
 use serial_test::serial;
 use std::fs;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use test_toolkit::{Backend, Level, LevelDecision, decide_harness};
 
 static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
-static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
-
-const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
-
-fn wait_for_sentinel(
-    harness: &mut WezTermHarness,
-    sentinel: &str,
-) -> Result<CapturedFrame, CapturedFrame> {
-    let deadline = Instant::now() + SENTINEL_TIMEOUT;
-    let mut last = CapturedFrame::from_raw(String::new());
-    while Instant::now() < deadline {
-        if let Ok(frame) = harness.capture() {
-            // The sentinel also appears inline in the command echo
-            // (e.g. `$ md ...; printf '\n__DM_DONE_0__\n'`). Only treat the
-            // sentinel as completion when it appears on a line of its own.
-            if frame.plain.lines().any(|l| l.trim() == sentinel) {
-                return Ok(frame);
-            }
-            last = frame;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Err(last)
-}
 
 fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFrame {
-    let id = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let sentinel = format!("__DM_LVL2_ERR_DONE_{id}__");
-    let wrapped = format!("{cmd}; printf '\\n{sentinel}\\n'");
-    harness
-        .send_command_with_env(&wrapped, &[("DARKMATTER_NO_BASELINE_SCHEMA", "1")])
-        .expect("send_command_with_env failed");
-    match wait_for_sentinel(harness, &sentinel) {
-        Ok(frame) => capture_settled(harness).unwrap_or(frame),
-        Err(last) => panic!(
-            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
-             last plain capture:\n{}",
-            last.plain
-        ),
-    }
+    run_with_sentinel_env(harness, cmd, &[("DARKMATTER_NO_BASELINE_SCHEMA", "1")])
 }
 
 /// Acquires the shared harness, spawning a pane on first use. Returns `None`
