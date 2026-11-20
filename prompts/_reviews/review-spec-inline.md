@@ -7,7 +7,7 @@ basename: "{{ basename(spec) }}"
 dir: "{{ dirname(spec) }}"
 
 start:
-    message: "👀 reviewing the specification file: `{{spec}}`"
+    message: "👀 reviewing the specification `{{[parent_dir(spec)}}` _in_ **{{ctx.repo}}** repo [**branch:** {{ctx.branch}}, **agent:** {{ctx.agent}}/{{ctx.model}}, **host:** {{ctx.hostname}}]"
 success:
     say: |-
         {{
@@ -15,8 +15,8 @@ success:
             ? "The review of the draft specification file in " + ctx.area + " has completed"
             : "The review of the draft specification file in the " + ctx.repo + " repo has completed"
         }}
-    message: "✅  review of the draft specification {{ code_link(spec) }} has completed"
-    info: the {{link(spec)}} _specification_ has been reviewed and updated inline
+    message: "✅  review of the draft specification `{{ parent_dir(spec) }}` has completed successfully [**branch:** {{ctx.branch}}, **agent:** {{ctx.agent}}/{{ctx.model}}, **host:** {{ctx.hostname}}]"
+    info: "the {{link(spec, parent_dir(spec))}} _specification_ has been reviewed and updated inline"
 failure:
     say: |-
         {{
