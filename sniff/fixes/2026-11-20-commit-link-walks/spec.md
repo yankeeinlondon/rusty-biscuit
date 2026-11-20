@@ -81,6 +81,9 @@ its refs again, and leaves the linking time and visits out of the report.
   It fills the complete list of containing remotes for each commit. A shared
   set that skips repeat visits would lose those memberships. Keep its existing
   branch limit and refresh behavior.
+- On native Windows, stop the first repository open in each sniff process
+  from starting Git child processes, after measuring that cost (see
+  [Windows: name the Git installation](#windows-name-the-git-installation)).
 - Keep linking local and read-only. Creating or maintaining a commit-graph
   stays a Git operation. Generation-number cutoffs are outside this fix.
   They need an existing commit-graph, which the motivating checkout lacks.
@@ -205,6 +208,75 @@ was measured. Keep JSON stdout as one complete value, with the existing
 embedded performance report and human-readable diagnostic on stderr when
 `--perf` is supplied.
 
+## Windows: name the Git installation
+
+### Problem
+
+On native Windows, the first `gix` repository open in a process asks Git
+where it is installed, unless `EXEPATH` names the installation. That means
+running `git config -lz --show-origin` and `git --exec-path` through the Git
+launcher, with a hidden `conhost.exe`. That is up to three process creations,
+which `wt` measured at about 40 ms per run. Git Bash sets `EXEPATH`.
+PowerShell, SSH sessions, and CI shells do not, so `sniff repo git-status`
+started from them pays this cost on every run. The sniff CLI does not set
+`EXEPATH` today. `wt` does, through `name_installation_for_gix` in
+`worktree/lib/src/git/program.rs`.
+
+### Change
+
+1. **Measure first.** On the Windows rig, from PowerShell, record the
+   `sniff repo git-status` wall time and the Git child processes it starts
+   (`GIT_TRACE2_EVENT=<dir>` writes one file per Git process), with and
+   without `EXEPATH` set to the installation's top directory. Record both in
+   the implementation log. If the measured saving is under 10 ms, stop here
+   and record that result instead of making the change.
+2. **Move the helper into sniff.** `wt` depends on `sniff`, so sniff cannot
+   call `wt`'s helper. Move `name_installation_for_gix` and its counterpart
+   `forget_installation_hint` (plus the installation lookup they need) into
+   the sniff library, next to its program lookup. Then point `wt` at the
+   moved copy, so one implementation remains (the same pattern as
+   `2026-11-14-shared-process-tree`). Keep the existing rules: do nothing
+   off Windows, outside a recognized installation, or when `EXEPATH` or
+   `GIT_EXEC_PATH` is already set.
+3. **Set it before any thread starts.** The helper writes the process
+   environment, which is only sound while the process has a single thread.
+   sniff's `main` is `#[tokio::main]`, whose runtime threads exist before the
+   body runs. Change `sniff/cli/src/main.rs` to a plain `fn main` that calls
+   the helper first and then builds the Tokio runtime explicitly. Apply the
+   same rule to any other sniff binary that opens a repository.
+4. **Keep children's environment unchanged.** Every child process sniff
+   starts (program version probes, package-manager and install commands,
+   process-tree children) must see the environment it would have inherited.
+   Apply `forget_installation_hint` once at sniff's subprocess chokepoint in
+   `process`, not at each call site.
+
+## Platform coverage
+
+The visited-set change is plain in-memory work over `gix` objects, with no
+OS-specific code. What differs between platforms is the cost around it and
+how the fixtures are built.
+
+| Environment | What to watch | Where it is handled |
+|---|---|---|
+| macOS | Case-insensitive APFS: loose refs whose names differ only in case collide | Fixtures |
+| Linux | CI checkouts are depth-1; tests must never read the monorepo's own history | Fixtures |
+| Native Windows | Git child processes at first open; about 20–30 ms per `git` child; system `core.autocrlf=true` | [Windows section](#windows-name-the-git-installation), Fixtures |
+| WSL2 | Linux code paths. A checkout under `/mnt/<drive>` is on drvfs (9p), where pack reads and status walks are much slower than on the guest's ext4 | Performance check |
+
+### Fixture rules
+
+- Build every fixture repository in a temporary directory through git2/gix.
+  Never depend on this repository's history, which is depth-1 in CI.
+- Create the shallow fixture by writing its `.git/shallow` file through the
+  library, not by running `git clone --depth`. That avoids a `file://` URL
+  requirement, the per-process cost on Windows, and the system
+  `core.autocrlf` setting.
+- Give remote-tracking branches names that stay distinct when case is
+  ignored. Within a remote, branches are ordered by byte value, as today,
+  and the docs should say so.
+- Assert on work counters and outcomes, never on wall-clock time. Wall
+  clock belongs only to the manual performance check.
+
 ## Documentation
 
 - Update [the status command guide](../../docs/cli/repo_git-status.md).
@@ -270,6 +342,16 @@ so the visit counter measures only containment work.
   keeps its shape,
   and keep existing aggregate and recent-commits JSON parity tests.
 
+### Windows startup tests
+
+- On native Windows, with `EXEPATH` and `GIT_EXEC_PATH` unset, assert that a
+  sniff run opening a repository starts no `git` process. Asserting that the
+  derived prefix matches is not enough, because the fallback derives the same
+  prefix.
+- Assert that a child process sniff starts does not inherit the `EXEPATH`
+  that sniff set, and does inherit an `EXEPATH` the caller set.
+- Keep `wt`'s existing tests green after it switches to the moved helper.
+
 ### Performance check
 
 Take a quick before-and-after sample of `sniff repo git-status --perf` on
@@ -287,12 +369,27 @@ The fix is accepted when, in that checkout state, terminal
 visit without a commit-graph, a single pass over the 16,682 distinct commits
 fits comfortably inside that margin.
 
+Repeat the same before-and-after sample, with an unpushed branch and several
+remote-tracking branches, on each of:
+
+- macOS (the author's laptop or `$BUILD_MACOS`)
+- native Windows (`$BUILD_WIN`), from PowerShell, not Git Bash
+- WSL2 (`$BUILD_WSL`), with the checkout on the guest's ext4 filesystem
+
+The same 0.5 s margin over `--json` applies on each, and the results go in
+the implementation log. On WSL2, also record one sample with the checkout
+under `/mnt/c`. It is informational, not a target, because drvfs dominates
+the cost there, and the docs should say so.
+
 ### Gates
 
 Run `just test` and `just lint` in `sniff/`, plus
 `cargo clippy -p sniff --all-targets -- -D warnings` and the same command
-for `sniff-detection-cli`. Keep fixture tests portable across macOS, Linux,
-native Windows, and WSL2.
+for `sniff-detection-cli`. Windows and WSL2 run only in the nightly CI
+schedule, so before handoff also run `just cross-check sniff --os windows`
+and `just cross-check sniff --os wsl` (or prove those cells with
+`just ci-seed`), and the same for `worktree` once it uses the moved helper.
+A cross-compile is compile evidence only and does not count.
 
 ## Author rulings (2026-11-20)
 
@@ -305,3 +402,8 @@ native Windows, and WSL2.
    repository-wide, so shared visits stay valid. The failed-walk fallback
    covers a walk that stops at a missing parent, and library test 4 asserts
    that shared and independent walks agree on a shallow fixture.
+3. **Windows startup cost is in scope, gated on measurement.** Measure the
+   Git child processes started at the first repository open on the Windows
+   rig. When the saving is 10 ms or more, move `wt`'s `EXEPATH` helper into
+   sniff, call it from a plain `main` before the Tokio runtime starts, and
+   switch `wt` to the moved copy.
