@@ -21,15 +21,14 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-11-20
-status: human-in-the-loop
+status: finalized-spec
 area: darkmatter
 reviewed: true
 reviewed_by: "codex/gpt-6.2-sol"
 reviewed_on: "2026-11-20"
 review_iterations: 0
-needs_rulings: true
+needs_rulings: false
 required_rulings:
-    - Whether to require static schema errors for expressions the editor cannot evaluate
 clarified: false
 implemented: false
 packages:
@@ -177,8 +176,8 @@ template syntax.
 > validator keeps conversion, defaults, and union selection consistent with
 > compose. An inferred shape helps the editor explain a value. A firm schema
 > error requires evidence the existing validation rules can judge. The
-> [Open Questions](#open-questions) section covers whether to add proofs for
-> cases where the editor has no concrete result.
+> editor reports no schema error from types alone; see
+> [Resolved decisions](#resolved-decisions).
 
 For an unavailable uncontracted load, the type is a container of unknown
 shape, plus null if the file argument may be null. A literal null file has
@@ -345,30 +344,15 @@ unique, and match the column count, with every record treated as data.
 The property check covers whole-value expressions. Header detection is
 deferred.
 
-## Open Questions
-
-### Should the editor reject expressions it cannot evaluate?
-
-The draft asked for a schema error for every declared property written as a
-whole-value expression. Some values depend on runtime-only bindings, a
-function the editor cannot run, or a read it cannot make. A declared return
-type can give the editor a useful hint while leaving it uncertain which value
-compose will get or which schema defaults and conversions apply.
-
-- **Use concrete results for new schema errors.** The editor reports
-  mismatches it can demonstrate with the same validation rules as compose.
-  This reuses the existing validator and avoids rejecting expressions that
-  compose can accept. Some errors remain visible only during compose.
-- **Also prove selected mismatches from types alone.** The editor could
-  catch cases such as a well-understood function returning a boolean for a
-  property that only accepts a list. It would need rules that distinguish
-  impossible results from broad types, conversion, nullable paths, defaults,
-  and partial knowledge. Unsupported cases would still be deferred.
-
-**Recommendation.** Use concrete results for this feature. They cover
-the loading and transformation examples with a direct path to compose
-parity. A separate static proof feature could name the cases it supports
-and specify what counts as enough evidence to reject an expression.
+The author ruled on 2026-11-20 that the editor reports new property schema
+errors only from concrete results it can evaluate, judged by the same
+validation rules as compose. When it cannot evaluate a property (runtime-only
+values, a function it cannot run, an unapproved read, or a missing file), it
+reports no schema verdict, and compose remains the check. For example, a
+missing file gets the missing-file warning but no error for a property
+declared as a non-container type; that mismatch appears once the file exists
+or at compose. Proving mismatches from types alone is out of scope for this
+feature.
 
 ## Documentation
 
