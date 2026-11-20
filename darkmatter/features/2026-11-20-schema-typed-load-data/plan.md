@@ -3,7 +3,7 @@ kind: plan
 created: 2026-11-20
 status: planned
 total_phases: 5
-phase: 2
+phase: 3
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -41,6 +41,35 @@ packages:
 - darkmatter
 - darkmatter-lsp
 - claudine
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/expression/spread.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/schemas/slots/admission.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/targets.rs
+- darkmatter/lib/tests/l1/object_spread.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/more_is_more_literals_and_indexes.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/tests/l1/object_spread_editor.rs
+- darkmatter/dmls/tests/l1/main.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+- claudine/lib/src/dispatch/matcher/tests.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/inline/call-check.md
+- darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/expressions.md
 ---
 
 # Implement Schema-Typed `load_data`
@@ -85,14 +114,14 @@ Phase 1 is complete in commits `2b782c3d5` and `d87d0d654`. The execution cursor
 
 ### Wave 2
 
-- [ ] **Integrate spread evaluation**
+- [x] **Integrate spread evaluation**
   - Replace the Phase 1 generic error in `expression/mod.rs` and interim `expression_type`, `partial_object`, and `literal_value` behavior in `expression/call_check.rs`. Add the library error and projection to `expression/error.rs` and `report_diagnostics.rs`. Extend the existing scope projections in `expression/scope/{iterable,projection}.rs`. Keep the landed `entry.value()` walkers in `expression/{absence,lint,member_check,prepared}.rs`, `compose/{remote.rs,preflight/collect.rs}`, and `schemas/slots/{admission.rs,evaluator.rs,grants/targets.rs}`. Update the interim error assertions in `lib/tests/l1/more_is_more_literals_and_indexes.rs`; the opt-in `lib/tests/prompts/dasherized_identifier_corpus.rs` already accepts the new tree. Add evaluator and passive coverage for order, single evaluation, multiple spreads, null, dynamic wrong types, and member typing after unknown spread and a subsequent explicit write. Prove the preflight and slot scans discover an input read in an overwritten operand.
-- [ ] **Adapt editor traversal**
+- [x] **Adapt editor traversal**
   - Retain operand traversal in the three `SpannedExprKind::ObjectLiteral` consumers in `darkmatter/dmls/src/overlay/expressions.rs` and exercise the explicit field-key spans already in `SpannedObjectEntry`. Use the existing key span and operand ranges in provider coverage. Exercise cursor scope, hover, and completion inside spread operands and nested callbacks through DMLS providers.
-- [ ] **Adapt Claudine traversal**
+- [x] **Adapt Claudine traversal**
   - Keep the landed `entry.value()` traversal in both walkers in `claudine/lib/src/composition/lifecycle/prewarm/classify.rs` and variable collection in `claudine/lib/src/dispatch/matcher.rs`. Add tests that assert that a call and binding in a spread operand affect classification and discovery even when a later field overwrites the same key.
 
-- [ ] **Verify expression integration**
+- [x] **Verify expression integration**
   - After Wave 2, map `CallProblem::InvalidSpreadOperand` in `darkmatter/dmls/src/diagnostics/{call_check,codes}.rs` and assert the authored operand range through a diagnostics request. Run the Simplified Schema package's `just test`, `LANG=C.UTF-8 just test -E 'test(object_spread) | test(design_time_call_check)'` in Darkmatter on Linux, and Claudine's `just test-library`. Search the workspace for `ObjectLiteral` to verify all consumers accept the entry enums and no tuple-destructuring walker remains.
 
 ## Phase 3 — Implement optional loads and compose provenance

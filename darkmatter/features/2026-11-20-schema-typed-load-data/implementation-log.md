@@ -43,13 +43,50 @@ decisions_for_review:
         Phase 1 changes the shared expression tree, which breaks every Darkmatter, DMLS, and Claudine reader of object literals; the plan schedules their spread semantics for Phase 2 but Phase 1 must still compile and pass. I adapted every reader now: pure walkers visit spread operands (what Phase 2 asks for), the evaluator already merges entries in order with a null spread adding nothing, and passive typing treats any literal containing a spread as "some object" (no member or option findings). A non-object spread operand fails at evaluation with the generic catch-all error ("...(): object spread requires an object or null, found number") instead of the planned typed error and code. Alternatives: leave the build broken until Phase 2 (fails this phase's gates), or reject spread at evaluation until Phase 2 (simpler, but a parsed spread would fail every document). Phase 2 replaces the placeholder error with `InvalidSpreadOperand` / `dm.expression.invalid_spread_operand` and the "unknown" typing with ordered spread inference; nothing else needs redoing.
     - |-
         A cache-only remote runtime registers nothing when asked to fetch: `register_and_fetch` returns without creating a slot, so `get_content` reports the URL as never registered, and editor reads must go through `cached_text(url, now)`. The plan only said this path must never register a fetch task. The alternative was to fill the slot synchronously from the cache (hit becomes a ready body, miss a failure), which would let existing `get_content` callers work unchanged but would turn "pending" into a read failure. If the reviewer prefers that, only `register_and_fetch`'s cache-only branch and its tests change.
+    - |-
+        A spread operand that turns out, when evaluated, to be neither an object nor null now stops composition everywhere, including in the body, where most evaluation errors are only warnings and leave the `{{ }}` text in place. The spec said only that the error is "checked when evaluated" and reported at the operand. I treated it like the passive rejection of the same mistake, and like a call that returns the wrong type: no partial object should stand in for one that could not be built. The alternative is to treat it like an arithmetic type error, which becomes a warning in lenient body interpolation. That would make the code `dm.expression.evaluation_failure` on that path unless the warning path were also taught the new code and operand location. To switch, change one line in `ExpressionError::is_authoring_fatal`, its row in the error tests, and the docs sentence in `docs/inline/call-check.md`.
+    - |-
+        The passive "invalid spread operand" finding travels as an ordinary call-check record whose function name is `...`, with no arguments and the new `CallProblem::InvalidSpreadOperand` problem; the plan named the problem variant but not the carrier. Reusing the call-check record means composition's precheck, its error location, the lifecycle checks, and DMLS diagnostics all report it with no new plumbing. The cost is a pseudo-call in a list that otherwise holds only calls: any consumer that looks up the function by name must ignore `...`, and a lifecycle warning would read "`...(…)` in lifecycle …". The alternative is a separate spread-check type with its own path through each of those consumers, which is more code but keeps the call list pure.
+    - |-
+        The passive check rejects a spread only when every possible value of the operand fails: its type excludes null and no alternative can be an object. An operand that may be null (`maybe: number`), may be an object (`object | number`), or has an unknown type is left to evaluation. The message names JSON types ("found number", "found number | string"), worded like the runtime error rather than as the declared type text (`literal(1.0) | literal(2.0)`). The alternative of also warning on "may fail" operands, in the way the uncertain-call category warns, was not specified and would need a new severity rule.
 message_to_agent: |-
-    Phase 1 already adapted every object-literal reader to the new `ObjectEntry` / `SpannedObjectEntry` enums so the workspace compiles; Phase 2 "Integrate spread evaluation" replaces these interim pieces rather than starting from tuple walkers:
-    (1) `darkmatter/lib/src/markdown/compose/expression/mod.rs` evaluator already merges in written order (last key wins, null adds nothing) but reports a non-object operand as `ExpressionError::Other { function: "...", .. }` - replace it with the typed `InvalidSpreadOperand` + `dm.expression.invalid_spread_operand` and the authored-span projection (test: `lib/tests/l1/more_is_more_literals_and_indexes.rs::object_spread_merges_in_written_order_and_rejects_a_non_object` asserts the current message; update it).
-    (2) `call_check.rs`: `expression_type` returns `ScopeShape::Unknown { non_null: true }` for any literal with a spread, and `partial_object` / `literal_value` return `None` for one - replace with Rule 2's ordered inference and literal folding.
-    (3) Pure walkers (absence, lint, member_check, prepared, preflight/collect, remote.rs, slots admission/evaluator/grants targets, DMLS overlay/expressions.rs x3, Claudine prewarm/classify.rs x2 and dispatch/matcher.rs) visit `entry.value()` already; Phase 2 still owes their tests (cursor scope / hover inside operands, Claudine classification) and DMLS field-key spans.
-    `ObjectEntry` and `SpannedObjectEntry` are re-exported from `darkmatter::markdown::compose::expression`.
-    Phase 4: the cache-only API (`RemoteFetchRuntime::cache_only`, `cached_text`, `CacheOnlyPending`, `remote_cache::{lookup_fresh, FreshCachedBody, CacheOnlyMiss}`) is marked `#[cfg_attr(not(test), expect(dead_code, ...))]`; remove those attributes when the editor consumes them or the build fails with an unfulfilled expectation. A cache-only runtime's `register_and_fetch` registers nothing.
+    Phase 2 (object spread) is complete. What Phase 3+ can build on:
+    (1) Occurrence-to-span mapping already exists and is reused: `member_check::expr_nodes` (erased tree) and `spanned_nodes` (spanned tree) list the same nodes in the same order, so a node's ordinal names it in both. `expression/spread.rs::SpreadSite` records a node address during evaluation and `evaluate`/`evaluate_observed` turn it into that ordinal (`ExpressionError::placed_in`); `report_diagnostics::spread_operand_source` reparses the recorded expression text and narrows the record. Rule 7's tracked evaluator (provenance keyed by AST occurrence) should use the same mirror rather than a new walker.
+    (2) The passive spread finding is a `CallCheck` named `SPREAD_CHECK_NAME` ("...") with `CallProblem::InvalidSpreadOperand`; `check_expression_calls` now visits every node (`visit_nodes`). Anything iterating call checks by function name must ignore "...".
+    (3) `ArgumentType::PartialObject` gained `opaque: bool` (an opaque spread may supply any key); `OptionsView::Partial` keeps the format open when it is set. Phase 3's header options must respect it.
+    (4) Spread typing is `scope::Shape::object_of_entries`; an open result carries a `<string>: unknown` pattern key that `serialize_property_atom` does not print, so type text looks closed.
+    (5) `just test -E '<filter with parentheses>'` breaks inside the darkmatter recipe (args unquoted); run nextest directly with `-p darkmatter --features effects-instrumentation,work-counters` (and the other packages' recipe features).
+    (6) `shipped_schema_corpus::shipped_markdown_named_type_references_resolve` fails because of uncommitted edits made outside this feature to `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md` (`apps: app[]` with no visible `types`). Do not revert it; exclude or report it.
+    (7) Still relevant for Phase 4: the cache-only API (`RemoteFetchRuntime::cache_only`, `cached_text`, `CacheOnlyPending`, `remote_cache::{lookup_fresh, FreshCachedBody, CacheOnlyMiss}`) carries `#[cfg_attr(not(test), expect(dead_code, ...))]`; remove it when the editor consumes the API. A cache-only runtime's `register_and_fetch` registers nothing.
+source_files_during_phase_2:
+    - "darkmatter/lib/src/markdown/compose/expression/spread.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/error.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/call_check.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/projection.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs"
+    - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/policy.rs"
+    - "darkmatter/lib/src/markdown/compose/preflight/collect.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/admission.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/targets.rs"
+    - "darkmatter/lib/tests/l1/object_spread.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "darkmatter/lib/tests/l1/more_is_more_literals_and_indexes.rs"
+    - "darkmatter/dmls/src/diagnostics/codes.rs"
+    - "darkmatter/dmls/src/diagnostics/call_check.rs"
+    - "darkmatter/dmls/tests/l1/object_spread_editor.rs"
+    - "darkmatter/dmls/tests/l1/main.rs"
+    - "claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs"
+    - "claudine/lib/src/dispatch/matcher/tests.rs"
+docs_updated_during_phase_2:
+    - "darkmatter/docs/inline/call-check.md"
+    - "darkmatter/dmls/docs/diagnostics.md"
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - ".claude/skills/darkmatter/expressions.md"
 ---
 
 # Implementation Log for 2026-11-20-schema-typed-load-data (5 phases)
@@ -186,3 +223,161 @@ changed, and its shapes are covered above).
 - `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md`
   showed as modified during this session. This phase did not edit it, and it
   is left alone.
+
+## Phase 2
+
+### Integrate spread evaluation (Darkmatter library)
+
+- `expression/error.rs`: new `ExpressionError::InvalidSpreadOperand { found, site }`
+  ("object spread requires an object or null, found number"). It is
+  authoring-fatal and not a recoverable read (`try` does not absorb it).
+  `ExpressionError::placed_in(root)` fills in the failing operand's site,
+  looking through callback wrappers.
+- `expression/spread.rs` (new): `SpreadSite` records the evaluated operand
+  node, and `evaluate`/`evaluate_observed` turn it into the node's ordinal in
+  `member_check::expr_nodes`, the existing erased-tree node list that
+  `spanned_nodes` mirrors. `spread_operand_span(spanned, ordinal)` maps it back
+  to the authored operand. A callback body is one node, so every iteration's
+  failure names the same authored operand.
+- `expression/mod.rs`: the evaluator raises the typed error; both entry points
+  place its site. The public `evaluate` signature is unchanged.
+- `report_diagnostics.rs`: `InvalidSpreadOperand` reports under
+  `dm.expression.invalid_spread_operand`. An interpolation failure anchored to
+  its `{{ … }}` is narrowed to the operand's line, column, and range by
+  reparsing the recorded expression text with spans. If the expression text is
+  not found verbatim in the construct, as in an escaped YAML scalar, the
+  record keeps the construct's position.
+- `expression/call_check.rs`:
+  - `CallProblem::InvalidSpreadOperand { span, found }`, carried by a
+    `CallCheck` named `...` (`SPREAD_CHECK_NAME`) and spanning the operand.
+    The existing pipeline (compose call precheck, `rejected_call`,
+    `call_diagnostic`, DMLS call diagnostics, lifecycle checks) therefore
+    rejects and locates it with no new plumbing.
+  - `check_expression_calls` now walks every node (`visit_nodes`, with
+    `visit_call_nodes` as a filter over it). It checks each spread operand in
+    its own `branch_scope`, so unselected branches and callback bodies are
+    covered. The operand is rejected only when its type excludes `null` and
+    no alternative can be an object.
+  - `expression_type` folds object literals through
+    `Shape::object_of_entries`, in the order written (see below).
+  - `literal_value` folds literal-object and `null` spreads.
+  - `partial_object` folds entries in order. An opaque spread clears the
+    literal members read before it and sets a new
+    `ArgumentType::PartialObject::opaque` flag. `OptionsView::Partial` reads
+    that flag, so an opaque spread keeps the format open, while a literal
+    written after it (for example `delimiter: ';;'`) is still judged.
+  - `INVALID_SPREAD_OPERAND_CODE` is exported and listed in
+    `COMPOSE_DIAGNOSTIC_CODES`. `diagnostics.rs` maps the problem to it.
+- `scope/projection.rs`: `spread_fields`/`spread_always_fails` give, for each
+  alternative of the operand, its declared keys (with required-ness) and
+  whether it is open, or for a non-object the JSON type it has instead.
+  Recursive references open through the same alias budget as `member_shape`.
+- `scope/iterable.rs`: `Shape::object_of_entries` implements Rule 2's ordered
+  inference.
+  - A written field sets its key's type.
+  - A spread replaces a key only when every alternative always writes it.
+    Otherwise the key widens, from `null` when it was not written yet.
+  - An unknown or open operand widens earlier keys to `unknown` and adds
+    `<string>: unknown`, so later reads are never reported as missing members.
+- Comment drift: `expression_type`'s table now mentions spreads, and
+  `literal_value` and `partial_object` describe their folding.
+- Pre-existing limitation, not changed: `serialize_property_atom` omits an
+  inline object's pattern keys, so an open spread result displays like a
+  closed one (`{a: unknown}`). The tests check openness through member
+  findings instead.
+
+### Adapt editor traversal (DMLS, done by a subagent and reviewed here)
+
+- `overlay/expressions.rs` needed no change. Its three `ObjectLiteral`
+  consumers already walk spread operands, and a temporary mutation (skipping
+  spreads) made both new hover tests fail, which confirms the tests can catch
+  a regression.
+- `diagnostics/codes.rs`: `EXPRESSION_INVALID_SPREAD_OPERAND` aliases
+  Darkmatter's `INVALID_SPREAD_OPERAND_CODE`, with an `ERROR` row in the
+  module table. `diagnostics/call_check.rs`: module doc only. The finding
+  already flows through `expression_call_diagnostics` → `CallCheck::diagnostics`.
+- `dmls/docs/diagnostics.md`: new `dm.expression.invalid_spread_operand` row.
+- New `dmls/tests/l1/object_spread_editor.rs`, declared in `tests/l1/main.rs`.
+  Its tests run through an in-process LSP session in a temp workspace:
+  hovering an operand, hovering a callback binding inside an operand,
+  completion inside an operand (the same labels as a field-value position), a
+  call in an overwritten operand that is still call-checked, and the
+  invalid-operand error ranged exactly on `7` (frontmatter), `5`, and
+  `[1, 2]`, under both `strict` settings, with no finding for `...null` or an
+  undeclared operand.
+
+### Adapt Claudine traversal (subagent, reviewed here)
+
+- `classify.rs` and `matcher.rs` are unchanged. Five tests were added in
+  `prewarm/classify/tests.rs` and `dispatch/matcher/tests.rs`:
+  - a call, a sequence-injected read, `fm`, and a late root (`err`) inside an
+    overwritten operand classify like the direct form;
+  - a condition inside an overwritten operand qualifies a matcher as an
+    expression;
+  - a variable used only as an operand is read when the matcher runs.
+- A mutation that skipped spreads failed three of the five tests. The other
+  two document behavior that does not depend on the walker.
+
+### Docs and skills
+
+- `darkmatter/docs/inline/call-check.md`: a new "Object spread operands"
+  subsection with what is rejected, what is not, and the runtime failure.
+- `darkmatter/dmls/docs/diagnostics.md`: a new code row (from the DMLS
+  subagent).
+- `.claude/skills/darkmatter/expressions.md`: the `...` call-check record, the
+  ordered typing, and the `SpreadSite` node-ordinal mirror.
+- The plan schedules the spread syntax guide itself
+  (`simplified-schema/docs/topics/expression-syntax.md`) for Phase 5.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+|---|---|
+| written order, last key wins, multiple spreads, null (literal and computed), nested copy | L1 `object_spread::evaluation::object_spread_entries_merge_in_written_order`; `more_is_more_literals_and_indexes::object_spread_merges_in_written_order_and_rejects_a_non_object` |
+| each operand evaluated once, left to right, even when overwritten | L1 `object_spread::evaluation::object_spread_operands_are_evaluated_once_each_in_order` (counting test function) |
+| dynamic wrong type: typed error, fatal, not `try`-recoverable, located at the operand (including in a callback) | L1 `object_spread::evaluation::object_spread_of_a_non_object_is_a_typed_fatal_error_at_its_operand`; unit `expression::spread::tests::*`; `error::tests::recovery` row |
+| runtime error code and authored line/column in the body, a frontmatter value, and a callback (normal compose path) | L1 `object_spread::composition::object_spread_runtime_failure_is_located_at_its_operand_in_body_and_frontmatter` |
+| passive rejection of a proven non-object (literal, typed, union, unselected branch, callback, nested), code, span, message | L1 `object_spread::passive::object_spread_of_a_proven_non_object_is_rejected_at_its_operand` |
+| no passive finding for null, maybe-null, object, unknown, or mixed operands; calls in operands still checked | L1 `object_spread::passive::object_spread_operands_that_may_be_objects_or_null_are_left_to_evaluation` |
+| compose rejects before anything runs, located at the operand | L1 `object_spread::composition::object_spread_proven_wrong_rejects_the_document_before_anything_runs` |
+| ordered inference: replace, widen, unknown spread, later explicit write | L1 `object_spread::typing::object_spread_types_follow_written_order`, `…member_types_reach_callbacks_and_member_checks` |
+| open result: no undeclared-member finding; closed result keeps one | `…member_types_reach_callbacks_and_member_checks` |
+| literal option folding, opaque spread, a known option after `...opts` | L1 `object_spread::typing::object_spread_literal_options_fold_in_written_order`; unit `call_check::tests::a_partial_object_keeps_its_literal_members_and_classifies_as_its_shape` |
+| reads in overwritten operands: remote discovery, preflight `as_markdown` walk, slot read targets, slot admission | L1 `object_spread::scans::object_spread_operand_urls_are_discovered_even_when_overwritten`; unit `preflight::collect::tests::object_spread_operands_are_scanned_even_when_overwritten`, `slots::grants::targets::tests::object_spread_operand_reads_are_collected_even_when_overwritten`, `slots::admission::tests::object_spread_operands_are_admitted_even_when_overwritten` |
+| DMLS hover, completion, call checks inside operands; diagnostic code and range | DMLS L1 `object_spread_editor::*` (5 tests) |
+| Claudine classification and matcher discovery | `prewarm::classify::tests::object_spread_operand_*` (2), `dispatch::matcher::tests::object_spread_operand_*` (3) |
+
+The Input Robustness Matrix does not apply: no file-format or configuration
+reader changed.
+
+### Gates
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `packages: [claudine, darkmatter, darkmatter-lsp, test-toolkit, darkmatter-cli]`
+  and `change_class: package`, so the gates ran.
+- `simplified-schema` `just test`: 2017/2017 passed (its code is unchanged in
+  this phase; the plan asks for the run).
+- The plan's Darkmatter filter, `just test -E '… | …'`, cannot run through the
+  recipe: it passes its arguments unquoted, so the parentheses break bash. I
+  ran the same filter with nextest directly and the recipe's features:
+  darkmatter 92/92, darkmatter-lsp 5/5, darkmatter-cli 0 matching.
+- `darkmatter` `just test`: 12093 passed and 1 failed before fail-fast stopped
+  the run, with no slow tests. The failure,
+  `shipped_schema_corpus::shipped_markdown_named_type_references_resolve`,
+  reads `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md`.
+  That file has uncommitted edits made outside this phase (it was already
+  modified during Phase 1). The edit adds `apps: app[]` to an inline
+  `$schema` without a `types` definition the schema can see, and the test's
+  message is "unknown named type `app` in the inline `$schema`". I left the
+  file alone. I then ran the whole area (darkmatter, darkmatter-cli,
+  darkmatter-lsp, zed-dmls-cli, with the recipe's features) through nextest
+  excluding only that test: 17294/17294 passed, none slow.
+- `darkmatter` `just lint`: clean, including the zed-dmls wasm check. A first
+  run failed because `tests/l1/object_spread.rs` imported the
+  instrumentation-only test hooks unconditionally; that one test is now
+  gated on `effects-instrumentation`, the feature `just test` and CI enable.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- `claudine` `just test-library`: 6937/6937 passed, none slow.
+  `cargo check -p claudine-cli --tests` is clean. Claudine is the only
+  dependent that names `ExpressionError`, `CallProblem`, or `PartialObject`.
+  Its `just lint` was run clean by the subagent.
