@@ -5444,65 +5444,131 @@ fn the_plan_schema_version_matches_the_frozen_contract() {
     );
 }
 
-/// Every `archive_guard` shape the shipped planner emits, read back by the
-/// guard's own contract-enforcing reader.
-///
-/// The reader validates the whole resolved-plan contract, so it can now reject
-/// a document the planner considers valid. Only a fixture that feeds it the
-/// real emitter's output catches that divergence; hand-written fixtures agree
-/// with whichever side wrote them. Skipped where no Python interpreter exists,
-/// as its sibling above is.
-#[test]
-fn the_shipped_planner_emits_plans_the_guards_reader_accepts() {
-    use test_toolkit::archive_guard::{GuardPlan, ScanMode};
+/// The resolved plan the shipped planner prints for `arguments`, which start
+/// with the planner's repository-relative path.
+fn shipped_plan(python: &str, arguments: &[&str]) -> String {
+    let output = Command::new(python)
+        .current_dir(repo_root())
+        .args(arguments)
+        .output()
+        .expect("the probed interpreter must still be runnable");
+    assert!(
+        output.status.success(),
+        "the planner must resolve a plan for {arguments:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("the resolved plan is UTF-8")
+}
 
-    let Some(python) = python_interpreter() else {
-        eprintln!("no Python interpreter is available; skipping the shipped-plan fixture");
-        return;
+/// Stamps the shipped-plan cases as separate tests, so nextest schedules each
+/// planner run on its own, and lists their names for
+/// `every_shipped_plan_case_has_a_test`.
+macro_rules! shipped_plan_cases {
+    ($($(#[$meta:meta])* fn $name:ident() $body:block)*) => {
+        const SHIPPED_PLAN_CASES: &[&str] = &[$(stringify!($name)),*];
+        $($(#[$meta])* fn $name() $body)*
     };
-    let root = repo_root();
+}
 
-    let resolve = |arguments: &[&str]| -> String {
-        let output = Command::new(python)
-            .current_dir(&root)
-            .args(["scripts/ci/affected_scope.py", "--resolved-plan"])
-            .args(arguments)
-            .output()
-            .expect("the probed interpreter must still be runnable");
-        assert!(
-            output.status.success(),
-            "the planner must resolve a plan for {arguments:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
+// Every `archive_guard` shape the shipped planner emits, read back by the
+// guard's own contract-enforcing reader.
+//
+// The reader validates the whole resolved-plan contract, so it can reject a
+// document the planner considers valid. Only a fixture that feeds it the real
+// emitter's output catches that divergence; hand-written fixtures agree with
+// whichever side wrote them. Each case is skipped where no Python interpreter
+// exists, as the deletion fixture above is.
+shipped_plan_cases! {
+    #[test]
+    fn the_shipped_planner_emits_a_documentation_plan_the_guards_reader_accepts() {
+        use test_toolkit::archive_guard::GuardPlan;
+
+        let Some(python) = python_interpreter() else {
+            eprintln!("no Python interpreter is available; skipping the shipped-plan fixture");
+            return;
+        };
+        // Documentation under an internal prompt folder, not the root README:
+        // the guard's selection reads only the change list, while any other
+        // non-source path makes the planner scan the whole workspace for tests
+        // that read it (about 2 s of CPU), which no assertion here needs.
+        let resolved = shipped_plan(
+            python,
+            &["scripts/ci/affected_scope.py", "--resolved-plan", "--", "prompts/_docs.md"],
         );
-        String::from_utf8(output.stdout).expect("the resolved plan is UTF-8")
-    };
 
-    let read_back = |arguments: &[&str]| -> GuardPlan {
-        GuardPlan::from_plan_json(Path::new("resolved-plan.json"), &resolve(arguments))
-            .unwrap_or_else(|err| panic!("the guard must read the planner's own document: {err}"))
-    };
+        let document: serde_json::Value =
+            serde_json::from_str(&resolved).expect("the resolved plan is JSON");
+        assert_eq!(
+            document["change_class"], "documentation",
+            "the planner must classify the input as a documentation-only change"
+        );
+        let plan = GuardPlan::from_plan_json(Path::new("resolved-plan.json"), &resolved)
+            .unwrap_or_else(|err| panic!("the guard must read the planner's own document: {err}"));
+        assert!(!plan.selected, "a documentation-only change selects no scan");
+        assert!(
+            !plan.reason.trim().is_empty(),
+            "an unselected plan still says why"
+        );
+    }
 
-    let documentation = read_back(&["--", "README.md"]);
-    assert!(
-        !documentation.selected,
-        "a documentation-only change selects no scan"
-    );
-    assert!(
-        !documentation.reason.trim().is_empty(),
-        "an unselected plan still says why"
-    );
+    #[test]
+    fn the_shipped_planner_emits_a_full_scope_plan_the_guards_reader_accepts() {
+        use test_toolkit::archive_guard::{GuardPlan, ScanMode};
 
-    let full = read_back(&["--all"]);
-    assert!(full.selected, "an explicit full-scope request selects the guard");
-    assert_eq!(full.mode, ScanMode::FullTree);
+        let Some(python) = python_interpreter() else {
+            eprintln!("no Python interpreter is available; skipping the shipped-plan fixture");
+            return;
+        };
+        let resolved =
+            shipped_plan(python, &["scripts/ci/affected_scope.py", "--resolved-plan", "--all"]);
 
-    let changed = read_back(&["--", "tools/test-toolkit/src/archive_guard.rs"]);
-    let ScanMode::Changed(listed) = &changed.mode else {
-        panic!("a change inventory resolves a changed scan, got {:?}", changed.mode);
-    };
-    assert!(
-        listed.windows(2).all(|pair| pair[0] < pair[1]),
-        "the planner's own list must satisfy the sorted, unique rule the reader enforces: {listed:?}"
+        let plan = GuardPlan::from_plan_json(Path::new("resolved-plan.json"), &resolved)
+            .unwrap_or_else(|err| panic!("the guard must read the planner's own document: {err}"));
+        assert!(plan.selected, "an explicit full-scope request selects the guard");
+        assert_eq!(plan.mode, ScanMode::FullTree);
+    }
+
+    #[test]
+    fn the_shipped_planner_emits_a_changed_file_plan_the_guards_reader_accepts() {
+        use test_toolkit::archive_guard::{GuardPlan, ScanMode};
+
+        let Some(python) = python_interpreter() else {
+            eprintln!("no Python interpreter is available; skipping the shipped-plan fixture");
+            return;
+        };
+        let resolved = shipped_plan(
+            python,
+            &[
+                "scripts/ci/affected_scope.py",
+                "--resolved-plan",
+                "--",
+                "tools/test-toolkit/src/archive_guard.rs",
+            ],
+        );
+
+        let plan = GuardPlan::from_plan_json(Path::new("resolved-plan.json"), &resolved)
+            .unwrap_or_else(|err| panic!("the guard must read the planner's own document: {err}"));
+        let ScanMode::Changed(listed) = &plan.mode else {
+            panic!("a change inventory resolves a changed scan, got {:?}", plan.mode);
+        };
+        assert!(
+            listed.windows(2).all(|pair| pair[0] < pair[1]),
+            "the planner's own list must satisfy the sorted, unique rule the reader enforces: {listed:?}"
+        );
+    }
+}
+
+/// The documentation-only, full-scope, and changed-file plans each keep a test:
+/// removing a case from `shipped_plan_cases!` fails here.
+#[test]
+fn every_shipped_plan_case_has_a_test() {
+    assert_eq!(
+        SHIPPED_PLAN_CASES,
+        [
+            "the_shipped_planner_emits_a_documentation_plan_the_guards_reader_accepts",
+            "the_shipped_planner_emits_a_full_scope_plan_the_guards_reader_accepts",
+            "the_shipped_planner_emits_a_changed_file_plan_the_guards_reader_accepts",
+        ]
     );
 }
 

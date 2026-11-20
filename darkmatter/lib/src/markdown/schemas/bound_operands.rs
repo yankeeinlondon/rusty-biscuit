@@ -41,8 +41,9 @@
 //! `edit`'s target and flags are also judged by the parser's own rules
 //! ([`edit_target_problem`](crate::lifecycle::edit_target_problem),
 //! [`edit_flag_problem`](crate::lifecycle::edit_flag_problem)), which convert
-//! as the schema does: a YAML number or boolean target names a file by its
-//! text, and boolean-like flag text such as `"yes"` is a flag. What remains
+//! as the schema does: a number or boolean target, authored or a constant
+//! expression such as `"{{ 5 }}"`, names a file by its text, and
+//! boolean-like flag text such as `"yes"` is a flag. What remains
 //! refused is a blank target, `edit: null`, and a flag that is a number, a
 //! list, or a template.
 //!
@@ -217,12 +218,12 @@ impl BoundOperands {
             {
                 let path = operand_path(&site.path, &location);
                 if let Some(found) = value_at(stored, &path)
-                    && let Some((message, mistyped)) = edit_target_problem(found)
+                    && let Some(message) = edit_target_problem(found)
                 {
                     bound.refused_targets.push(RefusedTarget {
                         at: path,
                         message: message.to_string(),
-                        mistyped,
+                        mistyped: false,
                     });
                 }
             }

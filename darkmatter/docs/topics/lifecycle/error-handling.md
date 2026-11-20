@@ -158,8 +158,10 @@ Three kinds of problem are **never suppressed**, even with `no_error`:
 
 - **A malformed action** (`edit: []`, `edit: null`, `gui: 1`, an unknown
   field) is a parse error reported before anything runs.
-- **A path that is not a non-blank string at run time**, such as
-  `edit: "{{ count }}"` where `count` is a number, is an evaluation error.
+- **A path that is not a non-blank name at run time**, such as
+  `edit: "{{ files }}"` where `files` is a list or `null`, is an evaluation
+  error. A number or boolean result is not: it names the file spelled by its
+  text.
 - **Cancellation.** An `edit` that was open when the run was cancelled, or
   that is reached after cancellation, ends the stack; see
   [Cancellation](#cancellation).

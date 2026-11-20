@@ -8,7 +8,7 @@
 //! `tests/real/real_pi_managed_rpc.rs`.
 
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -274,17 +274,14 @@ fn work_after_settling_keeps_the_run_open() {
     for (label, busy_state) in [("streaming", state(SESSION, true, 0)), ("compacting", json!({"sessionId":SESSION,"isStreaming":false,"isCompacting":true,"pendingMessageCount":0}))] {
         let opened = open();
         ready(&opened);
-        let answered = Arc::new(AtomicU64::new(0));
-        let count = Arc::clone(&answered);
         let _pi = FakePi::start(&opened, move |command| {
-            count.fetch_add(1, Ordering::SeqCst);
             vec![response(command, true, Some(busy_state.clone()))]
         });
         opened.session.observe(r#"{"type":"agent_settled"}"#);
-        wait_until("the check", || answered.load(Ordering::SeqCst) == 1);
-        thread::sleep(Duration::from_millis(50));
+        wait_until(&format!("{label}: steering to reopen after the check"), || {
+            opened.wire.commands().len() == 2 && !opened.session.inner.state.lock().unwrap().closing
+        });
         assert!(!closed(&opened), "{label}: Pi is still working");
-        assert!(!opened.session.inner.state.lock().unwrap().closing, "{label}: steering is accepted again");
     }
 }
 

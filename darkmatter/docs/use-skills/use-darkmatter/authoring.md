@@ -300,8 +300,10 @@ finalize:
   restore the terminal, the edit fails (`prepare the terminal` or
   `restore the terminal`).
 - The target is mandatory: `edit: null`, `edit: []`, a blank path, or a long
-  form without `file` is an error. A native number or boolean names a file by
-  its text (`edit: 5` opens `5`).
+  form without `file` is an error. A number or boolean names a file by its
+  text, whether written (`edit: 5` opens `5`) or produced by a template
+  (`edit: "{{{ issue }}}"` with `issue: 5` opens `5`); a template result that
+  is `null`, a list, or blank fails when the action runs.
 - Flags (`no_error`, `create_new`, `gui`) are literals, never evaluated.
   `true`/`false` and boolean-like text (`"yes"`, `"off"`) work; omitted or
   `null` takes the default (`false`; for `gui`, either editor); a native
