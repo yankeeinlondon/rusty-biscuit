@@ -3,6 +3,8 @@ kind: fix
 name: too-much-work
 date: 2026-11-17
 status: draft-spec
+related:
+  - 2026-10-06-archive-guard-full-tree
 reviewed: false
 implemented: false
 ---
@@ -107,6 +109,26 @@ that protect those surfaces.
   by removed work, not solely by warm-cache timing.
 - Current CI documentation and repo skills describe the resulting ownership
   rules and how a developer registers a maintenance script's checks.
+
+## Coordination with `2026-10-06-archive-guard-full-tree`
+
+That fix changes what the archive-path guard scans once it is selected (always
+the full eligible tree) and leaves its selection rules alone. This spec changes
+selection. The two are independent and can land in either order.
+
+- Narrowing when an ordinary `test-toolkit` lint cell exists will also reduce
+  how often that cell carries the `archive-path-guard` companion. That is
+  acceptable. The guard's explicit triggers must stay covered: an
+  eligible-source change or a change to a guard-owned input (deletions
+  included) still selects the guard, through the guard-only cell if no
+  ordinary owner lint cell exists, whenever the event schedules
+  `ubuntu-latest`.
+- Selecting the guard does not count as disproportionate work because it scans
+  the whole tree. That repository-wide scope answers the guard's question
+  directly; this spec decides only whether a change selects it.
+- Contract tests are deleted only when their contract disappears, as that fix
+  does for the guard's cross-language scope tests, and never only to lower a
+  count.
 
 ## Decisions still needed
 

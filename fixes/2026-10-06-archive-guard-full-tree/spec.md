@@ -7,6 +7,7 @@ related:
   - 2026-09-19-less-brittle
   - 2026-10-05-worker-git-processes
   - 2026-10-06-archive-key-helper
+  - 2026-11-17-too-much-work
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: "2026-10-06"
@@ -43,7 +44,7 @@ $schema:
 The archive-path guard stops reading its scan scope from the resolved plan and
 always scans the full eligible corpus: the Rust files admitted by the existing
 scanner's exclusions. The planner keeps deciding **whether**
-the guard runs (its scheduling rules are unchanged) but no longer tells it
+the guard runs (this fix does not change its selection rules) but no longer tells it
 **what** to scan, so the plan's `archive_guard` section, its Python emitter and
 validator, its Rust reader, and the two cross-language contract tests that run
 the whole planner to exercise that handoff are removed. The resolved plan's
@@ -52,6 +53,12 @@ schema version moves from 7 to 8.
 This reverses one part of `2026-09-19-less-brittle`: the table that scoped a
 pull request's guard scan to the changed eligible files. That spec's real goal,
 reliable **selection** of the guard, is kept as it is.
+
+*Refreshed 2026-11-19* against the current tree: the nightly environment
+policy, the landed key helper, the scanner's tokenization prefilter, the plan
+renderer's new file, and two further plan-fixture consumers. See
+[Coordination with `2026-11-17-too-much-work`](#coordination-with-2026-11-17-too-much-work)
+for how this fix relates to that selection change.
 
 ## Background
 
@@ -70,7 +77,7 @@ fallbacks; this fix does not change which expressions are accepted. Its
 
 | Test | Scope today |
 | --- | --- |
-| `no_archive_executed_target_bakes_in_a_producer_path` | the plan's scope (full tree, or a changed-file list) |
+| `no_archive_executed_target_bakes_in_a_producer_path` | the plan's scope: full tree for a push, a full-scope request, or a run with no change inventory; otherwise (a pull request) a changed-file list |
 | `every_allowlist_entry_still_names_a_live_site` | **always the full tree** |
 
 ### Where it runs
@@ -128,23 +135,29 @@ gives an approximate scale for the added work, not an upper bound on the
 violation scan or the whole suite. Recent full-tree runs report
 `files-checked=4038 … violations=5` (all five allowed).
 
+Since that measurement, the scanner skips tokenizing a file whose text holds
+none of the guarded path forms (commit `85c7da9c6`, 2026-11-16). Most eligible
+files contain none, so a full-tree violation scan should now cost less than
+the figure above. It has not been re-measured; acceptance 5 records it.
+
 ### The handoff's contract tests are expensive in archive mode
 
 Two tests in `tools/test-toolkit/tests/ci_workflow_contracts.rs` exist only to
 prove that the Python emitter and the Rust reader agree:
 
-- `the_shipped_planner_emits_plans_the_guards_reader_accepts` runs the shipped
-  planner three times against the real workspace, once per shape
+- three `the_shipped_planner_emits_a_{documentation,full_scope,changed_file}_plan_the_guards_reader_accepts`
+  tests run the shipped planner against the real workspace, once per shape
   (`-- README.md` → not selected, `--all` → full, `-- tools/test-toolkit/src/archive_guard.rs`
-  → changed), and parses each result with `GuardPlan::from_plan_json`.
+  → changed), and parse each result with `GuardPlan::from_plan_json`.
 - `the_shipped_planner_omits_deletions_and_the_reader_refuses_an_unexpected_absence`
   checks that deleted paths are omitted from `changed` and that the reader
   refuses a listed path that does not exist.
 
 On hosted CI, each test took 64–82 s on `ubuntu-latest`, and both timed out
-at 90 s on `windows-latest` (runs 37529082394, 37537695506). These timeouts keep
-`test-toolkit` L1 red on `windows-latest`, on `main` and on any `ci:all-os`
-pull request.
+at 90 s on `windows-latest` (runs 37529082394, 37537695506). At the time those
+timeouts kept `test-toolkit` L1 red on `windows-latest`. `windows-latest` is now
+scheduled only by the nightly, `workflow_dispatch`, and `ci:all-os` pull
+requests, so that is where such a timeout would show.
 
 Archive-mode runs on the build hosts (`BUILD_WSL` and `BUILD_WIN` through
 `just cross-check`) located the cause. Their durations do not predict hosted CI
@@ -156,8 +169,11 @@ change. In the same runs, the test-input scan was a small share of the time.
 Giving test 1 an input that skips the scan left both tests above nextest's
 30 s slow mark on `BUILD_WIN`.
 
-`2026-10-06-archive-key-helper` removes that compile by binding the artifact's
-verifier as the key helper. The timeouts are therefore not, on their own, a
+`2026-10-06-archive-key-helper` has since been implemented: an archive
+consumer binds the artifact's verified `ci-build` as the key helper, and
+`build_key.py` no longer falls back to `cargo run`. That removes the compile
+these tests paid for. No hosted `windows-latest` duration for them has been
+recorded since. The timeouts are therefore not, on their own, a
 reason for this spec. Deleting the two tests removes their cost along with the
 handoff they prove, but the case for removing the handoff rests on the
 subsections before and after this one: the scan cost and the detection goal. Whether the `windows-latest`
@@ -179,11 +195,15 @@ scan policy and a plan reader solely for it.
 1. Every guard invocation scans the full eligible corpus. The scanner reads
    no plan and no scope variable. It continues to use the existing runtime
    checkout lookup, so an archived binary checks the consumer's checkout.
-2. Scheduling is unchanged: the same changed paths trigger a guard-only
+2. This fix does not change scheduling: the same changed paths trigger a guard-only
    `test-toolkit` lint cell, the same ordinary owner lint cells carry the
    companion, and no guard cell forces `ubuntu-latest` into an event that does
-   not schedule it. A scheduled guard can now fail for a violation in an
-   untouched file; that wider detection is intentional.
+   not schedule it. "Unchanged" means unchanged *by the scan simplification*;
+   it does not freeze today's ordinary-cell attachment against separate
+   ownership changes (see
+   [Coordination](#coordination-with-2026-11-17-too-much-work)). A scheduled
+   guard can now fail for a violation in an untouched file; that wider
+   detection is intentional.
 3. The resolved plan no longer carries the guard's scope. Its lint cells'
    `archive-path-guard` companions describe scheduled execution, and a
    guard-only cell keeps its human-readable selection reason.
@@ -276,7 +296,14 @@ The Python planner in the `repo-deps` package owns scheduling.
   `SUITE_OWNER_PATHS` when its retired corpus is deleted. Keep
   `contract.json` ownership for its surviving cross-language readers.
 - Refresh selection and registry comments that explain the former scope
-  contract; keep the eligibility and owned-input agreement tests.
+  contract; keep the eligibility and owned-input agreement tests. The current
+  `archive_guard_scope` docstring says a `schedule` run schedules WSL2 alone;
+  that is stale (the nightly schedules `windows-latest` and `wsl2-ubuntu`), and
+  its replacement states the rule in terms of the scheduled environments.
+- Selection tests pin the selection policy in force when this fix is
+  implemented. If `2026-11-17-too-much-work` lands first and narrows when an
+  ordinary `test-toolkit` lint cell exists, these tests follow that result
+  rather than restoring the broader selection.
 
 ### Resolved plan schema (version 7 → 8)
 
@@ -331,8 +358,8 @@ implementation change:
   `ubuntu-latest` execution remains `OUTSTANDING` on another host. A local
   pass does not replace a non-reusable CI lint cell, including on Linux.
 - Replace the old scan-scope summary on both display surfaces:
-  [ci-plan](../../scripts/ci-plan.rs), the `repo-deps` terminal renderer, and
-  the local runner's `jq` fallback. They derive guard presence from lint-cell
+  [the plan renderer](../../scripts/ci-plan-render.rs), which the `repo-deps`
+  `ci-plan` binary uses, and the local runner's `jq` fallback. They derive guard presence from lint-cell
   companions and describe a full-tree scan when attached, or say that no
   guard execution is planned when none is attached. Cell selection reasons
   and execution states remain visible in the existing cell display. A
@@ -369,7 +396,9 @@ implementation change:
   ordinary owner lint cell, and the guard-only cell. Include an ordinary
   owner selection with no separate guard trigger to pin existing attachment.
 - Update `test_schema.py`, `test_resolved_plan.py`, `test_ci_local.py`,
-  `test_evidence_reuse.py`, `test_local_evidence.py`, and shared plan fixtures
+  `test_evidence_reuse.py`, `test_local_evidence.py`, `test_cross_check.py`,
+  `test_hosted_observations.py`, and shared plan fixtures
+  (`plan_fixtures.archive_guard` is removed)
   for the retired field and version. Retain version-first refusal, the
   `scope-schema` miss, and unchanged validation receipt behavior. Guard lint
   cells remain non-reusable.
@@ -393,8 +422,7 @@ README or topic page that describes the public scan API. Explain full-tree
 scanning, ordinary versus guard-only attachment, the still-required execution
 plan, non-reusable guard evidence, and the retained exclusions. Describe the
 guard's environment rule in terms of the environments actually scheduled,
-rather than depending on a hard-coded claim about the nightly event. The
-nightly policy discrepancy is recorded in Resolved Questions below; this fix
+rather than depending on a hard-coded claim about the nightly event. This fix
 does not change the environment table. Current docs state behavior directly
 and do not name this fix. Historical specs and schema history rows remain
 snapshots.
@@ -426,73 +454,72 @@ snapshots.
    validate this simplification. Existing execution bans remain binding.
 5. The selected Ubuntu lint companion reports `mode=full-tree` and a positive
    file count; a failing or unreported required companion cannot pass its
-   cell. Record durations from the normal validation run for context. The
+   cell. Record durations from the normal validation run for context,
+   including the violation test's full-tree time with the tokenization
+   prefilter. The
    existing measurements justify removing the handoff without a performance
    spike or a new timing threshold: 3.9 s measured one raw-form pass, not the
    total duration of two tests, compilation, or CI setup.
+
+## Coordination with `2026-11-17-too-much-work`
+
+The two specs overlap in the planner and its test contracts but answer
+different questions. Neither supersedes the other, and neither depends on the
+other being implemented first.
+
+| | This fix | `2026-11-17-too-much-work` |
+| --- | --- | --- |
+| Question | What does the guard scan once selected? | Which checks should a change select? |
+| Change | Always scan the full eligible tree; remove the file-list handoff | Replace directory-based selection with checks justified by the affected behavior |
+| Scheduling | Not changed by this fix | Intentionally changed |
+| Cost removed | Scope machinery and its contract tests | Unrelated gates, tests, and compilation |
+
+Where they meet:
+
+- **Planner ownership and companion attachment.** This fix keeps both guard
+  routes: an ordinary `test-toolkit` lint cell carries the companion, and an
+  explicit trigger without other owner work adds the guard-only cell. The
+  newer spec may reduce how often an ordinary owner lint cell exists (for
+  example, after a comment-only `justfile` change or a maintenance-script
+  change under `tools/test-toolkit`). That incidentally reduces guard runs and
+  is acceptable. What must survive either change: an eligible-source change or
+  a change to one of `ARCHIVE_GUARD_OWN_INPUTS` (deletions included) still
+  selects the guard whenever the event schedules `ubuntu-latest`.
+- **Contract-test selection.** Both specs agree on the rule: a test is deleted
+  when the contract it proves disappears (this fix's cross-language scope
+  tests), never merely to lower a test count. Surviving guard contracts listed
+  under Tests stay.
+- **One canonical plan.** Both keep the planner as the only scheduler. After
+  this fix the scanner reads no plan, but the workflow still reads the
+  resolved plan to decide whether to execute the companion.
+
+Full-tree scanning does not conflict with the newer spec's rule that every
+selected gate answers a concrete question. A selected guard answers: "does the
+eligible tree contain any unexempted archive-unsafe path?" Its repository-wide
+scope is intentional coverage; whether a given change should select it is the
+newer spec's question.
 
 ## Resolved Questions
 
 ### Which environments should the nightly event schedule?
 
-**Decided 2026-10-06 by the author: keep the checked-in environment table as
-it is for this fix, and resolve nightly policy separately.** This fix does not
-change `.github/ci/environments.json`; a nightly run continues to schedule
-WSL2 alone, so it does not execute the guard. The options as reviewed:
+**Settled outside this fix.** When this spec was first written, the nightly
+scheduled WSL2 alone while the repository instructions described Linux,
+Windows, and WSL2. The environment table and the repository instructions now
+agree: `schedule` runs `windows-latest` and `wsl2-ubuntu`, and pull requests
+and pushes to `main` prove `ubuntu-latest` and `macos-latest`. The nightly
+therefore schedules no `ubuntu-latest` cell and never executes the guard;
+Linux coverage of the guard comes from pull requests and pushes. This fix does
+not change `.github/ci/environments.json`.
 
-The repository instructions describe a nightly run covering Linux, Windows,
-and WSL2. However, the checked-in
-[environment table](../../.github/ci/environments.json) assigns `schedule`
-only to WSL2, and [the workflow](../../.github/workflows/ci.yml) describes
-that same rule. This matters because the guard is hosted on `ubuntu-latest`:
-a WSL2-only nightly cannot run it. This is a pre-existing policy discrepancy,
-not a consequence of removing scan scope.
-
-- **Preserve the checked-in table for this fix; resolve nightly policy
-  separately (chosen).** Pros: keeps scheduling unchanged and avoids
-  adding CI work unrelated to the guard's plan reader. Cons: the disagreement
-  with the repository instructions remains, and the current nightly does not
-  execute the guard. Recommended because this fix can satisfy its design
-  goal without deciding or expanding the nightly matrix. The author should
-  confirm the intended policy and correct its owning documents separately.
-- **Include a separately justified nightly-policy change.** Add `schedule`
-  to Linux and Windows in the environment table, then update the event tests
-  and current documentation together. Pros: brings the executable schedule
-  into agreement with the stated repository policy and runs the guard on
-  the nightly event. Cons: adds Linux and Windows work across the nightly
-  full-workspace plan, increasing runner time and making this fix responsible
-  for a broader scheduling change. It requires an explicit author decision
-  and a scope-based cost estimate before adding those cells.
-
-Either option leaves the guard rule unchanged: it runs only when the resolved
-plan contains a lint cell carrying its companion on `ubuntu-latest`. This
-policy question does not block implementing the scan simplification against
-the current table.
+The guard rule is unchanged: it runs only when the resolved plan contains a
+lint cell carrying its companion on `ubuntu-latest`.
 
 ## Not in scope
-
-These are open and recorded so they are not lost:
-
-- **Nightly environment policy.** The repository instructions and the
-  `rust-devops` CI page describe a nightly run covering Linux, Windows, and
-  WSL2, while `.github/ci/environments.json` schedules `schedule` on WSL2
-  alone. Deciding the intended policy and correcting whichever side is wrong
-  is a separate change (see Resolved Questions).
 
 - **Planner in Rust.** `scripts/ci/test_inputs.py` is a Rust lexer written in
   Python and the expensive part of planning; moving it into Rust, sharing the
   guard's lexer, is the proposed first step of an incremental migration. It
   needs its own spec.
-- **`repo-deps` Windows MAX_PATH.** Seven `ci-build` archive tests fail on
-  `windows-latest` with `LNK1104` because the nested fixture build reaches a
-  266-character path; four more time out. Partial uncommitted work is on
-  branch `fix/ci-build-fixture-max-path` (worktree
-  `.claude/worktrees/agent-aaa3ce04badad1120`).
-- **Fake-Gitea record-and-replay.** `list_prs::a_changed_origin_drops_the_old_head_checks_fallback_notice_and_caption`
-  misses the 3 s wait on `windows-latest`; about half its transport time is the
-  test fixture running `git http-backend` per request. Partial uncommitted work
-  is on branch `test/gitea-replay` (worktree
-  `.claude/worktrees/agent-ad15a63a110599e32`), with a probe test to delete.
-- **Proving `2026-10-05-worker-git-processes` on Windows CI.** Re-run `main`'s
-  run 37517419405 once the items above are merged; its `worktree` cell passed
-  521/521 last time and failed only on the UTF-8 crash fixed by PR #116.
+- **Selection by affected behavior.** Narrowing which changes select ordinary
+  `test-toolkit` lint cells belongs to `2026-11-17-too-much-work`.
