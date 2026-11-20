@@ -21,9 +21,15 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-11-20
-status: draft-spec
+status: human-in-the-loop
 area: darkmatter
-reviewed: false
+reviewed: true
+reviewed_by: "codex/gpt-6.2-sol"
+reviewed_on: "2026-11-20"
+review_iterations: 0
+needs_rulings: true
+required_rulings:
+    - Whether to require static schema errors for expressions the editor cannot evaluate
 clarified: false
 implemented: false
 packages:
@@ -40,33 +46,14 @@ depends-on:
 
 # Schema-Typed `load_data`
 
-Let `load_data(file)` be called without a type. The type of the loaded data
-is **inferred from the file's contents**, carried through the surrounding
-expression, and checked against the frontmatter property's declared
-`$schema` type. A document states its types once, in `$schema`, instead of
-repeating them as a quoted `as` string inside each call.
+Allow `load_data(file)` without a quoted type argument. A document can declare
+the destination type once in `$schema`, with the loaded data flowing through
+ordinary expressions such as `map`, `filter`, and conditionals. The Darkmatter
+language server (DMLS) can inspect approved data to catch mistakes while the
+author edits. Compose judges the values from its own run.
 
-This spec also adds **object spread** (`{ ...item, color: "blue" }`) to the
-expression language, which the motivating example needs and which does not
-exist today.
-
-## Motivation
-
-`load_data` requires `as`, a quoted type definition, on every call. When the
-call fills a frontmatter property, the document already declares that
-property's type in `$schema`, so the author writes the type twice, in two
-syntaxes, and the two can drift. The common case is also verbose:
-
-```yaml
-apps: "{{ load_data('../../../terminal-apps.yaml', '{sequence: {name: string, url: string, os: string[]}[]}') }}"
-```
-
-The type checker can already follow a value through `map`, `filter`,
-ternaries, and `||` (`expression_type` in
-[call_check.rs](../../lib/src/markdown/compose/expression/call_check.rs)). The only missing
-input is the type of the loaded data itself. If that type comes from the
-file, every property built from loaded data can be checked against its
-declared type, at design time in DMLS and at compose time.
+This feature also adds object spread, as in `{ ...item, color: 'blue' }`, so
+an author can extend a row without repeating its fields.
 
 ## Example
 
@@ -78,284 +65,355 @@ $schema:
         - "{ name: string(required), age: number }[]"
         - "literal(foobar)"
 direct: "{{ load_data('data.yaml') }}"
-additive: "{{ map(load_data('data.yaml'), i -> { ...i, color: 'blue' }) }}"
+additive: "{{ map(load_data('data.yaml'), i => { ...i, color: 'blue' }) }}"
 conditional: "{{ file_exists('data.yaml') ? load_data('data.yaml') : 'foobar' }}"
 ```
 
+Save the following as `data.yaml`.
+
 ```yaml
-# data.yaml
 - name: Ada
   age: 36
 - name: Grace
   age: 85
 ```
 
-All three properties pass, at design time and at compose time. If `data.yaml`
-gave Grace's age as `"old"`, `direct` and `additive` would fail. The error for
-`direct` would point at `data.yaml` line 4. The error for `additive` would
-point at the property, because the value passed through a transformation.
+All three properties pass in compose and in DMLS once the editor has an
+approved, current result. If Grace's age is changed to `"old"`, all three
+properties fail with the file present. The direct error points at the
+`direct` expression and the value on line 4 of `data.yaml`. The `additive`
+error points at the expression that built the new row. The conditional
+uses the fallback only when the file is absent.
 
-## Current behavior
+## Existing contracts
 
-Verified against the code on 2026-11-20:
-
-- **`as` is required.** The catalog signature is
-  `load_data(file: file | null, as: type-definition(container), options?: …)`
-  ([function catalog](../../schemas/partials/functions.yaml)). A one-argument
-  call fails with "no signature takes 1 argument".
-- **The checker gets `load_data`'s type only from `as`.** `load_data_type` in
-  `call_check.rs` parses the literal `as` text. Without it, the call's type
-  falls back to the catalog return type, `unknown | null`.
-- **Data must be a container.** The `as` contract must denote an array, tuple,
-  object, or dictionary, so a file holding a single scalar cannot satisfy any
-  contract.
-- **No property-level type check.** Nothing compares the type the checker
-  infers for a frontmatter property's expression with that property's
-  `$schema` type. Mismatches are found only when compose validates the
-  evaluated frontmatter.
-- **`is_subtype` is too narrow to do that comparison.** `simplified_schema::is_subtype`
-  ([subtyping](../../../simplified-schema/docs/topics/language/subtyping.md))
-  compares arrays only by identity, has no structural rule for inline objects,
-  and ignores presence (`required`) and conversion. It was built for approval
-  rules, not for checking values.
-- **There is no spread syntax.** The expression parser's object literal
-  (`parse_object_literal` in
-  [parser.rs](../../../simplified-schema/lib/src/expression/parser.rs)) accepts
-  only `key: value` entries and the `{a}` shorthand; `...` is not a token.
+- The Darkmatter [function catalog](../../schemas/partials/functions.yaml)
+  requires a container type in the second argument. The Darkmatter
+  [`expression_type` checker](../../lib/src/markdown/compose/expression/call_check.rs),
+  which supplies types for passive expression checks and editor features,
+  already follows callbacks and branches. Its special handling for
+  `load_data` uses a literal contract and accounts for a nullable file
+  argument. That checker stays independent of file access.
+- The [Loading Data guide](../../docs/topics/loading-data.md) defines
+  contract conversion, input parsing, positional and object rows, and
+  readable error locations. This feature extends that behavior by making
+  the contract optional, wrapping scalar roots, and changing named
+  tabular keys as described below.
+- [Darkmatter schema validation](../../docs/topics/schemas/definition.md)
+  judges the effective schema, which can include built-in rules, matching
+  triggers, and imported or resolved types. It already applies defaults
+  and converts values. These rules also apply to expression results.
+- The [Simplified Schema expression parser](../../../simplified-schema/lib/src/expression/parser.rs)
+  reads object fields and field shorthand. Adding spread affects this
+  parser and the consumers that evaluate or inspect the resulting expressions.
 
 ## Requirements
 
-### R1 — `as` becomes optional
+### Optional contracts and return values
 
 The catalog signature becomes
 `load_data(file: file | null, as?: type-definition(container) | null, options?: …)`.
+Calling `load_data(file)` and `load_data(file, null)` has the same meaning.
+Use `load_data(file, null, options)` to set options without a contract.
 
-- With `as`, `as` is the contract and the call's type is the type `as`
-  denotes, as today. R2 and R8 change what the data looks like before the
-  contract is applied.
-- Without `as` (or with `as: null`, so `options` can be passed positionally),
-  the data is not checked by the call. The call's type is the type
-  **inferred** from the data (R3), or `container` when the data cannot be read
-  at check time (R5).
+- A supplied contract keeps its existing role. It selects an allowed
+  tabular row shape and validates and converts the parsed value before the
+  call returns. Preserve literal-contract typing, including the null-file
+  case, and the existing treatment of computed or imported contracts.
+- Omitted or null `as` skips call-level schema validation and conversion.
+  Strict parsing, option checks, error handling, and read tracking still
+  apply. A CSV cell like `"1000"` is a string inside the surrounding
+  expression. A destination declared as `number` can convert it when
+  frontmatter is validated. Supply `as` when a callback needs converted
+  values before that stage.
+- After parsing, keep array and object roots, wrap any non-null scalar
+  root in a one-element array, and turn a null root into `[]`. Apply this
+  before a supplied contract is judged, so a YAML file containing `5`
+  can satisfy `number[]` and can fail a tuple that needs two elements. An
+  empty YAML file follows its parsed null value. Empty or malformed input
+  still follows each format's parser. For example, an empty JSON file
+  is malformed and JSON containing `null` produces `[]`.
+- A bound null file argument still short-circuits to null, before contract
+  imports, file resolution, or reads. Preserve the passive check for
+  provably invalid authored arguments, even in an unselected branch.
+- Preserve the existing resolution context, permissions, read set, and
+  failure order. A missing file is still a recoverable absence for
+  `try(…)`. Malformed data, invalid options, and permission failures
+  keep their current failure behavior. Ordinary compose reads use the
+  existing loader and memo, including their refresh after an executed
+  shell step.
 
-### R2 — loaded data is always a container
+### Checking expression results against the schema
 
-A file whose top-level value is a scalar loads as a one-element array:
-`5` → `[5]`, `"macOS"` → `["macOS"]`. A file whose top-level value is `null`,
-including a zero-byte YAML file (which loads as `null` today), loads as `[]`.
-This applies with or without `as`.
+Check top-level frontmatter properties declared by the effective schema whose
+entire authored value is one `{{ … }}` expression. Embedded text such as
+`"prefix {{ … }}"` and nested expression sites keep their existing
+compose-time checks. Use the effective declaration for that document and
+its original resolution context. Defer a finding if a schema slot, a root
+union arm, or another part of the applicable declaration cannot yet be
+resolved well enough to prove the problem. For example, an error under
+one possible root union arm does not establish an error under the union.
 
-`null` passed as the `file` argument still returns `null` without reading
-anything; this rule is about the contents of a file that was read.
+Use the exact observed values when available. Preserve literal leaves,
+array positions, object keys, and nulls. For member lookup and hover, this
+behaves like a tuple for an array and a known set of fields for an object.
+The implementation can retain the parsed value and derive shapes as needed.
+Keep the declared type visible in hover. Summarize large inferred shapes by
+field, element, or alternative count and show only a bounded preview. Build
+that preview without first formatting the entire value.
 
-The data-contract page and the `load_data` catalog entry document this.
+Compose uses the actual expression result and its normal frontmatter
+validation stage. DMLS checks a copy when an approved background evaluation
+has a concrete result. Use the schema engine's existing conversion,
+defaulting, presence, and constraint rules. For example, a missing field
+with a default can pass, `"1000"` can convert to a number, and an unexpected
+field still fails in a closed object. If a rule needs a file check or
+other input the editor cannot verify under its read policy, defer that
+finding. Treat strings returned by evaluation as data, even if they contain
+template syntax.
 
-### R3 — the inferred type is exact
+> **Reader's note.** The draft proposed a new type relation to predict what
+> validation would accept. Checking observed values through the existing
+> validator keeps conversion, defaults, and union selection consistent with
+> compose. An inferred shape helps the editor explain a value. A firm schema
+> error requires evidence the existing validation rules can judge. The
+> [Open Questions](#open-questions) section covers whether to add proofs for
+> cases where the editor has no concrete result.
 
-The inferred type of loaded data records the data exactly, with no
-generalizing:
+For an unavailable uncontracted load, the type is a container of unknown
+shape, plus null if the file argument may be null. A literal null file has
+type null. An unknown result is provisional. It supplies no property-level
+verdict and must also avoid new missing-member errors based solely on
+unobserved fields. For `header: false` without `as`, publish
+`unknown[][]`; DMLS skips cell-by-cell schema checking through that
+uncontracted read. Compose still validates every realized cell covered by
+the destination schema.
 
-| Data | Inferred type |
-|---|---|
-| a string, number, or boolean | that literal (`"macOS"` → `literal(macOS)`) |
-| `null` | `null` |
-| an array | a tuple of each element's inferred type |
-| an object | an inline object with each key present and typed exactly |
+### Editor reads and refresh
 
-Because nothing is generalized, an inferred `literal(macOS)` fits
-`enum(macOS, Linux, Windows)`, and it also fits `string`.
+Keep passive call checking available without reading inputs. Schedule new
+background reads for whole property expressions that use uncontracted
+`load_data`. Reuse the read authorization, function admission,
+work limits, cancellation, and current-result installation used for editor
+schema slots. Those rules already permit pure transforms and approved reads,
+and prevent effectful functions from running. Use the document's resolution
+context and frontmatter values known at editing time. Defer when the
+expression needs runtime-only values, unresolved dependencies, or an
+unsupported operation. Evaluation follows ordinary branch selection,
+short-circuiting, and `try` recovery. A missing file in an unselected branch
+does not produce a warning.
 
-CSV and TSV cells are text, so they infer as string literals. The one
-exception to exact typing is a CSV or TSV file read with `header: false`,
-which is typed `unknown[][]` (R8). The fit relation
-(R4) applies text-to-number and text-to-boolean conversion the same way
-validation does, so `"1000"` still fits `number`.
+- Allow local content and existence reads only under the configured
+  file-read policy or an applicable in-process approval. The worker raises
+  no prompt. An unapproved or unavailable read leaves the result pending.
+- Remote reads for this check may use a current cached response only when
+  the URL is allowed for the request, with authorization checked before
+  cache access. A miss, expired entry, or denied URL leaves the result
+  pending. The editor check never fetches or revalidates over the network.
+  Expiry also makes an installed result based on that response stale.
+- Feed completion, hover, and diagnostics from the installed snapshot.
+  Track reads and missing candidates, and refresh on relevant disk changes,
+  unsaved changes to dependent buffers, configuration or approval changes,
+  and schema invalidation. Discard results from outdated jobs. While a
+  result is stale, withhold its findings and inferred members. Follow the
+  existing [DMLS schema slot worker](../../docs/topics/schemas/schema-slots.md#in-the-editor)
+  for path watches, missing-file creation, and clients without file watches.
+- Warn at an executed, unrecovered missing local read that the editor can
+  prove under its read policy. The same missing file remains a compose
+  error. Preserve the distinction between a missing file and a file the
+  worker is unable to inspect.
 
-Each inferred literal remembers where it came from: the data file and the
-JSON Pointer to that value. R6 uses this.
+Reuse the parsed input across eligible properties in the same observation.
+Build source positions only for reported problems and stop when the
+background work allowance is exhausted. Compose needs neither an extra
+input read nor a separate inference pass to judge the completed property.
 
-**Display.** Hover and diagnostics never print a large inferred type in full.
-Past a threshold chosen in planning, a tuple is shown as an array of the union
-of its elements, and a long union of literals is shown by its base type and a
-count (for example `string (42 distinct values)`).
+### Error locations
 
-### R4 — a property's inferred type must fit its declared type
+Keep the authored Markdown expression as the primary location. For a
+direct load, including one wrapped in parentheses or selected unchanged by
+a conditional, add a data-file location to a property schema error when
+the failing value can be traced to the data. A result built by a callback
+or object spread gets the expression location only. Call-level malformed
+input and explicit-contract failures keep their existing data-file details
+regardless of how the result would have been used.
 
-Add a **fit** relation, "every value of type `a` is accepted by declared type
-`b`", in simplified-schema beside `is_subtype`. It differs from `is_subtype`
-in the ways that checking a value needs:
+Reuse Darkmatter's [`DataLocation` record](../../lib/src/markdown/compose/expression/diagnostics.rs)
+and the loader's [position lookup](../../lib/src/markdown/compose/expression/data/locate.rs)
+so the CLI and editor point to the same source. Store source identity and
+the mapping needed to locate a failure. Locate the original input, including
+the source root for a wrapped scalar and the original cell for a renamed
+header. Preserve the existing rules for absent members, unknown line or
+column, and optional byte offsets. Never guess a position. Extend the
+diagnostic data contract to allow `data_location` on these property schema
+failures as well as the existing data errors. Use existing schema error
+codes for the property failure so a call's own contract violation remains
+distinguishable from a destination schema violation.
 
-- arrays are covariant: `A[]` fits `B[]` when `A` fits `B`;
-- a tuple fits `B[]` when every position fits `B`;
-- an inline object fits a declared object when each declared field the value
-  has fits that field's type, each `required` field is present, and any extra
-  fields are allowed wherever validation allows them;
-- a union fits when every arm fits; a value fits a union when one arm accepts
-  it;
-- conversion is applied as in
-  [conversion rules](../../../simplified-schema/docs/topics/conversion.md):
-  a text literal fits `number` when it converts;
-- constraints (`min`, `pattern`, …) are checked against literal types, since
-  their values are known, and ignored for non-literal types;
-- `unknown` and `container` fit only `unknown` and container-compatible
-  declarations; they never cause a diagnostic by themselves.
-
-Using it, check every frontmatter property whose value is a single `{{ … }}`
-expression and whose name `$schema` declares: compute `expression_type` for
-the expression and report a mismatch when it does not fit.
-
-### R5 — when data is read for type inference
-
-- **Compose** reads the data as it does today; the inferred type is available
-  to every later check.
-- **DMLS** reads local data files off the request path, under the same rules
-  as the schema-slot worker
-  ([slot_jobs.rs](../../dmls/src/slot_jobs.rs)): configured read permissions
-  and in-process approvals decide each read, no prompt is raised, and a change
-  to a file that was read marks the result stale.
-- **Remote URLs** are not read at design time unless the read is already
-  approved and cached. Their type is `container`, which produces no
-  diagnostic.
-- **A local file that does not exist** is a design-time **warning** on the
-  call, and the call's type is `container`. At compose time it remains an
-  error, unless the call is inside `try(…)`, as today.
-
-### R6 — diagnostics name the data location
-
-When the value that fails the fit check is a literal inferred from a data file
-(the property's value passed through unchanged, as in `direct`), the
-diagnostic carries the existing `data_location` fields (file, JSON Pointer,
-line, column) in addition to the property's location. When the value passed
-through a transformation, the diagnostic names the property only.
-
-The compose-time check against `$schema` stays authoritative: the data file
-may change between design time and compose time.
-
-### R7 — object spread
-
-Add `...expr` as an object-literal entry:
+### Object spread
 
 ```text
-{ ...base, color: "blue" }
+{ ...base, color: 'blue' }
 { ...defaults, ...overrides }
 ```
 
-- Entries apply left to right; a later key replaces an earlier one, whether
-  it came from a spread or was written.
-- Spreading `null` contributes nothing.
-- Spreading anything other than an object or `null` is a type error, reported
-  by the passive check when the type is known and at evaluation otherwise.
-- Two **written** entries with the same key remain a parse error, as today.
-  A written key may replace a spread key.
-- `expression_type` merges object shapes in the same order, so
-  `{ ...i, color: "blue" }` over `{name: string, age: number}` has type
-  `{name: string, age: number, color: literal(blue)}`.
+- Evaluate entries once each in source order. For each key the last entry
+  providing it wins. Two explicitly written entries with the same key
+  remain a parse error, including shorthand and duplicates separated by
+  a spread.
+- Spread accepts an object or null. Null contributes no fields. A known
+  non-object, non-null operand is a passive type error. An operand whose
+  type cannot establish the result is checked when evaluated. Report the
+  error at the spread operand.
+- Type inference uses the same order. Known later fields replace earlier
+  fields. A field that might be supplied by a later spread can widen the
+  earlier field's type. A spread with unknown keys leaves an open result
+  until more is known, while a subsequent explicit field sets the type
+  of that field.
+- The Simplified Schema [expression tree](../../../simplified-schema/lib/src/expression/)
+  keeps written fields and spread operands distinct, with source spans for
+  editor ranges. Update every consumer that handles object literals,
+  including dependency and permission scans, passive diagnostics, editing
+  support, and evaluation across Simplified Schema, Darkmatter, DMLS, and
+  Claudine. Scans must visit spread operands, including ones whose keys
+  are later overwritten. Preserve the existing interpolation closing
+  rule and the literal-only grammar used for catalog examples.
 
-The AST change is in simplified-schema (`Expr::ObjectLiteral` and
-`SpannedExprKind::ObjectLiteral` gain a spread entry). About 18 files in
-darkmatter, darkmatter-lsp, simplified-schema, and claudine match on
-`ObjectLiteral` and must handle it. Each one is updated, not given a wildcard
-arm.
+Array spread is out of scope.
 
-Array spread (`[...a, b]`) is out of scope.
+### CSV and TSV rows and keys
 
-### R8 — CSV and TSV row shapes and header keys
+`header` accepts `boolean | string[]`; omitted or null uses `true`.
+With no `as` contract, it determines the shape.
 
-The `header` option's type widens from `boolean` to `boolean | string[]`; it
-still defaults to `true`. Without `as`, `header` alone decides each row's
-shape:
+| `header` | First input record | Row shape |
+|---|---|---|
+| `true` (default) | Header | Object keyed by camelCase names |
+| `['label', 'years']` | Data | Object with exactly the supplied column names |
+| `false` | Data | Array of cells in column order |
 
-| `header` | First row of the file | Each row | Rows from a file `First Name,Age` / `Ada,36` |
-|---|---|---|---|
-| `true` (default) | the header | an object keyed by the camelCased header | `{firstName: "Ada", age: "36"}` |
-| `[name, …]` | data | an object keyed by the given names | with `["label", "years"]`: `{label: "First Name", years: "Age"}`, `{label: "Ada", years: "36"}` |
-| `false` | data | a list of cells, by position | `["First Name", "Age"]`, `["Ada", "36"]` |
+With `as`, retain the existing rule that the contract selects object or
+positional rows and all applicable contract arms agree:
 
-```yaml
-rows: "{{ load_data('export.csv', null, { header: ['name', 'age'] }) }}"
-```
+- `header: true` supports either shape. Positional rows skip the header
+  record without inspecting its names. Object rows use camelCase keys with
+  or without `as`.
+- `header: false` requires a positional-row contract. A list of names
+  requires an object-row contract. Report an incompatible contract as
+  `dm.data.row_shape_conflict` before reading the data, using the existing
+  passive check when the format, header mode, and contract are known.
+- Use explicit names verbatim after normal argument binding. An empty
+  name, duplicate name, or empty name list is `dm.data.invalid_options`
+  on the options argument and fails before any data read. For a nonempty
+  file, the name count must equal the first data record's width. A
+  mismatch is `dm.data.malformed` at the first data record and names both
+  counts. With no data records, return `[]` and apply any supplied
+  contract. Keep the normal width check on every later record.
 
-**A list of names means the file has no header row.** Every record,
-including the first, is data, and the names become the keys:
+For example, `load_data('export.csv', null, { header: ['label', 'years'] })`
+reads a first record of `First Name,Age` as
+`{label: "First Name", years: "Age"}`. The second record `Ada,36` reads as
+`{label: "Ada", years: "36"}`. The same file under `header: true` yields
+one row, `{firstName: "Ada", age: "36"}`.
 
-- names are used exactly as written; they are not camelCased;
-- each name must be non-empty and unique, or the call fails as a bad
-  argument, before the file is read;
-- the number of names must equal the number of columns, or the call fails
-  with `dm.data.malformed`, naming both counts, on the first record's line;
-- rows are typed exactly, per R3, and an `as` contract names the given keys.
+Use the same case conversion as Darkmatter's
+[`camel_case` expression function](../../lib/src/markdown/compose/expression/functions/strings.rs)
+to make header-derived keys predictable in expressions. A normalized empty
+key or a collision such as `First Name` and `first_name` is
+`dm.data.malformed` on the header record. Name the offending original
+header or both colliding headers. Preserve the original row and cell
+positions and the read cache's distinction between different row shapes
+or explicit name lists. A tabular `header` value other than null stays
+invalid on non-tabular formats. Format, delimiter, and strict parsing
+rules continue to apply. Header detection from data is out of scope.
 
-Detecting whether a file's first row is a header (for example, by comparing
-its cell types with the second row's) is out of scope.
-
-`header` applies only to CSV and TSV. On YAML, TOML, JSON, JSON5, or JSONL it
-stays an error, as `delimiter` and `header` are today.
-
-With `header: false` the data's inferred type is the wide `unknown[][]`, not
-the exact type of R3: a headerless file has no named columns to check, so its
-rows are not checked value by value. An `as` contract still checks them, and
-the existing rule that `header: false` needs a list-row contract applies only
-when `as` is given.
-
-**With `header: true`, header keys are camelCased** with the same conversion as the `camel_case`
-expression function, so keys are readable in expressions
-(`row.firstName`). This applies with or without `as`: an
-`as` contract names the camelCased keys. Existing contracts keyed by a
-header that is already camelCase (such as `name` or `stars`) are unaffected.
-
-Two headers that become the same key after conversion (`First Name` and
-`first_name`) are `dm.data.malformed`, naming both original headers, on the
-header's source line. This replaces the existing duplicate-header rule in
-object-row mode.
+> **Reader's note.** Header normalization intentionally changes existing
+> object-row keys, including with `as`. Update contracts, member accesses,
+> and any consumers of emitted objects that use the old spellings. Callers
+> who need verbatim names can supply the names explicitly when their input
+> has no header record. Document this before-and-after migration with a
+> header such as `First Name`. Review shipped callers and examples for
+> affected keys. Positional rows still use cell order.
 
 ## Resolved decisions
 
-Decided by the author on 2026-11-20:
+The author decided on 2026-11-20 that a null or empty data value loads as
+`[]`; a tabular file without a contract gets camelCase-keyed objects from
+header rows and `unknown[][]` from headerless rows; object-row header keys
+are normalized even when `as` is supplied; and explicit names are verbatim,
+unique, and match the column count, with every record treated as data.
+The property check covers whole-value expressions. Header detection is
+deferred.
 
-- An empty or `null` data file loads as `[]` (R2).
-- Without `as`, CSV/TSV rows are camelCase-keyed objects with a header row and
-  lists of cells without one; a headerless file's type is `unknown[][]` (R8).
-- Header keys are camelCased with or without `as`; two headers that convert
-  to the same key are `dm.data.malformed` (R8).
-- `header` accepts `boolean | string[]`. A list of names means the file has
-  no header row; the names are used verbatim, must be unique, and must match
-  the column count. Header detection is deferred (R8).
-- The property check covers only properties whose whole value is one
-  `{{ … }}` expression; text such as `"prefix {{ … }}"` is left to
-  compose-time validation for now (R4).
+## Open Questions
+
+### Should the editor reject expressions it cannot evaluate?
+
+The draft asked for a schema error for every declared property written as a
+whole-value expression. Some values depend on runtime-only bindings, a
+function the editor cannot run, or a read it cannot make. A declared return
+type can give the editor a useful hint while leaving it uncertain which value
+compose will get or which schema defaults and conversions apply.
+
+- **Use concrete results for new schema errors.** The editor reports
+  mismatches it can demonstrate with the same validation rules as compose.
+  This reuses the existing validator and avoids rejecting expressions that
+  compose can accept. Some errors remain visible only during compose.
+- **Also prove selected mismatches from types alone.** The editor could
+  catch cases such as a well-understood function returning a boolean for a
+  property that only accepts a list. It would need rules that distinguish
+  impossible results from broad types, conversion, nullable paths, defaults,
+  and partial knowledge. Unsupported cases would still be deferred.
+
+**Recommendation.** Use concrete results for this feature. They cover
+the loading and transformation examples with a direct path to compose
+parity. A separate static proof feature could name the cases it supports
+and specify what counts as enough evidence to reject an expression.
 
 ## Documentation
 
-- `darkmatter/docs/functions/load-data.md` is regenerated from the catalog
-  (`just regen-expr-doc`).
-- The interpolation and frontmatter-interpolation pages describe the
-  property-level check and inference.
-- `simplified-schema/docs/topics/expression-syntax.md` documents spread.
-- The `simplified-schema` subtyping page documents the fit relation beside
-  `is_subtype`.
-- The `use-darkmatter` caller skill is updated where it shows `load_data`, then
-  `just publish-skills`.
+Update [Loading Data](../../docs/topics/loading-data.md), the generated
+[function page](../../docs/functions/load-data.md) via `just regen-expr-doc`,
+and the Darkmatter expression, frontmatter interpolation, and DMLS schema
+guides. Document optional contracts, when conversion happens, a header-key
+migration example, and what the editor can check. Update
+[Data Contracts](../../docs/cli/data-contracts.md) and its output schema for
+the additional use of `data_location`. Document object spread in
+[Simplified Schema expression syntax](../../../simplified-schema/docs/topics/expression-syntax.md).
+Update the Darkmatter overview and caller skill where they introduce
+`load_data`, then publish the caller skill with `just publish-skills`.
 
 ## Acceptance
 
-- All three properties in [Example](#example) produce no diagnostics in DMLS
-  or `md compose`. Changing Grace's age to `"old"` produces a DMLS error on
-  `direct` (with `data_location` at `data.yaml` line 4) and on `additive`
-  (without it), and compose fails on both.
-- `load_data('x.yaml')` where `x.yaml` holds `5` composes to `[5]`; an empty
-  `x.yaml` composes to `[]`.
-- A CSV with header `First Name,Age` loads rows as `{firstName, age}`
-  objects, and `row.firstName` resolves; with `header: false` it loads lists
-  of cells. Headers `First Name` and `first_name` together are
-  `dm.data.malformed`.
-- The same file with `header: ['label', 'years']` loads two rows,
-  `{label: "First Name", years: "Age"}` and `{label: "Ada", years: "36"}`.
-  Three names for two columns is `dm.data.malformed`; `['a', 'a']` and
-  `['']` fail before the file is read; `header` on a YAML file is an error.
-- A property declared `enum(macOS, Linux)[]` loaded from a file containing
-  `- macOS` passes; one containing `- BeOS` fails at design time.
-- A missing local file is a DMLS warning and a compose error.
-- Every existing `load_data` call with `as` behaves as before, except where
-  R2 (scalar and empty files) or R8 (camelCased headers) apply.
-- `{ ...a, k: 1 }`, `{ ...a, ...b }`, and `{ ...null }` evaluate and type as
-  in R7; `{ ...5 }` is a type error; `{ k: 1, k: 2 }` is still a parse error.
+- The worked example passes for valid data. With `age: "old"` on line 4,
+  all three expressions have property errors in DMLS when the file is
+  present and approved. `direct` and the selected direct conditional arm
+  also carry the original data location. Verify each property through
+  compose in isolation so failure order cannot hide another case.
+- A property declared `enum(macOS, Linux)[]` accepts `- macOS` and rejects
+  `- BeOS` when observed. A numeric string and a missing field with a
+  declared default agree with compose. An unexpected member in a closed
+  object fails. Verify effective schema selection with an imported type
+  and a trigger declaration.
+- Cover omitted and explicit null `as`, literal and computed null file
+  arguments, scalar wrapping, empty YAML, JSON `null`, and malformed
+  empty JSON. Verify that a supplied container contract is applied after
+  normalization and that equivalent calls share the existing read memo.
+- Cover all three header modes with and without compatible contracts,
+  including retained positional rows for `header: true`. Check camelCase
+  collisions and empty normalized names, invalid explicit names before
+  reads, width mismatches and their source lines, and `header: null` on
+  a non-tabular format. Verify that explicit names preserve cell positions
+  and that different lists do not share a result of the wrong shape.
+- An unguarded, missing local file gets an editor warning when provable
+  and fails compose. Test the guarded and recovered cases and verify
+  that creating the missing file refreshes the editor. Cover an approved
+  unsaved dependent buffer, a stale or superseded job, a disallowed
+  local read, and a remote cache miss without a network request.
+- Spread tests cover ordering, multiple spreads, null, wrong-type
+  operands, explicit duplicates, nested interpolation, and member typing
+  after a spread with unknown keys. Verify that reads in spread operands
+  are found and subject to the same permission checks.
+- Run the passive shipped-artifact corpus and the end-to-end cases through
+  normal Darkmatter and DMLS entry points. Check Claudine's expression
+  consumers after the shared parser change.
