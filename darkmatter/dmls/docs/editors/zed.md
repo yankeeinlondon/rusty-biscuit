@@ -8,7 +8,7 @@ Position encoding is UTF-16 only.
 The extension lives in a separate repo, `zed-dmls`. A ready-to-extract scaffold
 ships in [`../../zed-dmls/`](../../zed-dmls/) — copy it into its own repository to
 publish. See [zed-dmls/README.md](../../zed-dmls/README.md) for the binary
-resolution order (PATH → settings `binary.path` → GitHub release download) and
+resolution order (settings `binary.path` → PATH → GitHub release download) and
 the packaging steps.
 
 ## Install as a dev extension
