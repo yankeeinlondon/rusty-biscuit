@@ -1,21 +1,49 @@
 ---
 kind: fix
 created: 2026-11-20
-status: draft-spec
+status: finalized-spec
 area: claudine
 packages:
     - claudine-cli
-reviewed: false
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+reviewed: true
+reviewed_by: "codex/gpt-6.2-sol"
+reviewed_on: "2026-11-20"
+review_iterations: 0
+needs_rulings: false
 implemented: false
 ---
 
-# Loop Iterations Reread Their Prompt and Fire Lifecycle Events Against a Stale `ctx`
+# Keep loop prompts and lifecycle context in sync
 
 ## The defect
 
-Editing a looping prompt while it runs crashes the next iteration's `start`
-event when the edit references a `ctx.*` variable from a context group the
-original text never named:
+A running Claudine prompt loop can fail after someone edits the prompt. In the
+reported run, the first implementation phase succeeded. The second phase
+loaded an edited lifecycle message that referred to `ctx.branch` and
+`ctx.hostname`, then tried to render the message using a context snapshot taken
+for the earlier text. The snapshot did not have the newly required values.
+The `start` event failed before the second provider launch, and the edited
+`failure` message could fail for the same reason.
 
 ```text
 ⤫ CompositionError: lifecycle evaluation error
@@ -27,192 +55,221 @@ original text never named:
 ┃ capture; …
 ```
 
-Observed while `prompts/_implement/implement-plan.md` ran phase by phase and
-commit `daa04d786` added `{{ctx.branch}}` and `{{ctx.hostname}}` to its
-lifecycle messages. Before that commit the prompt named no Git or Os group
-variable, so neither group was captured for the run.
-
-The crash is the visible symptom of two defects:
-
-1. **Later loop iterations reread the document from disk.** The documented
-   contract is that "later loop iterations reuse the audited structural plan"
-   (`claudine/docs/pipeline.md`), and the entry matrix gives
-   `DocumentEntryReason::LoopIteration` the `StampedStructuralPlan` basis with
-   no full validation (`claudine/lib/src/composition/prepare/entry.rs`). In
-   practice every iteration after the first runs the harness's stabilized
-   reread, re-composing and re-validating the file as it now stands on disk.
-2. **A stabilized reread leaves the lifecycle guard on the earlier read's
-   context.** The reread installs its own lifecycle on the guard but not the
-   `ctx` snapshot it composed with, so the guard pairs new lifecycle text with a
-   context captured for different text. Any lifecycle expression that names a
-   group only the reread text requires raises `ContextNotCaptured`.
+Commit `daa04d786` added the branch and hostname references to the implementation
+prompt's lifecycle messages. The earlier prompt already referred to repository
+and working-tree information. The error establishes which values were missing
+from the snapshot used by that event.
 
 ### Reproduction
 
-Reproduced without code changes in a throwaway Git repository holding a copy of
-`prompts/`, `.claudine/`, and a spec/plan pair with `total_phases: 2`:
+The reported reproduction used a temporary Git repository with copies of the
+implementation router and target prompt, the local Claudine configuration, and a
+spec and plan pair with `total_phases: 2`. The target started with the prompt
+from before `daa04d786`, with shell actions replaced by informational actions
+to avoid approval prompts. A fake `claude` replaced the target with the edited
+version on its first launch and emitted a successful stream-JSON result. The
+command was `claudine compose --claude prompts/implement.md spec=<spec>`. The
+second phase failed in `start` and the process exited with code 1. The tests
+below use a small fixture so changes to the implementation prompts cannot
+affect the regression test.
 
-1. Check out the pre-`daa04d786` `implement-plan.md` (shell actions swapped for
-   `info:` so the run needs no approvals).
-2. Put a stub `claude` on `PATH` that, on its first launch only, overwrites
-   `implement-plan.md` with the current version, then prints a successful
-   stream-json `result` line.
-3. Run `claudine compose --claude prompts/implement.md spec=<spec>`.
+## What causes the failure
 
-Phase 1 succeeds. Phase 2's `start[0].message` raises the error above (for
-`ctx.hostname`, whose Os group was also never captured; which missing variable
-is reported first depends on evaluation order), followed by the same error
-from `failure.message`. Exit code 1.
-
-## Why it happens
+The [Claudine preparation pipeline](../../docs/pipeline.md#b4-staged-initialization-and-shell-preflight)
+and [entry rules](../../docs/topics/composition.md#entry-reasons-and-the-stage-matrix)
+say a later iteration uses the document prepared and audited when the loop
+started. Claudine's command code selects that source in memory, but its later
+iterations inherit the flag that tells the provider harness it still owes a
+read and a schema verdict. This can happen even when the first iteration
+already validated the source after `initialize`.
 
 ```mermaid
 sequenceDiagram
-    participant Loop as compose loop (prep.rs)
-    participant Guard as LifecycleRunGuard
-    participant Harness as harness attempt (loop_control.rs)
-    participant Disk as prompt on disk
-
-    Note over Loop: iteration ≥ 2
-    Loop->>Loop: capture ctx for in-memory source (old text)
-    Loop->>Guard: set_run_prepared_context(old ctx)
-    Loop->>Harness: request (schema_verdict_deferred = true, inherited)
-    Harness->>Disk: stabilized reread (new text)
-    Harness->>Harness: compose with epoch ctx extended for new text
-    Harness->>Guard: set_config(new lifecycle)
-    Note over Guard: context stays old ctx
-    Harness->>Guard: fire start
-    Guard-->>Harness: ContextNotCaptured (ctx.branch)
+    participant Loop as Claudine loop
+    participant Harness as Provider harness
+    participant Disk as Prompt file
+    participant Events as Lifecycle events
+    Loop->>Loop: Prepare iteration 2 from retained prompt
+    Loop->>Events: Install context for retained prompt
+    Loop->>Harness: Run iteration with schema verdict marked pending
+    Harness->>Disk: Read edited prompt and extend its context
+    Harness->>Events: Install edited lifecycle actions
+    Events->>Events: Render start with earlier context
+    Events-->>Harness: Required context value is missing
 ```
 
-- **The deferral flag leaks into later iterations.**
-  `claudine/cli/src/commands/compose/prep.rs` builds the loop's shared
-  `PrepareOptions` with
-  `defer_schema_verdict: schema_stage == SchemaStage::DeferToStabilizedReread`
-  (around line 1627). That is correct for iteration 1. Later iterations clone
-  the same options and call `prepare_without_schema`, which copies the flag
-  onto the prepared composition as `schema_verdict_deferred: true`
-  (`claudine/lib/src/composition/prepare.rs`, `prepare_direct_on`). The runner
-  then computes `stabilize_after_initialize = schema_verdict_deferred && …`
-  (`claudine/cli/src/commands/wrap/composition/runner.rs`, around line 165),
-  so the harness arms `BootstrapStage::StabilizeOnly` for every iteration and
-  `bootstrap_adopted_document_phase` rereads the file
-  (`claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`, stage 4).
-- **The guard keeps the earlier snapshot.** In `bootstrap_adopted_document_phase`
-  the reread's lifecycle is installed with `set_config(stabilized_lifecycle)`,
-  but the reread's `materialized.compose_context` is installed on the guard
-  only for a proxied target (`if stage != BootstrapStage::StabilizeOnly`). For a
-  `StabilizeOnly` reread the guard keeps the context installed earlier: for
-  iteration ≥ 2, the one `prep.rs` captured from the in-memory source and set
-  with `guard.set_run_prepared_context` (around line 1233); for iteration 1,
-  the coordinator's prepared snapshot. `LifecycleRunGuard::effective_prepared_context`
-  (`darkmatter/lib/src/lifecycle/run_guard.rs`) returns that snapshot.
-  `install_reentry_lifecycle_context` swaps the snapshot only for `Retry` and
-  `Resume`.
+The context problem also exists on a legitimate read after `initialize`. The
+Claudine CLI's [provider harness startup](../../cli/src/commands/wrap/harness_orch/loop_control.rs)
+installs the new lifecycle actions on the guard that fires events. A direct
+document can keep the earlier context, and an adopted document installs its
+identity-adjusted context only after later checks that can fail. The Claudine
+CLI's [command-level startup](../../cli/src/commands/compose/prep.rs) has a
+separate read after `initialize` for both single runs and the first loop
+iteration. It installs the new actions too, while the loop also saves its
+preparation context and frontmatter for the post-iteration condition. A
+harness-only fix leaves those command-level paths exposed.
 
-The reread's own context is not a second capture: `harness_prepare_options`
-(`claudine/cli/src/commands/wrap/harness_orch/prompt.rs`) extends the
-retained epoch snapshot with exactly the groups the reread text requires. Body
-and frontmatter composition already use it; only the lifecycle guard does not.
+## Expected behavior
 
-## What should happen
+### Retain the prompt prepared at startup
 
-- **R1 — Later loop iterations do not reread their document.** An iteration
-  after the first composes from the stabilized source the loop already holds
-  (the reread iteration 1 took, or the caller-resolved source when there was
-  none), exactly as `pipeline.md` documents. An edit to the prompt file made
-  while the loop runs takes effect on the next run, not the next iteration,
-  matching how a mid-run `$schema` edit already behaves
-  (`claudine/docs/topics/composition.md`). Only iteration 1 may carry a
-  deferred schema verdict.
-- **R2 — A stabilized reread's lifecycle and context come from the same read.**
-  Whenever the harness replaces the active document with a reread (stage 4 of
-  the staged boot, for a direct or adopted document), the lifecycle guard
-  receives that read's context alongside its lifecycle. It stays the same
-  document epoch's snapshot, extended for any newly required groups, so
-  launch-facing values do not change and nothing is captured twice. A direct
-  document's `initialize` that rewrites the file to name a new `ctx.*` group in
-  a lifecycle stack therefore evaluates that stack without error.
-- **R3 — Retry and resume are unchanged.** They already reread and install the
-  reread's context; a prompt edited before a retry is still honored by that
-  retry, as documented in `flow-control-reference.md`.
+- Keep the root document selected and validated for the first iteration as the
+  source of subsequent ordinary iterations. If startup reads the file after
+  `initialize`, retain that read, including its caller and proxy inputs and
+  the approvals it earned. On the eager route where the first preparation
+  owns the verdict, retain the source the caller or handoff resolved.
+- Every later iteration composes from that source with its own loop values,
+  runtime state, and required context. It observes Git working state as the
+  preceding iteration left it and audits the command text the new values
+  produce using existing approvals. A command that changes beyond those
+  approvals is refused through the existing shell checks. Each later
+  iteration skips the launch schema verdict and carries no pending verdict.
+- Edits to the root prompt on disk after startup take effect on a new run.
+  The rule covers the prompt body, authored frontmatter, and lifecycle
+  actions, including disk writes to the root made by lifecycle actions.
+  Use `set` or `loop.action` for values that should carry between iterations.
+  Includes and explicit reads such as `frontmatter("progress.md", "done")`
+  follow their existing resolution and approval rules.
+- Retry and resume continue to read and validate the active document from
+  disk for that attempt. A fresh read during recovery leaves the loop's
+  retained source and loop configuration in place for the next ordinary
+  iteration. A proxy handoff ends the source loop under the existing rules
+  and prepares the target under its own startup rules.
+- Apply the same document-loop rules inside a sequence. Sequence and group
+  containers still reread the inputs they are documented to read when a
+  step, task, or container starts. A new invocation of a prompt task sees
+  those edits before its own document loop begins.
 
-## Design decisions
+### Use the context that belongs to the active lifecycle actions
 
-- **Fix both defects, not only the guard.** R2 alone would stop the crash, but
-  iterations would keep rereading and re-validating, against the documented
-  contract and the entry matrix, and a prompt could change underneath a running
-  loop. The reread also costs a full composition per iteration. R1 alone would
-  leave iteration 1 exposed when `initialize` rewrites the prompt.
-- **Mid-run prompt edits are not picked up.** This follows the existing
-  documentation rather than introducing a new behavior. Picking up edits would
-  require a deliberate design (re-auditing new shell commands each iteration,
-  deciding which loop state survives a structural change) and is out of scope.
-- **Where R1 is enforced.** Clear `defer_schema_verdict` on the options for
-  iterations after the first in the loop closure in `prep.rs`, next to the
-  existing `ctx.iteration > 1` context recapture, rather than special-casing
-  the runner. The runner's `stabilize_after_initialize` rule stays as is: it is
-  correct for any composition that genuinely deferred.
-- **Where R2 is enforced.** In `bootstrap_adopted_document_phase`, install
-  `materialized.compose_context` on the guard for `StabilizeOnly` as well, and
-  record the `Lifecycle` prepared-context consumer on the document epoch as
-  `install_reentry_lifecycle_context` does. Update the comment above the
-  `stage != BootstrapStage::StabilizeOnly` branch, which currently states that
-  replacing a direct document's lifecycle context "would substitute a second
-  capture"; that holds for the launch identity rebuild but not for the epoch
-  snapshot.
+- After a successful read and preparation, hand off the lifecycle actions,
+  prepared `ctx.*` and `env.*` values, and their recorded document run
+  together. A read after `initialize` extends that run's snapshot on demand.
+  Values already observed retain their earlier values, and existing provider
+  and model selection rules apply. Install the matching values before any
+  event uses the new actions, including `blocked` and `finalize` where the
+  existing failure route selects those actions. If the read fails before a
+  new lifecycle is available, keep the previous actions and their context
+  for the existing failure route.
+- The loop condition and actions after an iteration use the preparation for
+  that iteration. When startup replaces the first iteration's preparation,
+  pass its resulting context and effective frontmatter to the loop engine.
+  Keep the existing event order and dispatch `initialize` only once.
+  `current.*` remains an event-time read.
+
+> **Reader’s note.** An `inline-compose` loop has two uses for the same file.
+> Its prompt instructions follow the retained-source rule. The file on disk
+> is also the deliverable, so Claudine still takes a baseline for the attempt
+> and reads the result to check what the provider changed. Use the live
+> baseline for change detection, repair, and rollback. An edit from iteration
+> 1 must never count as an edit from iteration 2. Reading those bytes for
+> reconciliation leaves prompt preparation and launch validation on the
+> retained source.
 
 ## Implementation and verification
 
-### Phase 1 — Failing tests
+### Phase 1 — Reproduce with isolated tests
 
-- L1 lifecycle trace (`claudine/cli/tests/l1/lifecycle_traces.rs`): a looping
-  document (`loop:` with two iterations) whose `start` stack names only
-  launch-safe variables, driven by a provider stub that, on its first launch,
-  rewrites the document so `start` also interpolates `ctx.branch` and
-  `ctx.hostname`. Expect both iterations to run, `start` to render with the
-  **original** text on iteration 2, and exit 0. This fails today.
-- L1 test for R2: a directly invoked, non-looping document whose `initialize`
-  rewrites its own file so a lifecycle stack names a context group the
-  bootstrap text did not. Expect the stack to evaluate. Confirm whether this
-  fails today; if it does not, record why in the implementation log and keep
-  the test as a guard.
-- Unit test in the loop closure (or an existing loop preparation test) that
-  iteration ≥ 2's prepared composition has `schema_verdict_deferred == false`.
+Use the Claudine CLI's [staged startup tests](../../cli/tests/l1/compose_initialize_staged_boot.rs),
+[lifecycle traces](../../cli/tests/l1/lifecycle_traces.rs), and
+[inline loop tests](../../cli/tests/l1/loop_cli.rs) as fixture patterns. Use a
+temporary repository and the shared CLI fixture with a fake provider. Drive
+file changes from the fixture or provider so the tests need neither a real
+provider nor timing delays.
 
-### Phase 2 — Fix
+- Exercise a loop-owning proxy target with `initialize`, matching the
+  reported route. On the first launch, replace its body, lifecycle text, and
+  root schema declaration on disk. The edited lifecycle references a context
+  group absent from the fixture's original prompt. Assert two launches, one
+  initialization, the original instructions and lifecycle text rendered with
+  the second iteration's values, and exit code 0. Start a new run or use an
+  existing fresh-read test to show that the fixture's edit is observable at
+  an intended read boundary. An eager direct loop alone can miss the bug
+  because it starts with no pending schema verdict.
+- Exercise a loop-owning proxy target whose first iteration delegates its
+  read to the harness. Change a marker before that read and again during the
+  first provider launch. Assert that both ordinary iterations use the
+  marker the harness actually validated.
+- Exercise a read after `initialize` that introduces a new context group in
+  `start`, with an existing group present from the first read. Assert that
+  the event renders the new value using the context used by composition
+  and retains the earlier observation. Cover both command and harness
+  startup where each installs the actions. At least one assertion must
+  exercise an event through the actual guard. If a test already passes,
+  record which route it covers and verify the separate affected route.
+- For the staged first loop iteration, check that the condition or actions
+  see a context value or frontmatter field supplied by the stabilized
+  preparation. Cover a later ordinary iteration with zero deferred schema
+  work and fresh working-tree values when the fixture changes them.
+- For inline composition, let iteration 1 change the body and let iteration
+  2 report success without editing it. Assert the existing unchanged-body
+  verdict and preservation of the first iteration's deliverable. Keep the
+  existing positive case where both iterations make distinct edits.
 
-- Apply R1 in `claudine/cli/src/commands/compose/prep.rs`.
-- Apply R2 in `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`.
-- Check the sequence step loop path (`claudine/cli/src/commands/wrap/sequence/`)
-  for the same deferral inheritance and the same guard pairing; fix it if it
-  exhibits either.
-- Fix comments that drifted with the behavior (the `StabilizeOnly` branch
-  comment; any comment in `prep.rs` claiming later iterations re-read).
+### Phase 2 — Correct the preparation paths
 
-### Phase 3 — Docs
+- In the Claudine CLI's [loop preparation](../../cli/src/commands/compose/prep.rs),
+  make the startup source and the later-iteration source agree. Clear the
+  pending-verdict flag in the later-iteration preparation path independently
+  of whether the invocation can provide a context. Keep the first-iteration
+  verdict at its existing boundary. If the first iteration delegates its
+  read to the provider harness, make that same resolved source and approval
+  basis available to the loop. Loading the file again after the provider
+  returns could adopt an edit made during that launch. Prepare later passes
+  under the existing loop-iteration policy and keep their per-iteration
+  template and lifecycle command checks.
+- In the Claudine CLI's [command startup](../../cli/src/commands/compose/prep.rs)
+  and [provider harness startup](../../cli/src/commands/wrap/harness_orch/loop_control.rs),
+  install the completed preparation's context on the lifecycle guard when
+  the new actions take effect. The Claudine library's
+  [prepared composition](../../lib/src/composition/types.rs) already carries
+  the context and the document run that owns it. Record lifecycle use on
+  that run through the existing accounting and reuse the installed context
+  for post-iteration evaluation. Preserve target identity overrides on
+  adopted routes and the existing shell gate for early handlers. Correct the
+  comment that treats handing off the prepared context as a second capture.
+- In the Claudine library's [inline preparation](../../lib/src/composition/prepare.rs),
+  the closure plan currently derives its baseline from the same source as
+  the prompt. Give inline reconciliation the actual pre-attempt bytes and
+  body hash without feeding those bytes back into preparation. Preserve the
+  existing [inline reconciliation](../../lib/src/composition/closure.rs)
+  checks, including the basis used for rollback and the completion schema
+  retained at launch.
+- Check the Claudine CLI's [sequence prompt task runner](../../cli/src/commands/wrap/sequence/task_run.rs)
+  for any document-loop entry that bypasses the shared preparation. Preserve
+  [sequence step input reads](../../cli/src/commands/wrap/sequence/iterate.rs)
+  when a new step begins.
 
-- `claudine/docs/topics/flow-control/looping.md`: state that a document's text
-  is fixed for the whole loop run once iteration 1 stabilizes, that edits take
-  effect on the next run, and that each iteration still observes fresh Git
-  working state through `ctx.*`.
-- `claudine/docs/pipeline.md`: keep "Later loop iterations reuse the audited
-  structural plan"; add that a stabilized reread hands its context to the
-  lifecycle events along with its lifecycle.
+### Phase 3 — Update the current documentation
+
+In the [looping guide](../../docs/topics/flow-control/looping.md) and
+[composition pipeline](../../docs/pipeline.md), show a root edit that a new
+run sees and a `set` or explicit file read that a later iteration can see.
+Explain how startup passes the same prepared context to composition and
+lifecycle evaluation. Qualify the
+[lifecycle guide's pre-warming example](../../docs/topics/flow-control/lifecycle.md#limits)
+so a disk write becomes visible at a boundary that actually reads it. Document
+the inline deliverable read alongside the retained instructions in the
+[composition guide](../../docs/topics/composition.md).
 
 ## Acceptance
 
-- The reproduction above exits 0, and phase 2's `start` renders the original
-  message.
-- No loop iteration after the first triggers a stabilized reread (verifiable
-  in `--debug debug` output: no `harness_materialize_prompt` span on
-  iterations ≥ 2 unless a retry or resume occurred).
-- The new tests pass; the existing `lifecycle_traces`, loop, retry, resume, and
-  proxy tests pass unchanged.
-- The looping and pipeline docs describe the behavior above.
+- The reproduction exits 0 and the second phase uses the original prompt and
+  lifecycle text. A change made by `initialize` before the first iteration
+  takes effect on that iteration and is the basis of later iterations.
+- Later ordinary iterations run without a startup reread or full launch
+  schema verdict. Verify through a focused assertion at the preparation
+  boundary or a trace identifying the iteration and read reason. The
+  existing harness materialization span may also represent retry or resume,
+  so a raw count of that span is insufficient.
+- The lifecycle and post-iteration checks use the matching prepared context
+  without a second observation of a group already captured in the same run.
+  A behavioral test and the existing context work counters are sufficient
+  evidence. This fix requires no timing benchmark.
+- The new cases and the existing Claudine loop, lifecycle, retry, resume,
+  proxy, sequence, and inline reconciliation tests pass. Run the area's
+  Level 1 suite with `just test` in `claudine/`.
 
 ## Open Questions
 
-- None blocking. If the author prefers loops to pick up mid-run prompt edits,
-  R1 is replaced by a design for per-iteration rereads (re-audit, loop state
-  carry-over); R2 is needed either way.
+None.
