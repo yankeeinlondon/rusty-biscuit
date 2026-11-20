@@ -1,7 +1,7 @@
 ---
 kind: fix
 created: 2026-11-20
-status: draft-spec
+status: human-in-the-loop
 area: sniff
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -26,16 +26,24 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-reviewed: false
+reviewed: true
+reviewed_by: "codex/gpt-6.2-sol"
+reviewed_on: "2026-11-20"
+review_iterations: 0
+needs_rulings: true
+required_rulings:
+    - Decide whether focused git-status JSON should include commit links.
+    - Decide whether shallow clones fall back to independent walks.
 implemented: false
 ---
 
-# Commit linking walks each remote's history once, inside the measured request
+# Reuse shared Git history when resolving commit links
 
 ## Why this exists
 
-`sniff repo git-status` takes about **3.5 s** on the Linux build host's
-checkout of this monorepo. Everything except linking finishes in 0.15 s:
+On the Linux build host's checkout of this monorepo, the text status report
+spent most of its time finding commit links. The JSON and zero-history reports
+show how much time the rest of the command took.
 
 | Command (Linux build host, 2026-11-20) | Wall clock |
 |---|---|
@@ -45,267 +53,266 @@ checkout of this monorepo. Everything except linking finishes in 0.15 s:
 | `sniff repo recent-commits` (text or `--json`) | 1.45 s |
 | `git status` | 0.03 s |
 
-Three gdb stack samples taken during the slow run all point to the same
-place. The text renderer calls `commit_links_at`
-(`cli/src/output/filesystem/mod.rs`, `build_git_status_items`), which runs
-`link_commits` → `link_commits_from_snapshot` → `walk_ancestry`, and the time
-goes into decoding commits from the pack (`gix_pack::data::File::decode_entry`
-under `gix::revision::walk`).
+Three debugger samples showed the text report spending time decoding packed Git
+objects while checking the last-known state of remote branches. None of the
+10 displayed commits was in a locally recorded remote branch. In that case,
+Sniff must check all those branches before reporting that a commit is absent.
+Walking the 26 branch tips separately visits **342,614** commits in total.
+Their combined history contains only **16,682** distinct commits.
 
-Three conditions combine on this host:
+The checkout had no commit-graph file, Git's optional index of commit ancestry.
+Adding one in a throwaway shared clone reduced link time from about 2.9 s to
+about 1.5 s in that sample. Avoiding repeated visits helps checkouts with or
+without the index.
 
-1. **The commits being linked are on no remote-tracking ref.** `HEAD` was 12
-   commits ahead of `origin/main`, so none of the 10 displayed commits were
-   contained. `CommitLink::remote` can only be `Some(false)` after *every*
-   remote tip has been walked to the root, so the early stop never fires.
-2. **Each remote tip is walked independently.** The checkout has 26
-   remote-tracking branches that share most of their history. Summing
-   `git rev-list --count` over each tip gives **342,614** commit visits, but
-   the union of all tips is only **16,682** commits, so about 20× of the work
-   is repeated. The 5,000,000-visit `COMMIT_VISIT_BUDGET` never limits it.
-3. **The repository has no commit-graph file** (`.git/objects/info/` is
-   absent), so every visit inflates a commit object. In a throwaway shared
-   clone, adding a commit-graph cut link time from about 2.9 s to about
-   1.5 s. That is a real gain, but the smaller of the three factors and
-   outside Sniff's control.
-
-The macOS laptop the author compares against is fast, most likely because its
-branch is usually pushed, so a target is found on the first tip and the walk
-stops. This was not measured on that host.
-
-A second defect hides the first. `--perf` on the slow run reported a
-**137 ms** total. Link resolution runs in the CLI's renderer, outside the
-collected detection pass, so neither its time nor its `git.commit_visits`
-appear in the report. The CLI skill's rule that business logic lives in the
-library, with the CLI only reporting it, is broken in the same place.
+The slow status command reported only **137 ms** with `--perf`. The
+`sniff-detection-cli` status renderer calls
+[`commit_links_at`](../../cli/src/output/filesystem/mod.rs) after Sniff takes
+its performance snapshot. That lookup opens the repository again, reads
+its refs again, and leaves the linking time and visits out of the report.
 
 ## Scope
 
-In scope:
+- Share ancestry work across all remote-tracking tips in one call to the
+  `sniff` library's [commit linker](../../lib/src/filesystem/git/commit_links.rs).
+  This benefits status, recent commits, the aggregate commit reports, and
+  single-commit lookups such as `sniff repo hash`.
+- Resolve status links as part of the measured request, before formatting
+  the report. Cover the default, compact, package, package-area, branch, and
+  linked-worktree views.
+- Keep the separate deep containment walk used with `--refresh-remotes`.
+  It fills the complete list of containing remotes for each commit. A shared
+  set that skips repeat visits would lose those memberships. Keep its existing
+  branch limit and refresh behavior.
+- Keep linking local and read-only. Creating or maintaining a commit-graph
+  stays a Git operation. Generation-number cutoffs are outside this fix.
+  They need an existing commit-graph, which the motivating checkout lacks.
 
-- `link_commits_from_snapshot` (`lib/src/filesystem/git/commit_links.rs`)
-  and the `walk_ancestry` helper it uses
-  (`lib/src/filesystem/git/remote_refresh.rs`). Every linker caller
-  benefits: `commit_links_at`, `commit_browser_url` (`repo commit` style
-  lookups in `cli/src/commands/mod.rs`), and `RecentCommits`
-  (`recent_commits/collect.rs`).
-- Moving `git-status` commit linking out of the renderer and into the
-  library's detection pass.
-- Documentation and skill updates listed under [Documentation](#documentation).
+## Share visits across remote-tracking tips
 
-Out of scope:
+The `sniff` library's [commit linker](../../lib/src/filesystem/git/commit_links.rs)
+keeps the existing priority. Walk `origin` first, then other remotes
+alphabetically, with `upstream` last. For each remote, walk the branch named by
+its local remote-tracking `HEAD` first when present, then its other branches
+alphabetically. The first walk that finds a target still determines its remote
+and browser URL, including when that remote has no known browser URL.
 
-- **The `--deep` containment walk** in `remote_refresh.rs` (the
-  `walk_ancestry` loop that fills `CommitInfo::remotes`). It records *every*
-  containing remote, not only the first, so pruning at commits an earlier
-  tip has already visited would drop remotes from its answer. It has the same
-  repeated-work shape, and fixing it needs a different algorithm
-  (propagating per-remote membership through one walk). It is not on the
-  default path, so it is left as is.
-- Writing a commit-graph or changing Git configuration on the user's behalf.
-  Sniff only reads repositories here.
-- Generation-number cutoffs (see [Open Questions](#open-questions)).
-
-## Change 1: one shared visited set across tip walks
-
-### Rule
-
-Within one `link_commits_from_snapshot` call, a commit visited by any
-earlier tip's walk is not visited again by a later tip's walk. The later walk
-**prunes** at that commit: neither it nor its ancestors are queued.
-
-### Why the result is unchanged
-
-Tips are walked in preferred order (preferred remote first, its default
-branch first, then the others alphabetically), and the first containing tip
-decides `winners`. Suppose a later tip *B* reaches a commit *X* that an
-earlier tip *A* already visited. If *A*'s walk finished, then *A* visited
-everything reachable from *X*. Any target in that history was already found
-and credited to *A*'s remote, which outranks *B*'s. A target that *A* never
-reached is not reachable from *X*, so pruning cannot hide it. Results stay
-identical to today's whenever every walk finishes.
+During a call, record the IDs yielded by the walk. Once a tip's walk finishes,
+its visited commits can serve as stopping points for later tips. At such a
+point, the earlier walk already examined the history below it. Any target in
+that history already has a winning remote, and the later tip's unique history
+still gets examined.
 
 ```mermaid
-flowchart LR
-    subgraph today [Today: every tip re-walks shared history]
-        A1[origin/main] --> H1[16k shared commits]
-        B1[origin/fix/x] --> H2[16k shared commits again]
-        C1[...24 more tips] --> H3[...]
-    end
-    subgraph after [After: later tips stop at visited commits]
-        A2[origin/main] --> S[16k shared commits]
-        B2[origin/fix/x] --> N[its own new commits] -.prune.-> S
-        C2[...24 more tips] -.prune.-> S
-    end
+flowchart TD
+    A[First remote branch tip] --> X[Shared commit]
+    X --> H[Older shared history]
+    B[Later remote branch tip] --> C[Commits unique to this branch]
+    C -. stop at previously visited commit .-> X
 ```
 
-### The guard for walks that did not finish
+Use the Git walk's selection filter so a rejected commit is skipped before its
+parents are queued. Skip a tip already covered by a completed walk before
+constructing a new walk. Keep commit-graph support and newest-first traversal.
+Use a read-only view of the earlier visits for the filter and a separate buffer
+for the current tip's visits if needed to satisfy the iterator's borrowing
+rules. Publish those visits only after completion. The set lives for this
+linking call and grows with the number of counted visits, up to the existing
+budget. With a single tip, use the existing walk directly because no later
+tip can reuse its visits. The `sniff` library's [ancestry walker](../../lib/src/filesystem/git/remote_refresh.rs)
+continues to serve deep containment without shared pruning.
 
-Pruning relies on the earlier walk having visited everything below the
-pruned commit. Two endings break that:
+### Incomplete walks and shallow clones
 
-- `AncestryWalkEnd::Failed`: an ancestor could not be read, so the commits
-  below it were never visited. After a failed walk, **later walks must not
-  prune**. Either clear the shared set or stop consulting it for the rest of
-  the call. The call is already `incomplete`, so undetermined targets stay
-  `remote: None`. This keeps a later tip able to find, and correctly
-  attribute, a target that the failed walk missed.
-- `AncestryWalkEnd::OverBudget` already ends the call (`break`), so nothing
-  more is needed.
-- `AncestryWalkEnd::Stopped` happens only when every target is determined,
-  which also ends the call.
+- An unreadable commit can leave some of the current tip's history unexplored.
+  Keep the matches already found, discard the shared set, and run subsequent
+  tips with the existing independent walks. A later match still establishes
+  containment. A target that remains unfound after any failed walk stays
+  undetermined.
+- Exhausting the visit budget stops the linking pass. Stop early as before
+  when all targets have been found. Only a completed walk can supply stopping
+  points to a later tip.
+- Use independent walks in shallow clones, including when shallow status
+  cannot be established. Git's walker accounts for shallow boundaries as each
+  tip is traversed. A commit seen in one such walk is insufficient evidence
+  that another tip would explore the same parent paths. Keep today's
+  shallow-history results and errors.
 
-### Mechanism
+Keep the five-million-visit budget across the entire linking call and the
+existing meaning of `git.commit_visits`. Each successfully yielded commit
+consumes one visit. Skipped commits consume zero. Sharing visits may let a
+request prove containment or absence where it previously ran out of budget.
+A complete search with no match still gives `remote: false`, including when
+there are no remote-tracking tips. An incomplete search with no match gives
+`remote: null`. Keep input order and duplicate target handling. These answers
+describe locally available history as of the last recorded remote refs.
 
-`walk_ancestry` gains a way to skip commits. The recommended shape is an
-optional `&mut HashSet<gix::ObjectId>` (or a small `VisitedSet` wrapper)
-passed through to gix's `Platform::selected(filter)`, which gix 0.90 calls
-before queueing each commit. The filter returns `false` for an id that is
-already in the set. Each commit the walk yields is inserted into the set and
-counted as today. Commits that are filtered out are neither yielded nor
-counted, so `git.commit_visits` shows the work actually done. The
-`remote_refresh.rs` caller passes no set and keeps its current behavior.
+## Resolve status links before rendering
 
-The tip itself goes through the same check: a tip already in the set (for
-example, a feature branch whose tip is an ancestor of `origin/main`, or two
-refs naming the same commit) starts no walk. Check this explicitly, because
-the tip is the walk's starting point, and starting points may not go through
-gix's `selected` filter.
+Use a focused library operation to prepare the final status report and, when
+requested, associate link results with the full IDs in its final
+`recent` list. Keep the extra link data alongside the status report so this
+fix can reuse the existing `sniff` library
+[`CommitInfo`](../../lib/src/filesystem/git/types.rs) records, which carry
+history and are constructed by other callers. Keep existing detection plans,
+presets, and public history entry points compatible. The existing
+`sniff` library [filesystem observation](../../lib/src/filesystem/mod.rs)
+already retains the open repository for the request. Reuse that handle and
+carry the captured refs through the status operation. Reuse the existing
+history readers and their decoration logic.
 
-`use_commit_graph(Some(true))` and the `ByCommitTime` newest-first ordering
-stay as they are. Pruning depends only on reachability, not on order.
+1. Request remote-tracking tips in the same
+   `sniff` library [ref snapshot](../../lib/src/filesystem/git/remote_refresh.rs)
+   used for other status facts when links are needed. Decorations alone do
+   not populate that snapshot's remote-tip list. This matters for detached
+   HEAD, where there is no current branch to trigger remote tracking
+   collection. When `--refresh-remotes` is explicit, use the same
+   post-refresh refs as the rest of status. Treat an unavailable linking
+   input as an unlinked report. Existing status and history read errors
+   still propagate as before.
+2. Resolve the final commit list before invoking the linker. Keep the current
+   selection precedence. A package or package area selects path history. A
+   different branch replaces it and clears working-tree changes. A selected
+   worktree then supplies its own history and working-tree changes. Preserve
+   selector validation, package/area intersection, count limits, and report
+   ordering. A bare `--branch` or the current branch keeps the current history
+   selection. Reuse the original ref snapshot for the current repository's
+   history and links. For a linked worktree, use the handle already opened
+   for that selection, preserving its effective configuration and ref view.
+   Reuse shared refs where the effective view is the same. If the selected
+   worktree needs a different ref observation, use it for both its history
+   and its links.
+3. Link only the entries the report will display. Make one linking pass at
+   most, even when selectors are combined. An empty display or
+   `--history 0` skips linking. This is independent of path history's
+   existing zero-count behavior. Request links for ordinary and compact
+   terminal reports. Explicit `--plain` already strips the hyperlinks, so
+   skip resolving them. See [Open Questions](#open-questions) for focused
+   JSON. The aggregate JSON report already collects link data in its
+   separate commit-family reports and keeps that behavior and shape.
+4. Pass the captured URLs into
+   [`build_git_status_items`](../../cli/src/output/filesystem/mod.rs) in
+   `sniff-detection-cli`, which formats commit lines using the existing
+   terminal components. A missing URL displays the short hash without a
+   hyperlink. Keep output order, visible text, and terminal fallback
+   behavior. Rendering needs no repository access.
 
-### Expected effect
-
-On this host's checkout, `link_commits_from_snapshot` visits at most the
-16,682 commits in the union of all remote tips, down from about 342,614.
-`git-status` and `recent-commits` should drop to roughly their `--json` /
-`--history 0` time plus one pass over the history (a few hundred
-milliseconds without a commit-graph). That target is measured in
-[Verification](#verification), not assumed.
-
-## Change 2: link commits inside the detection request
-
-### Rule
-
-The CLI renderer makes no Git calls. Commit links for `git-status` are
-computed by the library during the detection pass, under the request's
-performance collector, using the remote-tracking `RefSnapshot` the request
-already observes instead of a second `trusted_discover` and ref read.
-
-### Shape
-
-- `GitInfo::recent` entries (`CommitInfo`, `lib/src/filesystem/git/types.rs`)
-  carry their link. The recommended form is an optional `link: CommitLink`
-  field, populated only when the request asks for it. See the open question
-  on JSON exposure.
-- A `GitRequest` / `GitMetadataRequest` flag requests commit links. The
-  `git-status` plan in `cli/src/commands/mod.rs` sets it for text output.
-  Whether JSON output sets it depends on the JSON-exposure ruling. Under
-  the serialized-plan compatibility rule (`metadata: None` derives legacy
-  behavior), a plan without the field requests no links.
-- The paths that replace `git.recent` after detection (`--package`,
-  `--branch <other>`, `--worktree`) must link their replacement commits
-  through the library as well. The recommended way is for each library entry
-  point they call (`commits_for_path_at`, `commits_for_branch_at`,
-  `GitRepo::recent_commits`) to accept the same flag or return linked
-  commits. Linking stays out of the CLI.
-- `build_git_status_items` reads `commit.link` and no longer calls
-  `commit_links_at`. A missing link renders the SHA unlinked, as a failed
-  lookup does today.
-
-### Effect on `--perf`
-
-Once linking runs inside the request, `sniff repo git-status --perf` reports
-the linking time under `filesystem.git` (or a dedicated stage) and includes
-its `git.commit_visits`. The slow case above then shows up in the report.
+Run status preparation and linking under the same request performance
+collector. When scoped history is prepared after initial detection, take the
+final report snapshot after that preparation and use it for all output.
+Use a dedicated stage such as `filesystem.git.commit_links` and retain the
+existing ancestry visit counter. That counter also includes history selection
+and other Git walks, so a nonzero value alone cannot demonstrate that linking
+was measured. Keep JSON stdout as one complete value, with the existing
+embedded performance report and human-readable diagnostic on stderr when
+`--perf` is supplied.
 
 ## Documentation
 
-- `sniff/docs/cli/repo_git-status.md`: the commit-line section says
-  containment is decided "per commit by the library (`commit_links_at`)".
-  Change it to say that links are resolved during detection from the
-  remote-tracking refs the request already read, and that each remote's
-  history is walked once per request. If JSON exposure is approved, document
-  the new `recent[].link` field in the JSON section.
-- `sniff/docs/topics/repo/recent-commits.md`: if it describes link cost or
-  walk order, state the visited-set rule there too.
-- `.claude/skills/sniff/performance.md`: add the rule "one visited set per
-  linking call, no pruning after a failed walk". Record that linking time
-  counts in `--perf` for `git-status`.
-- A short note for users in `repo_git-status.md` under performance: a
-  repository without a commit-graph file decodes every visited commit from
-  its packs, and `git commit-graph write --reachable` (kept current by
-  `git config fetch.writeCommitGraph true` or `git maintenance start`)
-  roughly halves the cost of linking. This is a user action, not Sniff
-  behavior.
+- Update [the status command guide](../../docs/cli/repo_git-status.md).
+  The Sniff README is an overview and does not describe link lookup, so it
+  needs no change. Explain that the terminal report
+  resolves links locally during collection, when link output is requested.
+  The previously documented renderer lookup will be obsolete. If the author
+  approves links in focused JSON, document their shape and collection cost.
+- Update [the recent-commits guide](../../docs/topics/repo/recent-commits.md)
+  and the [Sniff architecture skill](../../../.claude/skills/sniff/architecture.md)
+  to describe shared visits across remotes, the fallback after a failed walk,
+  and shallow-clone behavior.
+- Update the [Sniff performance skill](../../../.claude/skills/sniff/performance.md)
+  with the linking stage, when the status performance snapshot is taken,
+  and what the shared visit counter measures.
 
 ## Verification
 
-### Tests (L1, in `commit_links.rs` `mod tests`)
+### Library tests
 
-1. **Shared history is visited once.** Build a chain of *M* commits. Point
-   *K* remote-tracking branches at tips that each add a few commits on top of
-   it, then link a target that no remote contains. Assert
-   `git.commit_visits` ≤ the number of distinct commits reachable from the
-   tips (not *K* × *M*), and assert `remote: Some(false)`.
-2. **Preferred-remote attribution is unchanged.** The existing
-   `origin_wins_over_other_remotes_that_also_contain_the_commit`,
-   `alphabetical_non_upstream_wins_without_origin_and_upstream_is_last`,
-   `stale_tips_are_walked_after_the_default_branch_finds_the_targets`, and
-   `a_shared_branch_snapshot_links_like_a_fresh_one_without_a_ref_walk`
-   tests pass unmodified.
-3. **A pruned path cannot hide a target.** Tip *A* (preferred) and tip *B*
-   share a base. The target lies only on *B*'s side branch, which *A* does
-   not contain. Assert the result is `Some(true)` with *B*'s remote URL.
-4. **No pruning after a failed walk.** Using whatever corruption fixture
-   produces `AncestryWalkEnd::Failed` (a missing parent object), arrange for
-   the failing walk to come first. Assert that a target reachable from a
-   later tip through the commits that failed to read is still credited to
-   that later tip.
-5. **Duplicate and ancestor tips start no walk.** Two remote refs name the
-   same commit, and a third names an ancestor of it. Assert the visit count
-   equals the commits reachable from the first tip.
-6. `budget_exhaustion_leaves_undetermined_targets_null_not_false` and
-   `budget_spent_on_one_remote_leaves_later_remotes_unwalked` still pass.
-   Their visit arithmetic may need updating if they counted re-walked
-   commits; any change must be justified in the implementation log.
+Use small local fixtures. Test the linker independently from status history
+so the visit counter measures only containment work.
 
-### Tests (CLI)
+1. Give multiple remote tips a shared base and unique commits. With a target
+   absent from every tip, assert exactly one visit per distinct reachable
+   commit and `remote: false`. Set a test budget just large enough for the
+   combined history, so repeated work would leave the answer undetermined.
+   Include duplicate tips and a tip that is an ancestor of the preferred tip.
+2. Check that the preferred remote still wins for shared targets and that a
+   target on a later tip's unique history goes to that later remote. Retain
+   existing coverage for remote order, default branch priority, skewed commit
+   timestamps, reused ref snapshots, and exhausted visit budgets.
+3. Exercise a walk that visits a shared commit and then fails before finishing
+   its parents. Use a deterministic walk seam if needed to arrange those
+   events. Verify that a later walk can revisit that commit and find a target
+   missed by the first walk, and that another unfound target stays
+   undetermined. A permanently missing object alone cannot demonstrate that
+   a later walk can reach through the skipped point.
+4. Exercise a shallow clone fixture against the existing independent walk.
+   Check visit counts and outcomes so the fixture proves the fallback ran.
+   Cover linking through the captured ref snapshot with detached HEAD, and
+   confirm that a missing snapshot cannot turn into a false absence claim.
 
-7. `repo git-status --perf` on a fixture with an unpushed commit and at least
-   one remote-tracking branch reports a nonzero `git.commit_visits` (it
-   reports none today because linking runs outside collection).
-8. Commit hyperlinks in `git-status` text output are unchanged on the
-   existing fixtures, including `--package`, `--branch`, and `--worktree`.
+### Command tests
 
-### Measurement (manual, recorded in the implementation log)
+- Use the Sniff CLI fixture with one contained commit and one unpushed
+  commit. Check association of URLs with final commit IDs for the default
+  view, compact mode, package and package-area history, a different branch,
+  and a selected worktree. Exercise selector precedence and verify that an
+  entry removed from the final list gets no link. Check presence and absence
+  of URLs in the render input or markup at the renderer boundary. Piped
+  stdout hides hyperlinks and can only establish the text fallback.
+- Prove that a text `--perf` report includes the linking stage and the
+  additional visits from the fixture's known remote history. Compare
+  equivalent linked and unlinked requests and assert the visit delta.
+  Exercise a scoped selection so an early performance snapshot would fail
+  the test. Assert one ref enumeration and one initial repository discovery
+  for the ordinary case, including detached HEAD, and no Git acquisition
+  during rendering.
+- Verify that `--history 0` and `--plain` incur no linking visits. Check
+  focused JSON according to the ruling, including output with `--perf`,
+  and keep existing aggregate and recent-commits JSON parity tests.
 
-On the Linux build host's monorepo checkout, with an unpushed `HEAD`, no
-commit-graph, and about 26 remote-tracking branches, record before and after
-wall-clock time and `git.commit_visits` for `sniff repo git-status`,
-`sniff repo git-status --perf --json`, and `sniff repo recent-commits`. The
-fix is accepted when `git-status` text output is within 0.5 s of
-`git-status --json` on that host.
+### Performance check
+
+Take a quick before-and-after sample of `sniff repo git-status --perf` on
+the Linux build host using the motivating checkout state or a comparable
+unpushed branch in that checkout. Record wall time and reported visits in
+the implementation log. The earlier total omitted the work, so compare
+wall time across versions and use the isolated linker test to establish
+visit savings. Use the sample to check that the reported linking stage
+accounts for the formerly hidden time. The existing commit-graph sample
+already establishes its effect on this checkout.
+
+The fix is accepted when, in that checkout state, terminal
+`sniff repo git-status` finishes within 0.5 s of
+`sniff repo git-status --json`. At the measured cost of roughly 10 µs per
+visit without a commit-graph, a single pass over the 16,682 distinct commits
+fits comfortably inside that margin.
 
 ### Gates
 
-`just test` and `just lint` in `sniff/`, plus
-`cargo clippy -p sniff --all-targets -- -D warnings` and the same for
-`sniff-detection-cli`.
+Run `just test` and `just lint` in `sniff/`, plus
+`cargo clippy -p sniff --all-targets -- -D warnings` and the same command
+for `sniff-detection-cli`. Keep fixture tests portable across macOS, Linux,
+native Windows, and WSL2.
 
 ## Open Questions
 
-1. **Expose links in `--json`?** Change 2 puts `CommitLink` on `CommitInfo`.
-   Serializing it adds `recent[].link` to `git-status --json` and the
-   aggregate `sniff repo --json`, and it makes JSON pay for linking, which
-   stays fast after Change 1 but is not free. *Recommendation:* serialize it
-   (skip when absent) and request it for `git-status` text and JSON alike, so
-   both outputs come from one observation. The alternative is to request it
-   for text only and mark the field `#[serde(skip)]`.
-2. **Generation-number cutoff.** With a commit-graph, a walk could stop below
-   the lowest generation number among the targets, which would make the
-   unpushed case close to free. Commit timestamps cannot be used for this
-   (`skewed_timestamps_do_not_hide_an_ancestor`), and repositories without a
-   commit-graph get no benefit. *Recommendation:* leave it out of this fix and
-   revisit only if the measurement above misses its target.
+### Should focused status JSON include commit links?
+
+`sniff repo git-status --json` currently exposes commit history without links
+and skips the link lookup. Scripts that need commit containment and URLs can
+already use `sniff repo recent-commits --json`. This decision applies to
+focused status JSON only. The aggregate uses its own projection, with
+`git_status` for working-tree status and `recent_commits` for commit data.
+
+| Option | Pros | Cons |
+|---|---|---|
+| Keep focused status JSON as it is (recommended) | Preserves the JSON shape and the fast status request used by scripts. Terminal status still gets measured links. | Scripts that need URLs continue to use a separate command with its own history-selection options. |
+| Include optional `recent[].link` in focused status JSON | Scripts can obtain URLs and containment alongside the exact status history selection. | Every JSON status request with history pays for linking. Consumers that validate an exact object shape may need an update. |
+
+Keep the existing JSON contract. Moving linking out of the renderer solves
+the user-visible slowdown and the reporting gap while keeping the established
+cost for scripts that only need status. If the author chooses to expose
+links, add them in the focused JSON projection. Omit the field when linking
+was not requested, preserve the distinction between contained, absent, and
+undetermined in the link object, and keep plain text and zero-history
+requests free of linking work.
