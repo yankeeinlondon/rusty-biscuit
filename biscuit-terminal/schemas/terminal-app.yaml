@@ -1,0 +1,26 @@
+kind: schema
+description: the metadata we will collect for each Terminal application
+$schema:
+    resources:
+        docs: url(required) -> the URL to the documentation for the terminal app
+        repo: url -> the URL to the repo for the app (if available)
+    license:
+        is-open-source: boolean(required) -> whether the app is open source
+        license: enum(mit,agpl,bsd,apache,mpl,isc,gpl,commercial,other) -> the license this software is offered under
+    multiplexing:
+        has_native: boolean(required) -> flag indicating if the terminal app provides native multiplexing
+        api_available: boolean(required) -> flag indicating whether the native multiplexer provided by the terminal app has a programmatic API
+    detection:
+        env-variables: string[](required) -> the list of ENV variables associated with the app ... include only those which would uniquely identify the app
+    osc-support:
+        osc-0-1-2: boolean(required) -> flag indicating whether app supports OSC 1, 2, and 3
+        osc-4-104: boolean(required) -> flag indicating whether app supports OSC 4 and 104
+        osc-5-105: boolean(required) -> flag indicating whether app supports OSC 5 and 105
+        osc-7: boolean(required) -> flag indicating whether app supports OSC 7
+        osc-8: boolean(required) -> flag indicating whether app supports OSC 8
+        osc-9: boolean(required) -> flag indicating whether app supports OSC 9
+        osc-9-4-protocol: boolean(required) -> flag indicating whether app supports the OSC 9 protocol
+        osc-9-conemu: boolean(required) -> flag indicating whether app supports the Conemu OSC 9 commands
+        osc-10-11-12: boolean(required) -> flag indicating whether app supports
+
+types:

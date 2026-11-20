@@ -1,4 +1,5 @@
 kind: sequence
+$state: terminal-app.yaml
 template:
     intro: "{{ name }} ({{url}})"
     slug: "{{dasherize(name)}}"
@@ -17,6 +18,11 @@ sequence:
       os:
           - linux
           - macos
+    - name: Rex
+      url: https://www.superlogical.com/rex/docs
+      os:
+          - macos
+          - windows
     - name: iTerm2
       url: "https://iterm2.com/"
       os:
