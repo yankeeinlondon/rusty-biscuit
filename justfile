@@ -570,6 +570,8 @@ cp:
     @echo "All committed files from {{ BOLD }}rusty-biscuit{{ RESET }} monorepo have now been pushed to remote."
     @echo
 
+init_pnpm_version := "12.21.0"
+
 # install host, CI/CD, and rusty-biscuit tools used by repository recipes
 #
 # On native Windows, run scripts\init.ps1 instead of invoking this recipe
@@ -606,9 +608,12 @@ init *args="": _ensure-native-bash
     just _ensure-kache
     just _ensure-gitnexus
     just _ensure-git-hooks
-    # The pnpm workspace packages (evidence-store's pinned Wrangler among them);
-    # pnpm itself comes from _ensure-ci-tools above.
-    pnpm install --frozen-lockfile
+    # Use the same installer on every host without replacing a developer's pnpm.
+    if [[ "$(pnpm --version)" == "{{ init_pnpm_version }}" ]]; then
+        pnpm install --frozen-lockfile
+    else
+        npm exec --yes --package=pnpm@{{ init_pnpm_version }} -- pnpm install --frozen-lockfile
+    fi
     echo
 
     echo -e "{{ BOLD }}Monorepo CLIs{{ RESET }}"
@@ -651,7 +656,7 @@ _ensure-host-tools:
 
 # ensure CLIs invoked directly by CI/CD and local reproduction recipes exist
 _ensure-ci-tools: _ensure-nextest
-    @bash scripts/ensure-ci-tools.sh
+    @bash scripts/ensure-ci-tools.sh {{ init_pnpm_version }}
 
 # ensure Rust, cargo, and C build tools are available
 _ensure-build-deps:
