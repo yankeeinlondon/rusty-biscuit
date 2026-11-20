@@ -15,7 +15,7 @@ yolo: true
 commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'phase') || frontmatter(plan, 'start_phase') || 1 : null }}"
-area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
+area: "{{ ctx.area ? '**area:** ' + ctx.area + ', ' : '' }}"
 pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
     {{
@@ -82,7 +82,7 @@ initialize:
           - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total_phases}})"
 
 start:
-    - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
+    - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**repo**: {{ctx.repo}},{{area}} **agent:** {{ctx.agent}}/{{ctx.model}}, **branch:** {{ctx.branch}}, **host:** {{ctx.hostname}})"
     # `start` (not `initialize`) because a loop re-enters each phase here; the
     # body renders the same message for the agent itself.
     - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
@@ -92,7 +92,7 @@ start:
 
                 {{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
 success: 
-    - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
+    - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan (_on **{{ctx.hostname}}** host)"
     - message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
     - say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
     # The agent writes the completion flags; this only surfaces a final
@@ -130,7 +130,7 @@ blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
     say: "Phase {{phase}} of a plan in {{ctx.area || ctx.repo }}, ran into problems!"
-    message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
+    message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` [repo: {{ctx.repo}}, agent: {{ctx.agent}}/{{ctx.model}}, host: {{ctx.hostname}}]: {{err.msg}}."
     effect: sad-trombone
 loop:
     until: "phase >= total_phases"
