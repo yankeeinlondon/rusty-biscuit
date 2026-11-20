@@ -2,3 +2,7 @@ packages:
   - homelab/server/frontend
   - tools/test-audit
   - tools/evidence-store
+allowBuilds:
+  esbuild: true
+  tree-sitter-rust: true
+  workerd: true

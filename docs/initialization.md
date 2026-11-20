@@ -386,6 +386,13 @@ their local reproduction recipes:
 - `cargo-fuzz` plus the nightly Rust toolchain on supported Unix hosts
 - `cross` and Bencher on Linux, where their owning workflows run
 
+Initialization installs JavaScript dependencies from the committed lockfile
+using the pnpm version pinned in the root justfile. If your installed pnpm
+differs, npm runs the pinned version for the workspace install. Build-script
+decisions are committed in `pnpm-workspace.yaml`, so the install runs without
+an approval prompt. When a dependency introduces a new install script, review
+it and record the decision in that file alongside the dependency update.
+
 On ARM Linux (including Linux VMs on Apple Silicon), initialization uses the
 native Rust toolchain. It checks `cross` outside the repository because Cross
 0.2.5 can attempt to install an x86_64 container toolchain even for

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+pnpm_version="${1:?expected the bootstrap pnpm version}"
+
 source scripts/cargo-path.sh
 
 case "$(uname -s)" in
@@ -147,17 +149,17 @@ ensure_pnpm() {
         return
     fi
 
-    echo "Installing pnpm..."
+    echo "Installing pnpm@$pnpm_version..."
     # `npm install --global` writes to npm's prefix, which for a distro or
     # Homebrew Node is root-owned (`/usr/local/lib/node_modules`). Unelevated it
     # dies EACCES, and under `set -e` that aborts `just init` outright — leaving
     # pnpm uninstalled, so homelab's frontend lint and test recipes self-skip on
     # every later run. Attempt unelevated first so a user-prefix or nvm/fnm Node
     # (and Windows, which has no sudo) never pulls in a needless sudo prompt.
-    if ! npm install --global pnpm 2>/dev/null; then
+    if ! npm install --global "pnpm@$pnpm_version" 2>/dev/null; then
         if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
             echo "npm's global prefix is not writable; retrying with sudo..."
-            sudo npm install --global pnpm
+            sudo npm install --global "pnpm@$pnpm_version"
         else
             echo "Could not install pnpm into npm's global prefix ($(npm config get prefix))." >&2
             echo "Install it manually (https://pnpm.io/installation) and re-run 'just init'." >&2
