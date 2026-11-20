@@ -134,6 +134,7 @@ completed` when the schedule or runners change.
 
 ## Evidence Reuse and Execution Constraints
 
+- Never use `git push --no-verify` to ship changes after pre-push validation fails. Treat test timeouts as failures, diagnose and fix them, then rerun the required validation before pushing.
 - Reuse qualifying passing evidence for each required cell on every OS. When
   qualifying passing evidence is absent, run the required tests. A request to
   avoid duplicate passing tests does not establish an environment ban.
