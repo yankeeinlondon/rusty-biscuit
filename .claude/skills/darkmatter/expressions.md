@@ -49,6 +49,21 @@ and DMLS both read it.
   call code, severity, or message outside this module. Parity tests:
   `lib/tests/l1/shared_diagnostics.rs`, DMLS
   `expression_call_diagnostics::shared_fields`.
+- **Object spread** (`{ ...base, k: v }`) is checked through the same
+  record. A provably non-object, non-null operand is a `CallCheck` named
+  `SPREAD_CHECK_NAME` (`...`) with `CallProblem::InvalidSpreadOperand`,
+  spanning the operand (`INVALID_SPREAD_OPERAND_CODE`). `check_expression_calls`
+  walks every node (`visit_nodes`); `visit_call_nodes` is a filter over that
+  walk. So any consumer that iterates checks must tolerate a `...` check that
+  has no arguments. Typing folds entries in order
+  (`scope::Shape::object_of_entries`, using `projection::spread_fields`); an
+  open result gets `<string>: unknown`, which `serialize_property_atom` does
+  not print. The runtime failure is `ExpressionError::InvalidSpreadOperand`
+  (fatal). Its `SpreadSite` is placed by `evaluate`/`evaluate_observed` as a
+  node ordinal in `member_check::expr_nodes`. `report_diagnostics` maps the
+  ordinal back through `spread_operand_span` (that is, `spanned_nodes`) to
+  narrow an interpolation record to the operand. Reuse that ordinal mirror
+  for any other node-level runtime location; never compare an AST by value.
 - `CallCheck::always_false` marks a call whose authored literal argument
   is not a well-formed file reference, at a parameter registered with
   `RegistrationBuilder::false_for_malformed_reference` (`file_exists` only;

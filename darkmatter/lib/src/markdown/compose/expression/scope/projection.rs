@@ -778,6 +778,98 @@ fn arm_member(atom: &PropertyAtom, member: &Member, definitions: &DefinitionTabl
     }
 }
 
+/// What spreading a value of one non-null alternative writes into an
+/// object literal.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SpreadFields {
+    /// Each declared key, the type of its value when written, and whether
+    /// every value of the alternative writes it.
+    pub(crate) fields: Vec<(String, Shape, bool)>,
+    /// Whether the alternative may write keys it does not declare: an open
+    /// or pattern-key object, a bare `object`, or a type that is not known
+    /// to be closed.
+    pub(crate) open: bool,
+}
+
+impl SpreadFields {
+    fn opaque() -> Self {
+        Self { fields: Vec::new(), open: true }
+    }
+}
+
+/// What a spread of each non-null alternative of `shape` writes, or for an
+/// alternative that is not an object (spreading it fails) the JSON type it
+/// has instead (`number`, `array`, …). `None` for an unknown shape. A
+/// recursive reference opens its definition through the same alias budget
+/// [`member_shape`] uses; one that cannot be opened is
+/// [`SpreadFields::open`] with no known keys.
+pub(crate) fn spread_fields(shape: &Shape, definitions: &DefinitionTable) -> Option<Vec<Result<SpreadFields, &'static str>>> {
+    let Shape::Arms { arms, .. } = shape else {
+        return None;
+    };
+    let mut found = Vec::new();
+    for arm in arms {
+        arm_spread_fields(arm, definitions, definitions.len(), &mut found);
+    }
+    Some(found)
+}
+
+fn arm_spread_fields(
+    atom: &PropertyAtom,
+    definitions: &DefinitionTable,
+    aliases: usize,
+    found: &mut Vec<Result<SpreadFields, &'static str>>,
+) {
+    use simplified_schema::simplified::narrowing::{Family, families};
+    if atom.is_array || matches!(atom.ty, TypeExpr::Tuple(_)) {
+        found.push(Err("array"));
+        return;
+    }
+    match &atom.ty {
+        TypeExpr::InlineObject(shape) => found.push(Ok(SpreadFields {
+            fields: shape
+                .properties
+                .iter()
+                .map(|(name, def)| (name.clone(), Shape::of_type(def), def.is_required()))
+                .collect(),
+            open: !shape.pattern_keys.is_empty(),
+        })),
+        TypeExpr::Ref(key) => match definitions.get(key).map(|definition| Shape::of_type(&definition.body)) {
+            Some(Shape::Arms { arms, .. }) if aliases > 0 => {
+                for arm in &arms {
+                    arm_spread_fields(arm, definitions, aliases - 1, found);
+                }
+            }
+            _ => found.push(Ok(SpreadFields::opaque())),
+        },
+        _ => match families(atom) {
+            [Family::String] => found.push(Err("string")),
+            [Family::Number] => found.push(Err("number")),
+            [Family::Boolean] => found.push(Err("boolean")),
+            [Family::Array] => found.push(Err("array")),
+            _ => found.push(Ok(SpreadFields::opaque())),
+        },
+    }
+}
+
+/// The JSON types of `shape`'s alternatives, in order and distinct, when
+/// spreading a value of it always fails: the shape is known, excludes
+/// `null`, and none of its alternatives is an object.
+pub(crate) fn spread_always_fails(shape: &Shape, definitions: &DefinitionTable) -> Option<Vec<&'static str>> {
+    if shape.admits_null() {
+        return None;
+    }
+    let arms = spread_fields(shape, definitions)?;
+    let mut types: Vec<&'static str> = Vec::new();
+    for arm in arms {
+        let found = arm.err()?;
+        if !types.contains(&found) {
+            types.push(found);
+        }
+    }
+    (!types.is_empty()).then_some(types)
+}
+
 /// The values of one item of the array alternative `atom`.
 pub(super) fn item_shape(atom: &PropertyAtom) -> Shape {
     let mut item = atom.clone();

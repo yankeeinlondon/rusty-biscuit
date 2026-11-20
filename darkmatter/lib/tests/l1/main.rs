@@ -212,6 +212,7 @@ mod missing_ctx_capture;
 mod more_is_more_literals_and_indexes;
 mod not_empty_frontmatter;
 mod numeric_admission;
+mod object_spread;
 mod path_function_contracts;
 mod path_lookup_guard;
 mod nested_composition;

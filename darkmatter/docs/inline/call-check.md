@@ -228,6 +228,24 @@ Only a call that is **proven** wrong (category 5) rejects the document:
 Silence is not a promise: a call the check accepts can still fail at runtime
 with its own type error, for example a constraint the value does not meet.
 
+### Object spread operands
+
+An object literal can copy another object's fields with a spread,
+`{ ...base, color: 'blue' }`. Its operand must be an object or `null`. When
+the operand's type proves it is neither, the check rejects the document under
+`dm.expression.invalid_spread_operand`, ranged on the operand alone:
+
+| Expression (with `size: number(required)`, `maybe: number`) | Verdict |
+|---|---|
+| `{ ...5 }`, `{ ...[1, 2] }`, `{ ...size }` | rejected: object spread requires an object or null, found number (or array) |
+| `{ ...null }`, `{ ...maybe }` | not rejected: `null` contributes no fields |
+| `{ ...untyped }` (no schema entry) | not rejected; its value is checked when it runs |
+
+An operand the check cannot judge is checked when it is evaluated. A value
+that is neither an object nor `null` then stops composition with the same
+code and message, located at the operand. In a callback body that runs once
+per item, the error points to the one authored operand.
+
 Every branch is checked, including the ones a run never takes: both sides of a
 ternary, both operands of `||`, `&&`, `and(…)`, and `or(…)`, and the body of a
 `::block` whose condition is false. Laziness at runtime is unchanged:

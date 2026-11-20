@@ -672,7 +672,16 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         ),
         MarkdownError::SchemaValidationFailed { path, .. } => (simplified_schema::SCHEMA_PREPARE_CODE, file_only(named(path))),
         MarkdownError::FileLoad(_) | MarkdownError::UrlFetch(_) => (INPUT_READ_CODE, None),
-        MarkdownError::Interpolation { source, cause, .. } => (expression_code(cause), proven(Some(source.as_ref()))),
+        MarkdownError::Interpolation { source, cause, expression, .. } => (
+            expression_code(cause),
+            match spread_operand_source(source, expression, cause) {
+                Some((source, range)) => {
+                    span = Some(range);
+                    Some(source)
+                }
+                None => proven(Some(source.as_ref())),
+            },
+        ),
         MarkdownError::Transclusion(inner) => (
             match inner.as_ref() {
                 TransclusionError::ParseDirective { .. } => DIRECTIVE_PARSE_CODE,
@@ -1011,8 +1020,33 @@ fn expression_code(cause: &ExpressionError) -> &'static str {
         }
         ExpressionError::UnknownFunction { .. } => UNKNOWN_FUNCTION_CODE,
         ExpressionError::InvalidCallback { .. } => simplified_schema::expression::parser::INVALID_CALLBACK_CODE,
+        ExpressionError::InvalidSpreadOperand { .. } => super::expression::INVALID_SPREAD_OPERAND_CODE,
         _ => ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
     }
+}
+
+/// The authored position and range of the spread operand an
+/// [`ExpressionError::InvalidSpreadOperand`] names, inside the anchored
+/// `{{ … }}` holding `expression`. `None` for any other cause, an unplaced
+/// site, or a construct whose text does not hold the expression as written
+/// (an escaped YAML scalar), which keeps the construct's own position.
+fn spread_operand_source(
+    source: &SourceRef,
+    expression: &str,
+    cause: &ExpressionError,
+) -> Option<(DiagnosticSource, std::ops::Range<usize>)> {
+    let ExpressionError::InvalidSpreadOperand { site, .. } = cause.without_callbacks() else {
+        return None;
+    };
+    let SourceRef::OnDiskSpan { context, span } = source else {
+        return None;
+    };
+    let construct = span.range();
+    let start = construct.start + context.content.get(construct)?.find(expression)?;
+    let operand = super::expression::spread_operand_span(&super::expression::parse_spanned(expression).ok()?, site.ordinal()?)?;
+    let range = start + operand.start..start + operand.end;
+    let (line, column) = super::expression::one_based_position(&context.content, range.start)?;
+    Some((DiagnosticSource::at(context_file(context), line, column), range))
 }
 
 /// The policy stop in `error`'s chain: its blocking and earlier warnings.

@@ -2394,6 +2394,14 @@ mod tests {
     use std::io::Write;
     use tempfile::TempDir;
 
+    /// A nested composition named in a spread operand is walked, even when
+    /// a later field overwrites the key it supplies.
+    #[test]
+    fn object_spread_operands_are_scanned_even_when_overwritten() {
+        let md: Markdown = "---\nv: \"{{ { ...{ k: as_markdown('fm.md') }, k: 1 } }}\"\n---\n{{ { ...{ k: as_markdown('body.md') }, k: 1 } }}\n".into();
+        assert_eq!(authored_as_markdown_literals(&md, true), ["fm.md", "body.md"]);
+    }
+
     #[test]
     fn authored_target_and_pending_shell_data_identify_the_same_dependency() {
         let md: Markdown = "---\nchild: \"$(printf child.md)\"\n---\n::file {{child}}\n".into();

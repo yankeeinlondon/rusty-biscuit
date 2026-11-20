@@ -46,7 +46,7 @@ use super::call_binding::{
 };
 use super::functions;
 use super::prepared::PreparedValue;
-use super::scope::{Polarity, Shape as ScopeShape, TypeScope};
+use super::scope::{ObjectEntryType, Polarity, Shape as ScopeShape, TypeScope};
 use simplified_schema::coercion::{Additional, ContentFormat, NumberShape, Shape, ValueKind, bind};
 use simplified_schema::simplified::serialize_property_atom;
 use simplified_schema::{
@@ -119,17 +119,22 @@ pub enum ArgumentType {
     /// No usable type: an undeclared or untyped variable, a call or operator
     /// expression whose type is `unknown`.
     Unknown,
-    /// An object literal with some literal and some computed members. It is
+    /// An object literal with some literal members and some it cannot
+    /// read: computed members, or keys an opaque spread may supply. It is
     /// classified, and displays, as [`Self::Typed`] with `shape`; its
     /// literal members stay visible to the checks that judge a value no
     /// computed member can change (a literal `load_data` option).
     PartialObject {
         /// The whole object's type.
         shape: ScopeShape,
-        /// The members written as literals.
+        /// The members whose final value is a literal: written as one, or
+        /// supplied by a literal object spread, after every later entry.
         literals: serde_json::Map<String, Value>,
-        /// The names of the members that are computed.
+        /// The names of the members whose final value is computed.
         computed: Vec<String>,
+        /// Whether a spread whose fields are not literal may supply keys
+        /// beyond `literals` and `computed`.
+        opaque: bool,
     },
 }
 
@@ -147,37 +152,60 @@ impl ArgumentType {
         match expression_type(arg, scope) {
             ScopeShape::Unknown { .. } => Self::Unknown,
             shape @ ScopeShape::Arms { .. } => match partial_object(arg) {
-                Some((literals, computed)) => Self::PartialObject { shape, literals, computed },
+                Some((literals, computed, opaque)) => Self::PartialObject { shape, literals, computed, opaque },
                 None => Self::Typed(shape),
             },
         }
     }
 }
 
-/// The literal members and the computed member names of an object literal
-/// that has at least one of each.
-fn partial_object(arg: &SpannedExpr) -> Option<(serde_json::Map<String, Value>, Vec<String>)> {
+/// The literal members, the computed member names, and whether an opaque
+/// spread may supply other keys, of an object literal that has at least one
+/// literal member and something it cannot read.
+///
+/// Entries fold in written order, as evaluation merges them: a literal
+/// object spread supplies its members, a `null` spread nothing, and a later
+/// entry replaces an earlier one's key. A spread of anything else may supply
+/// any key, so it discards every member read before it; members written
+/// after it stay readable.
+fn partial_object(arg: &SpannedExpr) -> Option<(serde_json::Map<String, Value>, Vec<String>, bool)> {
     let entries = match &arg.kind {
         SpannedExprKind::Paren(inner) => return partial_object(inner),
         SpannedExprKind::ObjectLiteral(entries) => entries,
         _ => return None,
     };
     let mut literals = serde_json::Map::new();
-    let mut computed = Vec::new();
+    let mut computed: Vec<String> = Vec::new();
+    let mut opaque = false;
     for entry in entries {
-        // Until spread typing lands, a literal with a spread has no
-        // inspectable members: the spread may overwrite any of them.
-        let SpannedObjectEntry::Field { key, value } = entry else {
-            return None;
-        };
-        match literal_value(value) {
-            Some(value) => {
-                literals.insert(key.value.clone(), value);
+        match entry {
+            SpannedObjectEntry::Field { key, value } => {
+                computed.retain(|name| *name != key.value);
+                match literal_value(value) {
+                    Some(value) => {
+                        literals.insert(key.value.clone(), value);
+                    }
+                    None => {
+                        literals.remove(&key.value);
+                        computed.push(key.value.clone());
+                    }
+                }
             }
-            None => computed.push(key.value.clone()),
+            SpannedObjectEntry::Spread { operand } => match literal_value(operand) {
+                Some(Value::Object(fields)) => {
+                    computed.retain(|name| !fields.contains_key(name));
+                    literals.extend(fields);
+                }
+                Some(Value::Null) => {}
+                _ => {
+                    literals.clear();
+                    computed.clear();
+                    opaque = true;
+                }
+            },
         }
     }
-    (!literals.is_empty() && !computed.is_empty()).then_some((literals, computed))
+    (!literals.is_empty() && (!computed.is_empty() || opaque)).then_some((literals, computed, opaque))
 }
 
 /// The design-time type of `expr` at the site `scope` describes, without
@@ -187,7 +215,7 @@ fn partial_object(arg: &SpannedExpr) -> Option<(serde_json::Map<String, Value>, 
 /// |---|---|
 /// | a literal | that value |
 /// | a variable, or a constant path on one | its type in `scope` |
-/// | an object literal | a closed object declaring each member at its own type (shorthand `{a, b}` is `{a: a, b: b}`) |
+/// | an object literal | a closed object declaring each member at its own type (shorthand `{a, b}` is `{a: a, b: b}`); spreads fold in written order ([`ScopeShape::object_of_entries`]) |
 /// | an array literal | an array of the union of its items' types |
 /// | a call | the union of the declared `returns` of every overload its argument count can select |
 /// | `load_data(file, '<contract>')`, with or without an options argument | the literal contract's type (named references `unknown`), with `null` when `file` may be null; `null` for a literal `null` file |
@@ -207,16 +235,18 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
     }
     match &expr.kind {
         SpannedExprKind::Paren(inner) => expression_type(inner, scope),
-        SpannedExprKind::ObjectLiteral(entries) => entries
-            .iter()
-            .map(|entry| match entry {
-                SpannedObjectEntry::Field { key, value } => Some((key.value.clone(), expression_type(value, scope))),
-                SpannedObjectEntry::Spread { .. } => None,
-            })
-            .collect::<Option<_>>()
-            .map(ScopeShape::object_of)
-            // A spread's keys are unknown here, so the literal is some object.
-            .unwrap_or(ScopeShape::Unknown { non_null: true }),
+        SpannedExprKind::ObjectLiteral(entries) => ScopeShape::object_of_entries(
+            entries
+                .iter()
+                .map(|entry| match entry {
+                    SpannedObjectEntry::Field { key, value } => {
+                        ObjectEntryType::Field(key.value.clone(), expression_type(value, scope))
+                    }
+                    SpannedObjectEntry::Spread { operand } => ObjectEntryType::Spread(expression_type(operand, scope)),
+                })
+                .collect(),
+            scope.definitions(),
+        ),
         SpannedExprKind::ArrayLiteral(items) => ScopeShape::array_of(
             &items
                 .iter()
@@ -800,7 +830,8 @@ fn family_fit(from: Family, to: Family, scalar_text: bool) -> Fit {
 }
 
 /// The value of a literal argument: a scalar, `null`, a negated number, or
-/// a list or object of literals.
+/// a list or object of literals (an object's spreads of literal objects or
+/// `null` included).
 fn literal_value(arg: &SpannedExpr) -> Option<Value> {
     match &arg.kind {
         SpannedExprKind::Paren(inner) => literal_value(inner),
@@ -813,14 +844,23 @@ fn literal_value(arg: &SpannedExpr) -> Option<Value> {
             _ => None,
         },
         SpannedExprKind::ArrayLiteral(items) => items.iter().map(literal_value).collect::<Option<Vec<_>>>().map(Value::Array),
-        SpannedExprKind::ObjectLiteral(entries) => entries
-            .iter()
-            .map(|entry| match entry {
-                SpannedObjectEntry::Field { key, value } => literal_value(value).map(|value| (key.value.clone(), value)),
-                SpannedObjectEntry::Spread { .. } => None,
-            })
-            .collect::<Option<serde_json::Map<_, _>>>()
-            .map(Value::Object),
+        // Spreads of literal objects and `null` fold in written order.
+        SpannedExprKind::ObjectLiteral(entries) => {
+            let mut object = serde_json::Map::new();
+            for entry in entries {
+                match entry {
+                    SpannedObjectEntry::Field { key, value } => {
+                        object.insert(key.value.clone(), literal_value(value)?);
+                    }
+                    SpannedObjectEntry::Spread { operand } => match literal_value(operand)? {
+                        Value::Object(fields) => object.extend(fields),
+                        Value::Null => {}
+                        _ => return None,
+                    },
+                }
+            }
+            Some(Value::Object(object))
+        }
         _ => None,
     }
 }
@@ -858,6 +898,16 @@ pub enum CallProblem {
     Ambiguous { signatures: Vec<String> },
     /// Several overloads take this many arguments and none can bind them.
     NoOverload { signatures: Vec<String> },
+    /// An object spread whose operand's type is neither an object nor
+    /// `null`. Its [`CallCheck`] names the function `...` and spans the
+    /// operand.
+    InvalidSpreadOperand {
+        /// The operand's span.
+        span: SourceSpan,
+        /// The JSON types the operand may have (`number`, `string | number`),
+        /// worded as evaluation reports the value it found.
+        found: String,
+    },
 }
 
 /// The design-time verdict on one call.
@@ -908,6 +958,16 @@ pub struct DataProblem {
 /// (`file_exists("https://")`). Composition reports it as a warning, and the
 /// editor shows it under the same code.
 pub const ALWAYS_FALSE_CALL_CODE: &str = "dm.expression.always_false_call";
+
+/// The diagnostic code of an object spread whose operand is neither an
+/// object nor `null`: proven by the operand's type before anything runs
+/// ([`CallProblem::InvalidSpreadOperand`]), or found when it is evaluated
+/// ([`ExpressionError::InvalidSpreadOperand`](super::ExpressionError::InvalidSpreadOperand)).
+/// Always an error, ranged at the operand.
+pub const INVALID_SPREAD_OPERAND_CODE: &str = "dm.expression.invalid_spread_operand";
+
+/// The function name a spread operand's [`CallCheck`] carries.
+pub const SPREAD_CHECK_NAME: &str = "...";
 
 impl CallCheck {
     /// The call's category: 5 for a call problem, otherwise the most
@@ -966,7 +1026,10 @@ impl CallCheck {
     pub fn findings(&self) -> Vec<CallFinding> {
         if let Some(problem) = &self.problem {
             return vec![CallFinding {
-                span: match problem { CallProblem::InvalidCallback { span, .. } => span.clone(), _ => self.span.clone() },
+                span: match problem {
+                    CallProblem::InvalidCallback { span, .. } | CallProblem::InvalidSpreadOperand { span, .. } => span.clone(),
+                    _ => self.span.clone(),
+                },
                 category: ArgumentCategory::Incompatible,
                 argument: None,
                 message: self.problem_message(problem),
@@ -1011,6 +1074,9 @@ impl CallCheck {
             }
             CallProblem::NoOverload { signatures } => {
                 format!("{function}: no signature accepts these arguments; expected {}", signatures.join(" or "))
+            }
+            CallProblem::InvalidSpreadOperand { found, .. } => {
+                format!("object spread requires an object or null, found {found}")
             }
         }
     }
@@ -1317,8 +1383,9 @@ fn literal_carriers(contract: &ArgumentType) -> Option<Vec<&Value>> {
 enum OptionsView<'a> {
     /// Nothing computed: omitted or `null` (`None`), or a literal object.
     Closed(Option<serde_json::Map<String, Value>>),
-    /// An object literal with some computed members.
-    Partial { bound: serde_json::Map<String, Value>, computed: &'a [String] },
+    /// An object literal with some computed members, or keys an opaque
+    /// spread may supply (`opaque`).
+    Partial { bound: serde_json::Map<String, Value>, computed: &'a [String], opaque: bool },
     /// A computed value, a literal the binder judges, or literal members
     /// that do not bind on their own (execution's binder error comes first).
     Unknown,
@@ -1329,7 +1396,7 @@ impl<'a> OptionsView<'a> {
         let (literals, computed) = match argument {
             ArgumentType::Literal(Value::Null) => return Self::Closed(None),
             ArgumentType::Literal(Value::Object(members)) => (members, None),
-            ArgumentType::PartialObject { literals, computed, .. } => (literals, Some(computed.as_slice())),
+            ArgumentType::PartialObject { literals, computed, opaque, .. } => (literals, Some((computed.as_slice(), *opaque))),
             _ => return Self::Unknown,
         };
         // Every option field is optional, so the literal members bind as an
@@ -1340,7 +1407,7 @@ impl<'a> OptionsView<'a> {
         };
         match computed {
             None => Self::Closed(Some(bound)),
-            Some(computed) => Self::Partial { bound, computed },
+            Some((computed, opaque)) => Self::Partial { bound, computed, opaque },
         }
     }
 
@@ -1358,7 +1425,7 @@ impl<'a> OptionsView<'a> {
     fn format_is_closed(&self) -> bool {
         match self {
             Self::Closed(_) => true,
-            Self::Partial { computed, .. } => !computed.iter().any(|key| key == "format"),
+            Self::Partial { computed, opaque, .. } => !opaque && !computed.iter().any(|key| key == "format"),
             Self::Unknown => false,
         }
     }
@@ -1576,7 +1643,18 @@ fn classify_against(
 /// ([`validate_expression`](super::validate_expression) reports them).
 pub fn check_expression_calls(expr: &SpannedExpr, site: &TypeScope<'_>) -> Vec<CallCheck> {
     let mut checks = Vec::new();
-    visit_call_nodes(expr, &mut |call| {
+    visit_nodes(expr, &mut |call| {
+        if let SpannedExprKind::ObjectLiteral(entries) = &call.kind {
+            for entry in entries {
+                if let SpannedObjectEntry::Spread { operand } = entry {
+                    checks.extend(spread_check(expr, operand, site));
+                }
+            }
+            return;
+        }
+        if !matches!(call.kind, SpannedExprKind::FunctionCall { .. } | SpannedExprKind::CallbackCall { .. }) {
+            return;
+        }
         let local_site = branch_scope(expr, &call.span, site.clone());
         let (name, types, spans) = match &call.kind {
             SpannedExprKind::FunctionCall { name, args } => (
@@ -1622,6 +1700,24 @@ pub fn check_expression_calls(expr: &SpannedExpr, site: &TypeScope<'_>) -> Vec<C
         }
     });
     checks
+}
+
+/// The check of the spread operand `operand` of `root` when its type, at
+/// its own site (every branch, callback bodies included), proves the spread
+/// fails: it is neither an object nor `null`.
+fn spread_check(root: &SpannedExpr, operand: &SpannedExpr, site: &TypeScope<'_>) -> Option<CallCheck> {
+    let scope = branch_scope(root, &operand.span, site.clone());
+    let found = super::scope::spread_always_fails(&expression_type(operand, &scope), scope.definitions())?.join(" | ");
+    Some(CallCheck {
+        function: SPREAD_CHECK_NAME.to_string(),
+        span: operand.span.clone(),
+        arguments: Vec::new(),
+        argument_spans: Vec::new(),
+        problem: Some(CallProblem::InvalidSpreadOperand { span: operand.span.clone(), found }),
+        binding_error: None,
+        always_false: None,
+        data_problem: None,
+    })
 }
 
 /// Whether the passive check proves that calling `name` with `args`, at the
@@ -1751,7 +1847,9 @@ pub fn check_prepared_calls(prepared: &PreparedValue, site: &TypeScope<'_>) -> V
             }
             check.span = expression.leaf_span(&check.span);
             check.argument_spans = check.argument_spans.iter().map(|span| expression.leaf_span(span)).collect();
-            if let Some(CallProblem::InvalidCallback { span, .. }) = &mut check.problem {
+            if let Some(CallProblem::InvalidCallback { span, .. } | CallProblem::InvalidSpreadOperand { span, .. }) =
+                &mut check.problem
+            {
                 *span = expression.leaf_span(span);
             }
             found.push(PreparedCallCheck {
@@ -1766,48 +1864,49 @@ pub fn check_prepared_calls(prepared: &PreparedValue, site: &TypeScope<'_>) -> V
 
 /// Calls `visit` for every function-call node in `expr`, outermost first.
 pub(crate) fn visit_call_nodes<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut(&'e SpannedExpr)) {
+    visit_nodes(expr, &mut |node| {
+        if matches!(node.kind, SpannedExprKind::FunctionCall { .. } | SpannedExprKind::CallbackCall { .. }) {
+            visit(node);
+        }
+    });
+}
+
+/// Calls `visit` for every node of `expr`, outermost first, children in
+/// written order (callback bodies and spread operands included).
+fn visit_nodes<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut(&'e SpannedExpr)) {
+    visit(expr);
     match &expr.kind {
         SpannedExprKind::Variable(_)
         | SpannedExprKind::StringLiteral(_)
         | SpannedExprKind::NumberLiteral(_)
         | SpannedExprKind::BoolLiteral(_) => {}
-        SpannedExprKind::ArrayLiteral(items) => items.iter().for_each(|item| visit_call_nodes(item, visit)),
-        SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|entry| visit_call_nodes(entry.value(), visit)),
+        SpannedExprKind::ArrayLiteral(items) => items.iter().for_each(|item| visit_nodes(item, visit)),
+        SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|entry| visit_nodes(entry.value(), visit)),
         SpannedExprKind::Paren(inner)
         | SpannedExprKind::UnaryNot(inner)
         | SpannedExprKind::UnaryMinus(inner)
-        | SpannedExprKind::MemberAccess { base: inner, .. } => visit_call_nodes(inner, visit),
-        SpannedExprKind::Binary { left, right, .. } | SpannedExprKind::Comparison { left, right, .. } => {
-            visit_call_nodes(left, visit);
-            visit_call_nodes(right, visit);
+        | SpannedExprKind::MemberAccess { base: inner, .. } => visit_nodes(inner, visit),
+        SpannedExprKind::Binary { left, right, .. }
+        | SpannedExprKind::Comparison { left, right, .. }
+        | SpannedExprKind::LogicalOr { left, right } => {
+            visit_nodes(left, visit);
+            visit_nodes(right, visit);
         }
         SpannedExprKind::Index { base, index } => {
-            visit_call_nodes(base, visit);
-            visit_call_nodes(index, visit);
-        }
-        SpannedExprKind::LogicalOr { left, right } => {
-            visit_call_nodes(left, visit);
-            visit_call_nodes(right, visit);
+            visit_nodes(base, visit);
+            visit_nodes(index, visit);
         }
         SpannedExprKind::Ternary {
             condition,
             then_branch,
             else_branch,
         } => {
-            visit_call_nodes(condition, visit);
-            visit_call_nodes(then_branch, visit);
-            visit_call_nodes(else_branch, visit);
+            visit_nodes(condition, visit);
+            visit_nodes(then_branch, visit);
+            visit_nodes(else_branch, visit);
         }
-        SpannedExprKind::CallbackCall { args, .. } => {
-            visit(expr);
-            for arg in args {
-                visit_call_nodes(arg.expression(), visit);
-            }
-        }
-        SpannedExprKind::FunctionCall { args, .. } => {
-            visit(expr);
-            args.iter().for_each(|arg| visit_call_nodes(arg, visit));
-        }
+        SpannedExprKind::CallbackCall { args, .. } => args.iter().for_each(|arg| visit_nodes(arg.expression(), visit)),
+        SpannedExprKind::FunctionCall { args, .. } => args.iter().for_each(|arg| visit_nodes(arg, visit)),
     }
 }
 
@@ -2016,11 +2115,12 @@ mod load_data_options_tests {
         let declared = super::super::DeclaredTypes::new(None);
         let scope = TypeScope::unguarded(&declared);
         let partial = ArgumentType::of(&parse_spanned("{delimiter: ';', format: x}").unwrap(), &scope);
-        let ArgumentType::PartialObject { shape, literals, computed } = &partial else {
+        let ArgumentType::PartialObject { shape, literals, computed, opaque } = &partial else {
             panic!("{partial:?}");
         };
         assert_eq!(literals.get("delimiter"), Some(&Value::String(";".to_string())));
         assert_eq!(computed, &["format".to_string()]);
+        assert!(!opaque);
         assert_eq!(partial.to_string(), ArgumentType::Typed(shape.clone()).to_string());
         // Every member literal, or every member computed, is not partial.
         assert!(matches!(ArgumentType::of(&parse_spanned("{a: 1}").unwrap(), &scope), ArgumentType::Literal(_)));

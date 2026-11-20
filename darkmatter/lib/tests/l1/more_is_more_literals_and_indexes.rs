@@ -1,5 +1,5 @@
 use darkmatter::markdown::compose::expression::{
-    EvaluationLookup, ResolutionContext, SpannedExprKind, SpannedObjectEntry, evaluate, parse, parse_spanned,
+    EvaluationLookup, ExpressionError, ResolutionContext, SpannedExprKind, SpannedObjectEntry, evaluate, parse, parse_spanned,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -114,7 +114,11 @@ fn object_spread_merges_in_written_order_and_rejects_a_non_object() {
     // A null spread contributes nothing; an object from a variable is copied.
     assert_eq!(eval("{ ...null, limit: ctx.limit, ...{} }", &lookup), json!({"limit": 3}));
     for (source, found) in [("{ ...1 }", "number"), ("{ ...'s' }", "string"), ("{ ...[1] }", "array"), ("{ ...true }", "boolean")] {
-        let error = evaluate(&parse(source).unwrap(), &lookup).unwrap_err().to_string();
-        assert!(error.contains(&format!("object spread requires an object or null, found {found}")), "{source}: {error}");
+        let error = evaluate(&parse(source).unwrap(), &lookup).unwrap_err();
+        assert!(
+            matches!(&error, ExpressionError::InvalidSpreadOperand { found: typed, .. } if *typed == found),
+            "{source}: {error:?}"
+        );
+        assert_eq!(error.to_string(), format!("object spread requires an object or null, found {found}"));
     }
 }

@@ -94,6 +94,7 @@ mod read_gate_tests;
 pub mod resolve_ctx;
 pub mod scope;
 pub mod semantics;
+pub mod spread;
 
 pub(crate) use absence::static_access_reads_in_scope;
 pub use absence::{
@@ -116,7 +117,7 @@ pub use call_binding::{
 };
 pub use call_check::{
     ALWAYS_FALSE_CALL_CODE, AlwaysFalseFinding, ArgumentCategory, ArgumentCheck, ArgumentType, CallCheck, CallFinding,
-    CallProblem, DataProblem, PreparedCallCheck, check_call,
+    CallProblem, DataProblem, INVALID_SPREAD_OPERAND_CODE, PreparedCallCheck, SPREAD_CHECK_NAME, check_call,
     check_call_with_definitions, check_expression_calls, check_prepared_calls, classify_argument,
     classify_argument_with_definitions, expression_type,
 };
@@ -153,6 +154,7 @@ pub(crate) use path_projection::{
     make_portable_relative_in_context,
 };
 pub use resolve_ctx::ResolutionContext;
+pub use spread::{SpreadSite, spread_operand_span};
 pub use scope::{
     BindingId, DeclaredType, DeclaredTypes, GuardOrigin, Member, Polarity, PresenceEvidence, RawDeclarations,
     ItemFrame, LexicalTypes, PatternMismatch, ScopedType, Shape, SortKeySupport, SourceProjection, Subject, TypeScope, TypedLocal,
@@ -550,7 +552,7 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
     // inside that scope, so it never reopens it.
     lookup.begin_expression_scope();
     let budget = evaluation_budget(lookup);
-    evaluate_expr(expr, lookup, AbsenceScope::default(), &mut (), &budget)
+    evaluate_expr(expr, lookup, AbsenceScope::default(), &mut (), &budget).map_err(|error| error.placed_in(expr))
 }
 
 /// [`evaluate`], reporting to `observer` every evaluated read of an unknown
@@ -569,7 +571,8 @@ pub(crate) fn evaluate_observed<L: EvaluationLookup, O: MissingRootObserver>(
 ) -> Result<Value, ExpressionError> {
     lookup.begin_expression_scope();
     let budget = evaluation_budget(lookup);
-    let result = evaluate_expr(expr, lookup, AbsenceScope::default(), observer, &budget);
+    let result = evaluate_expr(expr, lookup, AbsenceScope::default(), observer, &budget)
+        .map_err(|error| error.placed_in(expr));
     if O::OBSERVES_MEMBERS {
         observer.finish_expression(expr);
     }
@@ -661,12 +664,9 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
                             Value::Object(fields) => object.extend(fields),
                             Value::Null => {}
                             other => {
-                                return Err(ExpressionError::Other {
-                                    function: "...".to_string(),
-                                    message: format!(
-                                        "object spread requires an object or null, found {}",
-                                        crate::markdown::compose::context::merge::json_type_name(&other)
-                                    ),
+                                return Err(ExpressionError::InvalidSpreadOperand {
+                                    found: crate::markdown::compose::context::merge::json_type_name(&other),
+                                    site: spread::SpreadSite::of(spread),
                                 });
                             }
                         }

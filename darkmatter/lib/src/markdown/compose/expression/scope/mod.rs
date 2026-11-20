@@ -43,10 +43,11 @@ use simplified_schema::DefinitionTable;
 use crate::markdown::span::SourceSpan;
 
 pub use iterable::{ItemFrame, PatternMismatch, SourceProjection, project_pattern, project_source};
+pub(crate) use iterable::ObjectEntryType;
 pub use lexical::{LexicalTypes, TypedLocal};
 pub use projection::{BindingId, DeclaredType, DeclaredTypes, Member, Subject};
 pub use raw::RawDeclarations;
-pub(crate) use projection::{Declaration, MemberDeclaration, VariableClass, declares_member, member_shape};
+pub(crate) use projection::{Declaration, MemberDeclaration, VariableClass, declares_member, member_shape, spread_always_fails};
 pub use shape::{PresenceEvidence, ScopedType, Shape, SortKeySupport};
 
 /// Which side of a guard a region is on.

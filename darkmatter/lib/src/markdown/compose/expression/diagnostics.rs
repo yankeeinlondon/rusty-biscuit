@@ -319,6 +319,8 @@ impl CallCheck {
                 let data = self.data_problem.as_ref().filter(|problem| finding.argument == Some(problem.argument));
                 let code = if matches!(self.problem, Some(super::call_check::CallProblem::InvalidCallback { .. })) {
                     simplified_schema::expression::parser::INVALID_CALLBACK_CODE
+                } else if matches!(self.problem, Some(super::call_check::CallProblem::InvalidSpreadOperand { .. })) {
+                    super::call_check::INVALID_SPREAD_OPERAND_CODE
                 } else if let Some(problem) = data {
                     problem.code
                 } else if finding.category == ArgumentCategory::Incompatible {
