@@ -2,6 +2,9 @@
 $schema:
     description: string(required)
     apps_supporting: string[](required)
+    apps:
+        name: string(required)
+        url: url(required)
 apps: "{{ load_data('biscuit-terminal/docs/terminal-apps.yaml') }}"
 prompt: |-
     ConEmu defines a family of `OSC 9 ; <n> ; ...` sub-commands (9;1 through 9;12, e.g., 9;9 to report the current working directory, which Windows Terminal also uses). The 9;4 progress sub-command is researched separately in `osc-9-4-protocol.md`, so cover every other sub-command here.
@@ -25,7 +28,7 @@ prompt: |-
     The biscuit-terminal package in this repo cares about the following terminal apps:
 
     ::map apps "i => t.template"
-    - {{i}}
+    - {{i.name}} ({{i.url}})
     ::end-map
     
     - set `apps_supporting` as a list of those apps which are known to support ConEmu's OSC 9 sub-commands
