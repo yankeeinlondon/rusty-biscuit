@@ -8,8 +8,10 @@ settings for unrelated repositories.
 
 Initialization runs these stages in order:
 
-1. Ensures Rust, Cargo, platform C build tools, native libraries, and the
-   repository's portable shell-utility baseline are available.
+1. Ensures Rust, Cargo, platform C build tools, native libraries, the
+   repository's portable shell-utility baseline, and the Rust
+   cross-compilation targets local recipes build for are available; see
+   [Rust Targets](#rust-targets).
 2. Ensures the CI/CD command-line tools applicable to the host are available.
 3. Ensures Cargo artifact maintenance and GitNexus are usable.
 4. Ensures `sniff`, reports whether the runtime is native, WSL 1, or WSL 2,
@@ -375,6 +377,26 @@ example `cd claudine && just install`. The rule lives in
 Initialization also guarantees the shell utilities used by shared recipes,
 including `find`, `du`, `awk`, `jq`, `fd`, `rg`, and `fzf`, and installs
 `eza` plus `cargo-sweep` for repository and target-directory maintenance.
+
+## Rust Targets
+
+Some recipes compile for a target other than your host. Init adds each one to
+the toolchain pinned in `rust-toolchain.toml`, skipping any already installed:
+
+| Target | Needed by |
+|---|---|
+| `wasm32-wasip2` | the DMLS Zed extension: `just zed-wasm`, `just check-zed`, and `just install-dmls` in `darkmatter/` |
+
+Without it, `just install-dmls` warns that it could not rebuild the extension
+and installs the committed `extension.wasm` instead. To add a target by hand:
+
+```sh
+rustup target add wasm32-wasip2
+```
+
+The list is `init_rust_targets` in the root justfile. The targets are not in
+`rust-toolchain.toml`, because every toolchain install, including CI's, would
+then download them.
 
 ## Installed CI/CD Tools
 

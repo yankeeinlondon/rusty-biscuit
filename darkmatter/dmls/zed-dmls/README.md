@@ -121,8 +121,8 @@ just zed-doctor
 ```
 
 After installing the binary, `install-dmls` recompiles `extension.wasm` from
-`src/lib.rs` (`just zed-wasm`; a host without the `wasm32-wasip2` target warns
-and keeps the committed module) and stages this directory when Zed's data
+`src/lib.rs` (`just zed-wasm`; a host without the `wasm32-wasip2` target, which
+the root `just init` installs, warns and keeps the committed module) and stages this directory when Zed's data
 directory exists. Staging copies it (including the bundled `extension.wasm`)
 to a stable per-user location and points Zed's `extensions/installed/dmls`
 link at it, repairing a dangling link from a removed worktree. Exit status `3`
