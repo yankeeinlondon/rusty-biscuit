@@ -1,7 +1,7 @@
 ---
 kind: fix
 created: 2026-11-20
-status: human-in-the-loop
+status: finalized-spec
 area: sniff
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -30,10 +30,7 @@ reviewed: true
 reviewed_by: "codex/gpt-6.2-sol"
 reviewed_on: "2026-11-20"
 review_iterations: 0
-needs_rulings: true
-required_rulings:
-    - Decide whether focused git-status JSON should include commit links.
-    - Decide whether shallow clones fall back to independent walks.
+needs_rulings: false
 implemented: false
 ---
 
@@ -132,11 +129,12 @@ continues to serve deep containment without shared pruning.
 - Exhausting the visit budget stops the linking pass. Stop early as before
   when all targets have been found. Only a completed walk can supply stopping
   points to a later tip.
-- Use independent walks in shallow clones, including when shallow status
-  cannot be established. Git's walker accounts for shallow boundaries as each
-  tip is traversed. A commit seen in one such walk is insufficient evidence
-  that another tip would explore the same parent paths. Keep today's
-  shallow-history results and errors.
+- Shallow clones use the shared set like any other repository. Git records
+  the shallow boundary once per repository (`.git/shallow`), so every walk
+  that reaches a commit sees the same parents for it, and a completed walk's
+  visits remain valid stopping points. A walk that fails at a missing parent
+  falls back as described above. Keep today's shallow-history results and
+  errors.
 
 Keep the five-million-visit budget across the entire linking call and the
 existing meaning of `git.commit_visits`. Each successfully yielded commit
@@ -187,8 +185,8 @@ history readers and their decoration logic.
    `--history 0` skips linking. This is independent of path history's
    existing zero-count behavior. Request links for ordinary and compact
    terminal reports. Explicit `--plain` already strips the hyperlinks, so
-   skip resolving them. See [Open Questions](#open-questions) for focused
-   JSON. The aggregate JSON report already collects link data in its
+   skip resolving them. Focused JSON stays unlinked (see
+   [Author rulings](#author-rulings-2026-11-20)). The aggregate JSON report already collects link data in its
    separate commit-family reports and keeps that behavior and shape.
 4. Pass the captured URLs into
    [`build_git_status_items`](../../cli/src/output/filesystem/mod.rs) in
@@ -213,12 +211,12 @@ embedded performance report and human-readable diagnostic on stderr when
   The Sniff README is an overview and does not describe link lookup, so it
   needs no change. Explain that the terminal report
   resolves links locally during collection, when link output is requested.
-  The previously documented renderer lookup will be obsolete. If the author
-  approves links in focused JSON, document their shape and collection cost.
+  The previously documented renderer lookup will be obsolete. State that
+  focused JSON carries no links and point scripts to `recent-commits --json`.
 - Update [the recent-commits guide](../../docs/topics/repo/recent-commits.md)
   and the [Sniff architecture skill](../../../.claude/skills/sniff/architecture.md)
   to describe shared visits across remotes, the fallback after a failed walk,
-  and shallow-clone behavior.
+  and why shallow clones need no separate path.
 - Update the [Sniff performance skill](../../../.claude/skills/sniff/performance.md)
   with the linking stage, when the status performance snapshot is taken,
   and what the shared visit counter measures.
@@ -245,8 +243,9 @@ so the visit counter measures only containment work.
    missed by the first walk, and that another unfound target stays
    undetermined. A permanently missing object alone cannot demonstrate that
    a later walk can reach through the skipped point.
-4. Exercise a shallow clone fixture against the existing independent walk.
-   Check visit counts and outcomes so the fixture proves the fallback ran.
+4. On a shallow clone fixture with several remote tips sharing history,
+   assert that shared-visit linking returns the same results as independent
+   walks, and that it visits fewer commits.
    Cover linking through the captured ref snapshot with detached HEAD, and
    confirm that a missing snapshot cannot turn into a false absence claim.
 
@@ -267,7 +266,8 @@ so the visit counter measures only containment work.
   for the ordinary case, including detached HEAD, and no Git acquisition
   during rendering.
 - Verify that `--history 0` and `--plain` incur no linking visits. Check
-  focused JSON according to the ruling, including output with `--perf`,
+  that focused JSON (with and without `--perf`) does no linking work and
+  keeps its shape,
   and keep existing aggregate and recent-commits JSON parity tests.
 
 ### Performance check
@@ -294,25 +294,14 @@ Run `just test` and `just lint` in `sniff/`, plus
 for `sniff-detection-cli`. Keep fixture tests portable across macOS, Linux,
 native Windows, and WSL2.
 
-## Open Questions
+## Author rulings (2026-11-20)
 
-### Should focused status JSON include commit links?
-
-`sniff repo git-status --json` currently exposes commit history without links
-and skips the link lookup. Scripts that need commit containment and URLs can
-already use `sniff repo recent-commits --json`. This decision applies to
-focused status JSON only. The aggregate uses its own projection, with
-`git_status` for working-tree status and `recent_commits` for commit data.
-
-| Option | Pros | Cons |
-|---|---|---|
-| Keep focused status JSON as it is (recommended) | Preserves the JSON shape and the fast status request used by scripts. Terminal status still gets measured links. | Scripts that need URLs continue to use a separate command with its own history-selection options. |
-| Include optional `recent[].link` in focused status JSON | Scripts can obtain URLs and containment alongside the exact status history selection. | Every JSON status request with history pays for linking. Consumers that validate an exact object shape may need an update. |
-
-Keep the existing JSON contract. Moving linking out of the renderer solves
-the user-visible slowdown and the reporting gap while keeping the established
-cost for scripts that only need status. If the author chooses to expose
-links, add them in the focused JSON projection. Omit the field when linking
-was not requested, preserve the distinction between contained, absent, and
-undetermined in the link object, and keep plain text and zero-history
-requests free of linking work.
+1. **Focused status JSON keeps its current shape.** `sniff repo git-status
+   --json` gains no `recent[].link` field and does no link work, so JSON
+   status stays on the fast path. Scripts that need containment or URLs use
+   `sniff repo recent-commits --json`. A later additive field remains possible
+   if a consumer needs links alongside status's exact history selection.
+2. **Shallow clones get no separate path.** The shallow boundary is
+   repository-wide, so shared visits stay valid. The failed-walk fallback
+   covers a walk that stops at a missing parent, and library test 4 asserts
+   that shared and independent walks agree on a shallow fixture.
