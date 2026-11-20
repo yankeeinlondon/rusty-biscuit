@@ -452,8 +452,8 @@ fn walk_access<'e>(expr: &'e Expr, reads: &mut Vec<StaticAccessRead<'e>>) {
             }
         }
         Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                walk_access(value, reads);
+            for entry in entries {
+                walk_access(entry.value(), reads);
             }
         }
     }
@@ -574,7 +574,7 @@ fn child_holding<'e>(expr: &'e SpannedExpr, holds: &impl Fn(&SpannedExpr) -> boo
         SpannedExprKind::LogicalOr { left, .. } => vec![left],
         SpannedExprKind::Ternary { condition, .. } => vec![condition],
         SpannedExprKind::ArrayLiteral(items) => items.iter().collect(),
-        SpannedExprKind::ObjectLiteral(entries) => entries.iter().map(|(_, value)| value).collect(),
+        SpannedExprKind::ObjectLiteral(entries) => entries.iter().map(|entry| entry.value()).collect(),
         _ => Vec::new(),
     };
     children.into_iter().find(|child| holds(child))
@@ -614,8 +614,8 @@ fn walk_static<'e>(
             }
         }
         SpannedExprKind::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                walk_static(value, operand, reads);
+            for entry in entries {
+                walk_static(entry.value(), operand, reads);
             }
         }
         SpannedExprKind::Paren(inner) => walk_static(inner, scope, reads),

@@ -118,7 +118,7 @@
 
 use std::{ops::Range, str::FromStr};
 
-use crate::expression::{SpannedExpr, SpannedExprKind, parse_spanned};
+use crate::expression::{SpannedExpr, SpannedExprKind, SpannedObjectEntry, parse_spanned};
 use crate::numeric::{
     NumberTextError, NumericAdmissionError, admit_number_spelling, format_number, json_number,
 };
@@ -3702,7 +3702,13 @@ fn literal_to_json(expression: &SpannedExpr, src: &str) -> Result<serde_json::Va
             .map(Value::Array),
         SpannedExprKind::ObjectLiteral(entries) => entries
             .iter()
-            .map(|(key, value)| Ok((key.value.clone(), literal_to_json(value, src)?)))
+            .map(|entry| match entry {
+                SpannedObjectEntry::Field { key, value } => Ok((key.value.clone(), literal_to_json(value, src)?)),
+                SpannedObjectEntry::Spread { operand } => Err(format!(
+                    "`...{}` is not a literal; a spread is not allowed in a literal example",
+                    &src[operand.span.clone()]
+                )),
+            })
             .collect::<Result<serde_json::Map<_, _>, String>>()
             .map(Value::Object),
         _ => Err(format!("`{}` is not a literal", &src[expression.span.clone()])),

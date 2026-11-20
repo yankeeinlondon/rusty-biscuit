@@ -235,6 +235,62 @@ struct CachedEntry {
     directives: ResponseDirectives,
 }
 
+/// What the store holds for a key, decoded without changing the store.
+enum StoredEntry {
+    /// No manifest, or one that is not a remote manifest at all.
+    Absent,
+    /// A manifest recording `no-store`, whatever its [`CACHE_VERSION`]; the
+    /// body blob it names must never be served.
+    NoStore { blob_hash: u64 },
+    /// A manifest from another [`CACHE_VERSION`], an undecodable manifest,
+    /// or a missing or non-UTF-8 body.
+    Unusable,
+    /// A current manifest with its decoded body.
+    Usable(Box<CachedEntry>),
+}
+
+/// Decodes the entry for `key`. Shared by the fetching path, which purges a
+/// `no-store` entry, and the cache-only lookup, which never writes.
+fn decode_cached(store: &FileStore, key: u64) -> StoredEntry {
+    let Some(raw) = store
+        .read_manifest::<serde_json::Value>(ArtifactClass::RemoteUrl, key)
+        .ok()
+        .flatten()
+    else {
+        return StoredEntry::Absent;
+    };
+    let Ok(header) = serde_json::from_value::<RemoteUrlManifestHeader>(raw.clone()) else {
+        return StoredEntry::Absent;
+    };
+    let directives = ResponseDirectives::parse(header.cache_control.as_deref());
+    if directives.no_store {
+        return StoredEntry::NoStore {
+            blob_hash: header.body_blob_hash,
+        };
+    }
+    if header.cache_version != CACHE_VERSION {
+        return StoredEntry::Unusable;
+    }
+    let Ok(manifest) = serde_json::from_value::<RemoteUrlManifest>(raw) else {
+        return StoredEntry::Unusable;
+    };
+    let Some(bytes) = store
+        .read_blob(manifest.body_blob_hash, REMOTE_BLOB_EXT)
+        .ok()
+        .flatten()
+    else {
+        return StoredEntry::Unusable;
+    };
+    match String::from_utf8(bytes) {
+        Ok(body) => StoredEntry::Usable(Box::new(CachedEntry {
+            manifest,
+            body,
+            directives,
+        })),
+        Err(_) => StoredEntry::Unusable,
+    }
+}
+
 /// Reads a cached manifest and its body blob, if both are present.
 ///
 /// A manifest recording `no-store` (written before this cache honored it) is
@@ -247,30 +303,68 @@ fn read_cached(
     url: &Url,
     warnings: &mut Vec<String>,
 ) -> Option<CachedEntry> {
-    let raw: serde_json::Value = store
-        .read_manifest(ArtifactClass::RemoteUrl, key)
-        .ok()
-        .flatten()?;
-    let header: RemoteUrlManifestHeader = serde_json::from_value(raw.clone()).ok()?;
-    let directives = ResponseDirectives::parse(header.cache_control.as_deref());
-    if directives.no_store {
-        purge_cached(store, key, header.body_blob_hash, url, warnings);
-        return None;
+    match decode_cached(store, key) {
+        StoredEntry::Usable(entry) => Some(*entry),
+        StoredEntry::NoStore { blob_hash } => {
+            purge_cached(store, key, blob_hash, url, warnings);
+            None
+        }
+        StoredEntry::Absent | StoredEntry::Unusable => None,
     }
-    if header.cache_version != CACHE_VERSION {
-        return None;
+}
+
+/// A cached body that may be used without the network, with the instant it
+/// stops being usable.
+#[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FreshCachedBody {
+    /// The response body as UTF-8 text.
+    pub body: String,
+    /// When the body stops being fresh; always after the lookup's `now`.
+    pub expires_at: SystemTime,
+}
+
+/// Why [`lookup_fresh`] found no usable body.
+#[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CacheOnlyMiss {
+    /// No entry for the URL.
+    Absent,
+    /// An entry from another cache version, or an undecodable manifest or
+    /// body.
+    Unusable,
+    /// The entry recorded `no-store`.
+    NoStore,
+    /// The entry recorded `no-cache`, so every reuse needs revalidation.
+    NoCache,
+    /// The entry has no freshness lifetime, or it ended at or before `now`.
+    Expired,
+}
+
+/// Reads the entry for `url` only when it is fresh at `now`: the current
+/// cache version, a decodable body, no `no-store` or `no-cache`, and an
+/// `expires_at` after `now`.
+///
+/// Never touches the network and never writes, purges, or refreshes the
+/// store. The caller authorizes `url` before calling.
+#[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
+pub(crate) fn lookup_fresh(store: &FileStore, url: &Url, now: SystemTime) -> Result<FreshCachedBody, CacheOnlyMiss> {
+    let entry = match decode_cached(store, xx_hash(url.as_str())) {
+        StoredEntry::Usable(entry) => entry,
+        StoredEntry::Absent => return Err(CacheOnlyMiss::Absent),
+        StoredEntry::NoStore { .. } => return Err(CacheOnlyMiss::NoStore),
+        StoredEntry::Unusable => return Err(CacheOnlyMiss::Unusable),
+    };
+    if entry.directives.no_cache {
+        return Err(CacheOnlyMiss::NoCache);
     }
-    let manifest: RemoteUrlManifest = serde_json::from_value(raw).ok()?;
-    let bytes = store
-        .read_blob(manifest.body_blob_hash, REMOTE_BLOB_EXT)
-        .ok()
-        .flatten()?;
-    let body = String::from_utf8(bytes).ok()?;
-    Some(CachedEntry {
-        manifest,
-        body,
-        directives,
-    })
+    match entry.manifest.expires_at {
+        Some(expires_at) if entry.manifest.is_fresh(now) => Ok(FreshCachedBody {
+            body: entry.body,
+            expires_at,
+        }),
+        _ => Err(CacheOnlyMiss::Expired),
+    }
 }
 
 /// Best-effort removal of a cached entry; failures become cache warnings.

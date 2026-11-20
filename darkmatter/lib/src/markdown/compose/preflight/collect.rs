@@ -34,6 +34,7 @@ use crate::markdown::compose::shell_expansion::alias::AliasResolutions;
 use crate::markdown::compose::shell_expansion::probe::login_shell;
 use crate::markdown::compose::expression::ExpressionFinder;
 use crate::markdown::compose::expression::{Expr, ResolutionContext, parse};
+use simplified_schema::expression::ObjectEntry;
 use crate::markdown::compose::icmp::PlannedIcmpProbe;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::types::{
@@ -2114,7 +2115,7 @@ fn visit_calls_in_scope(expression: &Expr, locals: &[&str], visit: &mut impl FnM
             }
         }
         Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
+            for value in entries.iter().map(ObjectEntry::value) {
                 visit_calls_in_scope(value, locals, visit);
             }
         }

@@ -16,8 +16,8 @@ pub mod parser;
 pub mod scan;
 
 pub use ast::{
-    BinaryOp, BindingPattern, CallArgument, Callback, Expr, SpannedBindingPattern, SpannedCallArgument, SpannedCallback,
-    SpannedExpr, SpannedExprKind,
+    BinaryOp, BindingPattern, CallArgument, Callback, Expr, ObjectEntry, SpannedBindingPattern, SpannedCallArgument,
+    SpannedCallback, SpannedExpr, SpannedExprKind, SpannedObjectEntry,
 };
 pub use lexer::{ComparisonOp, Lexer, LexerError, Token, identifier_prefix_start, lex_spanned};
 pub use parser::{ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_spanned};

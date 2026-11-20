@@ -90,7 +90,7 @@ impl Walk {
             SpannedExprKind::Variable(path) => self.variable(path, &expr.span, scope),
             SpannedExprKind::StringLiteral(_) | SpannedExprKind::NumberLiteral(_) | SpannedExprKind::BoolLiteral(_) => {}
             SpannedExprKind::ArrayLiteral(items) => items.iter().for_each(|item| self.expr(item, scope)),
-            SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|(_, value)| self.expr(value, scope)),
+            SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|entry| self.expr(entry.value(), scope)),
             SpannedExprKind::UnaryNot(inner) | SpannedExprKind::UnaryMinus(inner) | SpannedExprKind::Paren(inner) => {
                 self.expr(inner, scope);
             }

@@ -284,7 +284,7 @@ fn walk_nodes(expr: &SpannedExpr, visit: &mut impl FnMut(&SpannedExpr)) {
         | SpannedExprKind::NumberLiteral(_)
         | SpannedExprKind::BoolLiteral(_) => {}
         SpannedExprKind::ArrayLiteral(items) => items.iter().for_each(|item| walk_nodes(item, visit)),
-        SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|(_, value)| walk_nodes(value, visit)),
+        SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|entry| walk_nodes(entry.value(), visit)),
         SpannedExprKind::UnaryNot(inner)
         | SpannedExprKind::UnaryMinus(inner)
         | SpannedExprKind::Paren(inner)

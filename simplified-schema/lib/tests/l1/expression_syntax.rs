@@ -4,9 +4,18 @@
 //! and their expected literals) accept any well-formed call, whether or not a
 //! host defines the function, and reject malformed text with a byte position.
 
+use simplified_schema::expression::scan::scan_plain;
 use simplified_schema::expression::{
-    Expr, SpannedExpr, SpannedExprKind, Token, lex_spanned, parse, parse_spanned,
+    Expr, ObjectEntry, SpannedExpr, SpannedExprKind, SpannedObjectEntry, Token, lex_spanned, parse, parse_spanned,
 };
+use simplified_schema::simplified::parse_property_definition;
+
+fn parse_type_definition(
+    property: &str,
+    text: &str,
+) -> Result<simplified_schema::simplified::PropertyDef, simplified_schema::SchemaError> {
+    parse_property_definition(property, &serde_yaml_ng::Value::String(text.to_string()))
+}
 
 /// The name and argument count of a top-level call, or `None` when `expr` is
 /// not one.
@@ -50,11 +59,17 @@ fn an_example_expected_literal_parses_to_literal_nodes() {
     let SpannedExprKind::ObjectLiteral(entries) = &expected.kind else {
         panic!("object literal, got {expected:?}");
     };
-    let keys: Vec<&str> = entries.iter().map(|(key, _)| key.value.as_str()).collect();
+    let keys: Vec<&str> = entries
+        .iter()
+        .map(|entry| match entry {
+            SpannedObjectEntry::Field { key, .. } => key.value.as_str(),
+            SpannedObjectEntry::Spread { .. } => panic!("no spread written"),
+        })
+        .collect();
     assert_eq!(keys, ["ok", "none"]);
-    assert!(matches!(&entries[0].1.kind, SpannedExprKind::ArrayLiteral(items) if items.len() == 2));
+    assert!(matches!(&entries[0].value().kind, SpannedExprKind::ArrayLiteral(items) if items.len() == 2));
     // `null` is an identifier to the parser; the grammar gives it meaning.
-    assert!(matches!(&entries[1].1.kind, SpannedExprKind::Variable(name) if name == "null"));
+    assert!(matches!(&entries[1].value().kind, SpannedExprKind::Variable(name) if name == "null"));
 }
 
 #[test]
@@ -111,4 +126,68 @@ fn each_parse_is_counted_once_whatever_the_outcome() {
     parse_spanned("unknown_fn(").unwrap_err();
     parse("a || b").unwrap();
     assert_eq!(snapshot().since(&before).get(Work::ExpressionParse), 3);
+}
+
+#[test]
+fn object_spread_keeps_entry_order_and_operand_spans() {
+    let source = "{ ...defaults, color: 'blue', ...overrides, id }";
+    let spanned = parse_spanned(source).expect("spread parses");
+    let SpannedExprKind::ObjectLiteral(entries) = &spanned.kind else {
+        panic!("object literal, got {spanned:?}");
+    };
+    let shape: Vec<(&str, &str)> = entries
+        .iter()
+        .map(|entry| match entry {
+            SpannedObjectEntry::Spread { operand } => ("spread", &source[operand.span.clone()]),
+            SpannedObjectEntry::Field { key, .. } => ("field", &source[key.span.clone()]),
+        })
+        .collect();
+    assert_eq!(shape, [("spread", "defaults"), ("field", "color"), ("spread", "overrides"), ("field", "id")]);
+    // Erasure keeps the order and distinguishes a shorthand field from a spread.
+    let Expr::ObjectLiteral(erased) = parse(source).unwrap() else { panic!("object literal") };
+    assert_eq!(erased[0], ObjectEntry::Spread { operand: Expr::Variable("defaults".into()) });
+    assert_eq!(erased[3], ObjectEntry::Field { key: "id".into(), value: Expr::Variable("id".into()) });
+    assert_eq!(spanned.erase(), Expr::ObjectLiteral(erased));
+    // `...` is one token with a three-byte span.
+    let tokens = lex_spanned("{...a}").unwrap();
+    assert_eq!((&tokens[1].value, tokens[1].span.clone()), (&Token::Ellipsis, 1..4));
+}
+
+#[test]
+fn object_spread_rejects_written_duplicates_and_array_spread() {
+    // A written key repeated across a spread is still a duplicate; the
+    // error points at the second occurrence.
+    let duplicate = parse("{ a: 1, ...rest, a: 2 }").unwrap_err();
+    assert!(duplicate.message.contains("duplicate object key \"a\""), "{duplicate}");
+    assert_eq!(duplicate.position, 17);
+    let shorthand = parse("{ a, ...rest, a }").unwrap_err();
+    assert_eq!(shorthand.position, 14, "{shorthand}");
+    let array = parse("[1, ...rest]").unwrap_err();
+    assert!(array.message.contains("array spread is not supported"), "{array}");
+    assert_eq!(array.position, 4);
+}
+
+#[test]
+fn a_spread_with_nested_objects_closes_at_the_interpolation_closer() {
+    // `}}}}`: the inner object and the literal close before the `}}` delimiter.
+    let text = "A {{ {...base, nested: {k: 1}}}} B {{ {...a}}} C";
+    let found = scan_plain(text);
+    let expressions: Vec<&str> = found.expressions.iter().map(|e| e.expression.as_str()).collect();
+    assert_eq!(expressions, ["{...base, nested: {k: 1}}", "{...a}"]);
+    assert_eq!(&text[found.expressions[0].end..], " B {{ {...a}}} C");
+}
+
+#[test]
+fn a_catalog_example_result_rejects_spread_at_any_depth() {
+    let control = parse_type_definition(
+        "f",
+        "function(parameters(x: unknown); returns(unknown); example(f(1) => {a: {b: 1}}))",
+    );
+    assert!(control.is_ok(), "{control:?}");
+    for result in ["{...base}", "{a: 1, ...base}", "{a: {...base}}", "[{...base}]"] {
+        let definition = format!("function(parameters(x: unknown); returns(unknown); example(f(1) => {result}))");
+        let error = parse_type_definition("f", &definition).expect_err(result).to_string();
+        assert!(error.contains("an example result must be a literal"), "{result}: {error}");
+        assert!(error.contains("`...base` is not a literal"), "{result}: {error}");
+    }
 }

@@ -101,7 +101,8 @@ pub use absence::{
     static_variable_reads, static_variable_reads_in_scope,
 };
 pub use simplified_schema::expression::ast::{
-    BinaryOp, BindingPattern, CallArgument, Callback, Expr, SpannedCallArgument, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
+    BinaryOp, BindingPattern, CallArgument, Callback, Expr, ObjectEntry, SpannedCallArgument, SpannedBindingPattern, SpannedCallback,
+    SpannedExpr, SpannedExprKind, SpannedObjectEntry,
 };
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
@@ -645,11 +646,35 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             .map(|item| evaluate_expr(item, lookup, operand, observer, budget))
             .collect::<Result<Vec<_>, _>>()
             .map(Value::Array),
-        Expr::ObjectLiteral(entries) => entries
-            .iter()
-            .map(|(key, value)| Ok((key.clone(), evaluate_expr(value, lookup, operand, observer, budget)?)))
-            .collect::<Result<serde_json::Map<_, _>, ExpressionError>>()
-            .map(Value::Object),
+        Expr::ObjectLiteral(entries) => {
+            // Entries run once each in written order; the last one to supply
+            // a key wins, and a null spread supplies nothing.
+            let mut object = serde_json::Map::new();
+            for entry in entries {
+                match entry {
+                    ObjectEntry::Field { key, value } => {
+                        let value = evaluate_expr(value, lookup, operand, observer, budget)?;
+                        object.insert(key.clone(), value);
+                    }
+                    ObjectEntry::Spread { operand: spread } => {
+                        match evaluate_expr(spread, lookup, operand, observer, budget)? {
+                            Value::Object(fields) => object.extend(fields),
+                            Value::Null => {}
+                            other => {
+                                return Err(ExpressionError::Other {
+                                    function: "...".to_string(),
+                                    message: format!(
+                                        "object spread requires an object or null, found {}",
+                                        crate::markdown::compose::context::merge::json_type_name(&other)
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Value::Object(object))
+        }
         Expr::Paren(inner) => evaluate_expr(inner, lookup, scope, observer, budget),
         Expr::UnaryNot(inner) => {
             let value = evaluate_expr(inner, lookup, operand, observer, budget)?;

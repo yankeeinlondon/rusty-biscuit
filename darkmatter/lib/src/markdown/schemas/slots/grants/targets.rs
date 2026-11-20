@@ -162,7 +162,7 @@ fn is_pure(expr: &SpannedExpr) -> bool {
         }
         SpannedExprKind::Variable(_) | SpannedExprKind::CallbackCall { .. } => false,
         SpannedExprKind::ArrayLiteral(items) => items.iter().all(is_pure),
-        SpannedExprKind::ObjectLiteral(entries) => entries.iter().all(|(_, value)| is_pure(value)),
+        SpannedExprKind::ObjectLiteral(entries) => entries.iter().all(|entry| is_pure(entry.value())),
         SpannedExprKind::UnaryNot(inner)
         | SpannedExprKind::UnaryMinus(inner)
         | SpannedExprKind::Paren(inner)

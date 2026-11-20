@@ -37,7 +37,9 @@ use std::fmt;
 use serde_json::Value;
 
 use super::absence::branch_scope;
-use simplified_schema::expression::ast::{Expr, SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind};
+use simplified_schema::expression::ast::{
+    Expr, ObjectEntry, SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind, SpannedObjectEntry,
+};
 use super::call_binding::{
     CallBindingError, CompiledParameter, CompiledSignature, FunctionRegistration, NoNamedTypes, SignatureProblem,
     shape_from_property_def_with_definitions,
@@ -162,7 +164,12 @@ fn partial_object(arg: &SpannedExpr) -> Option<(serde_json::Map<String, Value>, 
     };
     let mut literals = serde_json::Map::new();
     let mut computed = Vec::new();
-    for (key, value) in entries {
+    for entry in entries {
+        // Until spread typing lands, a literal with a spread has no
+        // inspectable members: the spread may overwrite any of them.
+        let SpannedObjectEntry::Field { key, value } = entry else {
+            return None;
+        };
         match literal_value(value) {
             Some(value) => {
                 literals.insert(key.value.clone(), value);
@@ -200,12 +207,16 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
     }
     match &expr.kind {
         SpannedExprKind::Paren(inner) => expression_type(inner, scope),
-        SpannedExprKind::ObjectLiteral(entries) => ScopeShape::object_of(
-            entries
-                .iter()
-                .map(|(key, value)| (key.value.clone(), expression_type(value, scope)))
-                .collect(),
-        ),
+        SpannedExprKind::ObjectLiteral(entries) => entries
+            .iter()
+            .map(|entry| match entry {
+                SpannedObjectEntry::Field { key, value } => Some((key.value.clone(), expression_type(value, scope))),
+                SpannedObjectEntry::Spread { .. } => None,
+            })
+            .collect::<Option<_>>()
+            .map(ScopeShape::object_of)
+            // A spread's keys are unknown here, so the literal is some object.
+            .unwrap_or(ScopeShape::Unknown { non_null: true }),
         SpannedExprKind::ArrayLiteral(items) => ScopeShape::array_of(
             &items
                 .iter()
@@ -804,7 +815,10 @@ fn literal_value(arg: &SpannedExpr) -> Option<Value> {
         SpannedExprKind::ArrayLiteral(items) => items.iter().map(literal_value).collect::<Option<Vec<_>>>().map(Value::Array),
         SpannedExprKind::ObjectLiteral(entries) => entries
             .iter()
-            .map(|(key, value)| literal_value(value).map(|value| (key.value.clone(), value)))
+            .map(|entry| match entry {
+                SpannedObjectEntry::Field { key, value } => literal_value(value).map(|value| (key.value.clone(), value)),
+                SpannedObjectEntry::Spread { .. } => None,
+            })
             .collect::<Option<serde_json::Map<_, _>>>()
             .map(Value::Object),
         _ => None,
@@ -1640,7 +1654,13 @@ fn unlocated(expr: &Expr) -> SpannedExpr {
         Expr::ObjectLiteral(entries) => SpannedExprKind::ObjectLiteral(
             entries
                 .iter()
-                .map(|(key, value)| (crate::markdown::span::Spanned::new(key.clone(), 0..0), unlocated(value)))
+                .map(|entry| match entry {
+                    ObjectEntry::Field { key, value } => SpannedObjectEntry::Field {
+                        key: crate::markdown::span::Spanned::new(key.clone(), 0..0),
+                        value: unlocated(value),
+                    },
+                    ObjectEntry::Spread { operand } => SpannedObjectEntry::Spread { operand: unlocated(operand) },
+                })
                 .collect(),
         ),
         Expr::UnaryNot(inner) => SpannedExprKind::UnaryNot(boxed(inner)),
@@ -1752,7 +1772,7 @@ pub(crate) fn visit_call_nodes<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut
         | SpannedExprKind::NumberLiteral(_)
         | SpannedExprKind::BoolLiteral(_) => {}
         SpannedExprKind::ArrayLiteral(items) => items.iter().for_each(|item| visit_call_nodes(item, visit)),
-        SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|(_, value)| visit_call_nodes(value, visit)),
+        SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|entry| visit_call_nodes(entry.value(), visit)),
         SpannedExprKind::Paren(inner)
         | SpannedExprKind::UnaryNot(inner)
         | SpannedExprKind::UnaryMinus(inner)
