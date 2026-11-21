@@ -67,23 +67,37 @@ decisions_for_review:
       in status_report.rs as the plan worded it. The file is about 600
       lines, and the sibling *_tests.rs pattern already exists in git/.
       Moving them inline is mechanical.
-message_to_agent: |-
-  Phase 3 landed the focused library path and CLI handler; the
-  between-phases regression from Phase 2 (unlinked terminal hashes) is gone.
-  For Phase 4:
-  1. A quick release sample at HEAD cba9ab138 (uncommitted Phase 2 and 3
-     tree), load average about 5: text `repo git-status --perf` 267-293 ms
-     against JSON 151-154 ms, so the 0.5 s margin looks met; take the formal
-     interleaved samples. Text reports commit_visits 16,768 and JSON 86; the
-     delta is exactly the 16,682 pre-counted union. ref_walks 1,
-     repository_discoveries 1, linking stage about 109 ms.
-  2. Phase 1 saved the pinned remote refs in
-     target/commit-link-walks-baseline/remote-refs.txt; diff against it
-     before sampling.
-  3. Gates were green at the end of Phase 3 (just test 3649 passed, none
-     slow; just lint and both strict clippy runs clean); rerun them in
-     Phase 4 as the plan asks.
-
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+    - sniff/lib/src/filesystem/git/commit_links.rs
+    - sniff/lib/src/filesystem/git/remote_refresh.rs
+    - sniff/lib/src/filesystem/git/types.rs
+    - sniff/lib/src/filesystem/git/discovery.rs
+    - sniff/lib/src/filesystem/git/mod.rs
+    - sniff/lib/src/filesystem/git/status_report.rs
+    - sniff/lib/src/filesystem/git/status_report_tests.rs
+    - sniff/lib/src/filesystem/mod.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/src/filesystem/repo/scope.rs
+    - sniff/lib/src/filesystem/repo/aggregate_view.rs
+    - sniff/lib/src/error.rs
+    - sniff/cli/src/commands/mod.rs
+    - sniff/cli/src/commands/repo.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - sniff/cli/src/output/repo_json.rs
+    - sniff/cli/src/bin/render_git_status_fixture.rs
+    - sniff/cli/tests/l1/cli.rs
+documentation:
+    - sniff/docs/cli/repo_git-status.md
+    - sniff/docs/topics/repo/recent-commits.md
+    - .claude/skills/sniff/architecture.md
+    - .claude/skills/sniff/performance.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-11-20-commit-link-walks (4 phases)
@@ -253,3 +267,63 @@ This is informational; Phase 4 owns acceptance. Release build at HEAD `cba9ab138
 ### Cross-OS rigs
 
 No local rigs are configured (`BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL` and `BUILD_MACOS` are unset), so everything above ran on Linux. The OS-sensitive pieces are the common-dir comparison (canonicalized on both sides and compared only with each other) and the refresh test's `insteadOf` value (a forward-slash native path). CI's macOS and the nightly Windows and WSL2 legs will exercise them.
+
+## Phase 4
+
+### Run Sniff gates (complete)
+
+Phase 4 changed no source, docs or skills files; it changed only this log, the plan and the spec frontmatter. The gates ran against HEAD `45075c7a4`, which is the committed Phase 2 and 3 tree, with a clean working tree. Load average was 1.4 to 3.5 on 16 cores throughout.
+
+- `just test` (in `sniff/`): **3649 passed, 33 skipped, exit 0**, with `🐢 L1 run recorded: 3649 test(s), none at or above 5.0s`. No SLOW, FAIL or TIMEOUT lines.
+- `just lint`: exit 0, no warnings.
+- `cargo clippy -p sniff --all-targets -- -D warnings`: clean. `cargo clippy -p sniff-detection-cli --all-targets -- -D warnings`: clean.
+- `git diff --check fce8e78bb HEAD` (the whole fix, from the Phase 1 baseline commit): clean.
+- Docs and comments: I grepped the Sniff docs, the skill and the CLI source for the removed renderer lookup (`commit_links_at`). The one hit is `.claude/skills/sniff/performance.md`, which describes the old behavior as history ("Earlier the renderer's `commit_links_at` ran…") and is accurate. No drift was found, so nothing was edited.
+- Dependents: nothing changed after Phase 3's serial, targeted dependent runs (Darkmatter, Claudine, claudine-cli, rendezvous-daemon, plus `cargo check` of the other direct dependents), so I did not repeat them.
+
+### Measure status speed (complete)
+
+**Pinning.** `git for-each-ref refs/remotes/origin/` is byte-identical to `target/commit-link-walks-baseline/remote-refs.txt` (md5 `ab99d39475562ab63a939bef11d32d4c`). The union over the 25 non-symbolic tips is still **16,682**, all 10 displayed targets are still absent from every remote branch, and the common dir still has no commit graph.
+
+HEAD is `45075c7a4`, not the baseline's `fce8e78bb`. This is unavoidable: the fix itself is two commits on top of the baseline. The displayed history, ten unpushed commits, and the remote tips have the same shape. The JSON visit count rose from 84 to 88 for the extra history depth, which is why the comparison below uses the linked-minus-JSON delta rather than absolute counts.
+
+**Sample.** Release build (`cargo build --release --locked -p sniff-detection-cli --bin sniff`, already fresh) at `/home/build/wt/rusty-biscuit/fix-biscuit-terminal/target/release/sniff`, with `--base` set to the worktree. One warm-up per mode, then three interleaved runs, first without perf flags (acceptance), then with `--perf` (diagnostics). Wall time was measured externally. Load average was 3.05 before and after. Raw stdout, stderr and wall times are in `target/commit-link-walks-after/` (ignored).
+
+| Run | text | JSON | text `--perf` | JSON `--perf` |
+| --- | --- | --- | --- | --- |
+| warm-up | 260 ms | 143 ms | 256 ms | 147 ms |
+| 1 | 256 ms | 144 ms | 264 ms | 144 ms |
+| 2 | 259 ms | 138 ms | 255 ms | 143 ms |
+| 3 | 254 ms | 145 ms | 263 ms | 145 ms |
+| **median** | **256 ms** | **144 ms** | **263 ms** | **144 ms** |
+
+- **Acceptance met:** terminal status is 112 ms over focused JSON (median 256 vs 144 ms), against a 0.5 s allowance. The baseline gap was about 3,390 ms (3,537 vs 147 ms), and text status is about 13.8× faster.
+- Visits: text `--perf` reports `git.commit_visits` **16,770** in all three runs; JSON reports **88** in all three. The delta, **16,682**, equals the pre-counted distinct reachable remote history exactly, so each reachable commit is visited once across the 25 tips.
+- `ref_walks` 1 and `repository_discoveries` 1 in both modes.
+- Linking stage `filesystem.git.commit_links`: 113.7, 109.8 and 113.9 ms; `filesystem.git.initial` 131 to 135 ms; selection under 1 µs. In-process totals: text 252.0, 244.1 and 251.7 ms; JSON 135.4, 134.3 and 135.0 ms. JSON's stages are `detect.filesystem`, `detect.total`, `filesystem.docs`, `filesystem.git.initial`, `filesystem.git.selection`, `filesystem.inventory` and `filesystem.repo`, with no linking stage. The baseline recorded no linking stage either, and the 3.4 s spent in the renderer went uncounted.
+- Output channels: without perf, piped stderr is empty in both modes, and JSON stdout parses as one value. With `--json --perf`, stdout is one JSON value with an embedded `performance` object, and the human diagnostic is on stderr.
+- **Saving over independent walks** comes from the isolated tests, which I reran: `shared_visits_prove_absence_within_the_distinct_reachable_history` proves absence at exactly the distinct reachable budget, where independent mode exhausts it. `shallow_boundaries_link_alike_shared_and_independent` gives 3 shared visits against 4 independent. `a_failed_walk_leaves_later_tips_walking_independently` also passes (3 of 3). On the motivating workload, 25 independent walks would each revisit most of the shared `main` history. That is the roughly 3.4 s baseline cost.
+
+No timing miss, so no breakdown or repeat sample was needed.
+
+### Record review evidence (complete)
+
+- Fixture markup and fallback are proven by Phase 2's renderer test, `captured_links_match_full_ids_and_rendering_reads_no_repository`. On this workload, the piped text output carries no hyperlinks (`0` OSC 8 sequences), as expected: all ten displayed targets are unpushed, so each line takes the short-hash fallback.
+- Departures from the plan: none in this phase. Earlier departures are in `decisions_for_review`.
+
+### Requirement-to-test mapping
+
+Phase 4 added no tests and changed no behavior. Acceptance evidence is the release sample above. The behavior-to-test mapping is in the Phase 2 and Phase 3 sections.
+
+### Gate-skip check
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+Run after all Phase 4 edits were saved, it reported `packages: []` and `change_class: documentation`. The gates ran anyway (above), so this result was not used to skip them.
+
+### Cross-OS rigs
+
+No local rigs are configured (`BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL` and `BUILD_MACOS` are unset), so every Phase 4 measurement and gate ran on Linux. CI's macOS leg and the nightly Windows and WSL2 legs provide the other environments.

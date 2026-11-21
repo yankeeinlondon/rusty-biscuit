@@ -2,7 +2,7 @@
 total_phases: 4
 created: 2026-11-20
 status: planned
-phase: 4
+phase: 5
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1: []
@@ -46,6 +46,37 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/sniff/architecture.md
 - .claude/skills/sniff/performance.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+- sniff/lib/src/filesystem/git/commit_links.rs
+- sniff/lib/src/filesystem/git/remote_refresh.rs
+- sniff/lib/src/filesystem/git/types.rs
+- sniff/lib/src/filesystem/git/discovery.rs
+- sniff/lib/src/filesystem/git/mod.rs
+- sniff/lib/src/filesystem/git/status_report.rs
+- sniff/lib/src/filesystem/git/status_report_tests.rs
+- sniff/lib/src/filesystem/mod.rs
+- sniff/lib/src/filesystem/repo/mod.rs
+- sniff/lib/src/filesystem/repo/scope.rs
+- sniff/lib/src/filesystem/repo/aggregate_view.rs
+- sniff/lib/src/error.rs
+- sniff/cli/src/commands/mod.rs
+- sniff/cli/src/commands/repo.rs
+- sniff/cli/src/output/mod.rs
+- sniff/cli/src/output/filesystem/mod.rs
+- sniff/cli/src/output/repo_json.rs
+- sniff/cli/src/bin/render_git_status_fixture.rs
+- sniff/cli/tests/l1/cli.rs
+documentation:
+- sniff/docs/cli/repo_git-status.md
+- sniff/docs/topics/repo/recent-commits.md
+- .claude/skills/sniff/architecture.md
+- .claude/skills/sniff/performance.md
+completed_phase: 4
+implemented: true
 ---
 
 # Reuse shared Git history when resolving commit links
@@ -129,10 +160,10 @@ The fix is done when tests prove exact visit savings, preference and shallow-his
 
 ## Phase 4 — Verify and record results
 
-- [ ] **Run Sniff gates**
+- [x] **Run Sniff gates**
   - In `sniff/`, run `just test`, `just lint`, `cargo clippy -p sniff --all-targets -- -D warnings`, and `cargo clippy -p sniff-detection-cli --all-targets -- -D warnings`. Keep all fixture tests portable. Review affected docs and comments and run `git diff --check`. Fix in-scope regressions and rerun affected gates.
-- [ ] **Measure status speed**
+- [x] **Measure status speed**
   - Rebuild the same release target and repeat the Phase 1 sample at the same HEAD and remote tips. Take three interleaved terminal and JSON samples without perf flags for acceptance. Record medians, visit counts, and linking stage times. The linked-versus-JSON visit delta on the motivating workload must equal the pre-counted union. Use the isolated test to establish the saving over independent walks.
   - A timing miss triggers a breakdown of wall time, the linking stage, visit delta and JSON bracket. Correct repeat visits, acquisitions, misattribution or shared-walk overhead found in this scope and repeat the sample. A bracket distorted by host load is repeated in an idle interval. Keep any unmet criterion explicit with observed values.
-- [ ] **Record review evidence**
+- [x] **Record review evidence**
   - Record the gate outcomes, timing and visit comparisons, fixture markup and fallback, and any departures in implementation-log.md. Leave the fix in its active directory for review after all phases.
