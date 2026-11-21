@@ -33,6 +33,12 @@ pub enum Json5Error {
     #[error("YAML serialization error: {0}")]
     Yaml(#[from] serde_yaml_ng::Error),
 
+    /// The YAML writer could not lay out the converted document; see
+    /// [`YamlError::Layout`](crate::YamlError::Layout).
+    #[cfg(feature = "yaml")]
+    #[error("YAML layout error: {0}")]
+    YamlLayout(String),
+
     /// YAML feature not enabled.
     #[cfg(not(feature = "yaml"))]
     #[error("YAML support requires the 'yaml' feature")]
@@ -47,6 +53,18 @@ pub enum Json5Error {
     #[cfg(not(feature = "toml"))]
     #[error("TOML support requires the 'toml' feature")]
     TomlFeatureDisabled,
+}
+
+#[cfg(feature = "yaml")]
+impl Json5Error {
+    /// Maps a [`to_yaml_string`](crate::to_yaml_string) failure onto this
+    /// type, so a backend failure stays [`Self::Yaml`].
+    fn from_yaml_write(error: crate::YamlError) -> Self {
+        match error {
+            crate::YamlError::Serialize(error) | crate::YamlError::Parse(error) => Self::Yaml(error),
+            other => Self::YamlLayout(other.to_string()),
+        }
+    }
 }
 
 /// JSON5 document with parsing and conversion capabilities.
@@ -244,15 +262,20 @@ impl Json5 {
         super::format::to_json5_compact(&self.value)
     }
 
-    /// Convert to a YAML string.
+    /// Convert to a YAML string laid out with [`Indentation::default`]
+    /// (four spaces per level); see [`to_yaml_string`](crate::to_yaml_string).
+    ///
+    /// [`Indentation::default`]: crate::Indentation::default
     ///
     /// ## Errors
     ///
-    /// Returns an error if YAML serialization fails or the feature is disabled.
+    /// [`Json5Error::Yaml`] when the backend cannot serialize the value and
+    /// [`Json5Error::YamlLayout`] when it cannot be laid out.
     #[cfg(feature = "yaml")]
     #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_yaml(&self) -> Result<String, Json5Error> {
-        let yaml = serde_yaml_ng::to_string(&self.value)?;
+        let yaml = crate::to_yaml_string(&self.value, crate::Indentation::default())
+            .map_err(Json5Error::from_yaml_write)?;
         debug!(output_len = yaml.len(), "JSON5 → YAML conversion complete");
         Ok(yaml)
     }
@@ -542,6 +565,35 @@ mod tests {
         let j = Json5::from_str(r#"{ name: "example", tags: ["a", "b"] }"#).unwrap();
         let yaml = j.as_yaml().unwrap();
         assert!(yaml.contains("name: example"));
+    }
+
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn as_yaml_lays_out_nested_data_with_four_spaces() {
+        let j = Json5::from_str(
+            r#"{ server: { host: "h", ports: [80, 443], tls: { enabled: true } } }"#,
+        )
+        .unwrap();
+
+        let yaml = j.as_yaml().unwrap();
+
+        assert_eq!(
+            yaml,
+            "server:\n    host: h\n    ports:\n        - 80\n        - 443\n    tls:\n        enabled: true\n"
+        );
+    }
+
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn as_yaml_parses_to_the_json5_value() {
+        let j = Json5::from_str(
+            r#"{ list: [{ a: 1, b: [true, null] }, "multi\nline"], n: 1.5 }"#,
+        )
+        .unwrap();
+
+        let parsed: serde_json::Value = serde_yaml_ng::from_str(&j.as_yaml().unwrap()).unwrap();
+
+        assert_eq!(&parsed, j.value());
     }
 
     // ── Conversion: TOML ─────────────────────────────────────────────

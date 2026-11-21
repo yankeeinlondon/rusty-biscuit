@@ -152,6 +152,40 @@ a document the check rejected. `YamlError::Parse` remains the error for
 reading YAML; a serialization failure is never reported as a parse
 error.
 
+## YAML that biscuit-file produces itself
+
+The conversions that return or print YAML have no destination file, so
+they all use `Indentation::default()` (four spaces):
+
+| Producer | Errors |
+| --- | --- |
+| `Json5::as_yaml` | `Json5Error::Yaml` (backend) or `Json5Error::YamlLayout` |
+| `Toml::as_yaml` | `TomlError::Yaml` (backend) or `TomlError::YamlLayout` |
+| `bf … --yaml`, including YAML input re-emitted as YAML | reported on standard error |
+
+```rust
+use biscuit_file::Toml;
+
+let toml = Toml::from_str("[server]\nports = [80, 443]\n")?;
+assert_eq!(toml.as_yaml()?, "server:\n    ports:\n        - 80\n        - 443\n");
+# Ok::<(), biscuit_file::TomlError>(())
+```
+
+```sh
+$ echo '{"a": {"b": [1, {"c": "x", "d": 2}]}}' | bf --input-format json --yaml
+a:
+    b:
+        - 1
+        - c: x
+          d: 2
+```
+
+`bf` re-lays YAML input too: `bf config.yaml --yaml` prints the parsed
+value at four spaces, without the file's comments. To keep another
+width, write the value with `to_yaml_string` yourself.
+`Toml::as_yaml_value` returns a parsed value, not text, and has no
+layout.
+
 ## Related
 
 - [YAML Library Design](../design/yaml-design.md): parsing, conversion,

@@ -28,7 +28,7 @@ assert!(Toml::is_valid("[package]\nname = \"demo\""));
 ```rust
 let json: String = toml.as_json()?;              // pretty JSON
 let json_value: serde_json::Value = toml.as_json_value()?;  // owned Value
-let yaml: String = toml.as_yaml()?;             // requires `yaml` feature
+let yaml: String = toml.as_yaml()?;             // requires `yaml`; four-space layout
 let yaml_value: serde_yaml_ng::Value = toml.as_yaml_value()?; // requires `yaml`
 let raw: &str = toml.raw();                     // original TOML text
 let value: &toml::Value = toml.value();           // parsed value tree
@@ -110,7 +110,7 @@ let json_compact: String = j.as_json_compact()?;   // single-line JSON
 let json_value: &serde_json::Value = j.as_json_value(); // reference
 let json5: String = j.as_json5();            // pretty idiomatic JSON5
 let json5_compact: String = j.as_json5_compact(); // single-line JSON5
-let yaml: String = j.as_yaml()?;             // requires `yaml` feature
+let yaml: String = j.as_yaml()?;             // requires `yaml`; four-space layout
 let toml: String = j.as_toml()?;             // requires `toml` feature
 ```
 

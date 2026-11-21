@@ -29,7 +29,7 @@ use biscuit_file::Toml;
 let toml = Toml::from_str("[package]\nname = \"demo\"")?;
 let json: String = toml.as_json()?;                    // pretty JSON
 let json_value: serde_json::Value = toml.as_json_value()?;  // owned Value
-let yaml: String = toml.as_yaml()?;             // requires `yaml` feature
+let yaml: String = toml.as_yaml()?;             // requires `yaml`; four-space layout
 let raw: &str = toml.raw();                     // original TOML text
 let value: &toml::Value = toml.value();           // parsed tree
 ```
@@ -87,7 +87,7 @@ let json: String = j.as_json()?;          // pretty JSON
 let json_compact: String = j.as_json_compact()?;
 let json5: String = j.as_json5()?;         // idiomatic JSON5 (unquoted keys, single quotes)
 let json5_compact: String = j.as_json5_compact()?;
-let yaml: String = j.as_yaml()?;        // requires `yaml` feature
+let yaml: String = j.as_yaml()?;        // requires `yaml`; four-space layout
 let toml: String = j.as_toml()?;        // requires `toml` feature
 ```
 
