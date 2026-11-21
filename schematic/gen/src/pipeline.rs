@@ -15,7 +15,7 @@ use schematic_definitions::registry::{ApiRegistration, registrations};
 
 use crate::diagnostics::{Output, ValidationDiagnostic, has_errors};
 use crate::errors::GeneratorError;
-use crate::export::openapi::{build_openapi_grouped, render_openapi_document};
+use crate::export::openapi::{build_openapi_grouped, render_openapi_document_for};
 use crate::export::postman::{render_postman_environment, render_postman_module};
 use crate::output::{
     MutationPlan, PublicationReport, RustOutputRequest, Selection, expand_selection,
@@ -484,10 +484,13 @@ fn publish_openapi(
         for (module_name, members) in &groups {
             let options = openapi_export_options(members, opts.openapi_format, opts.openapi_version);
             let document = build_openapi_grouped(members, module_name, &options)?;
-            files.push((
-                format!("{module_name}.{extension}"),
-                render_openapi_document(&document, opts.openapi_format.into())?,
-            ));
+            let name = format!("{module_name}.{extension}");
+            let content = render_openapi_document_for(
+                &document,
+                opts.openapi_format.into(),
+                &Path::new(openapi_dir).join(&name),
+            )?;
+            files.push((name, content));
         }
         let plan = prepare_export_output(Path::new(openapi_dir), files, complete, |name| {
             name.ends_with(".json") || name.ends_with(".yaml")

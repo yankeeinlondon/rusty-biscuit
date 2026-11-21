@@ -6,7 +6,10 @@
 
 use schemars::JsonSchema;
 use schematic_define::constraints::{ConstraintNumber, Constraints};
-use schematic_define::openapi::{ExportFormat, ExportOptions, OpenApiImport, OpenApiSource, export, serialize};
+use biscuit_file::{Indentation, serde_yaml_ng};
+use schematic_define::openapi::{
+    ExportFormat, ExportOptions, OpenApiImport, OpenApiSource, export, serialize, serialize_with_indentation,
+};
 use schematic_define::pagination::{MoreSignal, PageSize, Strategy};
 use schematic_define::{
     ApiRequest, DefinitionContext, Endpoint, FormField, ParamDef, PrimitiveType, QueryParamType, RestApi, SchemaComponent, TypeRef,
@@ -201,6 +204,62 @@ fn numbers_no_json_number_holds_serialize_exactly_in_json_and_yaml() {
     for output in [&json_text, &yaml_text] {
         assert!(!output.contains("x-schematic-exact"), "{output}");
     }
+}
+
+fn exact_numbers_api() -> RestApi {
+    let ctx = DefinitionContext::types_in("::models");
+    let endpoint = Endpoint::get("Exact", "/exact").describes("Exact").returns_empty()
+        .query(ParamDef::new("big", QueryParamType::Integer).constraints(Constraints::new().maximum("18446744073709551616")))
+        .query(ParamDef::new("unit", QueryParamType::Number).constraints(Constraints::new().minimum("1.0")))
+        .query(ParamDef::new("fine", QueryParamType::Number).constraints(Constraints::new().multiple_of("0.10000000000000000001")))
+        .build().unwrap();
+    api(&ctx, [endpoint])
+}
+
+fn spaces(width: u8) -> Indentation {
+    Indentation::spaces(std::num::NonZeroU8::new(width).unwrap())
+}
+
+/// The exact-number placeholders are substituted after the YAML layout, so
+/// the laid-out text carries each number exactly as declared at any width.
+#[test]
+fn yaml_layout_follows_the_requested_indentation_and_keeps_exact_numbers() {
+    let doc = export(&exact_numbers_api(), &ExportOptions::new()).unwrap();
+    let default = serialize(&doc, ExportFormat::Yaml).unwrap();
+    let two = serialize_with_indentation(&doc, ExportFormat::Yaml, spaces(2)).unwrap();
+
+    assert_eq!(default, serialize_with_indentation(&doc, ExportFormat::Yaml, Indentation::default()).unwrap());
+    assert!(default.contains("\ninfo:\n    title: Rules\n"), "{default}");
+    assert!(
+        default.contains("\n            parameters:\n                - in: query\n                  name: big\n                  schema:\n                      maximum: 18446744073709551616\n"),
+        "{default}"
+    );
+    assert!(two.contains("\ninfo:\n  title: Rules\n"), "{two}");
+    assert!(
+        two.contains("\n      parameters:\n        - in: query\n          name: big\n          schema:\n            maximum: 18446744073709551616\n"),
+        "{two}"
+    );
+    for text in [&default, &two] {
+        assert!(text.contains(" minimum: 1.0\n"), "{text}");
+        assert!(text.contains(" multipleOf: 0.10000000000000000001\n"), "{text}");
+        assert!(!text.contains("x-schematic-exact") && !text.contains("__schematic_exact"), "{text}");
+    }
+}
+
+#[test]
+fn yaml_layout_changes_no_parsed_value() {
+    let ctx = DefinitionContext::types_in("::models");
+    let doc = export(&api(&ctx, [every_param_endpoint()]), &ExportOptions::new()).unwrap();
+    let backend = serde_yaml_ng::to_value(&doc).unwrap();
+    for indentation in [Indentation::default(), spaces(2)] {
+        let text = serialize_with_indentation(&doc, ExportFormat::Yaml, indentation).unwrap();
+        assert_eq!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text).unwrap(), backend);
+    }
+    assert_eq!(
+        serialize_with_indentation(&doc, ExportFormat::Json, spaces(2)).unwrap(),
+        serialize(&doc, ExportFormat::Json).unwrap(),
+        "JSON ignores the indentation"
+    );
 }
 
 #[test]
