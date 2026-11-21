@@ -78,8 +78,9 @@ holds when every opinion agrees on each value it states; zero or one
 opinion is a consensus. A generic `[*]` rule can therefore override
 formatter settings for every file while the result still shows the
 disagreement. The fallback never participates in consensus or appears among
-alternative authorities. Files outside a worktree use the fallback without
-consulting worktree configuration or language conventions.
+alternative authorities. Files outside a worktree read no EditorConfig or formatter configuration;
+a built-in language convention still applies, because it describes the
+language rather than a repository, and anything else uses the fallback.
 
 > **Reader’s note.** Sniff puts EditorConfig first so generated files follow
 > the repository’s general editing policy. Some formatters give their own
@@ -157,7 +158,7 @@ still apply.
 
 Read local configuration as data. The rows describe supported indentation
 settings, not full formatter emulation. Parse JSONC configuration
-(`biome.jsonc`, `deno.jsonc`, `dprint.jsonc`) with biscuit-file's JSON5
+(`biome.jsonc`, `deno.jsonc`, `dprint.jsonc`, `.oxfmtrc.jsonc`) with biscuit-file's JSON5
 reader, which Sniff already depends on.
 
 | File types | Root configuration files, in order | Settings | Formatter default |
@@ -167,11 +168,16 @@ reader, which Sniff already depends on.
 | `js` `jsx` `ts` `tsx` `mjs` `cjs` `mts` `cts` `json` `jsonc` `css` `graphql` `gql` | `biome.json`, `biome.jsonc`, `.biome.json`, `.biome.jsonc` | `formatter.indentStyle`, `formatter.indentWidth`, and the language block (`javascript`, `json`, `css`, `graphql`) | Tabs, width 2 |
 | `js` `jsx` `ts` `tsx` `mjs` `cjs` `mts` `cts` `json` `jsonc` `yaml` `yml` `md` `css` `scss` `sass` `less` `html` `vue` | `deno.json`, `deno.jsonc` | `fmt.useTabs`, `fmt.indentWidth` | 2 spaces |
 | `js` `jsx` `ts` `tsx` `mjs` `cjs` `mts` `cts` `json` `jsonc` | `dprint.json`, `dprint.jsonc`, `.dprint.json`, `.dprint.jsonc` | `useTabs`, `indentWidth`, and the plugin block (`typescript`, `json`) | 2 spaces |
+| `js` `jsx` `ts` `tsx` `mjs` `cjs` `mts` `cts` `json` `jsonc` `json5` `yaml` `yml` `toml` `md` `mdx` `css` `scss` `less` `graphql` `gql` `html` `vue` | `.oxfmtrc.json`, `.oxfmtrc.jsonc` | `useTabs`, `tabWidth`, and matching `overrides[].options` | 2 spaces |
 | `py` `pyi` | `.ruff.toml`, `ruff.toml`, `pyproject.toml` | `indent-width`, `format.indent-style` (under `tool.ruff` in `pyproject.toml`) | 4 spaces |
+| `toml` | `.tombi.toml`, `tombi.toml`, `.config/tombi.toml`, `pyproject.toml` (`tool.tombi`) | `format.rules.indent-style`, `format.rules.indent-width` | 2 spaces |
 | `toml` | `.taplo.toml`, `taplo.toml` | `formatting.indent_string` | 2 spaces |
 | `yaml` `yml` | `.yamlfmt`, `.yamlfmt.yaml`, `.yamlfmt.yml`, `yamlfmt.yaml`, `yamlfmt.yml` | `formatter.indent` | 2 spaces |
 | `lua` `luau` | `stylua.toml`, `.stylua.toml` | `indent_type`, `indent_width` | Tabs, width 4 |
 | `c` `h` `cc` `cpp` `cxx` `hh` `hpp` `hxx` `m` `mm` `proto` | `.clang-format`, `_clang-format` | `IndentWidth`, `UseTab`, and `BasedOnStyle` from the built-in preset table below | LLVM preset |
+| `swift` | `.swift-format` | `indentation`, `tabWidth` | 2 spaces |
+| `rb` `rake` `gemspec` `ru` | `.rubocop.yml`, `.config/.rubocop.yml`, `.config/rubocop/config.yml` | `Layout/IndentationStyle` `EnforcedStyle`, `Layout/IndentationWidth` `Width` | 2 spaces |
+| `cs` `csx` | `.csharpierrc` (JSON or YAML), `.csharpierrc.json`, `.csharpierrc.yaml` | `useTabs`, `indentSize` | 4 spaces |
 
 Each row contributes at most one opinion, ranked in table order. Sniff
 uses the first readable, parseable candidate that declares the formatter,
@@ -213,6 +219,12 @@ style/width pair:
   more tabs gives tabs with the formatter’s default width. Other strings are
   diagnosed and ignored.
 - StyLua's `indent_type` is `Tabs` or `Spaces`.
+- Tombi's `indent-style` is `space` or `tab`; `indent-width` applies to
+  spaces only, so tabs take the formatter's default width.
+- swift-format's `indentation` is exactly one of `{"spaces": N}` (N
+  spaces) or `{"tabs": N}` (tabs, width N × `tabWidth`, which defaults
+  to 8).
+- RuboCop's `EnforcedStyle` is `spaces` or `tabs`.
 - clang-format's `UseTab: Never` means spaces. Recognized modes that
   permit tabs for block indentation give a tabs preference. Diagnose
   unknown values and use the selected preset's style.
@@ -224,17 +236,18 @@ style/width pair:
   applicable document gives no opinion. Diagnose unsupported presets
   and use LLVM defaults for the properties the file leaves unresolved.
 
-Apply matching Prettier overrides in file order, with later values taking
+Apply matching Prettier and oxfmt overrides in file order, with later values taking
 precedence per property. Match `files` and `excludeFiles` against the
 root-relative path using Prettier's glob rules, accepting strings and lists.
 For Biome and dprint, apply the language or plugin block over the global
 settings. This first version reads the local file's indentation settings.
-It does not execute JavaScript configs (`.prettierrc.js`,
-`prettier.config.*`), load shared presets or `extends` chains (including a
-string-valued `prettier` key in `package.json`), evaluate formatter
+It does not execute JavaScript or TypeScript configs (`.prettierrc.js`,
+`prettier.config.*`, `oxfmt.config.ts`), load shared presets or `extends` chains (including a
+string-valued `prettier` key in `package.json` and RuboCop's
+`inherit_from`/`inherit_gem`), evaluate formatter
 include/ignore rules (apart from Prettier override selection), or apply
-Biome's and dprint's top-level path overrides or Taplo's `[[rule]]`
-tables. For Deno, accept legacy `fmt.options` values when the corresponding
+Biome's, dprint's, and CSharpier's top-level path overrides, Taplo's
+`[[rule]]` tables, or Tombi's `[[overrides]]`. For Deno, accept legacy `fmt.options` values when the corresponding
 flat setting is absent. Report unsupported forms in lookup diagnostics.
 An unsupported executable config or preset reference with no local
 settings gives no opinion on its own. A supported local config with an
@@ -246,7 +259,12 @@ values and continue with the applicable formatter defaults.
 [Deno formatter](https://docs.deno.com/runtime/reference/cli/fmt/),
 [dprint configuration](https://dprint.dev/config/),
 [Ruff settings](https://docs.astral.sh/ruff/settings/),
+[oxfmt configuration](https://oxc.rs/docs/guide/usage/formatter/config),
 [Taplo configuration](https://taplo.tamasfe.dev/configuration/),
+[Tombi](https://tombi-toml.github.io/tombi/),
+[swift-format configuration](https://github.com/swiftlang/swift-format/blob/main/Documentation/Configuration.md),
+[RuboCop configuration](https://docs.rubocop.org/rubocop/latest/configuration.html),
+[CSharpier configuration](https://csharpier.com/docs/Configuration),
 [StyLua](https://github.com/JohnnyMorganz/StyLua),
 [clang-format options](https://clang.llvm.org/docs/ClangFormatStyleOptions.html),
 [verified formatter reference](formatters.md)
@@ -260,14 +278,19 @@ and give an opinion with `source: convention` and the convention's name in
 
 | File types | Convention | Indentation |
 | ---------- | ---------- | ----------- |
-| `go` | `gofmt` | Tabs with a Sniff reporting width of four columns |
+| `go` | `gofmt` | Tabs, width 8 (the tab width gofmt aligns with) |
 | `rs` | `rustfmt` defaults | 4 spaces |
 | `py` `pyi` | PEP 8 (Black is not configurable) | 4 spaces |
 | `zig` | `zig fmt` | 4 spaces |
 | `dart` | `dart format` | 2 spaces |
 | `ex` `exs` | `mix format` | 2 spaces |
-| `tf` `tfvars` | `terraform fmt` | 2 spaces |
+| `tf` `tfvars`, and path suffixes `.tftest.hcl`, `.tfmock.hcl`, `.tfquery.hcl` | `terraform fmt` | 2 spaces |
+| `elm` | `elm-format` | 4 spaces |
+| `gleam` | `gleam format` | 2 spaces |
 | `mk`, and exact basenames `Makefile`, `makefile`, `GNUmakefile` | Make recipe syntax | Tabs (see format constraints) |
+
+Path suffixes such as `.tftest.hcl` match only in path lookup; an
+extension query for `hcl` does not select the Terraform convention.
 
 ### Format constraints
 
@@ -306,8 +329,9 @@ pub struct Indentation {
 
 /// Serialized as kebab-case values: `editorconfig`, `clang-format`, …
 pub enum IndentAuthority {
-    EditorConfig, Rustfmt, Prettier, Biome, Deno, Dprint, Ruff,
-    Taplo, Yamlfmt, Stylua, ClangFormat,
+    EditorConfig, Rustfmt, Prettier, Biome, Deno, Dprint, Oxfmt, Ruff,
+    Tombi, Taplo, Yamlfmt, Stylua, ClangFormat, SwiftFormat, Rubocop,
+    Csharpier,
     /// A built-in language convention; `via` names it (`gofmt`).
     Convention,
     /// Sniff's fallback; used as the authority only when no opinion exists.
@@ -366,7 +390,8 @@ output is identical across platforms.
 
 ```rust
 /// Resolve indentation for `path`. Finds the repository root itself;
-/// a path outside a repository resolves to the default.
+/// a path outside a repository resolves to its language convention, if
+/// any, then the default.
 pub fn resolve_for_path(path: &Path) -> Result<ResolvedIndentation>;
 
 /// Resolve indentation for a file extension (with or without the
@@ -450,7 +475,8 @@ default  4 spaces  (.editorconfig [*])
 ```
 
 Use the current directory or the existing `--base` directory to discover the
-worktree. Outside a worktree the command exits successfully with the default
+worktree. Outside a worktree the command exits successfully with the language
+convention for the extension, if any, or the default
 and, in summary mode, an empty overrides map. An extension must start with an ASCII letter or digit after the optional
 leading dot. Its remaining characters may be ASCII letters, digits,
 underscores, plus signs, or hyphens. Other inputs are usage errors. Plain

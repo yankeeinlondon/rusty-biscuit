@@ -141,7 +141,7 @@ but can differ from what `biome format` produces.
 ### Width semantics that are not "columns per level"
 
 - **gofmt** indents with one tab per level; alignment is computed as if a
-  tab is 8 columns. Sniff's reporting width of 4 is a display choice.
+  tab is 8 columns, and Sniff reports that width.
 - **clang-format** separates `IndentWidth` (level) from `TabWidth` (tab
   stop). With `UseTab: ForIndentation` and `IndentWidth: 4, TabWidth: 8`,
   one level is half a tab.
@@ -172,20 +172,20 @@ Applied to `spec.md`: dprint's filename order (`dprint.json`,
 before `.stylua.toml`), Biome's `.biome.json`/`.biome.jsonc`, and Prettier's
 `package.yaml` key.
 
-Open choices:
+Author rulings (2026-11-20):
 
-- **Biome** also formats YAML and Markdown; its `yaml` block has
-  `indentWidth` but no `indentStyle`. Adding those types to the Biome row
-  would put Biome's tab default ahead of Deno and yamlfmt for YAML (the
-  format constraint would convert it to spaces).
-- **dprint** also reads `.config/dprint.json(c)`.
-- **Deno** `fmt.options` is deprecated but still honored when the flat keys
-  are absent; reading it is cheap and avoids a wrong answer.
-- **Candidate rows not yet in the spec:** oxfmt (Prettier-compatible keys),
-  Tombi (better specified than Taplo), swift-format, RuboCop, sqlfluff,
-  CSharpier, fourmolu. Built-in conventions could add elm (4), gleam (2),
-  haskell via ormolu (2), and `tftest.hcl`.
-- **gofmt** reporting width: consider 8 to match gofmt's own alignment.
+- **Added rows:** oxfmt, Tombi (ranked before Taplo), swift-format,
+  RuboCop, and CSharpier; conventions for elm-format, gleam format, and
+  terraform fmt's `.tftest.hcl`/`.tfmock.hcl`/`.tfquery.hcl` paths.
+- **Biome YAML and Markdown stay out** until Biome documents how YAML
+  indentation style is chosen.
+- **gofmt** reports tabs at width 8.
+- **Language conventions apply outside a worktree**; only EditorConfig and
+  formatter configs are skipped there.
+- **Deno `fmt.options`** is read when the flat keys are absent (from the
+  spec review).
+- **Not added:** sqlfluff and fourmolu (fourmolu's 4-space default
+  conflicts with ormolu's fixed 2, so Haskell has no single convention).
 
 ## Sources
 
