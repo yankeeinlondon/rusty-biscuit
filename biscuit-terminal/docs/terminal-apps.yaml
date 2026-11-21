@@ -1,9 +1,13 @@
 kind: sequence
-$state: terminal-app.yaml
+$state:
+    name: string(required) -> name of the app
+    url: url -> primary URL for the app
+    os: enum(linux,macos,windows,freebsd,netbsd,ios,android,solaris,openbsd,other)[](required)
 template:
     intro: "{{ name }} ({{url}})"
     slug: "{{dasherize(name)}}"
     file: "{{slug}}.md"
+
 sequence:
     - name: Wezterm
       url: "https://wezterm.org/"
