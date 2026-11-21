@@ -1,5 +1,5 @@
 ---
-source: sniff/cli/tests/snapshots.rs
+source: sniff/cli/tests/l1/snapshots.rs
 expression: stable
 ---
 {
@@ -127,6 +127,144 @@ expression: stable
     "untracked_count": 1
   },
   "has_merge_conflict": false,
+  "indent": {
+    "default": {
+      "alt_authorities": [],
+      "authority": {
+        "indent": 4,
+        "indent_using": "space",
+        "source": "default",
+        "via": []
+      },
+      "consensus": true,
+      "indent": 4,
+      "indent_using": "space",
+      "skipped": []
+    },
+    "overrides": {
+      "dart": {
+        "alt_authorities": [],
+        "authority": {
+          "indent": 2,
+          "indent_using": "space",
+          "source": "convention",
+          "via": [
+            "dart format"
+          ]
+        },
+        "consensus": true,
+        "indent": 2,
+        "indent_using": "space",
+        "skipped": []
+      },
+      "ex": {
+        "alt_authorities": [],
+        "authority": {
+          "indent": 2,
+          "indent_using": "space",
+          "source": "convention",
+          "via": [
+            "mix format"
+          ]
+        },
+        "consensus": true,
+        "indent": 2,
+        "indent_using": "space",
+        "skipped": []
+      },
+      "exs": {
+        "alt_authorities": [],
+        "authority": {
+          "indent": 2,
+          "indent_using": "space",
+          "source": "convention",
+          "via": [
+            "mix format"
+          ]
+        },
+        "consensus": true,
+        "indent": 2,
+        "indent_using": "space",
+        "skipped": []
+      },
+      "gleam": {
+        "alt_authorities": [],
+        "authority": {
+          "indent": 2,
+          "indent_using": "space",
+          "source": "convention",
+          "via": [
+            "gleam format"
+          ]
+        },
+        "consensus": true,
+        "indent": 2,
+        "indent_using": "space",
+        "skipped": []
+      },
+      "go": {
+        "alt_authorities": [],
+        "authority": {
+          "indent": 8,
+          "indent_using": "tab",
+          "source": "convention",
+          "via": [
+            "gofmt"
+          ]
+        },
+        "consensus": true,
+        "indent": 8,
+        "indent_using": "tab",
+        "skipped": []
+      },
+      "mk": {
+        "alt_authorities": [],
+        "authority": {
+          "indent": 8,
+          "indent_using": "tab",
+          "source": "convention",
+          "via": [
+            "make"
+          ]
+        },
+        "consensus": true,
+        "indent": 8,
+        "indent_using": "tab",
+        "skipped": []
+      },
+      "tf": {
+        "alt_authorities": [],
+        "authority": {
+          "indent": 2,
+          "indent_using": "space",
+          "source": "convention",
+          "via": [
+            "terraform fmt"
+          ]
+        },
+        "consensus": true,
+        "indent": 2,
+        "indent_using": "space",
+        "skipped": []
+      },
+      "tfvars": {
+        "alt_authorities": [],
+        "authority": {
+          "indent": 2,
+          "indent_using": "space",
+          "source": "convention",
+          "via": [
+            "terraform fmt"
+          ]
+        },
+        "consensus": true,
+        "indent": 2,
+        "indent_using": "space",
+        "skipped": []
+      }
+    },
+    "skipped": []
+  },
   "is_monorepo": true,
   "language": null,
   "name": "agg-fixture",

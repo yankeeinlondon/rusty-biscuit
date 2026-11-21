@@ -152,63 +152,94 @@ fn find_editorconfig(root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Parses EditorConfig content into a `FormattingConfig`.
-fn parse_editorconfig(content: &str, path: PathBuf) -> FormattingConfig {
-    let mut config = FormattingConfig {
-        config_path: path,
-        is_root: false,
-        sections: Vec::new(),
-    };
+/// One `key = value` assignment, in source order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScannedProperty {
+    /// The key, lowercased: EditorConfig keys are case-insensitive.
+    pub(crate) key: String,
+    /// The value as written, trimmed. Value case is left to each projection.
+    pub(crate) value: String,
+    /// One-based line number.
+    pub(crate) line: usize,
+}
 
-    let mut current_section: Option<EditorConfigSection> = None;
+/// One `[pattern]` section and its assignments, in source order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScannedSection {
+    pub(crate) pattern: String,
+    /// One-based line number of the section header.
+    pub(crate) line: usize,
+    pub(crate) properties: Vec<ScannedProperty>,
+}
 
-    for line in content.lines() {
+/// An `.editorconfig` file read as written, before any projection.
+///
+/// The formatting report ([`FormattingConfig`]) and the indentation resolver
+/// (`filesystem::indentation`) both project from this one scan, so they agree
+/// on what a section and an assignment are. Repeated keys are kept: each
+/// projection folds them in order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct EditorConfigScan {
+    /// Assignments before the first section (where `root` lives).
+    pub(crate) preamble: Vec<ScannedProperty>,
+    pub(crate) sections: Vec<ScannedSection>,
+}
+
+/// Reads EditorConfig text into sections and assignments in file order.
+pub(crate) fn scan_editorconfig(content: &str) -> EditorConfigScan {
+    let mut scan = EditorConfigScan::default();
+    for (index, line) in content.lines().enumerate() {
+        let line_number = index + 1;
         let line = line.trim();
-
-        // Skip empty lines and comments
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
             continue;
         }
-
-        // Check for section header
         if line.starts_with('[') && line.ends_with(']') {
-            // Save previous section
-            if let Some(section) = current_section.take() {
-                config.sections.push(section);
-            }
-
-            // Start new section
-            let pattern = line[1..line.len() - 1].to_string();
-            current_section = Some(EditorConfigSection {
-                pattern,
-                ..Default::default()
+            scan.sections.push(ScannedSection {
+                pattern: line[1..line.len() - 1].to_string(),
+                line: line_number,
+                properties: Vec::new(),
             });
             continue;
         }
-
-        // Parse key = value
         if let Some((key, value)) = parse_property(line) {
-            let key_lower = key.to_lowercase();
-            let value_trimmed = value.trim();
-
-            // Handle root property (not in a section)
-            if key_lower == "root" && current_section.is_none() {
-                config.is_root = value_trimmed.eq_ignore_ascii_case("true");
-                continue;
-            }
-
-            // Handle section properties
-            if let Some(ref mut section) = current_section {
-                apply_property(section, &key_lower, value_trimmed);
+            let property = ScannedProperty {
+                key: key.to_lowercase(),
+                value: value.trim().to_string(),
+                line: line_number,
+            };
+            match scan.sections.last_mut() {
+                Some(section) => section.properties.push(property),
+                None => scan.preamble.push(property),
             }
         }
     }
+    scan
+}
 
-    // Don't forget the last section
-    if let Some(section) = current_section {
+/// Parses EditorConfig content into a `FormattingConfig`.
+fn parse_editorconfig(content: &str, path: PathBuf) -> FormattingConfig {
+    let scan = scan_editorconfig(content);
+    let mut config = FormattingConfig {
+        config_path: path,
+        is_root: false,
+        sections: Vec::with_capacity(scan.sections.len()),
+    };
+    for property in &scan.preamble {
+        if property.key == "root" {
+            config.is_root = property.value.eq_ignore_ascii_case("true");
+        }
+    }
+    for scanned in &scan.sections {
+        let mut section = EditorConfigSection {
+            pattern: scanned.pattern.clone(),
+            ..Default::default()
+        };
+        for property in &scanned.properties {
+            apply_property(&mut section, &property.key, &property.value);
+        }
         config.sections.push(section);
     }
-
     config
 }
 

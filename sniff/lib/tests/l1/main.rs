@@ -22,6 +22,7 @@ mod committed_tree;
 mod focused_provider;
 mod git_parity;
 mod host_capability_cache;
+mod indentation;
 mod integration;
 mod lockfile_fixtures;
 mod lockfile_isolation;
