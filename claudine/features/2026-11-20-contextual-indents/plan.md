@@ -2,7 +2,7 @@
 total_phases: 4
 created: 2026-11-20
 status: planned
-phase: 2
+phase: 4
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -26,6 +26,50 @@ skills_files_updated_during_phase_1:
 - .claude/skills/biscuit-file/references/architecture.md
 packages:
 - biscuit-file
+- sniff
+- sniff-detection-cli
+source_files_during_phase_2:
+- sniff/lib/Cargo.toml
+- sniff/lib/src/error.rs
+- sniff/lib/src/filesystem/formatting.rs
+- sniff/lib/src/filesystem/mod.rs
+- sniff/lib/src/filesystem/indentation/mod.rs
+- sniff/lib/src/filesystem/indentation/catalog.rs
+- sniff/lib/src/filesystem/indentation/editorconfig.rs
+- sniff/lib/src/filesystem/indentation/formatters.rs
+- sniff/lib/src/filesystem/indentation/inputs.rs
+- sniff/lib/src/filesystem/indentation/tests.rs
+- sniff/lib/src/performance/counters.rs
+- sniff/lib/tests/l1/main.rs
+- sniff/lib/tests/l1/indentation.rs
+docs_updated_during_phase_2:
+- sniff/README.md
+- sniff/lib/README.md
+docs_created_during_phase_2:
+- sniff/docs/topics/indentation.md
+skills_files_updated_during_phase_2:
+- .claude/skills/sniff/SKILL.md
+source_files_during_phase_3:
+- sniff/cli/src/args/mod.rs
+- sniff/cli/src/args/repo.rs
+- sniff/cli/src/commands/mod.rs
+- sniff/cli/src/output/mod.rs
+- sniff/cli/src/output/filesystem/mod.rs
+- sniff/cli/src/output/filesystem/indentation.rs
+- sniff/cli/tests/l1/main.rs
+- sniff/cli/tests/l1/repo_indent.rs
+- sniff/cli/tests/l1/snapshots.rs
+- sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+docs_updated_during_phase_3:
+- sniff/README.md
+- sniff/cli/README.md
+- sniff/docs/cli/repo.md
+- sniff/docs/topics/json-output.md
+- sniff/docs/topics/indentation.md
+docs_created_during_phase_3:
+- sniff/docs/cli/repo_indent.md
+skills_files_updated_during_phase_3:
+- .claude/skills/sniff/SKILL.md
 ---
 
 # Contextual Indents Implementation Plan
@@ -69,21 +113,21 @@ Starts after Phase 1, because Sniff re-exports biscuit-file's `Indentation` and 
 
 Establish shared candidate metadata and output structs before the parallel tasks. Every parallel task owns separate files.
 
-- [ ] **Define Resolver Types**
+- [x] **Define Resolver Types**
   - Add `filesystem/indentation/mod.rs` with the spec's public types, summary API and re-exports. Put ordered formatter candidate paths, extensions, dialects, defaults, and conventions in `indentation/catalog.rs`. Keep serde values and optional omission as specified. Use portable slash text for provenance paths.
 
 ### Parallel tasks
 
-- [ ] **Match EditorConfig Sections**
+- [x] **Match EditorConfig Sections**
   - Implement the shared ordered scan in `formatting.rs` and the indentation projection and matching in `indentation/editorconfig.rs`. Exercise escapes, slash anchoring, basename rules, braces, signed numeric ranges, unset, invalid properties, tab width precedence, partial opinions and synthetic extension exclusions. Keep existing formatting report tests passing.
-- [ ] **Read Formatter Settings**
+- [x] **Read Formatter Settings**
   - Implement `indentation/formatters.rs` with per-row extraction, shared exact-width, Boolean, style and glob-field validators, ordered override layering, disabled and shadowed outcomes, and unsupported-form diagnostics. Include one control fixture per row, copied from that formatter's documented configuration example (no formatter binary runs in tests), and a fixture with omitted settings for every selected default.
-- [ ] **Load Candidate Snapshots**
+- [x] **Load Candidate Snapshots**
   - Implement `indentation/inputs.rs` using Rayon's indexed parallel iteration over distinct candidate paths, adapting the counted config reader in `filesystem/repo/detection.rs`. Treat missing paths as absent and retain unreadable and parse errors. Parse bytes once per path and dialect, including multi-document clang YAML as one file read. Keep path selection, extension-only candidate selection and full snapshot loading distinct at the entry points.
 
 ### Integration
 
-- [ ] **Integrate Resolver Results**
+- [x] **Integrate Resolver Results**
   - Wire the free functions, snapshot calls and summary in `indentation/mod.rs`. Resolve style and width independently, compute consensus on raw opinions, then apply the YAML adjustment. Verify default, alternative provenance, shadowing, summary omissions, and diagnostic deduplication even for omitted extensions.
   - At the public Sniff resolver, test field shapes once per validator with an unedited documented-example control, then a control and one invalid value at every wiring site. Test absent, null, wrong types, invalid and wholly invalid list elements, and empty shapes using the Phase 1 outcomes. Test duplicate keys and trailing garbage once each through strict JSON, JSON5, YAML, TOML, and the EditorConfig scanner's own grammar where duplicate assignments deliberately merge. Reject duplicate JSON/JSON5 keys before lossy value construction using the biscuit-file scan seam. Prove JSON5 comments and trailing commas, YAML implicit null, single-document rejection of a second document, and clang multi-document selection. Assert diagnostics and fallback through the returned public result. Audit `serde(default)`, `Option<T>`, silent filtering and discarded errors at load-bearing ingress.
   - Verify one parse/read per shared file, focused reads, stable ordering, linked and nested repositories, nonexisting paths, outside fallback, exact filename conventions and forward-slash matching. Run Sniff L1 and lint and write `sniff/docs/topics/indentation.md`, its overview link and the repo skill updates.
@@ -92,10 +136,10 @@ Establish shared candidate metadata and output structs before the parallel tasks
 
 Starts after Phase 2.
 
-- [ ] **Wire Indent Command**
+- [x] **Wire Indent Command**
   - Add `RepoAction::Indent` in `sniff/cli/src/args/repo.rs` and a lightweight dispatch arm in `commands/mod.rs` beside the early Git actions. Reuse the existing base-directory selection and JSON flag. Validate extensions through clap using the same grammar as the library boundary. Render in `output/filesystem/indentation.rs` using biscuit-terminal `Prose` and `UnorderedList`, naming sources for each filled dimension and highlighting disagreement using terminal styling. Send the leaf value or summary directly to the JSON writer.
   - Attach `indent` to ordinary parent repo JSON in the default-action path feeding `output/repo_json.rs::build_with_outcome`. Leave focused actions and plain default output on their existing path. Use the same summary function as the leaf.
-- [ ] **Verify Command Contract**
+- [x] **Verify Command Contract**
   - Add L1 fixture subprocess coverage for stdout-only JSON, ordinary parent JSON, unaffected focused JSON, partial opinions, YAML tab adjustments, invalid extensions, base-directory handling, and outside-worktree behavior. Reuse the public tests for the full robustness matrix. Prove CLI wiring with positive and malformed config examples through the supported dialects and assert the located skipped diagnostic alongside a usable result. Check completion/help and run L1 and lint for `sniff-detection-cli`.
   - Add `sniff/docs/cli/repo_indent.md`, update the repo reference and `sniff/docs/topics/json-output.md`, and update the caller skill with the new command and output contract.
 
