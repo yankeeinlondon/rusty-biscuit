@@ -2,7 +2,7 @@
 total_phases: 4
 created: 2026-11-20
 status: planned
-phase: 4
+phase: 5
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -28,6 +28,23 @@ packages:
 - biscuit-file
 - sniff
 - sniff-detection-cli
+- claudine
+- claudine-cli
+- claudine-gen
+- darkmatter
+- darkmatter-cli
+- darkmatter-lsp
+- biscuit-file-cli
+- biscuit-terminal
+- biscuit-tui
+- biscuit-tui-cli
+- content-policy
+- model-citizen
+- research
+- schematic-define
+- schematic-gen
+- simplified-schema
+- test-toolkit
 source_files_during_phase_2:
 - sniff/lib/Cargo.toml
 - sniff/lib/src/error.rs
@@ -70,6 +87,275 @@ docs_created_during_phase_3:
 - sniff/docs/cli/repo_indent.md
 skills_files_updated_during_phase_3:
 - .claude/skills/sniff/SKILL.md
+source_files_during_phase_4:
+- Cargo.lock
+- biscuit-file/cli/Cargo.toml
+- biscuit-file/cli/src/main.rs
+- biscuit-file/cli/tests/cli_tests.rs
+- biscuit-file/cli/tests/yaml_serializer_guard.rs
+- biscuit-file/lib/src/json5/types.rs
+- biscuit-file/lib/src/toml_impl/types.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/yaml_serializer_guard.rs
+- biscuit-terminal/lib/tests/l1/main.rs
+- biscuit-terminal/lib/tests/l1/yaml_serializer_guard.rs
+- biscuit-tui/cli/tests/l1/main.rs
+- biscuit-tui/cli/tests/l1/yaml_serializer_guard.rs
+- biscuit-tui/lib/Cargo.toml
+- biscuit-tui/lib/tests/yaml_serializer_guard.rs
+- claudine/cli/src/commands/wrap/composition/dry_run.rs
+- claudine/cli/tests/l1/first_run_config_layout.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/yaml_serializer_guard.rs
+- claudine/gen/Cargo.toml
+- claudine/gen/src/agent_errors_check.rs
+- claudine/gen/tests/l1/main.rs
+- claudine/gen/tests/l1/yaml_serializer_guard.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/linking/compatibility/frontmatter_io.rs
+- claudine/lib/tests/l1/config_indentation.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/yaml_serializer_guard.rs
+- content-policy/lib/Cargo.toml
+- content-policy/lib/tests/yaml_serializer_guard.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/hash.rs
+- darkmatter/cli/tests/l1/compose_array_rendering.rs
+- darkmatter/cli/tests/l1/compose_setters.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/render_dispatch.rs
+- darkmatter/cli/tests/l1/standalone_baseline.rs
+- darkmatter/cli/tests/l1/yaml_serializer_guard.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/yaml_serializer_guard.rs
+- darkmatter/lib/src/config/permissions/persist.rs
+- darkmatter/lib/src/config/write.rs
+- darkmatter/lib/src/effects/verbs.rs
+- darkmatter/lib/src/markdown/hash/baseline.rs
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/node_edit.rs
+- darkmatter/lib/src/markdown/hash/path_edit.rs
+- darkmatter/lib/src/markdown/hash/write.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/output/mod.rs
+- darkmatter/lib/src/markdown/output/string.rs
+- darkmatter/lib/src/markdown/yaml_block.rs
+- darkmatter/lib/src/yaml_edit.rs
+- darkmatter/lib/tests/l1/config_migration.rs
+- darkmatter/lib/tests/l1/config_migration_receipt.rs
+- darkmatter/lib/tests/l1/config_write_indentation.rs
+- darkmatter/lib/tests/l1/frontmatter_path_edit.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/markdown_save_indentation.rs
+- darkmatter/lib/tests/l1/yaml_edit.rs
+- darkmatter/lib/tests/l1/yaml_serializer_guard.rs
+- model-citizen/lib/Cargo.toml
+- model-citizen/lib/tests/yaml_serializer_guard.rs
+- research/lib/Cargo.toml
+- research/lib/tests/yaml_serializer_guard.rs
+- schematic/define/Cargo.toml
+- schematic/define/src/openapi/mod.rs
+- schematic/define/src/openapi/options.rs
+- schematic/define/tests/openapi_constraint_export.rs
+- schematic/define/tests/yaml_serializer_guard.rs
+- schematic/gen/Cargo.toml
+- schematic/gen/src/export/openapi.rs
+- schematic/gen/src/pipeline.rs
+- schematic/gen/tests/l1/main.rs
+- schematic/gen/tests/l1/openapi_yaml_indentation.rs
+- schematic/gen/tests/l1/yaml_serializer_guard.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_object.rs
+- simplified-schema/lib/tests/l1/yaml_serializer_guard.rs
+- sniff/lib/tests/l1/main.rs
+- sniff/lib/tests/l1/yaml_serializer_guard.rs
+- tools/test-toolkit/Cargo.toml
+- tools/test-toolkit/src/lib.rs
+- tools/test-toolkit/src/serializer_guard.rs
+- tools/test-toolkit/src/serializer_guard/tests.rs
+- tools/test-toolkit/tests/serializer_guard_coverage.rs
+docs_updated_during_phase_4:
+- biscuit-file/cli/README.md
+- biscuit-file/docs/dependencies.md
+- biscuit-file/docs/topics/yaml-writing.md
+- claudine/docs/topics/configuration.md
+- content-policy/docs/dependencies.md
+- darkmatter/docs/cli/hash.md
+- darkmatter/docs/structs/Markdown.md
+- darkmatter/docs/topics/config-writes.md
+- darkmatter/docs/topics/side-effects.md
+- darkmatter/docs/topics/yaml-editing.md
+- darkmatter/docs/use-skills/use-darkmatter/cli.md
+- docs/dependencies.md
+- schematic/docs/dependencies.md
+- schematic/docs/io/export-openapi.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- tools/test-toolkit/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/biscuit-file/references/api.md
+- .claude/skills/biscuit-file/references/format-conversion.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/frontmatter.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/schematic-define/schematic/openapi.md
+source_code:
+- biscuit-file/lib/src/indentation.rs
+- biscuit-file/lib/src/lib.rs
+- biscuit-file/lib/src/yaml/mod.rs
+- biscuit-file/lib/src/yaml/types.rs
+- biscuit-file/lib/src/yaml/write.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/yaml_writing.rs
+- biscuit-file/justfile
+- sniff/lib/Cargo.toml
+- sniff/lib/src/error.rs
+- sniff/lib/src/filesystem/formatting.rs
+- sniff/lib/src/filesystem/mod.rs
+- sniff/lib/src/filesystem/indentation/mod.rs
+- sniff/lib/src/filesystem/indentation/catalog.rs
+- sniff/lib/src/filesystem/indentation/editorconfig.rs
+- sniff/lib/src/filesystem/indentation/formatters.rs
+- sniff/lib/src/filesystem/indentation/inputs.rs
+- sniff/lib/src/filesystem/indentation/tests.rs
+- sniff/lib/src/performance/counters.rs
+- sniff/lib/tests/l1/main.rs
+- sniff/lib/tests/l1/indentation.rs
+- sniff/cli/src/args/mod.rs
+- sniff/cli/src/args/repo.rs
+- sniff/cli/src/commands/mod.rs
+- sniff/cli/src/output/mod.rs
+- sniff/cli/src/output/filesystem/mod.rs
+- sniff/cli/src/output/filesystem/indentation.rs
+- sniff/cli/tests/l1/main.rs
+- sniff/cli/tests/l1/repo_indent.rs
+- sniff/cli/tests/l1/snapshots.rs
+- sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+- Cargo.lock
+- biscuit-file/cli/Cargo.toml
+- biscuit-file/cli/src/main.rs
+- biscuit-file/cli/tests/cli_tests.rs
+- biscuit-file/cli/tests/yaml_serializer_guard.rs
+- biscuit-file/lib/src/json5/types.rs
+- biscuit-file/lib/src/toml_impl/types.rs
+- biscuit-file/lib/tests/l1/yaml_serializer_guard.rs
+- biscuit-terminal/lib/tests/l1/main.rs
+- biscuit-terminal/lib/tests/l1/yaml_serializer_guard.rs
+- biscuit-tui/cli/tests/l1/main.rs
+- biscuit-tui/cli/tests/l1/yaml_serializer_guard.rs
+- biscuit-tui/lib/Cargo.toml
+- biscuit-tui/lib/tests/yaml_serializer_guard.rs
+- claudine/cli/src/commands/wrap/composition/dry_run.rs
+- claudine/cli/tests/l1/first_run_config_layout.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/yaml_serializer_guard.rs
+- claudine/gen/Cargo.toml
+- claudine/gen/src/agent_errors_check.rs
+- claudine/gen/tests/l1/main.rs
+- claudine/gen/tests/l1/yaml_serializer_guard.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/linking/compatibility/frontmatter_io.rs
+- claudine/lib/tests/l1/config_indentation.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/yaml_serializer_guard.rs
+- content-policy/lib/Cargo.toml
+- content-policy/lib/tests/yaml_serializer_guard.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/hash.rs
+- darkmatter/cli/tests/l1/compose_array_rendering.rs
+- darkmatter/cli/tests/l1/compose_setters.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/render_dispatch.rs
+- darkmatter/cli/tests/l1/standalone_baseline.rs
+- darkmatter/cli/tests/l1/yaml_serializer_guard.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/yaml_serializer_guard.rs
+- darkmatter/lib/src/config/permissions/persist.rs
+- darkmatter/lib/src/config/write.rs
+- darkmatter/lib/src/effects/verbs.rs
+- darkmatter/lib/src/markdown/hash/baseline.rs
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/node_edit.rs
+- darkmatter/lib/src/markdown/hash/path_edit.rs
+- darkmatter/lib/src/markdown/hash/write.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/output/mod.rs
+- darkmatter/lib/src/markdown/output/string.rs
+- darkmatter/lib/src/markdown/yaml_block.rs
+- darkmatter/lib/src/yaml_edit.rs
+- darkmatter/lib/tests/l1/config_migration.rs
+- darkmatter/lib/tests/l1/config_migration_receipt.rs
+- darkmatter/lib/tests/l1/config_write_indentation.rs
+- darkmatter/lib/tests/l1/frontmatter_path_edit.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/markdown_save_indentation.rs
+- darkmatter/lib/tests/l1/yaml_edit.rs
+- darkmatter/lib/tests/l1/yaml_serializer_guard.rs
+- model-citizen/lib/Cargo.toml
+- model-citizen/lib/tests/yaml_serializer_guard.rs
+- research/lib/Cargo.toml
+- research/lib/tests/yaml_serializer_guard.rs
+- schematic/define/Cargo.toml
+- schematic/define/src/openapi/mod.rs
+- schematic/define/src/openapi/options.rs
+- schematic/define/tests/openapi_constraint_export.rs
+- schematic/define/tests/yaml_serializer_guard.rs
+- schematic/gen/Cargo.toml
+- schematic/gen/src/export/openapi.rs
+- schematic/gen/src/pipeline.rs
+- schematic/gen/tests/l1/main.rs
+- schematic/gen/tests/l1/openapi_yaml_indentation.rs
+- schematic/gen/tests/l1/yaml_serializer_guard.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_object.rs
+- simplified-schema/lib/tests/l1/yaml_serializer_guard.rs
+- sniff/lib/tests/l1/yaml_serializer_guard.rs
+- tools/test-toolkit/Cargo.toml
+- tools/test-toolkit/src/lib.rs
+- tools/test-toolkit/src/serializer_guard.rs
+- tools/test-toolkit/src/serializer_guard/tests.rs
+- tools/test-toolkit/tests/serializer_guard_coverage.rs
+documentation:
+- biscuit-file/README.md
+- biscuit-file/lib/README.md
+- biscuit-file/docs/design/yaml-design.md
+- biscuit-file/docs/topics/yaml-writing.md
+- sniff/README.md
+- sniff/lib/README.md
+- sniff/docs/topics/indentation.md
+- sniff/cli/README.md
+- sniff/docs/cli/repo.md
+- sniff/docs/topics/json-output.md
+- sniff/docs/cli/repo_indent.md
+- biscuit-file/cli/README.md
+- biscuit-file/docs/dependencies.md
+- claudine/docs/topics/configuration.md
+- content-policy/docs/dependencies.md
+- darkmatter/docs/cli/hash.md
+- darkmatter/docs/structs/Markdown.md
+- darkmatter/docs/topics/config-writes.md
+- darkmatter/docs/topics/side-effects.md
+- darkmatter/docs/topics/yaml-editing.md
+- darkmatter/docs/use-skills/use-darkmatter/cli.md
+- docs/dependencies.md
+- schematic/docs/dependencies.md
+- schematic/docs/io/export-openapi.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- tools/test-toolkit/README.md
+completed_phase: 4
+implemented: true
 ---
 
 # Contextual Indents Implementation Plan
@@ -147,31 +433,31 @@ Starts after Phase 2.
 
 Starts after Phases 1 and 2. Implements the **Config transaction boundary**, **Text-edit precedence**, **DMLS and Markdown**, and **Guard boundary** rules. Run the shared editor task before the parallel tasks. Among the parallel tasks, keep the guard's scan and test files separate from the production migrations. Run the guard against the migrated tree during integration.
 
-- [ ] **Extend Shared Editors**
+- [x] **Extend Shared Editors**
   - Implement the **Config transaction boundary** and **Text-edit precedence** rules first. Carry generated JSON values and lazy preference through staging, and exercise multiple batches, symlink targets, no-op reads, CRLF, existing indentless lists, multiline scalars, empty collection replacement, nested inserts, and pre-publication validation failures. Preserve the existing partial-publication error reporting for replacement failures.
   - Use the contextual editor in Darkmatter's config creation, permission edits, migration, initialization and registration callers in `config/{permissions/persist,init,migration}.rs`. Change permission creation's whole-document serializer to `TargetChange::create_yaml`. Route opening skeletons and generated edits through the same layout. Update Markdown hash property restoration and CLI frontmatter writes after the shared estimator lands. Keep the strict hash's serialized input unchanged.
 
 ### Parallel tasks
 
-- [ ] **Migrate Claudine Writes**
+- [x] **Migrate Claudine Writes**
   - In `config/persist.rs`, derive the initial projection as a value and pass it to `TargetChange::create_yaml`. Keep public `initial_text` as the default-width preview. Compute initial diffs against the projected value rather than serializing and reparsing it. Setup's existing `TargetChange::edit` inherits the destination preference through staging.
   - In `config/json_conversion.rs::convert`, publish via `create_yaml` and move `load_yaml_document` equality against the original JSON value into the staged validator. Preserve the receipt, clash recovery, backup/delete decisions, and located error mapping. Test both user and repository creation and recovery with normal entry points.
   - Migrate `linking/compatibility/frontmatter_io.rs` at its write destination, and `claudine/gen/src/agent_errors_check.rs::write_outcome_report` using the report path. Use the default layout for the whole YAML dry-run display in `cli/src/commands/wrap/composition/dry_run.rs`. Keep the generator drift preview in `gen/src/apply.rs` on its existing encoding.
-- [ ] **Migrate Darkmatter Outputs**
+- [x] **Migrate Darkmatter Outputs**
   - Migrate `markdown/output/string.rs`, `markdown/yaml_block.rs`, and `cli/src/commands/hash.rs` to the default writer for destinationless document output. For file-writing Markdown commands, thread the effective output destination through the existing save path before rendering frontmatter. Keep `markdown/delta/report.rs` and `markdown/toc/mod.rs` YAML fragments stable for their report/TOC contracts. Keep the schema materialization round trip in `markdown/schemas/mod.rs` on the existing backend.
   - Verify the existing DMLS missing-key action and literal completions against an unsaved buffer with nested frontmatter. Assert that the edit touches only the intended range and preserves scalar quote spelling and the surrounding layout.
-- [ ] **Migrate Format Exports**
+- [x] **Migrate Format Exports**
   - Migrate `biscuit-file/cli/src/main.rs::{emit_structured,process_yaml}`, `Json5::as_yaml`, and `Toml::as_yaml` with default indentation and typed conversions from `YamlError`. Retain the internal `Toml::as_yaml_value` round trip. Keep biscuit-file independent of Sniff.
   - Migrate `simplified-schema/lib/src/schema/export.rs` and `schematic/define/src/openapi/options.rs` to use defaults for string output. Keep `SimplifiedSchema::to_simplified_yaml` destinationless since its callers are library tests and documentation examples. Add `schematic_define::openapi::serialize_with_indentation` and keep `serialize` as its default wrapper. Use the explicit variant in `schematic/gen/src/export/openapi.rs::write_openapi_document` and `pipeline.rs::publish_openapi`, deriving the destination from the final filename before rendering. Resolve only the YAML branch and keep the pipeline's render-all-before-publish ordering. Keep OpenAPI exact-number marking and decimal substitution after YAML layout so backend number normalization cannot change exported text.
   - Keep biscuit-tui's `option_sources.rs` and `helpers/choice_builders.rs` encoders on their existing string/identifier contract. Research's `validation/frontmatter.rs` direct serializer is inside a test. Preserve the authored or composed bytes at research file copies and frontmatter validation paths.
-- [ ] **Build Serializer Guard**
+- [x] **Build Serializer Guard**
   - Implement the **Guard boundary** scanner in `tools/test-toolkit` with fixtures covering qualified, module alias, leaf alias, grouped and glob imports, and a re-export linking two modules. Test false positives for a similarly named JSON serializer and code behind test-only cfg. Add guard entries for the backend and the retained contracts named in this plan, including `markdown/hash/mod.rs` (strict hash), `yaml_documents/mod.rs` (fingerprint), `coercion/engine.rs` (coerced string), `triggers/envelope.rs` (envelope text), and Claudine `composition/file_detail.rs` and `linking/compatibility/properties.rs` (context fragments). Retain each entry with its specific reason. Add the per-package guard test to every package that depends on a YAML backend, and the manifest coverage test to test-toolkit.
 
 ### Integration
 
-- [ ] **Verify Writer Contracts**
+- [x] **Verify Writer Contracts**
   - Run each touched area's L1 and lint recipes using nextest through Just. Exercise repository-aware saves with path-specific widths, default stdout and standalone strings, relative and new destinations, comment-preserving edits, a generated stub with no authored local examples, and two identical saves. Confirm layout errors are reported before target or migration-source publication.
   - Compare strict frontmatter hashes and schema fingerprints against controls using the legacy backend bytes and biscuit-hash. Verify standalone YAML, schema exports and OpenAPI preserve parsed values and exact numeric output. Run every package's guard and the manifest coverage test on the complete migrated tree. Use the repo OS skill for the four environment verification paths and preserve terminal focus for any existing L2 coverage.
-- [ ] **Publish Behavior Docs**
+- [x] **Publish Behavior Docs**
   - Update affected README overviews, current topic docs, repo skills, caller skills and dependency inventories for their respective changes. Publish changed caller skills with each owning area's `just publish-skills`.
   - Put sample Sniff output, new and edited Claudine YAML, verification results, and implementation departures in the implementation log for final review. Leave the feature in its active directory.
