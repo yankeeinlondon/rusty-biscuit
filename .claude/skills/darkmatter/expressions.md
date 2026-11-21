@@ -513,6 +513,28 @@ codes). Code: `compose/expression/data/` (`load.rs` is the function;
 `contract.rs`, `parse.rs`, `locate.rs`, `runtime.rs`, `error.rs`). The
 command-scoped memo and read set are in [requests.md](requests.md#data-runtime-and-read-set).
 
+- **One loader for every surface.** Composition, schema slots, and DMLS
+  property observations all run the same `load.rs` handler over one
+  `DataRuntime` memo (requests.md); there is no editor-only parser or
+  shape pass. Editor mode is only `ResolutionContext::editor`
+  (`expression/editor_reads.rs`, set by `SlotSession::observe_properties`):
+  local candidates are gated before each probe, URLs come from a fresh
+  transport-cache entry only, bytes are charged before parsing, and a
+  refusal is `ExpressionError::ObservationPending`, which no `try`/`||`
+  recovers. Keep new loader behavior on the shared path so compose and the
+  editor cannot disagree. Behavior:
+  [With or without `as`](../../../darkmatter/docs/topics/loading-data.md#with-or-without-as),
+  [Typing data with the destination schema](../../../darkmatter/docs/topics/loading-data.md#typing-data-with-the-destination-schema).
+- **Uncontracted means unconverted, not unchecked.** With no `as` the call
+  still parses strictly, binds options, normalizes the root, normalizes header
+  keys, and records reads; only contract preparation and conversion are
+  skipped (no `PreparedContract`, empty bind-memo contract key). Conversion is left
+  to frontmatter validation (`compose/schema_validation.rs`), so never convert in the
+  loader "to help" an uncontracted call. Header-name failures (camelCase
+  collision, empty key) and an explicit list of the wrong width are
+  `DataError::Malformed` and stay `try`-recoverable
+  (`load_data_uncontracted::malformed_names_are_recovered_like_other_malformed_data`);
+  an invalid `header` list is `invalid_options` and is not.
 - **Recoverable read failures** (`error.rs::ExpressionError::is_recoverable_read_failure`):
   the one classifier the `try(expr, fallback)` special form uses. True only for a
   `FileReference` (or `Data(DataError::FileReference)`) miss that is
@@ -665,8 +687,11 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   turn it into `MarkdownError::SchemaValidationFailed::expression_origins`
   (`ExpressionMetadata`), and `report_diagnostics::ExpressionProjector` (used
   by the records and the status block alike) places each problem at the
-  expression with the data file's `data_location`. Never match provenance
-  by value equality. The
+  expression with the data file's `data_location`; DMLS gets the same
+  projection through the public `report_diagnostics::data_locations`, so the
+  CLI and the editor name one position. Never match provenance by value
+  equality. Behavior and the forwarding table:
+  [Where a destination failure points](../../../darkmatter/docs/topics/loading-data.md#where-a-destination-failure-points). The
   **Undeclared member check** above applies to these shapes as to any typed
   value: `h.nmae` against `{ name: string }[]` elements warns; a named
   reference (`unknown`) or a computed `as` stays silent.

@@ -125,6 +125,15 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
 `same_instance`, the observation log (`read_mark`, `observations_since`),
 `memo_generation`, and `record_entry` (cache replay into the read set).
 
+A `SlotSession` owns one `DataRuntime` too (`SlotSession::new(data)`, or the
+request's via `options.data_runtime()`), and `observe_properties` (DMLS
+property observation) runs every property of one pass over that runtime and
+one `IterationBudget` (`session.rs::observation_parts`). So the editor reuses
+one read, parse, and bind across properties loading the same file, through
+the same memo layers composition uses; only `ResolutionContext::editor`
+changes how a source is resolved and read (expressions.md, "One loader for
+every surface").
+
 - **Observation log** (`runtime.rs::Observation`, `ObservationKind::{File,
   Url, Exists, MissingProbe, Listing, Glob}`): every input-reading function
   observes what it read, hashed at read with BLAKE3 (`RawSource::hash`
@@ -158,8 +167,10 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
   source keyed by `SourceKey { identity, format, delimiter }` (effective
   values, so defaults and aliases share); a bound result keyed by that plus
   the contract key (the unsorted `to_json_schema_with_definitions`
-  serialization, the bare declaration, and the sorted import identities) and
-  the effective header. So two delimiters read once and parse twice, and two
+  serialization, the bare declaration, and the sorted import identities;
+  empty for an omitted or `null` `as`, so `load_data(f)` and
+  `load_data(f, null)` share one bind) and the effective `HeaderMode`
+  (a name list keys by its names, so two lists bind twice over one parse). So two delimiters read once and parse twice, and two
   contracts parse once and bind twice. `reads` counts raw loads only;
   `source_hits` counts parse-layer hits. Each layer is single-flighted
   against the generation of the entry below it (`single_flight` passes a

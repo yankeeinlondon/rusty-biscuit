@@ -99,6 +99,9 @@ pub struct MdRequest {
     trees: RefCell<HashMap<PathBuf, CommittedTreeCapture>>,
     /// The user file, loaded once with no repository.
     user: OnceCell<Result<Arc<ConfigSnapshot>, ConfigError>>,
+    /// [`ConfigLoadMode::MigrateLegacy`], or [`ConfigLoadMode::Setup`] once
+    /// [`Self::report_config_notices_for_init`] chose it before the load.
+    load_mode: std::cell::Cell<ConfigLoadMode>,
     /// One projection per repository root (`None`: no repository).
     configs: RefCell<HashMap<Option<PathBuf>, Arc<ConfigSnapshot>>>,
     /// Whether run notices go to a data output's `diagnostics` (set by
@@ -121,6 +124,7 @@ impl MdRequest {
             launch: OnceCell::new(),
             trees: RefCell::default(),
             user: OnceCell::new(),
+            load_mode: std::cell::Cell::new(ConfigLoadMode::MigrateLegacy),
             configs: RefCell::default(),
             data_output: std::cell::Cell::new(false),
             hosts: RefCell::default(),
@@ -129,16 +133,18 @@ impl MdRequest {
     }
 
     /// The user configuration file, loaded once per invocation with
-    /// [`ConfigLoadMode::MigrateLegacy`] (`md` is a writing CLI) and no
-    /// repository: what the missing-file notice is judged from, and the
-    /// bytes every [`Self::config_snapshot`] projection shares.
+    /// [`ConfigLoadMode::MigrateLegacy`] (`md` is a writing CLI, so a missing
+    /// file is created at its defaults; `md init` uses
+    /// [`ConfigLoadMode::Setup`]) and no repository: what the run notices
+    /// are judged from, and the bytes every [`Self::config_snapshot`]
+    /// projection shares.
     ///
     /// ## Errors
     ///
     /// The load's [`ConfigError`], kept for every later caller.
     pub fn user_config(&self) -> Result<&Arc<ConfigSnapshot>, &ConfigError> {
         self.user
-            .get_or_init(|| ConfigSnapshot::load_user(&self.snapshot, ConfigLoadMode::MigrateLegacy).map(Arc::new))
+            .get_or_init(|| ConfigSnapshot::load_user(&self.snapshot, self.load_mode.get()).map(Arc::new))
             .as_ref()
     }
 
@@ -231,9 +237,13 @@ impl MdRequest {
     }
 
     /// [`Self::report_config_notices`] for `md init`, which creates the user
-    /// file: a `dm.config.missing` warning would point at the very file it is
-    /// about to write, so only the other notices are reported.
+    /// file itself: the load uses [`ConfigLoadMode::Setup`], so nothing is
+    /// written before `init`'s own transaction (which writes nothing when it
+    /// fails), and a `dm.config.missing` warning would point at the very file
+    /// it is about to write, so only the other notices are reported. Must run
+    /// before anything else loads the user file.
     pub fn report_config_notices_for_init(&self, data_output: bool) {
+        self.load_mode.set(ConfigLoadMode::Setup);
         self.data_output.set(data_output);
         let notices = self
             .config_notices()
@@ -243,8 +253,9 @@ impl MdRequest {
         crate::output::report_run_notices(notices, data_output);
     }
 
-    /// The run-level notices of the invocation's configuration: the missing
-    /// user file's `dm.config.missing` warning and the user scope's
+    /// The run-level notices of the invocation's configuration: the created
+    /// user file's `dm.config.created` info (or, when it could not be
+    /// written, the `dm.config.missing` warning) and the user scope's
     /// `dm.config.migration` notices. A user file that
     /// fails to load is reported by the commands that read it, not here.
     pub fn config_notices(&self) -> Vec<darkmatter::markdown::compose::expression::Diagnostic> {
@@ -255,6 +266,7 @@ impl MdRequest {
             .iter()
             .filter(|notice| {
                 notice.code == darkmatter::config::load::CONFIG_MISSING_CODE
+                    || notice.code == darkmatter::config::load::CONFIG_CREATED_CODE
                     || notice.code == darkmatter::config::load::CONFIG_MIGRATION_CODE
             })
             .flat_map(darkmatter::markdown::compose::report_diagnostics::config_notice_diagnostics)

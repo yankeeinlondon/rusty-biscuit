@@ -822,20 +822,12 @@ fn observe(job: &SlotJob, session: &Arc<SlotSession>, bundle: Option<&crate::ove
     let mut replacements = std::collections::BTreeMap::new();
     let mut shapes = std::collections::BTreeMap::new();
     let mut origins = std::collections::BTreeMap::new();
-    // An uncontracted headerless read stays `unknown[][]` in the editor: no
-    // observed shape types it and no verdict judges its cells (composition
-    // judges every realized cell).
-    let provisional: Vec<&str> = job
-        .property_sites
-        .iter()
-        .filter(|site| {
-            simplified_schema::expression::parse_spanned(&site.expression)
-                .is_ok_and(|parsed| darkmatter::markdown::schemas::slots::observe::reads_headerless_uncontracted(&parsed.erase()))
-        })
-        .map(|site| site.key.as_str())
-        .collect();
     for property in &observations.properties {
-        if provisional.contains(&property.key.as_str()) {
+        // An executed uncontracted headerless read stays `unknown[][]` in
+        // the editor: no observed shape types a value that flows through it
+        // and no verdict judges its cells (composition judges every realized
+        // cell). A read in a branch that did not run never counts.
+        if property.headerless_uncontracted {
             continue;
         }
         if let PropertyOutcome::Observed { value, load } = &property.outcome {
@@ -863,42 +855,48 @@ fn observe(job: &SlotJob, session: &Arc<SlotSession>, bundle: Option<&crate::ove
 }
 
 /// The shape each `load_data` call (as written) returned across every
-/// observed property: the union of its distinct values' shapes, or nothing
-/// when, together, more than eight distinct values were returned.
+/// observed property: the union of its distinct values' shapes, with
+/// `unknown[][]` for any execution that was a headerless uncontracted read
+/// (whose cells are never typed from what it loaded), or nothing when,
+/// together, more than eight distinct values were returned.
 fn observed_call_shapes(
     observations: &darkmatter::markdown::schemas::slots::observe::PropertyObservations,
 ) -> Vec<(simplified_schema::expression::ast::Expr, darkmatter::markdown::compose::expression::scope::Shape)> {
     use darkmatter::markdown::compose::expression::scope::Shape;
     const ALTERNATIVES: usize = 8;
-    let mut grouped: Vec<(simplified_schema::expression::ast::Expr, Vec<serde_json::Value>, bool)> = Vec::new();
-    let calls = observations
-        .properties
-        .iter()
-        .flat_map(|property| &property.calls)
-        .filter(|call| !darkmatter::markdown::schemas::slots::observe::reads_headerless_uncontracted(&call.call));
-    for call in calls {
-        let index = match grouped.iter().position(|(known, _, _)| *known == call.call) {
+    struct Group {
+        call: simplified_schema::expression::ast::Expr,
+        values: Vec<serde_json::Value>,
+        overflow: bool,
+        headerless: bool,
+    }
+    let mut grouped: Vec<Group> = Vec::new();
+    for call in observations.properties.iter().flat_map(|property| &property.calls) {
+        let index = match grouped.iter().position(|group| group.call == call.call) {
             Some(index) => index,
             None => {
-                grouped.push((call.call.clone(), Vec::new(), false));
+                grouped.push(Group { call: call.call.clone(), values: Vec::new(), overflow: false, headerless: false });
                 grouped.len() - 1
             }
         };
-        let (_, values, overflow) = &mut grouped[index];
-        *overflow |= call.overflow;
+        let group = &mut grouped[index];
+        group.overflow |= call.overflow;
+        group.headerless |= call.headerless_uncontracted;
         for value in &call.values {
-            if !values.contains(value) {
-                values.push(value.clone());
+            if !group.values.contains(value) {
+                group.values.push(value.clone());
             }
         }
-        *overflow |= values.len() > ALTERNATIVES;
+        group.overflow |= group.values.len() > ALTERNATIVES;
     }
+    let unknown_rows = Shape::array_of(&Shape::array_of(&Shape::Unknown { non_null: false }));
     grouped
         .into_iter()
-        .filter(|(_, values, overflow)| !overflow && !values.is_empty())
-        .filter_map(|(call, values, _)| {
-            let shape = values.iter().map(Shape::observed).reduce(|left, right| left.union(&right))?;
-            Some((call, shape))
+        .filter(|group| !group.overflow)
+        .filter_map(|group| {
+            let headerless = group.headerless.then(|| unknown_rows.clone());
+            let shape = group.values.iter().map(Shape::observed).chain(headerless).reduce(|left, right| left.union(&right))?;
+            Some((group.call, shape))
         })
         .collect()
 }

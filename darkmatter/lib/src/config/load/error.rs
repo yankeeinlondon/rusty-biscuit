@@ -14,8 +14,12 @@ pub const CONFIG_REFERENCE_CODE: &str = "dm.config.reference";
 pub const CONFIG_NOT_SAVED_CODE: &str = "dm.config.not_saved";
 /// A temporary conversion of a legacy policy or configuration file.
 pub const CONFIG_MIGRATION_CODE: &str = "dm.config.migration";
-/// The user configuration file does not exist; defaults apply.
+/// The user configuration file does not exist, and was not created; defaults
+/// apply.
 pub const CONFIG_MISSING_CODE: &str = "dm.config.missing";
+/// A writing CLI's startup load created the missing user configuration file
+/// with every setting at its default.
+pub const CONFIG_CREATED_CODE: &str = "dm.config.created";
 
 /// Which observation of a configuration file a problem was found in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

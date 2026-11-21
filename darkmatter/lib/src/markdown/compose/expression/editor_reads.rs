@@ -6,6 +6,9 @@
 //! paths here only when the [`ResolutionContext`] carries [`EditorReads`];
 //! every other surface is unchanged.
 //!
+//! - A call is admitted when evaluation reaches it ([`admit_call`]), before
+//!   its arguments run: one the editor does not make is
+//!   [`ExpressionError::ObservationPending`] before it has any effect.
 //! - A local reference is resolved candidate by candidate, and each
 //!   candidate is put to the slot gate before it is probed, so a refused
 //!   candidate is never stat'ed or read. An open buffer counts as present.
@@ -78,6 +81,25 @@ impl std::fmt::Display for PendingReason {
 /// The pending failure of `function` for `reason`.
 pub(crate) fn pending(function: &str, reason: PendingReason) -> ExpressionError {
     ExpressionError::ObservationPending { function: function.to_string(), reason }
+}
+
+/// Admits a call to `name` that an editor observation's evaluation reached,
+/// before its arguments are evaluated or it runs. Pure functions and the
+/// guarded readers (`load_data`, `file_exists`) run. Any other reader (a
+/// listing included) and an effectful function are
+/// [`PendingReason::Unsupported`], and a captured or volatile one is
+/// [`PendingReason::RuntimeOnly`]. An unknown name is left for dispatch to
+/// fail. A call evaluation never reaches is never judged here, so an unused
+/// branch, recovery argument, or callback body does not decide the outcome.
+pub(crate) fn admit_call(name: &str) -> Result<(), ExpressionError> {
+    use super::functions::{SlotClass, is_editor_guarded_reader, slot_class};
+    let reason = match slot_class(name) {
+        Some(SlotClass::Pure) | None => return Ok(()),
+        Some(SlotClass::InputReading) if is_editor_guarded_reader(name) => return Ok(()),
+        Some(SlotClass::InputReading | SlotClass::Rejected) => PendingReason::Unsupported(format!("{name}()")),
+        Some(SlotClass::Captured | SlotClass::Volatile) => PendingReason::RuntimeOnly(format!("{name}()")),
+    };
+    Err(pending(name, reason))
 }
 
 /// What an editor observation reads through, shared by every property of
@@ -273,17 +295,42 @@ pub(crate) const CALL_VALUE_ALTERNATIVES: usize = 8;
 /// [`collecting_calls`] scope.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CallValues {
-    /// Distinct values, in first-seen order, at most
-    /// [`CALL_VALUE_ALTERNATIVES`].
+    /// Distinct values of its contracted or headed reads, in first-seen
+    /// order, at most [`CALL_VALUE_ALTERNATIVES`]. A headerless
+    /// uncontracted read's value is never kept: its type is `unknown[][]`
+    /// whatever it loaded.
     pub(crate) values: Vec<serde_json::Value>,
     /// More distinct values were returned than were kept.
     pub(crate) overflow: bool,
+    /// At least one execution bound no contract and read CSV or TSV with
+    /// `header: false`, judged from the bound arguments
+    /// ([`note_read_mode`]).
+    pub(crate) headerless_uncontracted: bool,
 }
 
 thread_local! {
     /// The per-node call facts of the running [`collecting_calls`] scope,
     /// keyed by the evaluated node's address.
     static CALLS: std::cell::RefCell<Option<Vec<(usize, CallValues)>>> = const { std::cell::RefCell::new(None) };
+    /// Whether the `load_data` call that just returned was a headerless
+    /// uncontracted read: set by the handler as it returns, taken by the
+    /// evaluator for that same node ([`take_read_mode`]).
+    static HEADERLESS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Records, from a successful `load_data` handler while a
+/// [`collecting_calls`] scope runs, whether its bound arguments made it a
+/// headerless uncontracted read. Called last, after every argument (and any
+/// nested call in one) was evaluated, so the evaluator's next
+/// [`take_read_mode`] belongs to this call.
+pub(crate) fn note_read_mode(headerless_uncontracted: bool) {
+    HEADERLESS.set(headerless_uncontracted);
+}
+
+/// Takes the read mode [`note_read_mode`] left, resetting it; `false` when
+/// the call returned before binding a read (a `null` file) or failed.
+pub(crate) fn take_read_mode() -> bool {
+    HEADERLESS.replace(false)
 }
 
 /// Runs `evaluate` collecting what each `load_data` node it evaluates
@@ -305,9 +352,9 @@ pub(crate) fn collecting_calls<T>(evaluate: impl FnOnce() -> T) -> (T, Vec<(usiz
     (value, collected)
 }
 
-/// Notes that the `load_data` node `node` returned `value`, when a
-/// [`collecting_calls`] scope is running.
-pub(crate) fn note_call(node: &simplified_schema::expression::ast::Expr, value: &serde_json::Value) {
+/// Notes that the `load_data` node `node` returned `value`, headerless and
+/// uncontracted or not, when a [`collecting_calls`] scope is running.
+pub(crate) fn note_call(node: &simplified_schema::expression::ast::Expr, value: &serde_json::Value, headerless_uncontracted: bool) {
     CALLS.with_borrow_mut(|calls| {
         let Some(calls) = calls.as_mut() else {
             return;
@@ -321,6 +368,10 @@ pub(crate) fn note_call(node: &simplified_schema::expression::ast::Expr, value: 
             }
         };
         let facts = &mut calls[index].1;
+        if headerless_uncontracted {
+            facts.headerless_uncontracted = true;
+            return;
+        }
         if facts.values.contains(value) {
             return;
         }

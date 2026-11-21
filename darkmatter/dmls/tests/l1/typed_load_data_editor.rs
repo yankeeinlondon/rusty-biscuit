@@ -592,8 +592,9 @@ fn direct_doc(expression: &str, extra: &str) -> String {
 }
 
 /// An effectful function, a runtime-only binding, and properties that read
-/// each other leave the property pending: the bad data is never judged and
-/// nothing warns.
+/// each other leave the property pending once evaluation reaches them: the
+/// bad data is never judged and nothing warns. One never reached (a
+/// fallback after a successful load) decides nothing.
 #[test]
 fn unsupported_runtime_only_and_cyclic_properties_are_pending() {
     let workspace = LspWorkspace::new();
@@ -601,7 +602,7 @@ fn unsupported_runtime_only_and_cyclic_properties_are_pending() {
     write(&root, "data.yaml", PEOPLE_OLD);
     let mut fixture = server(&workspace, &root);
     for (name, text) in [
-        ("effectful", direct_doc("load_data('data.yaml') || as_markdown('other.md')", "")),
+        ("effectful", direct_doc("as_markdown('other.md') || load_data('data.yaml')", "")),
         ("runtime", direct_doc("ctx.cwd ? load_data('data.yaml') : []", "")),
         ("cycle", direct_doc("other ? load_data('data.yaml') : []", "other: \"{{ direct }}\"\n")),
     ] {
@@ -610,9 +611,107 @@ fn unsupported_runtime_only_and_cyclic_properties_are_pending() {
         assert!(at_property(&diagnostics, "direct").is_empty(), "{name}: {diagnostics:#?}");
         assert!(with_code(&diagnostics, "dm.expression.evaluation_failure").is_empty(), "{name}: {diagnostics:#?}");
     }
-    // Control: the same data is judged once nothing blocks the evaluation.
-    let doc = root.join("control.md");
-    let diagnostics = open_and_observe(&mut fixture, &doc, &direct_doc("load_data('data.yaml')", ""));
+    // The same data is judged once nothing the evaluation reaches blocks it,
+    // an unused effectful fallback included.
+    for (name, expression) in [("control", "load_data('data.yaml')"), ("unused", "load_data('data.yaml') || as_markdown('other.md')")] {
+        let doc = root.join(format!("{name}.md"));
+        let diagnostics = open_and_observe(&mut fixture, &doc, &direct_doc(expression, ""));
+        assert_eq!(at_property(&diagnostics, "direct").len(), 1, "{name}: {diagnostics:#?}");
+    }
+}
+
+// ── Admission when evaluation reaches it ───────────────────────────────────
+
+/// One test per expression whose selected load of the bad-age data is
+/// judged in the editor, exactly as composition judges it, although an
+/// operand evaluation never reaches names something the editor does not
+/// evaluate.
+macro_rules! judges_the_reached_load {
+    ($($(#[$doc:meta])* $name:ident: $expression:expr;)*) => {$(
+        $(#[$doc])*
+        #[test]
+        fn $name() {
+            let workspace = LspWorkspace::new();
+            let root = workspace_root(&workspace, &["./data.yaml"]);
+            write(&root, "data.yaml", PEOPLE_OLD);
+            let text = direct_doc($expression, "");
+            let composed = compose_findings(&root, &text);
+            assert_eq!(composed.len(), 1, "{}: {composed:?}", $expression);
+            let doc = root.join("reached.md");
+            let mut fixture = server(&workspace, &root);
+            let diagnostics = open_and_observe(&mut fixture, &doc, &text);
+            let found = at_property(&diagnostics, "direct");
+            assert_eq!(found.len(), 1, "{}: {diagnostics:#?}", $expression);
+            assert_eq!(found[0]["data"]["instance_path"], json!("/direct/1/age"), "{:#?}", found[0]);
+            assert_eq!(editor_findings(&diagnostics), composed, "{}: {diagnostics:#?}", $expression);
+        }
+    )*};
+}
+
+judges_the_reached_load! {
+    /// R1-F1.1: the unselected arm reads `ctx`.
+    an_unselected_ctx_arm_does_not_withhold_the_verdict: "true ? load_data('data.yaml') : ctx.runtime";
+    /// R1-F1.1, reversed arms.
+    an_unselected_ctx_arm_does_not_withhold_the_verdict_when_reversed: "false ? ctx.runtime : load_data('data.yaml')";
+    /// R1-F1.2: the fallback after a successful load.
+    an_unused_ctx_fallback_does_not_withhold_the_verdict: "load_data('data.yaml') || ctx.runtime";
+    /// R1-F1.3: the recovery argument of a successful load.
+    an_unused_recovery_argument_does_not_withhold_the_verdict: "try(load_data('data.yaml'), ctx.runtime)";
+    /// R1-F1.4: an unselected listing.
+    an_unselected_listing_does_not_withhold_the_verdict: "true ? load_data('data.yaml') : find_files('*.yaml')";
+    /// R1-F1.5: an unselected absent property.
+    an_unselected_absent_property_does_not_withhold_the_verdict: "true ? load_data('data.yaml') : missing_property";
+    /// R1-F1.6: the body of a callback over an empty list.
+    an_unrun_callback_body_does_not_withhold_the_verdict: "map([], i => ctx.runtime) || load_data('data.yaml')";
+    /// R1-F1.7: the control.
+    an_ordinary_unselected_arm_is_judged: "true ? load_data('data.yaml') : []";
+}
+
+/// One test per expression whose evaluation reaches something the editor
+/// does not evaluate: no verdict, no inferred member, and no warning.
+macro_rules! a_reached_operation_withholds_the_verdict {
+    ($($(#[$doc:meta])* $name:ident: $expression:expr;)*) => {$(
+        $(#[$doc])*
+        #[test]
+        fn $name() {
+            let workspace = LspWorkspace::new();
+            let root = workspace_root(&workspace, &["./data.yaml"]);
+            write(&root, "data.yaml", PEOPLE_OLD);
+            let doc = root.join("reached.md");
+            let mut fixture = server(&workspace, &root);
+            let diagnostics = open_and_observe(&mut fixture, &doc, &direct_doc($expression, ""));
+            assert!(destination_findings(&diagnostics).is_empty(), "{}: {diagnostics:#?}", $expression);
+            assert!(with_code(&diagnostics, "dm.expression.evaluation_failure").is_empty(), "{}: {diagnostics:#?}", $expression);
+        }
+    )*};
+}
+
+a_reached_operation_withholds_the_verdict! {
+    /// R1-F1.9: the selected arm reads `ctx`.
+    a_selected_ctx_arm_withholds_the_verdict: "false ? load_data('data.yaml') : ctx.runtime";
+    /// R1-F1.9: an executed listing.
+    an_executed_listing_withholds_the_verdict: "true ? find_files('*.yaml') : load_data('data.yaml')";
+    /// R1-F1.9: an executed read of a property the document lacks.
+    a_selected_absent_property_withholds_the_verdict: "true ? missing_property : load_data('data.yaml')";
+}
+
+/// R1-F1.11: a provably invalid authored call in an unselected arm is still
+/// rejected passively, as composition rejects the document before running
+/// it, while the selected load is still observed and judged.
+#[test]
+fn an_invalid_call_in_an_unselected_arm_is_still_rejected_passively() {
+    let workspace = LspWorkspace::new();
+    let root = workspace_root(&workspace, &["./data.yaml"]);
+    write(&root, "data.yaml", PEOPLE_OLD);
+    let text = direct_doc("true ? load_data('data.yaml') : min(true, 5)", "");
+    let composed = compose_findings(&root, &text);
+    assert!(composed.iter().any(|(code, _)| code == "dm.expression.incompatible_call"), "{composed:?}");
+    let doc = root.join("invalid.md");
+    let mut fixture = server(&workspace, &root);
+    let diagnostics = open_and_observe(&mut fixture, &doc, &text);
+    let rejected = with_code(&diagnostics, "dm.expression.incompatible_call");
+    assert_eq!(rejected.len(), 1, "{diagnostics:#?}");
+    assert_eq!(rejected[0]["severity"], json!(1), "{:#?}", rejected[0]);
     assert_eq!(at_property(&diagnostics, "direct").len(), 1, "{diagnostics:#?}");
 }
 
@@ -737,24 +836,179 @@ fn a_callback_parameter_completes_with_the_observed_members() {
 
 // ── Headerless tabular data ────────────────────────────────────────────────
 
-/// An uncontracted `header: false` read is `unknown[][]` in the editor: its
-/// cells get no editor verdict, while composition judges each realized cell
-/// and fails on the bad one.
-#[test]
-fn a_headerless_uncontracted_read_has_no_editor_cell_verdict() {
+/// A headerless table with a bad cell (`x`, line 2).
+const TABLE: &str = "1,2\n3,x\n";
+/// A table with a header record and a bad `b` (line 2).
+const HEADED: &str = "a,b\n1,x\n";
+
+/// A document whose `cells` property, declared as positional number rows,
+/// is `expression`; `extra` adds frontmatter lines.
+fn cells_doc(expression: &str, extra: &str) -> String {
+    format!(
+        "---\n$schema:\n    cells: \"tuple([number, number])[]\"\ncells: \"{{{{ {expression} }}}}\"\n{extra}---\n"
+    )
+}
+
+/// A document whose `rows` property, declared as object rows, is
+/// `expression`.
+fn rows_doc(expression: &str) -> String {
+    format!("---\n$schema:\n    rows: \"{{ a: number, b: number }}[]\"\nrows: \"{{{{ {expression} }}}}\"\n---\n")
+}
+
+/// A workspace approving `table.csv` and `headed.csv`, both written.
+fn tables(workspace: &LspWorkspace) -> PathBuf {
+    let root = workspace_root(workspace, &["./table.csv", "./headed.csv"]);
+    write(&root, "table.csv", TABLE);
+    write(&root, "headed.csv", HEADED);
+    root
+}
+
+/// One test per document whose executed `load_data` call binds no contract
+/// and `header: false`, however that is written: composition fails on the
+/// bad cell, while the editor gives the property no verdict and no warning.
+macro_rules! defers_the_headerless_read {
+    ($($(#[$doc:meta])* $name:ident: $text:expr;)*) => {$(
+        $(#[$doc])*
+        #[test]
+        fn $name() {
+            let workspace = LspWorkspace::new();
+            let root = tables(&workspace);
+            let text: String = $text;
+            assert!(!compose_findings(&root, &text).is_empty(), "compose fails on the bad cell: {text}");
+            let doc = root.join("headerless.md");
+            let mut fixture = server(&workspace, &root);
+            let diagnostics = open_and_observe(&mut fixture, &doc, &text);
+            assert!(destination_findings(&diagnostics).is_empty(), "{text}: {diagnostics:#?}");
+            assert!(with_code(&diagnostics, "dm.expression.evaluation_failure").is_empty(), "{text}: {diagnostics:#?}");
+        }
+    )*};
+}
+
+defers_the_headerless_read! {
+    /// R1-F2.1: the literal control.
+    a_literal_headerless_read_has_no_editor_cell_verdict:
+        cells_doc("load_data('table.csv', null, { header: false })", "");
+    /// R1-F2.2: a string the binder converts to `false`.
+    a_string_false_header_has_no_editor_cell_verdict:
+        cells_doc("load_data('table.csv', null, { header: 'false' })", "");
+    /// R1-F2.3: options read from a literal property.
+    headerless_options_from_a_property_have_no_editor_cell_verdict:
+        cells_doc("load_data('table.csv', null, opts)", "opts: { header: false }\n");
+    /// R1-F2.4: options built by a spread.
+    spread_headerless_options_have_no_editor_cell_verdict:
+        cells_doc("load_data('table.csv', null, { ...{ header: false } })", "");
+    /// R1-F2.9: a later spread overrides an earlier `header: true`.
+    a_later_spread_header_false_has_no_editor_cell_verdict:
+        cells_doc("load_data('table.csv', null, { header: true, ...{ header: false } })", "");
+    /// R1-F2.9: a parenthesized `null` contract.
+    a_parenthesized_null_contract_has_no_editor_cell_verdict:
+        cells_doc("load_data('table.csv', (null), { header: false })", "");
+    /// R1-F2.9: a contract read from a `null` property.
+    a_null_contract_from_a_property_has_no_editor_cell_verdict:
+        cells_doc("load_data('table.csv', fm.none, { header: false })", "none: null\n");
+    /// R1-F2.9: a contract a conditional computes as `null`.
+    a_computed_null_contract_has_no_editor_cell_verdict:
+        cells_doc("load_data('table.csv', false ? 'number[]' : null, { header: false })", "");
+    /// The selected arm is the headerless read.
+    a_selected_headerless_arm_has_no_editor_cell_verdict:
+        rows_doc("false ? load_data('headed.csv') : load_data('headed.csv', null, { header: false })");
+    /// A property reading another property's headerless result.
+    a_property_reading_a_headerless_property_has_no_editor_verdict:
+        cells_doc("load_data('table.csv', null, { header: false }) || rows", "rows: \"{{ load_data('table.csv', null, { header: false }) }}\"\n");
+}
+
+/// One test per document whose executed read is headed or contracted: the
+/// editor judges its observed value and reports exactly what composition
+/// reports.
+macro_rules! judges_the_headed_read {
+    ($($(#[$doc:meta])* $name:ident: $text:expr;)*) => {$(
+        $(#[$doc])*
+        #[test]
+        fn $name() {
+            let workspace = LspWorkspace::new();
+            let root = tables(&workspace);
+            let text: String = $text;
+            let composed = compose_findings(&root, &text);
+            assert!(!composed.is_empty(), "compose fails: {text}");
+            let doc = root.join("headed.md");
+            let mut fixture = server(&workspace, &root);
+            let diagnostics = open_and_observe(&mut fixture, &doc, &text);
+            assert!(!destination_findings(&diagnostics).is_empty(), "{text}: {diagnostics:#?}");
+            assert_eq!(editor_findings(&diagnostics), composed, "{text}: {diagnostics:#?}");
+        }
+    )*};
+}
+
+judges_the_headed_read! {
+    /// R1-F2.5: an unused headerless arm does not withhold the verdict.
+    a_selected_headed_arm_is_judged_beside_an_unused_headerless_arm:
+        rows_doc("true ? load_data('headed.csv') : load_data('headed.csv', null, { header: false })");
+    /// R1-F2.6: the headed control.
+    a_headed_read_is_judged: rows_doc("load_data('headed.csv')");
+    /// R1-F2.9: a later `header: true` overrides a spread `header: false`.
+    a_later_header_true_is_judged: cells_doc("load_data('table.csv', null, { ...{ header: false }, header: true })", "");
+}
+
+/// The hover a callback local `r` in the body expression `{{ BODY }}` shows,
+/// once `frontmatter`'s observation is installed.
+fn body_local_hover(frontmatter: &str, body: &str) -> String {
     let workspace = LspWorkspace::new();
-    let root = workspace_root(&workspace, &["./table.csv"]);
-    write(&root, "table.csv", "1,2\n3,x\n");
-    let text = "---\n$schema:\n    cells: \"tuple([number, number])[]\"\ncells: \"{{ load_data('table.csv', null, { header: false }) }}\"\n---\n";
-    assert!(!compose_findings(&root, text).is_empty(), "compose fails on the bad cell");
-    let doc = root.join("cells.md");
+    let root = tables(&workspace);
+    let text = format!("{frontmatter}\n{{{{ {body} }}}}\n");
+    let doc = root.join("shapes.md");
     let mut fixture = server(&workspace, &root);
-    let diagnostics = open_and_observe(&mut fixture, &doc, text);
-    assert!(at_property(&diagnostics, "cells").is_empty(), "{diagnostics:#?}");
-    // Control: the same file read with a header record is judged, row by
-    // row, from its observed value.
-    let headed = "---\n$schema:\n    rows: \"{ a: number, b: number }[]\"\nrows: \"{{ load_data('table.csv') }}\"\n---\n";
-    let doc = root.join("rows.md");
-    let diagnostics = open_and_observe(&mut fixture, &doc, headed);
-    assert_eq!(at_property(&diagnostics, "rows").len(), 1, "{diagnostics:#?}");
+    open_and_observe(&mut fixture, &doc, &text);
+    // The body line, after the frontmatter that writes the same call.
+    let line = text.lines().count() - 1;
+    let character = text.lines().nth(line).unwrap().rfind("=> r").unwrap() + 3;
+    hover(&mut fixture, &doc, line, character)
+}
+
+/// One test per executed uncontracted headerless call: the same call written
+/// in the body types its rows as `unknown[]`, never from the cells it
+/// loaded, however its options are written (R1-F2.7, R1-F2.10).
+macro_rules! keeps_headerless_cells_provisional {
+    ($($(#[$doc:meta])* $name:ident: $call:expr, $extra:expr;)*) => {$(
+        $(#[$doc])*
+        #[test]
+        fn $name() {
+            let frontmatter = format!(
+                "---\n$schema:\n    cells: \"unknown[]\"\ncells: \"{{{{ map({}, r => r) }}}}\"\n{}---\n",
+                $call, $extra
+            );
+            let shown = body_local_hover(&frontmatter, &format!("map({}, r => r)", $call));
+            assert!(shown.contains("Local `r`: `unknown[]`"), "{shown}");
+        }
+    )*};
+}
+
+keeps_headerless_cells_provisional! {
+    /// The literal control.
+    literal_headerless_cells_stay_provisional: "load_data('table.csv', null, { header: false })", "";
+    /// A string the binder converts to `false`.
+    string_false_headerless_cells_stay_provisional: "load_data('table.csv', null, { header: 'false' })", "";
+    /// Options read from a literal property (R1-F2.10's callback).
+    headerless_cells_from_property_options_stay_provisional: "load_data('table.csv', null, opts)", "opts: { header: false }\n";
+    /// Options built by a spread.
+    spread_headerless_cells_stay_provisional: "load_data('table.csv', null, { ...{ header: false } })", "";
+}
+
+/// Control for R1-F2.7: a headed call's rows are typed from what it loaded,
+/// and its members complete.
+#[test]
+fn headed_call_rows_are_typed_from_the_observation() {
+    let frontmatter = "---\n$schema:\n    rows: \"unknown[]\"\nrows: \"{{ map(load_data('headed.csv'), r => r) }}\"\n---\n";
+    let shown = body_local_hover(frontmatter, "map(load_data('headed.csv'), r => r)");
+    assert!(shown.contains("Local `r`:") && shown.contains("a") && !shown.contains("Local `r`: `unknown"), "{shown}");
+
+    let workspace = LspWorkspace::new();
+    let root = tables(&workspace);
+    let text = format!("{frontmatter}\n{{{{ map(load_data('headed.csv'), r => r.a) }}}}\n");
+    let doc = root.join("members.md");
+    let mut fixture = server(&workspace, &root);
+    open_and_observe(&mut fixture, &doc, &text);
+    let line = line_of(&text, "r => r.a");
+    let character = text.lines().nth(line).unwrap().find("r.a").unwrap() + 2;
+    let labels = completion_labels(&mut fixture, &doc, line, character);
+    assert!(labels.iter().any(|label| label == "r.a") && labels.iter().any(|label| label == "r.b"), "{labels:?}");
 }

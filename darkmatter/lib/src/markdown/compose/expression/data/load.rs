@@ -260,6 +260,9 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
         table: bound.value().table.clone(),
         wrapped: bound.value().wrapped,
     });
+    if super::super::editor_reads::is_collecting_calls() {
+        super::super::editor_reads::note_read_mode(contract.is_none() && header == Some(HeaderMode::None));
+    }
     Ok(bound.value().value.clone())
 }
 

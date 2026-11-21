@@ -625,6 +625,7 @@ from:
 | a frontmatter property (`server`, `fm.server`) | the property's type in the effective schema |
 | a `load_data(file, as)` call with a literal `as` | the contract; a named import inside it (`Host@./types.yaml`) is unknown |
 | a `load_data` call with a computed `as` | unknown: never reported |
+| a `load_data` call with no `as` | an open object or `unknown[]` (rows of open objects for a literal CSV/TSV read): never reported |
 | a callback parameter (`h` in `map(hosts, h => …)`) or a `::map`/`::filter` item | the source's element type |
 | a function result, a literal object | the function's declared return type, the literal's shape |
 | a `local.*` binding | the binding's type |
@@ -1173,7 +1174,7 @@ recovered; everything else propagates:
 | a data source names a file that does not exist | a malformed file reference, or an `as` type that is not valid |
 | an ordinary local read fails (the file cannot be read) | an imported contract that is missing or invalid: the schema `as` imports is not the data source |
 | an allowed remote read fails in transport: an HTTP error status such as `500`, a refused connection, a body that is not valid UTF-8 | `dm.data.unsupported_format`, `dm.data.invalid_options`, `dm.data.not_a_container`, `dm.data.row_shape_conflict`, `dm.data.this_import_rejected` |
-| `dm.data.malformed`: the file cannot be parsed | parse errors, unknown functions, invalid callbacks, and calls the [call check](../inline/call-check.md) rejects |
+| `dm.data.malformed`: the file cannot be parsed, or its CSV/TSV header names cannot key rows | parse errors, unknown functions, invalid callbacks, and calls the [call check](../inline/call-check.md) rejects |
 | `dm.data.contract_mismatch`: the data does not fit `as` | policy refusals: a denied remote host (even when a cached copy exists), a redirect to a denied host, a warning made blocking by `--deny`, and schema slot refusals (approval required, denied, forbidden binding or function) |
 | | iteration and nested-composition limits, missing request context, unavailable host bindings |
 | | arithmetic failures, provider failures (such as `pr_list` with no remote), path-boundary refusals, glob failures, and a failure inside a nested composition such as `as_markdown` |
@@ -1182,6 +1183,12 @@ recovered; everything else propagates:
 missing file or a remote transport failure counts. The decision is made from
 the kind of failure, never from the function's name or the message text, and a
 kind of failure that is not on the left is not recovered.
+
+A value that a call returns successfully but that does not fit the type its
+frontmatter property declares is judged later, by frontmatter validation, so
+`try` around the call never sees that failure. Give the call an `as` to make
+the shape a recoverable `dm.data.contract_mismatch`; see
+[Typing data with the destination schema](./loading-data.md#typing-data-with-the-destination-schema).
 
 A request that is invalid for the format it asks for fails the same way
 when the file is missing: an extension that names no readable format
@@ -1551,7 +1558,7 @@ recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators and validates the result as a path; HTTP(S) arguments are rejected. Null passes through. | `join("sub", "note.md")` ⇒ `"sub/note.md"` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text and its absolute path as the destination. HTTP(S) URLs are rejected because they need a description; null passes through. | `link("fixture.md")` ⇒ `"[fixture.md](/path/to/fixture.md)"` (display only: result includes an absolute path, which is not portable) |
 | Filesystem | `link(target, desc)` | Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through. | `link("fixture.md", "Fixture")` ⇒ `"[Fixture](/path/to/fixture.md)"` (display only: result includes an absolute destination path, which is not portable) |
-| Filesystem | `load_data(file, [as], [options])` | Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file and returns its data as a container: an array or object root is kept, a `null` root (an empty YAML file included) is `[]`, and any other scalar root is wrapped in a one-element array. With the optional `as` container type, the data is converted to it or the call fails naming where the data breaks it; omitted or `null`, the data is returned unconverted (CSV and TSV cells stay text) and the destination's schema judges it. CSV and TSV rows become objects or lists of cells: `as`'s element type chooses, else the `header` option does. Header-derived object keys are the header's names in camelCase. The optional `options` object chooses how the file is read: `format` (`yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, `json5`, or the aliases `yml` and `ndjson`) overrides the extension; `delimiter`, one ASCII character other than a double quote, CR, or LF, separates CSV cells (default a comma; TSV accepts only a tab); `header` is `true` (the default: the first record names the columns), `false` (every record is a row by position, which needs a list-row `as`), or a list of distinct, non-empty column names used verbatim as object keys with every record a row (which needs an object-row `as`). `delimiter` or `header` on a non-tabular format is an error. Null passes through without reading anything. | `load_data("fixture.yaml")` ⇒ `["macOS", "Linux", "Windows"]`<br>`load_data("fixture.yaml", "string[]")` ⇒ `["macOS", "Linux", "Windows"]`<br>`load_data("fixture.json", "{name: string, tags: string[]}")` ⇒ `{name: "Ada", tags: ["math", "engines"]}`<br>`load_data("fixture.jsonl", "{id: number, ok: boolean}[]")` ⇒ `[{id: 1, ok: true}, {id: 2, ok: false}]`<br>`load_data("fixture.csv", "{name: string, active: boolean, stars: number}[]")` ⇒ `[{name: "Ada", active: true, stars: 1000}, {name: "Grace", active: false, stars: 250}]`<br>`load_data("fixture.tsv", "tuple([string, number])[]")` ⇒ `[["web", 8080], ["db", 5432]]`<br>`load_data("fixture.toml", "{package: {name: string, version: string}}")` ⇒ `{package: {name: "demo", version: "1.0.0"}}`<br>`load_data("fixture.json5", "{hosts: string[]}")` ⇒ `{hosts: ["alpha", "beta"]}`<br>`load_data("fixture-headerless.csv", "tuple([string, number])[]", {header: false})` ⇒ `[["web", 8080], ["db", 5432]]`<br>`load_data("fixture-headerless.csv", null, {header: ["label", "port"]})` ⇒ `[{label: "web", port: "8080"}, {label: "db", port: "5432"}]`<br>`load_data("fixture-semicolon.txt", "{name: string, port: number}[]", {format: "csv", delimiter: ";"})` ⇒ `[{name: "web", port: 8080}, {name: "db", port: 5432}]`<br>`load_data("fixture-export", "{name: string, tags: string[]}", {format: "json"})` ⇒ `{name: "Ada", tags: ["math", "engines"]}`<br>`load_data(null, "string[]")` ⇒ `null` |
+| Filesystem | `load_data(file, [as], [options])` | Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file and returns its data as a container: an array or object root is kept, a `null` root (an empty YAML file included) is `[]`, and any other scalar root is wrapped in a one-element array. With the optional `as` container type, the data is converted to it or the call fails naming where the data breaks it; omitted or `null`, the data is returned unconverted (CSV and TSV cells stay text) and the destination's schema judges it. CSV and TSV rows become objects or lists of cells: `as`'s element type chooses, else the `header` option does. Header-derived object keys are the header's names in camelCase. The optional `options` object chooses how the file is read: `format` (`yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, `json5`, or the aliases `yml` and `ndjson`) overrides the extension; `delimiter`, one ASCII character other than a double quote, CR, or LF, separates CSV cells (default a comma; TSV accepts only a tab); `header` is `true` (the default: the first record names the columns), `false` (every record is a list of cells by position; an `as` must then have list rows), or a list of distinct, non-empty column names used verbatim as object keys with every record a row (an `as` must then have object rows). `delimiter` or `header` on a non-tabular format is an error. Null passes through without reading anything. | `load_data("fixture.yaml")` ⇒ `["macOS", "Linux", "Windows"]`<br>`load_data("fixture.yaml", "string[]")` ⇒ `["macOS", "Linux", "Windows"]`<br>`load_data("fixture.json", "{name: string, tags: string[]}")` ⇒ `{name: "Ada", tags: ["math", "engines"]}`<br>`load_data("fixture.jsonl", "{id: number, ok: boolean}[]")` ⇒ `[{id: 1, ok: true}, {id: 2, ok: false}]`<br>`load_data("fixture.csv", "{name: string, active: boolean, stars: number}[]")` ⇒ `[{name: "Ada", active: true, stars: 1000}, {name: "Grace", active: false, stars: 250}]`<br>`load_data("fixture.tsv", "tuple([string, number])[]")` ⇒ `[["web", 8080], ["db", 5432]]`<br>`load_data("fixture.toml", "{package: {name: string, version: string}}")` ⇒ `{package: {name: "demo", version: "1.0.0"}}`<br>`load_data("fixture.json5", "{hosts: string[]}")` ⇒ `{hosts: ["alpha", "beta"]}`<br>`load_data("fixture-headerless.csv", "tuple([string, number])[]", {header: false})` ⇒ `[["web", 8080], ["db", 5432]]`<br>`load_data("fixture-headerless.csv", null, {header: ["label", "port"]})` ⇒ `[{label: "web", port: "8080"}, {label: "db", port: "5432"}]`<br>`load_data("fixture-semicolon.txt", "{name: string, port: number}[]", {format: "csv", delimiter: ";"})` ⇒ `[{name: "web", port: 8080}, {name: "db", port: 5432}]`<br>`load_data("fixture-export", "{name: string, tags: string[]}", {format: "json"})` ⇒ `{name: "Ada", tags: ["math", "engines"]}`<br>`load_data(null, "string[]")` ⇒ `null` |
 | Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown file's body holds only whitespace; null is false. | `markdown_body_empty("fixture.md")` ⇒ `false` |
 | Filesystem | `markdown_title(file)` | Returns the Markdown file's frontmatter `title`, else its first H1 heading, else null; null passes through. | `markdown_title("fixture.md")` ⇒ `"Fixture Title"` |
 | Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename, or empty text when there is none; null passes through. | `parent_dir("sub/note.md")` ⇒ `"sub"` |
@@ -1751,17 +1758,24 @@ runs no function.
 | `markdown_body_empty(path)` | whether another file's body is empty | yes (body only) |
 | `validate_schema(path)` | a file against its declared `$schema` | yes (body only) |
 | `validate_schema(path, obj)` | the file's frontmatter with `obj` merged over it, validated in memory | yes (body only) |
-| `load_data(path, as, [options])` | a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file, converted to the type `as` | yes (body only) |
+| `load_data(path, [as], [options])` | a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file, converted to the type `as` when one is given | yes (body only) |
 | `absolute(path)` | the absolute path a reference names, existing or not | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
 | `find_files(pattern)` | every file a glob reference matches | **no** |
 
 `load_data(path, as)` reads structured data rather than a Markdown file. Its
-`as` argument is a quoted type definition (`"string[]"`), and the data must fit
-it. An optional third argument chooses how the file is read:
+optional `as` argument is a quoted type definition (`"string[]"`), and the data
+must fit it. Without `as` (`load_data(path)`, or `null` in its place), the
+data is returned as the file holds it, and when the result is stored in a
+frontmatter property, the property's declared type judges and converts it at
+frontmatter validation. An optional third argument chooses how the file is
+read:
 `load_data("rows.txt", "tuple([string, number])[]", {format: "csv", delimiter: ";", header: false})`.
-Formats, options, CSV rows, optional files, and failures are described in
+Every result is a container: a scalar root is wrapped in a one-element array,
+and a `null` root is `[]`. CSV and TSV header names become camelCase keys
+(`First Name` is `firstName`). Formats, options, CSV rows, optional files,
+destination typing, and failures are described in
 [Loading Data](./loading-data.md).
 
 `frontmatter(path, …)` and `markdown_title(path)` decode a stored

@@ -247,12 +247,15 @@ pub fn config_error_diagnostics(error: &crate::config::load::ConfigError) -> Vec
 
 /// A finding a configuration load recorded without failing (the missing
 /// user file, a permissions error, an omitted registration) as warnings: one
-/// per located problem, or one naming the file when it has none.
+/// per located problem, or one naming the file when it has none. The created
+/// user file ([`crate::config::load::CONFIG_CREATED_CODE`]) is info.
 pub fn config_notice_diagnostics(notice: &crate::config::load::ConfigDiagnostic) -> Vec<Diagnostic> {
     if notice.problems.is_empty() {
+        let severity =
+            if notice.code == crate::config::load::CONFIG_CREATED_CODE { Severity::Info } else { Severity::Warning };
         return vec![Diagnostic {
             source: Some(DiagnosticSource::file_only(Some(notice.file.clone()))),
-            ..unlocated(notice.code, Severity::Warning, notice.message.clone())
+            ..unlocated(notice.code, severity, notice.message.clone())
         }];
     }
     notice

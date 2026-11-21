@@ -409,6 +409,17 @@ pub trait EvaluationLookup {
     /// that hold no lazy root.
     fn begin_expression_scope(&self) {}
 
+    /// The value of `root[key]` for a bare root and a literal string key,
+    /// when this lookup can answer it without materializing the whole root.
+    /// `None` (the default) evaluates the root and indexes it as usual.
+    ///
+    /// The editor's property observation answers `fm['key']` here, because
+    /// its whole `fm` is never known while the property's own template is
+    /// unresolved, but one authored key usually is.
+    fn resolve_index(&self, _root: &str, _key: &str) -> Option<Result<Value, ExpressionError>> {
+        None
+    }
+
     /// The enclosing request or standalone session's shared collection allowance.
     fn iteration_budget(&self) -> Option<&iteration::IterationBudget> {
         None
@@ -623,6 +634,15 @@ pub(crate) fn is_member_selector(expr: &Expr) -> bool {
     }
 }
 
+/// The lookup's own answer for `base[index]`, when `base` is a bare root and
+/// `index` a literal key; see [`EvaluationLookup::resolve_index`].
+fn lookup_index<L: EvaluationLookup>(base: &Expr, index: &Expr, lookup: &L) -> Option<Result<Value, ExpressionError>> {
+    match (base, index) {
+        (Expr::Variable(root), Expr::StringLiteral(key)) if !root.contains('.') => lookup.resolve_index(root, key),
+        _ => None,
+    }
+}
+
 /// Recursive evaluation inside one already-open expression scope. `scope`
 /// says whether this position handles absence; see [`absence`].
 ///
@@ -639,13 +659,18 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
 ) -> Result<Value, ExpressionError> {
     let value = evaluate_node(expr, lookup, scope, observer, budget);
     // An editor observation keeps what each `load_data` occurrence returned,
-    // for typing that call site (callback parameters included).
-    if let (Ok(returned), Expr::FunctionCall { name, .. }) = (&value, expr)
+    // and whether its bound read was headerless and uncontracted, for typing
+    // that call site (callback parameters included). The read mode is taken
+    // whatever the outcome, so a failed call leaves none behind.
+    if let Expr::FunctionCall { name, .. } = expr
         && editor_reads::is_collecting_calls()
         && functions::inspect_registration(name, |registration| registration.name() == data::load::FUNCTION)
             .unwrap_or(false)
     {
-        editor_reads::note_call(expr, returned);
+        let headerless = editor_reads::take_read_mode();
+        if let Ok(returned) = &value {
+            editor_reads::note_call(expr, returned, headerless);
+        }
     }
     if trace::is_active() {
         let forwards = match expr {
@@ -738,6 +763,9 @@ fn evaluate_node<L: EvaluationLookup, O: MissingRootObserver>(
             evaluate_binary(*op, &left, &right)
         }
         Expr::Index { base, index } => {
+            if let Some(value) = lookup_index(base, index, lookup) {
+                return value;
+            }
             // Access on a handled value is still that value's absence check.
             let base = evaluate_expr(base, lookup, scope, observer, budget)?;
             let index = evaluate_expr(index, lookup, operand, observer, budget)?;
@@ -934,6 +962,7 @@ fn evaluate_callback_function<L: EvaluationLookup, O: MissingRootObserver>(
     budget: &iteration::IterationBudget,
 ) -> Result<Value, ExpressionError> {
     let name = name.to_ascii_lowercase();
+    admit_editor_call(&name, lookup)?;
     let registration = functions::function_registration(&name).ok_or_else(|| unknown_function_error(&name))?;
     registration.check_arity(args.len()).map_err(|error| ExpressionError::Call(Box::new(error)))?;
     let invalid = |message: String| ExpressionError::InvalidCallback { span: 0..0, message };
@@ -1005,6 +1034,7 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
         if O::OBSERVES { scope.call_argument(name, index, args.len()) } else { scope.operand() }
     };
     let name = name.to_ascii_lowercase();
+    admit_editor_call(&name, lookup)?;
     if let Some((registration, kind)) = functions::lazy_function(&name) {
         return match kind {
             functions::LazyKind::All | functions::LazyKind::Any => {
@@ -1040,6 +1070,16 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     match functions::call_function(&name, &evaluated, ctx) {
         Some(result) => result,
         None => Err(unknown_function_error(&name)),
+    }
+}
+
+/// Under an editor observation, refuses a call the editor does not make
+/// ([`editor_reads::admit_call`]) once evaluation reaches it; every other
+/// surface is unaffected.
+fn admit_editor_call<L: EvaluationLookup>(name: &str, lookup: &L) -> Result<(), ExpressionError> {
+    match lookup.resolution_context_ref() {
+        Some(context) if context.editor.is_some() => editor_reads::admit_call(name),
+        _ => Ok(()),
     }
 }
 
@@ -1148,6 +1188,9 @@ fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
             // `evaluate_expr` would.
             if O::OBSERVES_MEMBERS && is_member_selector(expr) {
                 observer.member_read(std::ptr::from_ref(expr).addr());
+            }
+            if let Some(value) = lookup_index(base, index, lookup) {
+                return Ok((value?, None));
             }
             let (base_value, base_occurrence) =
                 evaluate_caller_file_argument(base, lookup, scope, observer, budget)?;

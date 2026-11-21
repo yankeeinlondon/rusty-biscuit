@@ -847,6 +847,10 @@ Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
 The same worker observes whole-value top-level properties whose expression
 holds a `load_data` with an omitted, `null`, or computed `as`
 (`observe::observes_property`); the schema need not be a template.
+User-facing behavior is in `darkmatter/docs/topics/schemas/schema-slots.md`
+("Observed properties"), the transport-cache side in
+`darkmatter/docs/topics/caching.md` ("Editor reads"), and per surface in
+`darkmatter/dmls/docs/{diagnostics,autocomplete,hover}.md`.
 
 - Demand: `overlay/properties.rs::{located_sites, sites_to_observe}` feed
   `SlotSnapshots::demand_with`, which keeps the slot demand separate: a
@@ -856,7 +860,17 @@ holds a `load_data` with an omitted, `null`, or computed `as`
   request side's `registered_hosts`.
 - Evaluation is the library's `SlotSession::observe_properties`
   (`schemas/slots/observe.rs`): one `DataRuntime` and one budget per pass,
-  `ResolutionContext.editor` set (only there). Editor reads
+  `ResolutionContext.editor` set (only there). Nothing is admitted up
+  front: the evaluator admits each call when it reaches it
+  (`editor_reads::admit_call`, from `evaluate_function` and
+  `evaluate_callback_function`, before arguments run), and the pass's
+  `PassLookup` resolves bare names, `fm`, `ctx`, `current`, and unbound
+  `local` on demand, evaluating a dependency property the first time a
+  reached read names it (`Cycle` when it is already evaluating). An unused
+  branch, fallback, `try` recovery, or callback body therefore decides
+  nothing; never reintroduce a syntactic pre-scan for this path. The passive
+  call check stays separate and still rejects a call that can never bind in
+  any branch. Editor reads
   (`compose/expression/editor_reads.rs`) authorize each candidate before it
   is probed (lexical precheck, then `decide_without_asking`), read remotes
   only from a fresh transport-cache entry (`cache_only` +
@@ -881,7 +895,13 @@ holds a `load_data` with an omitted, `null`, or computed `as`
   `DeclaredTypes::{with_observed, with_observed_calls}`; per-call facts are
   `PropertyObservation.calls`, matched by the span-free call) feed completion
   and hover only, never undeclared-member diagnostics. A headerless
-  uncontracted read gets no verdict or shape.
+  uncontracted read is an executed fact, never a syntax scan: `load_data`
+  notes it from its bound options (`editor_reads::note_read_mode`, taken by
+  `evaluate_expr` for the same node) into `ObservedCall::headerless_uncontracted`
+  and, through reads of other properties, `PropertyObservation::headerless_uncontracted`.
+  Such a property gets no verdict or shape (hover still previews its raw
+  value through `PropertyView::value`), and `observed_call_shapes` types such
+  a call `unknown[][]`, never from its cells.
 - Test seams: `LspFixture::start_with_slot_options` (gate, cache root,
   `ManualClock`), the lib feature `cache-test-hooks`
   (`compose::cache_test_hooks::seed_remote_entry`, enabled only by DMLS's

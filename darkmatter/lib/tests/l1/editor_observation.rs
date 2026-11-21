@@ -420,3 +420,270 @@ fn each_load_occurrence_keeps_what_it_returned() {
     assert!(inner.overflow);
     assert!(!property.calls[0].overflow);
 }
+
+/// The headerless-uncontracted fact comes from the read the loader bound:
+/// every spelling of `header: false` with no contract sets it on the call
+/// that ran and on its property (and on a property that reads it); a headed
+/// or contracted read, and a headerless call in an arm that did not run,
+/// record nothing.
+#[test]
+fn only_an_executed_headerless_uncontracted_read_is_marked() {
+    let fixture = Fixture::new();
+    fixture.write("table.csv", "1,2\n3,x\n");
+    let grants = vec![fixture.allow("table.csv")];
+    let marked = |observations: &PropertyObservations, key: &str| {
+        let property = observations.properties.iter().find(|property| property.key == key).unwrap();
+        (property.headerless_uncontracted, property.calls.iter().map(|call| call.headerless_uncontracted).collect::<Vec<_>>())
+    };
+    for expression in [
+        "load_data('table.csv', null, {header: false})",
+        "load_data('table.csv', null, {header: 'false'})",
+        "load_data('table.csv', null, {...{header: false}})",
+        "load_data('table.csv', null, {header: true, ...{header: false}})",
+        "load_data('table.csv', (null), {header: false})",
+        "load_data('table.csv', false ? 'number[]' : null, {header: false})",
+    ] {
+        let observations = fixture.one(grants.clone(), expression);
+        assert_eq!(observed(&observations, "p"), json!([["1", "2"], ["3", "x"]]), "{expression}");
+        assert_eq!(marked(&observations, "p"), (true, vec![true]), "{expression}");
+        let property = observations.properties.iter().find(|property| property.key == "p").unwrap();
+        assert!(property.calls[0].values.is_empty(), "a headerless value is never kept: {expression}");
+    }
+    for expression in [
+        "load_data('table.csv')",
+        "load_data('table.csv', null, {...{header: false}, header: true})",
+        "load_data('table.csv', 'tuple([number, unknown])[]', {header: false})",
+    ] {
+        let observations = fixture.one(grants.clone(), expression);
+        assert_eq!(marked(&observations, "p"), (false, vec![false]), "{expression}");
+    }
+    // The unused headerless arm is never evaluated, so it records no call.
+    let observations = fixture.one(grants.clone(), "true ? load_data('table.csv') : load_data('table.csv', null, {header: false})");
+    assert_eq!(marked(&observations, "p"), (false, vec![false]));
+
+    // Options and contracts read from the document, and a property reading
+    // a headerless property.
+    let data = DataRuntime::new();
+    let session = fixture.session(grants, &data);
+    let observations = fixture.observe(
+        &session,
+        json!({
+            "opts": { "header": false },
+            "none": null,
+            "a": "{{ load_data('table.csv', fm.none, opts) }}",
+            "b": "{{ first(a) ? a : [] }}",
+            "c": "{{ load_data('table.csv', null, opts) || a }}",
+        }),
+        &[
+            ("a", "load_data('table.csv', fm.none, opts)", false),
+            ("b", "first(a) ? a : []", true),
+            ("c", "load_data('table.csv', null, opts) || a", true),
+        ],
+    );
+    assert_eq!(marked(&observations, "a"), (true, vec![true]));
+    assert_eq!(marked(&observations, "b"), (true, vec![]), "b reads a headerless property");
+    assert_eq!(marked(&observations, "c"), (true, vec![true]), "the fallback was never read");
+}
+
+// ── Admission when evaluation reaches it ───────────────────────────────────
+//
+// A call is admitted, and a binding resolved, only when evaluation reaches
+// it: an unused branch, fallback, recovery argument, or callback body never
+// decides the outcome, and a reached one the editor cannot evaluate is
+// pending before it has any effect.
+
+fn rows() -> Value {
+    json!([{ "name": "Ada", "age": 36 }, { "name": "Grace", "age": 85 }])
+}
+
+/// Whether every observation is of `data.yaml`'s bytes: nothing was listed,
+/// probed, or read besides the selected load.
+fn read_only_the_data(fixture: &Fixture, observations: &PropertyObservations) -> bool {
+    let data = biscuit_file::to_portable_string(&fixture.root.join("data.yaml"));
+    observations.observations.iter().all(|observation| observation.entry == data && observation.kind == ObservationKind::File)
+}
+
+/// Handler entries are counted only with `effects-instrumentation` (the
+/// recipes' L1 runs enable it); without it these checks have nothing to read.
+fn reset_handler_entries() {
+    #[cfg(feature = "effects-instrumentation")]
+    darkmatter::markdown::compose::expression::function_test_hooks::reset_handler_entries();
+}
+
+/// The handler of `function` was not entered on this thread since the last
+/// [`reset_handler_entries`].
+fn assert_handler_not_entered(function: &str) {
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(
+        darkmatter::markdown::compose::expression::function_test_hooks::handler_entries(function),
+        0,
+        "{function}() ran"
+    );
+    #[cfg(not(feature = "effects-instrumentation"))]
+    let _ = function;
+}
+
+/// No handler the editor refuses ran.
+fn assert_no_effect_ran() {
+    for function in ["find_files", "as_markdown", "ipv4"] {
+        assert_handler_not_entered(function);
+    }
+}
+
+/// One test per expression whose selected load is observed although an
+/// operand evaluation never reaches names something the editor does not
+/// evaluate.
+macro_rules! observes_the_reached_load {
+    ($($(#[$doc:meta])* $name:ident: $expression:expr;)*) => {$(
+        $(#[$doc])*
+        #[test]
+        fn $name() {
+            let fixture = Fixture::new();
+            fixture.write("data.yaml", DATA);
+            reset_handler_entries();
+            let observations = fixture.one(vec![fixture.allow("data.yaml")], $expression);
+            assert_eq!(observed(&observations, "p"), rows(), "{}", $expression);
+            assert!(read_only_the_data(&fixture, &observations), "{:?}", observations.observations);
+            assert_no_effect_ran();
+        }
+    )*};
+}
+
+observes_the_reached_load! {
+    /// R1-F1.1: the unselected arm reads `ctx`.
+    an_unselected_ctx_arm_is_not_bound: "true ? load_data('data.yaml') : ctx.runtime";
+    /// R1-F1.1, reversed arms.
+    an_unselected_ctx_arm_is_not_bound_when_reversed: "false ? ctx.runtime : load_data('data.yaml')";
+    /// R1-F1.2: a truthy left operand never reads the fallback.
+    an_unused_ctx_fallback_is_not_bound: "load_data('data.yaml') || ctx.runtime";
+    /// R1-F1.3: a successful operand never evaluates the recovery argument.
+    an_unused_recovery_argument_is_not_bound: "try(load_data('data.yaml'), ctx.runtime)";
+    /// R1-F1.4: no listing runs for the unselected `find_files()`.
+    an_unselected_listing_is_not_admitted: "true ? load_data('data.yaml') : find_files('*.yaml')";
+    /// R1-F1.5: the unselected absent property is never bound.
+    an_unselected_absent_property_is_not_bound: "true ? load_data('data.yaml') : missing_property";
+    /// R1-F1.6: an empty map never runs its callback body.
+    an_empty_map_callback_body_is_not_bound: "map([], i => ctx.runtime) || load_data('data.yaml')";
+    /// R1-F1.7: the control with nothing unavailable in its other arm.
+    an_ordinary_unselected_arm_is_observed: "true ? load_data('data.yaml') : []";
+    /// R1-F1.10: a successful load never reaches the effectful fallback.
+    an_unused_effectful_fallback_is_not_admitted: "load_data('data.yaml') || as_markdown('other.md')";
+}
+
+/// One test per expression whose evaluation reaches something the editor
+/// does not evaluate: it is pending for `$reason`, and nothing, the load in
+/// the other operand included, was read, probed, or listed.
+macro_rules! a_reached_operation_is_pending {
+    ($($(#[$doc:meta])* $name:ident: $expression:expr => $reason:expr;)*) => {$(
+        $(#[$doc])*
+        #[test]
+        fn $name() {
+            let fixture = Fixture::new();
+            fixture.write("data.yaml", DATA);
+            fixture.write("other.yaml", DATA);
+            reset_handler_entries();
+            let observations = fixture.one(vec![fixture.allow("data.yaml"), fixture.allow("other.yaml")], $expression);
+            assert_eq!(pending(&observations, "p"), $reason, "{}", $expression);
+            assert!(observations.observations.is_empty(), "{}: {:?}", $expression, observations.observations);
+            assert_no_effect_ran();
+            assert_handler_not_entered("load_data");
+        }
+    )*};
+}
+
+a_reached_operation_is_pending! {
+    /// R1-F1.9: the selected arm reads `ctx`.
+    a_selected_ctx_arm_is_pending:
+        "false ? load_data('data.yaml') : ctx.runtime" => PendingReason::RuntimeOnly("ctx".to_string());
+    /// R1-F1.9 / R1-F1.11: an executed listing is refused before it lists.
+    an_executed_listing_is_pending_before_it_lists:
+        "true ? find_files('*.yaml') : load_data('data.yaml')" => PendingReason::Unsupported("find_files()".to_string());
+    /// R1-F1.11: an executed effectful call is refused before it runs, and
+    /// a later operand is never reached.
+    an_executed_effectful_call_is_pending_before_it_runs:
+        "as_markdown('other.md') || load_data('data.yaml')" => PendingReason::Unsupported("as_markdown()".to_string());
+    /// R1-F1.9: the selected arm reads a property the document lacks.
+    a_selected_absent_property_is_pending:
+        "true ? missing_property : load_data('data.yaml')" => PendingReason::RuntimeOnly("missing_property".to_string());
+    /// A reached pending binding is not a recoverable failure, so `try`
+    /// never evaluates its fallback.
+    a_pending_operand_is_not_recovered:
+        "try(ctx.runtime, load_data('data.yaml'))" => PendingReason::RuntimeOnly("ctx".to_string());
+    /// A callback body that runs is admitted when it runs.
+    a_callback_body_that_runs_is_pending:
+        "map([1], i => ctx.runtime) || load_data('data.yaml')" => PendingReason::RuntimeOnly("ctx".to_string());
+    /// A reached captured function is runtime-only, before it is called.
+    a_reached_captured_function_is_pending:
+        "true ? ipv4() : load_data('data.yaml')" => PendingReason::RuntimeOnly("ipv4()".to_string());
+}
+
+/// A dependency is evaluated when a reached read names it, so an unused
+/// arm naming a pending or cyclic property does not stop the selected load;
+/// a reached one still does.
+#[test]
+fn dependencies_are_evaluated_only_when_reached() {
+    let fixture = Fixture::new();
+    fixture.write("data.yaml", DATA);
+    let data = DataRuntime::new();
+    let session = fixture.session(vec![fixture.allow("data.yaml")], &data);
+    let seed = json!({
+        "blocked": "{{ ctx.runtime }}",
+        "unused": "{{ true ? load_data('data.yaml') : blocked }}",
+        "reached": "{{ false ? load_data('data.yaml') : blocked }}",
+        "a": "{{ true ? load_data('data.yaml') : b }}",
+        "b": "{{ a }}",
+        "c": "{{ d ? load_data('data.yaml') : [] }}",
+        "d": "{{ c }}",
+    });
+    let sites = [
+        ("blocked", "ctx.runtime", false),
+        ("unused", "true ? load_data('data.yaml') : blocked", true),
+        ("reached", "false ? load_data('data.yaml') : blocked", true),
+        ("a", "true ? load_data('data.yaml') : b", true),
+        ("b", "a", false),
+        ("c", "d ? load_data('data.yaml') : []", true),
+        ("d", "c", false),
+    ];
+    let observations = fixture.observe(&session, seed, &sites);
+    assert_eq!(observed(&observations, "unused"), rows());
+    assert_eq!(pending(&observations, "reached"), PendingReason::Dependency("blocked".to_string()));
+    assert_eq!(observed(&observations, "a"), rows(), "the unused arm names `b`, which reads `a`, and is never reached");
+    assert_eq!(pending(&observations, "c"), PendingReason::Cycle, "the condition reaches `d`, which reads `c`");
+    let keys: Vec<&str> = observations.properties.iter().map(|property| property.key.as_str()).collect();
+    assert_eq!(keys, ["blocked", "unused", "reached", "a", "c", "d"], "`b` is never reached");
+}
+
+/// `fm['key']` reads one authored key as `fm.key` does, so it is observed
+/// although the whole `fm` holds the property's own template; a template
+/// key or an absent key is pending, and a callback local named like the
+/// root is indexed as a value.
+#[test]
+fn a_literal_fm_index_reads_only_that_key() {
+    let fixture = Fixture::new();
+    fixture.write("data.yaml", DATA);
+    let data = DataRuntime::new();
+    let session = fixture.session(vec![fixture.allow("data.yaml")], &data);
+    let seed = json!({
+        "literal": "data.yaml",
+        "computed": "{{ 'data' + '.yaml' }}",
+        "indexed": "{{ load_data(fm['literal']) }}",
+        "templated": "{{ load_data(fm['computed']) }}",
+        "absent": "{{ load_data(fm['nowhere']) }}",
+        "whole": "{{ load_data(fm.literal) || fm }}",
+        "shadowed": "{{ map([{literal: 'x'}], literal => literal['literal']) || load_data('data.yaml') }}",
+    });
+    let sites = [
+        ("computed", "'data' + '.yaml'", false),
+        ("indexed", "load_data(fm['literal'])", true),
+        ("templated", "load_data(fm['computed'])", true),
+        ("absent", "load_data(fm['nowhere'])", true),
+        ("whole", "load_data(fm.literal) || fm", true),
+        ("shadowed", "map([{literal: 'x'}], literal => literal['literal']) || load_data('data.yaml')", true),
+    ];
+    let observations = fixture.observe(&session, seed, &sites);
+    assert_eq!(observed(&observations, "indexed"), rows());
+    assert_eq!(pending(&observations, "templated"), PendingReason::Dependency("computed".to_string()));
+    assert_eq!(pending(&observations, "absent"), PendingReason::RuntimeOnly("fm.nowhere".to_string()));
+    assert_eq!(observed(&observations, "whole"), rows(), "the unused whole `fm` fallback is never bound");
+    assert_eq!(observed(&observations, "shadowed"), json!(["x"]));
+}

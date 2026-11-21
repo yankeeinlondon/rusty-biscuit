@@ -1,7 +1,7 @@
 //! Darkmatter's user configuration at Claudine's startup: a file that does not
 //! load stops the run before any provider launches or command runs, with a
-//! located error; a missing file is one warning per invocation naming
-//! `claudine init`.
+//! located error; a missing file is created at its defaults and reported once,
+//! by the run that created it.
 //!
 //! The provider is the compiled `claudine-fake-goose` in its marker mode (one
 //! line per launch in `PROVIDER_MARKER`), and the document's frontmatter
@@ -73,16 +73,23 @@ fn a_user_file_that_does_not_load_stops_before_anything_is_dispatched() {
 }
 
 #[test]
-fn a_missing_user_file_is_reported_once_naming_claudine_init() {
+fn a_missing_user_file_is_created_at_its_defaults_and_reported_once() {
     let fixture = CliProcessFixture::named("dm-config-missing");
     fixture.seed_user_config();
     let fixture = fixture.without_darkmatter_config();
+    let config = fixture.home().join(".darkmatter.yaml");
 
-    // A missing file pre-approves no command, so `--yolo` approves this one.
-    let run = run(&fixture, &["--yolo"]);
+    // The created defaults pre-approve no command, so `--yolo` approves this one.
+    let first = run(&fixture, &["--yolo"]);
+    let second = run(&fixture, &["--yolo"]);
 
-    assert!(run.success, "{}", run.stderr);
-    assert_eq!(run.launches, 1);
-    assert_eq!(run.stderr.matches("does not exist").count(), 1, "{}", run.stderr);
-    assert!(run.stderr.contains("claudine init"), "{}", run.stderr);
+    assert!(first.success, "{}", first.stderr);
+    assert_eq!(first.launches, 1);
+    assert_eq!(first.stderr.matches("created").count(), 1, "{}", first.stderr);
+    assert!(first.stderr.contains(&config.display().to_string()), "{}", first.stderr);
+    assert!(!first.stderr.contains("does not exist"), "{}", first.stderr);
+    let text = fs::read_to_string(&config).expect("the created user file");
+    assert!(text.contains("permissions:") && text.contains("register: []"), "{text}");
+    assert!(second.success, "{}", second.stderr);
+    assert!(!second.stderr.contains("created"), "only the creating run reports it: {}", second.stderr);
 }

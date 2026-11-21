@@ -30,6 +30,13 @@ enum Coverage {
     Probed,
     /// A test fixture over a fixed map.
     Fixture,
+    /// The editor's property observation, which binds no `ctx` at all: a
+    /// bare name it cannot find in the document and every `ctx`, `current`,
+    /// or unbound `local` read is pending, never a context value. Probed
+    /// through the public observation API in the `editor_observation` L1
+    /// tests (`a_selected_ctx_arm_is_pending`,
+    /// `a_selected_absent_property_is_pending`).
+    Observation,
 }
 
 /// `(type, file relative to src/, coverage)`.
@@ -43,6 +50,7 @@ const INVENTORY: &[(&str, &str, Coverage)] = &[
     ("DeferrableLookup", "markdown/compose/inline/interpolation.rs", Coverage::Probed),
     ("ScopedLookup", "markdown/compose/expression/binding.rs", Coverage::Probed),
     ("SiteLookup", "markdown/compose/site_scope.rs", Coverage::Probed),
+    ("PassLookup", "markdown/schemas/slots/observe.rs", Coverage::Observation),
     ("Doc", "markdown/compose/expression/binding.rs", Coverage::Fixture),
     ("TestLookup", "markdown/compose/expression/mod.rs", Coverage::Fixture),
     ("Nothing", "markdown/compose/expression/absence.rs", Coverage::Fixture),

@@ -1,5 +1,5 @@
 ---
-last_updated: 2026-10-30
+last_updated: 2026-11-21
 ---
 # Darkmatter LSP Proposed Features
 
@@ -317,6 +317,18 @@ A template that did not resolve is never validated against, so a schema missing 
 Either command, and any configuration change (`workspace/didChangeConfiguration`), marks every resolution stale and re-publishes diagnostics, because a slot may read the environment, which no file event reports. The resolution itself runs on the worker, so the command answers without waiting for it.
 
 The full behavior, including what refreshes a resolution and the editor's smaller work allowance per slot, is in [Schema Slots: In the editor](../topics/schemas/schema-slots.md#in-the-editor).
+
+### 4.12 Observed `load_data` Properties (implemented)
+
+A top-level frontmatter property whose whole value is one `{{ … }}` calling `load_data` without a contract, such as `people: "{{ load_data('people.yaml') }}"`, has a type only its data can tell. The slot worker evaluates such a property in the background, under the same approvals as a slot read and without asking anything, and the editor uses the value it observed:
+
+| Capability | What the observed value adds |
+|---|---|
+| Diagnostics | the property is judged against the schema as `md compose` judges it; a failure is an error at the `{{ … }}`, with `relatedInformation` and `data.data_location` pointing into the data file for a direct load; an unrecovered load of a missing file is a `dm.expression.evaluation_failure` warning |
+| Completion | members from the loaded data, for example after `i.` in `{{ map(load_data('people.yaml'), i => i.) }}` |
+| Hover | a bounded preview of the observed value after the declared type |
+
+A local read must be pre-approved by `permissions.file-read` or approved in the session, and a URL is answered only from a fresh entry of the transport cache, never fetched. A property that cannot be evaluated is pending and gets no verdict, and a stale observation is withheld until its refresh installs. The full behavior is in [Schema Slots: Observed properties](../topics/schemas/schema-slots.md#observed-properties).
 
 ## 5. Cross-Cutting Requirements
 

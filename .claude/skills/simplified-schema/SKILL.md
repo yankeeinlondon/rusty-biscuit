@@ -88,6 +88,17 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   gate). Any other `{{`/`}}` end detector (`rfind("{{")`, a private depth
   scan) is a second rule: route it through these. Tests:
   `tests/l1/{expression_scanner,expression_regions,scanner_corpus}.rs`.
+- **Object entries are fields or spreads, never merged.** `Expr::ObjectLiteral`
+  holds `ObjectEntry::{Field { key, value }, Spread { operand }}` in written
+  order (`SpannedObjectEntry` keeps the key, value, and operand spans; a
+  spread's span is its operand's). The parser's duplicate check covers written
+  keys only, across spreads. Every walker of object literals (lint,
+  dependency, permission, and read scans, passive typing, editor support,
+  `literal_to_json`) must visit spread operands too, including ones whose keys
+  a later entry overwrites; `entry.value()` yields both. Only a walker that
+  needs keys matches on `Field`. Syntax rules and host semantics:
+  [Object literals and spread](../../../simplified-schema/docs/topics/expression-syntax.md#object-literals-and-spread).
+  Tests: `parser::tests::object_spread`, `tests/l1/expression_syntax.rs`.
 - **Templates are passive, resolution replays, and a template type is the
   pending type.** `{{ … }}` template constraints and template types parse
   without evaluating anything, every lowering entry fails with

@@ -138,6 +138,32 @@ still complete as usual. Once the slot resolves, the resolved type's keys
 and values are offered. See
 [Schema Slots: In the editor](../../docs/topics/schemas/schema-slots.md#in-the-editor).
 
+### Members of a loaded value
+
+A `load_data` call without a contract has no declared shape: until its data
+is known, its result is a container of unknown members. When it sits in a
+top-level frontmatter property whose whole value is that `{{ … }}`
+expression, the slot worker loads the data in the background (see
+[Observed properties](../../docs/topics/schemas/schema-slots.md#observed-properties)),
+and completion then offers the members the loaded value actually holds:
+
+```yaml
+names: "{{ map(load_data('people.yaml'), i => i.|) }}"   # offers `i.name`, `i.age` once observed
+```
+
+The same applies to a reference to the observed property (`people.` when
+`people: "{{ load_data('people.yaml') }}"`) and to the same call written
+elsewhere in the document, matched by its text. The completion request
+itself reads nothing; it uses the last installed observation. Before one is
+installed, while the read is pending (not approved, a URL with no fresh
+cached response, a function the editor does not run), and while a refresh is
+running, nothing is inferred from the data: the call offers no members, and
+a property's declared type answers as usual. A call that returned more than
+eight distinct values across the document stays untyped, and a call that
+ran as a CSV or TSV read with `header: false` and no contract stays
+`unknown[][]` (its rows complete no members), however its options were
+written: literally, as `"false"`, through a variable, or by a spread.
+
 ### Only the cursor's path is typed
 
 Completion resolves the schema along the cursor's own path and reads the
@@ -426,6 +452,10 @@ by a literal `load_data` contract gets its members from the contract:
                                                    offers `h.name`, `h.port`
 ```
 
-A computed contract (`load_data("hosts.yaml", t)`) or a named reference
-(`"Hosts@./types.yaml"`) types the local as unknown, so nothing is offered
-after `h.`; the server never opens the data or schema file to find out.
+A named reference (`"Hosts@./types.yaml"`) types the local as unknown, so
+nothing is offered after `h.`; the server never opens the schema file to
+find out. A call with no contract, or a computed one
+(`load_data("hosts.yaml", t)`), is unknown too until the slot worker has
+observed it, after which its loaded members are offered (see
+[Members of a loaded value](#members-of-a-loaded-value)); the completion
+request itself never opens the data file.

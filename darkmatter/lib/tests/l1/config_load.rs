@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::config::load::{
-    CONFIG_INVALID_CODE, CONFIG_MISSING_CODE, ConfigError, ConfigErrorKind, ConfigLoadMode, ConfigRevision,
+    CONFIG_CREATED_CODE, CONFIG_INVALID_CODE, CONFIG_MISSING_CODE, ConfigError, ConfigErrorKind, ConfigLoadMode, ConfigRevision,
     ConfigSnapshot, NetworkAccess, PermissionsSetting, ScopePermissions,
 };
 use darkmatter::config::migration_receipt::content_hash;
@@ -116,6 +116,62 @@ fn a_missing_user_file_takes_every_default_and_is_reported_once() {
     assert!(snapshot.repository().is_none(), "no repository named, none observed");
     assert_eq!(snapshot.dependencies().len(), 1);
     assert_eq!(snapshot.dependencies()[0].content_hash, None);
+}
+
+#[test]
+fn a_writing_cli_load_creates_the_missing_user_file_and_loads_it() {
+    let fixture = Fixture::new();
+
+    let snapshot = ConfigSnapshot::load(&fixture.context(), None, ConfigLoadMode::MigrateLegacy).unwrap();
+
+    let text = std::fs::read_to_string(fixture.user_file()).expect("the load created the user file");
+    assert!(text.contains("permissions:") && text.contains("register: []"), "{text}");
+    assert!(snapshot.user().is_present(), "the created file is what was loaded");
+    assert!(snapshot.user_config_missing().is_none());
+    assert_eq!(snapshot.user_config_created(), Some(fixture.user_file().as_path()));
+    let codes: Vec<_> = snapshot.diagnostics().iter().map(|d| d.code).collect();
+    assert_eq!(codes, [CONFIG_CREATED_CODE], "{:?}", snapshot.diagnostics());
+    assert_eq!(snapshot.diagnostics()[0].file, fixture.user_file());
+
+    let again = ConfigSnapshot::load(&fixture.context(), None, ConfigLoadMode::MigrateLegacy).unwrap();
+    assert!(again.user_config_created().is_none() && again.diagnostics().is_empty(), "{:?}", again.diagnostics());
+}
+
+#[test]
+fn passive_and_setup_loads_never_create_the_user_file() {
+    let fixture = Fixture::new();
+
+    for mode in [ConfigLoadMode::Passive, ConfigLoadMode::Setup] {
+        let snapshot = ConfigSnapshot::load(&fixture.context(), None, mode).unwrap();
+        assert!(!fixture.user_file().exists(), "{mode:?} wrote the user file");
+        assert_eq!(snapshot.user_config_missing(), Some(fixture.user_file().as_path()), "{mode:?}");
+        assert!(snapshot.user_config_created().is_none(), "{mode:?}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_user_file_that_cannot_be_created_falls_back_to_the_defaults_with_the_reason() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let fixture = Fixture::new();
+    let home = fixture.user_file().parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // Root ignores directory modes, so the write cannot be refused there.
+    if std::fs::write(home.join(".probe"), "").is_ok() {
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+
+    let snapshot = ConfigSnapshot::load(&fixture.context(), None, ConfigLoadMode::MigrateLegacy);
+    std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let snapshot = snapshot.unwrap();
+    assert!(!fixture.user_file().exists());
+    assert_eq!(snapshot.user_config_missing(), Some(fixture.user_file().as_path()));
+    let missing: Vec<_> = snapshot.diagnostics().iter().filter(|d| d.code == CONFIG_MISSING_CODE).collect();
+    assert_eq!(missing.len(), 1, "{:?}", snapshot.diagnostics());
+    assert!(missing[0].message.contains("could not be created"), "{}", missing[0].message);
+    assert_eq!(user_block(&snapshot).network.value, NetworkAccess::Deny, "the defaults apply");
 }
 
 #[test]

@@ -9,14 +9,19 @@
 //! session's grants (never asking anyone), its cancel flag and work limits,
 //! and one shared data runtime and work budget for the whole pass:
 //!
+//! - evaluation follows ordinary branch selection, short-circuiting, and
+//!   `try` recovery, and every call and binding is judged only when
+//!   evaluation reaches it, so an unused branch, fallback, recovery
+//!   argument, or callback body decides nothing;
 //! - only pure functions and the guarded readers `load_data` and
-//!   `file_exists` run; anything else leaves the property
-//!   [pending](PropertyOutcome::Pending), as do `ctx`, a host or runtime
-//!   binding, and a property absent from the document;
-//! - a bare name reads a literal property, or another whole-value property
-//!   evaluated first (memoized; properties that read each other are a
-//!   [cycle](PendingReason::Cycle)); `fm.NAME` reads the authored value, and
-//!   one still holding a template leaves the property pending;
+//!   `file_exists` run; any other reached call leaves the property
+//!   [pending](PropertyOutcome::Pending) before it runs, as does a reached
+//!   `ctx`, host or runtime binding, or property absent from the document;
+//! - a bare name reads a literal property, or another whole-value property,
+//!   evaluated the first time a reached read names it (memoized; properties
+//!   that read each other are a [cycle](PendingReason::Cycle)); `fm.NAME`
+//!   reads the authored value, and one still holding a template leaves the
+//!   property pending;
 //! - every read goes through the editor's guarded paths
 //!   (`compose::expression::editor_reads`): a candidate the permissions and
 //!   this process's approvals do not allow is never probed or read, a URL is
@@ -24,9 +29,16 @@
 //!   fetched, written, or asked;
 //! - an executed, unrecovered read of a provably missing local file is
 //!   [`PropertyOutcome::Missing`]; a refused or unavailable read is pending,
-//!   which `try` cannot turn into its fallback.
+//!   which `try` cannot turn into its fallback;
+//! - a `load_data` call that ran with no contract and bound a CSV or TSV
+//!   read with `header: false` is marked headerless and uncontracted
+//!   ([`ObservedCall::headerless_uncontracted`]), judged from the arguments
+//!   the loader bound, never from how they are written; a property whose
+//!   evaluation ran one, itself or through a property it read, is marked
+//!   too ([`PropertyObservation::headerless_uncontracted`]).
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -36,7 +48,6 @@ use serde_json::{Map, Value};
 use simplified_schema::expression::{SpannedCallArgument, SpannedExpr, SpannedExprKind};
 
 use super::SlotSession;
-use super::admission::{PropertyRoot, property_reads};
 use super::grants::gate::SlotGrants;
 use crate::markdown::compose::conditions::ShortcutLookup;
 use crate::markdown::compose::expression::data::Observation;
@@ -44,7 +55,9 @@ use crate::markdown::compose::expression::editor_reads::{self, EditorReads};
 use crate::markdown::compose::expression::iteration::IterationBudget;
 use crate::markdown::compose::expression::read_gate::{GateRefusal, ReadGate, ReadTarget};
 use crate::markdown::compose::expression::trace::{self, LoadOrigin};
-use crate::markdown::compose::expression::{ExpressionError, FileRefFailure, ResolutionContext, evaluate};
+use crate::markdown::compose::expression::binding::ResolvedBinding;
+use crate::markdown::compose::expression::fm_namespace;
+use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError, FileRefFailure, ResolutionContext, evaluate};
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
 
 pub use crate::markdown::compose::expression::editor_reads::PendingReason;
@@ -115,6 +128,12 @@ pub struct PropertyObservation {
     /// What each `load_data` call the evaluation reached returned, in the
     /// expression's node order; empty when the property was not evaluated.
     pub calls: Vec<ObservedCall>,
+    /// The evaluation ran a headerless uncontracted read, directly or
+    /// through another property it read. Its value's type is then
+    /// `unknown[][]` for that read, so an editor neither types nor judges it
+    /// cell by cell from the observed value (composition still judges every
+    /// realized cell). An unused branch's read never sets it.
+    pub headerless_uncontracted: bool,
 }
 
 /// The values one `load_data` call occurrence returned while a property was
@@ -127,11 +146,17 @@ pub struct ObservedCall {
     /// The call as written, without spans: what a reader typing the same
     /// call compares against.
     pub call: simplified_schema::expression::ast::Expr,
-    /// Its distinct returned values, first seen first, at most eight.
+    /// Its distinct returned values, first seen first, at most eight;
+    /// never a headerless uncontracted execution's value.
     pub values: Vec<Value>,
     /// It returned more distinct values than were kept, so its type stays
     /// provisional.
     pub overflow: bool,
+    /// At least one execution bound no contract (`as` omitted or `null`)
+    /// and a CSV or TSV read with `header: false` (written literally, as a
+    /// value that converts to it, through a variable, or by a spread): that
+    /// execution's type is `unknown[][]`, never its observed cells.
+    pub headerless_uncontracted: bool,
 }
 
 /// What evaluating one property produced.
@@ -181,27 +206,6 @@ pub fn observes_property(expression: &SpannedExpr) -> bool {
 
 fn is_load_data(name: &str) -> bool {
     crate::markdown::compose::expression::functions::canonical_function_name(name) == Some("load_data")
-}
-
-/// Whether `expression` calls `load_data` anywhere with no contract (or a
-/// literal `null`) and a literal `header: false`: a headerless read whose
-/// type is `unknown[][]` whatever it loads. An editor types and judges such
-/// a property provisionally, never cell by cell from its observed value.
-pub fn reads_headerless_uncontracted(expression: &simplified_schema::expression::ast::Expr) -> bool {
-    use simplified_schema::expression::ast::{Expr, ObjectEntry};
-    let is_null = |expr: &Expr| matches!(expr, Expr::Variable(name) if name == "null");
-    crate::markdown::compose::expression::member_check::expr_nodes(expression).into_iter().any(|node| {
-        let Expr::FunctionCall { name, args } = node else {
-            return false;
-        };
-        if !is_load_data(name) || !args.get(1).is_none_or(is_null) {
-            return false;
-        }
-        matches!(args.get(2), Some(Expr::ObjectLiteral(entries)) if entries.iter().any(|entry| matches!(
-            entry,
-            ObjectEntry::Field { key, value: Expr::BoolLiteral(false) } if key == "header"
-        )))
-    })
 }
 
 /// Whether `expr` is a literal other than `null`.
@@ -255,11 +259,19 @@ impl SlotSession {
         base.editor = Some(Arc::clone(&editor));
         base.iteration = IterationBudget::new(limits);
         let mark = data.read_mark();
-        let mut pass = Pass { request, base, states: HashMap::new(), calls: HashMap::new() };
+        let pass = Pass {
+            request,
+            base,
+            states: RefCell::new(HashMap::new()),
+            calls: RefCell::new(HashMap::new()),
+            headerless: RefCell::new(HashSet::new()),
+            reading: RefCell::new(Vec::new()),
+        };
         for site in request.sites.iter().filter(|site| site.eligible) {
             pass.site(&site.key);
         }
-        let Pass { mut states, base, mut calls, .. } = pass;
+        let Pass { states, base, calls, headerless, .. } = pass;
+        let (mut states, mut calls, headerless) = (states.into_inner(), calls.into_inner(), headerless.into_inner());
         let properties = request
             .sites
             .iter()
@@ -268,6 +280,7 @@ impl SlotSession {
                     key: site.key.clone(),
                     outcome,
                     calls: calls.remove(&site.key).unwrap_or_default(),
+                    headerless_uncontracted: headerless.contains(&site.key),
                 }),
                 Some(State::Evaluating) | None => None,
             })
@@ -288,28 +301,38 @@ enum State {
     Done(PropertyOutcome),
 }
 
+/// One observation pass. Properties are evaluated on demand, the first time
+/// an eligible site or a reading expression reaches them, so the state sits
+/// behind cells: a dependency is evaluated while its reader's evaluation is
+/// still running.
 struct Pass<'r> {
     request: &'r ObserveRequest,
     base: ResolutionContext,
-    states: HashMap<String, State>,
-    calls: HashMap<String, Vec<ObservedCall>>,
+    states: RefCell<HashMap<String, State>>,
+    calls: RefCell<HashMap<String, Vec<ObservedCall>>>,
+    /// The properties whose evaluation ran a headerless uncontracted read,
+    /// directly or through a property they read.
+    headerless: RefCell<HashSet<String>>,
+    /// One entry per evaluation in progress, innermost last: whether it read
+    /// a property in [`Self::headerless`].
+    reading: RefCell<Vec<bool>>,
 }
 
 impl Pass<'_> {
     /// The outcome of the site at `key`, evaluating it the first time.
-    fn site(&mut self, key: &str) -> PropertyOutcome {
-        match self.states.get(key) {
+    fn site(&self, key: &str) -> PropertyOutcome {
+        match self.states.borrow().get(key) {
             Some(State::Done(outcome)) => return outcome.clone(),
             Some(State::Evaluating) => return PropertyOutcome::Pending(PendingReason::Cycle),
             None => {}
         }
-        self.states.insert(key.to_string(), State::Evaluating);
+        self.states.borrow_mut().insert(key.to_string(), State::Evaluating);
         let outcome = self.evaluate(key);
-        self.states.insert(key.to_string(), State::Done(outcome.clone()));
+        self.states.borrow_mut().insert(key.to_string(), State::Done(outcome.clone()));
         outcome
     }
 
-    fn evaluate(&mut self, key: &str) -> PropertyOutcome {
+    fn evaluate(&self, key: &str) -> PropertyOutcome {
         let editor = self.base.editor.as_ref().expect("an observation pass reads through the editor");
         if editor.is_canceled() {
             return PropertyOutcome::Pending(PendingReason::Canceled);
@@ -324,69 +347,149 @@ impl Pass<'_> {
             // The passive call check reports the parse failure.
             return PropertyOutcome::Pending(PendingReason::Unsupported("an expression that does not parse".to_string()));
         };
-        let reads = property_reads(&parsed);
-        if let Some(blocked) = reads.blocked {
-            return PropertyOutcome::Pending(blocked);
-        }
-        let mut data = Map::new();
-        for root in &reads.roots {
-            if let Err(reason) = self.bind(root, &mut data) {
-                return PropertyOutcome::Pending(reason);
-            }
-        }
         let erased = parsed.erase();
-        let data = Value::Object(data);
-        let lookup = ShortcutLookup::in_context(&data, &self.base);
+        let empty = Value::Object(Map::new());
+        let lookup = PassLookup { pass: self, reserved: ShortcutLookup::in_context(&empty, &self.base) };
+        self.reading.borrow_mut().push(false);
         let ((result, load), facts) =
             editor_reads::collecting_calls(|| trace::traced(|| evaluate(&erased, &lookup)));
-        self.calls.insert(key.to_string(), observed_calls(&parsed, &erased, facts));
+        let read_headerless = self.reading.borrow_mut().pop().unwrap_or(false);
+        let calls = observed_calls(&parsed, &erased, facts);
+        if read_headerless || calls.iter().any(|call| call.headerless_uncontracted) {
+            self.headerless.borrow_mut().insert(key.to_string());
+        }
+        self.calls.borrow_mut().insert(key.to_string(), calls);
         match result {
             Ok(value) => PropertyOutcome::Observed { value, load },
             Err(error) => classify(error),
         }
     }
 
-    /// Adds what `root` reads to `data`, or why it is not known yet.
-    fn bind(&mut self, root: &PropertyRoot, data: &mut Map<String, Value>) -> Result<(), PendingReason> {
-        match root {
-            PropertyRoot::Bare(name) => {
-                if self.request.sites.iter().any(|site| &site.key == name) {
-                    return match self.site(name) {
-                        PropertyOutcome::Observed { value, .. } => {
-                            data.insert(name.clone(), value);
-                            Ok(())
-                        }
-                        PropertyOutcome::Pending(PendingReason::Cycle) => Err(PendingReason::Cycle),
-                        _ => Err(PendingReason::Dependency(name.clone())),
-                    };
-                }
-                match self.request.seed.get(name) {
-                    Some(value) if holds_template(value) => Err(PendingReason::Dependency(name.clone())),
-                    Some(value) => {
-                        data.insert(name.clone(), value.clone());
-                        Ok(())
+    /// The value of the bare top-level name `name`: a literal property, or
+    /// another whole-value property, evaluated now if it was not yet.
+    fn bare(&self, name: &str) -> Result<Value, PendingReason> {
+        if self.request.sites.iter().any(|site| site.key == name) {
+            return match self.site(name) {
+                PropertyOutcome::Observed { value, .. } => {
+                    if self.headerless.borrow().contains(name)
+                        && let Some(reading) = self.reading.borrow_mut().last_mut()
+                    {
+                        *reading = true;
                     }
-                    None => Err(PendingReason::RuntimeOnly(name.clone())),
+                    Ok(value)
                 }
-            }
-            PropertyRoot::Fm(name) => match self.request.seed.get(name) {
-                Some(value) if holds_template(value) => Err(PendingReason::Dependency(name.clone())),
+                PropertyOutcome::Pending(PendingReason::Cycle) => Err(PendingReason::Cycle),
+                _ => Err(PendingReason::Dependency(name.to_string())),
+            };
+        }
+        match self.request.seed.get(name) {
+            Some(value) if holds_template(value) => Err(PendingReason::Dependency(name.to_string())),
+            Some(value) => Ok(value.clone()),
+            None => Err(PendingReason::RuntimeOnly(name.to_string())),
+        }
+    }
+
+    /// The authored frontmatter `fm.PATH` reads: only the key it names, or
+    /// every key for a whole `fm`. A value still holding a template is not
+    /// known yet.
+    fn authored(&self, path: &str) -> Result<Value, PendingReason> {
+        let authored = |name: &str, value: &Value| {
+            if holds_template(value) { Err(PendingReason::Dependency(name.to_string())) } else { Ok(value.clone()) }
+        };
+        let mut data = Map::new();
+        match path.strip_prefix("fm.").map(|rest| rest.split('.').next().unwrap_or(rest)) {
+            Some(name) => match self.request.seed.get(name) {
                 Some(value) => {
-                    data.insert(name.clone(), value.clone());
-                    Ok(())
+                    data.insert(name.to_string(), authored(name, value)?);
                 }
-                None => Err(PendingReason::RuntimeOnly(format!("fm.{name}"))),
+                None => return Err(PendingReason::RuntimeOnly(format!("fm.{name}"))),
             },
-            PropertyRoot::WholeFm => {
+            None => {
                 for (name, value) in &self.request.seed {
-                    if holds_template(value) {
-                        return Err(PendingReason::Dependency(name.clone()));
-                    }
-                    data.insert(name.clone(), value.clone());
+                    data.insert(name.clone(), authored(name, value)?);
                 }
-                Ok(())
             }
         }
+        Ok(Value::Object(data))
+    }
+}
+
+/// The lookup an observed property evaluates against. Every binding is
+/// resolved when evaluation reaches it, never up front, so a branch,
+/// fallback, recovery argument, or callback body that does not run binds
+/// nothing:
+///
+/// - a bare name and `fm.NAME` read the document ([`Pass::bare`],
+///   [`Pass::authored`]);
+/// - `ctx`, `current`, and a `local.*` no callback binds are known only when
+///   the document is composed;
+/// - `env` and `null` read as composition reads them.
+///
+/// A binding that is not known yet fails the evaluation with
+/// [`ExpressionError::ObservationPending`], which no recovery absorbs.
+struct PassLookup<'p, 'r> {
+    pass: &'p Pass<'r>,
+    /// Answers `env`, `null`, and the read-side functions' context.
+    reserved: ShortcutLookup<'p>,
+}
+
+impl PassLookup<'_, '_> {
+    fn binding(&self, path: &str) -> Result<Option<Value>, PendingReason> {
+        let mut segments = path.split('.');
+        let root = segments.next().unwrap_or(path);
+        match root {
+            "null" | "env" => Ok(self.reserved.get(path)),
+            "ctx" | "current" | "local" => Err(PendingReason::RuntimeOnly(root.to_string())),
+            "fm" => Ok(fm_namespace::resolve_fm_namespace(path, &self.pass.authored(path)?)),
+            _ => {
+                let mut value = self.pass.bare(root)?;
+                for segment in segments {
+                    value = match value {
+                        Value::Object(mut members) => match members.remove(segment) {
+                            Some(member) => member,
+                            None => return Ok(None),
+                        },
+                        _ => return Ok(None),
+                    };
+                }
+                Ok(Some(value))
+            }
+        }
+    }
+}
+
+impl EvaluationLookup for PassLookup<'_, '_> {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.binding(path).ok().flatten()
+    }
+
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        match self.binding(path) {
+            Ok(value) => Ok(ResolvedBinding::classify(path, value)),
+            Err(reason) => Err(editor_reads::pending(path, reason)),
+        }
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.reserved.resolution_context()
+    }
+
+    /// `fm['key']` reads that one authored key, as `fm.key` does, rather
+    /// than the whole `fm` that holds this property's own template.
+    fn resolve_index(&self, root: &str, key: &str) -> Option<Result<Value, ExpressionError>> {
+        if root != "fm" {
+            return None;
+        }
+        let path = format!("fm.{key}");
+        Some(match self.pass.request.seed.get(key) {
+            Some(value) if holds_template(value) => Err(editor_reads::pending(&path, PendingReason::Dependency(key.to_string()))),
+            Some(value) => Ok(value.clone()),
+            None => Err(editor_reads::pending(&path, PendingReason::RuntimeOnly(path.clone()))),
+        })
+    }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        self.reserved.resolution_context_ref()
     }
 }
 
@@ -409,7 +512,16 @@ fn observed_calls(
             let ordinal = nodes.iter().position(|node| std::ptr::from_ref(*node).addr() == address)?;
             let span = spanned.get(ordinal)?.span.clone();
             let call = (*nodes.get(ordinal)?).clone();
-            Some((ordinal, ObservedCall { span, call, values: values.values, overflow: values.overflow }))
+            Some((
+                ordinal,
+                ObservedCall {
+                    span,
+                    call,
+                    values: values.values,
+                    overflow: values.overflow,
+                    headerless_uncontracted: values.headerless_uncontracted,
+                },
+            ))
         })
         .collect();
     calls.sort_by_key(|(ordinal, _)| *ordinal);

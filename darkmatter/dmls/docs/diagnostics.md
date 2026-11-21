@@ -23,7 +23,10 @@ So DMLS deliberately **does not diagnose things that are resolved at compose
 time**, because it cannot know statically whether they are actually wrong:
 
 - A frontmatter value holding a deferred `{{ }}` or `$(...)` construct is **not**
-  flagged (its type can't be checked until the value is real).
+  flagged (its type can't be checked until the value is real). The one
+  exception is a top-level value that is a single `{{ … }}` loading data
+  without a contract: the editor loads it in the background and judges the
+  value it actually gets (see [Observed property values](#observed-property-values)).
 - A schema-`required` key that is absent from the document is **not** flagged in
   the default mode — it is expected to be injected at launch. (Strict mode
   re-enables it; see [Severity](#severity).)
@@ -40,7 +43,10 @@ and reads its in-memory workspace graph; the only filesystem touches are the
 existence probes resolution makes and the one repository discovery per context
 build. It never executes a shell command (`$(...)`, `::shell`),
 fetches a remote URL, or mutates a file. Shell and remote content is *explained*
-statically (see the `darkmatter.security` source), never run.
+statically (see the `darkmatter.security` source), never run. The reads behind
+schema slots and [observed property values](#observed-property-values) happen
+on the background slot worker, never during a diagnostics pass, and they too
+never prompt, fetch, or write.
 
 ## Frontmatter typing is shared with later requests
 
@@ -573,7 +579,7 @@ suppress its code; the category number stays visible in the message.
 
 #### `load_data` data diagnostics
 
-`load_data(file, as, options?)` gets the same call check, plus a few
+`load_data(file, as?, options?)` gets the same call check, plus a few
 data-specific errors. Each one is proven from literal arguments alone, and
 `md compose` rejects the document with the same code before it reads anything:
 
@@ -599,6 +605,95 @@ computed `file` with no literal `format`. So
 defers only the `row_shape_conflict` check, so
 `{{ load_data("rows.json", t, {header: true}) }}` still shows
 `invalid_options` at `{header: true}`.
+
+## Observed property values
+
+This section covers the diagnostics DMLS draws from data it has loaded. A
+top-level frontmatter property whose whole value is one `{{ … }}` calling
+`load_data` without a contract is evaluated in the background by the slot
+worker, under the same approvals as a schema slot and without asking
+anything, and its value is judged against the schema by the same rules as
+`md compose`. Which properties qualify, what they may read, and what
+refreshes them is described in
+[Observed properties](../../docs/topics/schemas/schema-slots.md#observed-properties).
+Diagnostics come only from the observation currently installed:
+
+| Outcome | Diagnostic at the `{{ … }}` | Source |
+| --- | --- | --- |
+| the value passes the schema | none | |
+| the value fails the schema | the ordinary schema code (`dm.schema.type_mismatch`, `dm.schema.constraint`, `dm.schema.missing_required`, …), one per problem | `darkmatter.schema` |
+| an executed, unrecovered load of a local file that does not exist | `dm.expression.evaluation_failure` **warning**, with the file-reference details compose reports; no schema verdict | `darkmatter.compose` |
+| another evaluation failure (malformed data, a contract mismatch, a bad spread operand) | **error** with its own code, unless a passive diagnostic with that code is already inside the same range | `darkmatter.compose` |
+| pending (an unapproved read, a URL without a fresh cached response, a function or binding the editor does not evaluate that evaluation reaches, an exhausted allowance; one in a branch, fallback, or callback that does not run changes nothing) | none | |
+| the observation is stale and being refreshed | none until the refresh installs | |
+
+Severity follows compose, because the value is real: a missing required
+member inside an observed value is an **error** even without `schema.strict`,
+since nothing later supplies it, and an unknown key is a warning unless
+`schema.strict` is set. A `load_data` of a missing file is only a warning
+here, although compose fails the document there, because the file may
+simply not be created yet.
+
+**Where the problem is in the data.** When the property's value is one
+`load_data` call's result, unchanged (written directly, in parentheses, or
+selected by a `? :` conditional), a failure also says where the failing
+value sits in the data file. `data.data_location` is the record compose
+reports (see
+[Data location](../../docs/cli/data-contracts.md#data-location)), and, for a
+local file, `relatedInformation` points at the same spot as a zero-width
+range at the start of the value. The range uses the text the observation
+read, so an unsaved data buffer is located correctly. For the
+[observed-properties example](../../docs/topics/schemas/schema-slots.md#observed-properties),
+where Grace's `age` on line 4 of `people.yaml` is `"old"`:
+
+```json
+{
+  "range": { "start": { "line": 3, "character": 9 }, "end": { "line": 3, "character": 39 } },
+  "severity": 1,
+  "code": "dm.schema.type_mismatch",
+  "source": "darkmatter.schema",
+  "message": "…",
+  "relatedInformation": [
+    {
+      "location": {
+        "uri": "file:///work/people.yaml",
+        "range": { "start": { "line": 3, "character": 7 }, "end": { "line": 3, "character": 7 } }
+      },
+      "message": "the loaded value at `/1/age`"
+    }
+  ],
+  "data": {
+    "instance_path": "/people/1/age",
+    "data_location": { "file": "/work/people.yaml", "pointer": "/1/age", "line": 4, "column": 8 }
+  }
+}
+```
+
+`instance_path` is the failing value's place in the frontmatter and
+`pointer` its place in the data file. LSP positions count from zero, and
+`data_location` lines and columns from one. A value built by a callback or
+an object spread (`map(load_data('people.yaml'), p => { ...p, color: 'blue' })`)
+has no single source position, so it gets the expression range alone. A URL
+gets `data_location` with the URL as its `file`, but no `relatedInformation`.
+
+**No verdict from guesses.** No diagnostic is drawn from a value the editor
+has not seen. A pending property gets no schema error, and members read from
+it are not reported missing because of fields the data happens to lack:
+`dm.expression.undeclared_member` and the other member checks keep using the
+declared types, never the observed ones. A property whose evaluation ran a
+CSV or TSV read with `header: false` and no contract is typed `unknown[][]`
+and gets no verdict for its cells, while `md compose` still checks every cell
+the schema covers. The editor judges the options the call was bound with, not
+how they are written, and only a call that ran counts:
+
+```yaml
+$schema:
+    cells: "tuple([number, number])[]"
+    rows: "{ a: number, b: number }[]"
+opts: { header: false }
+cells: "{{ load_data('table.csv', null, opts) }}"   # no editor verdict; compose fails on a bad cell
+rows: "{{ true ? load_data('headed.csv') : load_data('headed.csv', null, opts) }}"   # judged: the headed arm ran
+```
 
 ## Ranging
 
@@ -727,6 +822,9 @@ Some diagnostics attach secondary locations:
   library's message (see
   [Merging use-site constraints](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#merging-use-site-constraints)).
 - `dm.transclusion.cycle` lists the transclusion ancestry that forms the cycle.
+- A schema failure of an [observed property value](#observed-property-values)
+  that comes straight from a local data file points at the failing value in
+  that file.
 
 ## Configuration
 

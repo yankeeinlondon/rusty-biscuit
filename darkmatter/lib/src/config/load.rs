@@ -46,7 +46,7 @@ pub use entries::{
     ShellCommandEntry,
 };
 pub use error::{
-    CONFIG_INVALID_CODE, CONFIG_MIGRATION_CODE, CONFIG_MISSING_CODE, CONFIG_NOT_SAVED_CODE, CONFIG_REFERENCE_CODE,
+    CONFIG_CREATED_CODE, CONFIG_INVALID_CODE, CONFIG_MIGRATION_CODE, CONFIG_MISSING_CODE, CONFIG_NOT_SAVED_CODE, CONFIG_REFERENCE_CODE,
     ConfigDiagnostic, ConfigError, ConfigErrorKind, ConfigProblem, ConfigRevision,
 };
 
@@ -86,8 +86,16 @@ pub enum ConfigLoadMode {
     /// files of the scopes the context names are converted into missing
     /// `permissions` properties and then deleted
     /// ([`super::migration`]); the notices lead [`ConfigSnapshot::diagnostics`].
-    /// A [`Self::Passive`] load reports those files instead.
+    /// A [`Self::Passive`] load reports those files instead. A missing
+    /// `~/.darkmatter.yaml` is then created with every setting at its default
+    /// ([`super::init::init_user`]) and loaded, reported once as
+    /// [`CONFIG_CREATED_CODE`]; only when it cannot be written does the load
+    /// fall back to the defaults with [`CONFIG_MISSING_CODE`].
     MigrateLegacy,
+    /// [`Self::MigrateLegacy`] without creating the user file: the load of a
+    /// setup command (`md init`) whose own transaction creates it, and which
+    /// must write nothing when that transaction fails.
+    Setup,
 }
 
 /// One configuration file the load observed: its path, which revision, and
@@ -246,6 +254,7 @@ pub struct ConfigSnapshot {
     dependencies: Vec<ConfigDependency>,
     diagnostics: Vec<ConfigDiagnostic>,
     user_missing: Option<PathBuf>,
+    user_created: Option<PathBuf>,
     /// The user file's bytes as read, shared by every projection
     /// ([`Self::with_repository_projection`]) so a request reads it once.
     user_bytes: Option<Arc<[u8]>>,
@@ -272,19 +281,51 @@ impl ConfigSnapshot {
         mode: ConfigLoadMode,
     ) -> Result<Self, ConfigError> {
         let migrated = match mode {
-            ConfigLoadMode::MigrateLegacy => super::migration::migrate(context)?,
+            ConfigLoadMode::MigrateLegacy | ConfigLoadMode::Setup => super::migration::migrate(context)?,
             ConfigLoadMode::Passive => Vec::new(),
         };
-        let user_bytes = match context.home_dir() {
-            Some(home) => read_worktree(&home.join(CONFIG_FILE_NAME), ConfigRevision::User)?.map(Arc::from),
+        let user_path = context.home_dir().map(|home| home.join(CONFIG_FILE_NAME));
+        let mut user_bytes = match &user_path {
+            Some(path) => read_worktree(path, ConfigRevision::User)?.map(Arc::from),
             None => None,
         };
+        let mut created = None;
+        let mut not_created = None;
+        if mode == ConfigLoadMode::MigrateLegacy
+            && user_bytes.is_none()
+            && let Some(path) = &user_path
+        {
+            match super::init::init_user(context, super::init::InitOptions::default()) {
+                Ok(_) => {
+                    user_bytes = read_worktree(path, ConfigRevision::User)?.map(Arc::from);
+                    created = Some(path.clone());
+                }
+                Err(error) => not_created = Some(error),
+            }
+        }
         let mut snapshot = Self::assemble(context, repository, mode, user_bytes)?;
-        let notices = match mode {
-            ConfigLoadMode::MigrateLegacy => migrated,
+        if let (Some(error), Some(path)) = (not_created, &user_path)
+            && let Some(missing) = snapshot.diagnostics.iter_mut().find(|notice| notice.code == CONFIG_MISSING_CODE)
+        {
+            missing.message = format!(
+                "`{}` does not exist and could not be created ({error}), so every setting takes its default",
+                path.display()
+            );
+        }
+        let mut notices = match mode {
+            ConfigLoadMode::MigrateLegacy | ConfigLoadMode::Setup => migrated,
             ConfigLoadMode::Passive => super::migration::passive_notices(context, &snapshot),
         };
+        if let Some(path) = &created {
+            notices.push(ConfigDiagnostic {
+                code: CONFIG_CREATED_CODE,
+                file: path.clone(),
+                message: format!("created `{}` with every setting at its default", path.display()),
+                problems: Vec::new(),
+            });
+        }
         snapshot.diagnostics.splice(0..0, notices);
+        snapshot.user_created = created;
         Ok(snapshot)
     }
 
@@ -342,7 +383,9 @@ impl ConfigSnapshot {
         // A writing CLI loads the user file once, before it knows its
         // sources' repositories; each repository's legacy files migrate here.
         let migrated = match (self.mode, context.repository_root()) {
-            (ConfigLoadMode::MigrateLegacy, Some(_)) => super::migration::migrate_repository(context)?,
+            (ConfigLoadMode::MigrateLegacy | ConfigLoadMode::Setup, Some(_)) => {
+                super::migration::migrate_repository(context)?
+            }
             _ => Vec::new(),
         };
         let mut projected = Self::assemble(context, tree, self.mode, self.user_bytes.clone())?;
@@ -469,6 +512,7 @@ impl ConfigSnapshot {
             dependencies,
             diagnostics,
             user_missing,
+            user_created: None,
             user_bytes,
         })
     }
@@ -533,6 +577,15 @@ impl ConfigSnapshot {
     #[must_use]
     pub fn user_config_missing(&self) -> Option<&Path> {
         self.user_missing.as_deref()
+    }
+
+    /// The path of the user file when this load created it
+    /// ([`ConfigLoadMode::MigrateLegacy`]), so a caller can report
+    /// [`CONFIG_CREATED_CODE`] once per invocation. A repository projection
+    /// never reports it.
+    #[must_use]
+    pub fn user_config_created(&self) -> Option<&Path> {
+        self.user_created.as_deref()
     }
 
     /// Everything a caller reports: the missing-user-file notice, the
