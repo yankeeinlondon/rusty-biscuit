@@ -39,6 +39,8 @@ packages:
     - "darkmatter-lsp"
     - "claudine"
     - "darkmatter-cli"
+    - "claudine-cli"
+    - "biscuit-terminal"
 decisions_for_review:
     - |-
         Phase 1 changes the shared expression tree, which breaks every Darkmatter, DMLS, and Claudine reader of object literals; the plan schedules their spread semantics for Phase 2 but Phase 1 must still compile and pass. I adapted every reader now: pure walkers visit spread operands (what Phase 2 asks for), the evaluator already merges entries in order with a null spread adding nothing, and passive typing treats any literal containing a spread as "some object" (no member or option findings). A non-object spread operand fails at evaluation with the generic catch-all error ("...(): object spread requires an object or null, found number") instead of the planned typed error and code. Alternatives: leave the build broken until Phase 2 (fails this phase's gates), or reject spread at evaluation until Phase 2 (simpler, but a parsed spread would fail every document). Phase 2 replaces the placeholder error with `InvalidSpreadOperand` / `dm.expression.invalid_spread_operand` and the "unknown" typing with ordered spread inference; nothing else needs redoing.
@@ -63,7 +65,9 @@ decisions_for_review:
     - |-
         The editor-facing provisional type of a contract-free `load_data` call narrows to rows only when the file's format and the header option are both literal. `header: "false"` written as a string (which the argument binder turns into `false`) is not narrowed and keeps the general `open object | unknown[]` type. Narrowing it would require binding the options inside the type function, as the passive options check already does.
     - |-
-        Editor admission is decided once over the whole property expression, before it runs. A function the editor will not run (an effectful call, a reader other than `load_data` and `file_exists`, a runtime-only binding) leaves the property pending even when it sits in a branch evaluation would not take. The plan asks for ordinary branch selection; this is the conservative reading. The alternative is to judge each operation as evaluation reaches it, which means moving the refusal into the evaluator's dispatch; tests in `editor_observation.rs` and `typed_load_data_editor.rs` that assert pending for such properties would change.
+        The initial implementation admitted the whole property expression before evaluation, including unused branches. Review 1 rejected that behavior; its repair now admits calls and resolves bindings only when evaluation reaches them. An executed unsupported operation leaves the property pending before it runs; an unused operation does not prevent observing the selected result.
+
+        Correction verified 2026-11-21 during Review 2: the former present-tense statement that admission happens once over the whole expression no longer describes the implementation. Verified `admit_editor_call` in expression/mod.rs, `PassLookup` in slots/observe.rs, and the public-observation and DMLS unused-branch regression tests in the 721-test focused run. Schema-slot admission remains a separate, whole-expression contract.
     - |-
         In the editor, `fm.X` of a property whose authored value is still a template is pending, while a bare `X` evaluates that other property first and uses its result. This follows the plan's wording that `fm` sees the authored seed. If compose actually exposes interpolated values through `fm` at that point, `fm.X` should evaluate the dependency too; only the binding step in `observe.rs` changes.
     - |-
@@ -82,14 +86,12 @@ decisions_for_review:
         DMLS tests seed the transport cache through a new library feature, `cache-test-hooks` (`compose::cache_test_hooks::seed_remote_entry`), enabled only by DMLS's dev-dependency. The alternative is making the cache module's types public.
     - |-
         Editor diagnostics for a missing or failed load use the source name `darkmatter.compose`, and a destination failure's related data-file location is a zero-width range at the value's start. Hover still shows the raw observed preview for a headerless, uncontracted CSV read, which gets no verdict and no shape.
-message_to_agent: |-
-    Phase 4 (editor observation in DMLS) is complete; Phase 5 is documentation, regeneration, and acceptance.
-    (1) Behavior to document: the library entry point is `darkmatter::markdown::schemas::slots::observe` (`SlotSession::observe_properties`, `PropertyOutcome::{Observed, Pending, Missing, Failed}`, `PendingReason`), editor reads in `compose/expression/editor_reads.rs` (authorize before probe; remote only from a fresh cache entry under `<base_dir or cache root>/.darkmatter/cache/...`, never a fetch), validation in `schemas/observed.rs` (`validate_observed_frontmatter`, `DeferReason`), and DMLS install/expiry/projection in `slot_jobs.rs`, `diagnostics/observed.rs`, `overlay/properties.rs`. The repo skill `.claude/skills/darkmatter/dmls.md` ("Property observation") summarizes it; the user docs (`schema-slots.md`, `dmls/docs/*`, `loading-data.md`, caching) are not updated yet.
-    (2) The diagnostic data contract gained `data.data_location` and `relatedInformation` on editor destination failures; see the example in the Phase 4 log.
-    (3) Departures a reviewer should see are in decisions_for_review (static admission, `fm.X` vs bare `X`, file-dependent and root-union deferral, call facts matched by text).
-    (4) Still failing, outside this feature: `shipped_schema_corpus::shipped_markdown_named_type_references_resolve` because of `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md`.
-    (5) The darkmatter recipe's `just test -E '(...)'` still breaks on parentheses; run nextest directly (`-p darkmatter --features effects-instrumentation,work-counters`, `-p darkmatter-lsp --features effects-instrumentation`, `-p darkmatter-cli --features test-fixtures`).
-    (6) The disk filled during Phase 4 and `target/debug/incremental` was deleted once; check `df -h .` before long builds.
+    - |-
+        To clear the Darkmatter corpus gate (`shipped_markdown_named_type_references_resolve`), I edited a research document outside this feature, `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md`. Its `$schema` used `apps: app[]` with `app` declared in a top-level `types:` block, a form only `kind: schema` files support, so the type never resolved. I wrote the object type inline (`"{ name: string(required), urls: url(required)[], support: enum(true,false,unknown; required) }[]"`) and dropped the three field descriptions that were attached with `->`. The alternatives were to leave the gate red, as Phases 3 and 4 did, or to move the type into a separate `kind: schema` file and import it with `app@file`, which keeps the descriptions but adds a file. If the author prefers the import, only that document changes.
+    - |-
+        The generated `load_data` page said `header: false` "needs a list-row `as`" and that a name list "needs an object-row `as`". That reads as if a contract were required, but without `as` these modes return `unknown[][]` and verbatim-keyed objects. I reworded the catalog description in `darkmatter/schemas/partials/functions.yaml` ("an `as` must then have list rows" / "object rows") and regenerated both shipped artifacts and the page. The alternative was to leave the catalog text alone and document the nuance only in the guide. Reverting means restoring one sentence and running `just shipped-schemas` and `just regen-expr-doc`.
+    - |-
+        The caller skill (`use-darkmatter/authoring.md`) summarizes `load_data` and links to the canonical Loading Data guide instead of transcluding a passage of it. The repository convention prefers transclusion, but the guide's prose has inline `{{ … }}` examples that would be evaluated (or fail under `--deny all`) at publication unless included with `interpolate=false`. Switching to transclusion means choosing a passage, adding `::file … interpolate=false`, and checking the published text.
 source_files_during_phase_2:
     - "darkmatter/lib/src/markdown/compose/expression/spread.rs"
     - "darkmatter/lib/src/markdown/compose/expression/error.rs"
@@ -243,6 +245,192 @@ docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - ".claude/skills/darkmatter/dmls.md"
+source_files_during_phase_5:
+    - "darkmatter/schemas/partials/functions.yaml"
+    - "darkmatter/lib/generated/shipped.json"
+    - "claudine/lib/generated/shipped.json"
+    - "claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap"
+docs_updated_during_phase_5:
+    - "darkmatter/README.md"
+    - "darkmatter/docs/topics/loading-data.md"
+    - "darkmatter/docs/topics/darkmatter-expressions.md"
+    - "darkmatter/docs/topics/caching.md"
+    - "darkmatter/docs/topics/schemas/schema-slots.md"
+    - "darkmatter/docs/inline/interpolation.md"
+    - "darkmatter/docs/lsp/features.md"
+    - "darkmatter/docs/cli/data-contracts.md"
+    - "darkmatter/docs/errors/composition-problems.md"
+    - "darkmatter/docs/functions/load-data.md"
+    - "darkmatter/dmls/docs/autocomplete.md"
+    - "darkmatter/dmls/docs/hover.md"
+    - "darkmatter/dmls/docs/diagnostics.md"
+    - "darkmatter/docs/use-skills/use-darkmatter/authoring.md"
+    - "simplified-schema/docs/topics/expression-syntax.md"
+    - "biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md"
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - ".claude/skills/darkmatter/expressions.md"
+    - ".claude/skills/darkmatter/requests.md"
+    - ".claude/skills/darkmatter/dmls.md"
+    - ".claude/skills/simplified-schema/SKILL.md"
+source_code:
+    - "simplified-schema/lib/src/expression/ast.rs"
+    - "simplified-schema/lib/src/expression/lexer.rs"
+    - "simplified-schema/lib/src/expression/mod.rs"
+    - "simplified-schema/lib/src/expression/parser.rs"
+    - "simplified-schema/lib/src/simplified/grammar.rs"
+    - "simplified-schema/lib/tests/l1/expression_syntax.rs"
+    - "darkmatter/lib/src/markdown/compose/cache/remote_cache.rs"
+    - "darkmatter/lib/src/markdown/compose/remote_fetch.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/absence.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/call_check.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/lint.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/member_check.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/prepared.rs"
+    - "darkmatter/lib/src/markdown/compose/preflight/collect.rs"
+    - "darkmatter/lib/src/markdown/compose/remote.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/admission.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/evaluator.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/targets.rs"
+    - "darkmatter/lib/tests/l1/more_is_more_literals_and_indexes.rs"
+    - "darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs"
+    - "darkmatter/lib/tests/l1/semantic_results_never_persist.rs"
+    - "darkmatter/dmls/src/overlay/expressions.rs"
+    - "claudine/lib/src/composition/lifecycle/prewarm/classify.rs"
+    - "claudine/lib/src/dispatch/matcher.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/spread.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/error.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/projection.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs"
+    - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/policy.rs"
+    - "darkmatter/lib/tests/l1/object_spread.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "darkmatter/dmls/src/diagnostics/codes.rs"
+    - "darkmatter/dmls/src/diagnostics/call_check.rs"
+    - "darkmatter/dmls/tests/l1/object_spread_editor.rs"
+    - "darkmatter/dmls/tests/l1/main.rs"
+    - "claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs"
+    - "claudine/lib/src/dispatch/matcher/tests.rs"
+    - "claudine/lib/generated/shipped.json"
+    - "claudine/lib/src/composition/schema/translate.rs"
+    - "darkmatter/cli/schemas/output/clean.yaml"
+    - "darkmatter/cli/schemas/output/code-block.yaml"
+    - "darkmatter/cli/schemas/output/compose.yaml"
+    - "darkmatter/cli/schemas/output/delta.yaml"
+    - "darkmatter/cli/schemas/output/edit.yaml"
+    - "darkmatter/cli/schemas/output/get.yaml"
+    - "darkmatter/cli/schemas/output/graph.yaml"
+    - "darkmatter/cli/schemas/output/hash.yaml"
+    - "darkmatter/cli/schemas/output/init.yaml"
+    - "darkmatter/cli/schemas/output/list-themes.yaml"
+    - "darkmatter/cli/schemas/output/render.yaml"
+    - "darkmatter/cli/schemas/output/rm.yaml"
+    - "darkmatter/cli/schemas/output/schema-about.yaml"
+    - "darkmatter/cli/schemas/output/schema-detect.yaml"
+    - "darkmatter/cli/schemas/output/schema-triggers.yaml"
+    - "darkmatter/cli/schemas/output/schema-validate.yaml"
+    - "darkmatter/cli/schemas/output/set.yaml"
+    - "darkmatter/cli/schemas/output/toc.yaml"
+    - "darkmatter/cli/schemas/output/validate-refs.yaml"
+    - "darkmatter/cli/src/commands/frontmatter.rs"
+    - "darkmatter/cli/tests/l1/load_data.rs"
+    - "darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json"
+    - "darkmatter/dmls/tests/l1/option_arguments.rs"
+    - "darkmatter/lib/generated/shipped.json"
+    - "darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/contract.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/error.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/load.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/locate.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/options.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/parse.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/runtime.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/functions/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/functions/strings.rs"
+    - "darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs"
+    - "darkmatter/lib/src/markdown/compose/interpolation/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs"
+    - "darkmatter/lib/src/markdown/compose/pipeline/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/schema_validation.rs"
+    - "darkmatter/lib/src/markdown/compose/value_origin.rs"
+    - "darkmatter/lib/src/markdown/errors/blocks.rs"
+    - "darkmatter/lib/src/markdown/mod.rs"
+    - "darkmatter/lib/src/markdown/types.rs"
+    - "darkmatter/lib/tests/l1/diagnostic_source_provenance.rs"
+    - "darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs"
+    - "darkmatter/lib/tests/l1/load_data_execution.rs"
+    - "darkmatter/lib/tests/l1/load_data_options.rs"
+    - "darkmatter/lib/tests/l1/load_data_options_passive.rs"
+    - "darkmatter/schemas/partials/functions.yaml"
+    - "darkmatter/schemas/partials/lifecycle.yaml"
+    - "darkmatter/lib/src/markdown/compose/expression/trace.rs"
+    - "darkmatter/lib/tests/l1/load_data_destination.rs"
+    - "darkmatter/lib/tests/l1/load_data_uncontracted.rs"
+    - "darkmatter/dmls/Cargo.toml"
+    - "darkmatter/dmls/src/clock.rs"
+    - "darkmatter/dmls/src/diagnostics/frontmatter.rs"
+    - "darkmatter/dmls/src/diagnostics/mod.rs"
+    - "darkmatter/dmls/src/diagnostics/observed.rs"
+    - "darkmatter/dmls/src/overlay/mod.rs"
+    - "darkmatter/dmls/src/overlay/properties.rs"
+    - "darkmatter/dmls/src/providers/dsl.rs"
+    - "darkmatter/dmls/src/providers/frontmatter.rs"
+    - "darkmatter/dmls/src/router.rs"
+    - "darkmatter/dmls/src/slot_jobs.rs"
+    - "darkmatter/dmls/tests/common/mod.rs"
+    - "darkmatter/dmls/tests/l1/typed_load_data_editor.rs"
+    - "darkmatter/lib/Cargo.toml"
+    - "darkmatter/lib/src/config/permissions.rs"
+    - "darkmatter/lib/src/markdown/compose/cache/store.rs"
+    - "darkmatter/lib/src/markdown/compose/cache_test_hooks.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/editor_reads.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/functions/fs.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/read_gate.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/tests.rs"
+    - "darkmatter/lib/src/markdown/compose/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/observed.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/observe.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/observe_tests.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/session.rs"
+    - "darkmatter/lib/tests/l1/editor_observation.rs"
+    - "darkmatter/lib/tests/l1/observed_validation.rs"
+    - "simplified-schema/lib/src/file_match.rs"
+    - "simplified-schema/lib/src/format.rs"
+    - "simplified-schema/lib/src/validate.rs"
+    - "claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap"
+documentation:
+    - ".claude/skills/darkmatter/remote-cache.md"
+    - "darkmatter/docs/inline/call-check.md"
+    - "darkmatter/dmls/docs/diagnostics.md"
+    - ".claude/skills/darkmatter/expressions.md"
+    - "darkmatter/docs/functions/load-data.md"
+    - "darkmatter/docs/topics/darkmatter-expressions.md"
+    - ".claude/skills/darkmatter/dmls.md"
+    - "darkmatter/README.md"
+    - "darkmatter/docs/topics/loading-data.md"
+    - "darkmatter/docs/topics/caching.md"
+    - "darkmatter/docs/topics/schemas/schema-slots.md"
+    - "darkmatter/docs/inline/interpolation.md"
+    - "darkmatter/docs/lsp/features.md"
+    - "darkmatter/docs/cli/data-contracts.md"
+    - "darkmatter/docs/errors/composition-problems.md"
+    - "darkmatter/dmls/docs/autocomplete.md"
+    - "darkmatter/dmls/docs/hover.md"
+    - "darkmatter/docs/use-skills/use-darkmatter/authoring.md"
+    - "simplified-schema/docs/topics/expression-syntax.md"
+    - "biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md"
+    - ".claude/skills/darkmatter/requests.md"
+    - ".claude/skills/simplified-schema/SKILL.md"
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-11-20-schema-typed-load-data (5 phases)
@@ -871,3 +1059,147 @@ controls inside the package runs below.
   `BUILD_MACOS` unset); cross-OS evidence is left to CI. The symlink case is
   `cfg(unix)`; the chmod-000 case skips itself when the process can still
   read the file (as root).
+
+## Phase 5
+
+Documentation, regeneration, and acceptance. No library behavior changed.
+The only non-documentation edits were a catalog description, the
+regenerated artifacts, a stale Claudine CLI snapshot, and a broken research
+document that failed the Darkmatter corpus gate.
+
+### Documentation (three writers on separate files, reviewed here)
+
+- **Loading and composition:** `docs/topics/loading-data.md` is now the
+  canonical guide. It covers the optional `as` and when conversion happens:
+  in the call, or later when frontmatter is validated (a CSV `"1000"` stays
+  text until then). It also covers wrapping a scalar root and turning `null`
+  into `[]`, the three header modes, and the `First Name` → `firstName`
+  migration in a contract (`p['First Name']` becomes `p.firstName`) and in
+  member access. It includes `header: ['label', 'years']`, the spec's
+  direct/additive/conditional example, and which forms keep
+  `data_location`. Shorter updates went to `darkmatter-expressions.md`,
+  `inline/interpolation.md`, the README (overview only),
+  `cli/data-contracts.md` ("Destination schema failures"),
+  `errors/composition-problems.md`, and the caller skill
+  `use-skills/use-darkmatter/authoring.md`. The caller skill links to the
+  guide instead of transcluding it, because the guide's prose has inline
+  `{{ … }}` examples that would be evaluated at publication. The writer
+  fixed drift it found: the empty-YAML advice (`| null` → it is now `[]`),
+  `{header: [1]}` (it now binds as `["1"]`), and the duplicate-header rule
+  (now the camelCase collision rule).
+- **Editor:** `topics/schemas/schema-slots.md` "In the editor" has a new
+  "Observed properties" subsection. It has the Mermaid flow (demand →
+  admission/authorization → evaluation → validation → install →
+  invalidation) and covers authorization, cached-remote setup, the
+  provisional state, the missing-file warning versus the compose error,
+  deferrals, and refresh triggers. Also updated: `topics/caching.md` ("Editor
+  reads": read-only, fresh entries only, never fetches), `lsp/features.md`
+  §4.12, and `dmls/docs/{autocomplete,hover,diagnostics}.md` (members of a
+  loaded value, bounded preview, a `relatedInformation` + `data.data_location`
+  JSON example, `unknown[][]` with no cell verdict). Drift fixed: the
+  `load_data` signature in `hover.md` and `diagnostics.md` still showed `as`
+  as required, and diagnostics.md said a `{{ }}` value is never flagged.
+  Schema failures on an observed value use the source `darkmatter.schema`.
+  Only missing-file and evaluation failures use `darkmatter.compose`.
+- **Spread:** `simplified-schema/docs/topics/expression-syntax.md` "Object
+  literals and spread" covers entries and spans, duplicate written keys,
+  array spread, the literal-example grammar (spread refused), and
+  Darkmatter's evaluation (in order, last key wins, shallow, `null` adds
+  nothing, `dm.expression.invalid_spread_operand`, and inference with
+  unknown keys).
+- **Repo skills:** `.claude/skills/darkmatter/{expressions,requests,dmls}.md`
+  and `.claude/skills/simplified-schema/SKILL.md` (the spread AST node; walkers
+  must visit spread operands).
+- Checked: the data-contracts JSON example matches real `md compose
+  --output json` output for the worked example with `age: "old"`.
+  It gives `dm.schema.type_mismatch` at `doc.md` 4:10, span 78..106, and
+  `data_location` `{file: data.yaml, pointer: /1/age, line: 4, column: 8}`.
+
+### Regeneration
+
+- `just regen-expr-doc`: the first run changed no function page. Phase 3
+  had already produced the optional signature
+  `load_data(file: file | null, [as: type-definition(container) | null], [options: …])`.
+  The page's description said `header: false` "needs a list-row `as`" and a
+  name list "needs an object-row `as`". That is wrong without a contract.
+  I reworded it in `schemas/partials/functions.yaml` ("an `as` must then have
+  list rows" / "… object rows"). Then I ran `just shipped-schemas`, which
+  regenerated `darkmatter/lib/generated/shipped.json` and
+  `claudine/lib/generated/shipped.json`, and ran `just regen-expr-doc` again
+  (`docs/functions/load-data.md` updated).
+- `just publish-skills` (darkmatter): published `use-darkmatter` and
+  `use-dmls`. I inspected `~/.claude/skills/use-darkmatter/authoring.md`. It
+  has the optional-`as` examples, the explicit-name example, and the
+  `First Name` → `firstName` note, with the fenced `{{ … }}` examples left
+  verbatim.
+
+### Fixes outside the feature, made to clear the gates
+
+- `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md`
+  declared `apps: app[]` with the `app` type in a sibling top-level `types:`
+  block. `types:` is a `kind: schema` construct, so a Markdown document's
+  inline `$schema` cannot see it. That failed
+  `shipped_schema_corpus::shipped_markdown_named_type_references_resolve`,
+  the known failure that Phases 3 and 4 left. I inlined the object type and
+  dropped the three field descriptions (see decisions_for_review).
+- `claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap`
+  still showed `load_data(file, as, [options])`. Phase 3 made `as` optional,
+  so I updated the line to `load_data(file, [as], [options])`. Earlier phases
+  never ran Claudine's CLI tests.
+
+### Requirement-to-test mapping
+
+This phase has no new behavior, so it adds no new tests. What it ran:
+
+- Optional signature in the shipped catalog and generated docs: Darkmatter's
+  `shipped_artifact_is_fresh` and expression-doc freshness tests (inside
+  `just test`), and Claudine's `context_expressions_function_order_snapshot`.
+- Shipped Markdown corpus with the passive named-type check:
+  `shipped_schema_corpus` and `shipped_corpus_invocation` with
+  `BISCUIT_L1_INCLUDE_SLOW=1`.
+- Shipped-artifact consumers: `test-toolkit`'s
+  `shipped_schemas_coordinator_contracts` (5 tests; these are the
+  test-toolkit tests that read the regenerated artifacts).
+- Loader, CLI, and editor entry points (Phases 3–4): `load_data*`,
+  `typed_load_data_editor`, `schema_slots_editor`, `editor_observation`, and
+  `observed_validation`, all inside `just test`.
+
+### Gates
+
+- Scope:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `packages: [claudine, darkmatter, claudine-cli, darkmatter-cli,
+  darkmatter-lsp, simplified-schema, test-toolkit]` and `change_class:
+  package`, so the gates ran.
+- Darkmatter: `LANG=C.UTF-8 just test`: 17394 passed, 10 skipped, 0 at or
+  above 5 s. The corpus failure is gone. `just lint`: clean, including the
+  zed-dmls wasm check. `just check-tier-coverage darkmatter`: 0 stranded.
+- Darkmatter slow corpus:
+  `LANG=C.UTF-8 BISCUIT_L1_INCLUDE_SLOW=1 cargo nextest run -p darkmatter --features effects-instrumentation,work-counters -p darkmatter-cli --features darkmatter-cli/test-fixtures -E 'test(shipped_schema_corpus) | test(shipped_corpus_invocation) | test(shipped_artifact_is_fresh) | test(load_data) | test(typed_load_data_editor) | test(schema_slots_editor)'`:
+  549/549. The recipe's `-E '(...)'` form still breaks on parentheses, so
+  this ran nextest directly.
+- Simplified Schema: `just test`: 2017 (plus the 2385-test unit binary)
+  passed, none slow. `BISCUIT_L1_INCLUDE_SLOW=1 just test shipped_corpus`:
+  passed (the `-E` form breaks the same way). `just lint`: clean.
+- Claudine: `just test-library` under the host's `LANG=C` failed 4
+  `group_framing` tests, which use ASCII fallback glyphs under `LANG=C`.
+  They are the same locale issue Phase 1 recorded for Darkmatter. With
+  `LANG=C.UTF-8`, they passed alone (12/12) and the full run passed
+  6937/6937, none slow. `just lint`: clean.
+- claudine-cli (dependent): `LANG=C.UTF-8 just test-cli`: 5326/5326, none
+  slow, after the snapshot update. A first plain `cargo nextest` run failed
+  15 tests in about 0.01 s each, because it skipped the recipe's `md`
+  provisioning (`_ensure-md`). That was a harness problem, not a code
+  problem.
+- test-toolkit (dependent, reads the regenerated artifacts):
+  `shipped_schemas_coordinator_contracts` 5/5. Two other tests fail and read
+  no file changed here:
+  `ci_workflow_contracts::the_lint_step_measures_a_sub_second_command_instead_of_recording_zero`
+  fails the same way alone (`duration_s=0.0`, from `time.monotonic`
+  readings in separate interpreters), and `real_kache_config_selector_bypasses_the_managed_pin`
+  is a `real_`-tier test that L1 excludes. Both are outside this feature.
+- `git diff --check`: clean. `just slow-tests fresh`: fresh. After the
+  Darkmatter run, only the Claudine snapshot file changed, and no Darkmatter
+  test reads it.
+- No local OS test rigs: `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`, and
+  `BUILD_MACOS` are unset, so cross-OS evidence is left to CI.

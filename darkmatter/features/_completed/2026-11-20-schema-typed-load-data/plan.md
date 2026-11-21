@@ -3,7 +3,7 @@ kind: plan
 created: 2026-11-20
 status: planned
 total_phases: 5
-phase: 5
+phase: 6
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -42,6 +42,8 @@ packages:
 - darkmatter-lsp
 - claudine
 - darkmatter-cli
+- claudine-cli
+- biscuit-terminal
 source_files_during_phase_2:
 - darkmatter/lib/src/markdown/compose/expression/spread.rs
 - darkmatter/lib/src/markdown/compose/expression/error.rs
@@ -195,6 +197,192 @@ docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
 - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/lib/generated/shipped.json
+- claudine/lib/generated/shipped.json
+- claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+docs_updated_during_phase_5:
+- darkmatter/README.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/inline/interpolation.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/docs/functions/load-data.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- simplified-schema/docs/topics/expression-syntax.md
+- biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/requests.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/simplified-schema/SKILL.md
+source_code:
+- simplified-schema/lib/src/expression/ast.rs
+- simplified-schema/lib/src/expression/lexer.rs
+- simplified-schema/lib/src/expression/mod.rs
+- simplified-schema/lib/src/expression/parser.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/tests/l1/expression_syntax.rs
+- darkmatter/lib/src/markdown/compose/cache/remote_cache.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/lint.rs
+- darkmatter/lib/src/markdown/compose/expression/member_check.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/prepared.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/schemas/slots/admission.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/targets.rs
+- darkmatter/lib/tests/l1/more_is_more_literals_and_indexes.rs
+- darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+- darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+- claudine/lib/src/dispatch/matcher.rs
+- darkmatter/lib/src/markdown/compose/expression/spread.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/tests/l1/object_spread.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/tests/l1/object_spread_editor.rs
+- darkmatter/dmls/tests/l1/main.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+- claudine/lib/src/dispatch/matcher/tests.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/schema/translate.rs
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/init.yaml
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- darkmatter/dmls/tests/l1/option_arguments.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/expression/data/options.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/value_origin.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/types.rs
+- darkmatter/lib/tests/l1/diagnostic_source_provenance.rs
+- darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/load_data_options.rs
+- darkmatter/lib/tests/l1/load_data_options_passive.rs
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/lib/src/markdown/compose/expression/trace.rs
+- darkmatter/lib/tests/l1/load_data_destination.rs
+- darkmatter/lib/tests/l1/load_data_uncontracted.rs
+- darkmatter/dmls/Cargo.toml
+- darkmatter/dmls/src/clock.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/observed.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/properties.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/tests/common/mod.rs
+- darkmatter/dmls/tests/l1/typed_load_data_editor.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/config/permissions.rs
+- darkmatter/lib/src/markdown/compose/cache/store.rs
+- darkmatter/lib/src/markdown/compose/cache_test_hooks.rs
+- darkmatter/lib/src/markdown/compose/expression/editor_reads.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/observed.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/observe.rs
+- darkmatter/lib/src/markdown/schemas/slots/observe_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/tests/l1/editor_observation.rs
+- darkmatter/lib/tests/l1/observed_validation.rs
+- simplified-schema/lib/src/file_match.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/validate.rs
+- claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+documentation:
+- .claude/skills/darkmatter/remote-cache.md
+- darkmatter/docs/inline/call-check.md
+- darkmatter/dmls/docs/diagnostics.md
+- .claude/skills/darkmatter/expressions.md
+- darkmatter/docs/functions/load-data.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- .claude/skills/darkmatter/dmls.md
+- darkmatter/README.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/inline/interpolation.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/docs/use-skills/use-darkmatter/authoring.md
+- simplified-schema/docs/topics/expression-syntax.md
+- biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md
+- .claude/skills/darkmatter/requests.md
+- .claude/skills/simplified-schema/SKILL.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implement Schema-Typed `load_data`
@@ -288,14 +476,14 @@ Invalid shapes produce a located error, run no subsequent processing for the fai
 
 ### Wave 4
 
-- [ ] **Update user guides**
+- [x] **Update user guides**
   - Update `darkmatter/README.md`, `docs/topics/{loading-data,darkmatter-expressions,caching}.md`, `docs/inline/interpolation.md`, `docs/lsp/features.md`, `docs/topics/schemas/schema-slots.md`, `docs/cli/data-contracts.md`, and `docs/errors/composition-problems.md`, plus `dmls/docs/{autocomplete,hover,diagnostics}.md`. Include a before-and-after migration from `First Name` to `firstName` in both contract and member access, an explicit-name example, the conversion stages, authorization and cached-remote setup, refresh and provisional editor behavior, and the diagnostic data contract. Include one Mermaid flow diagram for editor demand, evaluation, installation, and invalidation. Update the repo skills' Darkmatter expression, request and DMLS topics to explain the shared loader and observation paths.
-- [ ] **Document spread syntax**
+- [x] **Document spread syntax**
   - Update `simplified-schema/docs/topics/expression-syntax.md` and its repo skill expression guidance. Include precedence, explicit duplicates, null, and the effect of unknown keys on inference.
-- [ ] **Update caller skill**
+- [x] **Update caller skill**
   - Update `darkmatter/docs/use-skills/use-darkmatter/authoring.md` and use the canonical loading guide for behavior details. Use escaped or fenced expression examples as required by skill publication.
 
-- [ ] **Regenerate published outputs**
+- [x] **Regenerate published outputs**
   - After Wave 4, run `just regen-expr-doc` and `just publish-skills` from `darkmatter/`. Inspect the generated `docs/functions/load-data.md` and the published skill for the optional signature, preserved interpolation examples, and migration guidance.
-- [ ] **Run acceptance suites**
+- [x] **Run acceptance suites**
   - Run `just test` and `just lint` in Simplified Schema and Darkmatter and `just test-library` and `just lint` in Claudine. Use `LANG=C.UTF-8` for Darkmatter's Linux run, as Phase 1 verified that the terminal horizontal-rule fixture otherwise uses the ASCII fallback under `LANG=C`. Include the passive `shipped_corpus` and `shipped_schema_corpus`, the `shipped_corpus_invocation` consumer, artifact freshness, and the L1 loader, CLI and DMLS entry-point cases. Run `BISCUIT_L1_INCLUDE_SLOW=1 just test -E 'test(shipped_corpus)'` in Simplified Schema and `LANG=C.UTF-8 BISCUIT_L1_INCLUDE_SLOW=1 just test -E 'test(shipped_schema_corpus) | test(shipped_corpus_invocation)'` in Darkmatter on Linux to cover the named slow tests. Keep fixtures temporary, transport local or mocked, and editor tests headless. Run `git diff --check`. Record commands, results, normalized-header and diagnostic examples, and any spec departure in `implementation-log.md` beside this plan for review after this phase.

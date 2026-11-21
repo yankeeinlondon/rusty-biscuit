@@ -26,11 +26,13 @@ area: darkmatter
 reviewed: true
 reviewed_by: "codex/gpt-6.2-sol"
 reviewed_on: "2026-11-20"
-review_iterations: 0
+review_iterations: 2
+completed: true
 needs_rulings: false
 required_rulings:
 clarified: false
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 packages:
     - darkmatter
     - darkmatter-lsp
