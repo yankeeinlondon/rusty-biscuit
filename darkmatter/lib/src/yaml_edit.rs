@@ -13,10 +13,10 @@
 
 use crate::markdown::FrontmatterMap;
 use crate::markdown::hash::node_edit::{
-    self, Envelope, TracedNode, segment_of, unexpected_difference, unsupported,
+    self, Envelope, Layout, TracedNode, segment_of, unexpected_difference, unsupported,
 };
 use crate::markdown::hash::{FrontmatterPathSegment, PathEdit, PathEditRefusal};
-use biscuit_file::serde_yaml_ng;
+use biscuit_file::{Indentation, serde_yaml_ng};
 use serde_json::Value;
 use simplified_schema::completion::PathStep;
 use simplified_schema::span::line_col_of_offset;
@@ -104,6 +104,11 @@ pub struct YamlEditError {
 /// Every `Set` is applied first, in order; then every `Remove` together, with
 /// array indexes as they stand after the sets. The result is reloaded and every
 /// value compared with the expected one, named or not, before it is returned.
+/// Edits that leave every value as it was return `source` unchanged.
+///
+/// A new collection is indented like the nearest authored block of its kind,
+/// or four spaces where the file has none; see
+/// [`edit_yaml_paths_with_indentation`].
 ///
 /// ## Examples
 ///
@@ -125,6 +130,33 @@ pub struct YamlEditError {
 /// A [`YamlEditError`] naming the kind, property, and source position; see
 /// [`YamlEditErrorKind`].
 pub fn edit_yaml_paths(source: &str, edits: &[YamlEdit]) -> Result<String, YamlEditError> {
+    edit_yaml_paths_in_layout(source, edits, &node_edit::default_layout())
+}
+
+/// [`edit_yaml_paths`] for a file whose destination prefers `fallback`.
+///
+/// A new collection copies the indentation of the nearest authored block of
+/// its kind, and only where the file has none is it laid out with
+/// `fallback`. An existing block that is replaced keeps its own offset.
+///
+/// ## Errors
+///
+/// As [`edit_yaml_paths`].
+pub fn edit_yaml_paths_with_indentation(
+    source: &str,
+    edits: &[YamlEdit],
+    fallback: Indentation,
+) -> Result<String, YamlEditError> {
+    let fallback = move || fallback;
+    edit_yaml_paths_in_layout(source, edits, &Layout::new(&fallback, true))
+}
+
+/// [`edit_yaml_paths`] under the configuration writer's lazy layout.
+pub(crate) fn edit_yaml_paths_in_layout(
+    source: &str,
+    edits: &[YamlEdit],
+    layout: &Layout<'_>,
+) -> Result<String, YamlEditError> {
     let (bom, body) = match source.strip_prefix('\u{feff}') {
         Some(rest) => ("\u{feff}", rest),
         None => ("", source),
@@ -191,6 +223,12 @@ pub fn edit_yaml_paths(source: &str, edits: &[YamlEdit]) -> Result<String, YamlE
     })?;
     let mut expected = after_sets.clone();
     plan.apply(&mut expected);
+    // Edits that already hold change nothing: the source is returned as it
+    // is, so a repeated save is byte-identical and renders (and resolves a
+    // layout for) nothing.
+    if expected == original {
+        return Ok(source.to_string());
+    }
 
     let mut sets = Vec::with_capacity(set_paths.len());
     for path in &set_paths {
@@ -210,8 +248,8 @@ pub fn edit_yaml_paths(source: &str, edits: &[YamlEdit]) -> Result<String, YamlE
     for edit in sets.iter().chain(&removes) {
         refuse_unsupported_nodes(&at, edit)?;
     }
-    let text = apply_phase(&at, &working, &after_sets, &sets)?;
-    let mut text = apply_phase(&at, &text, &expected, &removes)?;
+    let text = apply_phase(&at, &working, &after_sets, &sets, layout)?;
+    let mut text = apply_phase(&at, &text, &expected, &removes, layout)?;
     // Removing every top-level key leaves the root written `{}`, as removing
     // a collection's last child does, so the file still holds one mapping.
     if expected.is_empty() && !original.is_empty() && content_start(&text) >= text.len() {
@@ -268,10 +306,11 @@ fn apply_phase(
     text: &str,
     expected: &FrontmatterMap,
     edits: &[PathEdit<'_>],
+    layout: &Layout<'_>,
 ) -> Result<String, YamlEditError> {
     let mut text = text.to_string();
     for edit in node_edit::application_order(edits) {
-        text = node_edit::apply_edits(&WholeDocument, &text, expected, std::slice::from_ref(edit))
+        text = node_edit::apply_edits(&WholeDocument, &text, expected, std::slice::from_ref(edit), layout)
             .map_err(|refusal| at.refusal(refusal, edit))?;
     }
     let reloaded = load_values(&text).map_err(|failure| at.load_failure(failure, None))?;

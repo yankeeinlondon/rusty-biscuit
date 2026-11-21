@@ -147,6 +147,7 @@ sniff repo is-monorepo     # Monorepo label (e.g. `cargo`; `false` if not). Exit
 sniff repo package-count   # Number of discovered packages
 sniff repo version         # Declared version(s) for the current package/area/repo context — scoped like `repo test-runner`; `--all`/`--package`/`--package-area` override the CWD scope; `--csv`/`--list`/`--md`/`--json`/`--verbose`
 sniff repo language        # Primary programming language for the repository
+sniff repo indent yaml     # Indentation for a file type, its source, and whether sources agree (docs/cli/repo_indent.md)
 ```
 
 **Repository Queries:**

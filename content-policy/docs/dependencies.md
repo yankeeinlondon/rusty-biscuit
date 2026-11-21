@@ -32,6 +32,7 @@ Development only, never shipped and not seen by `just deps-check`:
 | --- | --- |
 | `tempfile` | Temporary directories for the renewal and file-adapter tests that write files |
 | `gix` (`=0.90.0`, `sha1` only) | Creates fixture repositories for the file-adapter tests; pinned and featured as Biscuit File's own, so it adds no crate to the build |
+| `test-toolkit`, `biscuit-test-harness` | The YAML serializer guard over this crate's `src/` (`serializer_guard`, `manifest_dir!`); both are workspace paths already in the build |
 
 ## CLI (`content-policy-cli`)
 

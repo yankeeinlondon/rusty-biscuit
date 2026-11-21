@@ -413,6 +413,25 @@ serialized fallback, so a writer calls only that.
   `Markdown` reload; `crate::yaml_edit` supplies the whole file (past a leading
   `---` line). Engine changes reach both editors; run both test modules
   (`frontmatter_path_edit`, `yaml_edit`).
+- New collections are laid out by `node_edit::Layout`: a replaced block keeps
+  its measured child offset (an indentless list stays at zero); a new one
+  takes the offset of the nearest authored block of the same kind
+  (`collect_examples`: block collections under a mapping key with a positive
+  offset; never flow collections, compact `- key:` padding, or scalar
+  content), ranked by the deepest shared holder, then byte distance, then
+  earlier offset; otherwise the lazy fallback (`Layout::fallback_width`,
+  asked at most once). One width is used for every level of one rendered
+  value. Rendering goes through `biscuit_file::to_yaml_string`. The
+  `*_with_indentation` variants (`edit_frontmatter_paths`,
+  `edited_document_text`, `apply_hash_save_text`, `edit_yaml_paths`) take the
+  destination's preference; the unsuffixed ones use four spaces. The two
+  Markdown editors take it as a closure (`impl Fn() -> Indentation`), so a
+  caller passes `|| destination_indentation(path)` and resolves only when a
+  changed value renders. A `yaml_edit` call, and an `edit_frontmatter_paths*`
+  or `edited_document_text*` call whose source already reloads to the
+  expected values, returns the source unchanged without asking the fallback;
+  `md set --save` then skips the write (`saved: false`), and the lifecycle
+  frontmatter verbs return before `EffectEngine::save` when no value changed.
 
 ## Plain YAML Files
 

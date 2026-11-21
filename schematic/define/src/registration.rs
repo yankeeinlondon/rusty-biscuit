@@ -20,7 +20,7 @@
 //! ctx.register_as::<std::time::Duration>(rust_path!(::std::ops::Range<u64>));
 //! ```
 
-use std::{any::{TypeId, type_name}, collections::HashMap, marker::PhantomData};
+use std::{any::{TypeId, type_name}, collections::HashMap, marker::PhantomData, sync::OnceLock};
 use schemars::{JsonSchema, Schema, generate::SchemaSettings};
 use serde_json::Value;
 use crate::{ModelCatalog, ModelDef, PrimitiveType, SchemaComponent, TypeAlias, TypeRef};
@@ -195,12 +195,16 @@ pub struct DefinitionContext {
     errors: Vec<DefinitionError>,
     module_path: String,
     models: ModelCatalog,
+    /// [`Self::components`] of the current entries. Flattening a large group
+    /// takes most of its build, and both API build and module-group assembly
+    /// ask for it; every change to `entries` clears it.
+    flattened: OnceLock<Result<Vec<SchemaComponent>, DefinitionError>>,
 }
 impl DefinitionContext {
     /// State the generated types module once; it must be publicly accessible
     /// from the generated crate. Generated-client compilation proves visibility.
     pub fn types_in(module_path: impl Into<String>) -> Self {
-        Self { entries: Vec::new(), errors: Vec::new(), module_path: module_path.into(), models: ModelCatalog { module_path: None, types: Vec::new() } }
+        Self { entries: Vec::new(), errors: Vec::new(), module_path: module_path.into(), models: ModelCatalog { module_path: None, types: Vec::new() }, flattened: OnceLock::new() }
     }
     #[doc(hidden)]
     pub fn register_nominal<T: Registration>(&mut self) -> Result<TypeDesc, DefinitionError> {
@@ -234,6 +238,7 @@ impl DefinitionContext {
             let error = DefinitionError::Collision { schema_name: name, first: entry.diagnostic, second: type_name::<T>() };
             return Err(self.record(error));
         }
+        self.flattened.take();
         self.entries.push(TypeRegistration { identity: TypeId::of::<T>(), diagnostic: type_name::<T>(), name: name.clone(), path: path.into(), schema: SchemaSettings::openapi3().into_generator().into_root_schema_for::<T>(), structure: None });
         Ok(TypeDesc::new(TypeRef::Named(name), path.into()))
     }
@@ -323,6 +328,7 @@ impl DefinitionContext {
         T::register(self)?;
         let entry = self.entries.iter_mut().find(|e| e.identity == TypeId::of::<T>()).ok_or(DefinitionError::NotLeaf)?;
         entry.structure = Some(structure.clone());
+        self.flattened.take();
         self.models.types.push(ModelDef::Alias(TypeAlias { name: entry.name.clone(), description: None, target: structure, discriminator: None }));
         Ok(entry.descriptor())
     }
@@ -346,7 +352,9 @@ impl DefinitionContext {
     /// schemas give one name different wire schemas.
     pub fn components(&self) -> Result<Vec<SchemaComponent>, DefinitionError> {
         self.finish()?;
-        crate::components::flatten(self.entries.iter().map(|e| (e.name.as_str(), e.path.as_str(), e.diagnostic, e.schema.as_value(), e.structure.as_ref().map(TypeRef::wire_schema))))
+        self.flattened
+            .get_or_init(|| crate::components::flatten(self.entries.iter().map(|e| (e.name.as_str(), e.path.as_str(), e.diagnostic, e.schema.as_value(), e.structure.as_ref().map(TypeRef::wire_schema)))))
+            .clone()
     }
 }
 

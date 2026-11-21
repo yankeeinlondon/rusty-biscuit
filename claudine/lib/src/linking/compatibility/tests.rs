@@ -61,6 +61,20 @@ fn skill_name_is_derived_and_written_in_place() {
 }
 
 #[test]
+fn a_skill_needing_no_upgrade_is_left_unwritten() {
+    let tmp = TempDir::new().unwrap();
+    let skill_dir = tmp.path().join("build-pipeline");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    let authored = "---\nname: 'build-pipeline' # keep\ndescription: 'Build release artifacts'\n---\n# Build\n";
+    std::fs::write(skill_dir.join("SKILL.md"), authored).unwrap();
+
+    let candidate = build_candidate("build-pipeline", skill_dir.clone(), Provider::Claude, false);
+    classify_canonical_candidate(LinkableResource::Skill, &candidate, ResourceScope::User).unwrap();
+
+    assert_eq!(std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(), authored);
+}
+
+#[test]
 fn missing_required_properties_mark_source_as_partial() {
     let tmp = TempDir::new().unwrap();
     let skill_dir = tmp.path().join("missing-description");

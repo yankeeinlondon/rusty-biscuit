@@ -13,6 +13,7 @@ pub mod docs;
 pub mod file_types;
 pub mod formatting;
 pub mod git;
+pub mod indentation;
 pub mod just;
 pub mod languages;
 pub mod path_kind;

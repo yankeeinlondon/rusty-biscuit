@@ -6,7 +6,9 @@
 //! every registered WebSocket API for AsyncAPI) and compare the in-memory
 //! regeneration against the files committed under `schematic/schema/`,
 //! `schematic/openapi/`, `schematic/postman/`, and `schematic/asyncapi/`, and
-//! scan the committed OpenAPI corpus for `operationId` integrity.
+//! scan the committed OpenAPI corpus for `operationId` integrity. The Rust
+//! crate is regenerated one bounded module group at a time
+//! (`common::generation_groups`) in a copy of the committed crate.
 //!
 //! Run with:
 //!
@@ -19,17 +21,22 @@
 //! invoked — so the entire suite completes in a few seconds for ~16
 //! modules.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use schematic_define::openapi::ExportOptions;
 use schematic_definitions::apis_by_module;
+use schematic_definitions::naming::resolve_module_name;
+use schematic_definitions::registry::registrations;
 use schematic_gen::export::openapi::{operation_id_diagnostics, write_openapi_grouped};
 use schematic_gen::export::postman::{write_postman, write_postman_environment, write_postman_grouped};
+use schematic_gen::output::ws_modules;
 use schematic_gen::pipeline::{
     BatchScope, GenerateOpts, OpenApiFormat, generate_batch, resolve_all_apis,
 };
+
+use crate::common::generation_groups;
 
 /// Returns the absolute path to the `schematic/` package area, anchored on
 /// the gen crate's manifest directory so the tests work regardless of the
@@ -397,10 +404,33 @@ fn source_files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     files
 }
 
-#[test]
-fn generated_rust_artifacts_are_up_to_date() {
+/// Copies the committed Rust crate (`committed_src` and the manifest beside
+/// it) into a temporary `schema/`, regenerates the module groups of
+/// `modules` there through [`generate_batch`], and requires the result to be
+/// byte-identical to what is committed. A partial run also rebuilds
+/// `lib.rs`, `prelude.rs`, `shared.rs`, the WebSocket modules, and the
+/// manifest from the whole registry, and deletes obsolete files of the
+/// regenerated groups, so a module's committed form (one file or a split
+/// directory) and every crate-level file is proven by each case.
+fn assert_regenerating_reproduces_the_committed_crate(modules: &[&str], committed_src: &Path, committed_manifest: &Path) {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let output = temp_dir.path().join("schema/src");
+    let expected = source_files(committed_src);
+    assert!(!expected.is_empty(), "committed Rust source tree is empty");
+    for (path, bytes) in &expected {
+        let target = output.join(path);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(target, bytes).unwrap();
+    }
+    fs::copy(committed_manifest, output.parent().unwrap().join("Cargo.toml")).unwrap();
+
+    let apis = resolve_all_apis();
+    let selected: Vec<String> = apis
+        .iter()
+        .filter(|api| modules.contains(&resolve_module_name(api).as_str()))
+        .map(|api| api.name.clone())
+        .collect();
+    assert!(!selected.is_empty(), "{modules:?} select registered APIs");
     let output_text = output.to_str().unwrap();
     let opts = GenerateOpts {
         output: output_text,
@@ -414,14 +444,11 @@ fn generated_rust_artifacts_are_up_to_date() {
         no_postman: true,
         postman_environment: false,
     };
-    generate_batch(&resolve_all_apis(), &BatchScope::Complete, &opts)
-    .into_result()
-    .unwrap();
+    generate_batch(&apis, &BatchScope::Selection(selected), &opts)
+        .into_result()
+        .unwrap_or_else(|error| panic!("{error}; run `just -f schematic/justfile generate`"));
 
-    let committed = schematic_root().join("schema/src");
-    let expected = source_files(&committed);
     let generated = source_files(&output);
-    assert!(!expected.is_empty(), "committed Rust source tree is empty");
     assert_eq!(
         generated.keys().collect::<Vec<_>>(),
         expected.keys().collect::<Vec<_>>(),
@@ -435,10 +462,88 @@ fn generated_rust_artifacts_are_up_to_date() {
         );
     }
     assert!(
-        fs::read(output.parent().unwrap().join("Cargo.toml")).unwrap()
-            == fs::read(schematic_root().join("schema/Cargo.toml")).unwrap(),
+        fs::read(output.parent().unwrap().join("Cargo.toml")).unwrap() == fs::read(committed_manifest).unwrap(),
         "Rust manifest byte drift; run `just -f schematic/justfile generate`",
     );
+}
+
+/// The committed `schematic/schema` crate is what generation produces: one
+/// case regenerates each bounded module group in a copy of it, and one
+/// checks that it holds no file a full run would remove, which a partial run
+/// keeps.
+mod generated_rust_artifacts_are_up_to_date {
+    use super::*;
+
+    #[test]
+    fn openai() {
+        assert_regenerating_reproduces_the_committed_crate(
+            generation_groups::OPENAI,
+            &schematic_root().join("schema/src"),
+            &schematic_root().join("schema/Cargo.toml"),
+        );
+    }
+
+    #[test]
+    fn anthropic_to_gitlab() {
+        assert_regenerating_reproduces_the_committed_crate(
+            generation_groups::ANTHROPIC_TO_GITLAB,
+            &schematic_root().join("schema/src"),
+            &schematic_root().join("schema/Cargo.toml"),
+        );
+    }
+
+    #[test]
+    fn huggingface_to_unfolded_circle() {
+        assert_regenerating_reproduces_the_committed_crate(
+            generation_groups::HUGGINGFACE_TO_UNFOLDED_CIRCLE,
+            &schematic_root().join("schema/src"),
+            &schematic_root().join("schema/Cargo.toml"),
+        );
+    }
+
+    /// Every top-level entry is a crate-level file, a WebSocket module, or
+    /// one registered REST module as a file or a split directory, and every
+    /// module is present.
+    #[test]
+    fn no_unregistered_module() {
+        let committed = schematic_root().join("schema/src");
+        let (ws_shared, _) = ws_modules::generate_ws_shared_module().expect("ws_shared.rs");
+        let mut expected: BTreeSet<String> =
+            ["lib.rs", "prelude.rs", "shared.rs", ws_shared.as_str()].into_iter().map(String::from).collect();
+        let mut rest_modules = BTreeSet::new();
+        for entry in registrations() {
+            if entry.rest().is_some() {
+                rest_modules.insert(entry.module);
+            } else {
+                expected.insert(format!("{}.rs", entry.module));
+            }
+        }
+        let mut found = BTreeSet::new();
+        for entry in fs::read_dir(&committed).expect("read schema/src") {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            let module = if entry.file_type().unwrap().is_dir() {
+                let children: BTreeSet<String> =
+                    fs::read_dir(entry.path()).unwrap().map(|child| child.unwrap().file_name().into_string().unwrap()).collect();
+                assert_eq!(
+                    children,
+                    BTreeSet::from(["mod.rs", "requests.rs", "responses.rs"].map(String::from)),
+                    "schema/src/{name}/ is not a split module; run `just -f schematic/justfile generate`",
+                );
+                name.clone()
+            } else {
+                name.strip_suffix(".rs").unwrap_or(&name).to_string()
+            };
+            if rest_modules.contains(module.as_str()) {
+                found.insert(module);
+            } else {
+                assert!(expected.remove(&name), "schema/src/{name} is not generated; run `just -f schematic/justfile generate`");
+            }
+        }
+        assert!(expected.is_empty(), "missing from schema/src: {expected:?}; run `just -f schematic/justfile generate`");
+        let missing: Vec<&&str> = rest_modules.iter().filter(|module| !found.contains(**module)).collect();
+        assert!(missing.is_empty(), "missing from schema/src: {missing:?}; run `just -f schematic/justfile generate`");
+    }
 }
 
 #[test]

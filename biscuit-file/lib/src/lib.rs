@@ -4,7 +4,8 @@
 //! plus a file reference system for lazily resolving file paths:
 //!
 //! - **TOML**: Parse, convert to JSON/YAML, validate against schema
-//! - **YAML**: Parse, convert to JSON/TOML, validate against schema
+//! - **YAML**: Parse, convert to JSON/TOML, validate against schema, and
+//!   write a value laid out with an [`Indentation`] (`to_yaml_string`)
 //! - **JSON5**: Parse, convert to JSON/YAML/TOML
 //! - **JSON Lines**: Read one JSON value per line with each record's line and
 //!   byte offsets (`json_lines`)
@@ -107,6 +108,7 @@
 mod detect;
 mod error;
 mod format;
+mod indentation;
 mod list_format;
 mod path_text;
 mod span;
@@ -156,6 +158,9 @@ pub use detect::{FileType, detect_file_type, detect_file_type_from_bytes, detect
 // Re-export data format enum
 pub use format::DataFormat;
 
+// Re-export the writer indentation preference (no format feature needed)
+pub use indentation::{IndentStyle, Indentation};
+
 // Re-export list-shape classification and conversion
 pub use list_format::{ListFormat, classify_list};
 
@@ -172,6 +177,7 @@ pub use self::yaml::{
     YamlDiagnostic, YamlDiagnosticCode, YamlError, YamlLocation, YamlParseFailure,
     YamlParseOutcome, YamlPathSegment, YamlRepair, YamlSource, YamlValueLocation,
     YamlValueProperties, analyze_yaml, apply_edit_set, locate_yaml_key, locate_yaml_value,
+    to_yaml_string,
 };
 
 #[cfg(feature = "yaml")]

@@ -156,3 +156,4 @@ mod compose_lifecycle_refusals;
 mod lifecycle_passive_surfaces;
 mod lifecycle_schema_fallback;
 mod schema_recursive;
+mod yaml_serializer_guard;

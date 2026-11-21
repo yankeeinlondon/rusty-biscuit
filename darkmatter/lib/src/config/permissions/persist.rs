@@ -158,8 +158,7 @@ pub fn save_user_approval(policy: &PermissionPolicy, approval: &PersistentApprov
         }
         let mut items = defaults;
         push_unique(&mut items, &entry);
-        let initial = serde_yaml_string(list, items)?;
-        let change = TargetChange::create(file, initial, Vec::new());
+        let change = TargetChange::create_yaml(file, permissions_document(list, items), Vec::new());
         commit(policy, file, whole_config, change)?;
         return Ok(SavedApproval { file: file.to_path_buf(), list, entry, added: true, materialized_defaults: true });
     };
@@ -228,7 +227,9 @@ fn commit(policy: &PermissionPolicy, file: &Path, whole_config: bool, change: Ta
 
 fn write_error(file: &Path, error: &ConfigWriteError) -> NotSaved {
     let reason = match error {
-        ConfigWriteError::UnsupportedEdit { .. } | ConfigWriteError::ValidationFailed { .. } => NotSavedReason::InvalidEdit,
+        ConfigWriteError::UnsupportedEdit { .. }
+        | ConfigWriteError::ValidationFailed { .. }
+        | ConfigWriteError::Layout { .. } => NotSavedReason::InvalidEdit,
         _ => NotSavedReason::Write,
     };
     NotSaved::new(reason, Some(file), error.to_string())
@@ -254,13 +255,14 @@ fn push_unique(items: &mut Vec<Value>, entry: &str) {
     }
 }
 
-fn serde_yaml_string(list: &str, items: Vec<Value>) -> Result<String, NotSaved> {
+/// A new user configuration holding only `permissions.<list>`, which the
+/// transaction lays out with the file's indentation preference.
+fn permissions_document(list: &str, items: Vec<Value>) -> Value {
     let mut block = serde_json::Map::new();
     block.insert(list.to_string(), Value::Array(items));
     let mut document = serde_json::Map::new();
     document.insert("permissions".to_string(), Value::Object(block));
-    biscuit_file::serde_yaml_ng::to_string(&Value::Object(document))
-        .map_err(|error| NotSaved::new(NotSavedReason::InvalidEdit, None, error.to_string()))
+    Value::Object(document)
 }
 
 /// The rule's text, unless a `!` rule of any layer still matches it.

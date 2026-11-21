@@ -1,10 +1,12 @@
 //! The generated crate's documentation is honest (R38–R41, R51).
 //!
 //! The fast tests generate the shipped APIs into a temporary directory
-//! through the public generation entry point and read the doc text of the
-//! output: every code fence is a `no_run` doctest, no doc line is a stray
-//! `;`, every `client.<method>(` an example writes exists on that module's
-//! client, and a module shared by several APIs documents each of them. The
+//! through the public generation entry point, one bounded module group at a
+//! time (`common::generation_groups`), render the shipped crate root and
+//! prelude, and read the doc text of the output: every code fence is a
+//! `no_run` doctest, no doc line is a stray `;`, every `client.<method>(` an
+//! example writes exists on that module's client, and a module shared by
+//! several APIs documents each of them. The
 //! `slow_` test compiles those doctests in a fresh crate with the default
 //! features and with one module selected.
 
@@ -14,10 +16,16 @@ use std::path::{Path, PathBuf};
 
 use schematic_define::RestApi;
 use schematic_definitions::apis_by_module;
-use schematic_gen::output::generate_and_write_all;
+use schematic_definitions::naming::resolve_module_name;
+use schematic_definitions::registry::registrations;
+use schematic_gen::output::{
+    assemble_api_module, assemble_combined_api_module, assemble_lib_rs, assemble_prelude, assemble_shared_module,
+    format_code, generate_and_write_all, validate_code, ws_modules,
+};
 use schematic_gen::pipeline::resolve_all_apis;
 
 use crate::common::fresh_output::{Definitions, FreshCrate};
+use crate::common::generation_groups;
 
 /// The methods `schematic_runtime::api_client!` gives every client.
 const API_CLIENT_SOURCE: &str = include_str!("../../../runtime/src/api_client.rs");
@@ -43,11 +51,6 @@ fn collect(root: &Path, dir: &Path, files: &mut BTreeMap<PathBuf, String>) {
             files.insert(path.strip_prefix(root).unwrap().to_path_buf(), source);
         }
     }
-}
-
-fn generate_shipped() -> BTreeMap<PathBuf, String> {
-    let apis = resolve_all_apis();
-    generate(&apis.iter().collect::<Vec<_>>())
 }
 
 /// The doc text of each doc line of `source`, with its 1-based line number:
@@ -99,15 +102,13 @@ fn module_of(path: &Path) -> String {
     first.trim_end_matches(".rs").to_string()
 }
 
-/// One generation of the shipped APIs serves the three crate-wide checks:
-/// generating them takes about two seconds.
-#[test]
-fn the_shipped_crate_docs_hold_only_compilable_examples_of_existing_methods() {
-    let files = generate_shipped();
-
+/// The three doc checks over `files`, whose modules' `pub fn`s, with
+/// `extra_fns`, are what the crate root and prelude may call. Returns how
+/// many code fences and client calls were checked.
+fn check_docs(files: &BTreeMap<PathBuf, String>, extra_fns: &BTreeSet<String>) -> (usize, usize) {
     // R38: every code fence is a `no_run` doctest.
     let mut fences = 0;
-    for (path, source) in &files {
+    for (path, source) in files {
         let mut open = false;
         for (line, text) in doc_lines(source) {
             let Some(info) = text.trim().strip_prefix("```") else { continue };
@@ -119,11 +120,9 @@ fn the_shipped_crate_docs_hold_only_compilable_examples_of_existing_methods() {
         }
         assert!(!open, "{}: unclosed code fence", path.display());
     }
-    // Every request type, module, crate root and prelude carries one.
-    assert!(fences > 500, "only {fences} fences found; the scan is not reading the doc lines");
 
     // R41: no doc line is a stray `;`.
-    for (path, source) in &files {
+    for (path, source) in files {
         for (line, text) in doc_lines(source) {
             assert_ne!(text.trim(), ";", "{}:{line}: a doc line holding only `;`", path.display());
         }
@@ -135,12 +134,12 @@ fn the_shipped_crate_docs_hold_only_compilable_examples_of_existing_methods() {
     let client_methods = pub_fns(API_CLIENT_SOURCE);
     assert!(client_methods.contains("send") && client_methods.contains("base_url"), "{client_methods:?}");
     let mut module_fns: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for (path, source) in &files {
+    for (path, source) in files {
         module_fns.entry(module_of(path)).or_default().extend(pub_fns(source));
     }
-    let every_fn: BTreeSet<String> = module_fns.values().flatten().cloned().collect();
+    let every_fn: BTreeSet<String> = module_fns.values().flatten().chain(extra_fns).cloned().collect();
     let mut checked = 0;
-    for (path, source) in &files {
+    for (path, source) in files {
         let module = module_of(path);
         // The crate root and prelude show one API's client.
         let available = match module.as_str() {
@@ -157,7 +156,80 @@ fn the_shipped_crate_docs_hold_only_compilable_examples_of_existing_methods() {
             checked += 1;
         }
     }
-    assert!(checked > 30, "only {checked} calls found; the scan is not reading the examples");
+    (fences, checked)
+}
+
+/// Generates the APIs of `modules` as a crate of their own and checks every
+/// file of it; the shipped crate's modules are generated from their own
+/// groups alone.
+fn check_group_docs(modules: &[&str]) {
+    let apis = generation_groups::apis(modules);
+    let files = generate(&apis.iter().collect::<Vec<_>>());
+    let (fences, checked) = check_docs(&files, &BTreeSet::new());
+    // Every request type and module carries a fence, and every module's
+    // documentation shows its client.
+    let endpoints: usize = apis.iter().map(|api| api.endpoints.len()).sum();
+    assert!(fences > endpoints, "only {fences} fences found for {endpoints} endpoints; the scan is not reading the doc lines");
+    assert!(checked >= modules.len(), "only {checked} calls found; the scan is not reading the examples");
+}
+
+/// Every generated file holds only compilable examples of existing methods
+/// (R38, R39, R41): one case per bounded module group, and one for the
+/// shipped crate's root and prelude.
+mod the_shipped_crate_docs_hold_only_compilable_examples_of_existing_methods {
+    use super::*;
+
+    #[test]
+    fn openai() {
+        check_group_docs(generation_groups::OPENAI);
+    }
+
+    #[test]
+    fn anthropic_to_gitlab() {
+        check_group_docs(generation_groups::ANTHROPIC_TO_GITLAB);
+    }
+
+    #[test]
+    fn huggingface_to_unfolded_circle() {
+        check_group_docs(generation_groups::HUGGINGFACE_TO_UNFOLDED_CIRCLE);
+    }
+
+    /// The crate root and prelude the whole catalog gets, rendered as full
+    /// generation renders them. Their examples may call any module's method:
+    /// the REST modules' `pub fn`s are read from their assembled tokens,
+    /// which formatting does not rename.
+    #[test]
+    fn crate_root_and_prelude() {
+        let apis = resolve_all_apis();
+        let refs: Vec<&RestApi> = apis.iter().collect();
+        let render = |tokens| format_code(&validate_code(&tokens).expect("generated code parses"));
+        let files = BTreeMap::from([
+            (PathBuf::from("lib.rs"), render(assemble_lib_rs(&refs, registrations()))),
+            (PathBuf::from("prelude.rs"), render(assemble_prelude(&refs, registrations()))),
+        ]);
+        let mut groups: BTreeMap<String, Vec<&RestApi>> = BTreeMap::new();
+        for api in &refs {
+            groups.entry(resolve_module_name(api)).or_default().push(api);
+        }
+        let mut module_fns = BTreeSet::new();
+        for group in groups.values() {
+            let tokens = match group.as_slice() {
+                [api] => assemble_api_module(api),
+                _ => assemble_combined_api_module(group),
+            };
+            module_fns.extend(pub_fns(&tokens.to_string()));
+        }
+        assert!(module_fns.contains("list_releases"), "the GitHub module's methods are read");
+        let (_, ws_shared) = ws_modules::generate_ws_shared_module().expect("ws_shared.rs");
+        let ws_modules = ws_modules::generate_ws_definition_modules(registrations()).expect("WebSocket modules");
+        let shared = render(assemble_shared_module());
+        for source in ws_modules.iter().map(|(_, source)| source).chain([&ws_shared, &shared]) {
+            module_fns.extend(pub_fns(source));
+        }
+        let (fences, checked) = check_docs(&files, &module_fns);
+        assert!(fences >= 2, "only {fences} fences found; the scan is not reading the doc lines");
+        assert!(checked >= 2, "only {checked} calls found; the scan is not reading the examples");
+    }
 }
 
 #[test]

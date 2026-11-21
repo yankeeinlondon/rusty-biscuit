@@ -55,6 +55,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Pipes",
 ] }
 
+[dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+test-toolkit = { path = "../../tools/test-toolkit" }
+
 # Opt-out of benchmarking: interactive TUI component library; performance
 # is dominated by terminal I/O and ratatui's own rendering, neither of
 # which benefit from per-crate microbenchmarks.

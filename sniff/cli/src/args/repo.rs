@@ -215,10 +215,24 @@ pub enum RepoAction {
         list: bool,
         md: bool,
     },
+    /// `sniff repo indent [<file-ext>]` — the indentation a writer should use
+    /// for one file type (`Some`), or the repository summary (`None`). The
+    /// extension is validated and has its leading dot removed.
+    Indent {
+        extension: Option<String>,
+    },
     /// Bare `sniff repo` dispatch marker. Distinct from `Name` so the parent
     /// command can aggregate its children's scopes in `--json` mode while
     /// preserving the existing text fallback.
     Default,
+}
+
+/// Clap value parser for `sniff repo indent <FILE-EXT>`: the library's own
+/// extension grammar, so the command and the library accept the same inputs.
+fn parse_extension(input: &str) -> Result<String, String> {
+    sniff::filesystem::indentation::normalize_extension(input)
+        .map(str::to_string)
+        .map_err(|error| error.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -682,6 +696,19 @@ pub enum RepoSubcommand {
         /// Message to display when no version is found (text mode only)
         #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
+    },
+    /// Report the indentation to write a file type with, and where it comes from.
+    ///
+    /// With an extension (`yaml` or `.yaml`), prints the resolved style and
+    /// width, the source that decided them, the other sources' opinions, and
+    /// whether they agree. Without one, prints the repository default and every
+    /// file type whose indentation differs from it. Reads `.editorconfig` and
+    /// the supported formatter configurations at the worktree root; outside a
+    /// worktree, a language convention or the four-space fallback applies.
+    Indent {
+        /// File extension to resolve, with or without the leading dot
+        #[arg(value_name = "FILE-EXT", value_parser = parse_extension)]
+        extension: Option<String>,
     },
     /// Report the test runner(s) declared by the current repo/package context.
     ///

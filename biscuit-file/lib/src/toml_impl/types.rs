@@ -39,6 +39,12 @@ pub enum TomlError {
     #[error("YAML serialization error: {0}")]
     Yaml(#[from] serde_yaml_ng::Error),
 
+    /// The YAML writer could not lay out the converted document; see
+    /// [`YamlError::Layout`](crate::YamlError::Layout).
+    #[cfg(feature = "yaml")]
+    #[error("YAML layout error: {0}")]
+    YamlLayout(String),
+
     /// YAML feature not enabled.
     #[cfg(not(feature = "yaml"))]
     #[error("YAML support requires the 'yaml' feature")]
@@ -51,6 +57,18 @@ pub enum TomlError {
     /// Schema feature not enabled.
     #[error("Schema support requires the 'schema' feature")]
     SchemaFeatureDisabled,
+}
+
+#[cfg(feature = "yaml")]
+impl TomlError {
+    /// Maps a [`to_yaml_string`](crate::to_yaml_string) failure onto this
+    /// type, so a backend failure stays [`Self::Yaml`].
+    fn from_yaml_write(error: crate::YamlError) -> Self {
+        match error {
+            crate::YamlError::Serialize(error) | crate::YamlError::Parse(error) => Self::Yaml(error),
+            other => Self::YamlLayout(other.to_string()),
+        }
+    }
 }
 
 /// Validation issue severity.
@@ -253,16 +271,21 @@ impl Toml {
         Ok(json_value)
     }
 
-    /// Convert to a YAML string.
+    /// Convert to a YAML string laid out with [`Indentation::default`]
+    /// (four spaces per level); see [`to_yaml_string`](crate::to_yaml_string).
+    ///
+    /// [`Indentation::default`]: crate::Indentation::default
     ///
     /// ## Errors
     ///
-    /// Returns an error if YAML serialization fails or the feature is disabled.
+    /// [`TomlError::Yaml`] when the backend cannot serialize the value and
+    /// [`TomlError::YamlLayout`] when it cannot be laid out.
     #[cfg(feature = "yaml")]
     #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_yaml(&self) -> Result<String, TomlError> {
         let json_value = self.as_json_value()?;
-        let yaml = serde_yaml_ng::to_string(&json_value)?;
+        let yaml = crate::to_yaml_string(&json_value, crate::Indentation::default())
+            .map_err(TomlError::from_yaml_write)?;
         debug!(output_len = yaml.len(), "TOML → YAML conversion complete");
         Ok(yaml)
     }
@@ -828,6 +851,35 @@ name = "test"
         assert!(yaml.contains("- alpha"));
         assert!(yaml.contains("- beta"));
         assert!(yaml.contains("- gamma"));
+    }
+
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn as_yaml_lays_out_nested_data_with_four_spaces() {
+        let toml = Toml::from_str(
+            "[server]\nhost = \"h\"\nports = [80, 443]\n\n[server.tls]\nenabled = true\n",
+        )
+        .unwrap();
+
+        let yaml = toml.as_yaml().unwrap();
+
+        assert_eq!(
+            yaml,
+            "server:\n    host: h\n    ports:\n        - 80\n        - 443\n    tls:\n        enabled: true\n"
+        );
+    }
+
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn as_yaml_parses_to_the_toml_value() {
+        let toml = Toml::from_str(
+            "n = 1.5\n\n[[list]]\na = 1\nb = [true, false]\n\n[[list]]\ntext = \"multi\\nline\"\n",
+        )
+        .unwrap();
+
+        let parsed: serde_json::Value = serde_yaml_ng::from_str(&toml.as_yaml().unwrap()).unwrap();
+
+        assert_eq!(parsed, toml.as_json_value().unwrap());
     }
 
     // ==========================================================================

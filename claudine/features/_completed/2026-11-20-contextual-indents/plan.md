@@ -1,0 +1,463 @@
+---
+total_phases: 4
+created: 2026-11-20
+status: planned
+phase: 5
+agent: codex/gpt-6.2-sol
+yolo: true
+source_files_during_phase_1:
+- biscuit-file/lib/src/indentation.rs
+- biscuit-file/lib/src/lib.rs
+- biscuit-file/lib/src/yaml/mod.rs
+- biscuit-file/lib/src/yaml/types.rs
+- biscuit-file/lib/src/yaml/write.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/yaml_writing.rs
+- biscuit-file/justfile
+docs_updated_during_phase_1:
+- biscuit-file/README.md
+- biscuit-file/lib/README.md
+- biscuit-file/docs/design/yaml-design.md
+docs_created_during_phase_1:
+- biscuit-file/docs/topics/yaml-writing.md
+skills_files_updated_during_phase_1:
+- .claude/skills/biscuit-file/SKILL.md
+- .claude/skills/biscuit-file/references/api.md
+- .claude/skills/biscuit-file/references/architecture.md
+packages:
+- biscuit-file
+- sniff
+- sniff-detection-cli
+- claudine
+- claudine-cli
+- claudine-gen
+- darkmatter
+- darkmatter-cli
+- darkmatter-lsp
+- biscuit-file-cli
+- biscuit-terminal
+- biscuit-tui
+- biscuit-tui-cli
+- content-policy
+- model-citizen
+- research
+- schematic-define
+- schematic-gen
+- simplified-schema
+- test-toolkit
+source_files_during_phase_2:
+- sniff/lib/Cargo.toml
+- sniff/lib/src/error.rs
+- sniff/lib/src/filesystem/formatting.rs
+- sniff/lib/src/filesystem/mod.rs
+- sniff/lib/src/filesystem/indentation/mod.rs
+- sniff/lib/src/filesystem/indentation/catalog.rs
+- sniff/lib/src/filesystem/indentation/editorconfig.rs
+- sniff/lib/src/filesystem/indentation/formatters.rs
+- sniff/lib/src/filesystem/indentation/inputs.rs
+- sniff/lib/src/filesystem/indentation/tests.rs
+- sniff/lib/src/performance/counters.rs
+- sniff/lib/tests/l1/main.rs
+- sniff/lib/tests/l1/indentation.rs
+docs_updated_during_phase_2:
+- sniff/README.md
+- sniff/lib/README.md
+docs_created_during_phase_2:
+- sniff/docs/topics/indentation.md
+skills_files_updated_during_phase_2:
+- .claude/skills/sniff/SKILL.md
+source_files_during_phase_3:
+- sniff/cli/src/args/mod.rs
+- sniff/cli/src/args/repo.rs
+- sniff/cli/src/commands/mod.rs
+- sniff/cli/src/output/mod.rs
+- sniff/cli/src/output/filesystem/mod.rs
+- sniff/cli/src/output/filesystem/indentation.rs
+- sniff/cli/tests/l1/main.rs
+- sniff/cli/tests/l1/repo_indent.rs
+- sniff/cli/tests/l1/snapshots.rs
+- sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+docs_updated_during_phase_3:
+- sniff/README.md
+- sniff/cli/README.md
+- sniff/docs/cli/repo.md
+- sniff/docs/topics/json-output.md
+- sniff/docs/topics/indentation.md
+docs_created_during_phase_3:
+- sniff/docs/cli/repo_indent.md
+skills_files_updated_during_phase_3:
+- .claude/skills/sniff/SKILL.md
+source_files_during_phase_4:
+- Cargo.lock
+- biscuit-file/cli/Cargo.toml
+- biscuit-file/cli/src/main.rs
+- biscuit-file/cli/tests/cli_tests.rs
+- biscuit-file/cli/tests/yaml_serializer_guard.rs
+- biscuit-file/lib/src/json5/types.rs
+- biscuit-file/lib/src/toml_impl/types.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/yaml_serializer_guard.rs
+- biscuit-terminal/lib/tests/l1/main.rs
+- biscuit-terminal/lib/tests/l1/yaml_serializer_guard.rs
+- biscuit-tui/cli/tests/l1/main.rs
+- biscuit-tui/cli/tests/l1/yaml_serializer_guard.rs
+- biscuit-tui/lib/Cargo.toml
+- biscuit-tui/lib/tests/yaml_serializer_guard.rs
+- claudine/cli/src/commands/wrap/composition/dry_run.rs
+- claudine/cli/tests/l1/first_run_config_layout.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/yaml_serializer_guard.rs
+- claudine/gen/Cargo.toml
+- claudine/gen/src/agent_errors_check.rs
+- claudine/gen/tests/l1/main.rs
+- claudine/gen/tests/l1/yaml_serializer_guard.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/linking/compatibility/frontmatter_io.rs
+- claudine/lib/tests/l1/config_indentation.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/yaml_serializer_guard.rs
+- content-policy/lib/Cargo.toml
+- content-policy/lib/tests/yaml_serializer_guard.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/hash.rs
+- darkmatter/cli/tests/l1/compose_array_rendering.rs
+- darkmatter/cli/tests/l1/compose_setters.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/render_dispatch.rs
+- darkmatter/cli/tests/l1/standalone_baseline.rs
+- darkmatter/cli/tests/l1/yaml_serializer_guard.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/yaml_serializer_guard.rs
+- darkmatter/lib/src/config/permissions/persist.rs
+- darkmatter/lib/src/config/write.rs
+- darkmatter/lib/src/effects/verbs.rs
+- darkmatter/lib/src/markdown/hash/baseline.rs
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/node_edit.rs
+- darkmatter/lib/src/markdown/hash/path_edit.rs
+- darkmatter/lib/src/markdown/hash/write.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/output/mod.rs
+- darkmatter/lib/src/markdown/output/string.rs
+- darkmatter/lib/src/markdown/yaml_block.rs
+- darkmatter/lib/src/yaml_edit.rs
+- darkmatter/lib/tests/l1/config_migration.rs
+- darkmatter/lib/tests/l1/config_migration_receipt.rs
+- darkmatter/lib/tests/l1/config_write_indentation.rs
+- darkmatter/lib/tests/l1/frontmatter_path_edit.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/markdown_save_indentation.rs
+- darkmatter/lib/tests/l1/yaml_edit.rs
+- darkmatter/lib/tests/l1/yaml_serializer_guard.rs
+- model-citizen/lib/Cargo.toml
+- model-citizen/lib/tests/yaml_serializer_guard.rs
+- research/lib/Cargo.toml
+- research/lib/tests/yaml_serializer_guard.rs
+- schematic/define/Cargo.toml
+- schematic/define/src/openapi/mod.rs
+- schematic/define/src/openapi/options.rs
+- schematic/define/tests/openapi_constraint_export.rs
+- schematic/define/tests/yaml_serializer_guard.rs
+- schematic/gen/Cargo.toml
+- schematic/gen/src/export/openapi.rs
+- schematic/gen/src/pipeline.rs
+- schematic/gen/tests/l1/main.rs
+- schematic/gen/tests/l1/openapi_yaml_indentation.rs
+- schematic/gen/tests/l1/yaml_serializer_guard.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_object.rs
+- simplified-schema/lib/tests/l1/yaml_serializer_guard.rs
+- sniff/lib/tests/l1/main.rs
+- sniff/lib/tests/l1/yaml_serializer_guard.rs
+- tools/test-toolkit/Cargo.toml
+- tools/test-toolkit/src/lib.rs
+- tools/test-toolkit/src/serializer_guard.rs
+- tools/test-toolkit/src/serializer_guard/tests.rs
+- tools/test-toolkit/tests/serializer_guard_coverage.rs
+docs_updated_during_phase_4:
+- biscuit-file/cli/README.md
+- biscuit-file/docs/dependencies.md
+- biscuit-file/docs/topics/yaml-writing.md
+- claudine/docs/topics/configuration.md
+- content-policy/docs/dependencies.md
+- darkmatter/docs/cli/hash.md
+- darkmatter/docs/structs/Markdown.md
+- darkmatter/docs/topics/config-writes.md
+- darkmatter/docs/topics/side-effects.md
+- darkmatter/docs/topics/yaml-editing.md
+- darkmatter/docs/use-skills/use-darkmatter/cli.md
+- docs/dependencies.md
+- schematic/docs/dependencies.md
+- schematic/docs/io/export-openapi.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- tools/test-toolkit/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/biscuit-file/references/api.md
+- .claude/skills/biscuit-file/references/format-conversion.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/frontmatter.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/schematic-define/schematic/openapi.md
+source_code:
+- biscuit-file/lib/src/indentation.rs
+- biscuit-file/lib/src/lib.rs
+- biscuit-file/lib/src/yaml/mod.rs
+- biscuit-file/lib/src/yaml/types.rs
+- biscuit-file/lib/src/yaml/write.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/yaml_writing.rs
+- biscuit-file/justfile
+- sniff/lib/Cargo.toml
+- sniff/lib/src/error.rs
+- sniff/lib/src/filesystem/formatting.rs
+- sniff/lib/src/filesystem/mod.rs
+- sniff/lib/src/filesystem/indentation/mod.rs
+- sniff/lib/src/filesystem/indentation/catalog.rs
+- sniff/lib/src/filesystem/indentation/editorconfig.rs
+- sniff/lib/src/filesystem/indentation/formatters.rs
+- sniff/lib/src/filesystem/indentation/inputs.rs
+- sniff/lib/src/filesystem/indentation/tests.rs
+- sniff/lib/src/performance/counters.rs
+- sniff/lib/tests/l1/main.rs
+- sniff/lib/tests/l1/indentation.rs
+- sniff/cli/src/args/mod.rs
+- sniff/cli/src/args/repo.rs
+- sniff/cli/src/commands/mod.rs
+- sniff/cli/src/output/mod.rs
+- sniff/cli/src/output/filesystem/mod.rs
+- sniff/cli/src/output/filesystem/indentation.rs
+- sniff/cli/tests/l1/main.rs
+- sniff/cli/tests/l1/repo_indent.rs
+- sniff/cli/tests/l1/snapshots.rs
+- sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+- Cargo.lock
+- biscuit-file/cli/Cargo.toml
+- biscuit-file/cli/src/main.rs
+- biscuit-file/cli/tests/cli_tests.rs
+- biscuit-file/cli/tests/yaml_serializer_guard.rs
+- biscuit-file/lib/src/json5/types.rs
+- biscuit-file/lib/src/toml_impl/types.rs
+- biscuit-file/lib/tests/l1/yaml_serializer_guard.rs
+- biscuit-terminal/lib/tests/l1/main.rs
+- biscuit-terminal/lib/tests/l1/yaml_serializer_guard.rs
+- biscuit-tui/cli/tests/l1/main.rs
+- biscuit-tui/cli/tests/l1/yaml_serializer_guard.rs
+- biscuit-tui/lib/Cargo.toml
+- biscuit-tui/lib/tests/yaml_serializer_guard.rs
+- claudine/cli/src/commands/wrap/composition/dry_run.rs
+- claudine/cli/tests/l1/first_run_config_layout.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/yaml_serializer_guard.rs
+- claudine/gen/Cargo.toml
+- claudine/gen/src/agent_errors_check.rs
+- claudine/gen/tests/l1/main.rs
+- claudine/gen/tests/l1/yaml_serializer_guard.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/linking/compatibility/frontmatter_io.rs
+- claudine/lib/tests/l1/config_indentation.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/yaml_serializer_guard.rs
+- content-policy/lib/Cargo.toml
+- content-policy/lib/tests/yaml_serializer_guard.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/hash.rs
+- darkmatter/cli/tests/l1/compose_array_rendering.rs
+- darkmatter/cli/tests/l1/compose_setters.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/render_dispatch.rs
+- darkmatter/cli/tests/l1/standalone_baseline.rs
+- darkmatter/cli/tests/l1/yaml_serializer_guard.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/yaml_serializer_guard.rs
+- darkmatter/lib/src/config/permissions/persist.rs
+- darkmatter/lib/src/config/write.rs
+- darkmatter/lib/src/effects/verbs.rs
+- darkmatter/lib/src/markdown/hash/baseline.rs
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/node_edit.rs
+- darkmatter/lib/src/markdown/hash/path_edit.rs
+- darkmatter/lib/src/markdown/hash/write.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/output/mod.rs
+- darkmatter/lib/src/markdown/output/string.rs
+- darkmatter/lib/src/markdown/yaml_block.rs
+- darkmatter/lib/src/yaml_edit.rs
+- darkmatter/lib/tests/l1/config_migration.rs
+- darkmatter/lib/tests/l1/config_migration_receipt.rs
+- darkmatter/lib/tests/l1/config_write_indentation.rs
+- darkmatter/lib/tests/l1/frontmatter_path_edit.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/markdown_save_indentation.rs
+- darkmatter/lib/tests/l1/yaml_edit.rs
+- darkmatter/lib/tests/l1/yaml_serializer_guard.rs
+- model-citizen/lib/Cargo.toml
+- model-citizen/lib/tests/yaml_serializer_guard.rs
+- research/lib/Cargo.toml
+- research/lib/tests/yaml_serializer_guard.rs
+- schematic/define/Cargo.toml
+- schematic/define/src/openapi/mod.rs
+- schematic/define/src/openapi/options.rs
+- schematic/define/tests/openapi_constraint_export.rs
+- schematic/define/tests/yaml_serializer_guard.rs
+- schematic/gen/Cargo.toml
+- schematic/gen/src/export/openapi.rs
+- schematic/gen/src/pipeline.rs
+- schematic/gen/tests/l1/main.rs
+- schematic/gen/tests/l1/openapi_yaml_indentation.rs
+- schematic/gen/tests/l1/yaml_serializer_guard.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_object.rs
+- simplified-schema/lib/tests/l1/yaml_serializer_guard.rs
+- sniff/lib/tests/l1/yaml_serializer_guard.rs
+- tools/test-toolkit/Cargo.toml
+- tools/test-toolkit/src/lib.rs
+- tools/test-toolkit/src/serializer_guard.rs
+- tools/test-toolkit/src/serializer_guard/tests.rs
+- tools/test-toolkit/tests/serializer_guard_coverage.rs
+documentation:
+- biscuit-file/README.md
+- biscuit-file/lib/README.md
+- biscuit-file/docs/design/yaml-design.md
+- biscuit-file/docs/topics/yaml-writing.md
+- sniff/README.md
+- sniff/lib/README.md
+- sniff/docs/topics/indentation.md
+- sniff/cli/README.md
+- sniff/docs/cli/repo.md
+- sniff/docs/topics/json-output.md
+- sniff/docs/cli/repo_indent.md
+- biscuit-file/cli/README.md
+- biscuit-file/docs/dependencies.md
+- claudine/docs/topics/configuration.md
+- content-policy/docs/dependencies.md
+- darkmatter/docs/cli/hash.md
+- darkmatter/docs/structs/Markdown.md
+- darkmatter/docs/topics/config-writes.md
+- darkmatter/docs/topics/side-effects.md
+- darkmatter/docs/topics/yaml-editing.md
+- darkmatter/docs/use-skills/use-darkmatter/cli.md
+- docs/dependencies.md
+- schematic/docs/dependencies.md
+- schematic/docs/io/export-openapi.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- tools/test-toolkit/README.md
+completed_phase: 4
+implemented: true
+---
+
+# Contextual Indents Implementation Plan
+
+## Summary and Definition of Done
+
+biscuit-file owns structured YAML layout, Sniff resolves the destination's indentation and provenance, and writers pass the resolved preference at the write boundary. Existing text edits retain the layout of the collection they touch, comments, and untouched bytes.
+
+Completion requires the examples in the specification to pass through the real Sniff and Claudine entry points, including the four-space YAML layout, Rust's two-space fixture, Biome's tab default and EditorConfig disagreement, and the commented-config edit. Verify parsed YAML values and mapping order separately from layout. Repeated no-op saves preserve bytes, legacy migration preserves read-back and backup behavior, and the serializer guard rejects new direct calls. Preserve published hash and fingerprint results. Validate the platform-neutral fixtures on Linux, macOS, native Windows, and WSL2 through the repository's existing verification paths. The review after Phase 4 receives the implementation, representative output, test evidence, and any specification departures recorded below.
+
+## Implementation Rules
+
+These rules apply across all phases; each task names the rules it implements.
+
+- **API and ownership.** Export `Indentation` and `IndentStyle` from the biscuit-file crate root without feature gating. Export `to_yaml_string` and `Yaml::to_yaml_string(&self, indentation: Indentation) -> Result<String, YamlError>` behind `yaml`. Add `YamlError::Serialize(serde_yaml_ng::Error)` with an explicit mapping and `YamlError::Layout(String)`; the existing `From` remains the parse conversion. Evidence: `biscuit-file/lib/src/yaml/types.rs` stores parsed values separately from source text and already reserves `YamlError::Parse` for parse failures.
+- **Layout engine.** Put it in `biscuit-file/lib/src/yaml/write.rs`. Use `rlsp_yaml_parser::parse_events` from the locked 0.11 series, already used by DMLS, for structural spans. Serialize once through `serde_yaml_ng`, parse that text as the comparison value, and render from its structural events and source token spans. Use spaces for YAML, preserve compact dash alignment at dash column plus two even at width one, and advance one requested level for each block child of a mapping key. Preserve flow spelling for empty collections and use structural key spans for explicit complex keys. Keep the backend's block scalar spelling (`|`, `|-`, `|+`) for multiline values, re-indented to the requested level, so prose stays readable. Fall back to a YAML double-quoted string with JSON-compatible escapes, retaining tags, only when a block scalar cannot represent the content at that level: content needing an explicit indentation indicator above 9, leading or trailing whitespace patterns block chomping cannot reproduce, or characters a block scalar cannot carry. Multiline keys always use the double-quoted form. The choice is deterministic for a given value and width. Reparse and compare recursively in mapping iteration order, including keys and tags, treating NaN as equivalent to NaN. Evidence: the specification permits equivalent scalar spellings, `Yaml` already uses the same value backend, and the event API provides spans independently of decoded content.
+- **EditorConfig parser and matching.** Keep `FormattingConfig` and `EditorConfigSection` unchanged. Refactor `sniff/lib/src/filesystem/formatting.rs::parse_editorconfig` into one ordered section/property scan with two projections. The formatting report retains its current conversion, and indentation folds valid assignments and explicit tombstones in source order. Match case-sensitively against slash-joined path components. Use `globset` with literal separators and backslash escapes for wildcard matching, translating EditorConfig brace ranges into numeric predicates with signed inclusive bounds and no eager expansion. A leading slash anchors to the root, a slashless pattern matches the basename, and an invalid section pattern produces a diagnostic. Accept only exact positive integers through 255 for widths. Missing or unset `indent_size` uses `tab_width` only with tab style, and explicit `indent_size = tab` uses it independently of style. Evidence: `formatting.rs::{parse_editorconfig,apply_property}` currently projects directly into lossy report fields, and `sniff/lib/Cargo.toml` already uses globset.
+- **Resolution and summary.** Use `filesystem::git::repo_root` starting from the nearest existing directory ancestor, and `biscuit_file::{canonicalize_simplified,PathIdentity}` for physical root identity and snapshot containment. Match against the full destination after restoring missing components. Keep discovery in the free functions and use the snapshot's explicit root for repeated queries. Export `IndentationSummary` and `RepoIndentation::summary(&self) -> IndentationSummary`, plus `resolve_summary(base: &Path) -> Result<IndentationSummary>` for root discovery and outside-worktree defaults. The extension resolver validates external input before probing, and the infallible snapshot method takes documented valid extensions. Use a sorted map for overrides and deduplicate summary diagnostics by path, key, and reason, in first-seen order. Enumerate exact literal suffix and brace-suffix rules only. Extension-mode override entries with any basename- or directory-dependent include or exclude are skipped as a whole. Evidence: the spec separates snapshot and free lookups, `filesystem/git/api.rs::repo_root` implements the existing lightweight Git locator, and the summary needs to share one snapshot across extensions.
+- **Opinion and candidate ordering.** The specification's convention section controls convention fallback. Emit a convention when no enabled, applicable formatter contributed an opinion, including a row shadowed by a disabled configuration. Use table order across rows and `package.json` before `package.yaml` within Prettier. Select a readable declaring mapping with invalid individual settings, diagnosing those settings and falling through per property to the lower layer then row default. Skip a malformed document or wrong-type formatter declaration and continue within the row. A disabled Biome language wins over global enablement and shadows lower filenames. Bare supported files declare the row, while package and pyproject manifests need their named mapping. Evidence: the spec's built-in convention section and candidate rules take precedence over the ambiguous ranking diagram, and `formatters.md` records formatter precedence and defaults.
+- **Dialect and key choices.** Use strict JSON for `.json` and `.swift-format`, biscuit-file JSON5 for `.jsonc` and `.json5`, TOML for `.toml`, and YAML for explicit YAML, yamlfmt, and clang-format. For extensionless Prettier and CSharpier, choose strict JSON for a first non-whitespace `{` or `[` and YAML otherwise. Keep YAML values native through validation so document and scalar types survive. Enable JSON5 explicitly in `sniff/lib/Cargo.toml`. Report executable Prettier candidates `.prettierrc.{js,cjs,mjs,ts,cts,mts}` and `prettier.config.{js,cjs,mjs,ts,cts,mts}`, plus `oxfmt.config.{ts,mts}`, as unsupported even alongside a selected local config. Report string-valued Prettier presets, inheritance and unsupported top-level override keys named in the spec at their paths. Treat invalid higher-layer fields as absent for layering after diagnosis. Biome groups JS family under `javascript`, JSON family under `json`, and CSS and GraphQL under their own blocks. dprint groups the JS family under `typescript` and JSON under `json`. clang-format uses `ObjC` for m/mm, `Proto` for proto, and `Cpp` otherwise. Accept `ForIndentation`, `ForContinuationAndIndentation`, `AlignWithSpaces`, and `Always` as tab modes. Apply unqualified document then matching language document, diagnosing repeated language documents and keeping the first of each. Evidence: the spec's supported file table and mapping rules bound the local lookup, and the manifest currently enables TOML and YAML.
+- **Robustness outcomes.** For the new configuration readers, malformed documents and wrong-type declarations produce a located skipped diagnostic and publish no opinion from that candidate. The spec explicitly permits continuing with other candidates and publishing a resolved result. Invalid individual shapes produce a path/key diagnostic and do not apply that assignment. Missing optional settings use the applicable lower layer or default, null is invalid, empty declaring objects select defaults, empty override arrays apply no overrides, and empty glob lists or glob strings are invalid. A bad element invalidates its entire glob field, and an invalid override entry leaves the other entries usable. A manifest's absent declaration gives no opinion. Keep unsupported string presets distinct from invalid field types and from absent keys. EditorConfig's explicit `unset` is a valid clear. Evidence: the specification requires skipped diagnostics, partial editor opinions, row defaults, and fallback across candidates.
+- **Config transaction boundary.** Resolve lazily from `PlannedTarget.resolved` in `darkmatter/lib/src/config/write.rs::stage`, cache once across edit batches, and use default plus a path-qualified warning on discovery error. Add `TargetChange::create_yaml(path, value: serde_json::Value, edits)` with a separate generated base variant. A JSON value cannot carry YAML tags or non-string keys; configuration documents need neither, and a caller that does keeps `TargetChange::create` with an explicit skeleton. Serialize its value in staging with the same preference used by its edits. Keep `TargetChange::create` for explicit text skeletons. Check semantic no-op before invoking the lazy fallback resolver, and validate and reload under the existing lock. Use a generated-base flag to suppress local inference on creations across all batches. Route layout failures through a typed `ConfigWriteError` variant and existing caller error surfaces. Evidence: `ConfigTransaction::{add,commit}` canonicalizes once, coalesces changes, and validates all candidates before writing receipts and replacing targets.
+- **Text-edit precedence.** Add indentation-aware variants beside `edit_yaml_paths`, `edit_frontmatter_paths`, and `edited_document_text` and preserve their existing signatures as default wrappers. Share inference in `markdown/hash/node_edit.rs` using its `SchemaValueNode` collection spans. For an existing block, use its measured child offset and preserve an indentless sequence's offset of zero. For a newly rendered block, use the nearest authored comparable block of the same collection kind, preferring the nearest containing mapping, then byte distance and earlier offset on ties. Infer widths from actual parent and child offsets, excluding flow collections, compact dash padding, scalar continuation lines, and nonpositive offsets from general width inference. Fall back per rendered collection to the resolved width. Keep existing line terminators, splice boundaries, anchor protections, and post-edit reload validation. Evidence: `node_edit.rs::{apply_edit,walk,replace_entry,replace_item}` already owns the structural splice path for both editors.
+- **DMLS and Markdown.** Carry the effective save path into Darkmatter CLI `commands/frontmatter.rs::{set_value,rm_value}` and the hash property restoration write path. DMLS needs verification only. Its `providers/code_actions.rs::add_missing_required_keys` emits root-level empty or scalar-literal entries, and `providers/frontmatter.rs::yaml_scalar_literal` emits literal completions. Neither generates nested layout or creates a frontmatter block. Retain the scalar serialization allowlist entry and test that those edits preserve existing nested content. Evidence: the code action requires an existing AST and inserts only column-zero keys, and the literal tests pin quote spelling.
+- **Guard boundary.** Put a shared `syn`-based scanner in `tools/test-toolkit` as a `serializer_guard` module, beside its existing `archive_guard`. Each package that depends on a YAML backend calls it from one of its own L1 tests, scanning only that package's source with its own reasoned allowlist keyed by package-relative source file and enclosing symbol. A package's guard then reads only its own source, so the check attaches to that package's existing verification and adds no cross-package CI inputs. Exclude test targets, test-only modules and examples, and resolve namespace aliases, imported leaf aliases, crate re-exports and glob imports to the backend symbols, including workspace crates' known re-export paths of the backends. Cover `to_string`, `to_writer` and serializer construction for serde_yaml and serde_yaml_ng. A test-toolkit L1 test reads workspace manifests only and fails when a member depends on a YAML backend without a guard test; declare those manifests as its test inputs using the forms in the rust-testing skill. Evidence: test-toolkit is already the shared test dev-dependency and hosts `archive_guard`; CLAUDE.md's CI structure schedules a package's tests from its own source, while cross-package source inputs add a narrowed cell for every change.
+- **No spike.** The work has no unresolved measurement question. The specification defines a read-once contract, which tests prove with counted reads, and the current source identifies the edit and publication boundaries.
+
+## Phase 1 — Shared YAML Writer
+
+Implements the **API and ownership** and **Layout engine** rules.
+
+- [x] **Build YAML Writer**
+  - Implement the public types, feature gates, writer, wrapper, and typed layout errors. Enable the locked span-parser dependency under `yaml`.
+  - Exercise the layout at widths 1, 2, 4, 8, 10, and 255 with nested maps, scalar lists, compact map/list items, empty collections, tags, complex keys, non-finite numbers, quoted and block scalars (asserting block scalars stay block scalars where representable, and each double-quoted fallback trigger), Unicode, blank lines, and chomping. Round-trip the existing biscuit-file YAML corpus through `Yaml::to_yaml_string` and assert value/order and layout separately. Verify feature-disabled type exports.
+- [x] **Document YAML Writing**
+  - Add `biscuit-file/docs/topics/yaml-writing.md`, link it from the YAML design and overview, and update the biscuit-file repo skill and dependency inventory. Run the biscuit-file L1 and lint recipes.
+
+## Phase 2 — Sniff Resolution
+
+Starts after Phase 1, because Sniff re-exports biscuit-file's `Indentation` and `IndentStyle`. Implements the **EditorConfig parser and matching**, **Resolution and summary**, **Opinion and candidate ordering**, **Dialect and key choices**, and **Robustness outcomes** rules.
+
+Establish shared candidate metadata and output structs before the parallel tasks. Every parallel task owns separate files.
+
+- [x] **Define Resolver Types**
+  - Add `filesystem/indentation/mod.rs` with the spec's public types, summary API and re-exports. Put ordered formatter candidate paths, extensions, dialects, defaults, and conventions in `indentation/catalog.rs`. Keep serde values and optional omission as specified. Use portable slash text for provenance paths.
+
+### Parallel tasks
+
+- [x] **Match EditorConfig Sections**
+  - Implement the shared ordered scan in `formatting.rs` and the indentation projection and matching in `indentation/editorconfig.rs`. Exercise escapes, slash anchoring, basename rules, braces, signed numeric ranges, unset, invalid properties, tab width precedence, partial opinions and synthetic extension exclusions. Keep existing formatting report tests passing.
+- [x] **Read Formatter Settings**
+  - Implement `indentation/formatters.rs` with per-row extraction, shared exact-width, Boolean, style and glob-field validators, ordered override layering, disabled and shadowed outcomes, and unsupported-form diagnostics. Include one control fixture per row, copied from that formatter's documented configuration example (no formatter binary runs in tests), and a fixture with omitted settings for every selected default.
+- [x] **Load Candidate Snapshots**
+  - Implement `indentation/inputs.rs` using Rayon's indexed parallel iteration over distinct candidate paths, adapting the counted config reader in `filesystem/repo/detection.rs`. Treat missing paths as absent and retain unreadable and parse errors. Parse bytes once per path and dialect, including multi-document clang YAML as one file read. Keep path selection, extension-only candidate selection and full snapshot loading distinct at the entry points.
+
+### Integration
+
+- [x] **Integrate Resolver Results**
+  - Wire the free functions, snapshot calls and summary in `indentation/mod.rs`. Resolve style and width independently, compute consensus on raw opinions, then apply the YAML adjustment. Verify default, alternative provenance, shadowing, summary omissions, and diagnostic deduplication even for omitted extensions.
+  - At the public Sniff resolver, test field shapes once per validator with an unedited documented-example control, then a control and one invalid value at every wiring site. Test absent, null, wrong types, invalid and wholly invalid list elements, and empty shapes using the Phase 1 outcomes. Test duplicate keys and trailing garbage once each through strict JSON, JSON5, YAML, TOML, and the EditorConfig scanner's own grammar where duplicate assignments deliberately merge. Reject duplicate JSON/JSON5 keys before lossy value construction using the biscuit-file scan seam. Prove JSON5 comments and trailing commas, YAML implicit null, single-document rejection of a second document, and clang multi-document selection. Assert diagnostics and fallback through the returned public result. Audit `serde(default)`, `Option<T>`, silent filtering and discarded errors at load-bearing ingress.
+  - Verify one parse/read per shared file, focused reads, stable ordering, linked and nested repositories, nonexisting paths, outside fallback, exact filename conventions and forward-slash matching. Run Sniff L1 and lint and write `sniff/docs/topics/indentation.md`, its overview link and the repo skill updates.
+
+## Phase 3 — Sniff Command
+
+Starts after Phase 2.
+
+- [x] **Wire Indent Command**
+  - Add `RepoAction::Indent` in `sniff/cli/src/args/repo.rs` and a lightweight dispatch arm in `commands/mod.rs` beside the early Git actions. Reuse the existing base-directory selection and JSON flag. Validate extensions through clap using the same grammar as the library boundary. Render in `output/filesystem/indentation.rs` using biscuit-terminal `Prose` and `UnorderedList`, naming sources for each filled dimension and highlighting disagreement using terminal styling. Send the leaf value or summary directly to the JSON writer.
+  - Attach `indent` to ordinary parent repo JSON in the default-action path feeding `output/repo_json.rs::build_with_outcome`. Leave focused actions and plain default output on their existing path. Use the same summary function as the leaf.
+- [x] **Verify Command Contract**
+  - Add L1 fixture subprocess coverage for stdout-only JSON, ordinary parent JSON, unaffected focused JSON, partial opinions, YAML tab adjustments, invalid extensions, base-directory handling, and outside-worktree behavior. Reuse the public tests for the full robustness matrix. Prove CLI wiring with positive and malformed config examples through the supported dialects and assert the located skipped diagnostic alongside a usable result. Check completion/help and run L1 and lint for `sniff-detection-cli`.
+  - Add `sniff/docs/cli/repo_indent.md`, update the repo reference and `sniff/docs/topics/json-output.md`, and update the caller skill with the new command and output contract.
+
+## Phase 4 — Writer Migration
+
+Starts after Phases 1 and 2. Implements the **Config transaction boundary**, **Text-edit precedence**, **DMLS and Markdown**, and **Guard boundary** rules. Run the shared editor task before the parallel tasks. Among the parallel tasks, keep the guard's scan and test files separate from the production migrations. Run the guard against the migrated tree during integration.
+
+- [x] **Extend Shared Editors**
+  - Implement the **Config transaction boundary** and **Text-edit precedence** rules first. Carry generated JSON values and lazy preference through staging, and exercise multiple batches, symlink targets, no-op reads, CRLF, existing indentless lists, multiline scalars, empty collection replacement, nested inserts, and pre-publication validation failures. Preserve the existing partial-publication error reporting for replacement failures.
+  - Use the contextual editor in Darkmatter's config creation, permission edits, migration, initialization and registration callers in `config/{permissions/persist,init,migration}.rs`. Change permission creation's whole-document serializer to `TargetChange::create_yaml`. Route opening skeletons and generated edits through the same layout. Update Markdown hash property restoration and CLI frontmatter writes after the shared estimator lands. Keep the strict hash's serialized input unchanged.
+
+### Parallel tasks
+
+- [x] **Migrate Claudine Writes**
+  - In `config/persist.rs`, derive the initial projection as a value and pass it to `TargetChange::create_yaml`. Keep public `initial_text` as the default-width preview. Compute initial diffs against the projected value rather than serializing and reparsing it. Setup's existing `TargetChange::edit` inherits the destination preference through staging.
+  - In `config/json_conversion.rs::convert`, publish via `create_yaml` and move `load_yaml_document` equality against the original JSON value into the staged validator. Preserve the receipt, clash recovery, backup/delete decisions, and located error mapping. Test both user and repository creation and recovery with normal entry points.
+  - Migrate `linking/compatibility/frontmatter_io.rs` at its write destination, and `claudine/gen/src/agent_errors_check.rs::write_outcome_report` using the report path. Use the default layout for the whole YAML dry-run display in `cli/src/commands/wrap/composition/dry_run.rs`. Keep the generator drift preview in `gen/src/apply.rs` on its existing encoding.
+- [x] **Migrate Darkmatter Outputs**
+  - Migrate `markdown/output/string.rs`, `markdown/yaml_block.rs`, and `cli/src/commands/hash.rs` to the default writer for destinationless document output. For file-writing Markdown commands, thread the effective output destination through the existing save path before rendering frontmatter. Keep `markdown/delta/report.rs` and `markdown/toc/mod.rs` YAML fragments stable for their report/TOC contracts. Keep the schema materialization round trip in `markdown/schemas/mod.rs` on the existing backend.
+  - Verify the existing DMLS missing-key action and literal completions against an unsaved buffer with nested frontmatter. Assert that the edit touches only the intended range and preserves scalar quote spelling and the surrounding layout.
+- [x] **Migrate Format Exports**
+  - Migrate `biscuit-file/cli/src/main.rs::{emit_structured,process_yaml}`, `Json5::as_yaml`, and `Toml::as_yaml` with default indentation and typed conversions from `YamlError`. Retain the internal `Toml::as_yaml_value` round trip. Keep biscuit-file independent of Sniff.
+  - Migrate `simplified-schema/lib/src/schema/export.rs` and `schematic/define/src/openapi/options.rs` to use defaults for string output. Keep `SimplifiedSchema::to_simplified_yaml` destinationless since its callers are library tests and documentation examples. Add `schematic_define::openapi::serialize_with_indentation` and keep `serialize` as its default wrapper. Use the explicit variant in `schematic/gen/src/export/openapi.rs::write_openapi_document` and `pipeline.rs::publish_openapi`, deriving the destination from the final filename before rendering. Resolve only the YAML branch and keep the pipeline's render-all-before-publish ordering. Keep OpenAPI exact-number marking and decimal substitution after YAML layout so backend number normalization cannot change exported text.
+  - Keep biscuit-tui's `option_sources.rs` and `helpers/choice_builders.rs` encoders on their existing string/identifier contract. Research's `validation/frontmatter.rs` direct serializer is inside a test. Preserve the authored or composed bytes at research file copies and frontmatter validation paths.
+- [x] **Build Serializer Guard**
+  - Implement the **Guard boundary** scanner in `tools/test-toolkit` with fixtures covering qualified, module alias, leaf alias, grouped and glob imports, and a re-export linking two modules. Test false positives for a similarly named JSON serializer and code behind test-only cfg. Add guard entries for the backend and the retained contracts named in this plan, including `markdown/hash/mod.rs` (strict hash), `yaml_documents/mod.rs` (fingerprint), `coercion/engine.rs` (coerced string), `triggers/envelope.rs` (envelope text), and Claudine `composition/file_detail.rs` and `linking/compatibility/properties.rs` (context fragments). Retain each entry with its specific reason. Add the per-package guard test to every package that depends on a YAML backend, and the manifest coverage test to test-toolkit.
+
+### Integration
+
+- [x] **Verify Writer Contracts**
+  - Run each touched area's L1 and lint recipes using nextest through Just. Exercise repository-aware saves with path-specific widths, default stdout and standalone strings, relative and new destinations, comment-preserving edits, a generated stub with no authored local examples, and two identical saves. Confirm layout errors are reported before target or migration-source publication.
+  - Compare strict frontmatter hashes and schema fingerprints against controls using the legacy backend bytes and biscuit-hash. Verify standalone YAML, schema exports and OpenAPI preserve parsed values and exact numeric output. Run every package's guard and the manifest coverage test on the complete migrated tree. Use the repo OS skill for the four environment verification paths and preserve terminal focus for any existing L2 coverage.
+- [x] **Publish Behavior Docs**
+  - Update affected README overviews, current topic docs, repo skills, caller skills and dependency inventories for their respective changes. Publish changed caller skills with each owning area's `just publish-skills`.
+  - Put sample Sniff output, new and edited Claudine YAML, verification results, and implementation departures in the implementation log for final review. Leave the feature in its active directory.

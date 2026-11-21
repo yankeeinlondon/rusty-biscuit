@@ -28,6 +28,6 @@ fn compose_keeps_as_line_separated_newline_joined() {
         )
         .assert()
         .success()
-        .stdout(predicate::str::contains("joined: |-\n  a\n  b"))
+        .stdout(predicate::str::contains("joined: |-\n    a\n    b"))
         .stdout(predicate::str::contains(r#"mixed: x ["a","b"]"#));
 }

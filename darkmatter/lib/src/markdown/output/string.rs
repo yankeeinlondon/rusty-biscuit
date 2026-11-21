@@ -1,12 +1,13 @@
 //! String output formatting for Markdown documents.
 
 use crate::markdown::Markdown;
-use biscuit_file::serde_yaml_ng;
+use biscuit_file::Indentation;
 
 /// Converts a Markdown document to a string with frontmatter.
 ///
 /// If the document has frontmatter, it will be serialized as YAML between
-/// `---` delimiters. The content follows after the frontmatter block.
+/// `---` delimiters, nested four spaces per level (the layout for output with
+/// no destination file). The content follows after the frontmatter block.
 ///
 /// ## Examples
 ///
@@ -22,13 +23,24 @@ use biscuit_file::serde_yaml_ng;
 /// assert!(output.contains("# Hello"));
 /// ```
 pub fn as_string(md: &Markdown) -> String {
+    as_string_with_indentation(md, Indentation::default())
+}
+
+/// [`as_string`] for a document saved to a file whose indentation preference
+/// is `indentation` (see
+/// [`destination_indentation`](crate::config::write::destination_indentation)).
+///
+/// The whole frontmatter is re-serialized, so authored comments and layout
+/// are not kept. Frontmatter that cannot be serialized is written as an empty
+/// block, as [`as_string`] does.
+pub fn as_string_with_indentation(md: &Markdown, indentation: Indentation) -> String {
     if md.frontmatter().is_empty() {
         // No frontmatter, return just the content
         md.content().to_string()
     } else {
         // Serialize frontmatter as YAML
-        let yaml =
-            serde_yaml_ng::to_string(md.frontmatter().as_map()).unwrap_or_else(|_| String::new());
+        let yaml = biscuit_file::to_yaml_string(md.frontmatter().as_map(), indentation)
+            .unwrap_or_else(|_| String::new());
 
         // Build the full document with frontmatter delimiters
         let mut output = String::new();
@@ -97,6 +109,36 @@ mod tests {
         assert!(output.contains("- rust"));
         assert!(output.contains("- markdown"));
         assert!(output.contains("metadata:"));
+    }
+
+    #[test]
+    fn nested_frontmatter_is_laid_out_four_spaces_by_default() {
+        let mut md = Markdown::new("Body\n".to_string());
+        md.fm_insert("tags", json!(["rust", "markdown"])).unwrap();
+        md.fm_insert("metadata", json!({"version": "1.0", "authors": ["a"]}))
+            .unwrap();
+
+        let output = as_string(&md);
+
+        assert_eq!(
+            output,
+            "---\ntags:\n    - rust\n    - markdown\nmetadata:\n    version: '1.0'\n    authors:\n        - a\n---\nBody\n"
+        );
+        let reread: Markdown = output.into();
+        assert_eq!(reread.frontmatter().as_map(), md.frontmatter().as_map());
+    }
+
+    #[test]
+    fn an_explicit_indentation_sets_the_nesting_width() {
+        let mut md = Markdown::new("Body\n".to_string());
+        md.fm_insert("metadata", json!({"tags": ["a"]})).unwrap();
+        let two = Indentation::spaces(std::num::NonZeroU8::new(2).unwrap());
+
+        let output = as_string_with_indentation(&md, two);
+
+        assert_eq!(output, "---\nmetadata:\n  tags:\n    - a\n---\nBody\n");
+        let reread: Markdown = output.into();
+        assert_eq!(reread.frontmatter().as_map(), md.frontmatter().as_map());
     }
 
     #[test]

@@ -751,7 +751,8 @@ impl Markdown {
     /// Converts the markdown document to a string representation.
     ///
     /// If the document has frontmatter, it will be serialized as YAML between
-    /// `---` delimiters. The content follows after the frontmatter block.
+    /// `---` delimiters, nested four spaces per level. The content follows
+    /// after the frontmatter block.
     ///
     /// ## Examples
     ///
@@ -767,6 +768,12 @@ impl Markdown {
     /// ```
     pub fn as_string(&self) -> String {
         output::as_string(self)
+    }
+
+    /// [`Self::as_string`] for a document saved to a file whose indentation
+    /// preference is `indentation`; see [`output::as_string_with_indentation`].
+    pub fn as_string_with_indentation(&self, indentation: biscuit_file::Indentation) -> String {
+        output::as_string_with_indentation(self, indentation)
     }
 
     /// Converts the markdown document to an MDAST (Markdown Abstract Syntax Tree).

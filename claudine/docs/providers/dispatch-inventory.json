@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1863,
-    "provider_refs": 2051,
+    "sites": 1864,
+    "provider_refs": 2052,
     "by_form": {
-      "direct-ref": 1788,
+      "direct-ref": 1789,
       "eq-comparison": 20,
       "match-provider": 8,
       "matches-macro": 26,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 75,
-      "reference": 1788
+      "reference": 1789
     }
   },
   "sites": [
@@ -5130,7 +5130,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1002,
+      "line": 995,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5140,7 +5140,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1015,
+      "line": 1008,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5150,7 +5150,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1025,
+      "line": 1018,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5160,7 +5160,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1042,
+      "line": 1035,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5170,7 +5170,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1057,
+      "line": 1050,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5180,7 +5180,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1068,
+      "line": 1061,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5190,7 +5190,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1079,
+      "line": 1072,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5200,7 +5200,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1094,
+      "line": 1087,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5210,7 +5210,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1110,
+      "line": 1103,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5220,7 +5220,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1124,
+      "line": 1117,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5230,7 +5230,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1141,
+      "line": 1134,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5240,7 +5240,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/positional.rs",
-      "line": 1151,
+      "line": 1144,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6258,6 +6258,16 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/tests.rs",
+      "line": 52,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/sequence/tests.rs",
       "line": 53,
       "form": "direct-ref",
       "dispatch_class": "reference",
@@ -6268,17 +6278,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/tests.rs",
-      "line": 54,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/sequence/tests.rs",
-      "line": 57,
+      "line": 56,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6288,7 +6288,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/tests.rs",
-      "line": 61,
+      "line": 60,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6298,7 +6298,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/tests.rs",
-      "line": 69,
+      "line": 68,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6308,7 +6308,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/tests.rs",
-      "line": 72,
+      "line": 71,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6319,7 +6319,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/tests.rs",
-      "line": 77,
+      "line": 76,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7430,7 +7430,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 669,
+      "line": 667,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7440,7 +7440,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 671,
+      "line": 669,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7450,7 +7450,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 680,
+      "line": 678,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7461,7 +7461,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 681,
+      "line": 679,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7471,7 +7471,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 684,
+      "line": 682,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7481,7 +7481,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 698,
+      "line": 696,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7491,7 +7491,17 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 701,
+      "line": 699,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/lib/src/composition/error/tests.rs",
+      "line": 709,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7511,17 +7521,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 713,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 3507,
+      "line": 3546,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7532,7 +7532,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 3513,
+      "line": 3552,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7543,7 +7543,7 @@
     },
     {
       "path": "claudine/lib/src/composition/error/tests.rs",
-      "line": 3523,
+      "line": 3562,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -7857,7 +7857,7 @@
     },
     {
       "path": "claudine/lib/src/composition/schema/tests.rs",
-      "line": 2656,
+      "line": 2651,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9143,7 +9143,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 500,
+      "line": 502,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9153,7 +9153,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 605,
+      "line": 607,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9163,7 +9163,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 606,
+      "line": 608,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9173,7 +9173,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 635,
+      "line": 637,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9183,7 +9183,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 636,
+      "line": 638,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9193,7 +9193,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 706,
+      "line": 709,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9203,7 +9203,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 707,
+      "line": 710,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9213,7 +9213,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 724,
+      "line": 727,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9223,7 +9223,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 743,
+      "line": 746,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9233,7 +9233,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 759,
+      "line": 762,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9243,7 +9243,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 769,
+      "line": 772,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9253,7 +9253,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 773,
+      "line": 776,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9263,7 +9263,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 786,
+      "line": 789,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9273,7 +9273,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 790,
+      "line": 793,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9283,7 +9283,7 @@
     },
     {
       "path": "claudine/lib/src/config/claudine_config/tests.rs",
-      "line": 839,
+      "line": 842,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9523,7 +9523,7 @@
     },
     {
       "path": "claudine/lib/src/config/persist_tests.rs",
-      "line": 242,
+      "line": 244,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9533,7 +9533,7 @@
     },
     {
       "path": "claudine/lib/src/config/persist_tests.rs",
-      "line": 247,
+      "line": 249,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -9543,7 +9543,7 @@
     },
     {
       "path": "claudine/lib/src/config/persist_tests.rs",
-      "line": 257,
+      "line": 259,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -10593,7 +10593,7 @@
     },
     {
       "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 70,
+      "line": 71,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -10603,7 +10603,7 @@
     },
     {
       "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 96,
+      "line": 84,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -10613,7 +10613,7 @@
     },
     {
       "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 125,
+      "line": 110,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -10623,7 +10623,17 @@
     },
     {
       "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 142,
+      "line": 139,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/lib/src/linking/compatibility/tests.rs",
+      "line": 156,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -10633,47 +10643,47 @@
     },
     {
       "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 160,
+      "line": 174,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
         "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 168,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "KimiCode"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 171,
-      "form": "matches-macro",
-      "dispatch_class": "conditional",
-      "providers": [
-        "KimiCode"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 179,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
       ],
       "exempt_candidate": true
     },
     {
       "path": "claudine/lib/src/linking/compatibility/tests.rs",
       "line": 182,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "KimiCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/lib/src/linking/compatibility/tests.rs",
+      "line": 185,
+      "form": "matches-macro",
+      "dispatch_class": "conditional",
+      "providers": [
+        "KimiCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/lib/src/linking/compatibility/tests.rs",
+      "line": 193,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/lib/src/linking/compatibility/tests.rs",
+      "line": 196,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [
@@ -10683,7 +10693,7 @@
     },
     {
       "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 425,
+      "line": 439,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -10693,7 +10703,7 @@
     },
     {
       "path": "claudine/lib/src/linking/compatibility/tests.rs",
-      "line": 433,
+      "line": 447,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [

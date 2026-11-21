@@ -129,7 +129,8 @@ impl YamlBlock {
     /// ## Notes
     ///
     /// Frontmatter is round-tripped through Darkmatter's structured
-    /// `FrontmatterMap` before being re-serialized via `serde_yaml_ng`. As a
+    /// `FrontmatterMap` before being re-serialized by
+    /// `biscuit_file::to_yaml_string` with the default four-space nesting. As a
     /// result, the rendered YAML payload is **not** a byte-for-byte copy of the
     /// source frontmatter:
     ///
@@ -149,7 +150,11 @@ impl YamlBlock {
         let yaml = if md.frontmatter().is_empty() {
             "{}".to_string()
         } else {
-            serde_yaml_ng::to_string(md.frontmatter().as_map())?
+            biscuit_file::to_yaml_string(md.frontmatter().as_map(), biscuit_file::Indentation::default())
+                .map_err(|error| match error {
+                    biscuit_file::YamlError::Serialize(source) => source,
+                    other => <serde_yaml_ng::Error as serde::ser::Error>::custom(other),
+                })?
         };
         validate_yaml(&yaml)?;
         Ok(Self {
@@ -919,6 +924,16 @@ mod tests {
             "original quad-space whitespace should not survive; got: {}",
             block.yaml()
         );
+    }
+
+    #[test]
+    fn from_markdown_content_nests_four_spaces() {
+        let md = "---\nmeta:\n  tags:\n  - a\n---\nbody\n";
+        let block = YamlBlock::from_markdown_content(md).unwrap();
+        assert_eq!(block.yaml(), "meta:\n    tags:\n        - a\n");
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(block.yaml()).unwrap();
+        let expected: serde_yaml_ng::Value = serde_yaml_ng::from_str("meta: {tags: [a]}").unwrap();
+        assert_eq!(parsed, expected);
     }
 
     #[test]

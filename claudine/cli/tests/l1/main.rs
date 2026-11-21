@@ -89,6 +89,7 @@ mod entry_point_parity;
 mod error_guards;
 mod errors_command;
 mod exit_site_guard;
+mod first_run_config_layout;
 // Reads the `CLAUDINE_TEST_GROUP_BRANCHES` seam, which only `test-fixtures`
 // builds compile into the binary.
 #[cfg(feature = "test-fixtures")]
@@ -337,3 +338,4 @@ mod sequence_referenced_state;
 mod sequence_deep_cancelled;
 
 mod research_sequence_artifacts;
+mod yaml_serializer_guard;

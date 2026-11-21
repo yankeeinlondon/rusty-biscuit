@@ -439,7 +439,7 @@ fn compose_accepts_a_policy_template_over_shell_output_in_both_trigger_modes() {
             let (code, stdout, stderr) = compose_shell_resolved(&frontmatter, extra);
             assert_eq!(code, Some(0), "{extra:?} {content_policy}: {stderr}");
             assert!(
-                stdout.replace("\r\n", "\n").contains("content_policy:\n- TimeSensitive\n"),
+                stdout.replace("\r\n", "\n").contains("content_policy:\n    - TimeSensitive\n"),
                 "{extra:?} {content_policy}: {stdout}"
             );
         }

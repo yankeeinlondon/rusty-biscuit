@@ -113,6 +113,17 @@ A program that drives `EffectEngine` itself keeps the root-relative API:
 - **Network:** `http_post(url, body)` posts a body and returns an object with
   `status` and `body`. It is host-allowlist gated and deny-all by default.
 
+The frontmatter verbs rewrite the document's whole frontmatter block, so
+comments and authored layout in it are not kept. Nested values are indented
+with the preference Sniff resolves for the target file (its `.editorconfig`
+and repository conventions; `sniff repo indent` shows it), or four spaces,
+with a warning, when that cannot be resolved. A call that changes no value
+does not write the file at all, so its authored bytes stay as they are: setting
+`title` to the value it already holds, merging values that already hold, or
+deleting a property the document does not have. Such a call resolves no
+indentation preference and re-hashes nothing, and it returns what it would
+have returned after a write.
+
 Markdown frontmatter writers re-hash a `hash:` property automatically by
 default. Full-file overwrite and deletion are expressly out of scope for v1.
 

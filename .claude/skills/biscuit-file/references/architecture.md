@@ -5,7 +5,8 @@ Source: `biscuit-file/lib/src/`
 | Module | Feature Flag | Key Types |
 |--------|-------------|-----------|
 | `toml_impl` | `toml` | `Toml`, `TomlError`, `TomlSource`, `ValidationReport` |
-| `yaml` | `yaml` | `Yaml`, `YamlError`, `YamlSource`, `ConversionOutput` |
+| `yaml` | `yaml` | `Yaml`, `YamlError`, `YamlSource`, `ConversionOutput`, `to_yaml_string` (`yaml/write.rs`) |
+| `indentation` | (always) | `Indentation`, `IndentStyle` |
 | `json5` | `json5` | `Json5`, `Json5Error`, `Json5Source` |
 | `pdf` | `extract` / `lopdf` / `pdfium` | `Pdf`, `PdfConfig`, `PdfError`, `PdfMarkdown`, `PdfToc` |
 | `file_reference` | `file-reference-syntax` | `FileReference` (parse, `class`, `payload`, builders), `FileReferenceKind`, `FileReferenceClass`, `FileReferenceError`, `ResolutionFailure`, `ResolutionCandidate`, `RootProvenance`, `PathPosition`, `MagicPathTier`, `GlobReference` (`new`, `patterns`, `escape`), `GlobReferenceError`, `FileResolutionContext`, `BaseDirOrigin`, `LaunchMagicScope`, `home_dir`, `user_cache_dir`; from `file_reference::portable` (`path_identity`, `strategy`): `PathIdentity`, `RelativeRoute`, `PortabilityPreference`, `IntentForms` |
@@ -59,7 +60,7 @@ use biscuit_file::YamlParseError;      // serde_yaml_ng::Error
 All error types use `thiserror` derive macros. Library code never uses `unwrap()` or `expect()` outside of tests. All public functions return `Result` types with module-specific errors:
 
 - `TomlError` — IO, Parse, Serialize, Json, Yaml variants
-- `YamlError` — IO, Parse, JsonConversion, TomlConversion, SchemaParse, CycleDetected, MaxDepthExceeded
+- `YamlError` — IO, Parse, Serialize, Layout, JsonConversion, TomlConversion, SchemaParse, CycleDetected, MaxDepthExceeded (`From<serde_yaml_ng::Error>` is `Parse`; the writer maps backend failures to `Serialize` explicitly)
 - `Json5Error` — Io, Parse(String), Json, Yaml, Toml variants
 - `PdfError` — Io, BackendUnavailable, Parse, Encrypted, Image, Unsupported
 - `FileReferenceError` — InvalidSyntax, MissingEnvironmentVariable, CurrentDirectory, Git, Workspace, VaultNotConfigured, RelativePath, Io

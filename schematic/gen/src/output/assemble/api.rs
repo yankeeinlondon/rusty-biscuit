@@ -102,33 +102,138 @@ fn with_api_cookies(endpoint: &Endpoint, api_cookies: &[(String, String)]) -> En
     endpoint
 }
 
+/// The pieces one module group's generated module is built from, in either
+/// layout: [`Self::single_file`] or [`Self::split`].
+///
+/// Both layouts order the same pieces, so a caller can generate (and parse)
+/// each piece once and build whichever layout the module's size selects;
+/// `assemble_modules` needs the single-file form to measure a module before
+/// it knows whether to split it.
+pub(crate) struct ModulePieces<T> {
+    /// Module documentation: inner doc attributes only.
+    pub docs: T,
+    pub serde_import: T,
+    /// The re-exported definition types; the whole of `responses.rs`.
+    pub definitions_import: T,
+    /// Each API's client struct and tag type, in group order.
+    pub api_structs: Vec<T>,
+    /// Each API's request items ([`api_requests`]), in group order.
+    pub requests: Vec<T>,
+    /// The submodule declarations and re-exports of a split `mod.rs`.
+    pub submodules: T,
+    /// The imports a split `requests.rs` adds after the serde import.
+    pub split_imports: T,
+}
+
+impl<T> ModulePieces<T> {
+    /// Applies `convert` to every piece, failing on the first error.
+    pub(crate) fn try_map<U, E>(&self, mut convert: impl FnMut(&T) -> Result<U, E>) -> Result<ModulePieces<U>, E> {
+        Ok(ModulePieces {
+            docs: convert(&self.docs)?,
+            serde_import: convert(&self.serde_import)?,
+            definitions_import: convert(&self.definitions_import)?,
+            api_structs: self.api_structs.iter().map(&mut convert).collect::<Result<_, _>>()?,
+            requests: self.requests.iter().map(&mut convert).collect::<Result<_, _>>()?,
+            submodules: convert(&self.submodules)?,
+            split_imports: convert(&self.split_imports)?,
+        })
+    }
+
+    /// The pieces of the single-file module, in file order: each API's
+    /// struct is followed by its requests.
+    pub(crate) fn single_file(&self) -> Vec<&T> {
+        let mut pieces = vec![&self.docs, &self.serde_import, &self.definitions_import];
+        for (api_struct, requests) in self.api_structs.iter().zip(&self.requests) {
+            pieces.extend([api_struct, requests]);
+        }
+        pieces
+    }
+
+    /// The pieces of the split module's `mod.rs`, `requests.rs`, and
+    /// `responses.rs`, in file order.
+    pub(crate) fn split(&self) -> [Vec<&T>; 3] {
+        let mod_rs = [&self.docs, &self.submodules].into_iter().chain(&self.api_structs).collect();
+        let requests_rs = [&self.serde_import, &self.split_imports].into_iter().chain(&self.requests).collect();
+        [mod_rs, requests_rs, vec![&self.definitions_import]]
+    }
+}
+
+/// The pieces of the module shared by `apis`, documented by `docs`, with
+/// `definitions_import` re-exporting its definition types.
+fn module_pieces(apis: &[&RestApi], docs: TokenStream, definitions_import: TokenStream) -> ModulePieces<TokenStream> {
+    let module_path = resolve_module_name(apis[0]);
+    // The endpoint methods in `requests.rs` extend the API structs.
+    let api_items: Vec<_> = apis
+        .iter()
+        .flat_map(|api| [format_ident!("{}", api.name), format_ident!("{}", api_tag_name(api))])
+        .collect();
+    // JSON bodies are spelled by their components' qualified Rust paths, so
+    // only an unqualified pager item type names something in `responses`.
+    let needs_response_import = apis.iter().any(|api| api.endpoints.iter().any(|endpoint| {
+        let resolution = schematic_define::pagination::resolve(api, endpoint);
+        resolution.strategy().is_some()
+            && resolution.list().and_then(|list| list.item_type.as_deref()).is_some_and(|name| !name.contains("::"))
+    }));
+    let response_import = needs_response_import.then(|| quote! { use super::responses::*; });
+
+    ModulePieces {
+        docs,
+        serde_import: quote! { use serde::{Deserialize, Serialize}; },
+        definitions_import,
+        api_structs: apis.iter().map(|api| generate_api_struct(api)).collect(),
+        requests: apis.iter().map(|api| api_requests(api, &module_path)).collect(),
+        submodules: quote! {
+            pub mod requests;
+            pub mod responses;
+
+            pub use requests::*;
+            pub use responses::*;
+        },
+        split_imports: quote! {
+            #response_import
+            use super::{#(#api_items),*};
+        },
+    }
+}
+
+/// The pieces of one module group's generated module: a single API's own
+/// module documentation, or, for several, [`build_combined_module_docs`].
+///
+/// ## Panics
+///
+/// Panics if `apis` is empty.
+pub(crate) fn module_group_pieces(apis: &[&RestApi]) -> ModulePieces<TokenStream> {
+    assert!(!apis.is_empty(), "a module group has at least one API");
+    let docs = match apis {
+        [api] => ModuleDocBuilder::new(api).build(),
+        _ => build_combined_module_docs(apis),
+    };
+    module_pieces(apis, docs, build_definitions_import(&resolve_module_name(apis[0])))
+}
+
+fn concat(pieces: Vec<&TokenStream>) -> TokenStream {
+    pieces.into_iter().cloned().collect()
+}
+
+fn split_parts(pieces: &ModulePieces<TokenStream>) -> SplitApiParts {
+    let [mod_rs, requests_rs, responses_rs] = pieces.split().map(concat);
+    SplitApiParts { mod_rs, requests_rs, responses_rs }
+}
+
+/// The definitions import of a single API's module: the shipped definitions
+/// module, or the crate's own `types` module when standalone.
+fn single_api_definitions_import(api: &RestApi, options: &OutputOptions) -> TokenStream {
+    if options.standalone {
+        quote! { pub use crate::types::*; }
+    } else {
+        build_definitions_import(&resolve_module_name(api))
+    }
+}
+
 /// Assembles an API module with configurable options.
 pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) -> TokenStream {
-    let module_path = resolve_module_name(api);
-    let requests = api_requests(api, &module_path);
-    let api_struct = generate_api_struct(api);
-    let module_docs = ModuleDocBuilder::new(api).build();
-
-    let definitions_import = if options.standalone {
-        quote! {
-            // Re-export model types from local types module
-            pub use crate::types::*;
-        }
-    } else {
-        build_definitions_import(&module_path)
-    };
-
-    quote! {
-        #module_docs
-
-        use serde::{Deserialize, Serialize};
-
-        #definitions_import
-
-        #api_struct
-
-        #requests
-    }
+    let docs = ModuleDocBuilder::new(api).build();
+    concat(module_pieces(&[api], docs, single_api_definitions_import(api, options)).single_file())
 }
 
 /// Assembles the API module code (e.g., anthropic.rs): module documentation,
@@ -152,30 +257,8 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
         !apis.is_empty(),
         "assemble_combined_api_module requires at least one API"
     );
-
-    let module_path = resolve_module_name(apis[0]);
-    let combined_docs = build_combined_module_docs(apis);
-    let definitions_import = build_definitions_import(&module_path);
-
-    let per_api_code = apis.iter().map(|api| {
-        let api_struct = generate_api_struct(api);
-        let requests = api_requests(api, &module_path);
-        quote! {
-            #api_struct
-
-            #requests
-        }
-    });
-
-    quote! {
-        #combined_docs
-
-        use serde::{Deserialize, Serialize};
-
-        #definitions_import
-
-        #(#per_api_code)*
-    }
+    let docs = build_combined_module_docs(apis);
+    concat(module_pieces(apis, docs, build_definitions_import(&resolve_module_name(apis[0]))).single_file())
 }
 
 /// Builds combined module documentation for multiple APIs sharing a module:
@@ -221,18 +304,8 @@ fn demote_headings(markdown: &str) -> String {
 ///   pager impls, the call types, and the endpoint methods
 /// - `responses.rs` - definitions re-exports
 pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> SplitApiParts {
-    let module_path = resolve_module_name(api);
-    let module_docs = ModuleDocBuilder::new(api).build();
-
-    let definitions_import = if options.standalone {
-        quote! {
-            pub use crate::types::*;
-        }
-    } else {
-        build_definitions_import(&module_path)
-    };
-
-    split_parts(&[api], module_docs, definitions_import, &module_path)
+    let docs = ModuleDocBuilder::new(api).build();
+    split_parts(&module_pieces(&[api], docs, single_api_definitions_import(api, options)))
 }
 
 /// Assembles a combined API module split into submodules for large APIs.
@@ -249,61 +322,8 @@ pub fn assemble_split_combined_api_module(apis: &[&RestApi]) -> SplitApiParts {
         !apis.is_empty(),
         "assemble_split_combined_api_module requires at least one API"
     );
-
-    let module_path = resolve_module_name(apis[0]);
-    let combined_docs = build_combined_module_docs(apis);
-    let definitions_import = build_definitions_import(&module_path);
-    split_parts(apis, combined_docs, definitions_import, &module_path)
-}
-
-fn split_parts(
-    apis: &[&RestApi],
-    docs: TokenStream,
-    definitions_import: TokenStream,
-    module_path: &str,
-) -> SplitApiParts {
-    // The endpoint methods in `requests.rs` extend the API structs.
-    let api_items: Vec<_> = apis
-        .iter()
-        .flat_map(|api| [format_ident!("{}", api.name), format_ident!("{}", api_tag_name(api))])
-        .collect();
-    let api_structs = apis.iter().map(|api| generate_api_struct(api));
-    let requests = apis.iter().map(|api| api_requests(api, module_path));
-    // JSON bodies are spelled by their components' qualified Rust paths, so
-    // only an unqualified pager item type names something in `responses`.
-    let needs_response_import = apis.iter().any(|api| api.endpoints.iter().any(|endpoint| {
-        let resolution = schematic_define::pagination::resolve(api, endpoint);
-        resolution.strategy().is_some()
-            && resolution.list().and_then(|list| list.item_type.as_deref()).is_some_and(|name| !name.contains("::"))
-    }));
-    let response_import = needs_response_import.then(|| quote! { use super::responses::*; });
-
-    let mod_rs = quote! {
-        #docs
-
-        pub mod requests;
-        pub mod responses;
-
-        pub use requests::*;
-        pub use responses::*;
-
-        #(#api_structs)*
-    };
-
-    let requests_rs = quote! {
-        use serde::{Deserialize, Serialize};
-
-        #response_import
-        use super::{#(#api_items),*};
-
-        #(#requests)*
-    };
-
-    SplitApiParts {
-        mod_rs,
-        requests_rs,
-        responses_rs: definitions_import,
-    }
+    let docs = build_combined_module_docs(apis);
+    split_parts(&module_pieces(apis, docs, build_definitions_import(&resolve_module_name(apis[0]))))
 }
 
 #[doc(hidden)]

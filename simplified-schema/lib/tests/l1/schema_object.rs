@@ -539,7 +539,7 @@ mod export {
     #[test]
     fn root_union_arms() {
         let exported = round_trips("$schema:\n  - kind: enum(a)\n    size: number\n  - kind: enum(b)\n    flag: boolean\n");
-        assert!(exported.starts_with("$schema:\n- "), "{exported}");
+        assert!(exported.starts_with("$schema:\n    - "), "{exported}");
     }
 
     #[test]
@@ -555,7 +555,7 @@ mod export {
     fn informal_categories() {
         let exported = round_trips("categories: [Core]\n$schema:\n  id: Id\ntypes:\n  Id: string(category(Core))\n");
         assert!(!exported.contains("kind:"), "{exported}");
-        assert!(exported.starts_with("categories:\n- Core\n"), "{exported}");
+        assert!(exported.starts_with("categories:\n    - Core\n"), "{exported}");
     }
 
     #[test]
@@ -564,6 +564,27 @@ mod export {
             "$schema:\n  root: Node\n  pair: Pair\ntypes:\n  Node:\n    name: string\n    children: Node[]\n  Pair:\n    left: Node\n    right: Node\n",
         );
         assert!(exported.contains("children: Node[]"), "a recursive type is written by name:\n{exported}");
+    }
+
+    /// The export has no destination, so it takes the writer's default
+    /// four-space layout.
+    #[test]
+    fn yaml_export_uses_the_default_four_space_layout() {
+        let exported = round_trips(
+            "$schema:\n  name: string(required)\n  address:\n    street: string\n  either:\n    - string\n    - number\n",
+        );
+        assert_eq!(
+            exported,
+            "$schema:\n    name: string(required)\n    address:\n        street: string\n    either:\n        - string\n        - number\n"
+        );
+    }
+
+    #[test]
+    fn yaml_export_parses_to_the_authored_document() {
+        let authored = "$schema:\n  name: string(required)\n  address:\n    street: string\n  either:\n    - string\n    - number\n";
+        let exported = schema(authored).to_simplified_yaml().unwrap();
+        let parsed: Value = serde_yaml_ng::from_str(&exported).unwrap();
+        assert_eq!(parsed, serde_yaml_ng::from_str::<Value>(authored).unwrap());
     }
 
     #[test]

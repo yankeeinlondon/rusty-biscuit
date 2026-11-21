@@ -93,6 +93,7 @@ owner:                           owner:
 | Edit | What happens to the text |
 | --- | --- |
 | Replace a value | its lines are rewritten in place, in the standard YAML style; a comment on its key's line stays, and comments inside a replaced mapping or list go with it |
+| Set a value it already holds | nothing changes: quotes and comments inside the value stay, and `--save` does not write the file |
 | Add a key | a new line at the end of its parent, at the parent's indentation; missing parents are created |
 | Remove a value | its own lines go; a comment on the line above stays, because it is not part of the value |
 | Remove the last child | the parent stays, as `{}` or `[]`, and a later `md set` can add to an empty `{}` in place |

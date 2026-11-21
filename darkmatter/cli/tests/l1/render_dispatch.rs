@@ -214,7 +214,7 @@ fn a_formatted_source_output_shows_no_warning_of_the_document_style() {
 
 #[test]
 fn a_source_output_carries_no_cli_style_and_ignores_a_broken_document_style() {
-    let source = "---\ntitle: Notes\nstyle:\n  page:\n    margin-left: -4\n---\n# Title\n";
+    let source = "---\ntitle: Notes\nstyle:\n    page:\n        margin-left: -4\n---\n# Title\n";
     let fixture = fixture("dispatch-source", source);
     let markdown = run(&fixture, &["doc.md", "style.page.margin-left=4", "--output", "markdown"]);
     assert_eq!(markdown.status.code(), Some(0), "{}", stderr(&markdown));

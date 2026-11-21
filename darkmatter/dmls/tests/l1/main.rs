@@ -100,4 +100,5 @@ mod workspace_formatting_settings;
 mod workspace_schema_scopes;
 mod yaml_document_editor;
 mod yaml_document_session;
+mod yaml_serializer_guard;
 mod zed_extension_contract;

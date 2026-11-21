@@ -3499,9 +3499,17 @@ mod tests {
         docs: &[(&str, &str)],
         f: impl FnOnce(&DocumentContext) -> R,
     ) -> R {
+        with_ctx_config(text, docs, DmlsConfig::default(), f)
+    }
+
+    fn with_ctx_config<R>(
+        text: &str,
+        docs: &[(&str, &str)],
+        config: DmlsConfig,
+        f: impl FnOnce(&DocumentContext) -> R,
+    ) -> R {
         let path = Path::new("/w/doc.md");
         let uri: Uri = "file:///w/doc.md".parse().unwrap();
-        let config = DmlsConfig::default();
         let roots = [PathBuf::from("/w")];
         let state = OverlayState::default();
         let overlay = state.for_document(&uri, text, path, &config, &roots, &crate::context::test_support::resolution_for(path));
@@ -3880,6 +3888,96 @@ mod tests {
             for expected in ["fit", "fill", "snap"] {
                 assert!(labels.contains(&expected), "`{expected}` offered: {labels:?}");
             }
+        });
+    }
+
+    /// `text` with `edits` applied; positions are UTF-16, and these fixtures
+    /// are ASCII.
+    fn applied(text: &str, edits: &[TextEdit]) -> String {
+        let byte = |position: lsp_types::Position| {
+            let line_start: usize =
+                text.split_inclusive('\n').take(position.line as usize).map(str::len).sum();
+            line_start + position.character as usize
+        };
+        let mut edits = edits.to_vec();
+        edits.sort_by_key(|edit| std::cmp::Reverse(byte(edit.range.start)));
+        let mut out = text.to_string();
+        for edit in edits {
+            out.replace_range(byte(edit.range.start)..byte(edit.range.end), &edit.new_text);
+        }
+        out
+    }
+
+    fn frontmatter_value(text: &str) -> serde_json::Value {
+        let block = text.strip_prefix("---\n").unwrap().split("\n---\n").next().unwrap();
+        serde_yaml_ng::from_str(block).unwrap()
+    }
+
+    /// An unsaved buffer (`/w/doc.md` is never written) whose required
+    /// literals are missing beside an authored two-space nested block with an
+    /// indentless list.
+    const NESTED_MISSING_LITERALS: &str = concat!(
+        "---\n$schema:\n  kind: literal(created; required)\n  tag: literal('2'; required)\n",
+        "  meta:\n    nested: string\n    list: string[]\n",
+        "meta:\n  nested: x\n  list:\n  - a\n---\n\nbody\n",
+    );
+
+    #[test]
+    fn missing_literal_keys_action_inserts_only_at_the_root_end_of_an_unsaved_nested_buffer() {
+        let text = NESTED_MISSING_LITERALS;
+        // A missing required key is reported only in strict mode.
+        let mut config = DmlsConfig::default();
+        config.schema.strict = true;
+        with_ctx_config(text, &[], config, |ctx| {
+            let diagnostics = crate::providers::ProviderRegistry::with_substrate().diagnostics(ctx);
+            let action = crate::providers::code_actions::code_actions(ctx, &diagnostics)
+                .into_iter()
+                .find_map(|action| match action {
+                    lsp_types::CodeActionOrCommand::CodeAction(action) if action.title == "Add 2 required keys" => {
+                        Some(action)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("add-keys action offered for {diagnostics:#?}"));
+            let edit = action.edit.expect("workspace edit");
+            #[allow(clippy::mutable_key_type)]
+            let changes = edit.changes.expect("plain changes for a default client");
+            let edits = &changes[ctx.uri];
+
+            // One pure insertion, right after the last top-level value.
+            let [insertion] = edits.as_slice() else { panic!("one edit: {edits:#?}") };
+            assert_eq!(insertion.range.start, insertion.range.end);
+            assert_eq!(insertion.new_text, "\nkind: created\ntag: '2'");
+            let updated = applied(text, edits);
+            assert_eq!(updated, text.replace("  - a\n---", "  - a\nkind: created\ntag: '2'\n---"));
+
+            let values = frontmatter_value(&updated);
+            assert_eq!(values["kind"], serde_json::json!("created"));
+            assert_eq!(values["tag"], serde_json::json!("2"), "the quoted spelling keeps a string");
+            assert_eq!(values["meta"], serde_json::json!({"nested": "x", "list": ["a"]}));
+        });
+    }
+
+    #[test]
+    fn nested_literal_completion_replaces_only_the_value_and_keeps_its_quotes() {
+        let text = concat!(
+            "---\n$schema:\n  meta:\n    tag: literal('2')\n    list: string[]\n",
+            "meta:\n  tag: \n  list:\n  - a\n---\n\nbody\n",
+        );
+        with_ctx(text, |ctx| {
+            let offset = text.find("  tag: \n").unwrap() + "  tag: ".len();
+            let items = completion(ctx, offset);
+            let item = items.iter().find(|item| item.label == "'2'").unwrap_or_else(|| panic!("{items:#?}"));
+            let Some(CompletionTextEdit::Edit(edit)) = &item.text_edit else {
+                panic!("eager text edit");
+            };
+            assert_eq!(edit.range.start, edit.range.end, "nothing authored is replaced");
+            assert_eq!(edit.range.start, ctx.source_map.byte_to_lsp(offset).unwrap());
+            assert_eq!(edit.new_text, "'2'");
+
+            let updated = applied(text, std::slice::from_ref(edit));
+            assert_eq!(updated, text.replace("  tag: \n", "  tag: '2'\n"));
+            assert_eq!(frontmatter_value(&updated)["meta"], serde_json::json!({"tag": "2", "list": ["a"]}));
         });
     }
 

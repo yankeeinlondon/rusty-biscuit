@@ -100,8 +100,8 @@ shared default engine treats an entry selected by `patternProperties` or a
 catch-all as a property like any other, so a pattern-keyed map's existing
 `null` entry would take its own default and its values their child defaults.
 
-**Configuration writes** (`config/persist.rs`): nothing serializes a whole
-config any more. Every writer hands `persist` per-path `YamlEdit`s, applied
+**Configuration writes** (`config/persist.rs`): nothing re-serializes an
+existing config. Every writer hands `persist` per-path `YamlEdit`s, applied
 under Darkmatter's `ConfigTransaction` lock to the re-read file and judged by
 the scope's schema plus `ClaudineConfig::validate` before replacement
 (`ConfigEditRefused` / `ConfigWrite` on failure; the file is untouched).
@@ -111,7 +111,15 @@ recurse while the file holds a mapping, sequences/scalars are replaced whole,
 a lost key is removed when the file writes it, left alone when it came from a
 default) — the config TUI keeps `App::opening_config`/`opening_repo_config` for this;
 `initialize_config(path, scope, defaults, chosen)` is setup's form, always
-creating a missing file from `initial_text(scope)`. Edits that already hold
+creating a missing file: the scope's projection value goes to
+`TargetChange::create_yaml` (laid out under the lock with the destination's
+Sniff indentation preference; diffs are computed against that value), while
+public `initial_text(scope)` is only its default four-space preview. The
+legacy `json_conversion` publishes with `create_yaml` too, and its staged
+validator checks the candidate reads back as the converted JSON value
+(`ConfigWriteError::Layout`/`ValidationFailed` become `ConfigConversion`
+naming `config.json`). Tests: `lib/tests/l1/config_indentation.rs`,
+`cli/tests/l1/first_run_config_layout.rs`. Edits that already hold
 are dropped, so an unchanged save starts no transaction. A user file spelling
 `favorite_agent` has `preferred_agent` edits applied to that key.
 

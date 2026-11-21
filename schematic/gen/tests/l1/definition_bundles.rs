@@ -12,6 +12,8 @@ use schematic_definitions::naming::resolve_module_name;
 use schematic_gen::export::openapi::{build_openapi_grouped, render_openapi_document};
 use schematic_gen::export::postman::render_postman_module;
 
+use crate::common::generation_groups;
+
 fn exports(api: &RestApi) -> (String, String) {
     let module = resolve_module_name(api);
     let options = ExportOptions::new().with_version(api.version.as_deref().unwrap_or("0.1.0"));
@@ -19,9 +21,10 @@ fn exports(api: &RestApi) -> (String, String) {
     (render_openapi_document(&document, ExportFormat::Json).expect("render"), render_postman_module(&[api], &module).expect("Postman"))
 }
 
-#[test]
-fn every_shipped_bundle_round_trips_through_a_file_and_exports_like_the_registry() {
-    let apis = schematic_definitions::all_apis();
+/// Every API of `modules` round-trips through a bundle file and exports
+/// from it as from the registry.
+fn assert_bundles_round_trip(modules: &[&str]) {
+    let apis = generation_groups::apis(modules);
     assert!(!apis.is_empty());
     let dir = tempfile::tempdir().unwrap();
     for api in &apis {
@@ -33,6 +36,26 @@ fn every_shipped_bundle_round_trips_through_a_file_and_exports_like_the_registry
         assert!(loaded.api() == api, "{}: loaded bundle differs from its definition", api.name);
         assert!(loaded.to_json() == json, "{}: canonical JSON is not byte-stable", api.name);
         assert!(exports(loaded.api()) == exports(api), "{}: isolated export differs from the registry export", api.name);
+    }
+}
+
+/// One case per bounded module group of the shipped REST APIs.
+mod every_shipped_bundle_round_trips_through_a_file_and_exports_like_the_registry {
+    use super::*;
+
+    #[test]
+    fn openai() {
+        assert_bundles_round_trip(generation_groups::OPENAI);
+    }
+
+    #[test]
+    fn anthropic_to_gitlab() {
+        assert_bundles_round_trip(generation_groups::ANTHROPIC_TO_GITLAB);
+    }
+
+    #[test]
+    fn huggingface_to_unfolded_circle() {
+        assert_bundles_round_trip(generation_groups::HUGGINGFACE_TO_UNFOLDED_CIRCLE);
     }
 }
 

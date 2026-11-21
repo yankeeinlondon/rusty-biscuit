@@ -10,7 +10,7 @@ use super::save::SaveDecision;
 use crate::markdown::{
     FrontmatterMap, Markdown, MarkdownError, MarkdownResult, extract_frontmatter_block,
 };
-use biscuit_file::serde_yaml_ng;
+use biscuit_file::{Indentation, serde_yaml_ng};
 use indexmap::IndexMap;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -320,6 +320,23 @@ pub fn apply_hash_save_text(
     options: &MdHashOptions,
     today: &str,
 ) -> MarkdownResult<Option<String>> {
+    apply_hash_save_text_with_indentation(document_text, decision, options, today, Indentation::default())
+}
+
+/// [`apply_hash_save_text`] for a document saved where `fallback` is the
+/// indentation preference. A nested hash value copies the frontmatter's own
+/// block layout and uses `fallback` only where the frontmatter has none.
+///
+/// ## Errors
+///
+/// As [`apply_hash_save_text`].
+pub fn apply_hash_save_text_with_indentation(
+    document_text: &str,
+    decision: &SaveDecision,
+    options: &MdHashOptions,
+    today: &str,
+    fallback: Indentation,
+) -> MarkdownResult<Option<String>> {
     let Some(new_stored) = decision.new_stored.as_ref() else {
         // A no-op save never reported a near-miss fence, so only a block that
         // extracts cleanly meets the indentation refusal.
@@ -332,7 +349,8 @@ pub fn apply_hash_save_text(
 
     let Some(extraction) = extract_frontmatter_block(document_text)? else {
         let newline = new_block_terminator(document_text);
-        let mut yaml = apply_terminators(&serialize_entry(&options.property, &hash_value)?, &[newline]);
+        let width = usize::from(fallback.width.get());
+        let mut yaml = apply_terminators(&serialize_entry(&options.property, &hash_value, width)?, &[newline]);
         if decision.bump_last_updated {
             yaml.push_str(&format!("{LAST_UPDATED_KEY}: {today}{newline}"));
         }
@@ -349,11 +367,15 @@ pub fn apply_hash_save_text(
     let original_values = frontmatter_values(extraction.yaml)?;
     let mut updated = document_text.to_string();
     let hash_node = locate_node(extraction.yaml, &options.property)?;
+    let width = |at: usize| {
+        super::node_edit::top_level_width(document_text, extraction.yaml_span.clone(), &hash_value, at, fallback)
+    };
     match hash_node {
         Some(node) => {
             let node_text = &extraction.yaml[node.range.clone()];
+            let width = width(extraction.yaml_span.start + node.range.start);
             let replacement = apply_terminators(
-                &serialize_existing_entry(node_text, &node, &hash_value)?,
+                &serialize_existing_entry(node_text, &node, &hash_value, width)?,
                 &line_terminators(node_text),
             );
             let range = absolute_range(&extraction.yaml_span, node.range);
@@ -362,7 +384,7 @@ pub fn apply_hash_save_text(
         None => {
             let insert_at = extraction.yaml_span.end;
             let replacement = apply_terminators(
-                &serialize_entry(&options.property, &hash_value)?,
+                &serialize_entry(&options.property, &hash_value, width(insert_at))?,
                 &[preceding_terminator(document_text, insert_at)],
             );
             updated.insert_str(insert_at, &replacement);
@@ -1043,11 +1065,12 @@ fn parse_semantic_key(raw: &str) -> MarkdownResult<String> {
     }
 }
 
-/// Serializes one `key: value` entry with LF terminators.
-pub(super) fn serialize_entry(key: &str, value: &serde_json::Value) -> MarkdownResult<String> {
+/// Serializes one `key: value` entry with LF terminators, `width` columns
+/// per level.
+fn serialize_entry(key: &str, value: &serde_json::Value, width: usize) -> MarkdownResult<String> {
     let mut map = indexmap::IndexMap::new();
     map.insert(key.to_string(), value);
-    serde_yaml_ng::to_string(&map)
+    super::node_edit::layout_text(&map, width)
         .map_err(|error| text_edit_error(format!("managed value could not be serialized: {error}")))
 }
 
@@ -1057,10 +1080,11 @@ fn serialize_existing_entry(
     node_text: &str,
     node: &TextNode,
     value: &serde_json::Value,
+    width: usize,
 ) -> MarkdownResult<String> {
     let key_end = node.key_end - node.range.start;
     let key_source = &node_text[..key_end];
-    let canonical = serialize_entry("managed", value)?;
+    let canonical = serialize_entry("managed", value, width)?;
     let colon = mapping_colon(canonical.lines().next().unwrap_or_default())
         .ok_or_else(|| text_edit_error("serialized managed value did not contain a mapping key"))?;
     Ok(format!("{key_source}{}", &canonical[colon..]))
@@ -2074,7 +2098,7 @@ mod tests {
         // terminator.
         assert_eq!(
             saved_body_kind("---\ntitle: x\nhash: old\r\n---\nBody\n"),
-            "---\ntitle: x\nhash:\r\n  kind: body\r\n  value: '1111111111111111'\r\n---\nBody\n"
+            "---\ntitle: x\nhash:\r\n    kind: body\r\n    value: '1111111111111111'\r\n---\nBody\n"
         );
         // Shorter replacement: comment lines inside the replaced range count
         // as original lines.
@@ -2094,7 +2118,7 @@ mod tests {
         );
         assert_eq!(
             saved_body_kind("---\rtitle: x\rhash: old\r---\rBody\r"),
-            "---\rtitle: x\rhash:\r  kind: body\r  value: '1111111111111111'\r---\rBody\r"
+            "---\rtitle: x\rhash:\r    kind: body\r    value: '1111111111111111'\r---\rBody\r"
         );
     }
 

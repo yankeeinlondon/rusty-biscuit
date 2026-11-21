@@ -169,6 +169,12 @@ index past the end of an array, a number under a missing parent, or a path
 that goes through a scalar value. `set` writes only the value you gave
 (converted to its declared type), never a schema `default(...)`.
 
+A new nested value is indented like the frontmatter's own blocks. Where the
+frontmatter has none, `--save` uses the file's project preference (what
+`sniff repo indent md` reports, from `.editorconfig` or a formatter config),
+and printed output uses four spaces. A `set` that changes no value leaves
+the file byte-identical.
+
 ### Command-line values (`set`, compose setters, style setters)
 
 1. The text is first read as JSON5. `{a: 1}` and `["x","y"]` become objects

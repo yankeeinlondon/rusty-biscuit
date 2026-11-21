@@ -109,6 +109,25 @@ pub enum SniffError {
         reason: &'static str,
     },
 
+    /// An indentation lookup could not identify its destination or the
+    /// worktree it belongs to.
+    #[error("cannot resolve indentation for '{}': {reason}", path.display())]
+    IndentationTarget {
+        /// The path exactly as the caller supplied it.
+        path: PathBuf,
+        /// Why it could not be resolved.
+        reason: String,
+    },
+
+    /// A file extension given to an indentation lookup is malformed.
+    #[error("invalid file extension '{input}': {reason}")]
+    InvalidExtension {
+        /// The extension exactly as the caller supplied it.
+        input: String,
+        /// Why it was rejected.
+        reason: &'static str,
+    },
+
     /// The specified path is not a git repository.
     #[error("Not a git repository: {0}")]
     NotARepository(PathBuf),
