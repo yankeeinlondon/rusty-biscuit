@@ -40,7 +40,10 @@ impl SimplifiedSchema {
     }
 
     /// The schema as one SimplifiedSchema YAML document, in its authored
-    /// envelope (`$schema` with optional `types`, or `kind: schema`).
+    /// envelope (`$schema` with optional `types`, or `kind: schema`), laid
+    /// out with [`biscuit_file::Indentation::default`] (four spaces per
+    /// level). The string has no destination; a caller that writes it to a
+    /// file and wants that file's indentation re-lays it.
     ///
     /// A layered schema exports as the receiver's document with the
     /// properties merged in from the other layers. A template exports as
@@ -61,7 +64,8 @@ impl SimplifiedSchema {
             },
             layers => write_layered(layers)?,
         };
-        serde_yaml_ng::to_string(&YamlValue::Mapping(document)).map_err(|error| unsupported(&error.to_string()))
+        biscuit_file::to_yaml_string(&YamlValue::Mapping(document), biscuit_file::Indentation::default())
+            .map_err(|error| unsupported(&error.to_string()))
     }
 }
 
