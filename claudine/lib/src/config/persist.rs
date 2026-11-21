@@ -14,15 +14,16 @@
 //!
 //! A writer that holds a whole typed configuration supplies the value it
 //! opened and the value it holds now; [`changed_edits`] turns the difference
-//! into edits. A new file starts from the scope's schema projection
-//! ([`initial_text`]) with the writer's edits applied.
+//! into edits. A new file starts from the scope's schema projection with the
+//! writer's edits applied, laid out with the destination's indentation
+//! preference ([`initial_text`] previews it with the default).
 //!
 //! User-facing guide: `claudine/docs/topics/configuration.md`.
 
 use std::cell::RefCell;
 use std::path::Path;
 
-use biscuit_file::serde_yaml_ng;
+use biscuit_file::Indentation;
 use darkmatter::config::write::{
     ConfigTransaction, ConfigWriteError, SourceExpectation, TargetChange, ValidationCandidate, ValidationRefusal,
 };
@@ -97,7 +98,8 @@ pub fn edit_config(path: &Path, scope: ConfigScope, edits: Vec<YamlEdit>) -> Res
 /// applied to the file as it is now.
 ///
 /// Nothing is written when the two serialize alike. A missing file is created
-/// from [`initial_text`] only when there is something to save.
+/// from the scope's projection (see [`initial_text`]) only when there is
+/// something to save.
 ///
 /// ## Errors
 ///
@@ -111,7 +113,8 @@ pub fn save_changes<T: Serialize>(path: &Path, scope: ConfigScope, opened: &T, e
 /// projection of an empty file, such as [`ClaudineConfig::default`]) and
 /// `initialized`, so setup manages exactly the values it chose.
 ///
-/// A missing file is always created, from [`initial_text`] with those edits;
+/// A missing file is always created, from the scope's projection (see
+/// [`initial_text`]) with those edits;
 /// an existing file receives only those edits, so running setup again with
 /// the same values writes nothing.
 ///
@@ -140,27 +143,26 @@ fn save(path: &Path, scope: ConfigScope, opened: &Value, edited: &Value, create_
             if opened == edited && !create_always {
                 return Ok(SaveOutcome::default());
             }
-            let initial = initial_text(scope);
-            let base = load_yaml_document(&initial, path).ok().map(|loaded| loaded.json);
-            let edits = changed_edits(base.as_ref(), opened, edited)?;
+            let initial = initial_value(scope);
+            let edits = changed_edits(Some(&initial), opened, edited)?;
             create_config(path, scope, initial, edits)
         }
     }
 }
 
-/// The text a new configuration file of `scope` starts from: the schema's
-/// projection of an empty file. A user file lists every default the schema
-/// declares; a repository file inherits everything, so it starts as `{}`.
+/// The text a new configuration file of `scope` starts from, laid out with
+/// the default indentation: the schema's projection of an empty file. A user
+/// file lists every default the schema declares; a repository file inherits
+/// everything, so it starts as `{}`. A created file holds the same values in
+/// its destination's indentation.
 #[must_use]
 pub fn initial_text(scope: ConfigScope) -> String {
-    let projection = project_value(scope, &Value::Object(Map::new()))
-        .expect("the shipped schema accepts an empty configuration file");
-    match projection {
-        Value::Object(map) if !map.is_empty() => {
-            serde_yaml_ng::to_string(&Value::Object(map)).expect("a JSON value always serializes as YAML")
-        }
-        _ => "{}\n".to_string(),
-    }
+    biscuit_file::to_yaml_string(&initial_value(scope), Indentation::default())
+        .expect("the schema projection is a JSON mapping, which always lays out as YAML")
+}
+
+fn initial_value(scope: ConfigScope) -> Value {
+    project_value(scope, &Value::Object(Map::new())).expect("the shipped schema accepts an empty configuration file")
 }
 
 /// The per-path edits that turn `opened` into `edited`, two serialized
@@ -321,14 +323,13 @@ fn commit_edits(path: &Path, scope: ConfigScope, authored: Option<&Value>, edits
     commit(&path, scope, TargetChange::edit(&path, SourceExpectation::Current, edits))
 }
 
-fn create_config(path: &Path, scope: ConfigScope, initial: String, edits: Vec<YamlEdit>) -> Result<SaveOutcome> {
+fn create_config(path: &Path, scope: ConfigScope, initial: Value, edits: Vec<YamlEdit>) -> Result<SaveOutcome> {
     if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
-    let base = load_yaml_document(&initial, path).ok().map(|loaded| loaded.json);
-    let edits = effective_edits(scope, base.as_ref(), edits)?;
+    let edits = effective_edits(scope, Some(&initial), edits)?;
     let path = absolute_target(path)?;
-    commit(&path, scope, TargetChange::create(&path, initial, edits))
+    commit(&path, scope, TargetChange::create_yaml(&path, initial, edits))
 }
 
 /// The locked writer takes only absolute targets. With no home, Claudine's

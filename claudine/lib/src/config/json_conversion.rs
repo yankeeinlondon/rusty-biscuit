@@ -26,10 +26,9 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::serde_yaml_ng;
 use darkmatter::config::load::CONFIG_MIGRATION_CODE;
 use darkmatter::config::migration_receipt::{CleanupOutcome, MigrationSource, complete_cleanup, receipt_path};
-use darkmatter::config::write::{ConfigTransaction, TargetChange, ValidationRefusal};
+use darkmatter::config::write::{ConfigTransaction, ConfigWriteError, TargetChange, ValidationCandidate, ValidationRefusal};
 use serde_json::Value;
 use simplified_schema::yaml_documents::load_yaml_document;
 
@@ -43,6 +42,8 @@ pub const LEGACY_FILE_NAME: &str = "config.json";
 
 /// Where a converted legacy file is moved.
 pub const BACKUP_FILE_NAME: &str = "config.json.bak";
+
+const NOT_CONVERTIBLE: &str = "holds a value that does not survive conversion to YAML";
 
 /// How much a [`ConfigNotice`] matters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,7 +205,6 @@ fn convert(
         ),
         other => other,
     })?;
-    let yaml = render(value).map_err(|message| conversion_error(vec![ConfigProblem::whole(Some(json_path), message)]))?;
 
     let source = match std::fs::read(backup_path) {
         Ok(existing) if existing == bytes => MigrationSource::delete(json_path, bytes),
@@ -226,15 +226,15 @@ fn convert(
     };
     let removed_duplicate = matches!(source.action, darkmatter::config::migration_receipt::MigrationAction::Delete);
 
+    // The candidate is laid out under the lock with the destination's
+    // indentation, so it is checked to read back as `value` there.
+    let survives = |candidate: &ValidationCandidate<'_>| match load_yaml_document(candidate.candidate, candidate.target) {
+        Ok(loaded) if &loaded.json == value => Ok(()),
+        _ => Err(ValidationRefusal::new(NOT_CONVERTIBLE)),
+    };
     let mut transaction = ConfigTransaction::new();
-    let published = match transaction.add(TargetChange::create(yaml_path, yaml.clone(), Vec::new()).with_migration(vec![source])) {
-        Ok(_) => transaction.commit(&|candidate| {
-            if candidate.candidate == yaml {
-                Ok(())
-            } else {
-                Err(ValidationRefusal::new("the converted text changed while it was being written"))
-            }
-        }),
+    let published = match transaction.add(TargetChange::create_yaml(yaml_path, value.clone(), Vec::new()).with_migration(vec![source])) {
+        Ok(_) => transaction.commit(&survives),
         Err(error) => Err(error),
     };
     if let Err(error) = published {
@@ -243,10 +243,12 @@ fn convert(
             // finishes the cleanup.
             return Ok(ScopeState::Ready);
         }
-        return Err(conversion_error(vec![ConfigProblem::whole(
-            Some(json_path),
-            format!("{} could not be written; nothing was changed: {error}", yaml_path.display()),
-        )]));
+        let message = match error {
+            ConfigWriteError::ValidationFailed { .. } => NOT_CONVERTIBLE.to_string(),
+            ConfigWriteError::Layout { source, .. } => format!("holds a value that cannot be written as YAML: {source}"),
+            other => format!("{} could not be written; nothing was changed: {other}", yaml_path.display()),
+        };
+        return Err(conversion_error(vec![ConfigProblem::whole(Some(json_path), message)]));
     }
 
     let written = std::fs::read_to_string(yaml_path).map_err(ClaudineError::Io)?;
@@ -268,15 +270,6 @@ fn convert(
     })?;
     notices.push(converted_notice(json_path, yaml_path, backup_path, !removed_duplicate));
     Ok(ScopeState::Ready)
-}
-
-/// The YAML text of `value`, checked to read back as the same value.
-fn render(value: &Value) -> std::result::Result<String, String> {
-    let text = serde_yaml_ng::to_string(value).expect("a JSON value always serializes as YAML");
-    match load_yaml_document(&text, Path::new(super::schema::CONFIG_FILE_NAME)) {
-        Ok(loaded) if &loaded.json == value => Ok(text),
-        _ => Err("holds a value that does not survive conversion to YAML".to_string()),
-    }
 }
 
 fn converted_notice(json_path: &Path, yaml_path: &Path, backup_path: &Path, moved: bool) -> ConfigNotice {

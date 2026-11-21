@@ -309,6 +309,24 @@ flowchart TD
   repository file is created only when there is an override to write, and it
   holds only that override. Running setup again with the same choices leaves
   the file byte-for-byte unchanged.
+- **Indentation.** A new file is indented the way its location asks. Inside a
+  Git worktree that is the worktree's preference for `.yaml` files (an
+  `.editorconfig` `[*.yaml]` section with `indent_size = 2` gives two
+  spaces); anywhere else, including `~/.claudine/config.yaml` in a home that
+  is not a worktree, it is four spaces, with list items indented under their
+  key:
+
+  ```yaml
+  permissions:
+      file-read:
+          - ./*.txt
+          - ./*.md
+  ```
+
+  An edit to an existing file never re-indents it: a value it adds copies the
+  indentation of the file's own blocks, and only falls back to the location's
+  preference when the file has no block to copy. See
+  [Darkmatter's config writes](../../../darkmatter/docs/topics/config-writes.md#where-the-indentation-preference-comes-from).
 
 ## Converting a `config.json`
 
@@ -334,8 +352,11 @@ existing `config.json.bak` is never overwritten: if it holds the same bytes the
 unchanged `config.json` is simply removed; if it differs, the conversion stops
 and keeps both files.
 
-The new file is published through Darkmatter's locked configuration writer
-with a pending migration receipt (`config.yaml.darkmatter-migration.json`). If
+The new file is indented as a [new file](#how-claudine-writes-these-files)
+would be, and it is checked to read back as exactly the converted values
+before anything is published; a failure there, or in writing it, leaves
+`config.json` untouched and writes no `config.yaml`. It is published through
+Darkmatter's locked configuration writer with a pending migration receipt (`config.yaml.darkmatter-migration.json`). If
 the process stops after `config.yaml` is written but before `config.json` is
 renamed, the next load finishes the rename. If `config.json` was edited in
 between, it is kept and the load stops with an error; remove the receipt once

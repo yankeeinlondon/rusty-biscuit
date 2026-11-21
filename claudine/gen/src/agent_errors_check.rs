@@ -816,7 +816,8 @@ pub fn check_provider(
     Ok(report)
 }
 
-/// Atomically replaces the prior outcome without deleting it first.
+/// Atomically replaces the prior outcome without deleting it first. The
+/// frontmatter takes the indentation preference of `path`.
 fn write_outcome_report(path: &Path, report: &FindingsReport) -> Result<(), GenError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| GenError::Io {
@@ -824,7 +825,8 @@ fn write_outcome_report(path: &Path, report: &FindingsReport) -> Result<(), GenE
             source,
         })?;
     }
-    let yaml = serde_yaml_ng::to_string(report).map_err(|err| GenError::Json {
+    let indentation = darkmatter::config::write::destination_indentation(path);
+    let yaml = biscuit_file::to_yaml_string(report, indentation).map_err(|err| GenError::Json {
         message: err.to_string(),
     })?;
     let contents = format!("---\n{yaml}---\n\n# Agent Errors Gate Outcome\n");
