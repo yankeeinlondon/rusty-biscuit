@@ -12,6 +12,7 @@ mod common;
 mod cli;
 mod cli_process_fixture;
 mod filesystem_query;
+mod git_installation;
 mod install_interview_cli;
 mod install_plan;
 mod lockfile_cli;

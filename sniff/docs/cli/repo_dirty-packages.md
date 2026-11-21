@@ -24,6 +24,19 @@ A package is considered dirty if any file within its directory tree has:
 - Staged changes (in the index)
 - Unstaged changes (modified working tree)
 - Untracked files (new files not yet versioned)
+- Merge conflicts
+
+A file belongs to a package when it lies in the package's directory, compared
+by whole path segments: `area/member` owns `area/member/src/lib.rs` but not
+`area/member2/src/lib.rs`. A package at the repository root (a Cargo
+workspace that lists `"."` as a member, for example) owns only the files that
+no other package owns:
+
+| Changed file | Packages `root-app` (at `.`) and `member` (at `area/member`) |
+|---|---|
+| `src/lib.rs` | `root-app` |
+| `area/member/src/lib.rs` | `member` |
+| `area/member2/notes.rs` | `root-app` |
 
 ## Arguments and Flags
 

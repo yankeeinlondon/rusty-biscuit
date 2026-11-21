@@ -663,3 +663,112 @@ fn explicit_refresh_links_against_post_fetch_refs_without_another_ref_walk() {
     assert_eq!(git.recent[0].remotes.as_deref(), Some(&["origin".to_string()][..]));
     assert_eq!(counter(&report, counters::GIT_REF_WALKS), 1, "{:?}", report.counters);
 }
+
+/// A Cargo workspace whose root manifest is also a package (member `"."`),
+/// with one remotely contained commit and a nested `area/member` package.
+fn root_member_workspace() -> (Fixture, String) {
+    let mut fixture = Fixture::new();
+    let initial = fixture.commit(
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"root-app\"\nversion = \"0.1.0\"\n\n[workspace]\nmembers = [\".\", \"area/member\"]\n",
+            ),
+            ("src/lib.rs", "pub fn original() {}\n"),
+            ("area/member/Cargo.toml", "[package]\nname = \"member\"\nversion = \"0.1.0\"\n"),
+            ("area/member/src/lib.rs", "pub fn original() {}\n"),
+        ],
+        "initial",
+    );
+    fixture.set_remote_tip("main", &initial);
+    (fixture, initial)
+}
+
+fn stage(fixture: &Fixture, path: &str, content: &str) {
+    std::fs::write(fixture.root.join(path), content).unwrap();
+    let mut index = fixture.repo.index().unwrap();
+    index.add_path(Path::new(path)).unwrap();
+    index.write().unwrap();
+}
+
+fn changes(git: &GitInfo) -> Vec<(String, FileStatus)> {
+    let mut changes: Vec<(String, FileStatus)> = git
+        .file_changes
+        .iter()
+        .map(|change| (change.path.to_string_lossy().replace('\\', "/"), change.status))
+        .collect();
+    changes.sort_by(|a, b| a.0.cmp(&b.0));
+    changes
+}
+
+/// The root package's empty relative path is the empty prefix, which every
+/// repository-relative path matches, so its selection keeps the whole
+/// repository's history and working-tree changes, nested packages included.
+#[test]
+fn a_root_package_selection_keeps_the_repository_history_and_changes() {
+    let (fixture, initial) = root_member_workspace();
+    stage(&fixture, "src/lib.rs", "pub fn staged() {}\n");
+    std::fs::write(fixture.root.join("src/lib.rs"), "pub fn unstaged() {}\n").unwrap();
+    std::fs::write(fixture.root.join("src/new.rs"), "// new\n").unwrap();
+    std::fs::write(fixture.root.join("area/member/src/lib.rs"), "pub fn unstaged() {}\n").unwrap();
+
+    let (prepared, _) = prepare(
+        &fixture.root,
+        &GitStatusOptions {
+            package: Some("root-app"),
+            ..options(10)
+        },
+    );
+    let prepared = prepared.unwrap();
+    let git = prepared.git.as_ref().unwrap();
+    assert_eq!(shas(git), [initial.as_str()]);
+    assert_eq!(links_for(&prepared, &[initial.as_str()]), [&linked(&initial)]);
+    assert_eq!(
+        changes(git),
+        [
+            ("area/member/src/lib.rs".to_string(), FileStatus::Modified),
+            ("src/lib.rs".to_string(), FileStatus::Both),
+            ("src/new.rs".to_string(), FileStatus::Untracked),
+        ]
+    );
+    let status = git.status.as_ref().unwrap();
+    assert!(status.is_dirty);
+    assert_eq!(
+        (status.staged_count, status.unstaged_count, status.untracked_count),
+        (1, 2, 1)
+    );
+
+    // Control: the nested package keeps only its own changes.
+    let (prepared, _) = prepare(
+        &fixture.root,
+        &GitStatusOptions {
+            package: Some("member"),
+            ..options(10)
+        },
+    );
+    let prepared = prepared.unwrap();
+    let git = prepared.git.as_ref().unwrap();
+    assert_eq!(shas(git), [initial.as_str()]);
+    assert_eq!(links_for(&prepared, &[initial.as_str()]), [&linked(&initial)]);
+    assert_eq!(
+        changes(git),
+        [("area/member/src/lib.rs".to_string(), FileStatus::Modified)]
+    );
+    let status = git.status.as_ref().unwrap();
+    assert!(status.is_dirty);
+    assert_eq!(
+        (status.staged_count, status.unstaged_count, status.untracked_count),
+        (0, 1, 0)
+    );
+
+    // The root package lies in the top-level `""` area, never a named one.
+    let (inside_area, _) = prepare(
+        &fixture.root,
+        &GitStatusOptions {
+            package: Some("root-app"),
+            package_area: Some("area"),
+            ..options(10)
+        },
+    );
+    assert_eq!(selection_error(inside_area), "Package 'root-app' is in area '', not 'area'");
+}

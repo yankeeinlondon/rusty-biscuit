@@ -651,6 +651,18 @@ descendant-held pipe handles cannot extend the helper's deadline. **Never poll `
 piped stdout you are not draining** — the child blocks in `write()` past one pipe buffer (64 KiB
 Linux, ~16 KiB macOS), never exits, and gets killed at its deadline with its output lost.
 
+The one change the builder form makes to a child's environment is the Git installation hint. On
+native Windows the first `gix` repository open in a process starts `git` (through Git for Windows'
+launcher, with a hidden console) to ask where Git is installed, unless `EXEPATH` names the
+installation. The `sniff` CLI's `main` calls `sniff::programs::git_program::name_installation_for_gix`
+before it builds the Tokio runtime, which sets `EXEPATH` to the installation's top directory when
+neither `EXEPATH` nor `GIT_EXEC_PATH` is set and the `git` on `PATH` belongs to a recognized
+installation; off Windows it does nothing. `run_command_with_timeout` then removes that `EXEPATH`
+from every child (`forget_installation_hint`), so a version probe or package-manager command sees
+the environment it would have inherited. An `EXEPATH` the caller set is never removed. `wt` uses
+the same two functions; the installation layouts they recognize are described in
+`worktree/docs/git-for-windows.md`.
+
 What the owner guarantees and where it stops, on each OS, is described in
 [Process trees](./topics/process-trees.md). In short: on Windows nothing escapes once the owner is
 attached; on Unix a descendant that forks *and* `setsid()`s entirely between two descendant samples

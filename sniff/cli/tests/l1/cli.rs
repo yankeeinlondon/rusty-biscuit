@@ -8762,6 +8762,133 @@ fn test_dirty_packages_json_does_not_emit_prose_error_for_non_monorepo() {
     assert_eq!(json["names"], Value::Array(vec![]));
 }
 
+/// A Cargo workspace whose root is itself a member (`root-app`, relative
+/// path `""`) beside `area/member`, with one committed source file in each.
+fn root_member_workspace() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_test_repo();
+    commit_files_with_message(
+        &path,
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"root-app\"\nversion = \"0.1.0\"\n\n\
+                 [workspace]\nmembers = [\".\", \"area/member\"]\n",
+            ),
+            ("src/lib.rs", "pub fn original() {}\n"),
+            (
+                "area/member/Cargo.toml",
+                "[package]\nname = \"member\"\nversion = \"0.1.0\"\n",
+            ),
+            ("area/member/src/lib.rs", "pub fn original() {}\n"),
+        ],
+        "workspace",
+    );
+    (dir, path)
+}
+
+/// `{ names }` of a package-family `--json` command, requiring success.
+fn package_family_names(path: &Path, args: &[&str]) -> Vec<String> {
+    let mut full = args.to_vec();
+    full.push("--json");
+    let output = run_repo(path, &full);
+    assert!(
+        output.status.success(),
+        "{full:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("{full:?} stdout is not JSON ({error}): {stdout}"));
+    serde_json::from_value(value["names"].clone())
+        .unwrap_or_else(|error| panic!("{full:?} names is not a string array ({error}): {value}"))
+}
+
+/// Ordinary collection (file changes without patches) must name every package
+/// owning a staged, unstaged, or untracked file. The patch-only
+/// `status.dirty` / `status.untracked` arrays are empty in this request.
+#[test]
+fn dirty_package_families_name_packages_from_ordinary_file_changes() {
+    let (_dir, path) = root_member_workspace();
+    let repo = git2::Repository::open(&path).unwrap();
+    for source in ["src/lib.rs", "area/member/src/lib.rs"] {
+        std::fs::write(path.join(source), "pub fn staged() {}\n").unwrap();
+    }
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("src/lib.rs")).unwrap();
+    index.add_path(Path::new("area/member/src/lib.rs")).unwrap();
+    index.write().unwrap();
+    for folder in ["src", "area/member/src"] {
+        std::fs::write(path.join(folder).join("lib.rs"), "pub fn unstaged() {}\n").unwrap();
+        std::fs::write(path.join(folder).join("new.rs"), "// new\n").unwrap();
+    }
+
+    assert_eq!(
+        package_family_names(&path, &["dirty-packages"]),
+        ["member", "root-app"]
+    );
+    assert_eq!(
+        package_family_names(&path, &["dirty-package-areas"]),
+        ["", "area"]
+    );
+    assert_eq!(
+        package_family_names(&path, &["dirty-packages", "-p", "member"]),
+        ["member"]
+    );
+    assert_eq!(
+        package_family_names(&path, &["dirty-package-areas", "-p", "root-app"]),
+        [""]
+    );
+    assert_eq!(
+        package_family_names(&path, &["staged-packages"]),
+        ["member", "root-app"]
+    );
+    assert_eq!(
+        package_family_names(&path, &["unstaged-package-areas"]),
+        ["", "area"]
+    );
+
+    for (command, expected) in [("dirty-packages", "member"), ("dirty-package-areas", "area")] {
+        let output = run_repo(&path, &[command, "-p", "member"]);
+        assert!(
+            output.status.success(),
+            "{command} text failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected);
+    }
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.reset(head.as_object(), git2::ResetType::Hard, None)
+        .unwrap();
+    for folder in ["src", "area/member/src"] {
+        std::fs::remove_file(path.join(folder).join("new.rs")).unwrap();
+    }
+    for command in ["dirty-packages", "dirty-package-areas"] {
+        assert!(
+            package_family_names(&path, &[command]).is_empty(),
+            "{command} after reset"
+        );
+    }
+}
+
+/// `area/member` owns only its own directory: a change in the non-package
+/// sibling `area/member2` belongs to the root package.
+#[test]
+fn dirty_packages_respect_package_directory_boundaries() {
+    let (_dir, path) = root_member_workspace();
+    std::fs::create_dir_all(path.join("area/member2")).unwrap();
+    std::fs::write(path.join("area/member2/notes.rs"), "// note\n").unwrap();
+    let repo = git2::Repository::open(&path).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("area/member2/notes.rs")).unwrap();
+    index.write().unwrap();
+
+    for command in ["staged-packages", "dirty-packages"] {
+        assert_eq!(package_family_names(&path, &[command]), ["root-app"], "{command}");
+    }
+    assert_eq!(package_family_names(&path, &["dirty-package-areas"]), [""]);
+}
+
 // ============================================================================
 // Phase 5 — `package-dependencies --json` builder
 // ============================================================================
@@ -10664,6 +10791,75 @@ fn test_repo_git_status_package_with_area_name_errors() {
         stderr.contains("Valid package names"),
         "error must list valid package names (not areas), got:\n{stderr}"
     );
+}
+
+/// A root package (Cargo member `"."`) selects the whole repository, not the
+/// `"/"` prefix that matches no repository-relative path.
+#[test]
+fn test_repo_git_status_root_package_keeps_history_and_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test").unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"root-app\"\nversion = \"0.1.0\"\n\n[workspace]\nmembers = [\".\", \"area/member\"]\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn original() {}\n").unwrap();
+    std::fs::create_dir_all(dir.path().join("area/member/src")).unwrap();
+    std::fs::write(
+        dir.path().join("area/member/Cargo.toml"),
+        "[package]\nname = \"member\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("area/member/src/lib.rs"), "pub fn original() {}\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = repo.signature().unwrap();
+    let initial = repo
+        .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+        .unwrap()
+        .to_string();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn changed() {}\n").unwrap();
+
+    let assert = common::owned_sniff_command()
+        .args([
+            "--base",
+            dir.path().to_str().unwrap(),
+            "--json",
+            "repo",
+            "git-status",
+            "-p",
+            "root-app",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    let recent: Vec<&str> = value["recent"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|commit| commit["sha"].as_str().unwrap())
+        .collect();
+    assert_eq!(recent, [initial.as_str()]);
+    let changes: Vec<&str> = value["file_changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|change| change["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(changes, ["src/lib.rs"]);
+    assert_eq!(value["status"]["is_dirty"], Value::Bool(true));
 }
 
 // ============================================================================

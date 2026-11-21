@@ -1025,6 +1025,23 @@ mod tests {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
+    /// `file_changes` entries as an ordinary (patch-free) request reports them.
+    fn changes(
+        paths: &[&str],
+        status: sniff::filesystem::git::FileStatus,
+    ) -> Vec<sniff::filesystem::git::FileChange> {
+        paths
+            .iter()
+            .map(|path| sniff::filesystem::git::FileChange {
+                path: PathBuf::from(path),
+                status,
+                action: sniff::filesystem::git::FileAction::Modified,
+                lines_added: 1,
+                lines_removed: 0,
+            })
+            .collect()
+    }
+
     fn fixture_git_info() -> GitInfo {
         GitInfo {
             repo_root: PathBuf::from("/tmp/repo"),
@@ -1244,7 +1261,6 @@ mod tests {
     mod package_family {
         use super::*;
         use sniff::filesystem::FilesystemInfo;
-        use sniff::filesystem::git::types::DirtyFile;
         use sniff::filesystem::git::{FileAction, FileChange, FileStatus};
         use sniff::filesystem::repo::Package;
         use sniff::filesystem::repo::types::RepoInfo;
@@ -1303,26 +1319,10 @@ mod tests {
                 standalone_lockfiles: Vec::new(),
             };
             let mut git = fixture_git_info();
-            git.status.as_mut().unwrap().dirty = dirty_paths
-                .iter()
-                .map(|p| DirtyFile {
-                    filepath: PathBuf::from(p),
-                    absolute_filepath: PathBuf::from(format!("/tmp/repo/{p}")),
-                    diff: String::new(),
-                    last_local_commit: String::new(),
-                    origin_commit: None,
-                })
-                .collect();
-            git.file_changes = staged_paths
-                .iter()
-                .map(|p| FileChange {
-                    path: PathBuf::from(p),
-                    status: FileStatus::Staged,
-                    action: FileAction::Modified,
-                    lines_added: 1,
-                    lines_removed: 0,
-                })
-                .collect();
+            git.file_changes = changes(dirty_paths, FileStatus::Modified);
+            git.file_changes
+                .extend(changes(staged_paths, FileStatus::Staged));
+            git.status.as_mut().unwrap().is_dirty = !git.file_changes.is_empty();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
@@ -1479,7 +1479,7 @@ mod tests {
 
         use super::*;
         use sniff::filesystem::FilesystemInfo;
-        use sniff::filesystem::git::types::DirtyFile;
+        use sniff::filesystem::git::FileStatus;
         use sniff::filesystem::repo::Package;
         use sniff::filesystem::repo::types::RepoInfo;
 
@@ -1536,16 +1536,8 @@ mod tests {
                 standalone_lockfiles: Vec::new(),
             };
             let mut git = fixture_git_info();
-            git.status.as_mut().unwrap().dirty = dirty_paths
-                .iter()
-                .map(|p| DirtyFile {
-                    filepath: PathBuf::from(p),
-                    absolute_filepath: PathBuf::from(format!("/tmp/repo/{p}")),
-                    diff: String::new(),
-                    last_local_commit: String::new(),
-                    origin_commit: None,
-                })
-                .collect();
+            git.file_changes = changes(dirty_paths, FileStatus::Modified);
+            git.status.as_mut().unwrap().is_dirty = !git.file_changes.is_empty();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),

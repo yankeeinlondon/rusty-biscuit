@@ -56,6 +56,13 @@ Scopes all git output to a single package, a package area, or the intersection o
 
 When scoped, recent commits are filtered to paths under the resolved directory, and file changes are filtered to that path prefix. Staged, unstaged, and untracked counts are recomputed after filtering.
 
+A **root package** (a manifest at the repository root that is also a package, such as a Cargo workspace listing `"."` as a member) has no directory prefix, so `-p <root-package>` keeps the whole repository's history and file changes, nested packages included. The root package belongs to the top-level area `""`, which no `--package-area` value names, so combining it with `--package-area` is always an error:
+
+```sh
+sniff repo git-status -p root-app                 # every commit and change in the repository
+sniff repo git-status -p root-app -a area         # error: Package 'root-app' is in area '', not 'area'
+```
+
 > Breaking change vs. previous releases: passing a **package-area name** (e.g., `homelab`) to `--package` is now an error. Use `--package-area homelab` instead.
 
 ### `--branch` and `--worktree`

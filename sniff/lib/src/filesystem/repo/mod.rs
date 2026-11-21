@@ -36,8 +36,8 @@ pub use aggregate::{
     resolve_directory_version, resolve_scope, resolve_scope_with_overrides,
 };
 pub use aggregate_view::{
-    AggregateCwdContext, RepoAggregate, RepoAggregateObservation, detect_repo_aggregate,
-    scope_paths,
+    AggregateCwdContext, RepoAggregate, RepoAggregateObservation, area_changed_paths,
+    detect_repo_aggregate, observed_scope_paths, scope_paths,
 };
 pub use ownership::PackageOwnershipLookup;
 pub use area::{AreaError, detect_area};
