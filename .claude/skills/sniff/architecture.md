@@ -155,7 +155,10 @@ rules:
   decorations), and `--worktree`, in that order, and links only the first
   `history_count` entries of the final list into a map keyed by full SHA.
   The renderer only looks links up. Package/area resolution lives in
-  `repo/scope.rs::resolve_package_and_area` (`SniffError::RepositorySelection`).
+  `repo/scope.rs::resolve_package_and_area` (`SniffError::RepositorySelection`);
+  a nested package or area yields a `/`-terminated prefix and a root package
+  (`relative` empty) the empty prefix, which every path matches. Never build
+  a prefix with a bare `format!("{}/", relative)`: for the root it is `"/"`.
 - A selected linked worktree reuses the initial snapshot (with `is_head`
   re-marked by `RefSnapshot::with_head_branch`) only when both handles have
   equal canonical common dirs, namespaces, and effective object
@@ -307,7 +310,12 @@ Windows App Paths behavior.
 All subprocesses go through `process::run_with_timeout` or
 `process::run_command_with_timeout`. These helpers own deadlines, concurrent
 pipe draining, process-tree termination, and reaping on macOS, Linux, and
-Windows. Preserve caller cwd and environment when using the builder form.
+Windows. Preserve caller cwd and environment when using the builder form;
+the one exception is the `EXEPATH` that
+`programs::git_program::name_installation_for_gix` set for `gix` (CLI
+`main`, before the Tokio runtime is built), which `run_command_with_timeout` strips with
+`forget_installation_hint`. A new spawn that bypasses the helpers must call
+that hook itself. `wt` re-exports these and `git_program::command`.
 
 `process` is public for three things. The process-tree owner
 (`ProcessTree`, `TreeConfig`, `TreeIsolation`, `CleanupScan`,

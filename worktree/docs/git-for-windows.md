@@ -1,7 +1,8 @@
 # Running Git on Windows
 
 Every Git process `wt` starts, in production and in test fixtures, is built by
-`worktree::git::command()` ([`git/program.rs`](../lib/src/git/program.rs)).
+`worktree::git::command()`, a re-export of sniff's
+[`programs/git_program.rs`](../../sniff/lib/src/programs/git_program.rs).
 On macOS and Linux that is simply `git`. On Windows it looks at which
 `git.exe` the `PATH` names and, when that file belongs to a Git for Windows
 installation it recognizes, starts the real Git binary itself. This page
@@ -89,8 +90,8 @@ as one run by `C:\Program Files\Git\ucrt64\bin\git.exe` from that shell.
 system configuration, gix-path runs `git config -lz --show-origin` (and, for
 its system prefix, `git --exec-path`) with a hidden console, once per process
 (three process creations each through the launcher), unless
-`EXEPATH` names the installation, as Git Bash does. `wt`'s `main` therefore
-sets `EXEPATH` to `<top>` for either entry, when neither `EXEPATH` nor
+`EXEPATH` names the installation, as Git Bash does. `wt`'s `main` (like
+`sniff`'s) therefore sets `EXEPATH` to `<top>` for either entry, when neither `EXEPATH` nor
 `GIT_EXEC_PATH` is already set, and removes it again from every process it
 starts, so a child sees what it would have inherited.
 
@@ -108,14 +109,16 @@ prefix `git --exec-path` implies (`D:/git/ucrt64/libexec/git-core`).
 ## Checking it on Windows
 
 The layout rules are pure path logic, tested on every OS against temporary
-directories (`git::program::tests`, one test per prefix and entry plus every
-rejected layout). The Windows-only tests run against the host's real
+directories (sniff's `programs::git_program::tests`, one test per prefix and
+entry plus every rejected layout). The Windows-only tests run against the host's real
 installation. Because the resolution is cached per process, each starts a
 fresh copy of the test binary with the chosen entry first on `PATH`:
 
 ```sh
-cargo nextest run -p worktree -E 'test(git::program::tests::entries)'
+cargo nextest run -p sniff --lib -E 'test(git_program::tests::entries)'
+cargo nextest run -p sniff --lib -E 'test(installation_hint)'
 cargo nextest run -p git-wt-cli -E 'binary(list_output) & test(exec_path)'
+cargo nextest run -p sniff-detection-cli --features test-fixtures --test l1 -E 'test(git_installation)'
 ```
 
 - `through_the_launcher_the_named_installation_is_the_prefix_git_reports`
@@ -123,9 +126,16 @@ cargo nextest run -p git-wt-cli -E 'binary(list_output) & test(exec_path)'
   check that the hint names the prefix `git --exec-path` reports and never
   reaches a Git child.
 - `the_launcher_entry_sees_the_launchers_environment` compares a `!env` alias
-  run by `wt` with one run by the sibling `<top>\cmd\git.exe`.
+  run through `command()` with one run by the sibling `<top>\cmd\git.exe`.
 - `the_direct_entry_sees_what_the_found_binary_sees` compares it with one run
   by the found binary, unwrapped.
 - The `list_output` tests trace a real `wt list` (`GIT_TRACE2_EVENT`) with the
   inherited `PATH`, the launcher first, and the real binary first, and assert
   that no Git process was `git --exec-path`.
+- `installation_hint` (sniff's `process::tests`) checks that a child started
+  through sniff's bounded subprocess runner does not inherit the hint the
+  process set, and does inherit an `EXEPATH` its caller set.
+- `git_installation` (sniff's CLI tests) traces a real
+  `sniff repo git-status --json` without `EXEPATH` and asserts it started no
+  Git process, with a control run whose unusable caller `EXEPATH` makes gix
+  ask Git.

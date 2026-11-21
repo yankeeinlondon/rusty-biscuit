@@ -35,15 +35,19 @@
 //! tests compare each entry with what it stands for: the launcher entry with
 //! the sibling `cmd\git.exe`, the direct entry with the found binary run
 //! unwrapped.
+//!
+//! The same installation lookup backs [`name_installation_for_gix`], which
+//! `sniff`'s and `wt`'s `main` call before any other thread starts, and
+//! [`forget_installation_hint`], which keeps that hint from their children.
+//! `worktree/docs/git-for-windows.md` describes both entries and the hint.
 
 use std::process::Command;
 
 /// A [`Command`] for Git: the real Git for Windows binary when a recognized
 /// installation is found (see the module docs), else `git`.
 ///
-/// Every production Git process is built here, and test fixtures use it too,
-/// so both pay one process creation per call. Counting is unchanged: the
-/// caller still spawns through `calls::output` or calls `calls::started`.
+/// `wt` builds every Git process it starts here, in production and in test
+/// fixtures, so both pay one process creation per call.
 pub fn command() -> Command {
     #[cfg(windows)]
     if let Some(direct) = windows::resolved() {
@@ -63,15 +67,16 @@ static SET_EXEPATH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 ///
 /// Without it, gix-path runs `git --exec-path` (through the launcher, when
 /// that is what `PATH` names) with a hidden console once per process: up to
-/// three process creations, about 40 ms of every `wt` run on Windows outside
-/// Git Bash (which sets `EXEPATH` itself). Both routes name the same
+/// three process creations, about 40 ms of every `wt` or `sniff` run on
+/// Windows outside Git Bash (which sets `EXEPATH` itself). Both routes name the same
 /// `<top>\<prefix>`, since Git derives its exec path from that binary's
 /// location unless `GIT_EXEC_PATH` overrides it. gix-path reads `EXEPATH`
 /// for every prefix [`command`] recognizes, and asks Git when `<top>` holds
 /// more than one, which [`command`] rejects too.
 ///
 /// Neither entry sets `EXEPATH`, so [`command`] and
-/// [`forget_installation_hint`] keep it from the processes `wt` starts.
+/// [`forget_installation_hint`] keep it from the processes the caller starts;
+/// sniff's bounded subprocess runner applies the latter to every child.
 ///
 /// ## Safety
 ///
@@ -89,13 +94,26 @@ pub unsafe fn name_installation_for_gix() {
             return;
         };
         // SAFETY: the caller guarantees no other thread is running.
-        unsafe { std::env::set_var("EXEPATH", top) };
-        SET_EXEPATH.store(true, std::sync::atomic::Ordering::Relaxed);
+        unsafe { set_installation_hint(top.as_os_str()) };
     }
 }
 
+/// Sets `EXEPATH` to `top` and records that this process set it.
+///
+/// ## Safety
+///
+/// As [`name_installation_for_gix`]: no other thread may be running.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+pub(crate) unsafe fn set_installation_hint(top: &std::ffi::OsStr) {
+    // SAFETY: the caller guarantees no other thread is running.
+    unsafe { std::env::set_var("EXEPATH", top) };
+    SET_EXEPATH.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Removes the `EXEPATH` [`name_installation_for_gix`] set from `child`'s
-/// environment, so a process `wt` starts sees what it would have inherited.
+/// environment, so a child sees what it would have inherited. An `EXEPATH`
+/// this process inherited from its caller is left in place, as is one the
+/// caller set on `child` itself when this process set no hint.
 pub fn forget_installation_hint(child: &mut Command) {
     if SET_EXEPATH.load(std::sync::atomic::Ordering::Relaxed) {
         child.env_remove("EXEPATH");
@@ -191,7 +209,7 @@ mod windows {
     use super::{Direct, Entry, launcher_layout};
 
     /// Resolved once per process: the installation's location does not
-    /// change while `wt` runs.
+    /// change while the process runs.
     pub(super) fn resolved() -> Option<&'static Direct> {
         static DIRECT: OnceLock<Option<Direct>> = OnceLock::new();
         DIRECT.get_or_init(resolve).as_ref()
@@ -364,6 +382,32 @@ mod tests {
         a_direct_binary_of_another_prefix: ["ucrt64/bin/git.exe"], ["mingw64", "bin", "git.exe"];
     }
 
+    /// Off Windows there is no installation to name: the process environment
+    /// and the hint flag are untouched.
+    #[cfg(not(windows))]
+    #[test]
+    fn naming_the_installation_off_windows_changes_nothing() {
+        let before = std::env::var_os("EXEPATH");
+        // SAFETY: off Windows the function writes nothing, so other test
+        // threads cannot observe a write.
+        unsafe { name_installation_for_gix() };
+        assert_eq!(std::env::var_os("EXEPATH"), before);
+        assert!(!SET_EXEPATH.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    /// With no hint set by this process, forgetting leaves a child's own
+    /// `EXEPATH` alone. The hint-set case runs in a child process, in
+    /// `process::tests`, because setting the hint writes the environment.
+    #[test]
+    fn forgetting_without_a_hint_keeps_the_childs_exepath() {
+        assert!(!SET_EXEPATH.load(std::sync::atomic::Ordering::Relaxed));
+        let mut child = Command::new("git");
+        child.env("EXEPATH", "caller");
+        forget_installation_hint(&mut child);
+        let exepath = child.get_envs().find(|(name, _)| *name == "EXEPATH").and_then(|(_, value)| value);
+        assert_eq!(exepath, Some(std::ffi::OsStr::new("caller")));
+    }
+
     /// The real installation, through each entry on `PATH`. [`windows::resolved`]
     /// is cached once per process, so each entry runs a child test in a fresh
     /// copy of this test binary with that entry first on `PATH`; a child test
@@ -377,7 +421,7 @@ mod tests {
         use super::super::{Entry, command, name_installation_for_gix, windows};
 
         /// Set by [`in_child`] to the entry the child must resolve.
-        const ROLE: &str = "WT_GIT_PROGRAM_TEST_ENTRY";
+        const ROLE: &str = "SNIFF_GIT_PROGRAM_TEST_ENTRY";
 
         fn in_child(child: &str, entry: Entry) {
             let Some(host) = windows::resolved() else {
@@ -447,7 +491,7 @@ mod tests {
             in_child("named_installation", Entry::Direct);
         }
 
-        /// What `wt`'s `main` does: gix then takes the system prefix from
+        /// What `sniff`'s and `wt`'s `main` do: gix then takes the system prefix from
         /// `EXEPATH` without starting Git, and it is the one `git
         /// --exec-path` implies, while Git children never see the variable.
         #[test]
@@ -473,8 +517,9 @@ mod tests {
             let exec_path = String::from_utf8(exec_path.stdout).unwrap();
             // `<prefix>/libexec/git-core`, as gix-path derives the prefix from it.
             let reported = Path::new(exec_path.trim()).ancestors().nth(2).expect("a prefix").to_path_buf();
+            let same = |a: &Path, b: &Path| fs::canonicalize(a).ok().is_some_and(|a| fs::canonicalize(b).ok() == Some(a));
             assert!(
-                crate::remove::admin_entry::same_location(named, &reported),
+                same(named, &reported),
                 "{} vs {}",
                 named.display(),
                 reported.display()
@@ -491,7 +536,7 @@ mod tests {
         }
 
         /// The environment Git's hooks, aliases, and transports see is the
-        /// same whether `wt` starts the launcher or the binary behind it.
+        /// same whether a caller starts the launcher or the binary behind it.
         #[test]
         fn launcher_parity() {
             let Some(direct) = role() else {
@@ -510,8 +555,8 @@ mod tests {
             in_child("direct_parity", Entry::Direct);
         }
 
-        /// A binary `PATH` names directly gets nothing from `wt` but the
-        /// removal of the installation hint `wt` itself set.
+        /// A binary `PATH` names directly gets nothing from [`command`] but
+        /// the removal of the installation hint this process set.
         #[test]
         fn direct_parity() {
             let Some(direct) = role() else {
