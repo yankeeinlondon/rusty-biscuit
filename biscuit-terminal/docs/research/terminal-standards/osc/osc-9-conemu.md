@@ -1,7 +1,7 @@
 ---
 $schema:
     description: string(required)
-    apps_supporting: string[](required)
+    apps-supporting: string[](required)
     apps: "{ name: string(required), urls: url(required)[], support: enum(true,false,unknown; required) }[]"
 apps: "{{ load_data('biscuit-terminal/docs/terminal-apps.yaml') }}"
 prompt: |-
@@ -42,7 +42,7 @@ prompt: |-
 
     
     
-    - set `apps_supporting` as a list of those apps which are known to support ConEmu's OSC 9 sub-commands
+    - set `apps-supporting` as a list of those apps which are known to support ConEmu's OSC 9 sub-commands
     ::end-block
 sequence: 
     - research
