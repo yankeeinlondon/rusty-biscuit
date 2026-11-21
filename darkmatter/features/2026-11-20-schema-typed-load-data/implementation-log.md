@@ -38,6 +38,7 @@ packages:
     - "darkmatter"
     - "darkmatter-lsp"
     - "claudine"
+    - "darkmatter-cli"
 decisions_for_review:
     - |-
         Phase 1 changes the shared expression tree, which breaks every Darkmatter, DMLS, and Claudine reader of object literals; the plan schedules their spread semantics for Phase 2 but Phase 1 must still compile and pass. I adapted every reader now: pure walkers visit spread operands (what Phase 2 asks for), the evaluator already merges entries in order with a null spread adding nothing, and passive typing treats any literal containing a spread as "some object" (no member or option findings). A non-object spread operand fails at evaluation with the generic catch-all error ("...(): object spread requires an object or null, found number") instead of the planned typed error and code. Alternatives: leave the build broken until Phase 2 (fails this phase's gates), or reject spread at evaluation until Phase 2 (simpler, but a parsed spread would fail every document). Phase 2 replaces the placeholder error with `InvalidSpreadOperand` / `dm.expression.invalid_spread_operand` and the "unknown" typing with ordered spread inference; nothing else needs redoing.
@@ -49,15 +50,46 @@ decisions_for_review:
         The passive "invalid spread operand" finding travels as an ordinary call-check record whose function name is `...`, with no arguments and the new `CallProblem::InvalidSpreadOperand` problem; the plan named the problem variant but not the carrier. Reusing the call-check record means composition's precheck, its error location, the lifecycle checks, and DMLS diagnostics all report it with no new plumbing. The cost is a pseudo-call in a list that otherwise holds only calls: any consumer that looks up the function by name must ignore `...`, and a lifecycle warning would read "`...(…)` in lifecycle …". The alternative is a separate spread-check type with its own path through each of those consumers, which is more code but keeps the call list pure.
     - |-
         The passive check rejects a spread only when every possible value of the operand fails: its type excludes null and no alternative can be an object. An operand that may be null (`maybe: number`), may be an object (`object | number`), or has an unknown type is left to evaluation. The message names JSON types ("found number", "found number | string"), worded like the runtime error rather than as the declared type text (`literal(1.0) | literal(2.0)`). The alternative of also warning on "may fail" operands, in the way the uncertain-call category warns, was not specified and would need a new severity rule.
+    - |-
+        Provenance tracking (which `load_data` call, if any, produced a property's final value) uses a per-thread "origin of the last evaluated value" slot, switched on only while a whole-value frontmatter expression is evaluated. Each evaluated expression node clears it, except parentheses and the ternary operator (whose last evaluated child is the selected branch), and a `load_data` call sets it after a successful read. The plan described a record keyed by each executing node of the expression tree. Both give the same answer, and neither compares values or evaluates a branch twice; the slot needs no node identities and costs one thread-local check per node. If the reviewer wants the keyed record (for example because Phase 4 needs per-call facts for callbacks), only `expression/trace.rs` and the wrapper in `evaluate_expr` change; the stored `LoadOrigin`, the provenance record, and the reporting stay as they are.
+    - |-
+        `try(...)` still recovers malformed data, including the new header-name failures (an empty camelCase key, two headers that collide) and an explicit name list of the wrong width. The plan's test matrix said malformed content "remains non-recoverable through try", but the existing code and the Loading Data guide ("try covers a file that is present but bad") recover it, and the spec says malformed data keeps its current failure behavior. I kept the documented behavior and pinned it (`load_data_uncontracted::malformed_names_are_recovered_like_other_malformed_data`). Row-shape conflicts and invalid options stay non-recoverable. Making malformed data non-recoverable would mean changing `ExpressionError::is_recoverable_read_failure`, the guide, and the existing recovery tests.
+    - |-
+        A wrapped scalar (a data file whose root is `5`, loaded as `[5]`) is reported against the data file, not the wrapped array. A failure at element 0 points at the file's root (pointer ""), and so does a failure at a later element the file cannot hold (for example a two-element tuple contract). The original contract-mismatch records used the loaded value's pointer (`/0`, `/1`). The alternative was to keep those pointers while still giving the root's line and column. Reverting means editing `report_diagnostics::source_path` and one pointer line in `contract_records`.
+    - |-
+        A destination-schema failure on an unexpected member is placed at that member's value in the data file (for example column 28 of `"extra": 1`), which is how the loader already places contract mismatches. The member's key would be another reasonable place. Changing it means having `ExpressionProjector::project` ask the locator for the key position.
+    - |-
+        The status block (the human-readable error) adds one line per located problem: `data: <file>:<line>:<column> (<pointer>)`, with the file as a link, and the problem's ` at L:C` now names the expression's position instead of the frontmatter key's. The plan asked to "show both locations" but gave no layout. The text is assembled in `errors/blocks.rs::schema_validation_failed_block`.
+    - |-
+        The editor-facing provisional type of a contract-free `load_data` call narrows to rows only when the file's format and the header option are both literal. `header: "false"` written as a string (which the argument binder turns into `false`) is not narrowed and keeps the general `open object | unknown[]` type. Narrowing it would require binding the options inside the type function, as the passive options check already does.
+    - |-
+        Editor admission is decided once over the whole property expression, before it runs. A function the editor will not run (an effectful call, a reader other than `load_data` and `file_exists`, a runtime-only binding) leaves the property pending even when it sits in a branch evaluation would not take. The plan asks for ordinary branch selection; this is the conservative reading. The alternative is to judge each operation as evaluation reaches it, which means moving the refusal into the evaluator's dispatch; tests in `editor_observation.rs` and `typed_load_data_editor.rs` that assert pending for such properties would change.
+    - |-
+        In the editor, `fm.X` of a property whose authored value is still a template is pending, while a bare `X` evaluates that other property first and uses its result. This follows the plan's wording that `fm` sees the authored seed. If compose actually exposes interpolated values through `fm` at that point, `fm.X` should evaluate the dependency too; only the binding step in `observe.rs` changes.
+    - |-
+        A property expression that does not parse is reported as pending in the editor, not as a failure, because the passive call check already reports the syntax problem at the same place. Reporting it as a failure would need deduplication against that passive diagnostic.
+    - |-
+        Deciding which properties are file-dependent (and so get no editor verdict) searches the property's compiled JSON Schema declaration, following references, for the eager file format or the `match()` keyword. An unresolvable reference or nesting deeper than 32 levels also counts as file-dependent. This can over-defer but never probes a file. The alternative, reading the SimplifiedSchema declaration, is unavailable for raw JSON Schema layers.
+    - |-
+        When the schema root links properties together (a root union, or `anyOf`/`oneOf`/`allOf`/`if`/`not`/`dependent*` at the root), every observed property is deferred if any other property is still a template, and also if any file-dependent property is present. A root-level problem with no property of its own on a fully known document is reported on every observed property. Narrowing either needs an analysis of which arms touch which property.
+    - |-
+        Observed values feed completion and hover only. Diagnostics such as undeclared-member warnings keep using declared types, because an observed row that happens to lack an optional field would otherwise produce false warnings. A missing required member inside an observed value is always an error, even when DMLS is not in strict mode, since compose would fail on it.
+    - |-
+        Per-call observed values (used to type a callback's parameter, as in `map(load_data('data.yaml'), i => i.name)`) are matched by the call as written, not by its position, and the values of the same call text in several properties are merged (up to eight distinct values, then the call stays provisional). Position matching would need every editor parse to use the same coordinates, which the completion prefix parse does not.
+    - |-
+        Every slot job, not only a property observation, is now dropped and re-run when something it read changed between dispatch and install (including any grant or configuration change). This makes freshness uniform at the cost of occasional repeated work after two quick invalidations.
+    - |-
+        DMLS tests seed the transport cache through a new library feature, `cache-test-hooks` (`compose::cache_test_hooks::seed_remote_entry`), enabled only by DMLS's dev-dependency. The alternative is making the cache module's types public.
+    - |-
+        Editor diagnostics for a missing or failed load use the source name `darkmatter.compose`, and a destination failure's related data-file location is a zero-width range at the value's start. Hover still shows the raw observed preview for a headerless, uncontracted CSV read, which gets no verdict and no shape.
 message_to_agent: |-
-    Phase 2 (object spread) is complete. What Phase 3+ can build on:
-    (1) Occurrence-to-span mapping already exists and is reused: `member_check::expr_nodes` (erased tree) and `spanned_nodes` (spanned tree) list the same nodes in the same order, so a node's ordinal names it in both. `expression/spread.rs::SpreadSite` records a node address during evaluation and `evaluate`/`evaluate_observed` turn it into that ordinal (`ExpressionError::placed_in`); `report_diagnostics::spread_operand_source` reparses the recorded expression text and narrows the record. Rule 7's tracked evaluator (provenance keyed by AST occurrence) should use the same mirror rather than a new walker.
-    (2) The passive spread finding is a `CallCheck` named `SPREAD_CHECK_NAME` ("...") with `CallProblem::InvalidSpreadOperand`; `check_expression_calls` now visits every node (`visit_nodes`). Anything iterating call checks by function name must ignore "...".
-    (3) `ArgumentType::PartialObject` gained `opaque: bool` (an opaque spread may supply any key); `OptionsView::Partial` keeps the format open when it is set. Phase 3's header options must respect it.
-    (4) Spread typing is `scope::Shape::object_of_entries`; an open result carries a `<string>: unknown` pattern key that `serialize_property_atom` does not print, so type text looks closed.
-    (5) `just test -E '<filter with parentheses>'` breaks inside the darkmatter recipe (args unquoted); run nextest directly with `-p darkmatter --features effects-instrumentation,work-counters` (and the other packages' recipe features).
-    (6) `shipped_schema_corpus::shipped_markdown_named_type_references_resolve` fails because of uncommitted edits made outside this feature to `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md` (`apps: app[]` with no visible `types`). Do not revert it; exclude or report it.
-    (7) Still relevant for Phase 4: the cache-only API (`RemoteFetchRuntime::cache_only`, `cached_text`, `CacheOnlyPending`, `remote_cache::{lookup_fresh, FreshCachedBody, CacheOnlyMiss}`) carries `#[cfg_attr(not(test), expect(dead_code, ...))]`; remove it when the editor consumes the API. A cache-only runtime's `register_and_fetch` registers nothing.
+    Phase 4 (editor observation in DMLS) is complete; Phase 5 is documentation, regeneration, and acceptance.
+    (1) Behavior to document: the library entry point is `darkmatter::markdown::schemas::slots::observe` (`SlotSession::observe_properties`, `PropertyOutcome::{Observed, Pending, Missing, Failed}`, `PendingReason`), editor reads in `compose/expression/editor_reads.rs` (authorize before probe; remote only from a fresh cache entry under `<base_dir or cache root>/.darkmatter/cache/...`, never a fetch), validation in `schemas/observed.rs` (`validate_observed_frontmatter`, `DeferReason`), and DMLS install/expiry/projection in `slot_jobs.rs`, `diagnostics/observed.rs`, `overlay/properties.rs`. The repo skill `.claude/skills/darkmatter/dmls.md` ("Property observation") summarizes it; the user docs (`schema-slots.md`, `dmls/docs/*`, `loading-data.md`, caching) are not updated yet.
+    (2) The diagnostic data contract gained `data.data_location` and `relatedInformation` on editor destination failures; see the example in the Phase 4 log.
+    (3) Departures a reviewer should see are in decisions_for_review (static admission, `fm.X` vs bare `X`, file-dependent and root-union deferral, call facts matched by text).
+    (4) Still failing, outside this feature: `shipped_schema_corpus::shipped_markdown_named_type_references_resolve` because of `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md`.
+    (5) The darkmatter recipe's `just test -E '(...)'` still breaks on parentheses; run nextest directly (`-p darkmatter --features effects-instrumentation,work-counters`, `-p darkmatter-lsp --features effects-instrumentation`, `-p darkmatter-cli --features test-fixtures`).
+    (6) The disk filled during Phase 4 and `target/debug/incremental` was deleted once; check `df -h .` before long builds.
 source_files_during_phase_2:
     - "darkmatter/lib/src/markdown/compose/expression/spread.rs"
     - "darkmatter/lib/src/markdown/compose/expression/error.rs"
@@ -87,6 +119,130 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - ".claude/skills/darkmatter/expressions.md"
+source_files_during_phase_3:
+    - "claudine/lib/generated/shipped.json"
+    - "claudine/lib/src/composition/schema/translate.rs"
+    - "darkmatter/cli/schemas/output/clean.yaml"
+    - "darkmatter/cli/schemas/output/code-block.yaml"
+    - "darkmatter/cli/schemas/output/compose.yaml"
+    - "darkmatter/cli/schemas/output/delta.yaml"
+    - "darkmatter/cli/schemas/output/edit.yaml"
+    - "darkmatter/cli/schemas/output/get.yaml"
+    - "darkmatter/cli/schemas/output/graph.yaml"
+    - "darkmatter/cli/schemas/output/hash.yaml"
+    - "darkmatter/cli/schemas/output/init.yaml"
+    - "darkmatter/cli/schemas/output/list-themes.yaml"
+    - "darkmatter/cli/schemas/output/render.yaml"
+    - "darkmatter/cli/schemas/output/rm.yaml"
+    - "darkmatter/cli/schemas/output/schema-about.yaml"
+    - "darkmatter/cli/schemas/output/schema-detect.yaml"
+    - "darkmatter/cli/schemas/output/schema-triggers.yaml"
+    - "darkmatter/cli/schemas/output/schema-validate.yaml"
+    - "darkmatter/cli/schemas/output/set.yaml"
+    - "darkmatter/cli/schemas/output/toc.yaml"
+    - "darkmatter/cli/schemas/output/validate-refs.yaml"
+    - "darkmatter/cli/src/commands/frontmatter.rs"
+    - "darkmatter/cli/tests/l1/load_data.rs"
+    - "darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json"
+    - "darkmatter/dmls/tests/l1/option_arguments.rs"
+    - "darkmatter/features/2026-11-20-schema-typed-load-data/implementation-log.md"
+    - "darkmatter/lib/generated/shipped.json"
+    - "darkmatter/lib/src/markdown/compose/expression/call_check.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/contract.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/error.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/load.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/locate.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/options.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/parse.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/runtime.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/error.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/functions/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/functions/strings.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs"
+    - "darkmatter/lib/src/markdown/compose/interpolation/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs"
+    - "darkmatter/lib/src/markdown/compose/pipeline/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/schema_validation.rs"
+    - "darkmatter/lib/src/markdown/compose/value_origin.rs"
+    - "darkmatter/lib/src/markdown/errors/blocks.rs"
+    - "darkmatter/lib/src/markdown/mod.rs"
+    - "darkmatter/lib/src/markdown/types.rs"
+    - "darkmatter/lib/tests/l1/diagnostic_source_provenance.rs"
+    - "darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs"
+    - "darkmatter/lib/tests/l1/load_data_execution.rs"
+    - "darkmatter/lib/tests/l1/load_data_options.rs"
+    - "darkmatter/lib/tests/l1/load_data_options_passive.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "darkmatter/schemas/partials/functions.yaml"
+    - "darkmatter/schemas/partials/lifecycle.yaml"
+    - "darkmatter/lib/src/markdown/compose/expression/trace.rs"
+    - "darkmatter/lib/tests/l1/load_data_destination.rs"
+    - "darkmatter/lib/tests/l1/load_data_uncontracted.rs"
+docs_updated_during_phase_3:
+    - "darkmatter/docs/functions/load-data.md"
+    - "darkmatter/docs/topics/darkmatter-expressions.md"
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - ".claude/skills/darkmatter/expressions.md"
+source_files_during_phase_4:
+    - "darkmatter/dmls/Cargo.toml"
+    - "darkmatter/dmls/src/clock.rs"
+    - "darkmatter/dmls/src/diagnostics/frontmatter.rs"
+    - "darkmatter/dmls/src/diagnostics/mod.rs"
+    - "darkmatter/dmls/src/diagnostics/observed.rs"
+    - "darkmatter/dmls/src/overlay/mod.rs"
+    - "darkmatter/dmls/src/overlay/properties.rs"
+    - "darkmatter/dmls/src/providers/dsl.rs"
+    - "darkmatter/dmls/src/providers/frontmatter.rs"
+    - "darkmatter/dmls/src/router.rs"
+    - "darkmatter/dmls/src/slot_jobs.rs"
+    - "darkmatter/dmls/tests/common/mod.rs"
+    - "darkmatter/dmls/tests/l1/main.rs"
+    - "darkmatter/dmls/tests/l1/typed_load_data_editor.rs"
+    - "darkmatter/lib/Cargo.toml"
+    - "darkmatter/lib/src/config/permissions.rs"
+    - "darkmatter/lib/src/markdown/compose/cache/remote_cache.rs"
+    - "darkmatter/lib/src/markdown/compose/cache/store.rs"
+    - "darkmatter/lib/src/markdown/compose/cache_test_hooks.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/call_check.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/load.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/editor_reads.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/error.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/functions/fs.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/functions/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/read_gate.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/projection.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/tests.rs"
+    - "darkmatter/lib/src/markdown/compose/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/remote_fetch.rs"
+    - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+    - "darkmatter/lib/src/markdown/schemas/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/observed.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/admission.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/evaluator.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/observe.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/observe_tests.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/session.rs"
+    - "darkmatter/lib/tests/l1/editor_observation.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "darkmatter/lib/tests/l1/observed_validation.rs"
+    - "darkmatter/lib/tests/l1/semantic_results_never_persist.rs"
+    - "simplified-schema/lib/src/file_match.rs"
+    - "simplified-schema/lib/src/format.rs"
+    - "simplified-schema/lib/src/validate.rs"
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - ".claude/skills/darkmatter/dmls.md"
 ---
 
 # Implementation Log for 2026-11-20-schema-typed-load-data (5 phases)
@@ -381,3 +537,337 @@ reader changed.
   `cargo check -p claudine-cli --tests` is clean. Claudine is the only
   dependent that names `ExpressionError`, `CallProblem`, or `PartialObject`.
   Its `just lint` was run clean by the subagent.
+
+## Phase 3
+
+### What changed
+
+- **Optional contract** (`functions.yaml`, `data/load.rs`): the catalog now
+  declares `as?: type-definition(container) | null` and
+  `header: boolean | string[]`. An omitted and a `null` `as` are the same
+  call: no contract is prepared, the bind memo key's contract part is empty,
+  and the value is returned unconverted (CSV cells stay text). A bound
+  `null` file still returns `null` first. `plan_read`, `judge_absent`, and
+  `bind_source` take `Option<&PreparedContract>`.
+- **Root normalization** (`load.rs::bind_source`): arrays and objects kept,
+  a `null` root (empty YAML, JSON `null`) becomes `[]`, any other scalar a
+  one-element array, before a contract judges it. `LoadedData` gained
+  `wrapped` and `table`; `DataError::ContractMismatch` gained `wrapped`, and
+  its records (and destination records) place a wrapped scalar's paths at the
+  document root with a root pointer.
+- **Header modes** (`data/options.rs::HeaderMode::{FirstRecord, None,
+  Names}`; `header_names` validates names after binding, never trims). The
+  bind memo keys on the effective mode, names included. `load.rs::select_row_mode`
+  picks rows from the contract (checked by the shared
+  `contract::require_header_rows`, new `RowShapeConflict::NamedListRows`) or,
+  without one, from the mode. Header-record keys are
+  `functions::strings::to_camel_case` (extracted from `camel_case`);
+  `header_keys` reports an empty key or a collision as `dm.data.malformed`
+  naming the original headers at the first offending field, even with no data
+  rows. `tabular_source` checks an explicit list against the first record's
+  width (`dm.data.malformed` at the record, both counts).
+  `TabularSource::keys` carries each column's key; `locate.rs::table_offset`
+  finds cells by it.
+- **Passive check** (`call_check.rs`): one-argument and `null`-contract
+  calls; a literal `header` list goes through `header_names`
+  (`invalid_options` at argument 2) and the row rule (`row_shape_conflict` at
+  argument 1). Uncontracted calls get the provisional type
+  (`uncontracted_type`): open object or `unknown[]`, narrowed for a provable
+  CSV/TSV read to open-object rows or `unknown[][]` for `header: false`.
+- **Compose provenance** (Rules 6–7, 15): new `expression/trace.rs`
+  (`traced`, `record_load`, `derive`, `LoadOrigin`). `evaluate_expr` now wraps
+  `evaluate_node`; with a trace open it clears the origin after every node
+  except a parenthesized expression, a ternary, and a `load_data` call (whose
+  handler records the origin after a successful bind and clears it on entry).
+  `interpolation/rewrite.rs::interpolate_value_traced` opens the trace for a
+  whole-value `{{ … }}`; `frontmatter_interpolation.rs` records a top-level
+  key's `ExpressionOrigin` on `FrontmatterProvenance`
+  (`set_expression_origin`, cleared by `set_authored_source`). Both
+  `run_with_registry` calls and `validate_typed_shell_values` take the
+  origins; an instance failure builds
+  `MarkdownError::SchemaValidationFailed::expression_origins`
+  (`ExpressionMetadata { span, load, value }`; empty for preparation
+  failures). `report_diagnostics::ExpressionProjector` (one `SourceLocator`
+  per property) feeds both `failure_diagnostics` (primary source and `span`
+  at the expression, `data_location` for a direct load) and
+  `errors/blocks.rs::schema_validation_failed_block` (" at L:C" of the
+  expression and a linked `data: file:L:C (pointer)` line). No extra read or
+  shape derivation is added to compose.
+- **Callers**: Claudine's `schema/translate.rs` and `md set`'s
+  `commands/frontmatter.rs` construct the error with empty origins. The 19
+  CLI output schemas describe the wider `data_location` applicability.
+  `just shipped-schemas` (twice: after `functions.yaml`, and after
+  `just regen-lifecycle-schema` updated `schemas/partials/lifecycle.yaml`),
+  and `just regen-expr-doc` regenerated `docs/functions/load-data.md` and
+  the function table. The DMLS `a3_completions.json` golden was refreshed
+  (`DMLS_UPDATE_GOLDEN=1`); its diff is only the new signature.
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+|---|---|
+| Omitted/`null`/computed-null `as` share one read, parse, bind; cells stay text | `load_data_uncontracted::omitted_and_null_contracts_share_one_read_parse_and_bind` |
+| Literal and computed `null` file: `null`, no reads, no imports | `load_data_uncontracted::a_null_file_returns_null_without_reads_or_imports` |
+| Scalar wrapping (number, boolean, empty string), array contract accepts, tuple fails at the original root | `load_data_uncontracted::a_scalar_root_is_wrapped_before_the_contract` |
+| Empty YAML, `~`, JSON `null`, empty JSONL → `[]`; empty JSON malformed | `load_data_uncontracted::a_null_root_is_an_empty_list`, `load_data_execution::empty_yaml_is_an_empty_list` |
+| Three header modes without a contract (spec example) | `load_data_uncontracted::each_header_mode_chooses_the_row_shape_without_a_contract` |
+| Header modes with compatible contracts, positional skip of unusable names | `load_data_uncontracted::each_header_mode_with_a_compatible_contract` |
+| Explicit names verbatim, binder conversions, two lists → two binds over one parse | `load_data_uncontracted::explicit_names_are_verbatim_and_bind_separately`, `runtime::tests::a_header_choice_is_its_own_binding_over_one_parse` |
+| Empty normalized names and collisions (zero data rows too) | `load_data_uncontracted::unusable_header_names_are_malformed_at_the_header`, `load_data_execution::an_object_header_must_not_repeat_a_name` |
+| Explicit-name width mismatch with counts and coordinates; later ragged record | `load_data_uncontracted::explicit_names_must_match_the_first_record_width` |
+| No-record input judged against a contract | `load_data_uncontracted::no_records_is_an_empty_list_judged_by_the_contract` |
+| Computed header refusals read nothing and are not recovered by `try`; `header: null` on YAML | `load_data_uncontracted::computed_header_refusals_read_nothing_and_are_not_recovered` |
+| Header option shapes (absent/null/booleans/list/wrong type/mixed/all-invalid/empty/empty name/duplicate) | `load_data_options::option_matrix_invalid_cells_read_nothing` (new `Refuser::Header` cells), `load_data_options_passive::binder::unbindable_option_field_is_a_binding_error_at_argument_2`, `catalog::tests::load_data_options_bind_through_the_shared_binder` |
+| Cell coordinates through normalized and explicit keys (contract) | `load_data_uncontracted::contract_failures_locate_cells_by_their_keys` |
+| Passive provisional types | `call_check::load_data_options_tests::an_uncontracted_call_has_a_provisional_type` |
+| Worked example passes; each property in isolation fails with the right location | `load_data_destination::{the_worked_example_passes_for_valid_data, a_direct_load_failure_names_the_expression_and_the_data_position, a_derived_result_failure_names_only_the_expression, a_selected_ternary_arm_keeps_its_data_position}` |
+| Paren forwards; `try`, `||`, index, callback derive | `load_data_destination::only_parentheses_and_a_selected_arm_forward_the_load` |
+| Contract failure stays `dm.data.*` | `load_data_destination::a_contract_failure_stays_a_data_error` |
+| Enum, numeric string conversion, default, closed object, imported type, trigger | `load_data_destination::{an_enum_destination_judges_each_loaded_value, conversion_and_defaults_agree_with_the_destination, an_unexpected_member_fails_at_the_member, an_imported_destination_type_is_applied, a_trigger_destination_declaration_is_applied}` |
+| Normalized/explicit keys and wrapped scalar in destination records | `load_data_destination::{tabular_keys_locate_the_original_cell, a_wrapped_scalar_is_located_at_the_root}` |
+| Status block shows both locations | `load_data_destination::the_status_block_shows_both_locations` |
+| Pass-two property; caller-owned post-shell verdict | `load_data_destination::{a_property_completed_in_pass_two_keeps_its_provenance, a_caller_owned_post_shell_verdict_is_the_callers}` |
+| CLI wiring (explicit-name width, destination failure JSON and Markdown report) | `cli l1 load_data::{an_explicit_name_list_of_the_wrong_width_is_located, a_destination_schema_failure_names_the_expression_and_the_data, a_destination_schema_failure_report_shows_both_positions}` |
+| DMLS: nullable contract, header-list diagnostics and completion, provisional members | `dmls l1 option_arguments::{an_omitted_or_null_contract_is_no_diagnostic, options_after_a_null_contract_are_ranged_on_the_third_argument, header_list_problems_are_ranged_like_composition, a_header_list_value_offers_no_boolean_items, an_uncontracted_load_is_provisional_for_members, hover_on_load_data_shows_the_options_parameter_and_its_defaults}` |
+| Catalog examples (one-argument YAML, explicit-name CSV with text port) | catalog example verification tests and `load_data_function_page_matches_catalog` |
+
+Tree-loader document shapes (YAML duplicate key, second document, trailing
+syntax, JSON/JSON5 last-wins duplicates, trailing content, TOML duplicates,
+invalid UTF-8) were already covered by `load_data_execution.rs`'s tables;
+they are unchanged by this phase and were run as controls.
+
+Code-smell audit of the changed loader and binder lines (`serde(default)`,
+`unwrap_or_default()`, `.ok()`, `filter_map`): the only hit is a
+re-indented existing `.ok()?` in `load_data_type` (an unparsable literal
+contract types as the catalog's return, as before).
+
+### Findings while testing
+
+- My first provisional type parsed `unknown[][]`, which the SimplifiedSchema
+  grammar does not accept, behind an `expect`: a panic on any provable
+  headerless uncontracted read. Now built from shapes with no panic path,
+  pinned by `an_uncontracted_call_has_a_provisional_type`.
+- `{header: [1]}` now binds (`["1"]`), so the tests that used it as an
+  unbindable element use an object element and pin the conversion
+  separately.
+- Two more problems surfaced in the gates. The new `expression_origins` map pushed `MarkdownError` past clippy's
+  `large-error-threshold`, so it is boxed. A test object key `"any"` tripped
+  `trigger_spelling_guard` (a retired trigger spelling), so it was renamed.
+
+### Gates
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  (excluding the unrelated `sniff/fixes/2026-11-20-commit-link-walks/plan.md`
+  from another session) gave `packages: [claudine, darkmatter, darkmatter-cli,
+  darkmatter-lsp, test-toolkit, claudine-cli, simplified-schema]`,
+  `change_class: package`, so the gates ran.
+- The plan's filter `just test -E 'test(load_data) | …'` cannot run through the recipe because of the
+  parentheses (see Phase 1), so I ran it with nextest directly:
+  darkmatter 681/681 (with `call_check` and `expression_recovery_data`),
+  darkmatter-lsp `option_arguments` 19/19, darkmatter-cli `load_data::` 32/32.
+- `LANG=C.UTF-8 just test` (darkmatter area): 12114 passed and 1 failed before fail-fast stopped the run, with none at or above 5 s. The failure is
+  `shipped_schema_corpus::shipped_markdown_named_type_references_resolve` on
+  `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md`
+  (`apps: app[]`, committed in e21f32677, outside this feature; same failure
+  as Phases 1 and 2). I then ran each package with nextest, no fail-fast, and the recipe's
+  features: darkmatter 12666/12667 (one failure, the trigger-spelling guard
+  hit described above, fixed and re-run green); darkmatter-cli 2642/2642;
+  darkmatter-lsp 1996/1996; zed-dmls-cli 27/27. After the boxing change:
+  darkmatter `load_data|schema|error_snapshots|diagnostic_source` 2698/2699
+  (only the OSC-9 test fails). No slow tests.
+- `just lint` (darkmatter): clean after the two fixes above.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Dependent package, Claudine (its library has more than 200 tests, so the run was scoped to tests whose names include
+  `schema|load_data|shipped|translate|expression|validation|compose`):
+  1365/1365 passed. `cargo check -p claudine --tests` is clean.
+- No local OS test rigs (`BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`,
+  `BUILD_MACOS` unset); cross-OS evidence is left to CI.
+
+## Phase 4
+
+Wave 3 ran as two parallel subagents on disjoint files; their reports were
+reviewed here and `just lint` (darkmatter) was rerun clean on the merged tree.
+
+### Secure editor reads (Wave 3, task A)
+
+- New public module `darkmatter::markdown::schemas::slots::observe`
+  (`observe.rs`): `PropertySite`, `ObserveRequest`, `observes_property`,
+  `SlotSession::observe_properties`, `PropertyObservations` (with `get`),
+  `PropertyObservation`, `PropertyOutcome::{Observed, Pending, Missing,
+  Failed}`, and `PendingReason` (defined in the new
+  `compose/expression/editor_reads.rs`, re-exported from `observe`).
+- Editor mode is a field on `ResolutionContext` (`editor`), set only by
+  `observe_properties`; ordinary compose is unchanged. In editor mode the
+  local `load_data`/`file_exists` resolution goes through
+  `resolve_detailed_with_presence`: a lexical precheck
+  (`ReadGate::admits_lexically`, `PermissionPolicy::may_allow_file_read_lexically`)
+  and then the full non-prompting decision run before each candidate is
+  probed; open buffers count as present. A refused candidate is the new
+  nonrecoverable `ExpressionError::ObservationPending { function, reason }`
+  (`try`/`||` never recover it); an admitted clean miss is the ordinary
+  NotFound error (`try` recovers it; unrecovered it is `Missing`); I/O,
+  missing context, or a vanished file is `Pending(ReadUnavailable)`.
+- Remote reads in editor mode check the gate, then read
+  `RemoteFetchRuntime::cache_only` through `cached_text_bounded` (never
+  register, fetch, refresh, or write); a hit records its expiry and charges
+  its bytes. The unbounded `lookup_fresh` was replaced by a bounded store
+  read (`cache/store.rs`), and the Phase 1 `dead_code` expectations are gone.
+- Admission (`admission::property_reads`): pure functions plus `load_data`
+  and `file_exists` run; any other reader or effectful function is
+  `Unsupported`; captured/volatile functions, `ctx`, and `current`/`local`
+  outside a callback are `RuntimeOnly`. A bare name naming another
+  whole-value site is evaluated first (memoized, `Cycle` on a loop); `fm.X`
+  or a bare name whose authored value still holds `{{`/`$(` is `Dependency`.
+- One `DataRuntime` (the session's) and one `IterationBudget` cover the
+  pass; local bytes are charged to the 4 MiB allowance with a one-byte
+  overflow check before parsing; cancellation is checked before each site
+  and each read.
+- Guard updates: `semantic_results_never_persist` allowlist counts
+  (`remote_cache.rs` 9, `remote_fetch.rs` 8; the store is opened only in
+  `remote_fetch.rs::cache_only_under`), and the editor reader check moved to
+  `functions::is_editor_guarded_reader` to satisfy `type_scope_ownership_guard`.
+
+### Validate observed values (Wave 3, task B)
+
+- New `darkmatter/lib/src/markdown/schemas/observed.rs`:
+  `EffectiveSchema::validate_observed_frontmatter(seed, replacements) ->
+  ObservedValidation { properties: BTreeMap<String, ObservedVerdict> }`,
+  `ObservedVerdict::{Judged(problems), Deferred(DeferReason)}`,
+  `DeferReason::{Undeclared, UnresolvedDeclaration, RootUnionUnresolved,
+  FileDependent}`, re-exported from `markdown::schemas`.
+- The seed is copied with the replaced keys removed before the template
+  scan, so a replacement's own `{{ }}` text is data; it then reuses
+  `converted_candidate` and `validate_instance` on the full candidate.
+- Simplified Schema gained a thread-local, nesting, panic-safe scope
+  `validate::{with_unverified_file_checks, file_checks_unverified}`:
+  `format.rs`'s eager `darkmatter-file` check judges syntax only,
+  `file_match.rs`'s keyword admits every value, and
+  `darkmatter_file_reference_outcome` does no I/O inside it. `coerce.rs`
+  needed no edit (its validators run on the calling thread inside the
+  scope). Validator cache keys are unchanged.
+
+### Install editor results (after Wave 3, subagent C, reviewed here)
+
+- Demand: `overlay/properties.rs` (`located_sites`, `sites_to_observe`)
+  finds whole-value top-level sites through the shared scanner and
+  `observes_property`; a document with an eligible site now gets a slot job
+  even when its schema is not a template. `SlotSnapshots::demand_with`
+  replaces the old demand path and keeps a separate slot-demand decision: a
+  property-only job assembles over the installed pins (`SlotUse::Pins`) or
+  with no template, never resolves slots, and carries the installed
+  session, error, and slot reads forward. `resolve_slot_templates` now
+  returns the `SchemaBundle` and takes `registered_hosts` and a `SlotUse`.
+- Job: `session.observe_properties` then
+  `bundle.effective.validate_observed_frontmatter`; the result carries
+  observations, verdicts, observed reads, and the minimum remote expiry.
+- Install/expiry: an input generation plus a log of changed paths drops a
+  result dispatched before a change to a path it read
+  (`InstallOutcome::Outdated`) and requeues it; every read path is
+  re-stat'ed at install; a result already expired installs no observation;
+  the remote deadline is the job's paired monotonic sample plus
+  (expiry − paired wall time), served by a `crossbeam_channel::at` arm in the
+  router's `select!` and also checked on access. A stale or refreshing entry
+  withholds its `PropertyView`. `clock.rs` gained `Clock::pair`/`wall` and
+  `ManualClock::starting_at`.
+- Diagnostics: new `diagnostics/observed.rs::property_diagnostics`
+  publishes destination verdicts at the authored expression with the
+  existing schema codes, `relatedInformation` at the data file (UTF-16
+  column from the captured source text), and `data.data_location`;
+  `Missing` is a `dm.expression.evaluation_failure` warning with the
+  file-reference details; `Failed` keeps its own code and is skipped when a
+  passive diagnostic with that code already sits in the site's range;
+  pending sites publish nothing, and placeholder findings at eligible sites
+  are filtered. Library: `report_diagnostics::data_locations` (public, over
+  `ExpressionProjector`).
+- Completion/hover: `Shape::observed` (bounded depth and alternatives) and
+  `DeclaredTypes::with_observed` feed completion and hover; hover appends a
+  bounded "Observed value" preview (`overlay/properties.rs::preview`: 8
+  entries, depth 3, 120 characters, omitted counts) after the declared type.
+- Test seam: `LspFixture::start_with_slot_options(workspace, snapshot,
+  gated, cache_root, clock)`, `StartupHooks.slot_cache_root`,
+  `SlotSnapshots::{set_clock, set_cache_root}`.
+- Host note: the build hit "Disk quota exceeded" (filesystem 100% full);
+  the subagent deleted this worktree's rebuildable
+  `target/debug/incremental` (55 GB), leaving the disk at 77%.
+
+### Call facts and editor parity (subagent D, reviewed here)
+
+- Per-call observed facts: `editor_reads.rs` collects what each evaluated
+  `load_data` node returns (up to eight distinct values, then `overflow`);
+  `observe.rs` exposes them as `PropertyObservation.calls: Vec<ObservedCall
+  { span, call, values, overflow }>`; `DeclaredTypes::with_observed_calls`
+  and `call_check.rs::expression_type` type a matching call from them, so a
+  callback parameter completes with observed members while the view is
+  current.
+- Defects found and fixed in the install work: (1) the router waited on
+  `crossbeam_channel::at(deadline)` with a deadline from the injected clock,
+  so a `ManualClock` deadline never fired; it now waits
+  `after(deadline − clock.now())`; (2) an uncontracted `header: false` read
+  published cell verdicts and an observed shape, which the spec forbids; such
+  properties and calls now get neither.
+- Test seam: library feature `cache-test-hooks`
+  (`compose::cache_test_hooks::seed_remote_entry`), enabled only by DMLS's
+  dev-dependency.
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+|---|---|
+| Worked example observed; one read and one parse | `editor_observation::{the_worked_example_is_observed_with_an_approval, properties_share_one_parse}`, `typed_load_data_editor::{the_worked_example_is_valid_in_the_editor, properties_loading_one_file_share_its_parse}` |
+| Bad age on line 4: direct, parenthesized, conditional carry the data location; spread row expression-only | `typed_load_data_editor::{a_bad_age_fails_every_property_with_its_location, a_parenthesized_load_keeps_its_data_position}` |
+| Editor/compose parity per property | `typed_load_data_editor::the_editor_and_compose_agree_on_each_property` |
+| Refused read probes nothing; lexical and physical (symlink) exclusions; missing vs unreadable vs unauthorized | `editor_observation::{an_unapproved_read_is_pending_and_probes_nothing, lexical_and_physical_exclusions_refuse_before_reading, missing_unreadable_and_unauthorized_reads_differ}` |
+| Approved missing path is `Missing` and watched; `try` recovers only a proven miss | `editor_observation::{an_approved_missing_file_is_missing_and_its_candidate_is_watched, recovery_turns_only_a_proven_miss_into_the_fallback}` |
+| Guarded/recovered miss no warning; unrecovered warning cleared by creating the file (watch and stat fallback) | `typed_load_data_editor::{a_guarded_or_recovered_missing_input_is_no_warning, an_unrecovered_missing_load_warns_until_the_file_is_created, without_watchers_a_save_finds_the_created_file}` |
+| Unsaved dependent buffer | `typed_load_data_editor::an_unsaved_data_buffer_decides_the_verdict` |
+| Approval/config/schema invalidation; pending gives no verdict or invented member error | `typed_load_data_editor::{a_refused_read_is_pending_until_the_configuration_approves_it, a_once_grant_refreshes_a_pending_observation, a_schema_change_rejudges_the_observed_value}` |
+| Superseded jobs, older generation, expired at install, stale withholds, read changed before install | `typed_load_data_editor::a_superseded_job_never_installs`, `slot_jobs::tests::{a_result_from_an_older_input_generation_is_discarded, a_result_already_expired_at_install_installs_no_observation, a_stale_view_withholds_its_observation, a_read_that_changed_before_install_marks_the_entry_stale}` |
+| Property-only job resolves no slots; pins carried forward | `slot_jobs::tests::{a_property_only_job_observes_and_judges_without_resolving_slots, a_job_over_served_pins_keeps_the_installed_session}` |
+| Remote: fresh entry observed with expiry, denied URL never consults cache, expired/missing pending, no fetch, expiry deadline | `observe_tests::{an_allowed_url_is_read_from_a_fresh_cache_entry, a_denied_expired_or_missing_entry_leaves_the_read_pending, a_cached_body_past_the_allowance_stops_the_pass}`, `typed_load_data_editor::{a_cached_remote_response_is_judged_until_it_expires, a_denied_url_is_pending_with_a_fresh_entry}`, `slot_jobs::tests::a_remote_expiry_becomes_a_monotonic_deadline_from_the_paired_clock`, `clock::a_manual_clock_advances_wall_and_monotonic_time_together` |
+| Rejected effectful function, runtime-only binding, cycle; dependency-first properties | `editor_observation::{unsupported_operations_and_runtime_bindings_are_pending, properties_read_literals_and_other_properties_dependency_first}`, `typed_load_data_editor::unsupported_runtime_only_and_cyclic_properties_are_pending` |
+| Budget and byte bounds, prompt-free | `editor_observation::{an_exhausted_allowance_stops_the_pass, a_source_past_the_byte_allowance_stops_the_pass}`, `typed_load_data_editor::an_exhausted_allowance_is_pending_without_a_prompt` |
+| Bounded hover with declared type | `overlay::properties::the_preview_is_bounded_by_entries_depth_and_string_length`, `typed_load_data_editor::hover_shows_a_bounded_preview_after_the_declared_type` |
+| Call facts and callback completion | `editor_observation::each_load_occurrence_keeps_what_it_returned`, `typed_load_data_editor::a_callback_parameter_completes_with_the_observed_members`, `scope::tests::an_observed_value_has_its_exact_bounded_shape` |
+| Headerless uncontracted: `unknown[][]`, no editor cell verdict, compose fails | `typed_load_data_editor::a_headerless_uncontracted_read_has_no_editor_cell_verdict` |
+| Eligibility by contract argument | `editor_observation::observes_property_follows_the_contract_argument`, `overlay::properties::only_a_top_level_uncontracted_load_is_eligible` |
+| Observed validation: enum, numeric string, default, closed object, import, trigger, root union pass/fail/unresolved, file-dependent deferral without probe, template-like strings as data, undeclared deferred, inputs unchanged | `observed_validation::*` (13 tests), `simplified_schema validate::unverified_file_checks_judge_syntax_only_and_end_with_their_scope` |
+| UTF-16 related range past multibyte text | `diagnostics::observed::a_character_position_is_found_past_multibyte_text` |
+
+An editor destination diagnostic (worked example, Grace's age `"old"`):
+`code: dm.schema.type_mismatch`, range at the `direct` expression,
+`relatedInformation` at `data.yaml` line 4 (LSP line 3, character 7),
+`data: { instance_path: "/direct/1/age", data_location: { file, pointer:
+"/1/age", line: 4, column: 8 } }`.
+
+The loader's input matrix is unchanged this phase (no new parsed field); the
+editor read path reuses the same parsers, so the Phase 3 tables ran as
+controls inside the package runs below.
+
+### Gates
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  (excluding another session's `sniff/fixes/2026-11-20-commit-link-walks/plan.md`)
+  gave `packages: [claudine, darkmatter, darkmatter-cli, darkmatter-lsp,
+  simplified-schema, test-toolkit, claudine-cli, zed-dmls-cli]`,
+  `change_class: package`; the gates ran. (Phase 3's changes are still
+  uncommitted, so this covers both phases.)
+- `LANG=C.UTF-8 just test` (darkmatter): 12148 passed, 1 failed before
+  fail-fast stopped it, none at or above 5 s. The failure is the known
+  `shipped_schema_corpus::shipped_markdown_named_type_references_resolve` on
+  `biscuit-terminal/docs/research/terminal-standards/osc/osc-9-conemu.md`
+  (outside this feature). Then each package with nextest, `--no-fail-fast`,
+  and the recipe's features: darkmatter 12697/12698 (only that failure),
+  darkmatter-cli 2642/2642, darkmatter-lsp 2027/2027, zed-dmls-cli 27/27. No
+  slow tests.
+- `just lint` (darkmatter): clean. `just check-tier-coverage darkmatter`
+  (from the root): 0 stranded.
+- Simplified Schema (changed directly): `just test` 2385 + 2017 passed, none
+  slow; `just lint` clean.
+- Dependent Claudine (more than 200 tests; scoped to
+  `schema|load_data|shipped|translate|expression|validation|compose|fresh|slot`,
+  which includes its shipped-artifact freshness over the edited Simplified
+  Schema files): 1397/1397.
+- No local OS test rigs (`BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`,
+  `BUILD_MACOS` unset); cross-OS evidence is left to CI. The symlink case is
+  `cfg(unix)`; the chmod-000 case skips itself when the process can still
+  read the file (as root).

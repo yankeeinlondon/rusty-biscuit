@@ -3,7 +3,7 @@ kind: plan
 created: 2026-11-20
 status: planned
 total_phases: 5
-phase: 3
+phase: 5
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -41,6 +41,7 @@ packages:
 - darkmatter
 - darkmatter-lsp
 - claudine
+- darkmatter-cli
 source_files_during_phase_2:
 - darkmatter/lib/src/markdown/compose/expression/spread.rs
 - darkmatter/lib/src/markdown/compose/expression/error.rs
@@ -70,6 +71,130 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
 - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/schema/translate.rs
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/init.yaml
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- darkmatter/dmls/tests/l1/option_arguments.rs
+- darkmatter/features/2026-11-20-schema-typed-load-data/implementation-log.md
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/expression/data/options.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/value_origin.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/types.rs
+- darkmatter/lib/tests/l1/diagnostic_source_provenance.rs
+- darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/load_data_options.rs
+- darkmatter/lib/tests/l1/load_data_options_passive.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/lib/src/markdown/compose/expression/trace.rs
+- darkmatter/lib/tests/l1/load_data_destination.rs
+- darkmatter/lib/tests/l1/load_data_uncontracted.rs
+docs_updated_during_phase_3:
+- darkmatter/docs/functions/load-data.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/expressions.md
+source_files_during_phase_4:
+- darkmatter/dmls/Cargo.toml
+- darkmatter/dmls/src/clock.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/observed.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/properties.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/tests/common/mod.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/typed_load_data_editor.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/config/permissions.rs
+- darkmatter/lib/src/markdown/compose/cache/remote_cache.rs
+- darkmatter/lib/src/markdown/compose/cache/store.rs
+- darkmatter/lib/src/markdown/compose/cache_test_hooks.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/editor_reads.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/observed.rs
+- darkmatter/lib/src/markdown/schemas/slots/admission.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/observe.rs
+- darkmatter/lib/src/markdown/schemas/slots/observe_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/tests/l1/editor_observation.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/observed_validation.rs
+- darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+- simplified-schema/lib/src/file_match.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/validate.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/dmls.md
 ---
 
 # Implement Schema-Typed `load_data`
@@ -126,11 +251,11 @@ Phase 1 is complete in commits `2b782c3d5` and `d87d0d654`. The execution cursor
 
 ## Phase 3 — Implement optional loads and compose provenance
 
-- [ ] **Bind optional loads**
+- [x] **Bind optional loads**
   - Update `functions.yaml`, `call_check.rs`'s literal contract and partial-options checks, and `data/{contract,load,options,runtime,error,locate}.rs` and `functions/strings.rs` for Rules 3–6. Add a one-argument YAML example using `fixture.yaml` and an explicit-name CSV example using `fixture-headerless.csv` with `header: ["label", "port"]`. Pin the port cell as text in the CSV result. Ensure dynamic invalid option errors preserve the same argument index as passive errors through authored-span projection. Update `dmls/tests/l1/option_arguments.rs` for nullable contract arguments and list option completion and diagnostics. Run root `just shipped-schemas` before catalog tests.
-- [ ] **Project compose locations**
+- [x] **Project compose locations**
   - Add the traced result described in Rules 6–7 to evaluation, `frontmatter_interpolation.rs`, `value_origin.rs::FrontmatterProvenance`, and both validation passes in `pipeline/mod.rs`. Attach the authored span for every failing realized whole expression and the optional data-location descriptor for direct loads. Carry metadata in an `expression_origins` field on `MarkdownError::SchemaValidationFailed`, keyed by the decoded top-level property and shared by every problem under it, preserving schema codes and defaults' origin. Update `schema_validation.rs` to build the expression metadata for instance failures and initialize it empty for preparation failures. Update `report_diagnostics.rs::failure_diagnostics` and `MarkdownError::status_block` in `markdown/types.rs`. Extend `markdown/errors/blocks.rs::schema_validation_failed_block` using its existing `Prose` links to show both locations. Use the same projection helper for structured and human-readable diagnostics. Use the existing CLI diagnostic record serialization and refresh the output schema descriptions from Rule 14. Compose uses its existing validation stage, source text and memo. No extra read or shape derivation enters the compose path.
-- [ ] **Run loader matrix**
+- [x] **Run loader matrix**
   - Use `lib/tests/l1/{load_data_execution,load_data_headerless,load_data_options_passive,load_data_diagnostics,expression_recovery_data}.rs` and `cli/tests/l1/{load_data,compose_data_output}.rs`. Use one-edit fixture mutations with a passing control, checking public values/errors, source locations, stage ordering, and read/parse/bind counts. The matrix below defines the required cases. From `darkmatter/`, run `LANG=C.UTF-8 just test -E 'test(load_data) | test(compose_data_output) | test(expression_recovery_data) | test(option_arguments)'` on Linux. Assert `DataRuntime::stats()` reports one read, one parse, and one bind for omitted and explicit-null contracts over the same source and options. Two explicit name lists produce two binds over that same parse.
 
 ### Input Robustness Matrix
@@ -147,16 +272,16 @@ Invalid shapes produce a located error, run no subsequent processing for the fai
 
 ### Wave 3
 
-- [ ] **Secure editor reads**
+- [x] **Secure editor reads**
   - Wire Rules 8–10 and 13 into `schemas/slots/{admission,evaluator,session}.rs`, `compose/expression/{resolve_ctx.rs,functions/fs.rs,data/load.rs}`, and Simplified Schema's `resolve/{buffers,select}.rs`. This task returns evaluated values, executed call metadata, and read observations. It owns the bounded read hooks and consumption of the Phase 1 cache-only transport. Use a worker-only guarded lookup with structured pending, missing and failed outcomes. Include named contract preparation, path refusals, buffer presence, and read logging on failure. Share the memo over the full property pass. Verify a refused read gets no resolver existence/type probe or source bytes, a denied URL cannot consult the cache, and a missing local source differs from unreadable and unauthorized sources.
-- [ ] **Validate observed values**
+- [x] **Validate observed values**
   - Implement Rule 11 in `markdown/schemas/mod.rs` and Simplified Schema's `{coerce,format,validate,file_match}.rs`. Exercise it with supplied candidate values independently of the worker. Integrate it with the worker after Wave 3. Preserve original type and data location on the immutable observation and reuse the traced evaluator and source locator. Test enum membership, numeric string conversion, a missing field supplied by a default, closed-object rejection, imported types and trigger layering, root union pass/failure and unresolved arms, file-dependent deferral, and template-like returned strings. Assert the validator works from a copy and does not mutate any editor document or stored value.
 
 ### After Wave 3
 
-- [ ] **Install editor results**
+- [x] **Install editor results**
   - Extend the existing DMLS slot job and router paths per Rule 12. Drive completion and hover in `overlay/expressions.rs` and `providers/{completion,hover}.rs` through installed facts, including alias/frontmatter member lookup and callback scopes. Keep provisional shapes on stale or pending results. Project schema diagnostics in `diagnostics/frontmatter.rs` and expression diagnostics in `diagnostics/call_check.rs` from the same view. Use LSP `relatedInformation` for a proven local data-file range (using the captured source text for UTF-16 conversion) and `data.data_location` for the full structured location. Preserve existing default and schema origin information.
-- [ ] **Prove editor parity**
+- [x] **Prove editor parity**
   - Add in-process DMLS protocol coverage beside `dmls/tests/l1/schema_slots_editor.rs`, reusing the worker hooks from `slot_jobs.rs`. Check the worked example valid, then all three destination failures from bad age on line 4. Assert source location for direct and parenthesized/conditional loads and expression-only location for the mapped/spread row. Run each property separately through compose. Cover guarded and recovered missing inputs, a visible unrecovered warning, creation of a missing dependency, unsaved dependent buffers, no-watcher refresh, approval/config/schema invalidation, delayed superseded jobs, and remote freshness/expiry without a fetch. Include a rejected effectful function, an unavailable runtime-only binding, and a cycle. Verify denied or pending reads produce no property verdict or invented missing-member error. Use `just test -E 'test(schema_slots_editor) | test(typed_load_data_editor)'` in Darkmatter with the new cases registered as `dmls/tests/l1/typed_load_data_editor.rs`. Assert bounded hover, shared parse counts, prompt-free budget exhaustion, and `unknown[][]` with no editor cell verdict for an executed uncontracted headerless load whose bad cell fails in compose.
 
 ## Phase 5 — Publish and verify
