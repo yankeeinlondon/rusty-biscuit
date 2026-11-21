@@ -57,10 +57,22 @@ Sniff must check all those branches before reporting that a commit is absent.
 Walking the 26 branch tips separately visits **342,614** commits in total.
 Their combined history contains only **16,682** distinct commits.
 
-The checkout had no commit-graph file, Git's optional index of commit ancestry.
-Adding one in a throwaway shared clone reduced link time from about 2.9 s to
-about 1.5 s in that sample. Avoiding repeated visits helps checkouts with or
-without the index.
+The checkout had no commit-graph, Git's optional index of commit ancestry.
+That is the largest single factor. *Measured 2026-11-21* in an independent
+full copy of the checkout with this branch's build, `sniff repo hash` on an
+unpushed commit walks every remote tip. It took **3.4 s** without a
+commit-graph and **75 ms** with one (17 ms of that is the same command
+without linking), so the graph makes each visit about 60× cheaper. An
+earlier sample, taken in a clone that borrowed its objects from another
+repository, showed only a 2× gain and was invalid.
+
+The other hosts agree. The native Windows rig and the macOS laptop both
+have a commit-graph chain (`objects/info/commit-graphs/`) and link the same
+342,614 visits in about 0.1–0.2 s. The Linux host and the WSL2 rig have no
+commit-graph and take 3.2–3.6 s. Sniff only reads repositories, so it cannot
+create the graph. Avoiding repeated visits is what makes checkouts without a
+graph fast (16,682 visits instead of 342,614), and it still removes about 95%
+of the work on checkouts that have one.
 
 The slow status command reported only **137 ms** with `--perf`. The
 `sniff-detection-cli` status renderer calls
@@ -360,8 +372,10 @@ unpushed branch in that checkout. Record wall time and reported visits in
 the implementation log. The earlier total omitted the work, so compare
 wall time across versions and use the isolated linker test to establish
 visit savings. Use the sample to check that the reported linking stage
-accounts for the formerly hidden time. The existing commit-graph sample
-already establishes its effect on this checkout.
+accounts for the formerly hidden time. Take each sample without a
+commit-graph, which is the slow case the fix must handle, and record
+whether the checkout has one. A checkout that has a graph is already
+within the margin before the fix.
 
 The fix is accepted when, in that checkout state, terminal
 `sniff repo git-status` finishes within 0.5 s of
@@ -418,3 +432,10 @@ A cross-compile is compile evidence only and does not count.
    scope. Before implementing, repeat the measurement with this branch's
    build. Most of the Windows wall time is the working-tree status walk,
    which is outside this fix.
+
+   *Repeated 2026-11-21 with this branch's build (`387cce9a4`) on the same
+   rig:* `sniff repo state --json` took 436/455/439 ms without `EXEPATH` and
+   328/403/318 ms with it. That saving of about 50–120 ms per run (roughly a
+   quarter of the run) clears the gate clearly. The status walk itself is
+   now about 0.42 s, still about three times `git status` (0.13 s) on the
+   same checkout. That remaining gap belongs to a separate fix.
