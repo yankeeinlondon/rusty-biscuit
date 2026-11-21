@@ -137,7 +137,7 @@ fn a_missing_user_file_is_created_with_only_the_migrated_keys() {
 
     let snapshot = fixture.migrate();
 
-    assert_eq!(fixture.user_text().unwrap(), "permissions:\n  shell-commands:\n  - prefix git status\n");
+    assert_eq!(fixture.user_text().unwrap(), "permissions:\n    shell-commands:\n        - prefix git status\n");
     assert!(snapshot.user_config_missing().is_none());
     assert!(snapshot.diagnostics().iter().all(|notice| notice.code != CONFIG_MISSING_CODE));
     assert_eq!(shell_entries(&user_block(&snapshot)), ["prefix git status"]);
@@ -396,7 +396,7 @@ fn a_repository_whitelist_migrates_into_the_working_copy_file() {
     assert!(!whitelist.exists());
     assert_eq!(
         std::fs::read_to_string(root.join(CONFIG_FILE_NAME)).unwrap(),
-        "permissions:\n  shell-commands:\n  - exact make test\n"
+        "permissions:\n    shell-commands:\n        - exact make test\n"
     );
     assert_eq!(fixture.user_text().unwrap(), "{}\n", "the user file is untouched");
     let repository = snapshot.permissions().unwrap().repository.as_ref().expect("a repository");

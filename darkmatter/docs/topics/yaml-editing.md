@@ -90,6 +90,47 @@ The file's own conventions are kept:
   not. An empty file gets a terminated first line.
 - **Document marker.** A leading `---` line stays where it is.
 
+## Indentation of new values
+
+When an edit writes a new list or mapping, the editor has to choose how far to
+indent it. It copies the file's own style first and only falls back to a
+configured preference where the file shows none. The same rules apply to
+frontmatter edits (`md set`, `md rm`, `md hash --save`).
+
+The editor picks the indentation for a new collection in this order:
+
+1. **The block being replaced keeps its own offset.** Replacing an existing
+   list or mapping keeps how far its children sat, including an indentless
+   list whose `- ` items sit at the column of their key.
+2. **Otherwise, the nearest authored block of the same kind.** A new mapping
+   copies an existing block mapping, and a new list copies an existing block
+   list. A block inside the same parent is preferred; failing that, the one
+   closest in the file.
+3. **Otherwise, the destination's preference.** This is what Sniff resolves
+   for the file being saved, from its `.editorconfig` and the repository's
+   conventions (`sniff repo indent` shows it). If the file has no destination,
+   as with `edit_yaml_paths` called on text alone, the preference is four
+   spaces.
+
+Some text never counts as an example: flow collections (`[a, b]`,
+`{a: 1}`), the padding a compact `- key: value` item puts after its dash,
+and the content lines of a multiline (`|` or `>`) string.
+
+```yaml
+# before                          # after: Set tls.cert "c.pem"
+server:                           server:
+   port: 80                          port: 80
+                                  tls:
+                                     cert: c.pem     <- copies server's 3 columns
+```
+
+In a file with no block mapping to copy, the same edit takes the
+destination's preference instead, for example two spaces where
+`.editorconfig` sets `indent_size = 2` for the file.
+
+Edits that leave every value as it was return the source unchanged, so
+saving the same values twice leaves the file byte for byte identical.
+
 ## Every edit is checked
 
 Before the text is returned it is parsed again, and every value is compared

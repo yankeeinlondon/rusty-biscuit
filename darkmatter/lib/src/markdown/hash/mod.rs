@@ -29,12 +29,16 @@ pub use compute::{ComputedHash, DetailedValue, FmHashPair, SectionTuple};
 pub use explain::HashExplanation;
 pub use kind::{KindRelation, MdHashKind, ParseMdHashKindError, select_kind};
 pub use options::{DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashOptions, last_updated_stamp};
-pub use path_edit::{PathEdit, PathEditRefusal, edit_frontmatter_paths, edited_document_text};
+pub use path_edit::{
+    PathEdit, PathEditRefusal, edit_frontmatter_paths, edit_frontmatter_paths_with_indentation,
+    edited_document_text, edited_document_text_with_indentation,
+};
 pub use save::SaveDecision;
 pub use stored::{StoredHash, StoredHashValue};
 pub use write::{
     FrontmatterDelta, FrontmatterDeltaEntry, FrontmatterPathSegment, LeafLocateError, LeafSpan,
     RestoredDocument, UnlocatedLeaf, UnlocatedLeafReason, apply_hash_save_text,
+    apply_hash_save_text_with_indentation,
     locate_frontmatter_leaves, restore_properties_text,
 };
 pub(crate) use write::locate_frontmatter_value_range;

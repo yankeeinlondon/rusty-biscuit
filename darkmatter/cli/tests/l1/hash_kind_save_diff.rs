@@ -152,6 +152,23 @@ fn test_hash_kind_detailed_outputs_nested_yaml() {
 }
 
 #[test]
+fn test_hash_kind_detailed_nests_four_spaces() {
+    let fixture = CliProcessFixture::named("hash-kind-save-diff-test-hash-kind-detailed-nests-four-spaces");
+    let output = fixture
+        .command()
+        .args(["hash", "--kind", "detailed", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap().replace("\r\n", "\n");
+    assert!(stdout.contains("\nsections:\n    - "), "{stdout}");
+    let parsed: serde_json::Value = biscuit_file::serde_yaml_ng::from_str(&stdout).unwrap();
+    let section = &parsed["sections"][0];
+    assert_eq!((section[0].as_u64(), section[1].as_str()), (Some(1), Some("Hello")), "{parsed}");
+}
+
+#[test]
 fn test_hash_kind_fm_matches_frontmatter_flag() {
     let fixture =
         CliProcessFixture::named("hash-kind-save-diff-test-hash-kind-fm-matches-frontmatter-flag");
@@ -690,7 +707,7 @@ fn test_hash_save_detailed_value_preserves_authored_neighbors() {
         .assert()
         .success();
     let written = std::fs::read_to_string(&file).unwrap();
-    assert!(written.contains("title: T # keep\nhash:\n  kind: detailed\n"));
+    assert!(written.contains("title: T # keep\nhash:\n    kind: detailed\n"));
     assert!(written.ends_with("---\n# Heading\n\nBody.\n"));
     fixture
         .command()

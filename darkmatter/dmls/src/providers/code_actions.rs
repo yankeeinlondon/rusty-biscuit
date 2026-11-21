@@ -268,7 +268,7 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
     if keys.is_empty() {
         return None;
     }
-    let insert_offset = root_insertion_offset(ast)?;
+    let insert_offset = root_insertion_offset(ast, ctx.text)?;
     let position = ctx.source_map.byte_to_lsp(insert_offset)?;
     // A key the schema types as a single `literal(x)` is inserted with its
     // correct-by-construction value (YAML-quoted where required) instead of an
@@ -335,11 +335,18 @@ fn literal_scaffold(
 
 /// The byte offset to insert a new top-level key at: just past the last
 /// top-level entry's value (a fresh line follows), else the root mapping start.
-fn root_insertion_offset(ast: &FrontmatterAst) -> Option<usize> {
-    ast.top_level()
+///
+/// A block collection's span ends after its last line's terminator, so the
+/// offset is moved back before that terminator: the inserted `\nkey: …` then
+/// starts its own line and the closing `---` keeps its own.
+fn root_insertion_offset(ast: &FrontmatterAst, text: &str) -> Option<usize> {
+    let offset = ast
+        .top_level()
         .map(|entry| entry.value_span.end)
         .max()
-        .or(Some(ast.root_span().start))
+        .unwrap_or(ast.root_span().start);
+    let before = &text[..offset];
+    Some(before.strip_suffix("\r\n").or_else(|| before.strip_suffix('\n')).map_or(offset, str::len))
 }
 
 /// Extracts the missing key name from a validator message (`"key" is a required

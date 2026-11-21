@@ -8,20 +8,29 @@
 //! other's wrapper. Only a path's own node is replaced, a new key goes at the
 //! end of its parent, a new sequence item after the last one, and a removed
 //! node takes its own lines; every other byte is kept.
+//!
+//! New collections are laid out by [`Layout`]: an existing block keeps its
+//! measured child offset, a new block copies the nearest authored block of
+//! the same kind, and only where the text has none does the destination's
+//! resolved preference apply. User-facing rules:
+//! `darkmatter/docs/topics/yaml-editing.md#indentation-of-new-values`.
 
 use super::path_edit::{PathEdit, PathEditRefusal};
 use super::write::{
     FrontmatterPathSegment, apply_terminators, column_of, dotted_path, locate_all_nodes,
-    mapping_colon, new_block_terminator, preceding_terminator, serialize_entry,
-    validate_block_mapping, yaml_comment_start,
+    mapping_colon, new_block_terminator, preceding_terminator, validate_block_mapping,
+    yaml_comment_start,
 };
 use crate::markdown::FrontmatterMap;
-use biscuit_file::serde_yaml_ng;
+use biscuit_file::Indentation;
+use serde::Serialize;
 use serde_json::Value;
 use simplified_schema::completion::PathStep;
 use simplified_schema::simplified::locate_frontmatter_value;
 use simplified_schema::{SchemaValueEntry, SchemaValueKind, SchemaValueNode};
-use std::cmp::Ordering;
+use std::cell::OnceCell;
+use std::cmp::{Ordering, Reverse};
+use std::num::NonZeroU8;
 use std::ops::Range;
 
 /// Where the edited YAML sits in a text, and how that text reloads.
@@ -40,6 +49,35 @@ pub(crate) trait Envelope {
     fn reload(&self, text: &str) -> Result<FrontmatterMap, PathEditRefusal>;
 }
 
+/// How the engine lays out the collections it renders.
+///
+/// `fallback` is asked at most once, and only when a rendered collection has
+/// no authored example in the text: a save whose edits all find one, or
+/// render nothing, never resolves the destination's preference.
+pub(crate) struct Layout<'f> {
+    fallback: &'f dyn Fn() -> Indentation,
+    resolved: OnceCell<usize>,
+    /// Whether the text's own collections are examples. A document generated
+    /// from a value has none of its author's, so its edits use `fallback`.
+    infer_local: bool,
+}
+
+impl<'f> Layout<'f> {
+    pub(crate) fn new(fallback: &'f dyn Fn() -> Indentation, infer_local: bool) -> Self {
+        Self { fallback, resolved: OnceCell::new(), infer_local }
+    }
+
+    fn fallback_width(&self) -> usize {
+        *self.resolved.get_or_init(|| usize::from((self.fallback)().width.get()))
+    }
+}
+
+/// The layout of the editors' default wrappers: local examples first, then
+/// [`Indentation::default`].
+pub(crate) fn default_layout() -> Layout<'static> {
+    Layout::new(&Indentation::default, true)
+}
+
 /// Applies `edits` to `source` in [`application_order`], each against the text
 /// the previous one left. The result loads after every edit, but is not yet
 /// compared with `expected`; see [`verify_edited`].
@@ -48,10 +86,11 @@ pub(crate) fn apply_edits(
     source: &str,
     expected: &FrontmatterMap,
     edits: &[PathEdit<'_>],
+    layout: &Layout<'_>,
 ) -> Result<String, PathEditRefusal> {
     let mut text = source.to_string();
     for edit in application_order(edits) {
-        text = apply_edit(envelope, &text, expected, edit)?;
+        text = apply_edit(envelope, &text, expected, edit, layout)?;
         // Checked per edit because the next one begins by requiring strict
         // YAML: an alias orphaned here would otherwise read as an unsupported
         // form, and the Markdown fallback would hide it.
@@ -320,6 +359,7 @@ fn apply_edit(
     document: &str,
     expected: &FrontmatterMap,
     edit: &PathEdit<'_>,
+    layout: &Layout<'_>,
 ) -> Result<String, PathEditRefusal> {
     let (PathEdit::Set(steps) | PathEdit::Remove(steps)) = edit;
     let Some(PathStep::Key(top)) = steps.first() else {
@@ -331,7 +371,9 @@ fn apply_edit(
             return Err(unsupported("the document has no frontmatter"));
         }
         let newline = new_block_terminator(document);
-        let entry = entry_lines(top, expected_at(expected, &steps[..1])?, 0, newline)?;
+        let value = expected_at(expected, &steps[..1])?;
+        let widths = Widths { layout, examples: &[], at: 0, chain: &[] };
+        let entry = entry_lines(top, value, 0, newline, &widths)?;
         return Ok(envelope.with_new_block(document, &entry));
     };
     let yaml = &document[yaml_span.clone()];
@@ -339,13 +381,20 @@ fn apply_edit(
     let nodes = locate_all_nodes(yaml).map_err(|error| unsupported(error.to_string()))?;
     let yaml_start = yaml_span.start;
     let yaml_end = yaml_span.end;
+    let examples = if layout.infer_local && creating {
+        collect_examples(document, yaml_span.clone(), &nodes)
+    } else {
+        Vec::new()
+    };
 
     let Some(node) = nodes.get(*top) else {
         if !creating {
             return Err(unsupported(format!("`{top}` is not in the frontmatter")));
         }
         let newline = preceding_terminator(document, yaml_end);
-        let entry = entry_lines(top, expected_at(expected, &steps[..1])?, 0, newline)?;
+        let value = expected_at(expected, &steps[..1])?;
+        let widths = Widths { layout, examples: &examples, at: yaml_end, chain: &[] };
+        let entry = entry_lines(top, value, 0, newline, &widths)?;
         return Ok(spliced(document, vec![Splice::insert(yaml_end, entry)]));
     };
 
@@ -365,9 +414,12 @@ fn apply_edit(
         Walked::Node(frames) => match edit {
             PathEdit::Set(_) => {
                 let value = expected_at(expected, &steps[..frames.len()])?;
-                match frames[frames.len() - 1].holder {
-                    Holder::Entry(entry) => replace_entry(document, entry, value)?,
-                    Holder::Item(item) => replace_item(document, item, value)?,
+                let last = &frames[frames.len() - 1];
+                let chain = frame_chain(&frames[..frames.len() - 1]);
+                let widths = Widths { layout, examples: &examples, at: last.holder.start(), chain: &chain };
+                match last.holder {
+                    Holder::Entry(entry) => replace_entry(document, entry, value, &widths)?,
+                    Holder::Item(item) => replace_item(document, item, value, &widths)?,
                 }
             }
             PathEdit::Remove(_) => remove_node(document, &frames)?,
@@ -381,8 +433,10 @@ fn apply_edit(
                 .map_or(0, |entry| column_of(document, entry.key_span.start));
             let insert_at = after_last_child(document, mapping);
             let newline = preceding_terminator(document, insert_at);
-            let value = expected_at(expected, &steps[..=frames])?;
-            vec![Splice::insert(insert_at, entry_lines(key, value, column, newline)?)]
+            let value = expected_at(expected, &steps[..=frames.len()])?;
+            let chain = frame_chain(&frames);
+            let widths = Widths { layout, examples: &examples, at: insert_at, chain: &chain };
+            vec![Splice::insert(insert_at, entry_lines(key, value, column, newline, &widths)?)]
         }
         Walked::MissingItem { frames, sequence } => {
             let SchemaValueKind::Sequence(items) = &sequence.kind else {
@@ -394,12 +448,157 @@ fn apply_edit(
             let column = column_of(document, item_dash(document, first.span.start)?);
             let insert_at = after_last_child(document, sequence);
             let newline = preceding_terminator(document, insert_at);
-            let value = expected_at(expected, &steps[..=frames])?;
-            let text = inline_text(value, column + 2, newline)?;
+            let value = expected_at(expected, &steps[..=frames.len()])?;
+            let chain = frame_chain(&frames);
+            let widths = Widths { layout, examples: &examples, at: insert_at, chain: &chain };
+            let text = inline_text(value, column + 2, newline, widths.of(value))?;
             vec![Splice::insert(insert_at, format!("{}- {text}{newline}", " ".repeat(column)))]
         }
     };
     Ok(spliced(document, splices))
+}
+
+/// The authored shape of a collection in the text: an example of how far its
+/// author indents a block under its key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollectionKind {
+    Mapping,
+    Sequence,
+}
+
+impl CollectionKind {
+    fn of_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Object(_) => Some(Self::Mapping),
+            Value::Array(_) => Some(Self::Sequence),
+            _ => None,
+        }
+    }
+
+    fn of_node(node: &SchemaValueNode) -> Option<Self> {
+        match node.kind {
+            SchemaValueKind::Mapping(_) => Some(Self::Mapping),
+            SchemaValueKind::Sequence(_) => Some(Self::Sequence),
+            SchemaValueKind::Scalar => None,
+        }
+    }
+}
+
+/// A block collection under a mapping key, and how far its children sit past
+/// that key.
+#[derive(Debug)]
+struct Example {
+    kind: CollectionKind,
+    /// Columns from the key to the first child (its key, or its dash).
+    offset: usize,
+    /// Where its key is.
+    start: usize,
+    /// Where the holders enclosing its key are, outermost first.
+    chain: Vec<usize>,
+}
+
+/// Every block collection the YAML region holds under a mapping key.
+///
+/// Only actual structure counts: flow collections, the two columns a compact
+/// `- key:` item puts after its dash, the content lines of multiline scalars,
+/// and indentless sequences (an offset of zero) are never examples.
+fn collect_examples(
+    document: &str,
+    yaml: Range<usize>,
+    nodes: &indexmap::IndexMap<String, super::write::TextNode>,
+) -> Vec<Example> {
+    let mut examples = Vec::new();
+    for node in nodes.values() {
+        let start = yaml.start + node.range.start;
+        let end = yaml.start + node.range.end;
+        if let Some(tree) = locate_frontmatter_value(&document[start..end], start) {
+            collect_in(document, &tree, &mut Vec::new(), &mut examples);
+        }
+    }
+    examples
+}
+
+fn collect_in(document: &str, node: &SchemaValueNode, chain: &mut Vec<usize>, out: &mut Vec<Example>) {
+    match &node.kind {
+        SchemaValueKind::Mapping(entries) => {
+            for entry in entries {
+                let value = &entry.value;
+                if holds_block(document, value)
+                    && let (Some(kind), Some(child)) = (CollectionKind::of_node(value), first_child_column(document, value))
+                {
+                    let key = column_of(document, entry.key_span.start);
+                    if child > key {
+                        out.push(Example { kind, offset: child - key, start: entry.key_span.start, chain: chain.clone() });
+                    }
+                }
+                chain.push(entry.key_span.start);
+                collect_in(document, value, chain, out);
+                chain.pop();
+            }
+        }
+        SchemaValueKind::Sequence(items) => {
+            for item in items {
+                chain.push(item.span.start);
+                collect_in(document, item, chain, out);
+                chain.pop();
+            }
+        }
+        SchemaValueKind::Scalar => {}
+    }
+}
+
+/// Columns per level for `value` written as a new top-level entry of the
+/// YAML region `yaml` at `at`, chosen as the editors choose, with `fallback`
+/// where the region holds no example.
+pub(crate) fn top_level_width(document: &str, yaml: Range<usize>, value: &Value, at: usize, fallback: Indentation) -> usize {
+    let examples = locate_all_nodes(&document[yaml.clone()])
+        .map(|nodes| collect_examples(document, yaml, &nodes))
+        .unwrap_or_default();
+    let fallback = move || fallback;
+    let layout = Layout::new(&fallback, true);
+    Widths { layout: &layout, examples: &examples, at, chain: &[] }.of(value)
+}
+
+/// `value` laid out with `width` columns per level, with its final line
+/// break; the writer's error as text.
+pub(crate) fn layout_text<T: Serialize + ?Sized>(value: &T, width: usize) -> Result<String, String> {
+    let width = NonZeroU8::new(u8::try_from(width).unwrap_or(u8::MAX)).unwrap_or(Indentation::DEFAULT_WIDTH);
+    biscuit_file::to_yaml_string(value, Indentation::spaces(width)).map_err(|error| error.to_string())
+}
+
+fn frame_chain(frames: &[Frame<'_>]) -> Vec<usize> {
+    frames.iter().map(|frame| frame.holder.start()).collect()
+}
+
+/// The width choice for one rendered value at one place in the text.
+struct Widths<'l, 'e> {
+    layout: &'l Layout<'l>,
+    examples: &'e [Example],
+    /// Where the value goes.
+    at: usize,
+    /// The holders enclosing the value's own holder, as [`Example::chain`].
+    chain: &'e [usize],
+}
+
+impl Widths<'_, '_> {
+    /// Columns per level for `value`: the nearest example of its kind (a
+    /// scalar takes any kind), preferring one inside the deepest holder it
+    /// shares with the value, then the closest by bytes, then the earlier;
+    /// the resolved preference when there is none.
+    fn of(&self, value: &Value) -> usize {
+        self.for_kind(CollectionKind::of_value(value))
+    }
+
+    fn for_kind(&self, kind: Option<CollectionKind>) -> usize {
+        self.examples
+            .iter()
+            .filter(|example| kind.is_none_or(|kind| example.kind == kind))
+            .min_by_key(|example| {
+                let shared = self.chain.iter().zip(&example.chain).take_while(|(a, b)| a == b).count();
+                (Reverse(shared), example.start.abs_diff(self.at), example.start)
+            })
+            .map_or_else(|| self.layout.fallback_width(), |example| example.offset)
+    }
 }
 
 /// Where a new key goes in a block mapping, or a new item in a block sequence:
@@ -466,6 +665,14 @@ enum Holder<'t> {
 }
 
 impl<'t> Holder<'t> {
+    /// Where the holder is named, as [`Example::start`] and its chains record.
+    fn start(self) -> usize {
+        match self {
+            Self::Entry(entry) => entry.key_span.start,
+            Self::Item(item) => item.span.start,
+        }
+    }
+
     fn node(self) -> &'t SchemaValueNode {
         match self {
             Self::Entry(entry) => &entry.value,
@@ -485,16 +692,16 @@ enum Walked<'t> {
     /// when a `Set` reached an empty `{}`, which it replaces whole.
     Node(Vec<Frame<'t>>),
     /// The path leaves a block mapping at `key`, which a `Set` adds.
-    /// `frames` counts the steps already walked.
+    /// `frames` holds the steps already walked.
     MissingKey {
-        frames: usize,
+        frames: Vec<Frame<'t>>,
         mapping: &'t SchemaValueNode,
         key: &'t str,
     },
     /// A `Set`'s last step is the index one past a block sequence's last item,
-    /// which appends. `frames` counts the steps already walked.
+    /// which appends. `frames` holds the steps already walked.
     MissingItem {
-        frames: usize,
+        frames: Vec<Frame<'t>>,
         sequence: &'t SchemaValueNode,
     },
 }
@@ -541,7 +748,7 @@ fn walk<'t>(
                     },
                     None if creating => {
                         return Ok(Walked::MissingKey {
-                            frames: frames.len(),
+                            frames,
                             mapping: node,
                             key,
                         });
@@ -559,7 +766,7 @@ fn walk<'t>(
                 if creating && *index == items.len() && frames.len() + 1 == steps.len() =>
             {
                 return Ok(Walked::MissingItem {
-                    frames: frames.len(),
+                    frames,
                     sequence: node,
                 });
             }
@@ -625,6 +832,7 @@ fn replace_entry(
     document: &str,
     entry: &SchemaValueEntry,
     value: &Value,
+    widths: &Widths<'_, '_>,
 ) -> Result<Vec<Splice>, PathEditRefusal> {
     let colon = entry_colon(document, entry)?;
     let after_key_line = line_end(document, colon);
@@ -632,17 +840,20 @@ fn replace_entry(
     let newline = line_terminator(document, colon);
     let old = &entry.value;
     let becomes_block = is_block_value(value);
+    let width = widths.of(value);
 
     if holds_block(document, old) {
         let old_lines = after_key_line..line_end(document, old.span.end);
         if becomes_block {
-            let column = first_child_column(document, old).unwrap_or(key_column + 2);
+            // The touched block's own offset wins, an indentless sequence's
+            // zero included.
+            let column = first_child_column(document, old).unwrap_or(key_column + width);
             return Ok(vec![Splice {
                 range: old_lines,
-                text: block_lines(value, column, newline)?,
+                text: block_lines(value, column, newline, width)?,
             }]);
         }
-        let text = inline_text(value, key_column, newline)?;
+        let text = inline_text(value, key_column, newline, width)?;
         let head = key_head_end(document, colon);
         return Ok(vec![
             in_place(document, head..head, &format!(" {text}"), newline, ""),
@@ -652,17 +863,17 @@ fn replace_entry(
 
     if old.span.is_empty() {
         return Ok(vec![if becomes_block {
-            Splice::insert(after_key_line, block_lines(value, key_column + 2, newline)?)
+            Splice::insert(after_key_line, block_lines(value, key_column + width, newline, width)?)
         } else {
-            let text = format!(" {}", inline_text(value, key_column, newline)?);
+            let text = format!(" {}", inline_text(value, key_column, newline, width)?);
             in_place(document, colon + 1..colon + 1, &text, newline, "")
         }]);
     }
     if !becomes_block {
-        let text = inline_text(value, key_column, newline)?;
+        let text = inline_text(value, key_column, newline, width)?;
         return Ok(vec![in_place(document, old.span.clone(), &text, newline, "")]);
     }
-    let block = block_lines(value, key_column + 2, newline)?;
+    let block = block_lines(value, key_column + width, newline, width)?;
     let after_old = line_end(document, old.span.end);
     if old.span.start < after_key_line {
         // A comment after the old value stays, now on the key's line.
@@ -682,14 +893,16 @@ fn replace_item(
     document: &str,
     item: &SchemaValueNode,
     value: &Value,
+    widths: &Widths<'_, '_>,
 ) -> Result<Vec<Splice>, PathEditRefusal> {
     let start = item.span.start;
     let newline = line_terminator(document, start);
+    let width = widths.of(value);
     if item.span.is_empty() {
         let padding = if document[..start].ends_with([' ', '\t']) { "" } else { " " };
         let gap = if document[start..].starts_with('#') { " " } else { "" };
         let column = column_of(document, start) + padding.len();
-        let text = format!("{padding}{}", inline_text(value, column, newline)?);
+        let text = format!("{padding}{}", inline_text(value, column, newline, width)?);
         return Ok(vec![in_place(document, start..start, &text, newline, gap)]);
     }
     let end = if holds_block(document, item) {
@@ -697,7 +910,7 @@ fn replace_item(
     } else {
         item.span.end
     };
-    let text = inline_text(value, column_of(document, start), newline)?;
+    let text = inline_text(value, column_of(document, start), newline, width)?;
     Ok(vec![in_place(document, start..end, &text, newline, "")])
 }
 
@@ -890,9 +1103,10 @@ fn is_block_value(value: &Value) -> bool {
     }
 }
 
-fn yaml_text(value: &Value) -> Result<String, PathEditRefusal> {
-    let text = serde_yaml_ng::to_string(value)
-        .map_err(|error| unsupported(format!("the value could not be serialized: {error}")))?;
+/// `value` laid out with `width` columns per level, without its final line
+/// break.
+fn yaml_text<T: Serialize + ?Sized>(value: &T, width: usize) -> Result<String, PathEditRefusal> {
+    let text = layout_text(value, width).map_err(|error| unsupported(format!("the value could not be laid out: {error}")))?;
     Ok(text.strip_suffix('\n').map(str::to_string).unwrap_or(text))
 }
 
@@ -913,26 +1127,29 @@ fn indented(text: &str, column: usize, first: usize) -> String {
 }
 
 /// `value` written to start in place, its later lines at `column`.
-fn inline_text(value: &Value, column: usize, newline: &str) -> Result<String, PathEditRefusal> {
-    let text = indented(&yaml_text(value)?, column, 1);
+fn inline_text(value: &Value, column: usize, newline: &str, width: usize) -> Result<String, PathEditRefusal> {
+    let text = indented(&yaml_text(value, width)?, column, 1);
     Ok(apply_terminators(&text, &[newline]))
 }
 
 /// `value` as whole lines at `column`, each terminated.
-fn block_lines(value: &Value, column: usize, newline: &str) -> Result<String, PathEditRefusal> {
-    let mut text = indented(&yaml_text(value)?, column, 0);
+fn block_lines(value: &Value, column: usize, newline: &str, width: usize) -> Result<String, PathEditRefusal> {
+    let mut text = indented(&yaml_text(value, width)?, column, 0);
     text.push('\n');
     Ok(apply_terminators(&text, &[newline]))
 }
 
-/// A new `key: value` entry as whole lines at `column`, each terminated.
+/// A new `key: value` entry as whole lines at `column`, each terminated, its
+/// value one level of the width [`Widths`] picks for it past the key.
 fn entry_lines(
     key: &str,
     value: &Value,
     column: usize,
     newline: &str,
+    widths: &Widths<'_, '_>,
 ) -> Result<String, PathEditRefusal> {
-    let entry = serialize_entry(key, value).map_err(|error| unsupported(error.to_string()))?;
-    let text = indented(entry.strip_suffix('\n').unwrap_or(&entry), column, 0);
+    let mut entry = indexmap::IndexMap::new();
+    entry.insert(key, value);
+    let text = indented(&yaml_text(&entry, widths.of(value))?, column, 0);
     Ok(apply_terminators(&format!("{text}\n"), &[newline]))
 }

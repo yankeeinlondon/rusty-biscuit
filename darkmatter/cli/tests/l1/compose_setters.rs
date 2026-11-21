@@ -84,7 +84,8 @@ mod applying {
     fn a_missing_parent_is_created_and_shows_in_the_composed_frontmatter() {
         let fixture = with_document("setters-new-parent", "---\ntitle: T\n---\n{{ a.b.c }}\n");
         let out = composed(&fixture, &["doc.md", "a.b.c=7", "--frontmatter"]);
-        assert!(out.contains("a:\n  b:\n    c: 7"), "{out}");
+        // Printed output has no destination, so it nests four spaces.
+        assert!(out.contains("a:\n    b:\n        c: 7"), "{out}");
         assert!(out.ends_with('7'), "{out}");
     }
 

@@ -32,7 +32,7 @@ pub mod terminal;
 pub use ast::as_ast;
 pub(crate) use ast::parse_mdast;
 pub use html::HtmlOptions;
-pub use string::as_string;
+pub use string::{as_string, as_string_with_indentation};
 pub use terminal::{
     ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
     TerminalOptions,

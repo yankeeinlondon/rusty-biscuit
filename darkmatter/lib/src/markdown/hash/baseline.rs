@@ -11,7 +11,8 @@ use chrono::{DateTime, Utc};
 use super::options::{MdHashOptions, last_updated_stamp};
 use super::save::SaveDecision;
 use super::stored::StoredHash;
-use super::write::apply_hash_save_text;
+use super::write::{apply_hash_save_text, apply_hash_save_text_with_indentation};
+use biscuit_file::Indentation;
 use crate::markdown::{Markdown, MarkdownResult};
 
 /// What the caller knows about the content it is stamping.
@@ -73,12 +74,35 @@ impl Markdown {
         now: DateTime<Utc>,
         change: Change,
     ) -> MarkdownResult<BaselineStamp> {
+        self.stamp_baseline_with_indentation(source, options, now, change, Indentation::default)
+    }
+
+    /// [`Self::stamp_baseline`] for a document saved to a destination whose
+    /// indentation preference `fallback` returns. It is asked only when the
+    /// stamp writes, so a save that changes nothing resolves nothing.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::stamp_baseline`].
+    pub fn stamp_baseline_with_indentation(
+        &self,
+        source: &str,
+        options: &MdHashOptions,
+        now: DateTime<Utc>,
+        change: Change,
+        fallback: impl FnOnce() -> Indentation,
+    ) -> MarkdownResult<BaselineStamp> {
         let stored = self.stored_hash(options)?;
         let mut decision = self.plan_hash_save(stored.as_ref(), options)?;
         if change == Change::Known {
             decision.bump_last_updated = true;
         }
-        let text = apply_hash_save_text(source, &decision, options, &last_updated_stamp(now))?;
+        let stamp = last_updated_stamp(now);
+        let text = if decision.new_stored.is_some() {
+            apply_hash_save_text_with_indentation(source, &decision, options, &stamp, fallback())?
+        } else {
+            apply_hash_save_text(source, &decision, options, &stamp)?
+        };
         Ok(BaselineStamp { decision, text })
     }
 }
