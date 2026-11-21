@@ -24,7 +24,7 @@ use schematic_define::openapi::{
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
 use schematic_definitions::naming::resolve_module_name;
-use crate::validation::{ensure_no_errors, validate_openapi};
+use crate::validation::{ensure_no_errors, ensure_openapi_exportable};
 
 /// Writes an OpenAPI specification file to the specified directory.
 ///
@@ -75,7 +75,7 @@ pub fn write_openapi(
     options: &ExportOptions,
     dir: &Path,
 ) -> Result<std::path::PathBuf, GeneratorError> {
-    ensure_no_errors(Output::OpenApi, validate_openapi(&[api]))?;
+    ensure_openapi_exportable(&[api])?;
 
     if !dir.exists() {
         return Err(GeneratorError::OutputDirNotFound(dir.display().to_string()));
@@ -183,7 +183,7 @@ pub fn build_openapi_grouped(
         !apis.is_empty(),
         "build_openapi_grouped requires at least one API"
     );
-    ensure_no_errors(Output::OpenApi, validate_openapi(apis))?;
+    ensure_openapi_exportable(apis)?;
 
     let mut docs: Vec<(String, OpenAPI)> = Vec::with_capacity(apis.len());
     for api in apis {

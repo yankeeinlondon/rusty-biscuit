@@ -11,6 +11,7 @@ pub use api::{
     assemble_api_module_with_options, assemble_combined_api_module, assemble_split_api_module,
     assemble_split_combined_api_module,
 };
+pub(crate) use api::module_group_pieces;
 pub use helpers::get_request_suffix;
 pub(crate) use helpers::definitions_module_path;
 pub use lib_rs::{assemble_lib_rs, assemble_lib_rs_with_options};

@@ -4,3 +4,4 @@
 pub mod asyncapi;
 pub mod components;
 pub mod fresh_output;
+pub mod generation_groups;
