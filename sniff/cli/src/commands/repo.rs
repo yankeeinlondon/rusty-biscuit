@@ -7,6 +7,72 @@ use crate::args::{FileListArgs, PackagesFormat};
 use crate::output::{self, PathListFormat};
 use crate::perf::{CliPerf, handle_no_results};
 
+/// Subcommand-specific args for `sniff repo git-status`.
+pub(super) struct RepoGitStatusArgs<'a> {
+    pub(super) history: usize,
+    pub(super) refresh_remotes: bool,
+    pub(super) compact: bool,
+    pub(super) package: Option<&'a str>,
+    pub(super) package_area: Option<&'a str>,
+    /// `None` without `--branch`, `Some(None)` for a bare `--branch`.
+    pub(super) branch: Option<Option<&'a str>>,
+    pub(super) worktree: Option<&'a str>,
+}
+
+/// Handler for `sniff repo git-status`.
+///
+/// The library prepares the whole report, selectors and commit links
+/// included, inside this command's performance collector; the report is
+/// snapshotted only afterwards, so it covers that work. Links are requested
+/// for text output with a positive history count, unless `--plain` strips
+/// them anyway. JSON never carries links.
+pub(super) fn handle_repo_git_status(
+    args: RepoGitStatusArgs<'_>,
+    base_dir: Option<&std::path::Path>,
+    json: bool,
+    plain: bool,
+    verbose: u8,
+    perf: &CliPerf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = match base_dir {
+        Some(base) => base.to_path_buf(),
+        None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    };
+    let options = sniff::filesystem::GitStatusOptions {
+        history_count: args.history,
+        refresh_remotes: args.refresh_remotes,
+        include_commit_links: !json && !plain && args.history > 0,
+        package: args.package,
+        package_area: args.package_area,
+        branch: args.branch.flatten(),
+        worktree: args.worktree,
+    };
+    let prepared = perf.collect(|| sniff::filesystem::detect_repo_git_status(&dir, &options))?;
+    let report = perf.build_report();
+
+    if json {
+        let value = output::repo_json::git_status_value(prepared.git.as_ref());
+        output::print_json_value(value, report.as_ref());
+        perf.emit_for_json(report.as_ref());
+        return Ok(());
+    }
+
+    if let Some(git) = prepared.git.as_ref() {
+        let text = output::render_repo_git_status(
+            git,
+            args.history,
+            verbose,
+            args.compact,
+            args.branch,
+            args.worktree,
+            Some(&prepared.commit_links),
+        );
+        output::emit_text(&text, plain);
+    }
+    perf.emit_stdout(report.as_ref());
+    Ok(())
+}
+
 /// Subcommand-specific args for `sniff repo packages`.
 pub(super) struct RepoPackagesArgs<'a> {
     pub(super) filter: &'a [String],
@@ -61,7 +127,11 @@ pub(super) fn handle_repo_packages(
     // Validate that `--package` and `--package-area` resolve and (when both
     // are passed) overlap. The output functions apply the actual filtering;
     // this call surfaces the intersection error before render time.
-    super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
+    sniff::filesystem::repo::resolve_package_and_area(
+        info.packages.as_deref(),
+        package,
+        package_area,
+    )?;
 
     let names = output::collect_repo_package_names(&info, filter, package, package_area);
     let is_empty = info.is_monorepo && names.is_empty();
@@ -146,7 +216,11 @@ pub(super) fn handle_repo_package_areas(
     // Validate that `--package` and `--package-area` resolve and (when both
     // are passed) overlap. The output functions apply the actual filtering;
     // this call surfaces the intersection error before render time.
-    super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
+    sniff::filesystem::repo::resolve_package_and_area(
+        info.packages.as_deref(),
+        package,
+        package_area,
+    )?;
 
     let names = output::collect_repo_package_area_names(&info, filter, package, package_area);
     let is_empty = info.is_monorepo && names.is_empty();

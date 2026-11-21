@@ -5773,6 +5773,274 @@ fn test_repo_hash_and_git_status_link_only_remote_contained_commits() {
     assert!(!status.contains("github.com/o/r/commit"), "{status}");
 }
 
+/// Commit `relative` on the distinct-area monorepo fixture and return the
+/// new HEAD's full ID.
+fn commit_and_head(path: &Path, relative: &str, content: &str, message: &str) -> String {
+    test_commit_file_with_message(path, relative, content, message);
+    git2::Repository::open(path)
+        .unwrap()
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string()
+}
+
+/// Distinct-area monorepo with `origin/main` at an `alpha/core` commit, one
+/// unpushed `beta/core` commit at HEAD, a `side` branch off the initial
+/// commit, and a linked worktree `wt` with a commit of its own.
+struct StatusViews {
+    _dir: tempfile::TempDir,
+    _worktrees: tempfile::TempDir,
+    path: PathBuf,
+    initial: String,
+    alpha: String,
+    beta: String,
+    side: String,
+    worktree: String,
+}
+
+fn status_views_fixture() -> StatusViews {
+    let (dir, path) = create_cli_monorepo_distinct_area_and_package();
+    let repo = git2::Repository::open(&path).unwrap();
+    let initial = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    repo.remote("origin", "git@github.com:o/r.git").unwrap();
+    let alpha = commit_and_head(&path, "alpha/core/src/lib.rs", "pub fn a() {}", "alpha work");
+    repo.reference(
+        "refs/remotes/origin/main",
+        git2::Oid::from_str(&alpha).unwrap(),
+        true,
+        "test remote tip",
+    )
+    .unwrap();
+    let beta = commit_and_head(&path, "beta/core/src/lib.rs", "pub fn b() {}", "beta work");
+
+    let base = repo.find_commit(git2::Oid::from_str(&initial).unwrap()).unwrap();
+    let sig = repo.signature().unwrap();
+    let side = repo
+        .commit(Some("refs/heads/side"), &sig, &sig, "side work", &base.tree().unwrap(), &[&base])
+        .unwrap()
+        .to_string();
+
+    let worktrees = tempfile::tempdir().unwrap();
+    let wt_path = worktrees.path().join("wt-dir");
+    repo.worktree("wt", &wt_path, None).unwrap();
+    let worktree = commit_and_head(&wt_path, "alpha/cli/src/lib.rs", "pub fn w() {}", "wt work");
+
+    StatusViews {
+        _dir: dir,
+        _worktrees: worktrees,
+        path,
+        initial,
+        alpha,
+        beta,
+        side,
+        worktree,
+    }
+}
+
+fn git_status_stdout(path: &Path, args: &[&str]) -> String {
+    let output = common::owned_sniff_command()
+        .args(["--base", path.to_str().unwrap(), "repo", "git-status"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git-status {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    biscuit_terminal::prelude::strip_escape_codes(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Assert the rendered history shows exactly `shown` of the fixture's
+/// commits, each as its short hash with no URL (piped output cannot carry a
+/// hyperlink, so a linked hash prints its text alone).
+fn assert_shows(views: &StatusViews, args: &[&str], shown: &[&str]) {
+    let text = git_status_stdout(&views.path, args);
+    for sha in [&views.initial, &views.alpha, &views.beta, &views.side, &views.worktree] {
+        let visible = text.contains(&format!("[{}]", &sha[..7]));
+        assert_eq!(visible, shown.contains(&sha.as_str()), "{args:?} {sha}:\n{text}");
+    }
+    assert!(!text.contains("github.com/o/r/commit"), "{args:?}:\n{text}");
+}
+
+#[test]
+fn test_repo_git_status_views_show_their_final_history() {
+    let v = status_views_fixture();
+    let all = [v.beta.as_str(), v.alpha.as_str(), v.initial.as_str()];
+    assert_shows(&v, &[], &all);
+    assert_shows(&v, &["--compact"], &all);
+    assert_shows(&v, &["--branch"], &all);
+    let current = git2::Repository::open(&v.path)
+        .unwrap()
+        .head()
+        .unwrap()
+        .shorthand()
+        .unwrap()
+        .to_string();
+    assert_shows(&v, &["--branch", &current], &all);
+    assert_shows(&v, &["-p", "alpha-core"], &[&v.alpha, &v.initial]);
+    assert_shows(&v, &["-a", "beta"], &[&v.beta, &v.initial]);
+}
+
+#[test]
+fn test_repo_git_status_later_selectors_replace_earlier_history() {
+    let v = status_views_fixture();
+    assert_shows(&v, &["--branch", "side"], &[&v.side, &v.initial]);
+    assert_shows(&v, &["-p", "alpha-core", "--branch", "side"], &[&v.side, &v.initial]);
+    // The worktree branched from HEAD, so its history includes `beta`.
+    let worktree = [v.worktree.as_str(), v.beta.as_str(), v.alpha.as_str(), v.initial.as_str()];
+    assert_shows(&v, &["--worktree", "wt"], &worktree);
+    assert_shows(&v, &["-a", "beta", "--worktree", "wt-dir"], &worktree);
+
+    common::owned_sniff_command()
+        .args(["--base", v.path.to_str().unwrap(), "repo", "git-status"])
+        .args(["--branch", "side", "--worktree", "wt"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+    common::owned_sniff_command()
+        .args(["--base", v.path.to_str().unwrap(), "repo", "git-status"])
+        .args(["--worktree", "nope"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Worktree not found: nope"));
+}
+
+/// The value printed after `label` in the text performance report, for every
+/// row with that label. Tree glyphs, alignment, and paths are ignored.
+fn perf_rows(stdout: &str, label: &str) -> Vec<String> {
+    let report = stdout
+        .split_once("Performance")
+        .map(|(_, report)| report)
+        .unwrap_or_else(|| panic!("no performance report:\n{stdout}"));
+    report
+        .lines()
+        .filter_map(|line| {
+            let mut tokens = line
+                .split_whitespace()
+                .map(|token| token.trim_start_matches(|c: char| !c.is_alphanumeric()));
+            tokens.find(|token| *token == label)?;
+            Some(tokens.next().unwrap_or_default().to_string())
+        })
+        .collect()
+}
+
+fn perf_counter(stdout: &str, label: &str) -> u64 {
+    match perf_rows(stdout, label).as_slice() {
+        [] => 0,
+        [value] => value.parse().unwrap_or_else(|_| panic!("{label} = {value}")),
+        rows => panic!("{label} reported {} times: {rows:?}", rows.len()),
+    }
+}
+
+fn json_perf(path: &Path, args: &[&str]) -> (Value, String) {
+    let output = common::owned_sniff_command()
+        .args(["--base", path.to_str().unwrap(), "--perf", "repo", "git-status", "--json"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let value: Value = serde_json::from_slice(&output.stdout).expect("stdout is one JSON value");
+    (value, String::from_utf8_lossy(&output.stderr).into_owned())
+}
+
+fn json_visits(value: &Value) -> u64 {
+    value["performance"]["counters"]["git.commit_visits"]
+        .as_u64()
+        .unwrap_or(0)
+}
+
+#[test]
+fn test_repo_git_status_text_perf_measures_linking_with_one_discovery_and_ref_walk() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "pushed.txt", "pushed");
+    let repo = git2::Repository::open(&path).unwrap();
+    let pushed = repo.head().unwrap().peel_to_commit().unwrap().id();
+    repo.remote("origin", "git@github.com:o/r.git").unwrap();
+    repo.reference("refs/remotes/origin/main", pushed, true, "test remote tip")
+        .unwrap();
+    test_commit_file(&path, "unpushed.txt", "unpushed");
+    let head = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    for detached in [false, true] {
+        if detached {
+            repo.set_head_detached(head).unwrap();
+        }
+        let text = git_status_stdout(&path, &["--perf"]);
+        assert_eq!(perf_rows(&text, "commit_links").len(), 1, "detached={detached}:\n{text}");
+        assert_eq!(perf_counter(&text, "repository_discoveries"), 1, "{text}");
+        assert_eq!(perf_counter(&text, "ref_walks"), 1, "{text}");
+    }
+}
+
+#[test]
+fn test_repo_git_status_scoped_linking_adds_exactly_the_remote_history() {
+    let v = status_views_fixture();
+    // An unpushed alpha commit keeps the walk going over the whole remote
+    // history without finding it.
+    commit_and_head(&v.path, "alpha/core/src/lib.rs", "pub fn c() {}", "unpushed alpha");
+    let repo = git2::Repository::open(&v.path).unwrap();
+    let mut walk = repo.revwalk().unwrap();
+    walk.push(git2::Oid::from_str(&v.alpha).unwrap()).unwrap();
+    let remote_history = walk.count() as u64;
+    assert_eq!(remote_history, 2);
+
+    let scope = ["-p", "alpha-core"];
+    let linked = git_status_stdout(&v.path, &[&scope[..], &["--perf"]].concat());
+    let plain = git_status_stdout(&v.path, &[&scope[..], &["--perf", "--plain"]].concat());
+    let (json, stderr) = json_perf(&v.path, &scope);
+
+    assert_eq!(perf_rows(&linked, "commit_links").len(), 1, "{linked}");
+    assert!(perf_rows(&plain, "commit_links").is_empty(), "{plain}");
+    let stages = json["performance"]["stages"].as_object().unwrap();
+    assert!(!stages.contains_key("filesystem.git.commit_links"), "{stages:?}");
+    assert!(stages.contains_key("filesystem.git.selection"), "{stages:?}");
+
+    let unlinked = perf_counter(&plain, "commit_visits");
+    assert_eq!(json_visits(&json), unlinked);
+    assert_eq!(perf_counter(&linked, "commit_visits") - unlinked, remote_history);
+    assert!(stderr.contains("commit_visits"), "JSON perf diagnostic on stderr: {stderr}");
+}
+
+#[test]
+fn test_repo_git_status_zero_history_links_nothing_with_or_without_scope() {
+    let v = status_views_fixture();
+    for scope in [&[][..], &["-p", "alpha-core"][..]] {
+        let args = [scope, &["--history", "0"]].concat();
+        let text = git_status_stdout(&v.path, &[&args[..], &["--perf"]].concat());
+        let (json, _) = json_perf(&v.path, &args);
+        assert!(perf_rows(&text, "commit_links").is_empty(), "{scope:?}:\n{text}");
+        assert_eq!(perf_counter(&text, "commit_visits"), json_visits(&json), "{scope:?}");
+    }
+}
+
+#[test]
+fn test_repo_git_status_json_is_one_unlinked_git_info_value() {
+    let v = status_views_fixture();
+    let output = common::owned_sniff_command()
+        .args(["--base", v.path.to_str().unwrap(), "repo", "git-status", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    let (with_perf, _) = json_perf(&v.path, &[]);
+    for value in [serde_json::from_slice::<Value>(&output.stdout).unwrap(), with_perf] {
+        assert!(value["repo_root"].is_string() && value["status"].is_object(), "{value}");
+        let recent = value["recent"].as_array().unwrap();
+        assert_eq!(recent[0]["sha"], v.beta);
+        for commit in recent {
+            let keys: Vec<&String> = commit.as_object().unwrap().keys().collect();
+            assert!(
+                keys.iter().all(|key| !key.contains("link") && !key.contains("url")),
+                "{keys:?}"
+            );
+        }
+    }
+}
+
 /// Corrupt the HEAD commit object of a freshly-built test repo and return its
 /// path, so corruption surfaces through any history-reading command.
 fn repo_with_corrupt_head() -> (tempfile::TempDir, PathBuf) {

@@ -1,5 +1,6 @@
 //! Filesystem section output formatting (Git, Repo, Languages, Docs).
 
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
@@ -7,7 +8,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
-use sniff::filesystem::git::{ConventionalCommit, FileAction, FileStatus, RefKind};
+use sniff::filesystem::git::{CommitLink, ConventionalCommit, FileAction, FileStatus, RefKind};
 use sniff::filesystem::repo::Package;
 
 use super::{TextOutput, format_number, relative_path};
@@ -429,19 +430,18 @@ fn build_git_status_items(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
     verbose: u8,
+    commit_links: Option<&HashMap<String, CommitLink>>,
 ) -> Vec<String> {
     let mut status_items: Vec<String> = Vec::new();
 
     // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom).
-    // `git.recent` is newest-first. Commit links come from the library, which
-    // links a commit only when a local remote-tracking ref contains it; a
-    // lookup failure renders the commits unlinked rather than failing the report.
-    let commits: Vec<_> = git.recent.iter().take(history_count).collect();
-    let shas: Vec<&str> = commits.iter().map(|commit| commit.sha.as_str()).collect();
-    let links = sniff::filesystem::git::commit_links_at(&git.repo_root, &shas).unwrap_or_default();
-
-    for (index, commit) in commits.iter().enumerate().rev() {
-        let commit_url = links.get(index).and_then(|link| link.commit_url.as_deref());
+    // `git.recent` is newest-first. Links were captured by the library, keyed
+    // by full SHA; rendering never reads the repository, and a commit without
+    // a captured URL renders its hash unlinked.
+    for commit in git.recent.iter().take(history_count).rev() {
+        let commit_url = commit_links
+            .and_then(|links| links.get(&commit.sha))
+            .and_then(|link| link.commit_url.as_deref());
         status_items.push(format_commit_line(commit, verbose, commit_url));
     }
 
@@ -789,6 +789,7 @@ pub fn render_git_section(
     compact: bool,
     target_branch: Option<&str>,
     target_worktree: Option<(&str, &str)>,
+    commit_links: Option<&HashMap<String, CommitLink>>,
 ) -> String {
     let mut out = String::new();
     let terminal = Terminal::default();
@@ -810,7 +811,7 @@ pub fn render_git_section(
     writeln!(out, "{}", status_title).unwrap();
     out.push('\n');
 
-    let status_items = build_git_status_items(git, history_count, verbose);
+    let status_items = build_git_status_items(git, history_count, verbose, commit_links);
 
     // Render status items as list
     if !status_items.is_empty() {
@@ -1419,7 +1420,6 @@ mod tests {
     };
     use sniff::filesystem::repo::Package;
     use sniff::filesystem::{TitleSource, UpdatedSource};
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     fn make_package(name: &str, area: &str, depends_on: &[&str]) -> Package {
@@ -1536,7 +1536,7 @@ mod tests {
                 },
             ]);
 
-            let items = build_git_status_items(&git, 10, 0);
+            let items = build_git_status_items(&git, 10, 0, None);
 
             let last = items.last().expect("at least one status item");
             assert!(last.starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
@@ -1562,6 +1562,66 @@ mod tests {
             assert!(untracked_index < conflicted_index);
         }
 
+        /// Captured links are matched by full SHA: two commits sharing the
+        /// displayed seven-character prefix must not borrow each other's URL,
+        /// and rendering must not read the repository (`/repo` does not exist).
+        #[test]
+        fn captured_links_match_full_ids_and_rendering_reads_no_repository() {
+            let linked = format!("abcdef1{}", "1".repeat(33));
+            let unlinked = format!("abcdef1{}", "2".repeat(33));
+            let mut git = make_git_info(vec![]);
+            let template = git.recent[0].clone();
+            git.recent = vec![
+                CommitInfo {
+                    sha: linked.clone(),
+                    message: "feat: newest".to_string(),
+                    ..template.clone()
+                },
+                CommitInfo {
+                    sha: unlinked.clone(),
+                    message: "fix: oldest".to_string(),
+                    ..template
+                },
+            ];
+            let url = format!("https://github.com/o/r/commit/{linked}");
+            let links = HashMap::from([(
+                linked.clone(),
+                CommitLink { remote: Some(true), commit_url: Some(url.clone()) },
+            )]);
+
+            let collector = sniff::performance::PerformanceCollector::new_shared();
+            let (items, section) =
+                sniff::performance::with_current_collector(Some(collector.clone()), || {
+                    (
+                        build_git_status_items(&git, 10, 0, Some(&links)),
+                        render_git_section(&git, 10, 0, false, None, None, Some(&links)),
+                    )
+                });
+
+            assert_eq!(items.len(), 2);
+            assert!(items[0].contains("oldest"), "oldest first: {items:?}");
+            assert!(items[0].starts_with("[<dim><i>abcdef1</i></dim>]"), "{}", items[0]);
+            assert!(!items[0].contains("href"), "{}", items[0]);
+            assert!(items[1].contains("newest"), "{}", items[1]);
+            assert!(
+                items[1].starts_with(&format!("[<a href=\"{url}\"><b>abcdef1</b></a>]")),
+                "{}",
+                items[1]
+            );
+            assert_eq!(section.matches("abcdef1").count(), 2, "{section}");
+
+            let snapshot = collector.snapshot(std::time::Duration::ZERO);
+            assert!(
+                snapshot.counters.values().all(|count| *count == 0),
+                "rendering did Git work: {:?}",
+                snapshot.counters
+            );
+
+            let unlinked_items = build_git_status_items(&git, 10, 0, None);
+            assert!(unlinked_items.iter().all(|item| !item.contains("href")));
+            assert_eq!(build_git_status_items(&git, 0, 0, Some(&links)), Vec::<String>::new());
+        }
+
         #[test]
         fn compact_git_status_omits_meta_section() {
             let git = make_git_info(vec![FileChange {
@@ -1572,7 +1632,7 @@ mod tests {
                 lines_removed: 0,
             }]);
 
-            let output = render_git_section(&git, 10, 0, true, None, None);
+            let output = render_git_section(&git, 10, 0, true, None, None, None);
 
             assert!(output.contains("Status"));
             assert!(!output.contains("\x1b[1m\x1b[4mMeta"));
@@ -1582,7 +1642,7 @@ mod tests {
         #[test]
         fn git_status_headers_use_double_underline_markup() {
             let git = make_git_info(vec![]);
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
             // The header is produced via Prose with <b><uu>Status</uu></b>.
             // In a TTY with double-underline support this renders as \x1b[4:2m;
             // otherwise it degrades to regular underline or plain text.  We
@@ -1614,7 +1674,7 @@ mod tests {
             git.in_worktree = true;
             git.current_branch = Some("feature".to_string());
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
             let lines: Vec<&str> = output.lines().collect();
 
             // Find section headers (they contain the rendered header text)
@@ -1731,7 +1791,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("main:"),
@@ -1783,7 +1843,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("Current Worktree:"),
@@ -1814,7 +1874,7 @@ mod tests {
             git.current_branch = Some("main".to_string());
             git.in_worktree = false;
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 !output.contains("Worktrees"),
@@ -1877,7 +1937,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("login-fix"),
@@ -2125,7 +2185,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("Current Worktree:"),
@@ -2167,7 +2227,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("Current Worktree:") && !output.contains("main:"),
@@ -2201,7 +2261,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("main:"),
@@ -2237,7 +2297,7 @@ mod tests {
                 },
             );
 
-            let output = render_git_section(&git, 10, 0, false, None, None);
+            let output = render_git_section(&git, 10, 0, false, None, None, None);
 
             assert!(
                 output.contains("Current Worktree:"),
@@ -2811,7 +2871,7 @@ mod tests {
             assert!(super::packages::dirty_package_names(&result).is_empty());
 
             // Status-oriented renderers must produce output without panicking.
-            let _ = render_git_section(git, 10, 1, false, None, None);
+            let _ = render_git_section(git, 10, 1, false, None, None, None);
             let _ = super::repo::render_filesystem_section(fs, 1, Some(&git.repo_root), false);
         }
 

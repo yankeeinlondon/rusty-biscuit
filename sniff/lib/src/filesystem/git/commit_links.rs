@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
 use super::GitHostingProvider;
-use super::remote_refresh::{AncestryWalkEnd, RefSnapshot, walk_ancestry};
+use super::remote_refresh::{AncestryWalkEnd, RefSnapshot, walk_ancestry_with_filter};
 use super::remote_resolver::{RemoteEndpoint, configured_url, preferred_remote_order};
 use crate::Result;
 
@@ -309,16 +309,59 @@ pub(crate) fn link_commits_with_budget(
 /// as soon as any walk reaches it, and linking stops once every target is
 /// determined.
 ///
-/// `refs` must include remote branches; a snapshot without them links every
-/// target `remote: Some(false)`.
+/// Walks share their visits: a commit a completed earlier walk already
+/// visited is not entered again, and a tip so covered is not walked, so the
+/// pass visits each reachable commit at most once. A commit pruned this way
+/// was already seen by an earlier, preferred tip, so pruning never changes the
+/// winning remote. After a failed walk, the remaining tips are walked
+/// independently.
+///
+/// A snapshot that did not observe remote branches links every target
+/// unknown; an observed empty set links every target `remote: Some(false)`.
 pub(crate) fn link_commits_from_snapshot(
     repo: &gix::Repository,
     refs: &RefSnapshot,
     targets: &[gix::ObjectId],
     visit_budget: usize,
 ) -> Vec<CommitLink> {
+    link_commits_from_snapshot_with_walk(
+        repo,
+        refs,
+        targets,
+        visit_budget,
+        true,
+        |repo, tip, budget, completed, visit| {
+            walk_ancestry_with_filter(repo, tip, budget, completed, visit)
+        },
+    )
+}
+
+type AncestryVisitor<'a> = dyn FnMut(gix::ObjectId) -> ControlFlow<()> + 'a;
+
+/// [`link_commits_from_snapshot`] with the per-tip walk injected, and with
+/// visit sharing switchable so tests can compare against independent walks.
+///
+/// `walk` receives `(repo, tip, budget, completed visits to skip, visitor)`
+/// and must behave as [`walk_ancestry_with_filter`].
+fn link_commits_from_snapshot_with_walk(
+    repo: &gix::Repository,
+    refs: &RefSnapshot,
+    targets: &[gix::ObjectId],
+    visit_budget: usize,
+    share_visits: bool,
+    mut walk: impl FnMut(
+        &gix::Repository,
+        gix::ObjectId,
+        &mut usize,
+        Option<&HashSet<gix::ObjectId>>,
+        &mut AncestryVisitor<'_>,
+    ) -> AncestryWalkEnd,
+) -> Vec<CommitLink> {
     if targets.is_empty() {
         return Vec::new();
+    }
+    if !refs.has_remote_branch_tips() {
+        return vec![CommitLink::default(); targets.len()];
     }
     let remotes = preferred_remote_order(refs.remote_branch_tips().map(|(remote, _, _)| remote));
     let mut tips: Vec<(usize, gix::ObjectId)> = Vec::new();
@@ -338,12 +381,26 @@ pub(crate) fn link_commits_from_snapshot(
     let mut winners: HashMap<gix::ObjectId, usize> = HashMap::new();
     let mut remaining = visit_budget;
     let mut incomplete = false;
+    // Every commit some completed walk visited; one tip has nothing to share.
+    let mut completed: Option<HashSet<gix::ObjectId>> =
+        (share_visits && tips.len() > 1).then(HashSet::new);
+    // The current walk's visits, published to `completed` only if it
+    // completes: a partial walk's visits are not closed under ancestry.
+    let mut visited: Vec<gix::ObjectId> = Vec::new();
 
     for (remote_index, tip) in tips {
         if undetermined.is_empty() {
             break;
         }
-        let end = walk_ancestry(repo, tip, &mut remaining, |id| {
+        if completed.as_ref().is_some_and(|completed| completed.contains(&tip)) {
+            continue;
+        }
+        visited.clear();
+        let record = completed.is_some();
+        let end = walk(repo, tip, &mut remaining, completed.as_ref(), &mut |id| {
+            if record {
+                visited.push(id);
+            }
             if undetermined.remove(&id) {
                 winners.insert(id, remote_index);
             }
@@ -354,8 +411,18 @@ pub(crate) fn link_commits_from_snapshot(
             }
         });
         match end {
-            AncestryWalkEnd::Stopped | AncestryWalkEnd::Completed => {}
-            AncestryWalkEnd::Failed => incomplete = true,
+            AncestryWalkEnd::Completed => {
+                if let Some(completed) = completed.as_mut() {
+                    completed.extend(visited.drain(..));
+                }
+            }
+            AncestryWalkEnd::Stopped => {}
+            AncestryWalkEnd::Failed => {
+                incomplete = true;
+                // The pass is already inconclusive for unfound targets; the
+                // remaining tips run exactly as the unshared algorithm would.
+                completed = None;
+            }
             AncestryWalkEnd::OverBudget => {
                 incomplete = true;
                 break;
@@ -868,6 +935,250 @@ mod tests {
             assert_eq!(
                 complete[0].commit_url.as_deref(),
                 Some(format!("https://github.com/u/r/commit/{}", upstream_only[0]).as_str())
+            );
+        }
+
+        fn independent_walk(
+            repo: &gix::Repository,
+            tip: gix::ObjectId,
+            budget: &mut usize,
+            completed: Option<&HashSet<gix::ObjectId>>,
+            visit: &mut AncestryVisitor<'_>,
+        ) -> AncestryWalkEnd {
+            walk_ancestry_with_filter(repo, tip, budget, completed, visit)
+        }
+
+        /// Preferred and later remotes over one shared base, with a duplicate
+        /// tip and an ancestor tip. Proving a target absent costs exactly the
+        /// distinct reachable history (5 base + 3 + 2 unique = 10 commits),
+        /// where independent walks exhaust the same budget.
+        #[test]
+        fn shared_visits_prove_absence_within_the_distinct_reachable_history() {
+            let (dir, repo) = setup_repo();
+            add_remote(&repo, "origin", "https://github.com/me/r.git");
+            add_remote(&repo, "upstream", "https://github.com/up/r.git");
+            let base = chain(&repo, None, 5, "base");
+            let preferred = chain(&repo, Some(base[4]), 3, "preferred");
+            let later = chain(&repo, Some(base[4]), 2, "later");
+            // No origin/HEAD, so origin's branches walk alphabetically.
+            set_tip(&repo, "origin", "dup", preferred[2]);
+            set_tip(&repo, "origin", "main", preferred[2]);
+            set_tip(&repo, "origin", "old", base[4]);
+            set_tip(&repo, "upstream", "main", later[1]);
+            let unpushed = commit(&repo, &[preferred[2]], "unpushed", 1_900_000_000);
+
+            let gix = gix_repo(&dir);
+            let refs = RefSnapshot::observe(&gix, false, true, false).unwrap();
+            let targets = [
+                oid(later[1]),
+                oid(preferred[0]),
+                oid(base[0]),
+                oid(unpushed),
+                oid(preferred[0]),
+            ];
+            let me = |id: git2::Oid| Some(format!("https://github.com/me/r/commit/{id}"));
+            let up = |id: git2::Oid| Some(format!("https://github.com/up/r/commit/{id}"));
+
+            let (links, counts) =
+                testing::measure(|| link_commits_from_snapshot(&gix, &refs, &targets, 10));
+            assert_eq!(
+                links,
+                vec![
+                    CommitLink { remote: Some(true), commit_url: up(later[1]) },
+                    CommitLink { remote: Some(true), commit_url: me(preferred[0]) },
+                    CommitLink { remote: Some(true), commit_url: me(base[0]) },
+                    CommitLink { remote: Some(false), commit_url: None },
+                    CommitLink { remote: Some(true), commit_url: me(preferred[0]) },
+                ]
+            );
+            assert_eq!(counts.get(counters::GIT_COMMIT_VISITS), 10);
+
+            let short = link_commits_from_snapshot(&gix, &refs, &targets, 9);
+            assert_eq!(short[0].remote, Some(true), "the later tip itself is visited");
+            assert_eq!(short[3], CommitLink::default(), "one visit short is unproven");
+
+            let (independent, counts) = testing::measure(|| {
+                link_commits_from_snapshot_with_walk(
+                    &gix,
+                    &refs,
+                    &targets,
+                    10,
+                    false,
+                    independent_walk,
+                )
+            });
+            assert_eq!(counts.get(counters::GIT_COMMIT_VISITS), 10);
+            assert_eq!(
+                independent.iter().map(|link| link.remote).collect::<Vec<_>>(),
+                [None, Some(true), Some(true), None, Some(true)],
+                "the duplicate tip re-walks the shared base and exhausts the budget"
+            );
+        }
+
+        /// A walk that fails after yielding a commit shared with a later tip,
+        /// before reaching that commit's parent, must not let its partial
+        /// visits prune the later walk.
+        #[test]
+        fn a_failed_walk_leaves_later_tips_walking_independently() {
+            let (dir, repo) = setup_repo();
+            add_remote(&repo, "origin", "https://github.com/me/r.git");
+            add_remote(&repo, "upstream", "https://github.com/up/r.git");
+            let root = commit(&repo, &[], "root", 100);
+            let base = commit(&repo, &[root], "base", 200);
+            let first = commit(&repo, &[base], "first tip", 300);
+            let missed = commit(&repo, &[base], "missed parent", 400);
+            let shared = commit(&repo, &[missed], "shared", 500);
+            let failing = commit(&repo, &[shared], "failing tip", 600);
+            let unpushed = commit(&repo, &[failing], "unpushed", 700);
+            set_tip(&repo, "origin", "a", first);
+            set_tip(&repo, "origin", "b", failing);
+            set_tip(&repo, "upstream", "main", shared);
+
+            let gix = gix_repo(&dir);
+            let refs = RefSnapshot::observe(&gix, false, true, false).unwrap();
+            let targets = [oid(failing), oid(shared), oid(missed), oid(unpushed)];
+            let mut filters = Vec::new();
+            let links = link_commits_from_snapshot_with_walk(
+                &gix,
+                &refs,
+                &targets,
+                COMMIT_VISIT_BUDGET,
+                true,
+                |repo, tip, budget, completed, visit| {
+                    filters.push(completed.map(HashSet::len));
+                    let inject = tip == oid(failing);
+                    let mut injected = false;
+                    let end = walk_ancestry_with_filter(repo, tip, budget, completed, |id| {
+                        let flow = visit(id);
+                        if inject && id == oid(shared) {
+                            injected = true;
+                            return ControlFlow::Break(());
+                        }
+                        flow
+                    });
+                    if injected { AncestryWalkEnd::Failed } else { end }
+                },
+            );
+
+            assert_eq!(filters, [Some(0), Some(3), None], "first tip seeded three visits");
+            let me = |id: git2::Oid| Some(format!("https://github.com/me/r/commit/{id}"));
+            assert_eq!(
+                links,
+                vec![
+                    CommitLink { remote: Some(true), commit_url: me(failing) },
+                    CommitLink { remote: Some(true), commit_url: me(shared) },
+                    CommitLink {
+                        remote: Some(true),
+                        commit_url: Some(format!("https://github.com/up/r/commit/{missed}")),
+                    },
+                    CommitLink::default(),
+                ]
+            );
+
+            // Control: without the failure, origin/b completes, covers the
+            // upstream tip, and wins every reachable target.
+            let control = link_commits_from_snapshot(&gix, &refs, &targets, COMMIT_VISIT_BUDGET);
+            assert_eq!(control[2].commit_url, me(missed));
+            assert_eq!(control[3], CommitLink { remote: Some(false), commit_url: None });
+        }
+
+        /// Two tips over a shallow boundary whose parent object is absent:
+        /// gix stops at the boundary in both modes, so the boundary completes
+        /// the walk rather than failing it.
+        #[test]
+        fn shallow_boundaries_link_alike_shared_and_independent() {
+            let (dir, repo) = setup_repo();
+            add_remote(&repo, "origin", "https://github.com/me/r.git");
+            let tree = repo.treebuilder(None).unwrap().write().unwrap();
+            let raw = format!(
+                "tree {tree}\nparent {}\nauthor Test <test@example.com> 1700000000 +0000\n\
+                 committer Test <test@example.com> 1700000000 +0000\n\nboundary\n",
+                "1".repeat(40)
+            );
+            let boundary =
+                repo.odb().unwrap().write(git2::ObjectType::Commit, raw.as_bytes()).unwrap();
+            std::fs::write(repo.path().join("shallow"), format!("{boundary}\n")).unwrap();
+            let left = commit(&repo, &[boundary], "left", 1_700_000_100);
+            let right = commit(&repo, &[boundary], "right", 1_700_000_200);
+            set_tip(&repo, "origin", "left", left);
+            set_tip(&repo, "origin", "right", right);
+            let unpushed = commit(&repo, &[left], "unpushed", 1_700_000_300);
+
+            let gix = gix_repo(&dir);
+            let shallow = gix.shallow_commits().unwrap().expect("a shallow repository");
+            assert!(shallow.contains(&oid(boundary)));
+            let refs = RefSnapshot::observe(&gix, false, true, false).unwrap();
+            let targets = [oid(right), oid(boundary), oid(unpushed)];
+
+            let (shared, shared_counts) = testing::measure(|| {
+                link_commits_from_snapshot(&gix, &refs, &targets, COMMIT_VISIT_BUDGET)
+            });
+            let (independent, independent_counts) = testing::measure(|| {
+                link_commits_from_snapshot_with_walk(
+                    &gix,
+                    &refs,
+                    &targets,
+                    COMMIT_VISIT_BUDGET,
+                    false,
+                    independent_walk,
+                )
+            });
+
+            assert_eq!(shared, independent);
+            assert_eq!(
+                shared.iter().map(|link| link.remote).collect::<Vec<_>>(),
+                [Some(true), Some(true), Some(false)]
+            );
+            assert_eq!(shared_counts.get(counters::GIT_COMMIT_VISITS), 3);
+            assert_eq!(independent_counts.get(counters::GIT_COMMIT_VISITS), 4);
+        }
+
+        /// Only a snapshot that observed remote branches can prove absence;
+        /// an observed empty set does.
+        #[test]
+        fn snapshots_without_remote_tip_coverage_link_unknown() {
+            let (dir, repo) = setup_repo();
+            add_remote(&repo, "origin", "https://github.com/me/r.git");
+            let pushed = commit(&repo, &[], "pushed", 1_700_000_000);
+            set_tip(&repo, "origin", "main", pushed);
+            let unpushed = commit(&repo, &[pushed], "unpushed", 1_700_000_100);
+            let gix = gix_repo(&dir);
+            let targets = [oid(pushed), oid(unpushed)];
+
+            for (label, refs) in [
+                ("default", RefSnapshot::default()),
+                ("decorations", RefSnapshot::observe(&gix, false, false, true).unwrap()),
+                ("local branches", RefSnapshot::observe(&gix, true, false, false).unwrap()),
+            ] {
+                assert!(!refs.has_remote_branch_tips(), "{label}");
+                let (links, counts) = testing::measure(|| {
+                    link_commits_from_snapshot(&gix, &refs, &targets, COMMIT_VISIT_BUDGET)
+                });
+                assert_eq!(links, vec![CommitLink::default(); 2], "{label}");
+                assert_eq!(counts.get(counters::GIT_COMMIT_VISITS), 0, "{label}");
+            }
+
+            let observed = RefSnapshot::observe(&gix, false, true, false).unwrap();
+            assert!(observed.has_remote_branch_tips());
+            assert_eq!(
+                link_commits_from_snapshot(&gix, &observed, &targets, COMMIT_VISIT_BUDGET),
+                vec![
+                    CommitLink {
+                        remote: Some(true),
+                        commit_url: Some(format!("https://github.com/me/r/commit/{pushed}")),
+                    },
+                    CommitLink { remote: Some(false), commit_url: None },
+                ]
+            );
+
+            let (empty_dir, _empty) = setup_repo();
+            let empty = gix_repo(&empty_dir);
+            let observed_empty = RefSnapshot::observe(&empty, false, true, false).unwrap();
+            assert!(observed_empty.has_remote_branch_tips());
+            assert_eq!(observed_empty.remote_branch_tips().count(), 0);
+            assert_eq!(
+                link_commits_from_snapshot(&empty, &observed_empty, &targets, COMMIT_VISIT_BUDGET),
+                vec![CommitLink { remote: Some(false), commit_url: None }; 2]
             );
         }
 

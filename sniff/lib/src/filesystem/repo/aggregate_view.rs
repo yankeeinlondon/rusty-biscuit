@@ -148,7 +148,7 @@ pub fn detect_repo_aggregate(dir: &Path) -> Result<RepoAggregateObservation> {
         performance::record_logged_stage("detect.total", started.elapsed(), tracing::Level::INFO);
     }
     let evidence = detected
-        .git
+        .aggregate_git
         .as_ref()
         .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?;
     let aggregate = project_repo_aggregate(dir, Some(&detected.filesystem), evidence)?;

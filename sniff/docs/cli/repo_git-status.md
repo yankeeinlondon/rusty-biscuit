@@ -1,9 +1,10 @@
 ---
 blast_radius:
-  - sniff/cli/src/args.rs
-  - sniff/cli/src/commands.rs
-  - sniff/cli/src/output/filesystem.rs
-  - sniff/lib/src/filesystem/git.rs
+  - sniff/cli/src/args/repo.rs
+  - sniff/cli/src/commands/repo.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/lib/src/filesystem/git/status_report.rs
+  - sniff/lib/src/filesystem/git/commit_links.rs
   - sniff/lib/src/filesystem/mod.rs
 ---
 
@@ -15,7 +16,7 @@ Shows a compact git status for the current repository: recent commit history, wo
 
 ```
 sniff repo git-status [OPTIONS]
-sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes] [--compact] [-p <PKG>] [--package-area <AREA>]
+sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes] [--compact] [-p <PKG>] [--package-area <AREA>] [--branch [<BRANCH>] | --worktree <WORKTREE>]
 ```
 
 ## Flags and Options
@@ -26,7 +27,9 @@ sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes
 | `--refresh-remotes` | | off | Fetch remotes to check if branches are out of sync (enables `--deep` detection) |
 | `--compact` | | off | Render only the top Status section |
 | `--package <PKG>` | `-p` | | Scope the git view to a specific package (exact match on `Package.name`) |
-| `--package-area <AREA>` | | | Scope the git view to a specific package area (prefix match on `Package.package_area`) |
+| `--package-area <AREA>` | `-a` | | Scope the git view to a specific package area (prefix match on `Package.package_area`) |
+| `--branch [<BRANCH>]` | | | Show another branch's commits; bare, or naming the current branch, changes nothing |
+| `--worktree <WORKTREE>` | | | Show a linked worktree's commits and working-tree changes (branch name or directory basename); cannot be combined with `--branch` |
 | `--json` | | off | Emit JSON instead of styled text (global flag) |
 | `--plain` | | off | Strip all ANSI escape codes from text output (global flag) |
 | `--verbose` / `-v` | `-v` | 0 | Increase output verbosity; repeatable (`-vv`) |
@@ -55,6 +58,21 @@ When scoped, recent commits are filtered to paths under the resolved directory, 
 
 > Breaking change vs. previous releases: passing a **package-area name** (e.g., `homelab`) to `--package` is now an error. Use `--package-area homelab` instead.
 
+### `--branch` and `--worktree`
+
+Selectors apply in a fixed order, and a later one replaces what an earlier one chose:
+
+1. `-p` / `--package-area` select the path history and narrow the working-tree changes.
+2. `--branch <BRANCH>`, when it names a branch other than the current one, replaces the history with that branch's (a local branch, a remote-tracking name such as `origin/main`, or a commit SHA) and clears the working-tree changes, which belong to the checked-out branch.
+3. `--worktree <WORKTREE>` replaces the history and working-tree changes with the linked worktree's own, and the report names that worktree's path and branch.
+
+```
+sniff repo git-status -p sniff-lib --branch release   # release's history; the package scope is validated but replaced
+sniff repo git-status -a sniff --worktree login-fix   # the login-fix worktree's history and changes
+```
+
+Every selector is still validated, and its errors are still reported, when a later one replaces its result. An unknown worktree fails with `Worktree not found: <name> (available: …)`.
+
 ## Default Output
 
 The output is divided into three labeled sections: **Status**, **Worktrees**, and **Meta**. Each section header is double-underlined (`<uu>`), degrading to a straight underline on terminals without double-underline support, and separated from adjacent content by exactly one blank row.
@@ -65,7 +83,18 @@ Lists up to `--history` recent commits followed by any working tree changes. Ite
 
 #### Commit Lines
 
-Each commit renders as a one-liner using `format_commit_line`. The SHA (first 7 characters) is shown as an OSC8 hyperlink when a locally recorded remote-tracking ref contains the commit and the preferred containing remote has a known browser URL. Other commits show the SHA as plain bold text. Containment is decided per commit by the library (`commit_links_at`) from local refs only, with no fetch.
+Each commit renders as a one-liner using `format_commit_line`. The SHA (first 7 characters) is shown as a bold OSC8 hyperlink to the commit's page when a locally recorded remote-tracking ref contains the commit and the preferred containing remote has a known browser URL. Other commits show the SHA in dim italics. A terminal without hyperlink support, or piped output, shows the same text without the link.
+
+#### Commit Links
+
+Links are resolved while the report is collected, not while it is drawn:
+
+1. The command reads status, history, and refs once.
+2. It applies `-p`, `--package-area`, `--branch`, and `--worktree`, in that order, to decide the final commit list.
+3. It links only the commits the report will show (the first `--history` entries), walking the history of every locally recorded remote-tracking branch once, from the same refs. Nothing is fetched unless `--refresh-remotes` was given, in which case the links use the refreshed refs.
+4. The renderer looks each displayed commit up by its full ID and reads no repository.
+
+Linking is skipped for `--plain`, which would strip the hyperlinks anyway, and for `--history 0`, which shows no commits. With `--perf`, the work appears as the `filesystem.git.commit_links` stage, beside `filesystem.git.initial` (status, history, and refs) and `filesystem.git.selection` (the selectors).
 
 Conventional commit format (`type(scope): description`) is parsed and displayed with the type and scope styled separately from the description.
 
@@ -73,9 +102,9 @@ At `verbose > 0`, the author name is appended to each commit line.
 
 #### File Change Lines
 
-Status lines are listed in this order: conflicted files, recent commits, staged files, unstaged files, then untracked files.
+Status lines are listed in this order: recent commits, staged files, unstaged files, untracked files, then conflicted files.
 
-- **Conflicted** — rendered in red at the top of the list: `conflicted: [dir/]<filename>`
+- **Conflicted** — rendered in red at the bottom of the list: `conflicted: [dir/]<filename>`
 - **Staged** — rendered in lime: `staged(<action>): [dir/]<filename>` with diff stats for modified files
 - **Unstaged** — rendered in yellow: `unstaged(<action>): [dir/]<filename>` with diff stats
 - **Untracked** — rendered in dim grey: `untracked: [dir/]<filename>`
@@ -258,8 +287,10 @@ Key notes on the JSON schema:
 - `file_changes[].status` — one of `"Staged"`, `"Modified"`, `"Both"`, `"Untracked"`
 - `file_changes[].action` — one of `"Created"`, `"Modified"`, `"Deleted"`
 
-When `-p`/`--package` and/or `--package-area` are used, `recent` commits, `file_changes`, `status.dirty`, `status.untracked`, and the derived counts are all filtered to the resolved path prefix before serialization.
+When `-p`/`--package` and/or `--package-area` are used, `recent` commits, `file_changes`, `status.dirty`, `status.untracked`, and the derived counts are all filtered to the resolved path prefix before serialization. `--branch` and `--worktree` apply to JSON exactly as they do to text.
+
+JSON carries no commit links and does no link work, so it stays fast: `recent[]` has no URL or containment field. A script that needs links or remote containment for recent commits uses `sniff repo recent-commits --json`. Stdout is always one JSON value; with `--perf`, the performance report is embedded in it as `performance`, and a human-readable copy goes to stderr.
 
 ## Plain Output (`--plain`)
 
-Adding `--plain` strips all ANSI escape codes (colors, bold, OSC8 hyperlinks) from text output. Useful for piping or logging.
+Adding `--plain` strips all ANSI escape codes (colors, bold, OSC8 hyperlinks) from text output. Useful for piping or logging. Because the hyperlinks would be stripped, `--plain` also skips the commit-link lookup.

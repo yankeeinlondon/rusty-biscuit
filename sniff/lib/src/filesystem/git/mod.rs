@@ -12,6 +12,7 @@ pub mod remote_observation;
 pub mod remote_refresh;
 pub mod remote_resolver;
 pub mod status;
+pub mod status_report;
 pub mod tracked_state;
 #[cfg(test)]
 mod tracked_state_tests;
@@ -46,6 +47,7 @@ pub use recent_commits::{
 };
 pub use committed_tree::{CommittedEntry, CommittedTreeSnapshot};
 pub use status::detect_merge_conflicts;
+pub use status_report::{GitStatusOptions, PreparedGitStatus};
 pub use types::{
     BehindStatus, BranchInfo, ChangedBase, CommitInfo, ConventionalCommit, FileAction, FileChange,
     FileStatus, GitConfig, GitHostingProvider, GitHostingProviderMetadata, GitInfo, GitRepo,

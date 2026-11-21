@@ -39,7 +39,7 @@ pub use git::{
     RecentCommitFileTypes, RecentCommitPackages, RecentCommits, RecentCommitsOptions,
     RecentCommitsProjection, RecentCommitsVerbosity, RemoteIdentity, RemoteInfo, RepoStatus,
     RepositoryLink,
-    Selection, commit_browser_url, commit_by_sha_at, commit_files_at, commit_links_at, commit_url,
+    GitStatusOptions, PreparedGitStatus, Selection, commit_browser_url, commit_by_sha_at, commit_files_at, commit_links_at, commit_url,
     commits_for_branch_at,
     commits_for_path_at, detect_git, detect_git_with_request, detect_merge_conflicts,
     get_commit_by_sha, get_commit_files, get_commits_for_branch, get_commits_for_path,
@@ -423,7 +423,10 @@ pub fn detect_filesystem_with_request(
     root: &Path,
     request: &FilesystemRequest,
 ) -> Result<FilesystemInfo> {
-    Ok(detect_filesystem_with_request_inner(root, request, false, None)?.filesystem)
+    Ok(
+        detect_filesystem_with_request_inner(root, request, FilesystemGitMode::Standard, None)?
+            .filesystem,
+    )
 }
 
 /// Detect filesystem information using an already acquired Git observation.
@@ -437,12 +440,71 @@ pub fn detect_filesystem_with_observation(
     observation: &FilesystemObservation,
 ) -> Result<FilesystemInfo> {
     validate_observation_root(root, observation)?;
-    Ok(detect_filesystem_with_request_inner(root, request, false, Some(observation))?.filesystem)
+    Ok(detect_filesystem_with_request_inner(
+        root,
+        request,
+        FilesystemGitMode::Standard,
+        Some(observation),
+    )?
+    .filesystem)
 }
 
-pub(crate) struct AggregateFilesystemDetection {
+/// Prepare the focused `repo git-status` report for `root`.
+///
+/// One filesystem detection collects status, history, and (for a package or
+/// package-area selector) the package catalog. The selectors in `options` are
+/// then applied in their documented order, and with
+/// [`GitStatusOptions::include_commit_links`] the displayed commits are linked
+/// against the same request's refs. All of it runs inside the caller's
+/// performance collector, recorded as `detect.filesystem` and `detect.total`
+/// with `filesystem.git.initial`, `filesystem.git.selection`, and
+/// `filesystem.git.commit_links` beneath them.
+///
+/// ## Errors
+///
+/// Status and history read errors propagate, as does a failed discovery of
+/// the selected worktree. A selector that matches nothing is
+/// [`crate::SniffError::RepositorySelection`].
+pub fn detect_repo_git_status(
+    root: &Path,
+    options: &GitStatusOptions<'_>,
+) -> Result<PreparedGitStatus> {
+    let collecting = performance::is_collecting();
+    let started = collecting.then(Instant::now);
+    let request = git::status_report::status_request(options);
+    let detected = detect_filesystem_with_request_inner(
+        root,
+        &request,
+        FilesystemGitMode::Status(options),
+        None,
+    )?;
+    if let Some(started) = started {
+        // `detect_with_plan`'s two stages, so focused and generic reports
+        // share a top level.
+        performance::record_logged_stage("detect.filesystem", started.elapsed(), Level::INFO);
+        performance::record_logged_stage("detect.total", started.elapsed(), Level::INFO);
+    }
+    Ok(PreparedGitStatus {
+        git: detected.filesystem.git,
+        commit_links: detected.commit_links,
+    })
+}
+
+/// What the Git worker collects beyond the standard [`GitInfo`].
+#[derive(Clone, Copy)]
+enum FilesystemGitMode<'a> {
+    Standard,
+    /// The private repository-aggregate companion.
+    Aggregate,
+    /// The focused status report: its selectors and commit links.
+    Status(&'a GitStatusOptions<'a>),
+}
+
+pub(crate) struct FilesystemDetection {
     pub(crate) filesystem: FilesystemInfo,
-    pub(crate) git: Option<git::types::GitAggregateEvidence>,
+    pub(crate) aggregate_git: Option<git::types::GitAggregateEvidence>,
+    /// Status-mode links for the displayed commits, by full commit ID.
+    pub(crate) commit_links: std::collections::HashMap<String, CommitLink>,
 }
 
 /// Run filesystem detection with the private repository-aggregate companion.
@@ -453,16 +515,16 @@ pub(crate) struct AggregateFilesystemDetection {
 pub(crate) fn detect_filesystem_for_aggregate(
     root: &Path,
     request: &FilesystemRequest,
-) -> Result<AggregateFilesystemDetection> {
-    detect_filesystem_with_request_inner(root, request, true, None)
+) -> Result<FilesystemDetection> {
+    detect_filesystem_with_request_inner(root, request, FilesystemGitMode::Aggregate, None)
 }
 
 fn detect_filesystem_with_request_inner(
     root: &Path,
     request: &FilesystemRequest,
-    collect_aggregate: bool,
+    mode: FilesystemGitMode<'_>,
     observation: Option<&FilesystemObservation>,
-) -> Result<AggregateFilesystemDetection> {
+) -> Result<FilesystemDetection> {
     let collector = performance::current_collector();
     let need_repo_context = request.repo.is_some() || request.include_docs;
     let consumers = WalkConsumers::of(request);
@@ -493,17 +555,30 @@ fn detect_filesystem_with_request_inner(
     };
 
     std::thread::scope(|scope| {
+        // Focused status records the worker as `filesystem.git.initial` and
+        // leaves `filesystem.git` unmeasured: the perf tree then sums the
+        // worker, selection, and linking into it rather than showing only
+        // the first of them.
+        let (git_stage, include_link_tips) = match mode {
+            FilesystemGitMode::Status(options) => (
+                "filesystem.git.initial",
+                git::status_report::wants_link_tips(options),
+            ),
+            FilesystemGitMode::Standard | FilesystemGitMode::Aggregate => ("filesystem.git", false),
+        };
         let git_handle = request.git.as_ref().map(|git_request| {
             let collector = collector.clone();
             let observation = git_observation.cloned();
             scope.spawn(move || {
                 performance::with_current_collector(collector, || {
                     let git_started = Instant::now();
-                    let detected: Result<Option<GitInfo>> = observation
+                    let detected = observation
                         .expect("Git request always has an observation")
-                        .with_repository(|repo| repo.detect_with_request(git_request));
+                        .with_repository(|repo| {
+                            repo.detect_with_ref_snapshot(git_request, include_link_tips)
+                        });
                     performance::record_logged_stage(
-                        "filesystem.git",
+                        git_stage,
                         git_started.elapsed(),
                         Level::DEBUG,
                     );
@@ -581,19 +656,37 @@ fn detect_filesystem_with_request_inner(
         };
         performance::record_logged_stage("filesystem.repo", repo_started.elapsed(), Level::DEBUG);
 
-        let git = match git_handle {
+        let detected_git = match git_handle {
             Some(handle) => handle.join().unwrap()?,
             None => None,
         };
-        // Aggregate evidence waits for repo detection rather than running on
-        // the Git thread: commit attribution reuses this request's package
-        // catalog instead of detecting repository structure a second time.
-        let aggregate_git = match (collect_aggregate, git_observation) {
-            (true, Some(observation)) if git.is_some() => observation
-                .with_repository(|repo| {
+        let mut commit_links = std::collections::HashMap::new();
+        let mut aggregate_git = None;
+        let git = match (mode, git_observation) {
+            // Status selectors and aggregate evidence wait for repo detection
+            // rather than running on the Git thread: they reuse this request's
+            // package catalog instead of detecting repository structure again.
+            (FilesystemGitMode::Status(options), Some(observation)) => {
+                let packages = repo_context
+                    .info
+                    .as_ref()
+                    .and_then(|repo| repo.packages.as_deref());
+                let (git, links) = git::status_report::finish_status(
+                    observation,
+                    detected_git,
+                    packages,
+                    options,
+                )?;
+                commit_links = links;
+                git
+            }
+            (FilesystemGitMode::Aggregate, Some(observation)) if detected_git.is_some() => {
+                aggregate_git = observation.with_repository(|repo| {
                     repo.observe_aggregate_evidence(repo_context.info.as_ref())
-                })?,
-            _ => None,
+                })?;
+                detected_git.map(|(git, _)| git)
+            }
+            _ => detected_git.map(|(git, _)| git),
         };
         let formatting = formatting_handle.and_then(|handle| handle.join().unwrap());
 
@@ -693,7 +786,7 @@ fn detect_filesystem_with_request_inner(
             false => None,
         };
 
-        Ok(AggregateFilesystemDetection {
+        Ok(FilesystemDetection {
             filesystem: FilesystemInfo {
                 languages,
                 files,
@@ -702,7 +795,8 @@ fn detect_filesystem_with_request_inner(
                 formatting,
                 docs,
             },
-            git: aggregate_git,
+            aggregate_git,
+            commit_links,
         })
     })
 }

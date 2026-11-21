@@ -119,11 +119,13 @@ pub(crate) fn build_with_outcome(
             package.as_deref(),
             package_area.as_deref(),
         )),
-        // `git-status --json` returns the focused `GitInfo` object.
-        // Package scoping is performed in `commands.rs` between detection
-        // and serialization, so we just serialize whatever git data lives
-        // on `result.filesystem` at this point.
-        Some(RepoAction::GitStatus { .. }) => BuildOutcome::pure(git_status_value(result)),
+        // `git-status --json` returns the focused `GitInfo` object. The CLI
+        // dispatches it to `sniff::filesystem::detect_repo_git_status`, which
+        // applies the selectors, and serializes through `git_status_value`
+        // too; this arm serializes whatever Git data a result carries.
+        Some(RepoAction::GitStatus { .. }) => BuildOutcome::pure(git_status_value(
+            result.filesystem.as_ref().and_then(|fs| fs.git.as_ref()),
+        )),
         // Phase 3: dirty / staged / unstaged package + package-area families
         // emit `{ scope, kind, names }` so JSON consumers can scope
         // automation by lifecycle (dirty/staged/unstaged) and
@@ -547,13 +549,10 @@ fn build_deps_package_entry(pkg: &Package) -> Value {
 /// Returns the `GitInfo` object directly. When git information is unavailable
 /// (e.g. the working directory is not inside a git repository), an empty
 /// object is returned so JSON consumers always see an object shape.
-fn git_status_value(result: &SniffResult) -> Value {
-    if let Some(ref fs) = result.filesystem
-        && let Some(ref git) = fs.git
-    {
-        serde_json::to_value(git).unwrap_or(Value::Null)
-    } else {
-        json!({})
+pub(crate) fn git_status_value(git: Option<&sniff::filesystem::git::GitInfo>) -> Value {
+    match git {
+        Some(git) => serde_json::to_value(git).unwrap_or(Value::Null),
+        None => json!({}),
     }
 }
 

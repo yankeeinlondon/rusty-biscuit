@@ -72,5 +72,5 @@ fn main() {
 
     // `render_git_section` constructs its own `Terminal::default()` internally,
     // so capability detection happens inside the real terminal at runtime.
-    print!("{}", render_git_section(&git, 10, 0, false, None, None));
+    print!("{}", render_git_section(&git, 10, 0, false, None, None, None));
 }

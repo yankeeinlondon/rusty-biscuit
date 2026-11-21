@@ -26,9 +26,10 @@ mod repo;
 
 use remote::{handle_pr_command, handle_remote_url, handle_shorthand};
 use repo::{
-    RepoPackageAreasArgs, RepoPackageManagerArgs, RepoPackagesArgs, RepoTestRunnerArgs,
+    RepoGitStatusArgs, RepoPackageAreasArgs, RepoPackageManagerArgs, RepoPackagesArgs, RepoTestRunnerArgs,
     RepoVersionArgs, handle_file_list_command, handle_repo_branches, handle_repo_dependencies,
-    handle_repo_package_areas, handle_repo_package_manager, handle_repo_packages,
+    handle_repo_git_status, handle_repo_package_areas, handle_repo_package_manager,
+    handle_repo_packages,
     handle_repo_test_runner, handle_repo_version,
 };
 
@@ -527,6 +528,32 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle RepoAction variants that don't need full detection as early returns
     if let Some(ref action) = repo_action {
         match action {
+            crate::args::RepoAction::GitStatus {
+                history,
+                refresh_remotes,
+                compact,
+                package,
+                package_area,
+                branch,
+                worktree,
+            } => {
+                return handle_repo_git_status(
+                    RepoGitStatusArgs {
+                        history: *history,
+                        refresh_remotes: *refresh_remotes,
+                        compact: *compact,
+                        package: package.as_deref(),
+                        package_area: package_area.as_deref(),
+                        branch: branch.as_ref().map(Option::as_deref),
+                        worktree: worktree.as_deref(),
+                    },
+                    base_dir.as_deref(),
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    &perf,
+                );
+            }
             crate::args::RepoAction::Remote { remote } => {
                 let remote = match remote {
                     Some(r) => r.clone(),
@@ -1149,31 +1176,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             _ => {
-                // Other RepoAction variants (Structure, GitStatus, Deps, etc.)
-                // are handled after full detection below
+                // Other RepoAction variants (Structure, Deps, etc.) are
+                // handled after full detection below
             }
         }
     }
 
-    let refresh_remotes_enabled = match &repo_action {
-        Some(crate::args::RepoAction::GitStatus {
-            refresh_remotes: true,
-            ..
-        }) => true,
-        _ => cli
-            .command
-            .as_ref()
-            .is_some_and(|command| command.refresh_remotes()),
-    };
+    let refresh_remotes_enabled = cli
+        .command
+        .as_ref()
+        .is_some_and(|command| command.refresh_remotes());
 
     // Set commit count from history flag
-    let history_count = match &repo_action {
-        Some(crate::args::RepoAction::GitStatus { history, .. }) => *history,
-        _ => cli
-            .command
-            .as_ref()
-            .map_or(DEFAULT_COMMIT_COUNT, |c| c.history()),
-    };
+    let history_count = cli
+        .command
+        .as_ref()
+        .map_or(DEFAULT_COMMIT_COUNT, |c| c.history());
 
     // Lightweight repo subcommands only need the repo root and package list —
     // no worktrees, commits, or per-file change stats. Using `summary` skips the
@@ -1315,37 +1333,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         })
                         .without_file_inventory(),
                 ),
-            Some(crate::args::RepoAction::GitStatus {
-                package,
-                package_area,
-                ..
-            }) => {
-                // `git-status` renders only the git section (Status, Worktrees,
-                // Meta). Repo language scanning, docs, formatting, and the file
-                // inventory are never displayed, so none of it is requested —
-                // this was the dominant fixed cost keeping the command above
-                // the 500ms target.
-                //
-                // Repo *structure* is still required to resolve a
-                // `--package`/`--package-area` scope to a path; in that case
-                // keep the cheap `structure()` scan only.
-                let needs_packages = package.is_some() || package_area.is_some();
-                let fs = FilesystemRequest::new()
-                    .git(git_request.clone())
-                    .without_docs()
-                    .without_formatting()
-                    .without_file_inventory();
-                let fs = if needs_packages {
-                    fs.repo(RepoRequest::structure())
-                } else {
-                    fs.without_repo()
-                };
-                DetectionPlan::new()
-                    .without_os()
-                    .without_hardware()
-                    .without_network()
-                    .filesystem(fs)
-            }
             _ => DetectionPlan::new()
                 .without_os()
                 .without_hardware()
@@ -1423,186 +1410,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         perf.collect(|| detect_with_plan(plan))?
     };
 
-    // Handle package scoping for git actions. Both `--package` and
-    // `--package-area` are honored; when both are passed, the resolved package
-    // path must lie within the resolved area (intersection error fires here).
-    let git_scope = match &repo_action {
-        Some(crate::args::RepoAction::GitStatus {
-            package,
-            package_area,
-            ..
-        }) => resolve_package_and_area(
-            packages_from_result(&result),
-            package.as_deref(),
-            package_area.as_deref(),
-        )?,
-        _ => None,
-    };
-    if let Some(path_prefix) = git_scope.as_deref()
-        && let Some(ref mut filesystem) = result.filesystem
-        && filesystem.git.is_some()
-    {
-        let dir = base_dir
-            .as_deref()
-            .unwrap_or_else(|| std::path::Path::new("."));
-        {
-            let scoped_history = sniff::filesystem::commits_for_path_at(
-                dir,
-                path_prefix,
-                sniff::filesystem::PathHistoryOptions::new(history_count),
-            )?;
-            if let Some(ref mut git) = filesystem.git {
-                git.recent = scoped_history.commits;
-
-                // Filter file_changes to the package path
-                git.file_changes
-                    .retain(|f| f.path.to_string_lossy().starts_with(path_prefix));
-
-                // Filter dirty files
-                let status = git
-                    .status
-                    .as_mut()
-                    .expect("git-status command always computes status");
-                status
-                    .dirty
-                    .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
-
-                // Filter untracked files
-                status
-                    .untracked
-                    .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
-
-                // Update counts to match filtered lists
-                status.staged_count = git
-                    .file_changes
-                    .iter()
-                    .filter(|f| {
-                        f.status == sniff::filesystem::git::FileStatus::Staged
-                            || f.status == sniff::filesystem::git::FileStatus::Both
-                    })
-                    .count();
-                status.unstaged_count = git
-                    .file_changes
-                    .iter()
-                    .filter(|f| {
-                        f.status == sniff::filesystem::git::FileStatus::Modified
-                            || f.status == sniff::filesystem::git::FileStatus::Both
-                    })
-                    .count();
-                status.untracked_count = git
-                    .file_changes
-                    .iter()
-                    .filter(|f| f.status == sniff::filesystem::git::FileStatus::Untracked)
-                    .count();
-                status.is_dirty = status.staged_count > 0
-                    || status.unstaged_count > 0
-                    || status.untracked_count > 0
-                    || git
-                        .file_changes
-                        .iter()
-                        .any(|f| f.status == sniff::filesystem::git::FileStatus::Conflicted);
-            }
-        }
-    }
-
-    // Branch filter for `repo git-status --branch [<name>]`. When the flag is
-    // given without a value, the current branch is used (which is a no-op vs
-    // the default HEAD walk). When a different branch is given, replace the
-    // recent commit list with one walked from that branch's tip.
-    if let Some(crate::args::RepoAction::GitStatus {
-        branch: Some(branch_opt),
-        ..
-    }) = &repo_action
-        && let Some(ref mut filesystem) = result.filesystem
-        && let Some(ref mut git) = filesystem.git
-    {
-        let explicit = branch_opt.as_deref().filter(|s| !s.is_empty());
-        let target_branch = explicit
-            .map(str::to_string)
-            .or_else(|| git.current_branch.clone());
-
-        if let Some(branch_name) = target_branch
-            && git.current_branch.as_deref() != Some(branch_name.as_str())
-        {
-            let dir = base_dir
-                .as_deref()
-                .unwrap_or_else(|| std::path::Path::new("."));
-            git.recent =
-                sniff::filesystem::commits_for_branch_at(dir, &branch_name, history_count)?;
-
-            // Working-tree state belongs to the currently checked-out branch,
-            // not the one being inspected — clear it so the output doesn't
-            // imply those files are dirty on the target branch.
-            git.file_changes.clear();
-            let status = git
-                .status
-                .as_mut()
-                .expect("git-status command always computes status");
-            status.dirty.clear();
-            status.untracked.clear();
-            status.staged_count = 0;
-            status.unstaged_count = 0;
-            status.untracked_count = 0;
-            status.is_dirty = false;
-        }
-    }
-
-    // Worktree filter for `repo git-status --worktree <name>`. Replaces both
-    // the recent commit list and the working-tree status with those of the
-    // selected worktree. The selector matches against either the worktree's
-    // branch (the `worktrees` HashMap key) or its directory basename.
-    if let Some(crate::args::RepoAction::GitStatus {
-        worktree: Some(wt_selector),
-        ..
-    }) = &repo_action
-        && let Some(ref mut filesystem) = result.filesystem
-        && let Some(ref mut git) = filesystem.git
-    {
-        let matched = git
-            .worktrees
-            .values()
-            .find(|info| {
-                info.branch == *wt_selector
-                    || info
-                        .filepath
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|basename| basename == *wt_selector)
-            })
-            .cloned();
-
-        match matched {
-            Some(info) => {
-                if let Some(wt_repo) = sniff::filesystem::git::GitRepo::discover(&info.filepath)? {
-                    git.recent = wt_repo.recent_commits(history_count);
-
-                    let file_changes = wt_repo.file_changes().unwrap_or_default();
-                    let repo_status = wt_repo.repo_status().unwrap_or_default();
-                    git.file_changes = file_changes;
-                    git.status = Some(repo_status);
-                }
-                // Reflect the worktree's location so absolute file paths in
-                // the rendered output resolve to the worktree, and the queried
-                // branch so downstream code sees it as the current branch.
-                git.repo_root = info.filepath.clone();
-                git.current_branch = Some(info.branch.clone());
-            }
-            None => {
-                let names: Vec<String> = git
-                    .worktrees
-                    .values()
-                    .map(|info| info.branch.clone())
-                    .collect();
-                let listing = if names.is_empty() {
-                    "no linked worktrees found".to_string()
-                } else {
-                    format!("available: {}", names.join(", "))
-                };
-                return Err(format!("Worktree not found: {} ({})", wt_selector, listing).into());
-            }
-        }
-    }
-
     // Tier 2/3 scoping: validate that `--package` and `--package-area` resolve
     // and (when both supplied) overlap. The output functions apply the actual
     // filtering; this call surfaces the intersection error before render time.
@@ -1649,7 +1456,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
     ) = &repo_action
     {
-        resolve_package_and_area(
+        sniff::filesystem::repo::resolve_package_and_area(
             packages_from_result(&result),
             package.as_deref(),
             package_area.as_deref(),
@@ -2093,143 +1900,6 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
     }
 
     result
-}
-
-/// Resolve a package name to its path prefix for git filtering.
-///
-/// Performs an exact case-insensitive match on `Package.name`. The returned
-/// path always ends with a trailing `/` so `starts_with` filtering matches
-/// whole-segment boundaries.
-///
-/// ## Errors
-///
-/// Returns an error listing valid package names when no package matches.
-pub(super) fn resolve_package_path(
-    packages: Option<&[sniff::filesystem::repo::Package]>,
-    pkg_name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let Some(packages) = packages else {
-        return Err("No packages found in this repository".into());
-    };
-
-    let lower = pkg_name.to_lowercase();
-
-    if let Some(pkg) = packages.iter().find(|p| p.name.to_lowercase() == lower) {
-        return Ok(format!("{}/", pkg.relative));
-    }
-
-    let mut names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
-    names.sort();
-    names.dedup();
-
-    Err(format!(
-        "Package '{}' not found.\n\nValid package names: {}",
-        pkg_name,
-        names.join(", "),
-    )
-    .into())
-}
-
-/// Resolve a package-area name to its path prefix for git filtering.
-///
-/// Performs a case-insensitive **prefix** match on `Package.package_area`.
-/// The returned path always ends with a trailing `/` so `starts_with`
-/// filtering matches whole-segment boundaries. The canonical area casing
-/// from the package list is preserved.
-///
-/// ## Errors
-///
-/// Returns an error listing valid package areas when no area matches.
-pub(super) fn resolve_package_area_path(
-    packages: Option<&[sniff::filesystem::repo::Package]>,
-    area: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let Some(packages) = packages else {
-        return Err("No packages found in this repository".into());
-    };
-
-    let lower = area.to_lowercase();
-
-    // The top-level `""` area has no directory prefix to filter by.
-    if let Some(pkg) = packages
-        .iter()
-        .filter(|p| !p.package_area.is_empty())
-        .find(|p| p.package_area.to_lowercase().starts_with(&lower))
-    {
-        return Ok(format!("{}/", pkg.package_area));
-    }
-
-    let mut areas: Vec<&str> = packages
-        .iter()
-        .map(|p| p.package_area.as_str())
-        .filter(|area| !area.is_empty())
-        .collect();
-    areas.sort();
-    areas.dedup();
-
-    Err(format!(
-        "Package area '{}' not found.\n\nValid package areas: {}",
-        area,
-        areas.join(", "),
-    )
-    .into())
-}
-
-/// Resolve and intersect optional `--package` and `--package-area` inputs.
-///
-/// Returns `Ok(None)` when both inputs are `None`. Otherwise resolves the
-/// inputs that are `Some` via [`resolve_package_path`] and
-/// [`resolve_package_area_path`] respectively. When **both** are `Some`, the
-/// resolved package path must start with the resolved area path; otherwise
-/// the function returns a hard error. The narrower prefix (the package path)
-/// is returned in the overlap case.
-///
-/// ## Errors
-///
-/// - Either resolver propagates its error when an input does not match.
-/// - When both resolve but the package is in a different area, the error
-///   message names the package, its real area, and the requested area.
-pub(super) fn resolve_package_and_area(
-    packages: Option<&[sniff::filesystem::repo::Package]>,
-    package: Option<&str>,
-    area: Option<&str>,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    match (package, area) {
-        (None, None) => Ok(None),
-        (Some(name), None) => resolve_package_path(packages, name).map(Some),
-        (None, Some(area)) => resolve_package_area_path(packages, area).map(Some),
-        (Some(name), Some(area)) => {
-            let pkg_path = resolve_package_path(packages, name)?;
-            let area_path = resolve_package_area_path(packages, area)?;
-            if !pkg_path.starts_with(&area_path) {
-                let lower_name = name.to_lowercase();
-                let real_area = packages
-                    .and_then(|pkgs| pkgs.iter().find(|p| p.name.to_lowercase() == lower_name))
-                    .map(|p| p.package_area.clone())
-                    .unwrap_or_else(|| pkg_path.trim_end_matches('/').to_string());
-                let requested = area_path_label(packages, area).unwrap_or_else(|| area.to_string());
-                return Err(format!(
-                    "Package '{name}' is in area '{real_area}', not '{requested}'"
-                )
-                .into());
-            }
-            Ok(Some(pkg_path))
-        }
-    }
-}
-
-/// Return the canonical package-area label for an input string, if any
-/// package's area starts with the (case-insensitive) input.
-fn area_path_label(
-    packages: Option<&[sniff::filesystem::repo::Package]>,
-    area: &str,
-) -> Option<String> {
-    let packages = packages?;
-    let lower = area.to_lowercase();
-    packages
-        .iter()
-        .find(|p| p.package_area.to_lowercase().starts_with(&lower))
-        .map(|p| p.package_area.clone())
 }
 
 /// Extract the package list from a [`SniffResult`] for resolver consumption.

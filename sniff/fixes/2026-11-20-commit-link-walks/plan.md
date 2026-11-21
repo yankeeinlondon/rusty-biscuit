@@ -2,14 +2,50 @@
 total_phases: 4
 created: 2026-11-20
 status: planned
-phase: 2
+phase: 4
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+- sniff
+- sniff-detection-cli
+source_files_during_phase_2:
+- sniff/lib/src/filesystem/git/commit_links.rs
+- sniff/lib/src/filesystem/git/remote_refresh.rs
+- sniff/cli/src/output/filesystem/mod.rs
+- sniff/cli/src/output/mod.rs
+- sniff/cli/src/bin/render_git_status_fixture.rs
+docs_updated_during_phase_2:
+- sniff/docs/topics/repo/recent-commits.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/sniff/architecture.md
+source_files_during_phase_3:
+- sniff/lib/src/error.rs
+- sniff/lib/src/filesystem/mod.rs
+- sniff/lib/src/filesystem/git/mod.rs
+- sniff/lib/src/filesystem/git/types.rs
+- sniff/lib/src/filesystem/git/discovery.rs
+- sniff/lib/src/filesystem/git/remote_refresh.rs
+- sniff/lib/src/filesystem/git/status_report.rs
+- sniff/lib/src/filesystem/git/status_report_tests.rs
+- sniff/lib/src/filesystem/repo/mod.rs
+- sniff/lib/src/filesystem/repo/scope.rs
+- sniff/lib/src/filesystem/repo/aggregate_view.rs
+- sniff/cli/src/commands/mod.rs
+- sniff/cli/src/commands/repo.rs
+- sniff/cli/src/output/repo_json.rs
+- sniff/cli/tests/l1/cli.rs
+docs_updated_during_phase_3:
+- sniff/docs/cli/repo_git-status.md
+- sniff/docs/topics/repo/recent-commits.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/sniff/architecture.md
+- .claude/skills/sniff/performance.md
 ---
 
 # Reuse shared Git history when resolving commit links
@@ -57,13 +93,13 @@ The fix is done when tests prove exact visit savings, preference and shallow-his
 
 ### Wave 1
 
-- [ ] **Prune completed ancestry**
+- [x] **Prune completed ancestry**
   - Own `git/commit_links.rs` and `git/remote_refresh.rs` for this wave. Implement filtering, budget and visitor behavior, the coverage guard, and independent fallback. Keep deep containment on the unfiltered entry and update affected comments.
   - Extend `commit_links.rs::tests::containment` using its git2 helpers and `performance::testing::measure`. Give preferred and later tips a shared base, unique commits, a duplicate tip and an ancestor tip. Budget exactly the distinct reachable count for an absent target and assert `Some(false)` with exact visits. Show independent mode exhausts the same budget. Assert preferred and later unique URLs and retain the existing priority, default branch, timestamp, snapshot and budget coverage.
   - Inject a failure after a shared commit is yielded but before its parent is visited. Seed the completed set with an earlier completed tip. Delegate to the real walker, stopping at the prescribed ID and translating that test-only stop to `Failed`. Assert later walks receive no filter, a winner found during the failed walk survives, a later tip finds the missed ancestor, and another absent target stays unknown.
   - Build a shallow clone layout using git2 with two tips over a common boundary commit written through the ODB, a `shallow` file naming that commit, and its parent object omitted. Assert gix recognizes the boundary, the shared and independent results match, and shared mode visits fewer commits. Cover observed empty tips versus missing coverage. Run the `commit_links` and `remote_refresh` L1 slices via filtered `just test` in `sniff/`.
 
-- [ ] **Consume captured links**
+- [x] **Consume captured links**
   - Own `cli/src/output/filesystem/mod.rs`, `cli/src/output/mod.rs`, and the synthetic status fixture binary. Implement the renderer and heading helper signatures and pass the captured URL to the existing commit line formatter.
   - Add a renderer-boundary L1 test with two IDs sharing a seven-character prefix. Assert URL markup on only the selected full ID, hash fallback on the other, and oldest-first display. Use a nonexistent repository path and a fresh collector to assert zero Git acquisition and work in rendering. Keep existing compact and synthetic terminal tests.
 
@@ -71,22 +107,22 @@ The fix is done when tests prove exact visit savings, preference and shallow-his
 
 ### Wave 2
 
-- [ ] **Prepare library status**
+- [x] **Prepare library status**
   - Implement the focused library path, snapshot companion, history adaptation, worktree ref reuse and shared scope resolver. This follows the Phase 2 changes to `remote_refresh.rs`. Keep aggregate evidence on its existing path and update its companion field access. Use the OS skill for common-directory comparisons and the retained trusted discovery seams.
   - Add focused library tests in `git/status_report.rs` for default and detached HEAD, branch no-op and replacement, package and area intersection, history-zero path behavior, and selected worktree history, status and HEAD decoration. Test worktree-specific URL config via `extensions.worktreeConfig` with shared refs. Test a shared symbolic branch that targets distinct per-worktree `refs/worktree/…` refs for the fresh-snapshot case. Assert one ref walk for shared and two for distinct views. Exercise scope, branch and worktree together at the library boundary, preserving earlier selector errors and linking only the final display. Assert a missing snapshot produces an unlinked report.
   - Exercise explicit refresh against a temporary bare remote whose tip moves. Configure a known browser remote and use Git `url.*.insteadOf` to rewrite its fetch to a local file URL. Assert links and deep membership use post-fetch refs with no extra enumeration for linking. Run the focused library L1 slice.
 
-- [ ] **Update behavior guides**
+- [x] **Update behavior guides**
   - Update `sniff/docs/cli/repo_git-status.md` with local collection of links after history selection, plain and zero-count skips, and the focused JSON contract. Point consumers to `recent-commits --json`. Correct the guide's conflicted-file ordering and unlinked-hash styling to match `build_git_status_items` and `format_commit_line`, and fix its obsolete source paths.
   - Update `sniff/docs/topics/repo/recent-commits.md` and `.claude/skills/sniff/architecture.md` with shared visits, failed-walk fallback, tri-state containment, repository-wide shallow boundaries, and independent deep membership. Update `.claude/skills/sniff/performance.md` with the stage, final snapshot timing, and counter meaning. The README is already an overview and there is no Sniff caller skill to publish.
 
 ### CLI wiring
 
-- [ ] **Wire focused command**
+- [x] **Wire focused command**
   - After Wave 2, dispatch focused status and take the final performance snapshot. Remove the generic status-plan arm and the three post-detection CLI scope projections. Remove status-only branches in generic history and refresh plumbing while retaining the existing accessors used elsewhere. Route remaining package and area validation through the moved resolver.
   - Use the JSON projection and heading helper from the rules. Confirm ordinary and compact terminal output keep their sections, focused JSON emits a single value, and the same final performance report is used for stdout JSON and the stderr diagnostic.
 
-- [ ] **Verify command paths**
+- [x] **Verify command paths**
   - Extend `cli/tests/l1/cli.rs` using `common::owned_sniff_command`, `create_cli_monorepo_distinct_area_and_package`, and the contained/unpushed fixture pattern from `test_repo_hash_and_git_status_link_only_remote_contained_commits`. Assert final history and visible fallback in default, compact, package, area, branch and worktree modes. Cover bare and current branch, package plus branch, area plus worktree, and the Clap conflict. In the library cases feeding those views, assert the exact set of companion keys equals the displayed full IDs and that commands with scoped histories never carry a link entry for an excluded commit. Compare each retained ID with the expected URL or absence of one. Use the Wave 1 markup test to prove the formatter consumes the supplied URL.
   - Assert one linking stage, one discovery and one ref walk for ordinary and detached text with perf. In a scoped fixture with an unpushed display target, compare linked text with equivalent plain and JSON perf requests. The visit delta equals the fixture's distinct reachable remote history. Plain and focused JSON omit the linking stage. Assert history-zero text and JSON visit parity with and without path scope. Match stage and counter labels after stripping escapes, independent of glyphs, paths and alignment.
   - Parse focused JSON stdout in both perf modes as a single value, preserve the GitInfo shape and check absence of recent link fields. Assert JSON perf diagnostics on stderr. Run focused CLI L1 tests including absent and corrupt history regressions and `test_repo_aggregate_commit_families_match_the_focused_commands`.
