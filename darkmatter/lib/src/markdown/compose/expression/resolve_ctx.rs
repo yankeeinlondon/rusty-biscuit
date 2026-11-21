@@ -111,6 +111,9 @@ pub struct ResolutionContext {
     /// The read gate of a schema slot's evaluation; `None` everywhere else,
     /// which leaves every read as it is (see [`super::read_gate`]).
     pub(crate) slot_gate: Option<Arc<dyn super::read_gate::ReadGate>>,
+    /// An editor observation's guarded reads; `None` everywhere else, which
+    /// leaves every read as it is (see [`super::editor_reads`]).
+    pub(crate) editor: Option<Arc<super::editor_reads::EditorReads>>,
 }
 
 /// Unit tests that never resolve a file use an empty `cwd`.
@@ -147,6 +150,7 @@ impl ResolutionContext {
             caller_file_provenance: HashMap::new(),
             active_caller_file_provenance: None,
             slot_gate: None,
+            editor: None,
         }
     }
 
@@ -458,12 +462,21 @@ impl ResolutionContext {
     ///   URL's host, and [`RemoteTextError::Failed`] when the URL is malformed
     ///   or the fetch failed.
     pub(crate) fn fetch_remote_text(&self, raw: &str) -> Result<Option<String>, RemoteTextError> {
+        let invalid = |e: url::ParseError| {
+            RemoteTextError::Failed(RemoteFetchFailure::new(RemoteReadKind::InvalidReference, format!("invalid URL {raw:?}: {e}")))
+        };
+        // An editor observation answers only from a fresh cache entry and
+        // never registers or starts a fetch.
+        if let Some(editor) = &self.editor {
+            let url = url::Url::parse(raw).map_err(invalid)?;
+            return super::editor_reads::cached_text("remote read", &url, self, editor)
+                .map(Some)
+                .map_err(|pending| RemoteTextError::Pending(PendingRemote(Box::new(pending))));
+        }
         let Some(rf) = self.remote_fetch.as_ref() else {
             return Ok(None);
         };
-        let url = url::Url::parse(raw).map_err(|e| {
-            RemoteTextError::Failed(RemoteFetchFailure::new(RemoteReadKind::InvalidReference, format!("invalid URL {raw:?}: {e}")))
-        })?;
+        let url = url::Url::parse(raw).map_err(invalid)?;
         if let Ok(Some(body)) = rf.get_content_typed(&url) {
             return Ok(Some(body));
         }
@@ -496,7 +509,25 @@ pub(crate) enum RemoteTextError {
     Denied,
     /// Any other failure, typed and worded by the remote runtime.
     Failed(RemoteFetchFailure),
+    /// An editor observation has no usable cached body, or ran out of work:
+    /// the failure to return, an [`ExpressionError::ObservationPending`] or
+    /// an [`ExpressionError::IterationLimit`].
+    Pending(PendingRemote),
 }
+
+/// An editor observation's remote failure, carried through
+/// [`RemoteTextError`]. Compared by its display text, which is all the
+/// remote-text comparisons in tests need.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingRemote(pub(crate) Box<ExpressionError>);
+
+impl PartialEq for PendingRemote {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_string() == other.0.to_string()
+    }
+}
+
+impl Eq for PendingRemote {}
 
 /// Returns `true` when the argument is an HTTP(S) URL (handled remotely rather
 /// than as a filesystem path).

@@ -44,6 +44,7 @@ use super::call_binding::{
     CallBindingError, CompiledParameter, CompiledSignature, FunctionRegistration, NoNamedTypes, SignatureProblem,
     shape_from_property_def_with_definitions,
 };
+use super::data::options::HeaderMode;
 use super::functions;
 use super::prepared::PreparedValue;
 use super::scope::{ObjectEntryType, Polarity, Shape as ScopeShape, TypeScope};
@@ -219,6 +220,7 @@ fn partial_object(arg: &SpannedExpr) -> Option<(serde_json::Map<String, Value>, 
 /// | an array literal | an array of the union of its items' types |
 /// | a call | the union of the declared `returns` of every overload its argument count can select |
 /// | `load_data(file, '<contract>')`, with or without an options argument | the literal contract's type (named references `unknown`), with `null` when `file` may be null; `null` for a literal `null` file |
+/// | `load_data(file)`, or `load_data(file, null, options?)` | provisionally `{ <string>: unknown } \| unknown[]`; `{ <string>: unknown }[]` for a provable CSV/TSV read with object rows, `unknown[][]` with `header: false`; `null` added as for a contract |
 /// | `try(expr, fallback)` | the union of both operands' types; an authored `[]` operand adds nothing when the other operand's type provably accepts `[]` |
 /// | `x \|\| y` | `x`'s type without `null`, joined with `y`'s type where `x` is falsy |
 /// | `c ? a : b` | `a`'s type where `c` holds, joined with `b`'s where it does not |
@@ -255,6 +257,13 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
                 .unwrap_or(ScopeShape::Unknown { non_null: false }),
         ),
         SpannedExprKind::FunctionCall { name, args } => {
+            // An editor's observation of this very call types it by what it
+            // returned.
+            if is_load_data(name)
+                && let Some(observed) = scope.declared().observed_call(expr)
+            {
+                return observed.clone();
+            }
             load_data_type(name, args, scope)
                 .or_else(|| try_type(name, args, scope))
                 .unwrap_or_else(|| call_returns(name, args.len()))
@@ -307,33 +316,86 @@ fn is_load_data(name: &str) -> bool {
 /// The canonical name of the data-loading function.
 const LOAD_DATA: &str = "load_data";
 
-/// The type a `load_data` call (two arguments, or three with options)
-/// returns when its `as` is a literal contract the passive judgment accepts;
-/// `None` (the catalog's `any | null`) for a computed or invalid contract.
-/// Options, literal or computed, never change the type.
+/// The type a `load_data` call returns when its `as` is a literal contract
+/// the passive judgment accepts; `None` (the catalog's `any | null`) for a
+/// computed or invalid contract. Options, literal or computed, never change
+/// a contracted call's type.
+///
+/// An uncontracted call (one argument, or a literal `null` `as`) has no
+/// declared result, so its type is provisional ([`uncontracted_type`]): an
+/// open object or an array of unknown items, which proves no member absent.
 ///
 /// A named-type reference, which a shape cannot resolve, is `unknown` in
 /// place. The signature's null passthrough survives: a literal `null` file
 /// returns `null`, and a file that may be `null` adds `null` to the type.
 fn load_data_type(name: &str, args: &[SpannedExpr], scope: &TypeScope<'_>) -> Option<ScopeShape> {
-    let (file, contract) = match args {
-        [file, contract] | [file, contract, _] => (file, contract),
+    let (file, contract, options) = match args {
+        [file] => (file, None, None),
+        [file, contract] => (file, Some(contract), None),
+        [file, contract, options] => (file, Some(contract), Some(options)),
         _ => return None,
     };
     if !is_load_data(name) {
         return None;
     }
-    let carrier = literal_value(contract)?;
-    let written = super::data::written_contract(&carrier)?;
-    let mut denoted = super::data::judge_written_contract(&written).ok()?;
-    unresolved_as_unknown(&mut denoted);
-    let denoted = ScopeShape::of_type(&denoted);
+    let carrier = contract.map_or(Some(Value::Null), literal_value)?;
+    let denoted = if carrier.is_null() {
+        uncontracted_type(file, options)
+    } else {
+        let written = super::data::written_contract(&carrier)?;
+        let mut denoted = super::data::judge_written_contract(&written).ok()?;
+        unresolved_as_unknown(&mut denoted);
+        ScopeShape::of_type(&denoted)
+    };
     let file = expression_type(file, scope);
     Some(match &file {
         ScopeShape::Arms { arms, nullable: true } if arms.is_empty() => file,
         file if file.admits_null() => denoted.union(&ScopeShape::of_literal(&Value::Null)),
         _ => denoted,
     })
+}
+
+/// The provisional type of an uncontracted `load_data` call: an open object
+/// or an array of unknown items, since any parsed root becomes one of them.
+/// A read the call provably makes as CSV or TSV (a literal `format`, else a
+/// literal file's extension, with literal options) narrows it by its header
+/// mode: objects with open keys for a header record or explicit names,
+/// `unknown[][]` for `header: false`.
+fn uncontracted_type(file: &SpannedExpr, options: Option<&SpannedExpr>) -> ScopeShape {
+    let options = match options.map(literal_value) {
+        None => Some(serde_json::Map::new()),
+        Some(Some(Value::Null)) => Some(serde_json::Map::new()),
+        Some(Some(Value::Object(members))) => Some(members),
+        Some(_) => None,
+    };
+    let tabular_rows = options.and_then(|options| {
+        let format = match options.get("format") {
+            Some(Value::String(name)) => super::data::options::format_from_name(name)?,
+            None | Some(Value::Null) => match literal_value(file)? {
+                Value::String(path) => format_of_path(&path)?,
+                _ => return None,
+            },
+            Some(_) => return None,
+        };
+        if !matches!(format, biscuit_file::DataFormat::Csv | biscuit_file::DataFormat::Tsv) {
+            return None;
+        }
+        match options.get("header") {
+            None | Some(Value::Null | Value::Bool(true) | Value::Array(_)) => Some(open_object()),
+            Some(Value::Bool(false)) => Some(ScopeShape::array_of(&ScopeShape::Unknown { non_null: false })),
+            Some(_) => None,
+        }
+    });
+    match tabular_rows {
+        Some(row) => ScopeShape::array_of(&row),
+        None => open_object().union(&ScopeShape::array_of(&ScopeShape::Unknown { non_null: false })),
+    }
+}
+
+/// An object with unknown keys, each of unknown type.
+fn open_object() -> ScopeShape {
+    super::data::judge_written_contract("{ <string>: unknown }")
+        .map_or(ScopeShape::Unknown { non_null: true }, |def| ScopeShape::of_type(&def))
 }
 
 /// The type a two-operand `try(expr, fallback)` call returns: either
@@ -1311,7 +1373,9 @@ fn load_data_problem(
     options_bind: bool,
     leading_bind: bool,
 ) -> Option<DataProblem> {
+    let no_contract = ArgumentType::Literal(Value::Null);
     let (file, contract, options) = match arguments {
+        [file] => (file, &no_contract, OptionsView::Closed(None)),
         [file, contract] => (file, contract, OptionsView::Closed(None)),
         [file, contract, options] if options_bind => (file, contract, OptionsView::of(registration, options)),
         [file, contract, _] => (file, contract, OptionsView::Unknown),
@@ -1321,6 +1385,16 @@ fn load_data_problem(
     let delimiter = match options.literal("delimiter") {
         Some(Value::String(text)) => match super::data::options::delimiter_byte(text) {
             Ok(byte) => Some(byte),
+            Err(error) if leading_bind => return Some(data_problem(&error)),
+            Err(_) => None,
+        },
+        _ => None,
+    };
+    let header = match options.literal("header") {
+        Some(Value::Bool(true)) => Some(HeaderMode::FirstRecord),
+        Some(Value::Bool(false)) => Some(HeaderMode::None),
+        Some(Value::Array(names)) => match super::data::options::header_names(names) {
+            Ok(names) => Some(HeaderMode::Names(names)),
             Err(error) if leading_bind => return Some(data_problem(&error)),
             Err(_) => None,
         },
@@ -1340,11 +1414,7 @@ fn load_data_problem(
     }
     let format = provable_format(file, &options)?;
     // 3. Applicability of literal options to the provable format.
-    let header = match options.literal("header") {
-        Some(Value::Bool(header)) => Some(*header),
-        _ => None,
-    };
-    let chosen = super::data::options::DataOptions { format: Some(format), delimiter, header };
+    let chosen = super::data::options::DataOptions { format: Some(format), delimiter, header: header.clone() };
     if let Err(error) = chosen.check_applicability(format) {
         return Some(data_problem(&error));
     }
@@ -1354,7 +1424,9 @@ fn load_data_problem(
     }
     let mut problems = verdicts?.into_iter().map(|verdict| match verdict {
         ContractVerdict::Problem(problem) => Some(problem),
-        ContractVerdict::Rows { written, property, definitions } => row_problem(&written, &property, &definitions, header),
+        ContractVerdict::Rows { written, property, definitions } => {
+            row_problem(&written, &property, &definitions, header.as_ref())
+        }
         ContractVerdict::Open => None,
     });
     let first = problems.next()??;
@@ -1485,13 +1557,19 @@ fn judge_literal_contract(carrier: &Value) -> ContractVerdict {
 }
 
 /// Step 4 of [`load_data_problem`]: the contract's rows against a tabular
-/// format, and against positional reading for a literal `header: false`.
-fn row_problem(written: &str, property: &PropertyDef, definitions: &DefinitionTable, header: Option<bool>) -> Option<DataProblem> {
+/// format, and against the row shape a literal `header` mode reads
+/// (`header: false` positional rows, a list of names object rows).
+fn row_problem(
+    written: &str,
+    property: &PropertyDef,
+    definitions: &DefinitionTable,
+    header: Option<&HeaderMode>,
+) -> Option<DataProblem> {
     use super::data::DataError;
-    let conflict = match super::data::classify_rows(property, definitions) {
-        Ok(class) if header == Some(false) => super::data::require_positional_rows(class).err()?,
-        Ok(_) => return None,
-        Err(conflict) => conflict,
+    let conflict = match (super::data::classify_rows(property, definitions), header) {
+        (Ok(class), Some(header)) => super::data::contract::require_header_rows(header, class).err()?,
+        (Ok(_), None) => return None,
+        (Err(conflict), _) => conflict,
     };
     Some(data_problem(&DataError::RowShapeConflict { written: written.to_string(), conflict }))
 }
@@ -2196,6 +2274,52 @@ mod load_data_options_tests {
         assert_eq!(typed("load_data('rows.csv', 'tuple([string, number])[]', {header: false})"), two);
         assert_eq!(typed("load_data('rows.csv', 'tuple([string, number])[]', opts)"), two);
         assert_eq!(typed("load_data(null, 'string[]', {format: 'csv'})"), typed("load_data(null, 'string[]')"));
+    }
+
+    /// An uncontracted call is provisional: the general container union, or
+    /// for a provable CSV/TSV read the header mode's rows; `null` joins as
+    /// the file argument requires, and a literal `null` file is `null`.
+    #[test]
+    fn an_uncontracted_call_has_a_provisional_type() {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        let shape = |source: &str| expression_type(&parse_spanned(source).unwrap(), &scope);
+        trait Admits {
+            fn admits(&self, value: &Value) -> bool;
+        }
+        impl Admits for ScopeShape {
+            fn admits(&self, value: &Value) -> bool {
+                match self {
+                    ScopeShape::Unknown { non_null } => !(value.is_null() && *non_null),
+                    ScopeShape::Arms { arms, nullable } => {
+                        (value.is_null() && *nullable)
+                            || arms.iter().any(|arm| {
+                                simplified_schema::completion::alternative_accepts_in(arm, value, &DefinitionTable::default())
+                            })
+                    }
+                }
+            }
+        }
+        let general = shape("load_data('rows.yaml')");
+        assert_eq!(shape("load_data('rows.yaml', null)"), general);
+        assert_eq!(shape("load_data('rows.csv', null, {format: 'json'})"), general);
+        assert!(general.admits(&serde_json::json!({"key": 1})) && general.admits(&serde_json::json!([1, "x"])));
+        assert!(!general.admits(&Value::Null) && !general.admits(&serde_json::json!("text")));
+
+        let objects = shape("load_data('rows.csv')");
+        for source in ["load_data('rows.csv', null, {header: true})", "load_data('rows.tsv', null, {header: ['a']})", "load_data('x.txt', null, {format: 'csv'})"] {
+            assert_eq!(shape(source), objects, "{source}");
+        }
+        assert!(objects.admits(&serde_json::json!([{"firstName": "Ada"}])) && !objects.admits(&serde_json::json!([["Ada"]])));
+
+        let cells = shape("load_data('rows.csv', null, {header: false})");
+        assert!(cells.admits(&serde_json::json!([["Ada", 1]])) && !cells.admits(&serde_json::json!([{"a": 1}])));
+        // A computed header could choose either shape.
+        assert_eq!(shape("load_data('rows.csv', null, {header: h})"), general);
+
+        assert!(shape("load_data(f)").admits(&Value::Null), "a computed file may be null");
+        assert_eq!(shape("load_data(null)"), ScopeShape::of_literal(&Value::Null));
+        assert_eq!(shape("load_data(null, null, {header: false})"), ScopeShape::of_literal(&Value::Null));
     }
 
     #[test]

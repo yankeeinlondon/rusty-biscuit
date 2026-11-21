@@ -358,6 +358,52 @@ impl Shape {
         };
         Shape::Arms { arms: vec![atom], nullable: false }
     }
+
+    /// The shape of an observed value (an editor's evaluation of a
+    /// property): each scalar its literal, each object its exact fields
+    /// (closed), each array the union of its items' shapes. The walk is
+    /// bounded: past [`OBSERVED_DEPTH`] levels, or where an array's items
+    /// have more than [`OBSERVED_ALTERNATIVES`] distinct shapes, the part is
+    /// `unknown`, so a large value is summarized rather than copied.
+    pub fn observed(value: &serde_json::Value) -> Shape {
+        observed_at(value, 0)
+    }
+}
+
+/// How deep [`Shape::observed`] follows containers.
+pub const OBSERVED_DEPTH: usize = 8;
+/// How many distinct item shapes [`Shape::observed`] keeps per array.
+pub const OBSERVED_ALTERNATIVES: usize = 8;
+
+fn observed_at(value: &serde_json::Value, depth: usize) -> Shape {
+    if depth >= OBSERVED_DEPTH {
+        return Shape::Unknown { non_null: !value.is_null() };
+    }
+    match value {
+        serde_json::Value::Object(members) => {
+            Shape::object_of(members.iter().map(|(key, member)| (key.clone(), observed_at(member, depth + 1))).collect())
+        }
+        serde_json::Value::Array(items) => {
+            let mut joined: Option<Shape> = None;
+            let mut alternatives: Vec<Shape> = Vec::new();
+            for item in items {
+                let shape = observed_at(item, depth + 1);
+                if alternatives.contains(&shape) {
+                    continue;
+                }
+                if alternatives.len() == OBSERVED_ALTERNATIVES {
+                    return Shape::array_of(&Shape::Unknown { non_null: false });
+                }
+                joined = Some(match joined {
+                    Some(joined) => joined.union(&shape),
+                    None => shape.clone(),
+                });
+                alternatives.push(shape);
+            }
+            Shape::array_of(&joined.unwrap_or(Shape::Unknown { non_null: false }))
+        }
+        scalar => Shape::of_literal(scalar),
+    }
 }
 
 /// The fields `pattern` binds against an entry of type `entry`, with each

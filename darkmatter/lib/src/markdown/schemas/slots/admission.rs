@@ -211,6 +211,143 @@ impl Walk {
     }
 }
 
+/// A document binding an editor property's expression reads.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum PropertyRoot {
+    /// A bare name: a document property, or (when absent) a host or runtime
+    /// binding.
+    Bare(String),
+    /// `fm.NAME`: the authored frontmatter's `NAME`.
+    Fm(String),
+    /// A whole `fm`, or a computed `fm[...]`: every authored property.
+    WholeFm,
+}
+
+/// What an editor property's expression may reach, found passively over
+/// every node (both branches, every operand, every callback body).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PropertyReads {
+    /// The first operation the editor does not evaluate, when there is one.
+    pub(crate) blocked: Option<crate::markdown::compose::expression::editor_reads::PendingReason>,
+    /// The document bindings it reads, sorted.
+    pub(crate) roots: Vec<PropertyRoot>,
+}
+
+/// The editor's admission of a whole-value frontmatter property: the slot
+/// walk's function classes, with document bindings admitted as the
+/// [`PropertyRoot`]s they read. Only pure functions and the guarded readers
+/// (`load_data`, `file_exists`) run; an effectful, captured, or volatile
+/// function, another reader (a listing included), `ctx`, and `current.*` or
+/// `local.*` outside a callback leave the property pending.
+pub(crate) fn property_reads(expr: &SpannedExpr) -> PropertyReads {
+    let mut walk = PropertyWalk { blocked: None, roots: Vec::new() };
+    walk.expr(expr, &Scope::default());
+    walk.roots.sort();
+    walk.roots.dedup();
+    PropertyReads { blocked: walk.blocked, roots: walk.roots }
+}
+
+struct PropertyWalk {
+    blocked: Option<crate::markdown::compose::expression::editor_reads::PendingReason>,
+    roots: Vec<PropertyRoot>,
+}
+
+impl PropertyWalk {
+    fn block(&mut self, reason: crate::markdown::compose::expression::editor_reads::PendingReason) {
+        if self.blocked.is_none() {
+            self.blocked = Some(reason);
+        }
+    }
+
+    fn expr<'e>(&mut self, expr: &'e SpannedExpr, scope: &Scope<'e>) {
+        match &expr.kind {
+            SpannedExprKind::Variable(path) => self.variable(path, scope),
+            SpannedExprKind::StringLiteral(_) | SpannedExprKind::NumberLiteral(_) | SpannedExprKind::BoolLiteral(_) => {}
+            SpannedExprKind::ArrayLiteral(items) => items.iter().for_each(|item| self.expr(item, scope)),
+            SpannedExprKind::ObjectLiteral(entries) => entries.iter().for_each(|entry| self.expr(entry.value(), scope)),
+            SpannedExprKind::UnaryNot(inner) | SpannedExprKind::UnaryMinus(inner) | SpannedExprKind::Paren(inner) => {
+                self.expr(inner, scope);
+            }
+            SpannedExprKind::Binary { left, right, .. }
+            | SpannedExprKind::Comparison { left, right, .. }
+            | SpannedExprKind::LogicalOr { left, right } => {
+                self.expr(left, scope);
+                self.expr(right, scope);
+            }
+            SpannedExprKind::Ternary { condition, then_branch, else_branch } => {
+                self.expr(condition, scope);
+                self.expr(then_branch, scope);
+                self.expr(else_branch, scope);
+            }
+            SpannedExprKind::MemberAccess { base, name } => match bare_variable(base) {
+                Some(path) => self.variable(&format!("{path}.{name}"), scope),
+                None => self.expr(base, scope),
+            },
+            SpannedExprKind::Index { base, index } => {
+                match (bare_variable(base), &index.kind) {
+                    (Some(path), SpannedExprKind::StringLiteral(key)) => self.variable(&format!("{path}.{key}"), scope),
+                    (Some("fm"), _) if !scope.locals.contains(&"fm") => self.roots.push(PropertyRoot::WholeFm),
+                    _ => self.expr(base, scope),
+                }
+                self.expr(index, scope);
+            }
+            SpannedExprKind::FunctionCall { name, args } => {
+                self.call(name);
+                args.iter().for_each(|arg| self.expr(arg, scope));
+            }
+            SpannedExprKind::CallbackCall { name, args } => {
+                self.call(name);
+                for arg in args {
+                    match arg {
+                        SpannedCallArgument::Value(value) => self.expr(value, scope),
+                        SpannedCallArgument::Callback(callback) => {
+                            let mut inner = scope.clone();
+                            match &callback.pattern {
+                                simplified_schema::expression::SpannedBindingPattern::Identifier(name) => {
+                                    inner.locals.push(&name.value);
+                                }
+                                simplified_schema::expression::SpannedBindingPattern::Fields(fields) => {
+                                    inner.locals.extend(fields.iter().map(|field| field.value.as_str()));
+                                }
+                            }
+                            self.expr(&callback.body, &inner);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn call(&mut self, name: &str) {
+        use crate::markdown::compose::expression::editor_reads::PendingReason;
+        match slot_class(name) {
+            Some(SlotClass::Pure) | None => {}
+            Some(SlotClass::InputReading) if crate::markdown::compose::expression::functions::is_editor_guarded_reader(name) => {}
+            Some(SlotClass::InputReading | SlotClass::Rejected) => self.block(PendingReason::Unsupported(format!("{name}()"))),
+            Some(SlotClass::Captured | SlotClass::Volatile) => self.block(PendingReason::RuntimeOnly(format!("{name}()"))),
+        }
+    }
+
+    fn variable(&mut self, path: &str, scope: &Scope<'_>) {
+        use crate::markdown::compose::expression::editor_reads::PendingReason;
+        let mut segments = path.split('.');
+        let root = segments.next().unwrap_or(path);
+        if scope.locals.contains(&root) {
+            return;
+        }
+        match root {
+            "null" | "true" | "false" | "env" => {}
+            "current" | "local" if scope.in_callback() => {}
+            "ctx" | "current" | "local" => self.block(PendingReason::RuntimeOnly(root.to_string())),
+            "fm" => match segments.next() {
+                Some(key) => self.roots.push(PropertyRoot::Fm(key.to_string())),
+                None => self.roots.push(PropertyRoot::WholeFm),
+            },
+            _ => self.roots.push(PropertyRoot::Bare(root.to_string())),
+        }
+    }
+}
+
 /// The variable path `expr` reads directly, through parentheses.
 fn bare_variable(expr: &SpannedExpr) -> Option<&str> {
     match &expr.kind {

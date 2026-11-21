@@ -42,6 +42,44 @@ use super::{
 
 pub use super::positions::{PositionMap, build_position_map};
 
+thread_local! {
+    /// How many [`with_unverified_file_checks`] scopes are running on this
+    /// thread.
+    static UNVERIFIED_FILE_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Runs `judge` with every file check that would touch the filesystem left
+/// unverified on this thread: the eager `darkmatter-file` format judges only
+/// its syntax (as the lazy format always does), the `match()` keyword
+/// admits every value, and a failing file value's diagnostic is never
+/// re-resolved. Nothing is probed or read, so the verdict says nothing
+/// about a file value: a caller that cannot authorize file reads (an editor
+/// judging an observed value) runs a validation here and sets aside the
+/// properties whose declarations judge files.
+///
+/// The scope covers conversion and problem collection alike, since both
+/// run validators on the calling thread. It nests, and it ends when `judge`
+/// returns, even when it panics. Compiled validators and their cache keys
+/// are unchanged: the policy is read when a check runs, never captured.
+pub fn with_unverified_file_checks<T>(judge: impl FnOnce() -> T) -> T {
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            UNVERIFIED_FILE_CHECKS.with(|depth| depth.set(depth.get().saturating_sub(1)));
+        }
+    }
+    UNVERIFIED_FILE_CHECKS.with(|depth| depth.set(depth.get() + 1));
+    let _leave = Leave;
+    judge()
+}
+
+/// Whether a [`with_unverified_file_checks`] scope is running on this
+/// thread.
+#[must_use]
+pub fn file_checks_unverified() -> bool {
+    UNVERIFIED_FILE_CHECKS.with(|depth| depth.get() > 0)
+}
+
 /// Environment variable for overriding the validator-cache bound.
 pub const CACHE_SIZE_ENV: &str = "DARKMATTER_SCHEMA_CACHE_SIZE";
 
@@ -1155,7 +1193,11 @@ fn darkmatter_file_reference_outcome(
     let Value::String(value) = instance.as_ref() else {
         return None;
     };
+    // Unverified, an eager value was judged by its syntax alone, so only a
+    // syntax failure can be here; it is described below without resolving.
+    let unverified = file_checks_unverified();
     if format == format::DARKMATTER_FILE_FORMAT
+        && !unverified
         && let FileRefAnchors::Resolved { base_dir, fallback, context, .. } = anchors
     {
         return match format::resolve_file_reference_in_context(value, base_dir, fallback, context) {
@@ -1168,7 +1210,7 @@ fn darkmatter_file_reference_outcome(
     }
     // A structural validator resolved only an absolute eager value; it judged
     // every other one as the lazy format does.
-    if format == format::DARKMATTER_FILE_FORMAT && format::context_free_path(value).is_some() {
+    if format == format::DARKMATTER_FILE_FORMAT && !unverified && format::context_free_path(value).is_some() {
         let failure = format::FileReferenceFailure::NoMatch { raw: value.to_string(), resolved_from: None };
         return Some((failure.to_string(), file_reference_diagnostic(&failure)));
     }
@@ -2771,6 +2813,33 @@ mod tests {
                 "doc": { "type": "string", "format": "darkmatter-file" }
             }
         })
+    }
+
+    /// Unverified, an eager file value is judged by its syntax alone (a
+    /// missing file passes, a malformed reference still fails), the scope
+    /// nests, and it ends even when the judgment panics.
+    #[cfg(feature = "file")]
+    #[test]
+    fn unverified_file_checks_judge_syntax_only_and_end_with_their_scope() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
+        let missing = json!({ "doc": "./does-not-exist.md" });
+        let malformed = json!({ "doc": "" });
+        assert_eq!(resolved_problems(&v, &missing, &context).len(), 1, "control: verified, a missing file fails");
+        let (missing_problems, malformed_problems) = with_unverified_file_checks(|| {
+            assert!(file_checks_unverified());
+            with_unverified_file_checks(|| assert!(file_checks_unverified()));
+            assert!(file_checks_unverified(), "an inner scope leaves the outer one running");
+            (resolved_problems(&v, &missing, &context), resolved_problems(&v, &malformed, &context))
+        });
+        assert!(missing_problems.is_empty(), "{missing_problems:?}");
+        assert_eq!(malformed_problems.len(), 1, "syntax is still judged: {malformed_problems:?}");
+        assert!(!file_checks_unverified());
+        let panicked = std::panic::catch_unwind(|| with_unverified_file_checks(|| panic!("judge failed")));
+        assert!(panicked.is_err());
+        assert!(!file_checks_unverified(), "a panic ends the scope");
+        assert_eq!(resolved_problems(&v, &missing, &context).len(), 1, "verified again after the scope");
     }
 
     #[cfg(feature = "file")]

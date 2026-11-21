@@ -22,6 +22,7 @@ pub mod event_views;
 pub mod expressions;
 pub mod frontmatter;
 pub mod hosts;
+pub(crate) mod properties;
 pub mod named_types;
 pub mod references;
 pub mod registry;
@@ -238,6 +239,10 @@ pub struct DocumentOverlay {
     /// [`DocumentContext::host_view`](crate::providers::DocumentContext::host_view)
     /// serves without selection.
     pub host: Option<Arc<hosts::HostView>>,
+    /// The slot worker's current observation of the document's eligible
+    /// whole-value properties ([`properties`]); `None` while none is
+    /// installed for this text, or the installed one is stale.
+    pub properties: Option<Arc<crate::slot_jobs::PropertyView>>,
 }
 
 /// How a template schema is being served to a request.
@@ -316,6 +321,7 @@ impl DocumentOverlay {
             yaml_document: None,
             slots: None,
             host: None,
+            properties: None,
         }
         .with_yaml(yaml)
     }
@@ -483,6 +489,9 @@ struct FrontmatterSchema {
     /// The document's selected host, chosen with the outcome; `None` with
     /// no context.
     host: Option<Arc<hosts::HostView>>,
+    /// The slot worker's current observation of this text's eligible
+    /// properties.
+    properties: Option<Arc<crate::slot_jobs::PropertyView>>,
 }
 
 impl FrontmatterSchema {
@@ -496,6 +505,7 @@ impl FrontmatterSchema {
             key: None,
             slots: None,
             host: None,
+            properties: None,
         }
     }
 }
@@ -632,6 +642,7 @@ impl OverlayState {
                 key: schema_key,
                 slots: slot_status,
                 host,
+                properties: observed_properties,
             } =
                 timings.time(Stage::SchemaAssembly, || {
                     cache.schema_for(
@@ -699,6 +710,7 @@ impl OverlayState {
                 yaml_document: None,
                 slots: slot_status,
                 host,
+                properties: observed_properties.filter(|_| !stale),
             });
         }
 
@@ -764,6 +776,7 @@ impl OverlayState {
                         yaml_document: None,
                         slots: None,
                         host: None,
+                        properties: None,
                     });
                 }
                 // The selected definition's report owns the shape of a
@@ -796,6 +809,7 @@ impl OverlayState {
                             yaml_document: None,
                             slots: None,
                             host: None,
+                            properties: None,
                         });
                     }
                 }
@@ -859,6 +873,7 @@ impl OverlayState {
                     yaml_document: None,
                     slots: None,
                     host: None,
+                    properties: None,
                 });
             }
             Ok(None) if claim.is_none() => {}
@@ -915,6 +930,7 @@ impl OverlayState {
                     yaml_document: None,
                     slots: None,
                     host: None,
+                    properties: None,
                 });
             }
         }
@@ -1474,6 +1490,7 @@ impl OverlayCache {
                 key: Some(key),
                 slots: cached.slots.clone(),
                 host: cached.host.clone(),
+                properties: current_properties(&view, base_key),
             };
         }
         let schema_roots: Vec<PathBuf> = registry
@@ -1535,8 +1552,12 @@ impl OverlayCache {
                 SchemaOutcome::Ready(None) => false,
             };
         let mut key = key;
-        let slot_status = templated.then(|| {
-            let demanded = slots.demand(path, base_key, pins_missed, || crate::slot_jobs::JobInputs {
+        // Eligible whole-value properties are observed by the slot worker
+        // too, so a document whose schema is no template still gets a job.
+        let property_sites = properties::sites_to_observe(text);
+        let observes = !property_sites.is_empty();
+        let demanded = (templated || observes)
+            && slots.demand_with(path, base_key, pins_missed, observes, || crate::slot_jobs::JobInputs {
                 uri: uri.clone(),
                 text: text.to_string(),
                 config: config.clone(),
@@ -1544,16 +1565,23 @@ impl OverlayCache {
                 registry: job_registry,
                 context: context.clone(),
                 buffers: self.triggers.source_buffers().clone(),
+                templated,
+                property_sites,
+                registered_hosts: registered.cloned(),
             });
-            if demanded {
-                key = base_key ^ slot_key_part(slots.view(path).generation);
-            }
-            SlotStatus {
-                refreshing: view.refreshing || demanded,
-                unresolved: !matches!(outcome, SchemaOutcome::Ready(_)),
-                template_shape,
-                template,
-            }
+        let view = if demanded {
+            let view = slots.view(path);
+            key = base_key ^ slot_key_part(view.generation);
+            view
+        } else {
+            view
+        };
+        let properties = current_properties(&view, base_key);
+        let slot_status = templated.then(|| SlotStatus {
+            refreshing: view.refreshing || demanded,
+            unresolved: !matches!(outcome, SchemaOutcome::Ready(_)),
+            template_shape,
+            template,
         });
         let named_types = Arc::new(frontmatter_named_types(text, path, &schema_roots, context));
         let schema_references =
@@ -1603,6 +1631,7 @@ impl OverlayCache {
             key: Some(key),
             slots: slot_status,
             host: Some(host),
+            properties,
         };
         self.schema.insert(
             uri_key.to_string(),
@@ -2030,28 +2059,34 @@ fn select_host(
     Arc::new(hosts::HostView::select(installed, &frontmatter, path, context))
 }
 
+/// The slot view's property observation when it describes the text keyed
+/// `base_key` and is current.
+fn current_properties(view: &crate::slot_jobs::SlotView, base_key: u64) -> Option<Arc<crate::slot_jobs::PropertyView>> {
+    view.properties.clone().filter(|_| view.installed_key == Some(base_key))
+}
+
 /// The part of a schema cache key a slot snapshot's state contributes.
 fn slot_key_part(generation: u64) -> u64 {
     generation.wrapping_mul(0x9E37_79B9_7F4A_7C15)
 }
 
-/// The slot worker's resolution of a document's templates: the schema
-/// assembled with `session` resolving every template layer, in the job's
-/// captured inputs. The worker installs `session`, whose pinned snapshots
-/// requests then serve.
+/// The slot worker's assembly of a document's schema in the job's captured
+/// inputs: with `slots` resolving every template layer (a fresh session the
+/// worker then installs, whose pinned snapshots requests serve), serving an
+/// installed session's pins, or with no template. `registered_hosts` is the
+/// value request-side assembly selects the document's host with.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_slot_templates(
     path: &Path,
     text: &str,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
     registry: Option<simplified_schema::triggers::TriggerRegistry>,
+    registered_hosts: Option<&Arc<darkmatter::config::registration::RegisteredHosts>>,
     context: &FileResolutionContext,
-    session: &Arc<darkmatter::markdown::schemas::slots::SlotSession>,
-) -> Result<(), SchemaError> {
-    // The slot worker's job carries no registrations: a registered host's
-    // trigger layer is pinned through the request path's own assembly.
-    schema::assemble(path, text, config, workspace_roots, registry, None, context, schema::SlotUse::Resolve(session))
-        .map(|_| ())
+    slots: schema::SlotUse<'_>,
+) -> Result<Option<SchemaBundle>, SchemaError> {
+    schema::assemble(path, text, config, workspace_roots, registry, registered_hosts, context, slots)
         .map_err(|failure| failure.error)
 }
 

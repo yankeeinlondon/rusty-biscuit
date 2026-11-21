@@ -48,7 +48,7 @@ mod pull_requests;
 mod repository;
 mod shell;
 mod skills;
-mod strings;
+pub(crate) mod strings;
 mod terminal;
 #[cfg(any(test, feature = "effects-instrumentation"))]
 pub mod test_hooks;
@@ -835,6 +835,14 @@ pub use fs::*;
 /// name.
 pub(crate) fn canonical_function_name(name: &str) -> Option<&'static str> {
     find_binding(name).map(|entry| entry.binding.canonical)
+}
+
+/// Whether a call to `name` reads only through the editor observation's
+/// guarded paths (`editor_reads`), so the editor may run it: `load_data` and
+/// `file_exists`, whose local and remote reads ask the gate before probing
+/// and answer a URL from the transport cache alone.
+pub(crate) fn is_editor_guarded_reader(name: &str) -> bool {
+    matches!(canonical_function_name(name), Some("load_data" | "file_exists"))
 }
 
 /// Whether `canonical` is a registered function with an overload that takes

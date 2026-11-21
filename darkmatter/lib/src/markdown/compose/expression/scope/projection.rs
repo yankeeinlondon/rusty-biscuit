@@ -41,6 +41,13 @@ pub struct DeclaredTypes<'s> {
     frontmatter: Option<&'s Map<String, Value>>,
     host_roots: HostRoots<'s>,
     host_catalog: Option<&'s GlobalCatalog>,
+    /// Observed values' shapes by top-level key (an editor's evaluation);
+    /// each replaces the declaration's shape for its property.
+    observed: Option<&'s std::collections::BTreeMap<String, Shape>>,
+    /// Observed `load_data` calls' shapes by the call as written, without
+    /// spans (an editor's evaluation); each replaces a matching call's
+    /// provisional type wherever it is typed.
+    observed_calls: Option<&'s [(simplified_schema::expression::ast::Expr, Shape)]>,
 }
 
 /// The schema a [`DeclaredTypes`] projects on first read.
@@ -216,7 +223,33 @@ impl<'s> DeclaredTypes<'s> {
             frontmatter: None,
             host_roots: HostRoots::None,
             host_catalog: None,
+            observed: None,
+            observed_calls: None,
         }
+    }
+
+    /// Types each property in `observed` by the shape of its observed value
+    /// ([`Shape::observed`]) instead of its declaration's shape; the
+    /// declared type itself stays what the schema says.
+    pub fn with_observed(mut self, observed: &'s std::collections::BTreeMap<String, Shape>) -> Self {
+        self.observed = Some(observed);
+        self
+    }
+
+    /// Types each `load_data` call written as one of `calls` (compared
+    /// without spans) by its observed values' shape instead of the call's
+    /// provisional type.
+    pub fn with_observed_calls(mut self, calls: &'s [(simplified_schema::expression::ast::Expr, Shape)]) -> Self {
+        self.observed_calls = Some(calls);
+        self
+    }
+
+    /// The observed shape of a `load_data` call written as `call`, when
+    /// [`Self::with_observed_calls`] supplied one.
+    pub(crate) fn observed_call(&self, call: &simplified_schema::expression::SpannedExpr) -> Option<&'s Shape> {
+        let calls = self.observed_calls.filter(|calls| !calls.is_empty())?;
+        let erased = call.erase();
+        calls.iter().find(|(known, _)| *known == erased).map(|(_, shape)| shape)
     }
 
     /// The declared layer of every layer of `schema`, after resolution and
@@ -563,6 +596,16 @@ impl<'s> DeclaredTypes<'s> {
     pub(super) fn projected(&self, subject: &Subject) -> (DeclaredType, Shape) {
         let unknown = Shape::Unknown { non_null: false };
         match &subject.binding {
+            BindingId::Document(key) if self.observed.is_some_and(|observed| observed.contains_key(key)) => {
+                let observed = self.observed.and_then(|observed| observed.get(key)).cloned().unwrap_or(unknown);
+                let shape = walk(observed, &subject.path, self.definitions());
+                let declared = match self.declaration(key) {
+                    Declaration::Undeclared if subject.path.is_empty() => DeclaredType::Undeclared,
+                    Declaration::Found(def) if subject.path.is_empty() => DeclaredType::Property(def.into_owned()),
+                    _ => shape.to_definition().map_or(DeclaredType::NoProjection, DeclaredType::Property),
+                };
+                (declared, shape)
+            }
             BindingId::Document(key) => {
                 let def = match self.declaration(key) {
                     Declaration::Found(def) => def,

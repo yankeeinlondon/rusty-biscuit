@@ -87,6 +87,7 @@ mod style_markdown_parity;
 mod suggest_constraint_phase1;
 mod test_layout;
 mod type_definition_arguments;
+mod typed_load_data_editor;
 mod type_scope_ownership_guard;
 mod undeclared_member;
 mod undeclared_property;

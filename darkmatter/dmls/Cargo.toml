@@ -81,8 +81,9 @@ sniff = { path = "../../sniff/lib", features = ["remote"] }
 # The alias-search work counter behind the linear-diagnostics regression; a
 # dev-dependency feature, so no non-test build of dmls compiles it.
 # `cleanup-test-hooks` exposes the injected broken pass the formatting
-# refusal tests install.
-darkmatter = { path = "../lib", features = ["work-counters", "cleanup-test-hooks"] }
+# refusal tests install; `cache-test-hooks` writes the transport-cache entries
+# the typed `load_data` editor suite observes.
+darkmatter = { path = "../lib", features = ["work-counters", "cleanup-test-hooks", "cache-test-hooks"] }
 tempfile = "3"
 # Scoped log capture: a failed context build logs one `error` event.
 tracing-test = "0.2"

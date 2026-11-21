@@ -372,6 +372,22 @@ pub enum ExpressionError {
         refusal: super::read_gate::GateRefusal,
     },
 
+    /// An editor observation stopped before it could produce a value: a read
+    /// its approvals do not cover, an input it cannot inspect, a remote body
+    /// with no fresh cache entry, or an operation the editor does not run
+    /// (see [`editor_reads`](super::editor_reads)). Only the editor's
+    /// property observation raises it. Like
+    /// [`SlotReadRefused`](Self::SlotReadRefused) it is never recovered into
+    /// a value, so `try` cannot turn an unapproved read into a known
+    /// fallback.
+    #[error("{function}(): the editor cannot observe this value yet: {reason}")]
+    ObservationPending {
+        /// The function (or binding) that could not be observed.
+        function: String,
+        /// Why the observation is pending.
+        reason: super::editor_reads::PendingReason,
+    },
+
     /// A call that breaks a function's specified contract where the
     /// specification requires a compose error and the declared signature
     /// cannot express the rule (an argument out of a domain the type does
@@ -799,6 +815,7 @@ impl ExpressionError {
             | Self::Provider { .. }
             | Self::ContextNotCaptured { .. }
             | Self::SlotReadRefused { .. }
+            | Self::ObservationPending { .. }
             | Self::ContractViolation { .. }
             | Self::FunctionContextNotCaptured { .. }
             | Self::ContextProjectionInvariant { .. }
@@ -1357,6 +1374,7 @@ mod tests {
                         failure: simplified_schema::coercion::ConversionError { failures: Vec::new() },
                         text: Arc::from("[1]"),
                         table: None,
+                        wrapped: false,
                     }),
                     true,
                 ),

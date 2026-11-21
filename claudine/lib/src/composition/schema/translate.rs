@@ -113,6 +113,7 @@ pub(super) fn translate_schema_failure(
                 summary,
                 description: None,
                 source: None,
+                expression_origins: Default::default(),
             },
         ));
     }

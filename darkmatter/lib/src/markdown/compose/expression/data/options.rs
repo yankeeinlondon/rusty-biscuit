@@ -8,6 +8,9 @@
 //! [`invalid_options_message`], so passive checking and execution report the
 //! same text.
 
+use std::collections::HashSet;
+use std::sync::Arc;
+
 use biscuit_file::DataFormat;
 use serde_json::Value;
 
@@ -20,11 +23,60 @@ const DELIMITER_REASON: &str =
 /// The options a call chose; `None` is "not given" (absent or `null`), which
 /// [`effective_delimiter`] and [`effective_header`] turn into the format's
 /// default.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct DataOptions {
     pub(crate) format: Option<DataFormat>,
     pub(crate) delimiter: Option<u8>,
-    pub(crate) header: Option<bool>,
+    pub(crate) header: Option<HeaderMode>,
+}
+
+/// How a CSV or TSV read treats its first record, from the `header` option.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum HeaderMode {
+    /// `header: true` (the default): the first record names the columns and
+    /// is not a row.
+    FirstRecord,
+    /// `header: false`: every record is a row, read by position.
+    None,
+    /// `header: [names…]`: every record is a row, an object keyed by these
+    /// names in column order, verbatim. Never empty, never repeating a name,
+    /// never holding an empty name ([`header_names`]).
+    Names(Arc<[String]>),
+}
+
+impl HeaderMode {
+    /// Whether the first record is a header rather than a row.
+    pub(crate) fn skips_first_record(&self) -> bool {
+        matches!(self, Self::FirstRecord)
+    }
+}
+
+/// The header names an explicit `header` list holds, judged after ordinary
+/// binding and never trimmed.
+///
+/// ## Errors
+///
+/// [`DataError::InvalidOptions`] on `header` for an empty list, an empty
+/// name, or a repeated name.
+pub(crate) fn header_names(names: &[Value]) -> Result<Arc<[String]>, DataError> {
+    if names.is_empty() {
+        return Err(invalid("header", "must name at least one column; omit it, or use true or false"));
+    }
+    let mut seen = HashSet::new();
+    let mut out = Vec::with_capacity(names.len());
+    for (index, name) in names.iter().enumerate() {
+        let Value::String(name) = name else {
+            return Err(invalid("header", format!("must be a boolean or a list of column names, but item {} is {}", index + 1, kind_of(name))));
+        };
+        if name.is_empty() {
+            return Err(invalid("header", format!("item {} is an empty column name", index + 1)));
+        }
+        if !seen.insert(name.as_str()) {
+            return Err(invalid("header", format!("names the column `{name}` more than once")));
+        }
+        out.push(name.clone());
+    }
+    Ok(out.into())
 }
 
 impl DataOptions {
@@ -55,13 +107,18 @@ impl DataOptions {
                     })?);
                 }
                 ("delimiter", Value::String(text)) => options.delimiter = Some(delimiter_byte(text)?),
-                ("header", Value::Bool(header)) => options.header = Some(*header),
+                ("header", Value::Bool(true)) => options.header = Some(HeaderMode::FirstRecord),
+                ("header", Value::Bool(false)) => options.header = Some(HeaderMode::None),
+                ("header", Value::Array(names)) => options.header = Some(HeaderMode::Names(header_names(names)?)),
                 ("format", other) => return Err(invalid("format", format!("must be a string, but received {}", kind_of(other)))),
                 ("delimiter", other) => {
                     return Err(invalid("delimiter", format!("must be a string, but received {}", kind_of(other))));
                 }
                 ("header", other) => {
-                    return Err(invalid("header", format!("must be a boolean, but received {}", kind_of(other))));
+                    return Err(invalid(
+                        "header",
+                        format!("must be a boolean or a list of column names, but received {}", kind_of(other)),
+                    ));
                 }
                 (unknown, _) => {
                     return Err(invalid("options", format!("`{unknown}` is not an option; use `format`, `delimiter`, or `header`")));
@@ -153,11 +210,11 @@ pub(crate) fn effective_delimiter(format: DataFormat, chosen: Option<u8>) -> Opt
     }
 }
 
-/// Whether a `format` read treats its first record as a header: the chosen
-/// value or `true` for CSV and TSV, none for other formats.
-pub(crate) fn effective_header(format: DataFormat, chosen: Option<bool>) -> Option<bool> {
+/// How a `format` read treats its first record: the chosen mode or
+/// [`HeaderMode::FirstRecord`] for CSV and TSV, none for other formats.
+pub(crate) fn effective_header(format: DataFormat, chosen: Option<HeaderMode>) -> Option<HeaderMode> {
     match format {
-        DataFormat::Csv | DataFormat::Tsv => Some(chosen.unwrap_or(true)),
+        DataFormat::Csv | DataFormat::Tsv => Some(chosen.unwrap_or(HeaderMode::FirstRecord)),
         _ => None,
     }
 }
@@ -204,7 +261,7 @@ mod tests {
             assert_eq!(DataOptions::from_bound(value.as_ref()).unwrap(), DataOptions::default(), "{value:?}");
         }
         let chosen = DataOptions::from_bound(Some(&json!({"format": "csv", "delimiter": ";", "header": false}))).unwrap();
-        assert_eq!(chosen, DataOptions { format: Some(DataFormat::Csv), delimiter: Some(b';'), header: Some(false) });
+        assert_eq!(chosen, DataOptions { format: Some(DataFormat::Csv), delimiter: Some(b';'), header: Some(HeaderMode::None) });
     }
 
     #[test]
@@ -216,7 +273,7 @@ mod tests {
         let options = DataOptions::from_bound(Some(&json!({"format": "yml"}))).unwrap();
         assert_eq!(options, DataOptions::from_bound(Some(&json!({"format": "yaml"}))).unwrap());
         // The alias is gone: a later failure names the canonical format.
-        let error = DataOptions { header: Some(true), ..options }.check_applicability(options.format.unwrap()).unwrap_err();
+        let error = DataOptions { header: Some(HeaderMode::FirstRecord), ..options.clone() }.check_applicability(options.format.unwrap()).unwrap_err();
         assert!(error.to_string().contains("this call reads YAML"), "{error}");
     }
 
@@ -255,10 +312,10 @@ mod tests {
             let error = delimiter.check_applicability(format).unwrap_err();
             assert_eq!(key_of(&error), "delimiter");
             assert!(error.to_string().contains(format_name(format)), "{error}");
-            let header = DataOptions { header: Some(true), ..DataOptions::default() };
+            let header = DataOptions { header: Some(HeaderMode::FirstRecord), ..DataOptions::default() };
             assert_eq!(key_of(&header.check_applicability(format).unwrap_err()), "header");
             // A delimiter is reported before a header.
-            let both = DataOptions { delimiter: Some(b';'), header: Some(false), ..DataOptions::default() };
+            let both = DataOptions { delimiter: Some(b';'), header: Some(HeaderMode::None), ..DataOptions::default() };
             assert_eq!(key_of(&both.check_applicability(format).unwrap_err()), "delimiter");
             assert!(DataOptions::default().check_applicability(format).is_ok());
         }
@@ -275,7 +332,7 @@ mod tests {
         for options in [
             DataOptions::default(),
             DataOptions { delimiter: Some(b'\t'), ..DataOptions::default() },
-            DataOptions { header: Some(false), ..DataOptions::default() },
+            DataOptions { header: Some(HeaderMode::None), ..DataOptions::default() },
         ] {
             assert!(options.check_applicability(DataFormat::Tsv).is_ok(), "{options:?}");
         }
@@ -294,8 +351,8 @@ mod tests {
         assert_eq!(effective_delimiter(DataFormat::Csv, None), effective_delimiter(DataFormat::Csv, Some(b',')));
         assert_eq!(effective_delimiter(DataFormat::Tsv, None), effective_delimiter(DataFormat::Tsv, Some(b'\t')));
         assert_eq!(effective_delimiter(DataFormat::Tsv, None), Some(b'\t'));
-        assert_eq!(effective_header(DataFormat::Csv, None), effective_header(DataFormat::Csv, Some(true)));
-        assert_eq!(effective_header(DataFormat::Tsv, Some(false)), Some(false));
+        assert_eq!(effective_header(DataFormat::Csv, None), effective_header(DataFormat::Csv, Some(HeaderMode::FirstRecord)));
+        assert_eq!(effective_header(DataFormat::Tsv, Some(HeaderMode::None)), Some(HeaderMode::None));
         for format in TREE_FORMATS {
             assert_eq!(effective_delimiter(format, None), None);
             assert_eq!(effective_header(format, None), None);

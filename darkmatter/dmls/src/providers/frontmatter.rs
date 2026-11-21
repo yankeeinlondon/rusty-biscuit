@@ -1850,7 +1850,35 @@ fn frontmatter_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     {
         return ctx_hover(ctx, entry);
     }
-    schema_hover(ctx, &path, entry)
+    let hover = schema_hover(ctx, &path, entry);
+    match path.as_slice() {
+        [FmPathSegment::Key(key)] => with_observed_preview(ctx, key, entry, hover),
+        _ => hover,
+    }
+}
+
+/// `hover` with a bounded preview of `key`'s observed value appended, when
+/// the slot worker's current observation holds one; the declared type the
+/// hover already shows stays first. A property with an observation but no
+/// schema hover gets the preview alone.
+fn with_observed_preview(ctx: &DocumentContext, key: &str, entry: &FmEntry, hover: Option<Hover>) -> Option<Hover> {
+    let Some(value) = ctx.overlay.and_then(|overlay| overlay.properties.as_deref()).and_then(|view| view.value(key)) else {
+        return hover;
+    };
+    let preview = format!("**Observed value**\n\n```json\n{}\n```", crate::overlay::properties::preview(value));
+    match hover {
+        Some(mut hover) => {
+            if let lsp_types::HoverContents::Markup(markup) = &mut hover.contents {
+                markup.value.push_str("\n\n");
+                markup.value.push_str(&preview);
+            }
+            Some(hover)
+        }
+        None => {
+            let span = entry.key_span.clone().unwrap_or_else(|| entry.value_span.clone());
+            markup_hover(ctx, span, preview)
+        }
+    }
 }
 
 fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {

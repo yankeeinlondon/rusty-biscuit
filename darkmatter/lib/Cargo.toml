@@ -46,6 +46,11 @@ work-counters = ["simplified-schema/work-counters"]
 # DMLS) can prove a broken pass is refused. Off by default; production builds
 # compile none of it.
 cleanup-test-hooks = []
+# Test-only seam. Exposes `markdown::compose::cache_test_hooks`, which writes a
+# transport-cache entry for a URL under a cache root, so consumer suites (DMLS)
+# can prove an editor observation answers from a fresh entry and never
+# fetches. Off by default; production builds compile none of it.
+cache-test-hooks = []
 terminal-tests = ["dep:image"]
 browser-tests = ["dep:biscuit-browser-harness", "dep:chromiumoxide", "dep:futures-util"]
 # Opt-in tests of the repository's internal `prompts/`; run by

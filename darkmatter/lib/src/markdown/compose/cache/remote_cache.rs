@@ -247,16 +247,27 @@ enum StoredEntry {
     Unusable,
     /// A current manifest with its decoded body.
     Usable(Box<CachedEntry>),
+    /// A manifest or body past a bounded reader's limit; never decoded.
+    TooLarge,
 }
 
 /// Decodes the entry for `key`. Shared by the fetching path, which purges a
 /// `no-store` entry, and the cache-only lookup, which never writes.
 fn decode_cached(store: &FileStore, key: u64) -> StoredEntry {
-    let Some(raw) = store
-        .read_manifest::<serde_json::Value>(ArtifactClass::RemoteUrl, key)
-        .ok()
-        .flatten()
-    else {
+    decode_cached_bounded(store, key, None)
+}
+
+/// [`decode_cached`], refusing a manifest or body longer than `limit` bytes
+/// (read one byte past it at most) as [`StoredEntry::TooLarge`].
+fn decode_cached_bounded(store: &FileStore, key: u64, limit: Option<u64>) -> StoredEntry {
+    let manifest = match limit {
+        None => store.read_manifest::<serde_json::Value>(ArtifactClass::RemoteUrl, key),
+        Some(limit) => match store.read_manifest_bounded::<serde_json::Value>(ArtifactClass::RemoteUrl, key, limit) {
+            Err(error) if error.kind() == std::io::ErrorKind::FileTooLarge => return StoredEntry::TooLarge,
+            other => other,
+        },
+    };
+    let Some(raw) = manifest.ok().flatten() else {
         return StoredEntry::Absent;
     };
     let Ok(header) = serde_json::from_value::<RemoteUrlManifestHeader>(raw.clone()) else {
@@ -274,11 +285,14 @@ fn decode_cached(store: &FileStore, key: u64) -> StoredEntry {
     let Ok(manifest) = serde_json::from_value::<RemoteUrlManifest>(raw) else {
         return StoredEntry::Unusable;
     };
-    let Some(bytes) = store
-        .read_blob(manifest.body_blob_hash, REMOTE_BLOB_EXT)
-        .ok()
-        .flatten()
-    else {
+    let blob = match limit {
+        None => store.read_blob(manifest.body_blob_hash, REMOTE_BLOB_EXT),
+        Some(limit) => match store.read_blob_bounded(manifest.body_blob_hash, REMOTE_BLOB_EXT, limit) {
+            Err(error) if error.kind() == std::io::ErrorKind::FileTooLarge => return StoredEntry::TooLarge,
+            other => other,
+        },
+    };
+    let Some(bytes) = blob.ok().flatten() else {
         return StoredEntry::Unusable;
     };
     match String::from_utf8(bytes) {
@@ -309,13 +323,12 @@ fn read_cached(
             purge_cached(store, key, blob_hash, url, warnings);
             None
         }
-        StoredEntry::Absent | StoredEntry::Unusable => None,
+        StoredEntry::Absent | StoredEntry::Unusable | StoredEntry::TooLarge => None,
     }
 }
 
 /// A cached body that may be used without the network, with the instant it
 /// stops being usable.
-#[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FreshCachedBody {
     /// The response body as UTF-8 text.
@@ -324,8 +337,7 @@ pub(crate) struct FreshCachedBody {
     pub expires_at: SystemTime,
 }
 
-/// Why [`lookup_fresh`] found no usable body.
-#[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
+/// Why [`lookup_fresh_bounded`] found no usable body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CacheOnlyMiss {
     /// No entry for the URL.
@@ -339,6 +351,8 @@ pub(crate) enum CacheOnlyMiss {
     NoCache,
     /// The entry has no freshness lifetime, or it ended at or before `now`.
     Expired,
+    /// The manifest or body is larger than the reader's byte limit.
+    TooLarge,
 }
 
 /// Reads the entry for `url` only when it is fresh at `now`: the current
@@ -347,9 +361,19 @@ pub(crate) enum CacheOnlyMiss {
 ///
 /// Never touches the network and never writes, purges, or refreshes the
 /// store. The caller authorizes `url` before calling.
-#[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
-pub(crate) fn lookup_fresh(store: &FileStore, url: &Url, now: SystemTime) -> Result<FreshCachedBody, CacheOnlyMiss> {
-    let entry = match decode_cached(store, xx_hash(url.as_str())) {
+///
+/// Reads at most `limit` bytes of the manifest and at most `limit` of the
+/// body (each stopping one byte past it), so an entry
+/// larger than an editor's remaining work allowance is
+/// [`CacheOnlyMiss::TooLarge`] before it is decoded.
+pub(crate) fn lookup_fresh_bounded(
+    store: &FileStore,
+    url: &Url,
+    now: SystemTime,
+    limit: u64,
+) -> Result<FreshCachedBody, CacheOnlyMiss> {
+    let entry = match decode_cached_bounded(store, xx_hash(url.as_str()), Some(limit)) {
+        StoredEntry::TooLarge => return Err(CacheOnlyMiss::TooLarge),
         StoredEntry::Usable(entry) => entry,
         StoredEntry::Absent => return Err(CacheOnlyMiss::Absent),
         StoredEntry::NoStore { .. } => return Err(CacheOnlyMiss::NoStore),

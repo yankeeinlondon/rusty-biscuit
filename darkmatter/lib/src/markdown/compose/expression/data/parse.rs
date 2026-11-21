@@ -501,12 +501,12 @@ mod tests {
         let first_cells = |table: &TabularSource| {
             (0..table.row_count()).map(|index| table.row(index).unwrap().fields[0].text.clone()).collect::<Vec<_>>()
         };
-        let headed = TabularSource { mode: RowMode::List, header: true, data: data.clone() };
-        let headerless = TabularSource { mode: RowMode::List, header: false, data };
+        let headed = TabularSource { mode: RowMode::List, header: true, keys: None, data: data.clone() };
+        let headerless = TabularSource { mode: RowMode::List, header: false, keys: None, data };
         assert_eq!(first_cells(&headed), ["1"]);
         assert_eq!(first_cells(&headerless), ["a", "1"]);
         assert!(headerless.row(2).is_none());
-        let empty = TabularSource { mode: RowMode::List, header: false, data: Arc::new(biscuit_file::read_delimited("", b',').unwrap()) };
+        let empty = TabularSource { mode: RowMode::List, header: false, keys: None, data: Arc::new(biscuit_file::read_delimited("", b',').unwrap()) };
         assert_eq!(empty.row_count(), 0);
     }
 

@@ -150,6 +150,9 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     // ranges and rewrites would land on the wrong bytes.
     if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale && overlay.yaml_document.is_none()) {
         crate::diagnostics::nested_span::whole_value_diagnostics(ctx, ast, &mut out);
+        // After the passive passes, so an observed call failure the call
+        // check already marks is not reported twice.
+        crate::diagnostics::observed::property_diagnostics(ctx, ast, overlay.bundle(), &mut out);
     }
 
     // A claimed kind's definition problems are the report's: the envelope's
@@ -639,7 +642,7 @@ pub(crate) fn schema_problem_diagnostics(
 /// mapping and a list item shares its line with its fields, so the validator's
 /// JSON Pointer travels with it. A missing key's pointer names the parent
 /// object, as in `md schema validate --format json`; the message names the key.
-fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
+pub(super) fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
     let mut data = serde_json::Map::new();
     data.insert("instance_path".to_string(), problem.path.clone().into());
     if let Some(applied) = &problem.default {
@@ -1461,7 +1464,7 @@ fn without_fix(
 
 /// `relatedInformation` pointing at a problem's schema origin, when it is a
 /// referenced schema file.
-fn schema_origin_related(
+pub(super) fn schema_origin_related(
     ctx: &DocumentContext,
     bundle: &SchemaBundle,
     problem: &ValidationProblem,
@@ -1879,7 +1882,7 @@ fn trigger_yaml_span(text: &str, error: &SchemaError) -> Option<std::ops::Range<
 
 /// A zero-width range at the document start (fallback when a span cannot
 /// convert).
-fn zero_range() -> Range {
+pub(super) fn zero_range() -> Range {
     Range::default()
 }
 

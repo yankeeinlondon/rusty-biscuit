@@ -340,6 +340,30 @@ impl PermissionPolicy {
         )
     }
 
+    /// Whether [`Self::file_read`] could pre-approve `target`, judged from
+    /// its lexical path alone and without touching the filesystem: no layer
+    /// excludes it lexically, and some layer's allow matches it lexically.
+    /// `true` grants nothing (the physical path and the repository
+    /// containment are still to be judged); `false` means no physical answer
+    /// could allow it, so a reader that must not probe a path it may not read
+    /// can refuse before asking anything that stats it.
+    #[must_use]
+    pub fn may_allow_file_read_lexically(&self, target: &Path, reading: &FileResolutionContext) -> bool {
+        let lexical = lexically_normal(&if target.is_absolute() { target.to_path_buf() } else { reading.cwd().join(target) });
+        let repository_context = self
+            .repository
+            .as_ref()
+            .map(|repository| reading.clone().with_repository_root(&repository.root));
+        let context_of = |layer: &PolicyLayer| match (layer.revision, &repository_context) {
+            (ConfigRevision::User, _) | (_, None) => reading,
+            (_, Some(context)) => context,
+        };
+        let excluded = self
+            .layers()
+            .any(|layer| layer.read_exclusions.iter().any(|(_, glob)| glob.matches(&lexical, context_of(layer))));
+        !excluded && self.layers().any(|layer| layer.read_allows.as_ref().is_some_and(|glob| glob.matches(&lexical, context_of(layer))))
+    }
+
     /// The shell-command projection of this policy.
     #[must_use]
     pub const fn shell(&self) -> &ShellPermissions {

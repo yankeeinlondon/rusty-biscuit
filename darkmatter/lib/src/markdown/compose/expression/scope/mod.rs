@@ -42,7 +42,7 @@ use crate::markdown::compose::expression::Expr;
 use simplified_schema::DefinitionTable;
 use crate::markdown::span::SourceSpan;
 
-pub use iterable::{ItemFrame, PatternMismatch, SourceProjection, project_pattern, project_source};
+pub use iterable::{ItemFrame, OBSERVED_ALTERNATIVES, OBSERVED_DEPTH, PatternMismatch, SourceProjection, project_pattern, project_source};
 pub(crate) use iterable::ObjectEntryType;
 pub use lexical::{LexicalTypes, TypedLocal};
 pub use projection::{BindingId, DeclaredType, DeclaredTypes, Member, Subject};

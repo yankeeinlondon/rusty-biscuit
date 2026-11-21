@@ -275,7 +275,7 @@ fn env_reads(expr: &SpannedExpr, names: &mut Vec<String>, whole: &mut bool) {
 }
 
 /// Visits every node of `expr`, callback bodies included.
-fn walk_nodes(expr: &SpannedExpr, visit: &mut impl FnMut(&SpannedExpr)) {
+pub(crate) fn walk_nodes(expr: &SpannedExpr, visit: &mut impl FnMut(&SpannedExpr)) {
     use simplified_schema::expression::SpannedCallArgument;
     visit(expr);
     match &expr.kind {

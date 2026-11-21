@@ -244,7 +244,9 @@ fn a_bracketed_union_of_containers_loads_from_every_carrier() {
     write(dir.path(), "os.yaml", OS_YAML);
     write(dir.path(), "empty.yaml", "");
     assert_eq!(loaded(dir.path(), "os.yaml", "['string[]', null]"), json!(["macOS", "Linux", "Windows"]));
-    assert_eq!(loaded(dir.path(), "empty.yaml", "['string[]', null]"), Value::Null);
+    // An empty YAML file parses to `null`, which loads as `[]` before the
+    // contract judges it.
+    assert_eq!(loaded(dir.path(), "empty.yaml", "['string[]', null]"), json!([]));
     for content in [
         "---\nt: \"['string[]', null]\"\n---\n{{ as_csv(load_data(\"os.yaml\", t)) }}\n",
         "---\nt: ['string[]', null]\n---\n{{ as_csv(load_data(\"os.yaml\", t)) }}\n",
@@ -312,8 +314,9 @@ loads! {
         => json!([{"a": "x"}, {"a": "y"}]);
     csv_a_delimiter_only_line_is_a_row_of_empty_cells: "d.csv", "a,b\n,\n", "{ a: string, b: string }[]"
         => json!([{"a": "", "b": ""}]);
-    csv_headers_and_cells_are_not_trimmed: "d.csv", "a , b\n x ,y\n", "{ <string>: string }[]"
-        => json!([{"a ": " x ", " b": "y"}]);
+    // Header names become camelCase keys; cells are never trimmed.
+    csv_header_keys_are_camel_case_and_cells_are_not_trimmed: "d.csv", "a , b\n x ,y\n", "{ <string>: string }[]"
+        => json!([{"a": " x ", "b": "y"}]);
     csv_a_quoted_newline_in_a_list_row_loads: "d.csv", "a,b\n\"x\ny\",z\n", "tuple([string, string])[]"
         => json!([["x\ny", "z"]]);
 
@@ -335,8 +338,9 @@ loads! {
     toml_crlf_loads: "d.toml", "a = 1\r\nb = 2\r\n", "{ <string>: number }" => json!({"a": 1, "b": 2});
     json5_crlf_loads: "d.json5", "[\r\n'a',\r\n]\r\n", "string[]" => json!(["a"]);
 
-    // Empty input: YAML null, JSON Lines/CSV/TSV no rows, TOML an empty table.
-    empty_yaml_is_null: "d.yaml", "", "string[] | null" => Value::Null;
+    // Empty input: YAML null (read as `[]`), JSON Lines/CSV/TSV no rows, TOML
+    // an empty table.
+    empty_yaml_is_an_empty_list: "d.yaml", "", "string[] | null" => json!([]);
     empty_jsonl_is_an_empty_list: "d.jsonl", "", "string[]" => json!([]);
     empty_csv_is_an_empty_list: "d.csv", "", "{ a: string }[]" => json!([]);
     empty_tsv_is_an_empty_list: "d.tsv", "", "{ a: string }[]" => json!([]);
@@ -519,7 +523,7 @@ fn an_object_header_must_not_repeat_a_name() {
     write(dir.path(), "d.csv", "\n\nname,port,name\nweb,1,x\n");
     match &*load_failure(dir.path(), "d.csv", "{ <string>: string }[]") {
         DataError::Malformed { message, location, .. } => {
-            assert!(message.contains("column 3 repeats `name` from column 1"), "{message}");
+            assert!(message.contains("columns 1 (`name`) and 3 (`name`) both name the field `name`"), "{message}");
             assert_eq!(line_column(location), (Some(3), Some(11)), "located on the header's own line");
         }
         other => panic!("{other}"),

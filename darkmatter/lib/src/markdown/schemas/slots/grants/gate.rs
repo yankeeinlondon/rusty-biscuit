@@ -162,6 +162,43 @@ impl SlotGrants {
         }
     }
 
+    /// Whether a local `target`, compared as written, could be allowed
+    /// without asking: an allow for this run naming exactly its lexical path,
+    /// or a `permissions.file-read` allow matching it lexically with no
+    /// lexical exclusion. Never touches the filesystem and grants nothing;
+    /// see [`ReadGate::admits_lexically`]. A URL, a listing, and a glob are
+    /// left to [`Self::decide_without_asking`].
+    pub(crate) fn may_admit_lexically(&self, reading: &FileResolutionContext, target: &ReadTarget) -> bool {
+        let ReadLocation::Local(path) = &target.location else {
+            return true;
+        };
+        if target.kind == ReadKind::Listing {
+            return true;
+        }
+        let policy = match &self.permissions {
+            SlotPermissions::Invalid(_) => return false,
+            SlotPermissions::Captured(policy) => Some(policy),
+            SlotPermissions::Unconfigured => None,
+        };
+        let absolute = if path.is_absolute() { path.clone() } else { reading.cwd().join(path) };
+        let lexical = crate::config::permissions::lexically_normal(&absolute);
+        // The same name under its folder's canonical spelling (macOS `/var`
+        // is `/private/var`), where approvals are recorded. Only the folder
+        // is resolved, never the target itself.
+        let spellings: Vec<PathBuf> = match (lexical.parent(), lexical.file_name()) {
+            (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+                let folder = canonical_target(parent).join(name);
+                if folder == lexical { vec![lexical] } else { vec![lexical, folder] }
+            }
+            _ => vec![lexical],
+        };
+        let book = self.book.lock().unwrap_or_else(PoisonError::into_inner);
+        if spellings.iter().any(|spelling| book.decide(&ReadLocation::Local(spelling.clone())) == Some(GrantDecision::Allow)) {
+            return true;
+        }
+        policy.is_some_and(|policy| spellings.iter().any(|spelling| policy.may_allow_file_read_lexically(spelling, reading)))
+    }
+
     /// Whether a file a listing returned may reach a slot reading from
     /// `reading`: only when the permissions or this run's approvals allow it
     /// without asking.

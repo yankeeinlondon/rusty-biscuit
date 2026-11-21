@@ -10,8 +10,9 @@
 //! of its first invalid UTF-8 byte, with the size and BLAKE3 hash of what was
 //! read) is keyed by the resolved identity alone; a parsed source by a
 //! source key (identity, effective format, effective delimiter); and a
-//! bound result by a bind key (that source key, the contract key, and the
-//! effective header). So two delimiters over one file read it once and parse
+//! bound result by a bind key (that source key, the contract key, empty for
+//! an omitted or `null` contract, and the effective header mode, explicit
+//! names included). So two delimiters over one file read it once and parse
 //! it twice, two contracts parse it once and bind it twice, and an omitted
 //! default shares its entries with the same default written out. Each entry
 //! is single-flight: the first caller loads, and concurrent callers for the
@@ -44,6 +45,7 @@ use biscuit_file::DataFormat;
 
 use super::contract::PreparedContract;
 use super::error::DataError;
+use super::options::HeaderMode;
 
 /// The resolved identity of a data source: a canonical local path or a
 /// normalized URL. It keys the source memo; [`Self::read_set_entry`] is its
@@ -186,6 +188,12 @@ pub struct LoadedData {
     pub value: serde_json::Value,
     /// The number of top-level items (array elements or object members).
     pub items: usize,
+    /// Whether the parsed root was a scalar wrapped in a one-element array,
+    /// so the value's index 0 is the document's root.
+    pub wrapped: bool,
+    /// For CSV and TSV, the table the rows were built from, with the column
+    /// keys of object rows; `None` for every other format.
+    pub table: Option<super::error::TabularSource>,
 }
 
 /// Counts of the work a [`DataRuntime`] did, for assertions about reuse.
@@ -258,13 +266,14 @@ pub(crate) struct SourceKey {
     pub(crate) delimiter: Option<u8>,
 }
 
-/// The bind-layer key: a parsed source, a contract, and the effective
-/// header choice (`None` for a format without one).
+/// The bind-layer key: a parsed source, a contract (empty for none), and the
+/// effective header mode (`None` for a format without one). The row shape is
+/// decided by these, so different explicit name lists never share a result.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct BindKey {
     source: SourceKey,
     contract: String,
-    header: Option<bool>,
+    header: Option<HeaderMode>,
 }
 
 struct Generation<R, S, B> {
@@ -489,7 +498,7 @@ impl<R, S, B> DataMemo<R, S, B> {
         &self,
         source: &SourceEntry<S>,
         contract_key: &str,
-        header: Option<bool>,
+        header: Option<HeaderMode>,
         binder: impl FnOnce(&S) -> Result<B, Arc<DataError>>,
     ) -> Result<BindEntry<B>, Arc<DataError>> {
         let key = BindKey { source: source.key.clone(), contract: contract_key.to_string(), header };
@@ -726,7 +735,7 @@ impl DataRuntime {
         &self,
         source: &SourceEntry<LoadedSource>,
         contract_key: &str,
-        header: Option<bool>,
+        header: Option<HeaderMode>,
         binder: impl FnOnce(&LoadedSource) -> Result<LoadedData, Arc<DataError>>,
     ) -> Result<BindEntry<LoadedData>, Arc<DataError>> {
         self.inner.memo.bind(source, contract_key, header, binder)
@@ -973,15 +982,31 @@ mod tests {
 
     #[test]
     fn a_header_choice_is_its_own_binding_over_one_parse() {
+        use super::super::options::HeaderMode;
         let memo = Memo::default();
         let file = key(&identity("rows.csv"), DataFormat::Csv, Some(b','));
-        for header in [Some(true), Some(false), Some(true)] {
+        let names = |names: &[&str]| HeaderMode::Names(names.iter().map(|name| name.to_string()).collect());
+        let modes = [
+            HeaderMode::FirstRecord,
+            HeaderMode::None,
+            HeaderMode::FirstRecord,
+            names(&["x", "y"]),
+            names(&["y", "x"]),
+            names(&["x", "y"]),
+        ];
+        for (index, header) in modes.into_iter().enumerate() {
             let source = load(&memo, &file, "a,b");
-            let bound = memo.bind(&source, "c", header, |text| Ok(text.len() + usize::from(header == Some(true)))).unwrap();
-            assert_eq!(*bound.value(), 3 + usize::from(header == Some(true)));
+            let bound = memo.bind(&source, "c", Some(header.clone()), |_| Ok(index)).unwrap();
+            // A memo hit returns the first binding of the same mode.
+            let first = match index {
+                2 => 0,
+                5 => 3,
+                other => other,
+            };
+            assert_eq!(*bound.value(), first, "{header:?}");
         }
         let stats = memo.stats();
-        assert_eq!((stats.reads, stats.source_hits, stats.binds, stats.bind_hits), (1, 2, 2, 1), "{stats:?}");
+        assert_eq!((stats.reads, stats.source_hits, stats.binds, stats.bind_hits), (1, 5, 4, 2), "{stats:?}");
     }
 
     #[test]
@@ -1089,7 +1114,7 @@ mod tests {
         let file = key(&identity("late.csv"), DataFormat::Csv, Some(b','));
         // Every layer is warm before the in-flight read starts.
         let warm = load(&memo, &file, "warm");
-        memo.bind(&warm, "c", Some(true), |text| Ok(text.len())).unwrap();
+        memo.bind(&warm, "c", Some(super::super::options::HeaderMode::FirstRecord), |text| Ok(text.len())).unwrap();
         memo.invalidate();
 
         let entered = Arc::new(Barrier::new(2));
@@ -1105,7 +1130,7 @@ mod tests {
                     })
                     .unwrap();
                 let source = memo.load_source(&file, &raw, |raw| Ok(raw.clone())).unwrap();
-                *memo.bind(&source, "c", Some(true), |text| Ok(text.len() * 10)).unwrap().value()
+                *memo.bind(&source, "c", Some(super::super::options::HeaderMode::FirstRecord), |text| Ok(text.len() * 10)).unwrap().value()
             })
         };
         entered.wait();
@@ -1116,7 +1141,7 @@ mod tests {
         let source = load(&memo, &file, "fresh!");
         assert_eq!(source.value(), "fresh!", "neither the warm nor the late raw entry survived");
         assert!(!source.from_memo(), "the late parse did not populate the new generation");
-        let bound = memo.bind(&source, "c", Some(true), |text| Ok(text.len())).unwrap();
+        let bound = memo.bind(&source, "c", Some(super::super::options::HeaderMode::FirstRecord), |text| Ok(text.len())).unwrap();
         assert!(!bound.from_memo(), "the late binding did not populate the new generation");
         assert_eq!(*bound.value(), 6);
         let stats = memo.stats();

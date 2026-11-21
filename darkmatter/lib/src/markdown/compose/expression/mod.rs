@@ -74,6 +74,7 @@ pub mod catalog;
 pub mod ctx;
 pub mod data;
 mod deferred;
+pub(crate) mod editor_reads;
 pub mod diagnostics;
 pub(crate) mod equality;
 pub(crate) mod fm_namespace;
@@ -95,6 +96,7 @@ pub mod resolve_ctx;
 pub mod scope;
 pub mod semantics;
 pub mod spread;
+pub mod trace;
 
 pub(crate) use absence::static_access_reads_in_scope;
 pub use absence::{
@@ -623,7 +625,46 @@ pub(crate) fn is_member_selector(expr: &Expr) -> bool {
 
 /// Recursive evaluation inside one already-open expression scope. `scope`
 /// says whether this position handles absence; see [`absence`].
+///
+/// With a [`trace`] open, a node that derives its value clears the trace's
+/// origin after evaluating; a parenthesized expression and a ternary forward
+/// what their last evaluated child (the selected arm) left, and a `load_data`
+/// call what its handler recorded.
 fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
+    expr: &Expr,
+    lookup: &L,
+    scope: AbsenceScope<'_>,
+    observer: &mut O,
+    budget: &iteration::IterationBudget,
+) -> Result<Value, ExpressionError> {
+    let value = evaluate_node(expr, lookup, scope, observer, budget);
+    // An editor observation keeps what each `load_data` occurrence returned,
+    // for typing that call site (callback parameters included).
+    if let (Ok(returned), Expr::FunctionCall { name, .. }) = (&value, expr)
+        && editor_reads::is_collecting_calls()
+        && functions::inspect_registration(name, |registration| registration.name() == data::load::FUNCTION)
+            .unwrap_or(false)
+    {
+        editor_reads::note_call(expr, returned);
+    }
+    if trace::is_active() {
+        let forwards = match expr {
+            Expr::Paren(_) | Expr::Ternary { .. } => true,
+            Expr::FunctionCall { name, .. } => {
+                functions::inspect_registration(name, |registration| registration.name() == data::load::FUNCTION)
+                    .unwrap_or(false)
+            }
+            _ => false,
+        };
+        if !forwards {
+            trace::derive();
+        }
+    }
+    value
+}
+
+/// One node of [`evaluate_expr`].
+fn evaluate_node<L: EvaluationLookup, O: MissingRootObserver>(
     expr: &Expr,
     lookup: &L,
     scope: AbsenceScope<'_>,

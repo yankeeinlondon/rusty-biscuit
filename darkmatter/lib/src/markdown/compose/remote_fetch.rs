@@ -20,7 +20,7 @@ use url::Url;
 use super::ComposeWarning;
 use super::cache::FileStore;
 use super::cache::remote_cache::{
-    CacheOnlyMiss, FreshCachedBody, RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache, lookup_fresh,
+    CacheOnlyMiss, FreshCachedBody, RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache, lookup_fresh_bounded,
 };
 use super::expression::{ExpressionError, RemoteReadKind};
 use super::remote::{RemoteReadConfig, RemoteReadError};
@@ -166,13 +166,12 @@ struct RemoteFetchInner {
     /// TTL, refresh, and freshness-mode inputs for cache evaluation.
     cache_config: RemoteCacheConfig,
     /// Set by [`RemoteFetchRuntime::cache_only`]: registration never starts
-    /// a fetch, and reads go through [`RemoteFetchRuntime::cached_text`].
+    /// a fetch, and reads go through [`RemoteFetchRuntime::cached_text_bounded`].
     cache_only: bool,
 }
 
-/// Why [`RemoteFetchRuntime::cached_text`] has no body to offer. Every case
+/// Why [`RemoteFetchRuntime::cached_text_bounded`] has no body to offer. Every case
 /// leaves a cache-only reader's result pending; none is a read failure.
-#[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
 #[derive(Debug, Clone)]
 pub(crate) enum CacheOnlyPending {
     /// The URL is not HTTP(S), so no transport cache entry can exist.
@@ -184,6 +183,22 @@ pub(crate) enum CacheOnlyPending {
     NoStore,
     /// The store has no fresh entry.
     Miss(CacheOnlyMiss),
+    /// The entry is larger than the reader's byte limit
+    /// ([`RemoteFetchRuntime::cached_text_bounded`]).
+    TooLarge,
+}
+
+impl CacheOnlyPending {
+    /// Why there is no body, in words, for logging.
+    pub(crate) fn describe(&self) -> String {
+        match self {
+            Self::NotHttp => "not an HTTP(S) URL".to_string(),
+            Self::Refused(error) => format!("refused: {error}"),
+            Self::NoStore => "no transport cache".to_string(),
+            Self::Miss(miss) => format!("cache miss: {miss:?}"),
+            Self::TooLarge => "the entry is larger than the remaining allowance".to_string(),
+        }
+    }
 }
 
 /// Provider query slots store the typed expression error so a focused
@@ -517,26 +532,49 @@ impl RemoteFetchRuntime {
         runtime
     }
 
+    /// [`Self::cache_only`] over the transport store a composition with
+    /// `--cache-root cache_root` fills (`<cache_root>/.darkmatter/cache/v…`).
+    /// Nothing is created: a missing store is a cache miss.
+    pub(crate) fn cache_only_under(policy: FetchPolicy, network: NetworkPermission, cache_root: &std::path::Path) -> Self {
+        let store = FileStore::at(FileStore::resolve_cache_root(cache_root, None));
+        Self::cache_only(policy, network, Some(Arc::new(store)))
+    }
+
     /// Whether this runtime was built by [`Self::cache_only`].
-    #[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
     pub(crate) fn is_cache_only(&self) -> bool {
         self.inner.cache_only
     }
 
+    /// [`Self::cached_text_bounded`] with no byte limit.
+    #[cfg(test)]
+    pub(crate) fn cached_text(&self, url: &Url, now: std::time::SystemTime) -> Result<FreshCachedBody, CacheOnlyPending> {
+        self.cached_text_bounded(url, now, u64::MAX)
+    }
+
     /// The fresh cached body for `url` at `now`, without any network access
-    /// or store write.
+    /// or store write, reading at most `limit` bytes of the entry's manifest
+    /// and of its body before decoding either; a larger entry is
+    /// [`CacheOnlyPending::TooLarge`].
     ///
     /// The URL's scheme, the configured `network` permission, and the host
     /// policy are checked, in that order, before the store is opened, so a
     /// refused URL never reveals whether it is cached.
-    #[cfg_attr(not(test), expect(dead_code, reason = "editor observation of remote data reads through the cache-only path"))]
-    pub(crate) fn cached_text(&self, url: &Url, now: std::time::SystemTime) -> Result<FreshCachedBody, CacheOnlyPending> {
+    pub(crate) fn cached_text_bounded(
+        &self,
+        url: &Url,
+        now: std::time::SystemTime,
+        limit: u64,
+    ) -> Result<FreshCachedBody, CacheOnlyPending> {
         if !matches!(url.scheme(), "http" | "https") {
             return Err(CacheOnlyPending::NotHttp);
         }
         self.check_allowed(url).map_err(CacheOnlyPending::Refused)?;
         let store = self.inner.store.as_deref().ok_or(CacheOnlyPending::NoStore)?;
-        lookup_fresh(store, url, now).map_err(CacheOnlyPending::Miss)
+        match lookup_fresh_bounded(store, url, now, limit) {
+            Ok(fresh) => Ok(fresh),
+            Err(CacheOnlyMiss::TooLarge) => Err(CacheOnlyPending::TooLarge),
+            Err(miss) => Err(CacheOnlyPending::Miss(miss)),
+        }
     }
 
     fn build(

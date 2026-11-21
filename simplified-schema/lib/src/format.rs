@@ -249,6 +249,8 @@ pub(crate) fn register_darkmatter_formats_with(
 ) -> ValidationOptions {
     options
         .with_format(DARKMATTER_FILE_FORMAT, move |value: &str| match &file_values {
+            // No probe: the value is judged by its syntax, as the lazy format is.
+            _ if super::validate::file_checks_unverified() => FileReference::new(value).is_ok(),
             super::validate::FileValues::Syntax => match FileReference::new(value) {
                 Ok(_) => context_free_path(value).is_none_or(|path| path.exists()),
                 Err(_) => false,

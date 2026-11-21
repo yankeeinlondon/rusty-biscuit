@@ -48,6 +48,7 @@ pub(crate) mod coerce;
 pub mod completion;
 pub mod detect;
 mod frontmatter_shape;
+mod observed;
 pub mod resolve;
 pub mod rewrite;
 mod schema_files;
@@ -97,6 +98,7 @@ pub use detect::{
     detect_schema_with_contexts, schema_to_yaml,
 };
 pub use frontmatter_shape::effective_property_shape;
+pub use observed::{DeferReason, ObservedValidation, ObservedVerdict};
 pub use rewrite::NormalizationOutcome;
 use simplified::{
     DefKey, Definition, DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, to_json_schema_with_definitions,

@@ -47,6 +47,16 @@ pub(crate) trait ReadGate: Send + Sync + fmt::Debug {
     /// anyone: a file only a prompt could allow is `false`, and the listing
     /// leaves it out.
     fn admits_listed(&self, target: &ReadTarget) -> bool;
+
+    /// Whether `target`'s path, compared as written (lexically, without
+    /// touching the filesystem), could be allowed at all. An editor
+    /// observation asks this before [`check`](Self::check), whose canonical
+    /// comparison stats the path, so a path no rule or approval could allow
+    /// is refused before it is probed. Allowing here grants nothing: `check`
+    /// still decides.
+    fn admits_lexically(&self, _target: &ReadTarget) -> bool {
+        true
+    }
 }
 
 /// What a read names.
