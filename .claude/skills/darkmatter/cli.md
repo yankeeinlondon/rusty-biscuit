@@ -231,8 +231,11 @@ adds only missing top-level settings at their schema defaults, and commits
 all scopes in one `ConfigTransaction` validated by `check_config_text`.
 `--inline` alone replaces a reference (with the target's authored block, or
 schema defaults plus an `InitNotice`). `main` calls
-`MdRequest::report_config_notices_for_init`, which drops `dm.config.missing`
-for the file init creates; setup errors become `ClassifiedFailure::located`
+`MdRequest::report_config_notices_for_init`, which switches the user load to
+`ConfigLoadMode::Setup` (every other command's `MigrateLegacy` load creates a
+missing user file and reports `dm.config.created`; `Setup` leaves it for
+init's transaction, so a failed init writes nothing) and drops
+`dm.config.missing`; setup errors become `ClassifiedFailure::located`
 records (`dm.config.invalid`/`reference` for an invalid file,
 `dm.config.not_saved` otherwise). Claudine's handshake reuses `observe`,
 `setup_change`, `commit_checked`, and `TargetChange::published_last` (the

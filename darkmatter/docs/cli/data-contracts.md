@@ -367,7 +367,8 @@ warnings belong to the run's output rather than to composition:
 | Code | Warning |
 |---|---|
 | `dm.output.fractional_width` | `--width` was fractional and was rounded down |
-| `dm.config.missing` | `~/.darkmatter.yaml` does not exist, so every setting takes its default; names the file and `md init`. Reported once per run by every command (a repository without `.darkmatter.yaml` is not reported) |
+| `dm.config.created` | `info`: `~/.darkmatter.yaml` did not exist, so this run created it with every setting at its default; names the file. Reported once, by the run that created it, for every command except `md init` |
+| `dm.config.missing` | `~/.darkmatter.yaml` does not exist and could not be created (or there is no home directory), so every setting takes its default; names the file and why. Reported once per run by every command (a repository without `.darkmatter.yaml` is not reported) |
 | `dm.config.migration` | a legacy policy file (`.darkmatter-shell-whitelist`, `.darkmatter-shell-blacklist`, `.config/darkmatter/schema-read-policy`) was converted into the configuration, a line of it was dropped, a blacklist rule became a `!` exclusion, or a source was kept; one record per notice. See [Migrating Legacy Policy Files](../topics/configuration.md#migrating-legacy-policy-files-temporary) |
 | `dm.config.not_saved` | an "always allow" answer could not be saved to the user's `permissions`; the operation is still approved for this run. See [Saving an "Always Allow" Approval](../topics/configuration.md#saving-an-always-allow-approval) |
 | `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` | a `register` entry's host could not be used, or a document's host could not be chosen; each distinct warning once per run. See [Host Registration](../topics/host-registration.md#diagnostics) |

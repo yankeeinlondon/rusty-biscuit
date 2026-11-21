@@ -98,7 +98,10 @@ block, or `permissions: {}`, holds all three permission defaults.
 ## Setting Up: `md init`
 
 `md init` writes `~/.darkmatter.yaml` with every setting at its default, so
-you can see and edit them. `md init --repo` also writes the repository's
+you can see and edit them. You rarely need to run it for the user file: the
+first `md` or Claudine run that finds no `~/.darkmatter.yaml` writes the same
+file and says so once (see
+[How `md` and Claudine report configuration](#how-md-and-claudine-report-configuration)). `md init --repo` also writes the repository's
 `.darkmatter.yaml` (with the repository defaults). The command reference is
 [`md init`](../cli/init.md).
 
@@ -259,7 +262,17 @@ fn load(context: &FileResolutionContext) -> Result<(), Box<dyn std::error::Error
 - `ConfigLoadMode::MigrateLegacy` is for a writing CLI's startup. Before it
   reads anything it converts legacy policy files into the configuration; see
   [Migrating legacy policy files](#migrating-legacy-policy-files-temporary).
-  `Passive` never writes or deletes a file.
+  Then, when `~/.darkmatter.yaml` still does not exist, it creates the file
+  with every setting at its default (exactly what `md init` writes) and loads
+  that: `user_config_created()` returns its path and `diagnostics()` holds one
+  `dm.config.created` notice. Only when the file cannot be written does the
+  load fall back to the defaults, with a `dm.config.missing` warning that
+  says why.
+- `ConfigLoadMode::Setup` migrates like `MigrateLegacy` but never creates the
+  user file. It is for a setup command, such as `md init`, that creates the
+  file in its own transaction and must write nothing when that fails.
+- `Passive` never writes or deletes a file; a missing user file is reported
+  as `dm.config.missing`.
 - `dependencies()` lists every file the load observed with the BLAKE3 hash of
   its bytes (or `None` when it was absent), so a caller can tell when a
   snapshot is stale.
@@ -304,9 +317,10 @@ and a 1-based line and column when the text has one. A reference problem has
 the code `dm.config.reference`; every other problem `dm.config.invalid`.
 
 `diagnostics()` returns everything a caller should report:
-`dm.config.missing` when the user file does not exist (a missing repository
-file is normal and never reported), the permissions error, and each
-registration finding. `md` and Claudine report the missing file as described
+`dm.config.created` when the load created the user file,
+`dm.config.missing` when the user file does not exist and was not created (a
+missing repository file is normal and never reported), the permissions
+error, and each registration finding. `md` and Claudine report the missing file as described
 in [How `md` and Claudine report configuration](#how-md-and-claudine-report-configuration);
 DMLS reports it as described in [How DMLS reports configuration](#how-dmls-reports-configuration).
 The same module defines the codes
@@ -471,23 +485,40 @@ flowchart TD
 
 `md` loads the user file once per invocation (in `ConfigLoadMode::MigrateLegacy`,
 since `md` writes files), after help, completion, and usage errors have
-returned. When it does not exist, the run reports one `dm.config.missing`
-warning naming the file and `md init`:
+returned. When it does not exist, the run creates it with every setting at
+its default, uses it, and reports one `dm.config.created` notice naming the
+file. Every later run finds the file and reports nothing:
 
-- formatted output: one warning row on stderr;
-- data output (`--output json`, …): one record in the result's `diagnostics`
-  (or `run_diagnostics` for `md clean`), with stderr empty.
+```text
+$ md get doc.md title
+created `/home/me/.darkmatter.yaml` with every setting at its default
+My Title
+$ md get doc.md title
+My Title
+```
+
+- formatted output: one info row on stderr;
+- data output (`--output json`, …): one `info` record in the result's
+  `diagnostics` (or `run_diagnostics` for `md clean`), with stderr empty.
 
 This holds for every command, including ones that compose nothing (`md hash`,
-`md get`), except `md init`, which creates the file the warning would point
-at. A repository without `.darkmatter.yaml` reports nothing.
+`md get`), except `md init`, which creates the file itself and reports it as
+`created` in its own result. When the file cannot be written (a read-only
+home, for example), the run still uses the defaults and reports one
+`dm.config.missing` warning saying why it could not be created. A repository
+without `.darkmatter.yaml` reports nothing.
+
+Claudine does the same at startup, writing the created (or could-not-create)
+line to stderr; its setup later moves the inline `permissions` block into
+`~/.claudine/config.yaml` as described in
+[When Claudine is set up](#when-claudine-is-set-up).
 
 ### No home directory
 
 When no home directory can be found for the process, there is no user file
 to read. Every command still runs with the
 user defaults and reports one `dm.config.missing` warning saying that no home
-directory is available. Nothing is ever written there: `md init` fails with
+directory is available. Nothing is created or ever written there: `md init` fails with
 `dm.config.not_saved`, and an "always allow" approval applies to the current
 run only.
 

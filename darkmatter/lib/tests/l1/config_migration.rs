@@ -344,7 +344,8 @@ fn a_document_directory_policy_file_is_never_migrated() {
     let snapshot = ConfigSnapshot::load(&context, None, ConfigLoadMode::MigrateLegacy).unwrap();
 
     assert!(local.exists());
-    assert!(fixture.user_text().is_none());
+    let user = fixture.user_text().expect("the missing user file is created at its defaults");
+    assert!(!user.contains("prefix ls"), "the document directory's rule leaked into it: {user}");
     assert!(migration_notices(&snapshot).is_empty());
 }
 
