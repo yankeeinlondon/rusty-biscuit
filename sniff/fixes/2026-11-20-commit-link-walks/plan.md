@@ -2,9 +2,14 @@
 total_phases: 4
 created: 2026-11-20
 status: planned
-phase: 1
+phase: 2
 agent: codex/gpt-6.2-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Reuse shared Git history when resolving commit links
@@ -44,7 +49,7 @@ The fix is done when tests prove exact visit savings, preference and shallow-his
 - Extract the existing status title calculation from `output/mod.rs::render_text` into crate-private `render_repo_git_status` and use it from the focused handler and the generic renderer. The generic renderer supplies no link map. Add a final `Option<&HashMap<String, CommitLink>>` parameter to `render_git_section` and `build_git_status_items`. Update the in-tree unit callers and `cli/src/bin/render_git_status_fixture.rs` to pass `None` for synthetic reports. Use captured URLs by full SHA and remove `commit_links_at` from the renderer. Keep `format_commit_line`, InlineProse and list components, compact sections, ordering and fallback. No callers of `render_git_section` were found outside the Sniff CLI package.
 - Run a before/after acceptance sample on Linux, with no separate discovery spike. The spec's two commit-graph timings already establish its effect. Planning confirmed `fix/biscuit-terminal` at `fb35e1684` has ten displayed commits absent from all remote history, 16,682 distinct reachable commits, and no commit-graph file or chain. Its 26 remote refs include symbolic `origin/HEAD`, which `remote_branch_tips` excludes. Keep HEAD and remote refs pinned through sampling and use JSON as the fixed-cost bracket.
 
-- [ ] **Capture baseline**
+- [x] **Capture baseline**
   - Before source edits, run `cargo build --release --locked -p sniff-detection-cli --bin sniff`. Invoke the absolute built binary with the session worktree as `--base`. Record source HEAD, remote ref names and IDs, reachable union count, number of the ten targets absent, and commit-graph presence.
   - Warm one run per mode, then record three interleaved runs each of `repo git-status --perf` and `repo git-status --json --perf`. Capture stdout, stderr and external wall time. Record median wall times, both reported visit counts, and the baseline's absent linking stage in implementation-log.md. Keep raw samples in the ignored build target directory. Baseline counters exclude the former renderer lookup.
 
