@@ -28,6 +28,8 @@ indexmap = { version = "2", optional = true }
 openapiv3 = { version = "2", optional = true }
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+test-toolkit = { path = "../../tools/test-toolkit" }
 serial_test = "3.2"
 wiremock = "0.6"
 # default-features = false drops reqwest's system-proxy only; see docs/dependencies.md.

@@ -69,6 +69,7 @@ sniff repo --json
 #   "recent_commits": [ { "hash": "...", "heading": "...", "files": [ ... ], ... } ],
 #   "source_code_changes": [ ... ],
 #   "documentation_changes": [ ... ],
+#   "indent": { "default": { "indent_using": "space", "indent": 4, ... }, "overrides": { ... }, "skipped": [] },
 #   ...
 # }
 # consolidated aggregate with snake_case keys. Focused child commands keep
@@ -76,6 +77,10 @@ sniff repo --json
 # catalogs and groups change data into ScopeBucket objects. The three commit
 # families are the exception: each embeds exactly the bare array its focused
 # command (`repo recent-commits --json`, etc.) emits for the last 10 commits.
+#
+# `indent` is the `sniff repo indent --json` summary, unchanged. It is computed
+# only for this aggregate and for `sniff repo indent`; no other focused repo
+# command reads formatter configuration or carries the key.
 #
 # Note: the focused `sniff repo is-monorepo --json` leaf uses a different
 # snake_case object shape (`{ "is_monorepo": ... }`); see its subcommand docs.

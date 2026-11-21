@@ -35,6 +35,7 @@ pub struct TextOutput {
     pub stderr: String,
 }
 
+pub(crate) use filesystem::indentation as indentation;
 pub use filesystem::query::{UNWRAPPED_WIDTH, View as PathUsageView, render_path_usage};
 pub(crate) use filesystem::query::neutralize as neutralize_control_text;
 pub use filesystem::{

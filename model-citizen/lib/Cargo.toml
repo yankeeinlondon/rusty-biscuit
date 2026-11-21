@@ -39,6 +39,8 @@ gguf-rs-lib = "0.2"
 schematic-definitions = { path = "../../schematic/definitions" }
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+test-toolkit = { path = "../../tools/test-toolkit" }
 serial_test = { version = "3.4", features = ["file_locks"] }
 tempfile = "3.26"
 

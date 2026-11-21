@@ -21,3 +21,4 @@ mod steering_activation;
 mod steering_check;
 mod test_layout;
 mod vocabulary;
+mod yaml_serializer_guard;

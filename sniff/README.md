@@ -31,7 +31,7 @@ A comprehensive Rust library for system detection:
 - **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone, NTP status
 - **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage, audio devices
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses (scope-preserving), WAN IP lookup (TTL-cached), default IPv4/IPv6 gateways, CGNAT/Tailscale detection, and unprivileged ICMP echo probes
-- **Filesystem Analysis**: Git repos, monorepo tools, language detection, file type classification, EditorConfig, document discovery, blast radius, justfile detection, recent commits
+- **Filesystem Analysis**: Git repos, monorepo tools, language detection, file type classification, EditorConfig, [indentation resolution](docs/topics/indentation.md), document discovery, blast radius, justfile detection, recent commits
 - **Programs Module**: Detect installed software across 10 categories, with installation support for 8, test-runner availability, and remote-bash consent gating
 - **Services Module**: Detect and list system services across 10+ init systems
 - **Process Trees**: Own a spawned command and everything it starts, then stop or release them together, and lend an interactive one the terminal while it runs ([process trees](docs/topics/process-trees.md))
@@ -88,6 +88,7 @@ sniff repo git-status                # Git status with commit history
 sniff repo branches                  # Local branches from known refs
 sniff repo package-dependencies      # Internal workspace dependency graph
 sniff repo dependencies              # External package dependencies
+sniff repo indent yaml               # Indentation to write YAML with, and its source
 sniff files --association image      # Image counts within the package/base directory
 sniff files --association image -v   # …and each matching file, hyperlinked to its path
 sniff repo git-status --compact      # Status section only

@@ -33,8 +33,10 @@ use schematic_define::pagination::{
     Collection, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize,
     Partition, Relay, Session, SessionStep, Strategy, ValueSource,
 };
+use schematic_definitions::registry::registrations;
 use schematic_gen::output::{
-    RustOutputRequest, Selection, generate_and_write_all, prepare_rust_output,
+    RustOutputRequest, Selection, assemble_lib_rs, assemble_prelude, assemble_shared_module, format_code,
+    generate_and_write_all, prepare_rust_output, validate_code,
 };
 use schematic_gen::pipeline::resolve_all_apis;
 
@@ -42,6 +44,7 @@ use crate::common::fresh_output::{
     Definitions, FreshCrate, OFFLINE_CACHE_HINT, TreeSnapshot, diff_summary, doctored_runtime,
     list_dir, offline_cache_hint, schematic_root, snapshot_tree,
 };
+use crate::common::generation_groups;
 
 /// The fixture APIs and the generator features each one covers.
 const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
@@ -3348,64 +3351,85 @@ const RUNTIME_DEFINITIONS: &[&str] = &[
     "redirect::Policy",
 ];
 
-#[test]
-fn generated_rest_code_references_the_runtime_and_defines_none_of_it() {
-    let apis = resolve_all_apis();
-    let api_refs: Vec<&RestApi> = apis.iter().collect();
-    let out = tempfile::TempDir::new().unwrap();
-    generate_and_write_all(&api_refs, out.path(), false).expect("generate");
-
+/// The generated REST sources under `out`, by path relative to it: every
+/// `.rs` file except the WebSocket modules.
+fn rest_sources(out: &Path) -> Vec<(String, String)> {
     let mut rest_files = Vec::new();
-    for (relative, bytes) in snapshot_tree(out.path()) {
+    for (relative, bytes) in snapshot_tree(out) {
         let Some(bytes) = bytes else { continue };
         let websocket = relative.ends_with("_ws.rs") || relative == "ws_shared.rs";
         if relative.ends_with(".rs") && !websocket {
             rest_files.push((relative, String::from_utf8(bytes).expect("UTF-8 source")));
         }
     }
-    assert!(rest_files.len() > 18, "every REST module and the shared files are scanned");
-    for (relative, source) in &rest_files {
+    rest_files
+}
+
+/// The registered REST API names, built from nothing.
+fn registered_rest_names() -> Vec<&'static str> {
+    registrations().iter().filter(|entry| entry.rest().is_some()).map(|entry| entry.name).collect()
+}
+
+/// What no generated REST source may hold wherever it sits in the crate: a
+/// runtime definition, a removed name, or a client alias of any registered
+/// API. Returns the sources joined without whitespace and with `,)` closed
+/// up, for [`assert_client_names`].
+fn assert_defines_no_runtime(rest_files: &[(String, String)]) -> String {
+    for (relative, source) in rest_files {
         for definition in RUNTIME_DEFINITIONS {
             assert!(!source.contains(definition), "{relative} contains `{definition}`");
         }
     }
-
-    let source_of = |name: &str| &rest_files.iter().find(|(path, _)| path == name).unwrap().1;
-    assert!(source_of("lib.rs").contains("pub use schematic_runtime;"));
-    assert!(source_of("lib.rs").contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
-    // GitHub's endpoint methods push its module over the split threshold.
-    let github = source_of("github/requests.rs");
-    assert!(github.contains("impl schematic_runtime::EndpointSpec for ListPullRequestsRequest"));
-    let github_flat: String = github.split_whitespace().collect::<String>().replace(",)", ")");
-    assert!(
-        github_flat.contains(
-            "pubfnlist_releases(&self,owner:implInto<String>,repo:implInto<String>)->ListReleasesCall<'_>"
-        ),
-        "GitHub has the endpoint method of the documented example"
-    );
-    // Every REST API has exactly one user-facing client name: its struct,
-    // given its settings by the runtime macro. No alias, per-API builder, or
-    // fallible constructor remains anywhere.
     let all_rest = rest_files
         .iter()
         .flat_map(|(_, source)| source.split_whitespace())
         .collect::<String>()
         .replace(",)", ")");
-    for api in &apis {
-        let name = &api.name;
+    for name in registered_rest_names() {
+        assert!(!all_rest.contains(&format!("{name}Client")), "{name} still has a client alias");
+    }
+    for removed in ["ClientBuilder", "fnbuilder()", "BuildError", "pubtype"] {
+        assert!(!all_rest.contains(removed), "generated REST code still contains `{removed}`");
+    }
+    all_rest
+}
+
+/// Every REST API has exactly one user-facing client name: its struct,
+/// given its settings by the runtime macro. `all_rest` defines it for each
+/// API of `defined` once and for every other registered API not at all, so
+/// the crate root and the module groups together define each once.
+fn assert_client_names(all_rest: &str, defined: &[&str]) {
+    for name in registered_rest_names() {
+        let count = usize::from(defined.contains(&name));
         for expected in [
             format!("pub struct {name}(schematic_runtime::Client<{name}Api>);"),
             format!("pub enum {name}Api {{}}"),
             format!("schematic_runtime::api_client!({name}, {name}Api);"),
         ] {
             let squashed: String = expected.split_whitespace().collect();
-            assert_eq!(all_rest.matches(&squashed).count(), 1, "{name}: `{expected}`");
+            assert_eq!(all_rest.matches(&squashed).count(), count, "{name}: `{expected}`");
         }
-        assert!(!all_rest.contains(&format!("{name}Client")), "{name} still has a client alias");
     }
-    for removed in ["ClientBuilder", "fnbuilder()", "BuildError", "pubtype"] {
-        assert!(!all_rest.contains(removed), "generated REST code still contains `{removed}`");
+}
+
+/// Generates the APIs of `modules` as a crate of their own and checks its
+/// REST sources; returns them for group-specific checks.
+fn check_group_runtime_references(modules: &[&str]) -> Vec<(String, String)> {
+    let apis = generation_groups::apis(modules);
+    let api_refs: Vec<&RestApi> = apis.iter().collect();
+    let out = tempfile::TempDir::new().unwrap();
+    generate_and_write_all(&api_refs, out.path(), false).expect("generate");
+
+    let rest_files = rest_sources(out.path());
+    for module in modules {
+        assert!(
+            rest_files.iter().any(|(path, _)| *path == format!("{module}.rs") || path.starts_with(&format!("{module}/"))),
+            "{module}: every REST module of the group is scanned"
+        );
     }
+    let all_rest = assert_defines_no_runtime(&rest_files);
+    let names: Vec<&str> = apis.iter().map(|api| api.name.as_str()).collect();
+    assert_client_names(&all_rest, &names);
     for (relative, source) in &rest_files {
         let module = relative.trim_end_matches(".rs");
         if ["lib", "prelude", "shared"].contains(&module) || relative.ends_with("/requests.rs") || relative.ends_with("/responses.rs") {
@@ -3415,6 +3439,59 @@ fn generated_rest_code_references_the_runtime_and_defines_none_of_it() {
             source.contains("schematic_runtime::"),
             "{relative} declares an API without referring to the runtime"
         );
+    }
+    rest_files
+}
+
+/// Generated REST code refers to `schematic_runtime` and defines none of
+/// it: one case per bounded module group, and one for the shipped crate's
+/// root, prelude, and shared module.
+mod generated_rest_code_references_the_runtime_and_defines_none_of_it {
+    use super::*;
+
+    #[test]
+    fn openai() {
+        check_group_runtime_references(generation_groups::OPENAI);
+    }
+
+    #[test]
+    fn anthropic_to_gitlab() {
+        let rest_files = check_group_runtime_references(generation_groups::ANTHROPIC_TO_GITLAB);
+        let source_of = |name: &str| &rest_files.iter().find(|(path, _)| path == name).unwrap().1;
+        // GitHub's endpoint methods push its module over the split threshold.
+        let github = source_of("github/requests.rs");
+        assert!(github.contains("impl schematic_runtime::EndpointSpec for ListPullRequestsRequest"));
+        let github_flat: String = github.split_whitespace().collect::<String>().replace(",)", ")");
+        assert!(
+            github_flat.contains(
+                "pubfnlist_releases(&self,owner:implInto<String>,repo:implInto<String>)->ListReleasesCall<'_>"
+            ),
+            "GitHub has the endpoint method of the documented example"
+        );
+    }
+
+    #[test]
+    fn huggingface_to_unfolded_circle() {
+        check_group_runtime_references(generation_groups::HUGGINGFACE_TO_UNFOLDED_CIRCLE);
+    }
+
+    /// `lib.rs`, `prelude.rs`, and `shared.rs` of the whole catalog,
+    /// rendered as full generation renders them.
+    #[test]
+    fn crate_root_prelude_and_shared() {
+        let apis = resolve_all_apis();
+        let refs: Vec<&RestApi> = apis.iter().collect();
+        let render = |tokens| format_code(&validate_code(&tokens).expect("generated code parses"));
+        let rest_files = vec![
+            ("lib.rs".to_string(), render(assemble_lib_rs(&refs, registrations()))),
+            ("prelude.rs".to_string(), render(assemble_prelude(&refs, registrations()))),
+            ("shared.rs".to_string(), render(assemble_shared_module())),
+        ];
+        let all_rest = assert_defines_no_runtime(&rest_files);
+        assert_client_names(&all_rest, &[]);
+        let lib = &rest_files[0].1;
+        assert!(lib.contains("pub use schematic_runtime;"));
+        assert!(lib.contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
     }
 }
 

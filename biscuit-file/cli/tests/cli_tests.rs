@@ -418,6 +418,44 @@ fn default_json_is_pretty_not_compact() {
         .stdout(predicate::function(|s: &str| s.trim().lines().count() > 1));
 }
 
+// ── YAML output layout ──────────────────────────────────────────────
+
+const NESTED_JSON: &str = r#"{"a":{"b":[1,{"c":"x","d":2}],"e":"y"}}"#;
+
+/// Standard output has no destination, so `--yaml` uses the writer's
+/// default four-space layout; sequence items keep the compact mapping rule.
+const NESTED_YAML: &str = "a:\n    b:\n        - 1\n        - c: x\n          d: 2\n    e: y\n";
+
+fn stdout_of(input_format: &str, output_flag: &str, stdin: &str) -> String {
+    let output = bf()
+        .args(["--input-format", input_format, output_flag])
+        .write_stdin(stdin)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).expect("bf writes UTF-8")
+}
+
+#[test]
+fn converted_yaml_output_uses_the_default_layout() {
+    // `println!` adds one line break after the document's own.
+    assert_eq!(stdout_of("json", "--yaml", NESTED_JSON), format!("{NESTED_YAML}\n"));
+}
+
+#[test]
+fn yaml_to_yaml_output_is_relaid_with_the_default_layout() {
+    let authored = "a:\n  b:\n  - 1\n  - c: x\n    d: 2\n  e: y\n";
+    assert_eq!(stdout_of("yaml", "--yaml", authored), format!("{NESTED_YAML}\n"));
+}
+
+#[test]
+fn yaml_output_parses_to_the_input_value() {
+    let yaml = stdout_of("json", "--yaml", NESTED_JSON);
+    let round_trip: serde_json::Value =
+        serde_json::from_str(&stdout_of("yaml", "--json", &yaml)).unwrap();
+    assert_eq!(round_trip, serde_json::from_str::<serde_json::Value>(NESTED_JSON).unwrap());
+}
+
 // ── Mutual exclusivity ──────────────────────────────────────────────
 
 #[test]

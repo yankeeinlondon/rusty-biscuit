@@ -201,13 +201,14 @@ pub(crate) fn render_frontmatter(frontmatter: &Value, term: &Terminal) -> String
         .join("\n")
 }
 
-/// Convert a frontmatter JSON `Value` to a YAML string.
+/// Convert a frontmatter JSON `Value` to a YAML string laid out with the
+/// default indentation (the display has no destination file).
 ///
 /// Falls back to an empty string if serialization fails (a non-object
 /// `Value` still serializes; failure is effectively unreachable for
 /// frontmatter shapes).
 fn frontmatter_to_yaml(value: &Value) -> String {
-    biscuit_file::serde_yaml_ng::to_string(value).unwrap_or_default()
+    biscuit_file::to_yaml_string(value, biscuit_file::Indentation::default()).unwrap_or_default()
 }
 
 /// Produce a `cwd`-relative display string when possible, falling back to

@@ -153,6 +153,20 @@ YAML-to-JSON conversion supports configurable policies for edge cases via `as_js
 - `NonStringKeyPolicy` -- handling of non-string map keys
 - `NonFiniteFloatPolicy` -- handling of NaN/Infinity values
 
+#### Writing YAML
+
+`to_yaml_string(&value, indentation)` (and `Yaml::to_yaml_string`) writes any
+`Serialize` value as YAML laid out with an `Indentation` (four spaces by
+default), and checks that the text parses back to the same value before
+returning it. See [Writing YAML](../docs/topics/yaml-writing.md).
+
+```rust
+use biscuit_file::{Indentation, Yaml};
+
+let yaml = Yaml::from_str("list:\n- a\n")?;
+assert_eq!(yaml.to_yaml_string(Indentation::default())?, "list:\n    - a\n");
+```
+
 #### YAML Source Analysis and Repair
 
 Use `analyze_yaml` when the source may be invalid. Unlike `Yaml::from_str`, the

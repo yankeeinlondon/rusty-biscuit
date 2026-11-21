@@ -179,7 +179,7 @@ fn parse_ignore_properties(raw: &str, property: &str) -> Vec<String> {
 }
 
 /// A computed hash's text: the flat string for `fm`/`body`/`simple`/`structured`,
-/// or the nested YAML object for `detailed`.
+/// or the nested YAML object for `detailed`, nested four spaces per level.
 fn computed_hash_text(computed: &ComputedHash) -> Result<String> {
     match computed.flat_string() {
         Some(flat) => Ok(format!("{flat}\n")),
@@ -187,7 +187,8 @@ fn computed_hash_text(computed: &ComputedHash) -> Result<String> {
             let ComputedHash::Detailed(detailed) = computed else {
                 unreachable!("only detailed hashes lack a flat string form");
             };
-            serde_yaml_ng::to_string(detailed).wrap_err("Failed to serialize detailed hash")
+            biscuit_file::to_yaml_string(detailed, biscuit_file::Indentation::default())
+                .wrap_err("Failed to serialize detailed hash")
         }
     }
 }
@@ -244,7 +245,9 @@ fn run_hash_save(
         None => None,
     };
 
-    let stamp = md.stamp_baseline(source, options, now, Change::Detect)?;
+    let stamp = md.stamp_baseline_with_indentation(source, options, now, Change::Detect, || {
+        darkmatter::config::write::destination_indentation(resolved)
+    })?;
     let saved = stamp.text.is_some();
 
     if let Some(written) = stamp.text {

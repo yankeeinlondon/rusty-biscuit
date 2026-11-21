@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use biscuit_file::serde_yaml_ng;
+use biscuit_file::{YamlError, serde_yaml_ng};
 
 use crate::error::{ClaudineError, Result};
 
@@ -216,8 +216,14 @@ fn normalize_yaml_indentation_tabs(raw: &str) -> String {
     normalized
 }
 
+/// Writes `parsed` to `path`, its frontmatter laid out with the indentation
+/// preference of `path`.
 pub(super) fn write_markdown_document(path: &Path, parsed: &ParsedMarkdown) -> Result<()> {
-    let yaml = serde_yaml_ng::to_string(&parsed.frontmatter)?;
+    let indentation = darkmatter::config::write::destination_indentation(path);
+    let yaml = biscuit_file::to_yaml_string(&parsed.frontmatter, indentation).map_err(|error| match error {
+        YamlError::Serialize(source) => ClaudineError::YamlParse(source),
+        other => ClaudineError::LinkingError(format!("{}: frontmatter could not be laid out: {other}", path.display())),
+    })?;
     let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
     let yaml = yaml.trim_end_matches('\n');
 

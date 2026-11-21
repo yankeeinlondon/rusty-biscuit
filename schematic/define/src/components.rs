@@ -5,6 +5,8 @@
 //! [`RestApi::schemas`], so a reference cannot disagree with it; it can only
 //! dangle, which [`RestApi::validate_references`] rejects.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -55,12 +57,13 @@ pub(crate) fn flatten<'a>(
             Some(composition) => (SchemaComponent { schema: composition.clone(), ..own }, composition, Some(own_shape)),
             None => (own, own_shape, None),
         };
-        match merged.components.iter().position(|c| c.name == name) {
+        match merged.index.get(name).copied() {
             Some(index) if !merged.agrees(index, &shape) && alternate.as_ref().is_none_or(|a| !merged.agrees(index, a)) => merged.conflict(index, diagnostic.into()),
             Some(index) => {
                 merged.components[index] = entry;
                 merged.shapes[index].0 = shape;
                 merged.alternates[index] = alternate;
+                merged.agreeing[index].clear();
             }
             None => merged.push(entry, (shape, alternate), diagnostic.into()),
         }
@@ -71,19 +74,34 @@ pub(crate) fn flatten<'a>(
 
 /// Components with the wire shape and source description of each, by index.
 #[derive(Default)]
-struct Merged {
+struct Merged<'a> {
     components: Vec<SchemaComponent>,
+    /// The index of each component name.
+    index: HashMap<String, usize>,
     shapes: Vec<(Value, String)>,
     /// A composed component's own schema shape, which a nested copy may match.
     alternates: Vec<Option<Value>>,
+    /// Nested schemas, as written, whose shape agrees with the current one.
+    /// Every registration repeats the nested definitions of the types it
+    /// reaches, and an identical copy needs no second wire shape, unless it
+    /// names its document root (`"$ref": "#"`), which differs by
+    /// registration: such a copy is never recorded.
+    agreeing: Vec<Vec<&'a Value>>,
     conflicts: Vec<DefinitionError>,
 }
 
-impl Merged {
+impl<'a> Merged<'a> {
     fn push(&mut self, component: SchemaComponent, (shape, alternate): (Value, Option<Value>), source: String) {
+        self.index.insert(component.name.clone(), self.components.len());
         self.components.push(component);
         self.shapes.push((shape, source));
         self.alternates.push(alternate);
+        self.agreeing.push(Vec::new());
+    }
+
+    /// Records that the nested `schema` agrees with component `index`.
+    fn agreed(&mut self, index: usize, schema: &'a Value) {
+        if !names_root(schema) { self.agreeing[index].push(schema); }
     }
 
     fn agrees(&self, index: usize, shape: &Value) -> bool {
@@ -98,19 +116,22 @@ impl Merged {
 
     /// `root_name` is the component of the registration being walked, the
     /// target of its definitions' `"$ref": "#"`; `root` describes it.
-    fn nested(&mut self, value: &Value, root_name: &str, root: &str) {
+    fn nested(&mut self, value: &'a Value, root_name: &str, root: &str) {
         match value {
             Value::Object(object) => {
                 let defs = object.get("$defs").and_then(Value::as_object);
                 let schemas = object.get("components").and_then(|c| c.get("schemas")).and_then(Value::as_object);
                 for (name, schema) in defs.into_iter().chain(schemas).flatten() {
+                    let index = self.index.get(name).copied();
+                    if index.is_some_and(|index| self.agreeing[index].contains(&schema)) { continue; }
                     let stripped = strip(schema, root_name);
                     let shape = wire_shape(&stripped, root_name, true);
-                    match self.components.iter().position(|c| &c.name == name) {
+                    match index {
                         Some(index) if !self.agrees(index, &shape) => self.conflict(index, format!("a schema nested in {root}")),
-                        Some(_) => {}
+                        Some(index) => self.agreed(index, schema),
                         None => {
                             self.push(SchemaComponent { name: name.clone(), rust_path: None, schema: stripped }, (shape, None), format!("a schema nested in {root}"));
+                            self.agreed(self.components.len() - 1, schema);
                             self.nested(schema, root_name, root);
                         }
                     }
@@ -140,6 +161,15 @@ fn wire_shape(schema: &Value, root_name: &str, nested: bool) -> Value {
     if let Some(object) = shape.as_object_mut() { object.remove("title"); }
     resolve_root_refs(&mut shape, &format!("#/components/schemas/{root_name}"));
     shape
+}
+
+/// Whether `value` holds a `"$ref": "#"`, which [`resolve_root_refs`] rewrites.
+fn names_root(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => object.iter().any(|(key, value)| (key == "$ref" && value == "#") || names_root(value)),
+        Value::Array(values) => values.iter().any(names_root),
+        _ => false,
+    }
 }
 
 fn resolve_root_refs(value: &mut Value, target: &str) {

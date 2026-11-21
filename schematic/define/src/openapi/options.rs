@@ -5,7 +5,7 @@
 
 use super::OpenApiError;
 #[cfg(feature = "openapi")]
-use biscuit_file::serde_yaml_ng;
+use biscuit_file::{Indentation, serde_yaml_ng, to_yaml_string};
 
 /// Output format for exported OpenAPI documents.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -70,7 +70,21 @@ impl ExportOptions {
     }
 }
 
-/// Serializes an OpenAPI document to the specified format.
+/// Serializes an OpenAPI document to the specified format, with YAML laid
+/// out at [`Indentation::default`] (four spaces per level).
+///
+/// For a document with no destination file; a writer that knows its
+/// destination uses [`serialize_with_indentation`].
+///
+/// ## Errors
+///
+/// Returns `OpenApiError::Parse` if serialization fails.
+pub fn serialize(doc: &openapiv3::OpenAPI, format: ExportFormat) -> Result<String, OpenApiError> {
+    serialize_with_indentation(doc, format, Indentation::default())
+}
+
+/// Serializes an OpenAPI document to the specified format, laying YAML out
+/// `indentation` columns per level. JSON output ignores `indentation`.
 ///
 /// A schema whose numeric keyword carries a
 /// [`crate::constraints::EXACT_EXTENSION`] entry is written with that exact
@@ -78,15 +92,15 @@ impl ExportOptions {
 /// the extension, so no constraint is narrowed on the way out. A document
 /// without the extension serializes unchanged.
 ///
-/// ## Returns
-///
-/// The serialized document as a string.
-///
 /// ## Errors
 ///
-/// Returns `OpenApiError::Parse` if serialization fails.
-pub fn serialize(doc: &openapiv3::OpenAPI, format: ExportFormat) -> Result<String, OpenApiError> {
-    let direct = render(doc, format)?;
+/// Returns `OpenApiError::Parse` if serialization or YAML layout fails.
+pub fn serialize_with_indentation(
+    doc: &openapiv3::OpenAPI,
+    format: ExportFormat,
+    indentation: Indentation,
+) -> Result<String, OpenApiError> {
+    let direct = render(doc, format, indentation)?;
     if !direct.contains(crate::constraints::EXACT_EXTENSION) {
         return Ok(direct);
     }
@@ -94,12 +108,14 @@ pub fn serialize(doc: &openapiv3::OpenAPI, format: ExportFormat) -> Result<Strin
     // written exactly as above.
     let mut value = serde_yaml_ng::to_value(doc).map_err(|e| failed("YAML", &e))?;
     write_exact_marks(&mut value);
-    let marked = render(&value, format)?;
+    let marked = render(&value, format, indentation)?;
+    // Substituted only after layout: the placeholders are strings to the
+    // writer, so neither the backend nor the layout can respell the numbers.
     Ok(EXACT_PLACEHOLDER.replace_all(&marked, "$text").into_owned())
 }
 
 /// Prefixes the exact text that replaces a stand-in number while the
-/// document is rendered; it never survives [`serialize`].
+/// document is rendered; it never survives [`serialize_with_indentation`].
 const EXACT_PREFIX: &str = "__schematic_exact_number__";
 
 /// A rendered placeholder, quoted or plain, and its decimal text.
@@ -133,10 +149,14 @@ fn write_exact_marks(value: &mut serde_yaml_ng::Value) {
     }
 }
 
-fn render(value: &impl serde::Serialize, format: ExportFormat) -> Result<String, OpenApiError> {
+fn render(
+    value: &impl serde::Serialize,
+    format: ExportFormat,
+    indentation: Indentation,
+) -> Result<String, OpenApiError> {
     match format {
         ExportFormat::Json => serde_json::to_string_pretty(value).map_err(|e| failed("JSON", &e)),
-        ExportFormat::Yaml => serde_yaml_ng::to_string(value).map_err(|e| failed("YAML", &e)),
+        ExportFormat::Yaml => to_yaml_string(value, indentation).map_err(|e| failed("YAML", &e)),
     }
 }
 

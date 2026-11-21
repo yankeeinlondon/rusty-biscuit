@@ -182,6 +182,41 @@ owns it (as Claudine owns `~/.claudine/`).
 A newly created file gets the temporary file's permissions, which on Unix are
 owner read and write only (`0600`).
 
+When you have a value rather than authored text, use
+`TargetChange::create_yaml(path, value, edits)`. It serializes the
+`serde_json::Value` under the lock, laid out with the target's indentation
+preference, then applies `edits` with the same preference:
+
+```rust
+transaction.add(TargetChange::create_yaml(
+    "/home/me/project/.tool.yaml",
+    serde_json::json!({"permissions": {"file-read": ["./*.md"]}}),
+    Vec::new(),
+))?;
+// With `.editorconfig` setting `indent_size = 2` for `*.yaml`, the file is:
+// permissions:
+//   file-read:
+//     - ./*.md
+```
+
+`create` is different: its `initial_text` is authored, so its own blocks are
+the examples its edits copy (see
+[Indentation of new values](./yaml-editing.md#indentation-of-new-values)).
+
+### Where the indentation preference comes from
+
+A transaction asks Sniff for each target's preference (the same answer
+`sniff repo indent` gives for that file) lazily: at most once per target, and
+only when something is written that has no authored example to copy. A save
+whose edits all find one, or that changes nothing, never asks. If Sniff cannot
+resolve the preference, the target is written with four spaces and its
+`CommittedTarget::indentation_warning` says why. A caller that already knows
+the preference, or a test, can supply it with
+`ConfigTransaction::with_indentation_resolver`.
+
+A generated document that cannot be laid out fails with `Layout` and nothing
+is written.
+
 ## Symlinks and aliases
 
 The writer follows symlinks to the real file and edits that file in place; a
@@ -208,6 +243,7 @@ The two changes must agree on what the file should hold, or `add` returns
 | `ValidationFailed { path, refusal }` | your callback refused the edited text | none |
 | `ReplacementFailed { path, published }` | renaming the temporary file failed; `path` is untouched | only the files listed in `published` |
 | `ConflictingChanges { path }` | one file added twice with different expectations | none |
+| `Layout { path, source }` | a `create_yaml` value could not be laid out as YAML | none |
 
 ## Migration receipts
 

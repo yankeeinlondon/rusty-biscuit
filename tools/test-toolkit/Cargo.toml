@@ -38,6 +38,13 @@ toml = "1.0"
 # so it adds no crate to the graph.
 unicode-ident = "1"
 
+# `serializer_guard` parses each production source file once and resolves
+# `use` declarations over the syntax tree, which a token scan cannot do soundly.
+# Line numbers in its failures need `span-locations`, which `claudine/cli`,
+# `claudine/lib`, and `unchained-ai/model_id` already enable in the graph.
+syn = { version = "2.0", features = ["full", "parsing", "visit"] }
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
+
 # Pulled in only for the `leak-sweep` binary (feature-gated) so the many crates
 # that depend on this crate as a dev-dependency do not inherit them.
 clap = { version = "4", features = ["derive"], optional = true }
@@ -124,4 +131,24 @@ source-inputs = [
     "scripts/distribution/publish-tap.sh",
     "scripts/distribution/tap.py",
     "scripts/distribution/verify_binstall.py",
+    # `serializer_guard_coverage` checks that each package reaching a YAML
+    # backend still calls the serializer guard from these tests.
+    "biscuit-file/cli/tests/yaml_serializer_guard.rs",
+    "biscuit-file/lib/tests/l1/yaml_serializer_guard.rs",
+    "content-policy/lib/tests/yaml_serializer_guard.rs",
+    "biscuit-terminal/lib/tests/l1/yaml_serializer_guard.rs",
+    "claudine/cli/tests/l1/yaml_serializer_guard.rs",
+    "claudine/gen/tests/l1/yaml_serializer_guard.rs",
+    "claudine/lib/tests/l1/yaml_serializer_guard.rs",
+    "darkmatter/cli/tests/l1/yaml_serializer_guard.rs",
+    "darkmatter/lib/tests/l1/yaml_serializer_guard.rs",
+    "simplified-schema/lib/tests/l1/yaml_serializer_guard.rs",
+    "model-citizen/lib/tests/yaml_serializer_guard.rs",
+    "darkmatter/dmls/tests/l1/yaml_serializer_guard.rs",
+    "sniff/lib/tests/l1/yaml_serializer_guard.rs",
+    "biscuit-tui/lib/tests/yaml_serializer_guard.rs",
+    "biscuit-tui/cli/tests/l1/yaml_serializer_guard.rs",
+    "research/lib/tests/yaml_serializer_guard.rs",
+    "schematic/define/tests/yaml_serializer_guard.rs",
+    "schematic/gen/tests/l1/yaml_serializer_guard.rs",
 ]

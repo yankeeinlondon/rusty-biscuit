@@ -289,7 +289,11 @@ table as authored.
   recursive type stays a finite reference graph, and parsing the export gives
   the same schema. Nested objects are written as block mappings and property
   unions as YAML lists, so pattern keys, `$constraints`, and each arm's
-  description survive.
+  description survive. The string has no destination file, so it is
+  indented four spaces per level whatever the source used
+  (`$schema:` / `    name: string`); a caller that saves it and wants the
+  file's own indentation writes the parsed document again with
+  biscuit-file's `to_yaml_string`.
 
 Some schemas have no SimplifiedSchema form, and the YAML export refuses them
 with `SimplifiedSchemaError::ExportUnsupported` rather than dropping

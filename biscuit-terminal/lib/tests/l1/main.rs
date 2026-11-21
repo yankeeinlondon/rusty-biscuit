@@ -74,3 +74,4 @@ mod tree_layout;
 mod two_column_markdown_html;
 mod two_column_parity;
 mod unordered_list_parity;
+mod yaml_serializer_guard;

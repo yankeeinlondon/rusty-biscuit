@@ -47,6 +47,9 @@ bf config.toml --json --compact        # any input format works
 
 `--compact` is ignored for YAML, TOML, text, and Markdown output.
 
+YAML output is indented four spaces per level (see
+[Writing YAML](../docs/topics/yaml-writing.md#yaml-that-biscuit-file-produces-itself)).
+
 ## Input Format Detection
 
 File type is detected automatically from extension:

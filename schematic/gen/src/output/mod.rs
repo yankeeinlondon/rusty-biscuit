@@ -377,23 +377,17 @@ fn assemble_modules(apis: &[&RestApi]) -> Result<Vec<GeneratedModule>, Generator
 
     let mut generated = Vec::new();
     for (module_path, group) in &module_groups {
-        let tokens = if group.len() == 1 {
-            assemble_api_module(group[0])
-        } else {
-            assemble_combined_api_module(group)
-        };
-        let formatted = render(&tokens)?;
+        // Each piece is parsed once: the single-file form is formatted to
+        // measure it, and a split reuses the parsed pieces.
+        let pieces = assemble::module_group_pieces(group).try_map(validate_code)?;
+        let formatted = format_code(&join_files(pieces.single_file())?);
         if formatted.lines().count() > SPLIT_THRESHOLD_LINES {
-            let parts = if group.len() == 1 {
-                assemble_split_api_module(group[0], &OutputOptions::default())
-            } else {
-                assemble_split_combined_api_module(group)
-            };
+            let [mod_rs, requests_rs, responses_rs] = pieces.split().map(join_files);
             generated.push(GeneratedModule::Directory {
                 module_path: module_path.clone(),
-                mod_rs: render(&parts.mod_rs)?,
-                requests_rs: render(&parts.requests_rs)?,
-                responses_rs: render(&parts.responses_rs)?,
+                mod_rs: format_code(&mod_rs?),
+                requests_rs: format_code(&requests_rs?),
+                responses_rs: format_code(&responses_rs?),
             });
         } else {
             generated.push(GeneratedModule::SingleFile {
@@ -403,6 +397,20 @@ fn assemble_modules(apis: &[&RestApi]) -> Result<Vec<GeneratedModule>, Generator
         }
     }
     Ok(generated)
+}
+
+/// The file whose tokens are those of `files` in order. Only the first may
+/// carry inner attributes: after an item, they would not parse.
+fn join_files(files: Vec<&syn::File>) -> Result<syn::File, GeneratorError> {
+    let mut joined = syn::File { shebang: None, attrs: Vec::new(), items: Vec::new() };
+    for (index, file) in files.into_iter().enumerate() {
+        if index > 0 && !file.attrs.is_empty() {
+            return Err(GeneratorError::CodeGenError("Generated code is invalid: inner attributes after an item".to_string()));
+        }
+        joined.attrs.extend(file.attrs.iter().cloned());
+        joined.items.extend(file.items.iter().cloned());
+    }
+    Ok(joined)
 }
 
 impl GeneratedModule {

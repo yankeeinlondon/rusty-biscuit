@@ -1036,6 +1036,9 @@ impl Commands {
                     no_error: *no_error,
                     on_error: on_error.clone(),
                 },
+                Some(RepoSubcommand::Indent { extension }) => RepoAction::Indent {
+                    extension: extension.clone(),
+                },
                 Some(RepoSubcommand::TestRunner { csv, list, md }) => RepoAction::TestRunner {
                     csv: *csv,
                     list: *list,
@@ -1202,6 +1205,11 @@ Identity:
   sniff repo version --package <name> Scope to one package
   sniff repo version --package-area <name>
                                        Scope to one package area
+
+Indentation:
+  sniff repo indent yaml              Indentation for YAML files, its source, and whether sources agree
+  sniff repo indent                   Repository default plus every file type that differs
+  sniff repo indent rs --json         { \"indent_using\": \"space\", \"indent\": 4, \"authority\": {...}, ... }
 
 Structure:
   sniff repo structure                Show repository/monorepo structure

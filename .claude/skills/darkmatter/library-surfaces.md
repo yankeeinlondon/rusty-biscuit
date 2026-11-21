@@ -23,18 +23,26 @@ behavior.
   hash.
 - YAML analysis and span support are shared through `biscuit-file` rather than
   reimplemented in Darkmatter.
-- `yaml_edit` (`edit_yaml_paths`, `YamlEdit`, `YamlEditError`) edits plain
-  YAML files in place with the frontmatter path editor's engine and never
-  serializes the whole file; see [frontmatter.md](frontmatter.md#plain-yaml-files).
+- `yaml_edit` (`edit_yaml_paths`, `edit_yaml_paths_with_indentation`,
+  `YamlEdit`, `YamlEditError`) edits plain YAML files in place with the
+  frontmatter path editor's engine and never serializes the whole file; see
+  [frontmatter.md](frontmatter.md#plain-yaml-files).
 - `config::write` (`ConfigTransaction`, `TargetChange`, `ConfigWriteError`)
   is the one configuration writer: sibling `<name>.darkmatter-lock` (kept,
   `File::try_lock`, 2 s/20 ms), locks in portable-path order, re-read,
-  `edit_yaml_paths`, caller's passive validation callback, expected-bytes
+  the layout-aware edit (`edit_yaml_paths_in_layout`; `TargetChange::create_yaml`
+  serializes a value with `biscuit_file::to_yaml_string` under the lock),
+  caller's passive validation callback, expected-bytes
   check, then the shared `atomic_replace::persist` (also used by
   `effects::fs_write`). `config::migration_receipt` is the one receipt
   reader/writer (`<name>.darkmatter-migration.json`, parsed by
   `strict_json`); `complete_cleanup` acts only on caller-listed known
-  sources. Test seams: `config::write::test_hooks` under
+  sources. The target's indentation preference comes from Sniff
+  (`resolve_destination_indentation`) lazily, once per target, only when a
+  value is rendered with no local example; a failure falls back to four
+  spaces with `CommittedTarget::indentation_warning`.
+  `ConfigTransaction::with_indentation_resolver` replaces Sniff (tests,
+  callers that know it). Test seams: `config::write::test_hooks` under
   `effects-instrumentation`. User docs: `docs/topics/config-writes.md`.
 - `config::schema` holds the shipped configuration schema
   (`darkmatter/schemas/darkmatter-config.yaml`, in `embedded::SHIPPED`,

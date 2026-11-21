@@ -66,6 +66,20 @@ fn composition_one_of_binds_untagged_enum() {
     ctx.finish().unwrap();
 }
 
+/// The context reuses its flattened components until a registration or a
+/// composition changes them.
+#[test]
+fn components_follow_registrations_and_compositions_after_a_read() {
+    let (mut ctx, cat, dog) = context();
+    let names = |ctx: &DefinitionContext| ctx.components().unwrap().into_iter().map(|c| c.name).collect::<Vec<_>>();
+    assert_eq!(names(&ctx), ["Cat", "Dog"]);
+    ctx.register::<Named>().unwrap();
+    assert_eq!(names(&ctx), ["Cat", "Dog", "Named"]);
+    ctx.one_of::<Pet>([cat, dog]).unwrap();
+    assert_eq!(names(&ctx), ["Cat", "Dog", "Named", "Pet"]);
+    assert_eq!(schema_of(&ctx, "Pet"), json!({"oneOf": [reference("Cat"), reference("Dog")]}));
+}
+
 #[test]
 fn composition_repeats_and_later_plain_registration_return_composed_descriptor() {
     let (mut ctx, cat, dog) = context();

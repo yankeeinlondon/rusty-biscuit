@@ -150,6 +150,11 @@ value you did not name, through a YAML alias.
 - Updates the source file in place.
 - A formatted output prints nothing on success (exit status 0).
 - A data output prints the value, with `saved: true`.
+- When the property already holds the value, and no `--width` reflows the
+  body, the file is not written and keeps its authored bytes:
+  `md set doc.md title same --save` on `title: 'same' # keep` leaves the
+  quotes and the comment. The command still succeeds; a data output reports
+  `saved: false`, with `document` holding the file's unchanged text.
 - Returns exit status 1 on failure, with the error on stderr, or in the value for a
   data output.
 

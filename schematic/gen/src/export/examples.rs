@@ -81,6 +81,8 @@ pub struct ExampleSource {
     document: Value,
     registry: Result<Registry<'static>, String>,
     validators: RefCell<HashMap<String, Result<Rc<Validator>, String>>>,
+    /// Validators of inline schemas, by their absolutized JSON text.
+    inline_validators: RefCell<HashMap<String, Result<Rc<Validator>, String>>>,
 }
 
 impl ExampleSource {
@@ -98,7 +100,7 @@ impl ExampleSource {
             .add(BASE, document.clone())
             .and_then(|builder| builder.prepare())
             .map_err(|error| format!("the API's schema components do not form a schema registry: {error}"));
-        Self { document, registry, validators: RefCell::new(HashMap::new()) }
+        Self { document, registry, validators: RefCell::new(HashMap::new()), inline_validators: RefCell::new(HashMap::new()) }
     }
 
     /// A value that validates against `reference`.
@@ -141,7 +143,11 @@ impl ExampleSource {
             At::Inline => {
                 let mut absolute = node.clone();
                 absolutize(&mut absolute);
-                self.compile(&absolute).map(Rc::new)
+                // Endpoints share wrapper schemas, and each compile walks
+                // every component the schema reaches.
+                let mut cache = self.inline_validators.borrow_mut();
+                let entry = cache.entry(absolute.to_string()).or_insert_with(|| self.compile(&absolute).map(Rc::new));
+                entry.clone()
             }
         }
         .map_err(|reason| at.error(reason))?;
