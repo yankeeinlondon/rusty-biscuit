@@ -49,3 +49,4 @@ mod test_layout;
 mod yaml_corpus;
 mod yaml_mutation;
 mod yaml_safety;
+mod yaml_writing;

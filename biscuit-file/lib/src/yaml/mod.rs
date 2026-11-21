@@ -13,6 +13,12 @@
 //! - Heterogeneous arrays (TOML requires homogeneous arrays)
 //! - Non-finite floats like NaN and Infinity (JSON doesn't support them)
 //!
+//! ## Writing
+//!
+//! [`to_yaml_string`] and [`Yaml::to_yaml_string`] write a value as YAML laid
+//! out with a caller's [`Indentation`](crate::Indentation); see
+//! `biscuit-file/docs/topics/yaml-writing.md`.
+//!
 //! ## Diagnostics and Repairs
 //!
 //! [`Yaml::analyze`] is the entry point for source-first diagnostics. It
@@ -52,6 +58,7 @@
 mod analyze;
 mod location;
 mod types;
+mod write;
 
 pub use analyze::{
     EditAudit, EditRejection, EditSetOutcome, RejectedEdit, YamlAnalysis, YamlCertainty,
@@ -65,6 +72,7 @@ pub use types::{
     NonFiniteFloatPolicy, NonStringKeyPolicy, NullPolicy, TomlConversionOptions, Yaml, YamlError,
     YamlSource,
 };
+pub use write::to_yaml_string;
 
 #[cfg(test)]
 mod tests;

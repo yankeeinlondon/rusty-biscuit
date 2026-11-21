@@ -72,6 +72,15 @@ let output: ConversionOutput<serde_json::Value> = yaml.as_json_with(options)?;
 let toml: toml::Value = yaml.as_toml()?;
 ```
 
+### Writing (laid out with an `Indentation`)
+```rust
+use biscuit_file::{Indentation, IndentStyle, to_yaml_string};
+
+let text = to_yaml_string(&value, Indentation::default())?; // any `Serialize`; four spaces
+let text = yaml.to_yaml_string(indentation)?;              // the wrapper's value, never its source text
+```
+`Indentation`/`IndentStyle` are unfeatured (`IndentStyle` serializes `space`/`tab`); `Tabs` writes `width` spaces in YAML. Errors: `YamlError::Serialize` (backend refused the value) or `YamlError::Layout` (output failed its reparse-and-compare check, order included). See [Writing YAML](../../../../biscuit-file/docs/topics/yaml-writing.md).
+
 ### Edge Case Policies (via `as_json_with` / `as_toml_with`)
 ```rust
 use biscuit_file::yaml::{JsonConversionOptions, NonStringKeyPolicy, NonFiniteFloatPolicy};

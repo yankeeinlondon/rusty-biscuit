@@ -70,8 +70,9 @@ test *args="":
 slow-tests *args="":
     @just _slow_tests {{ args }}
 
-# Proves the path→text boundary is genuinely unfeatured, and that the reference
-# and glob grammar work under `file-reference-syntax` alone.
+# Proves the path→text boundary and the writer `Indentation` types are
+# genuinely unfeatured, and that the reference and glob grammar work under
+# `file-reference-syntax` alone.
 #
 # `to_portable_string` / `try_portable_string` are documented as available
 # without `file-reference` and its gix/cargo_metadata/walkdir/dirs/url stack, so
@@ -110,7 +111,7 @@ test-minimal *args="":
     echo ""
     echo -e "Testing {{ BOLD }}biscuit-file{{ RESET }} with {{ ITALIC }}--no-default-features{{ RESET }}"
     echo "--------------------------"
-    cargo test -p biscuit-file --no-default-features --lib path_text
+    cargo test -p biscuit-file --no-default-features --lib -- path_text indentation
 
     # The passive reference and glob grammar must build and parse without the
     # resolution stack (`gix`, `walkdir`). Nextest, not `cargo test`: `l1` is a
