@@ -1,6 +1,31 @@
 ---
 area: claudine
-status: draft-spec
+status: finalized-spec
+reviewed: false
+reviewed_by: "codex/default"
+reviewed_on: "2026-11-20"
+review_iterations: 0
+needs_rulings: false
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
 created: 2026-11-20
 owner: Ken Snyder <ken@ken.net>
 ---
@@ -25,88 +50,217 @@ ignores this repository's own `.editorconfig`, which asks for four spaces in
 1. **Sniff resolves indentation.** Given a repository and a file (or a file
    extension), Sniff answers "what indentation does this project want here?"
    and says where the answer came from.
-2. **The `sniff repo indentation [<file-ext>]` command** exposes that answer
+2. **The `sniff repo indent [<file-ext>]` command** exposes that answer
    on the command line.
 3. **biscuit-file owns YAML writing.** One shared writer takes an indentation
-   and produces indented YAML. Every place in the repository that writes YAML
-   moves to it.
+   and produces indented YAML for newly generated documents and new parts of
+   existing documents.
 
 ## Indentation Policy
 
-Indentation is resolved for a file in a repository by checking these sources
-in order. The first one that states an indentation wins.
+Sniff reads formatting settings at the Git worktree root. Every source that
+exists for the file type gives an **opinion**, and the opinions are ranked
+in this order:
+
+1. the root `.editorconfig`;
+2. the file type's formatter configuration, when one is present. A present
+   configuration means the project uses that formatter, so a value it leaves
+   unstated takes **that formatter's documented default** (Biome's tabs,
+   Prettier's two spaces), not Sniff's fallback;
+3. the file type's built-in language convention, for languages with one
+   canonical formatter (`gofmt`, `rustfmt`, PEP 8);
+4. the fallback of four spaces, which applies only when no opinion
+   exists and is never compared with the others.
+
+The highest-ranked opinion is the **authority**; the rest are
+**alternative authorities**. The resolved style and width each come from
+the highest-ranked opinion that states it, so an `.editorconfig` that sets
+only `indent_style` takes its width from the next opinion. **Consensus**
+holds when every opinion agrees on each value it states; zero or one
+opinion is a consensus. A generic `[*]` rule can therefore override
+formatter settings for every file while the result still shows the
+disagreement. Files outside a worktree use the fallback.
+
+```yaml
+# sniff repo indent ts --json, with .editorconfig at 4 spaces and a bare biome.json
+indent_using: space
+indent: 4
+authority:
+    source: editorconfig
+    path: .editorconfig
+    via: ["*", "*.{js,ts,jsx,tsx,vue,json,yaml,yml,toml}"]
+    indent_using: space
+    indent: 4
+alt_authorities:
+    - source: biome
+      path: biome.json
+      via: []            # no indentation keys: Biome's defaults
+      indent_using: tab
+      indent: 2
+consensus: false
+skipped: []
+```
 
 ```mermaid
 flowchart TD
-    start([file path or extension]) --> ec{".editorconfig at the<br/>repository root has a matching<br/>section that sets indentation?"}
-    ec -- yes --> useEc[use it]
-    ec -- no --> lang{"a language formatter config<br/>for this file type sets<br/>indentation?"}
-    lang -- yes --> useLang[use it]
-    lang -- no --> def[4 spaces]
+    start([Output path or file extension]) --> gather[Read every present config concurrently]
+    gather --> ec[EditorConfig opinion from matching sections]
+    gather --> fmt[One opinion per present formatter, defaults filling unstated values]
+    fmt --> any{Any formatter opinion?}
+    any -- no --> conv[Convention opinion, if the language has one]
+    ec --> rank[Rank opinions: EditorConfig, formatters in table order, convention]
+    any -- yes --> rank
+    conv --> rank
+    rank --> fill[Each value from the highest opinion stating it, else four spaces]
+    fill --> result[Return authority, alt_authorities, consensus]
 ```
-
-1. **`.editorconfig` at the repository root.** Sections are matched against
-   the file's path relative to the root, following EditorConfig rules: later
-   matching sections override earlier ones, property by property. A generic
-   `[*]` section that sets `indent_size` counts as stating an indentation, so
-   it outranks the language configs in step 2. That is intended: an
-   `.editorconfig` is the project's explicit, cross-language statement.
-2. **A language-specific formatter config at the repository root**, chosen by
-   the file type (see the table below).
-3. **Default: 4 spaces.**
-
-Files outside any repository (for example `~/.claudine/config.yaml`) skip
-steps 1 and 2 and get the default.
 
 ### EditorConfig details
 
-Sniff's existing `detect_formatting` already reads only the root
-`.editorconfig` and does not walk parent directories. Resolution keeps that
-behavior. Sniff stores each section's glob but does not match globs today, so
-this feature adds a matcher for EditorConfig's glob syntax: `*`, `**`, `?`,
-`[name]`, `[!name]`, `{a,b}`, `{1..3}`, and the rule that a pattern without
-`/` matches at any depth.
+Reuse the parser behind [`detect_formatting`](../../../sniff/lib/src/filesystem/formatting.rs),
+which Sniff uses to read root formatting settings. Preserve the existing
+formatting report's public representation while retaining enough information
+internally to distinguish missing properties, explicit `unset`, and
+`indent_size = tab`. Match sections against the root-relative path with
+forward slashes on every platform. Follow EditorConfig's glob syntax,
+including escaped literals, numeric ranges, and basename matching for a
+pattern without a slash. Merge matching sections from top to bottom one
+property at a time. `unset` clears an earlier value and allows fallback.
+The EditorConfig opinion's `via` lists, in file order, the matching sections
+that set an indentation property.
+The root-only search is a deliberate limit on discovery. [EditorConfig specification](https://spec.editorconfig.org/)
 
-The two indentation properties combine like this:
+| Effective settings | Resolution |
+| ------------------ | ---------- |
+| `indent_style = space`, `indent_size = 2` | Two spaces |
+| `indent_style = space` only | Spaces, with width from the next opinion that states one |
+| Numeric `indent_size` only | Use that width, with style from the next opinion that states one |
+| `indent_size = tab` | Use `tab_width` if stated, then the normal width fallback. Resolve style independently |
+| `indent_style = tab` with no `indent_size` | Use `tab_width` if stated, then the normal width fallback |
+| Numeric `indent_size` and a different `tab_width` | Use `indent_size` for columns per level |
 
-| `indent_style` | `indent_size` | Result |
-| -------------- | ------------- | ------ |
-| `space` | `2` | 2 spaces |
-| `space` | unset | not stated; continue to step 2 for the size, keep `space` |
-| `tab` | any or unset | tabs, displayed at `tab_width` (else `indent_size`, else 4) |
-| unset | `2` | 2 spaces |
-| any | `tab` | tabs, displayed at `tab_width` |
-
-A section that sets `indent_style = space` without a size still decides the
-style. The size then comes from step 2 or the default.
+The API reports columns per level and a preferred indentation character.
+It does not describe the exact mix of tabs and spaces an editor might use
+when the configured tab display width differs from the level width. Accept
+widths from 1 through 255. Ignore invalid individual settings and include
+their file, key, and reason in diagnostics so lower-priority values can
+still apply.
 
 ### Language-specific sources
 
-Only configs at the repository root are read, matching the EditorConfig rule.
-Each row is a single entry in a lookup table, so adding a language later
-means adding one row.
+Read local configuration as data. The rows describe supported indentation
+settings, not full formatter emulation. Parse JSONC configuration
+(`biome.jsonc`, `deno.jsonc`, `dprint.jsonc`) with biscuit-file's JSON5
+reader, which Sniff already depends on.
 
-| File types | Config files, in order | Keys read |
-| ---------- | ---------------------- | --------- |
-| `rs` | `rustfmt.toml`, `.rustfmt.toml` | `hard_tabs`, `tab_spaces` |
-| `js` `jsx` `ts` `tsx` `mjs` `cjs` `json` `json5` `yaml` `yml` `md` `css` `scss` `html` `vue` | `.prettierrc` (JSON or YAML), `.prettierrc.json`, `.prettierrc.yaml`, `.prettierrc.yml`, `.prettierrc.toml`, `package.json` (`prettier` key) | `useTabs`, `tabWidth`, and an `overrides` entry whose `files` matches |
-| same as the previous row | `biome.json`, `biome.jsonc` | `formatter.indentStyle`, `formatter.indentWidth`, and the language block's overrides (for example `javascript.formatter`) |
-| same as the previous row | `deno.json`, `deno.jsonc` | `fmt.useTabs`, `fmt.indentWidth` |
-| `py` | `pyproject.toml` (`[tool.ruff]`, `[tool.ruff.format]`), `ruff.toml`, `.ruff.toml` | `indent-width`, `format.indent-style` |
-| `go` | none; `gofmt` always uses tabs | tabs, width 4 |
+| File types | Root configuration files, in order | Settings | Formatter default |
+| ---------- | ----------------------------------- | -------- | ----------------- |
+| `rs` | `.rustfmt.toml`, `rustfmt.toml` | `hard_tabs`, `tab_spaces` | 4 spaces |
+| `js` `jsx` `ts` `tsx` `mjs` `cjs` `mts` `cts` `json` `jsonc` `json5` `yaml` `yml` `md` `mdx` `css` `scss` `less` `graphql` `gql` `html` `vue` | `package.json` or `package.yaml` (`prettier` key), `.prettierrc` (JSON or YAML), `.prettierrc.json`, `.prettierrc.yaml`, `.prettierrc.yml`, `.prettierrc.json5`, `.prettierrc.toml` | `useTabs`, `tabWidth`, and matching `overrides[].options` | 2 spaces |
+| `js` `jsx` `ts` `tsx` `mjs` `cjs` `mts` `cts` `json` `jsonc` `css` `graphql` `gql` | `biome.json`, `biome.jsonc`, `.biome.json`, `.biome.jsonc` | `formatter.indentStyle`, `formatter.indentWidth`, and the language block (`javascript`, `json`, `css`, `graphql`) | Tabs, width 2 |
+| `js` `jsx` `ts` `tsx` `mjs` `cjs` `mts` `cts` `json` `jsonc` `yaml` `yml` `md` `css` `scss` `sass` `less` `html` `vue` | `deno.json`, `deno.jsonc` | `fmt.useTabs`, `fmt.indentWidth` | 2 spaces |
+| `js` `jsx` `ts` `tsx` `mjs` `cjs` `mts` `cts` `json` `jsonc` | `dprint.json`, `dprint.jsonc`, `.dprint.json`, `.dprint.jsonc` | `useTabs`, `indentWidth`, and the plugin block (`typescript`, `json`) | 2 spaces |
+| `py` `pyi` | `.ruff.toml`, `ruff.toml`, `pyproject.toml` | `indent-width`, `format.indent-style` (under `tool.ruff` in `pyproject.toml`) | 4 spaces |
+| `toml` | `.taplo.toml`, `taplo.toml` | `formatting.indent_string` | 2 spaces |
+| `yaml` `yml` | `.yamlfmt`, `.yamlfmt.yaml`, `.yamlfmt.yml`, `yamlfmt.yaml`, `yamlfmt.yml` | `formatter.indent` | 2 spaces |
+| `lua` `luau` | `stylua.toml`, `.stylua.toml` | `indent_type`, `indent_width` | Tabs, width 4 |
+| `c` `h` `cc` `cpp` `cxx` `hh` `hpp` `hxx` `m` `mm` `proto` | `.clang-format`, `_clang-format` | `IndentWidth`, `UseTab`, and `BasedOnStyle` from the built-in preset table below | LLVM preset |
 
-Within a row, the first config file that exists is used. Prettier, Biome, and
-Deno are mutually exclusive in practice; if more than one exists, the order in
-the table decides. Prettier configs written in JavaScript
-(`prettier.config.js`, `.prettierrc.cjs`, ...) are not executed: Sniff
-reports them as present and unread, and resolution continues.
+Every row with a present configuration contributes one opinion, ranked in
+table order. Within a row, the formatter itself reads only the first readable
+candidate that declares it, so Sniff uses that one; any later candidate in
+the same row that also exists is reported in `skipped` as shadowed. A
+manifest without its formatter key is skipped quietly, as is a Biome
+configuration with `formatter.enabled: false` (or the language block's
+equivalent). An unreadable or unparseable candidate is recorded and the
+next candidate is tried. Values the configuration leaves unstated take that
+row's formatter default, so a formatter opinion always states both values;
+`via` lists only the keys actually read. This keeps Sniff's fallback from
+contradicting a formatter the project visibly uses: a `biome.json` that
+only enables linting rules still means tab-indented JavaScript.
 
-### Tabs in YAML
+#### Concurrent reads
 
-YAML forbids tabs for indentation. When the resolved indentation for a YAML
-file is tabs, the YAML writer uses that many spaces as the tab width instead
-of tabs, and reports this in the resolution's provenance (see below). Other
-languages receive tabs as resolved.
+Build the distinct set of candidate files from the EditorConfig file and
+every row, then probe, read, and parse them concurrently with rayon, as
+`filesystem/just.rs` already does. Read and parse each file at most once per
+lookup, even when several rows or file types share it (`package.json`,
+`deno.json`, `pyproject.toml`). Collect results by table position, not
+completion order, so output stays deterministic. Summary mode and callers
+resolving many paths load the set once through `RepoIndentation` and
+evaluate each file type against it without reading again.
+
+Value mapping, where the formatter's own vocabulary is not a plain
+style/width pair:
+
+- Taplo's `indent_string` of only spaces gives that many spaces; one or
+  more tabs gives tabs at the normal width fallback. Other strings are
+  diagnosed and ignored.
+- StyLua's `indent_type` is `Tabs` or `Spaces`.
+- clang-format's `UseTab: Never` means spaces; every other value means tabs.
+  `BasedOnStyle` reads a small built-in table, not external files: `LLVM`,
+  `Google`, `Chromium`, `Mozilla`, and `GNU` indent 2 spaces; `WebKit` and
+  `Microsoft` indent 4. A multi-document file uses the document whose
+  `Language` matches the file type, then the document without `Language`.
+
+Apply matching Prettier overrides in file order, with later values taking
+precedence per property. Match `files` and `excludeFiles` against the
+root-relative path using Prettier's glob rules, accepting strings and lists.
+For Biome and dprint, apply the language or plugin block over the global
+settings. This first version reads the local file's indentation settings.
+It does not execute JavaScript configs (`.prettierrc.js`,
+`prettier.config.*`), load shared presets or `extends` chains (including a
+string-valued `prettier` key in `package.json`), evaluate formatter
+include/ignore rules (apart from Prettier override selection), or apply
+Biome's top-level path overrides, Taplo's `[[rule]]` tables, or Deno's
+legacy `fmt.options` block. Report each encountered unsupported config form
+in the lookup diagnostics so readers can tell why results may differ from
+their formatter. A JavaScript-only configuration still gives an opinion,
+stating that formatter's defaults.
+[Prettier configuration](https://prettier.io/docs/configuration),
+[Biome configuration](https://biomejs.dev/reference/configuration/),
+[Deno formatter](https://docs.deno.com/runtime/reference/cli/fmt/),
+[dprint configuration](https://dprint.dev/config/),
+[Ruff settings](https://docs.astral.sh/ruff/settings/),
+[Taplo configuration](https://taplo.tamasfe.dev/configuration/),
+[StyLua](https://github.com/JohnnyMorganz/StyLua),
+[clang-format options](https://clang.llvm.org/docs/ClangFormatStyleOptions.html),
+[verified formatter reference](formatters.md)
+
+### Built-in language conventions
+
+These apply only when no formatter configuration was selected. They cover
+languages whose canonical formatter is ubiquitous and fixed or nearly so,
+and give an opinion with `source: convention` and the convention's name in
+`via`.
+
+| File types | Convention | Indentation |
+| ---------- | ---------- | ----------- |
+| `go` | `gofmt` | Tabs with a Sniff reporting width of four columns |
+| `rs` | `rustfmt` defaults | 4 spaces |
+| `py` `pyi` | PEP 8 (Black is not configurable) | 4 spaces |
+| `zig` | `zig fmt` | 4 spaces |
+| `dart` | `dart format` | 2 spaces |
+| `ex` `exs` | `mix format` | 2 spaces |
+| `tf` `tfvars` | `terraform fmt` | 2 spaces |
+| `mk`, and exact basenames `Makefile`, `makefile`, `GNUmakefile` | Make recipe syntax | Tabs (see format constraints) |
+
+### Format constraints
+
+Some formats fix the indentation character whatever the project prefers.
+Sniff applies these to the resolved value after ranking, leaves each
+opinion's own values unchanged, and records an explicit adjustment in the
+result. Consensus is computed on the opinions, before adjustment.
+
+- **YAML forbids tabs.** For `yaml` and `yml`, Sniff reports spaces at the
+  resolved level width if the selected style is tabs. The biscuit-file writer
+  applies the same conversion to a tabs preference passed directly by a
+  caller. Markdown frontmatter uses the containing Markdown file's settings
+  and this same YAML conversion at the writer boundary.
+- **Make recipes require tabs.** For `mk` and the Make basenames above, Sniff
+  reports tabs at the resolved width if the selected style is spaces. A
+  generic `[*] indent_style = space`, like this repository's, would
+  otherwise produce a Makefile that does not run.
 
 ## Sniff Library API
 
@@ -118,27 +272,71 @@ pub enum IndentStyle { Spaces, Tabs }
 
 pub struct Indentation {
     pub style: IndentStyle,
-    /// Columns per level: the space count, or the tab display width.
-    pub width: u8,
+    /// Columns per indentation level.
+    pub width: NonZeroU8,
 }
 
-pub enum IndentSource {
-    EditorConfig { path: PathBuf, sections: Vec<String> },
-    LanguageConfig { path: PathBuf, key: String },
+/// Serialized as kebab-case values: `editorconfig`, `clang-format`, …
+pub enum IndentAuthority {
+    EditorConfig, Rustfmt, Prettier, Biome, Deno, Dprint, Ruff,
+    Taplo, Yamlfmt, Stylua, ClangFormat,
+    /// A built-in language convention; `via` names it (`gofmt`).
+    Convention,
+    /// Sniff's fallback; used as the authority only when no opinion exists.
     Default,
 }
 
-pub struct ResolvedIndentation {
-    pub indentation: Indentation,
-    /// Where the style and the width came from; they can differ (an
-    /// `.editorconfig` that sets only `indent_style`).
-    pub style_source: IndentSource,
-    pub width_source: IndentSource,
-    /// Formatter configs that exist but could not be read
-    /// (JavaScript Prettier configs, unparsable files).
-    pub skipped: Vec<PathBuf>,
+pub struct IndentOpinion {
+    pub source: IndentAuthority,
+    /// Absent for `Convention` and `Default`.
+    pub path: Option<PathBuf>,
+    /// EditorConfig sections, formatter keys read, or the convention name.
+    /// Empty for a formatter whose defaults supplied every value.
+    pub via: Vec<String>,
+    /// Absent only on an EditorConfig opinion that does not state it.
+    pub indent_using: Option<IndentStyle>,
+    pub indent: Option<NonZeroU8>,
 }
 
+pub struct ResolvedIndentation {
+    pub indent_using: IndentStyle,
+    /// Columns per indentation level.
+    pub indent: NonZeroU8,
+    pub authority: IndentOpinion,
+    /// Remaining opinions in rank order.
+    pub alt_authorities: Vec<IndentOpinion>,
+    /// Every opinion agrees on each value it states.
+    pub consensus: bool,
+    /// Present when the target's format requires a style adjustment.
+    pub adjustment: Option<IndentAdjustment>,
+    pub skipped: Vec<IndentationDiagnostic>,
+}
+
+impl ResolvedIndentation {
+    /// The value to pass to biscuit-file's writer.
+    pub fn indentation(&self) -> Indentation;
+}
+
+pub struct IndentAdjustment {
+    /// The style ranking selected before the format constraint applied.
+    pub requested: IndentStyle,
+    pub reason: AdjustmentReason, // YamlForbidsTabs | MakeRequiresTabs
+}
+
+pub struct IndentationDiagnostic {
+    pub path: PathBuf,
+    pub key: Option<String>,
+    pub reason: String,
+}
+```
+
+Keep the result deterministic and include all of these details in JSON,
+following Sniff's snake_case key convention. `IndentStyle` serializes as
+`space` or `tab`, and absent opinion values are omitted. Opinion and
+diagnostic paths are worktree-relative and serialize with `/` separators, so
+output is identical across platforms.
+
+```rust
 /// Resolve indentation for `path`. Finds the repository root itself;
 /// a path outside a repository resolves to the default.
 pub fn resolve_for_path(path: &Path) -> Result<ResolvedIndentation>;
@@ -146,51 +344,94 @@ pub fn resolve_for_path(path: &Path) -> Result<ResolvedIndentation>;
 /// Resolve indentation for a file extension (with or without the
 /// leading dot) as if for a file at the repository root.
 pub fn resolve_for_extension(repo_root: &Path, ext: &str) -> Result<ResolvedIndentation>;
+
+/// Every present configuration in one worktree, read once.
+pub struct RepoIndentation { /* … */ }
+
+impl RepoIndentation {
+    pub fn load(repo_root: &Path) -> Result<Self>;
+    pub fn resolve_for_path(&self, path: &Path) -> ResolvedIndentation;
+    pub fn resolve_for_extension(&self, ext: &str) -> ResolvedIndentation;
+}
 ```
 
-`resolve_for_path` is the accurate form, because `.editorconfig` sections can
-target directories (`[docs/**.md]`). `resolve_for_extension` serves the CLI
-and callers that have no concrete file yet; it does not match path-scoped
-sections.
+The free functions load a `RepoIndentation` and resolve one target.
 
-`Indentation` is defined in **biscuit-file**, not Sniff, and re-exported by
-Sniff. The reason is the dependency direction: Sniff already depends on
-biscuit-file, so the YAML writer cannot call Sniff. A caller resolves with
-Sniff and passes the resulting `Indentation` to biscuit-file. Defining the
-type in biscuit-file lets both crates use the same value without a
-conversion and without a dependency cycle.
+Use existing Sniff worktree discovery, including linked worktrees and
+nested Git repositories. For new output files, find the worktree from the
+nearest existing ancestor and match against the full destination path.
+Callers that follow a symlink when writing pass the same effective destination
+they will write. A missing repository is a normal fallback. Reserve
+resolution errors for failures that prevent identifying the destination or
+worktree. A failed lookup in a human-facing writer uses the default and
+surfaces the reason through its existing diagnostics.
 
-## `sniff repo indentation` Command
+Extension lookup strips one leading dot, normalizes ASCII case for file-type
+selection, and matches a synthetic root basename such as `file.yaml` for
+extension patterns. Ignore filename-specific rules and directory-scoped rules
+for this lookup, even if a rule could match the synthetic basename. Exact
+paths use their real basename and can match rules such as `[Makefile]` or
+`[docs/**.md]`.
+
+`Indentation` and `IndentStyle` belong to biscuit-file and Sniff re-exports
+them. The caller passes its resolved setting into the writer, keeping
+biscuit-file independent of Sniff and usable without a repository.
+
+## `sniff repo indent` Command
 
 ```text
-sniff repo indentation [<file-ext>] [-b/--base <DIR>] [--json]
+sniff repo indent [<file-ext>] [-b/--base <DIR>] [--json]
 ```
 
 `<file-ext>` accepts `yaml` or `.yaml`.
 
-**With an extension**, it prints the resolved indentation and its source:
+**With an extension**, it prints the resolved indentation, its authority,
+and whether the sources agree:
 
 ```text
-$ sniff repo indentation rs
+$ sniff repo indent rs
 4 spaces  (.editorconfig [*], [*.rs])
+also: rustfmt.toml  4 spaces
+consensus: yes
 ```
 
-**Without an extension**, it prints the repository default (what a file with
-no more specific rule gets), then every extension whose result differs from
-it. The extensions are those named in `.editorconfig` section globs and in
-the language-specific table above.
+When the authority states only one value, plain output names the opinion
+that supplied the other. Each alternative authority is listed with its
+values, and a disagreeing value is highlighted.
+
+**Without an extension**, print the result of applying the generic `[*]`
+sections and the fallback, followed by extension-specific results whose
+effective style or width differs. Build a sorted, deduplicated list from the
+formatter and built-in convention tables and root EditorConfig patterns that name literal suffixes
+(for example `*.rs` and `*.{yaml,yml}`). A wildcard or range inside a suffix
+does not enumerate file types. Callers can query a specific extension
+directly.
 
 ```text
-$ sniff repo indentation
+$ sniff repo indent
 default  4 spaces  (.editorconfig [*])
-go       tabs (width 4)  (gofmt)
 ```
 
-Outside a repository, the command prints the default and exits `0`. `--json`
-emits the `ResolvedIndentation` (with an extension) or a
-`{ default, overrides: { ext: ResolvedIndentation } }` object (without one),
-following `sniff/docs/topics/json-output.md`. `skipped` configs are printed
-as a dimmed note after the result.
+Use the current directory or the existing `--base` directory to discover the
+worktree. Outside a worktree the command exits successfully with the default
+and, in summary mode, an empty overrides map. An extension must start with an ASCII letter or digit after the optional
+leading dot. Its remaining characters may be ASCII letters, digits,
+underscores, plus signs, or hyphens. Other inputs are usage errors. Plain
+output identifies separate style and width sources when they differ and
+shows adjustment and skipped-config notes. A missing consensus is not an
+error; the exit status stays 0. Use biscuit-terminal's
+renderable components for terminal formatting.
+
+`--json` writes only the result, including provenance, adjustment, and
+diagnostics. An extension returns a single `ResolvedIndentation` in the shape
+shown under the indentation policy. Summary
+mode returns `{ default, overrides: { ext: ResolvedIndentation }, skipped }`.
+The summary-level `skipped` list deduplicates diagnostics across all queries,
+including extensions whose effective indentation matches the default. Add
+the summary payload under `indent` in `sniff repo --json` as required by
+the [Sniff JSON output contract](../../../sniff/docs/topics/json-output.md).
+Calculate it only for those two commands so unrelated repository queries
+avoid formatter configuration reads.
 
 ## biscuit-file YAML Writer
 
@@ -200,9 +441,10 @@ biscuit-file gains a single YAML serialization entry point:
 pub fn to_yaml_string<T: Serialize>(value: &T, indentation: Indentation) -> Result<String, YamlError>;
 ```
 
-with a matching `Yaml` method. It serializes with `serde_yaml_ng`, then
-re-indents the output to the requested width, with list items indented under
-their key:
+Add a matching formatted-output method to biscuit-file's
+[`Yaml`](../../../biscuit-file/lib/src/yaml/types.rs) wrapper, which holds
+a parsed YAML value. Existing methods that expose source text still return
+that text.
 
 ```yaml
 permissions:
@@ -214,39 +456,65 @@ permissions:
           url: http://localhost
 ```
 
-Re-indenting rules:
+Serialize the caller's value once with the existing YAML backend. Apply
+indentation using YAML structure and source spans so that text resembling
+YAML syntax inside a quoted or block scalar is handled as content. Indent
+block sequences one level under their mapping key. In a compact mapping
+item such as `- name: local`, align continuation keys with the first key.
+Use the same compact-item rule for nested sequences. Preserve empty
+collections, mapping order, tags, scalar types, and the content of
+multiline scalars, including leading spaces, blank lines and trailing
+newlines. Explicit scalar indentation indicators must remain valid even
+when the requested width exceeds YAML's single-digit indicator range.
+Choose an equivalent scalar spelling when needed, for example an escaped
+double-quoted string when a block scalar cannot express the layout.
 
-- every nesting level is `width` spaces, for mappings and sequences alike;
-- a sequence's `- ` sits one level in from its parent key, and the keys of a
-  mapping inside a list item align two columns after the dash (the layout
-  Prettier produces);
-- the content of block scalars (`|`, `>`) is moved with its parent and never
-  re-indented relative to it; an explicit indentation indicator (`|2`) is
-  rewritten if the shift requires it;
-- before returning, the writer parses its output and compares the value with
-  the input's value. A mismatch is a bug in the writer and returns an error
-  rather than writing a different document.
-
-biscuit-file does not resolve indentation itself. Callers that have no
-repository context pass `Indentation::default()` (4 spaces).
+Before returning, compare the parsed formatted document with the parsed
+backend output using YAML values, including tagged values and non-string
+mapping keys. Compare mapping order separately where the value comparison
+ignores it. A layout or semantic failure returns `YamlError` before any
+caller replaces a file. Callers without a destination use
+`Indentation::default()` (four spaces).
 
 ## Migrating Writers
 
-Every non-test call to `serde_yaml_ng::to_string` or `to_writer` moves to the
-biscuit-file writer: about 30 sites across Claudine, Darkmatter, DMLS,
-simplified-schema, biscuit-tui, research, schematic, and biscuit-file itself.
-Each one passes indentation resolved by `sniff` for the file it writes, or
-the default when the output is not a file in a repository (strings returned
-to a caller, stdout, a file in the home directory).
+> **Reader's note.** The goal is consistent indentation in YAML people read
+> or edit. A blanket serializer migration would also change bytes used as
+> hash inputs, convert comment-preserving edits into document rewrites, and
+> add parsing to paths that never write a document. Those calls keep their
+> existing encoding or editing contract.
 
-Writers that edit a YAML file in place, keeping comments and ordering (for
-example Claudine's per-key configuration edits), keep the indentation the
-file already uses. They use the resolved indentation only for content they
-add that has no existing pattern to follow.
-
-After migration, a lint stops new code from calling `serde_yaml_ng`'s
-serializer directly: a `clippy.toml` `disallowed-methods` entry in each
-affected crate, with biscuit-file's writer exempted.
+- **Whole-document output.** Migrate production serializers that emit YAML
+  documents to users or files. Audit call sites across Claudine, Darkmatter,
+  DMLS, simplified-schema, biscuit-tui, research, schematic, and biscuit-file,
+  including serializers reached through imports or re-exports. A repository
+  file uses the destination's settings. Standalone strings, stdout and user
+  configuration outside a repository use the default. Carry an already
+  known destination into the write boundary so generic conversions do not
+  discover a repository or use the caller's current directory implicitly.
+  Keep existing machine-output envelopes and serialization error handling.
+- **Edits to existing text.** Claudine and Darkmatter keep
+  [`ConfigTransaction`](../../../darkmatter/lib/src/config/write.rs),
+  Darkmatter's shared lock, validation and atomic write service. Pass
+  resolved indentation as a fallback to its edit path. Determine local
+  layout from the text re-read under the lock. Prefer the touched
+  collection's indentation, then the nearest comparable block, then the
+  resolved preference. Preserve comments, ordering, and untouched text,
+  including existing indentless sequences. Apply the same approach to
+  frontmatter edits in DMLS and Darkmatter's Markdown editing paths.
+  New documents and newly inserted collections with no local example use
+  the shared layout. Existing no-op saves stay byte-identical.
+- **Byte-sensitive and internal uses.** Preserve existing encoding for
+  Darkmatter's frontmatter hash and simplified-schema's declaration
+  fingerprint. Audit other consumers before changing output used as a
+  cache key, coercion result, embedded fragment, or diagnostic text. Keep
+  formatting-independent uses on their existing contract and record the
+  exceptions with their reason.
+- **Enforcement.** Gate direct serializer calls in production code with a
+  source guard and a narrow, reasoned allowlist for the backend and
+  contract-bound exceptions. Recognize imported and re-exported calls so
+  changing import syntax cannot bypass the guard. Attach the check to
+  existing verification for affected packages.
 
 ## Out of Scope
 
@@ -255,7 +523,8 @@ affected crate, with biscuit-file's writer exempted.
   not part of this feature.
 - Reformatting files that already exist. Files change style only when a
   migrated writer next rewrites them.
-- Walking parent directories for `.editorconfig` above the repository root.
+- Discovering nested EditorConfig files, walking above the worktree root,
+  or running external formatters.
 
 ## Phases
 
@@ -264,9 +533,10 @@ affected crate, with biscuit-file's writer exempted.
 - add `Indentation` and `IndentStyle`, with `Default` = 4 spaces;
 - add `to_yaml_string` and the `Yaml` method, with the round-trip check;
 - tests: nested mappings, lists of scalars, lists of mappings, lists of
-  lists, block scalars with and without indentation indicators, empty
-  collections (`[]`, `{}`), widths 2, 4, and 8, and the existing YAML corpus
-  round-tripping at each width;
+  lists, tagged values, non-string keys, quoted multiline strings, block
+  scalars with explicit indentation and chomping indicators, empty
+  collections, and widths 1, 2, 4, 8, and greater than 9. Round-trip the
+  existing YAML corpus and assert layout separately from value equivalence;
 - update `biscuit-file/docs/design/yaml-design.md` (or a new
   `docs/topics/yaml-writing.md`) and the `biscuit-file` skill.
 
@@ -274,40 +544,63 @@ affected crate, with biscuit-file's writer exempted.
 
 - EditorConfig glob matcher and property merge;
 - language-specific lookup table and readers;
-- `resolve_for_path`, `resolve_for_extension`, provenance, and `skipped`;
-- tests: each table row, precedence between the steps, style-only and
-  size-only sections, `indent_size = tab`, path-scoped sections, missing and
-  unparsable configs, and paths outside a repository;
+- `RepoIndentation`, `resolve_for_path`, `resolve_for_extension`, opinions,
+  consensus, and `skipped`, with concurrent config reads;
+- tests: each formatter and convention row, including a configuration that
+  states no indentation (formatter default applies, not the fallback),
+  ranking and value filling across opinions, consensus with agreeing,
+  disagreeing, and partial opinions, shadowed candidates, each shared file
+  read once, the YAML and Make constraints, style-only and
+  size-only sections, explicit `unset`, `indent_size = tab`, conflicting
+  tab and level widths, path-scoped sections, formatter overrides, malformed
+  configs, new paths, linked worktrees, and paths outside a repository;
 - document under `sniff/docs/topics/indentation.md` and update the `sniff`
   skill.
 
 ### Phase 3: CLI (sniff-cli)
 
-- `sniff repo indentation [<file-ext>]` with the outputs above;
-- `sniff/docs/cli/repo_indentation.md` and the `sniff repo` reference;
-- an L2 test of the plain and `--json` outputs against fixture repositories.
+- `sniff repo indent [<file-ext>]` with the outputs above;
+- `sniff/docs/cli/repo_indent.md` and the `sniff repo` reference;
+- L1 subprocess tests of plain output, JSON leaf and parent payloads,
+  invalid arguments, and outside-repository fallback using fixture
+  repositories. These assertions need no real terminal.
 
 ### Phase 4: Migrate writers
 
 Phase 4 can run in parallel per package once Phase 2 lands.
 
-- move every write site to the biscuit-file writer with resolved
-  indentation;
-- add the `disallowed-methods` lint;
-- update golden and snapshot fixtures whose YAML layout changes, and check
-  each changed fixture by parsing it, not only by accepting the new snapshot.
+- migrate whole-document output and thread the indentation fallback through
+  existing editors;
+- add the serializer guard and check that retained hashes and fingerprints
+  match their pre-migration values;
+- update affected output fixtures, check parsed values and exact layout,
+  and verify create, edit, and repeated no-op saves through the normal
+  entry points;
+- update the affected package docs and caller skills for visible behavior
+  changes and publish the updated caller skills.
 
 ## Success Criteria
 
-- `sniff repo indentation yaml` in this repository prints 4 spaces sourced
+- `sniff repo indent yaml` in this repository prints 4 spaces sourced
   from `.editorconfig`.
-- Re-saving Claudine's configuration writes `permissions.file-read` items
-  indented under their key, four spaces deep.
+- A newly created Claudine configuration using the four-space preference
+  puts `file-read` four spaces under `permissions` and its list items four
+  spaces under `file-read`. Editing an existing commented configuration
+  preserves its local indentation and comments.
 - In a fixture repository with no `.editorconfig` and a `rustfmt.toml`
-  setting `tab_spaces = 2`, `sniff repo indentation rs` reports 2 spaces
-  from `rustfmt.toml`, and `sniff repo indentation yaml` reports the
+  setting `tab_spaces = 2`, `sniff repo indent rs` reports 2 spaces
+  from `rustfmt.toml`, and `sniff repo indent yaml` reports the
   default.
-- No non-test code outside biscuit-file calls `serde_yaml_ng::to_string` or
-  `serde_yaml_ng::to_writer`, and the lint enforces it.
-- The suite passes on macOS, Linux, and Windows; path-scoped `.editorconfig`
-  matching uses `/` separators on Windows.
+- In a fixture repository with no `.editorconfig` and a `biome.json` that
+  sets no formatter options, `sniff repo indent ts` reports tabs from
+  Biome's formatter default. With this repository's `.editorconfig` added,
+  it reports 4 spaces from `.editorconfig`, Biome as an alternative
+  authority, and `consensus: false`.
+- The serializer guard rejects new direct production calls outside
+  the documented exceptions, and existing hash outputs stay stable.
+- The implementation works on macOS, Linux, native Windows, and WSL2.
+  EditorConfig matching uses `/` separators on every platform.
+
+## Open Questions
+
+No author rulings remain.
