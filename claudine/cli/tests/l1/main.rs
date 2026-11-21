@@ -213,6 +213,10 @@ mod loop_retry_passes;
 #[cfg(feature = "test-fixtures")]
 mod loop_gate_ambient;
 mod loop_initialize_state;
+// Installs the `claudine-fake-goose` and `claudine-fake-editor` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod loop_startup_source;
 mod mcp_cli;
 mod override_boundary_guard;
 mod path_lookup_guard;
