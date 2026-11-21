@@ -842,6 +842,52 @@ Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
   `StartupEvent::{SlotJobQueued, SlotPreparing, SlotPrepared}` events. Tests:
   `tests/l1/schema_slots_editor.rs`, `slot_jobs::tests`.
 
+### Property observation (uncontracted `load_data`)
+
+The same worker observes whole-value top-level properties whose expression
+holds a `load_data` with an omitted, `null`, or computed `as`
+(`observe::observes_property`); the schema need not be a template.
+
+- Demand: `overlay/properties.rs::{located_sites, sites_to_observe}` feed
+  `SlotSnapshots::demand_with`, which keeps the slot demand separate: a
+  property-only job assembles over the installed pins (`SlotUse::Pins`) or
+  `SlotUse::None`, never resolves slots, and carries the installed session
+  forward. `resolve_slot_templates` returns the `SchemaBundle` and takes the
+  request side's `registered_hosts`.
+- Evaluation is the library's `SlotSession::observe_properties`
+  (`schemas/slots/observe.rs`): one `DataRuntime` and one budget per pass,
+  `ResolutionContext.editor` set (only there). Editor reads
+  (`compose/expression/editor_reads.rs`) authorize each candidate before it
+  is probed (lexical precheck, then `decide_without_asking`), read remotes
+  only from a fresh transport-cache entry (`cache_only` +
+  `cached_text_bounded`, never a fetch or write), and turn anything refused
+  or unavailable into the nonrecoverable `ExpressionError::ObservationPending`;
+  only an admitted clean miss is the ordinary (recoverable) NotFound.
+- Verdicts come from `EffectiveSchema::validate_observed_frontmatter`
+  (`schemas/observed.rs`) on a copy; eager file checks run inside
+  `simplified_schema::validate::with_unverified_file_checks` and such
+  properties defer.
+- Install: an input generation plus a changed-path log drops a result
+  dispatched before a change to something it read (`InstallOutcome::Outdated`,
+  requeued); read paths are re-stat'ed at install; a remote expiry becomes a
+  router deadline (`Clock::pair`, waited as `after(deadline − now)` so a
+  `ManualClock` drives it) and is checked on access. A stale or refreshing
+  entry withholds its `PropertyView` and every diagnostic projected from it.
+- Projection: `diagnostics/observed.rs::property_diagnostics` (destination
+  verdicts with `relatedInformation` and `data.data_location` through
+  `report_diagnostics::data_locations`; `Missing` as a
+  `dm.expression.evaluation_failure` warning; `Failed` deduplicated against
+  passive call diagnostics). Observed shapes (`Shape::observed`,
+  `DeclaredTypes::{with_observed, with_observed_calls}`; per-call facts are
+  `PropertyObservation.calls`, matched by the span-free call) feed completion
+  and hover only, never undeclared-member diagnostics. A headerless
+  uncontracted read gets no verdict or shape.
+- Test seams: `LspFixture::start_with_slot_options` (gate, cache root,
+  `ManualClock`), the lib feature `cache-test-hooks`
+  (`compose::cache_test_hooks::seed_remote_entry`, enabled only by DMLS's
+  dev-dependency). Tests: `tests/l1/typed_load_data_editor.rs`,
+  `lib/tests/l1/{editor_observation,observed_validation}.rs`.
+
 ## Whole YAML documents
 
 User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,

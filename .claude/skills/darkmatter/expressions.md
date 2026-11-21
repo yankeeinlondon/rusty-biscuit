@@ -486,10 +486,14 @@ greps the handler sources.
 
 ## `load_data` (data files)
 
-`load_data(file: file | null, as: type-definition(container), options?:
+`load_data(file: file | null, as?: type-definition(container) | null, options?:
 {format, delimiter, header} | null)` reads YAML, JSON, JSONL/NDJSON, CSV, TSV,
-TOML, or JSON5 and returns the value fully converted to `as`, or fails; a
-partial value is never returned. `options` is a closed inline object in the
+TOML, or JSON5. The bound root is normalized first (`load.rs::bind_source`:
+arrays/objects kept, `null` → `[]`, any other scalar → a one-element array,
+`LoadedData::wrapped`), then converted to `as` when one is given; an omitted
+and a `null` `as` are the same call (empty contract key in the bind memo) and
+return the value unconverted, so CSV cells stay text until the destination
+schema converts them. A partial value is never returned. `options` is a closed inline object in the
 catalog (`schemas/partials/functions.yaml`): `format` is an `enum` of the
 seven names plus the aliases `yml`/`ndjson` (normalized to `yaml`/`jsonl` in
 `options.rs::format_from_name`, so they share memo entries and messages name
@@ -590,13 +594,20 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   every non-null arm and array/tuple element must agree; object/dictionary
   elements read rows by header, list/tuple elements by position (header row
   skipped); anything else, or a tuple with no elements, is
-  `dm.data.row_shape_conflict`. The first row is a header unless
-`header: false`, which reads every record as a list row (an object-row
-contract is `RowShapeConflict::HeaderlessObjectRows`, same code; the logical
-row view in `error.rs::TabularSource` keeps pointers and positions counted
-from the first record). Rows are
-  built per contract at bind time from the memoized table, so the
-  object-mode duplicate/empty-header error is per contract.
+  `dm.data.row_shape_conflict`. `header` is `options.rs::HeaderMode`
+  (`FirstRecord` default, `None` for `false`, `Names(Arc<[String]>)` for a
+  list, validated by `options::header_names`: non-empty, no empty or repeated
+  name, never trimmed); the bind memo keys on it, names included. Without a
+  contract the mode picks the rows (`load.rs::select_row_mode`); with one,
+  `contract::require_header_rows` (shared with the passive check) refuses
+  object rows for `None` (`HeaderlessObjectRows`) and list rows for `Names`
+  (`NamedListRows`). Header-record keys are `functions::strings::to_camel_case`
+  of each name (`load.rs::header_keys`: an empty key or a collision is
+  `dm.data.malformed` naming the original headers, even with no data rows);
+  explicit names must equal the first record's width
+  (`load.rs::tabular_source`). `TabularSource::keys` carries each column's
+  key, and `locate.rs::table_offset` finds a cell by it. Rows are built per
+  contract and mode at bind time from the memoized table.
 - **Numbers and formats** (`parse.rs`): JSON/JSONL through
   `numeric::admit_json_text_numbers`, JSON5 through `admit_json5_text_numbers`
   and `reject_non_finite_json5`, TOML by walking `Toml::value()` with
@@ -637,10 +648,28 @@ from the first record). Rows are
 - **Typed literal returns** (`call_check.rs::expression_type`): a literal
   `as` types the call as its bare shape (named references `unknown`, explicit
   null arms kept, `| null` added when `file` may be null, `null` for a literal
-  `null` file), which flows into `map`/`filter` callback locals. The
+  `null` file), which flows into `map`/`filter` callback locals. An
+  uncontracted call is provisional (`call_check.rs::uncontracted_type`): an
+  open object (`<string>: unknown`, which proves no member absent) or
+  `unknown[]`, narrowed for a provable CSV/TSV read to open-object rows or
+  `unknown[][]` for `header: false`.
+- **Destination provenance** (`expression/trace.rs`): a whole-value
+  frontmatter `{{ … }}` is evaluated under `trace::traced`
+  (`interpolation/rewrite.rs::interpolate_value_traced`); `evaluate_expr`
+  clears the origin after every node except a parenthesized expression, a
+  ternary (its last child is the selected arm), and a `load_data` call, whose
+  handler records a `LoadOrigin` (identity, format, text, table, wrap flag).
+  `frontmatter_interpolation.rs` stores it per top-level key as
+  `value_origin::ExpressionOrigin` on `FrontmatterProvenance`; both schema
+  passes (`schema_validation::run_with_registry`, `validate_typed_shell_values`)
+  turn it into `MarkdownError::SchemaValidationFailed::expression_origins`
+  (`ExpressionMetadata`), and `report_diagnostics::ExpressionProjector` (used
+  by the records and the status block alike) places each problem at the
+  expression with the data file's `data_location`. Never match provenance
+  by value equality. The
   **Undeclared member check** above applies to these shapes as to any typed
   value: `h.nmae` against `{ name: string }[]` elements warns; a named
   reference (`unknown`) or a computed `as` stays silent.
-- Tests: `lib/tests/l1/load_data_{execution,diagnostics,passive,runtime}.rs`,
+- Tests: `lib/tests/l1/load_data_{execution,diagnostics,passive,runtime,uncontracted,destination}.rs`,
   `cli/tests/l1/load_data.rs`; biscuit-file's opt-in readers in its
   `l1-delimited` target.
