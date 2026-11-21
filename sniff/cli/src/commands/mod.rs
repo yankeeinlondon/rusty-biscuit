@@ -741,6 +741,45 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 std::process::exit(1);
             }
+            crate::args::RepoAction::Indent { extension } => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let term = biscuit_terminal::terminal::Terminal::default();
+                match extension {
+                    Some(extension) => {
+                        let resolved =
+                            sniff::filesystem::indentation::resolve_for_extension(dir, extension)?;
+                        if cli.json {
+                            output::print_json_value(
+                                serde_json::to_value(&resolved)?,
+                                perf.build_report().as_ref(),
+                            );
+                            return Ok(());
+                        }
+                        output::emit_text(
+                            &output::indentation::render_resolved(&resolved, &term),
+                            cli.plain,
+                        );
+                    }
+                    None => {
+                        let summary = sniff::filesystem::indentation::resolve_summary(dir)?;
+                        if cli.json {
+                            output::print_json_value(
+                                serde_json::to_value(&summary)?,
+                                perf.build_report().as_ref(),
+                            );
+                            return Ok(());
+                        }
+                        output::emit_text(
+                            &output::indentation::render_summary(&summary, &term),
+                            cli.plain,
+                        );
+                    }
+                }
+                perf.emit_stderr(None);
+                return Ok(());
+            }
             crate::args::RepoAction::State => {
                 let dir = base_dir
                     .as_deref()
@@ -1765,8 +1804,32 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let aggregate = detected_aggregate
                 .as_ref()
                 .expect("bare aggregate detection returns its projection");
-            let value = output::repo_json::build_aggregate_value(&result, aggregate);
+            let mut value = output::repo_json::build_aggregate_value(&result, aggregate);
             timer.finish();
+            // `indent` is the `sniff repo indent` child's scope. It is its own
+            // observation (formatter configuration reads), made here rather
+            // than in the pure projection above, and only for this aggregate.
+            // The worktree detection already found is reused: the aggregate
+            // command discovers the repository exactly once.
+            let observed_root = result
+                .filesystem
+                .as_ref()
+                .and_then(|fs| fs.git.as_ref())
+                .map(|git| git.repo_root.as_path());
+            let summary = match observed_root {
+                Some(root) => sniff::filesystem::indentation::RepoIndentation::load(root)?.summary(),
+                None => sniff::filesystem::indentation::resolve_summary(
+                    base_dir
+                        .as_deref()
+                        .unwrap_or_else(|| std::path::Path::new(".")),
+                )?,
+            };
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "indent".to_string(),
+                    serde_json::to_value(&summary).unwrap_or(serde_json::Value::Null),
+                );
+            }
             Ok::<_, sniff::SniffError>(value)
         })?;
         let report = perf.build_report();

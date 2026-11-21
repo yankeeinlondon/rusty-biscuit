@@ -76,6 +76,7 @@ mod deps;
 mod docs;
 mod file_list;
 mod files;
+pub(crate) mod indentation;
 mod language;
 mod lockfile;
 mod package_areas;

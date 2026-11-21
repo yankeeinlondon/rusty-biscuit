@@ -8,11 +8,18 @@
 //! that writes these files through this type therefore serializes with every
 //! other; nothing is claimed about an editor that does not take the lock.
 //!
+//! New collections take the target's indentation: an edit copies the text's
+//! own layout where it has an example, and otherwise the preference Sniff
+//! resolves for the resolved target, asked at most once per target and only
+//! when something is rendered without an example.
+//!
 //! User-facing guide: `darkmatter/docs/topics/config-writes.md`.
 
 use crate::config::migration_receipt::{self, MigrationSource};
-use crate::yaml_edit::{YamlEdit, YamlEditError, edit_yaml_paths};
-use biscuit_file::{PathIdentity, canonicalize_simplified, to_portable_string};
+use crate::markdown::hash::node_edit::Layout;
+use crate::yaml_edit::{YamlEdit, YamlEditError, edit_yaml_paths_in_layout};
+use biscuit_file::{Indentation, PathIdentity, YamlError, canonicalize_simplified, to_portable_string};
+use std::cell::{OnceCell, RefCell};
 use simplified_schema::PropertyPath;
 use std::fmt;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -185,6 +192,16 @@ pub enum ConfigWriteError {
         /// Targets already replaced before this one, in replacement order.
         published: Vec<PathBuf>,
     },
+    /// A generated document ([`TargetChange::create_yaml`]) could not be laid
+    /// out. Nothing was written.
+    #[error("{}: the configuration could not be laid out: {source}", path.display())]
+    Layout {
+        /// The resolved target.
+        path: PathBuf,
+        /// The writer's error.
+        #[source]
+        source: Box<YamlError>,
+    },
     /// One transaction names the same file twice (perhaps through two
     /// symlinks) with different expectations or two sets of migration sources.
     #[error("{} is named twice in one transaction with conflicting expectations", path.display())]
@@ -209,10 +226,13 @@ pub enum SourceExpectation {
     Blake3(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Base {
     Existing(SourceExpectation),
     Create { initial: String },
+    /// Created from a value laid out with the target's preference; its own
+    /// text holds no authored layout, so edits never infer from it.
+    Generated { value: serde_json::Value },
 }
 
 /// One file's change, added to a [`ConfigTransaction`].
@@ -234,8 +254,21 @@ impl TargetChange {
 
     /// Creates the file at `path` from `initial` with `edits` applied. The
     /// file must still be missing under the lock; its directory must exist.
+    /// `initial` is authored text, so its collections are layout examples
+    /// for the edits.
     pub fn create(path: impl Into<PathBuf>, initial: impl Into<String>, edits: Vec<YamlEdit>) -> Self {
         Self { path: path.into(), base: Base::Create { initial: initial.into() }, edits, migration: None, publish_last: false }
+    }
+
+    /// Creates the file at `path` from `value`, serialized under the lock with
+    /// the target's indentation preference, then `edits` applied with the
+    /// same preference. As with [`Self::create`], the file must still be
+    /// missing and its directory must exist.
+    ///
+    /// A JSON value carries neither YAML tags nor non-string keys; a document
+    /// that needs them uses [`Self::create`] with an explicit skeleton.
+    pub fn create_yaml(path: impl Into<PathBuf>, value: serde_json::Value, edits: Vec<YamlEdit>) -> Self {
+        Self { path: path.into(), base: Base::Generated { value }, edits, migration: None, publish_last: false }
     }
 
     /// Records `sources` in the target's migration receipt, written under the
@@ -282,6 +315,9 @@ pub struct CommittedTarget {
     pub written: bool,
     /// The BLAKE3 hex digest of the bytes the target now holds.
     pub hash: String,
+    /// Why the target's indentation preference fell back to the default,
+    /// naming the target, when resolving it failed.
+    pub indentation_warning: Option<String>,
 }
 
 /// The result of a successful [`ConfigTransaction::commit`], in replacement
@@ -320,12 +356,74 @@ pub struct CommitOutcome {
 #[derive(Debug, Default)]
 pub struct ConfigTransaction {
     targets: Vec<PlannedTarget>,
+    resolver: Resolver,
+}
+
+/// Finds a resolved target's indentation preference; `Err` carries why it
+/// could not be found.
+pub type IndentationResolver = dyn Fn(&Path) -> Result<Indentation, String> + Send + Sync;
+
+#[derive(Default)]
+struct Resolver(Option<Box<IndentationResolver>>);
+
+impl fmt::Debug for Resolver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(if self.0.is_some() { "Resolver(custom)" } else { "Resolver(sniff)" })
+    }
+}
+
+impl Resolver {
+    fn resolve(&self, path: &Path) -> Result<Indentation, String> {
+        match &self.0 {
+            Some(resolver) => resolver(path),
+            None => resolve_destination_indentation(path),
+        }
+    }
+}
+
+/// The indentation preference Sniff resolves for the file `path` (which need
+/// not exist yet); `Err` says why the destination or its worktree could not
+/// be identified.
+pub fn resolve_destination_indentation(path: &Path) -> Result<Indentation, String> {
+    sniff::filesystem::indentation::resolve_for_path(path)
+        .map(|resolved| resolved.indentation())
+        .map_err(|error| error.to_string())
+}
+
+/// [`resolve_destination_indentation`], or [`Indentation::default`] with a
+/// warning naming `path` when it fails. For a writer outside a
+/// [`ConfigTransaction`] that saves one file.
+pub fn destination_indentation(path: &Path) -> Indentation {
+    resolve_destination_indentation(path).unwrap_or_else(|reason| {
+        tracing::warn!("{}", fallback_warning(path, &reason));
+        Indentation::default()
+    })
+}
+
+fn fallback_warning(path: &Path, reason: &str) -> String {
+    format!(
+        "{}: could not resolve the indentation preference ({reason}); using {} spaces",
+        path.display(),
+        Indentation::default().width
+    )
 }
 
 impl ConfigTransaction {
     /// An empty transaction.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Replaces the Sniff resolution of each target's indentation preference
+    /// with `resolver`, for a caller that already knows it or a test that
+    /// needs a failure.
+    #[must_use]
+    pub fn with_indentation_resolver(
+        mut self,
+        resolver: impl Fn(&Path) -> Result<Indentation, String> + Send + Sync + 'static,
+    ) -> Self {
+        self.resolver = Resolver(Some(Box::new(resolver)));
+        self
     }
 
     /// Resolves `change`'s target and adds it. A file already in the
@@ -393,7 +491,7 @@ impl ConfigTransaction {
 
         let mut staged = Vec::with_capacity(self.targets.len());
         for target in &self.targets {
-            staged.push(stage(target, validate)?);
+            staged.push(stage(target, validate, &self.resolver)?);
         }
 
         for (target, stage) in self.targets.iter().zip(&staged) {
@@ -434,6 +532,7 @@ impl ConfigTransaction {
                 created: stage.current.is_none(),
                 written,
                 hash: migration_receipt::content_hash(bytes),
+                indentation_warning: stage.indentation_warning.clone(),
             });
         }
         Ok(CommitOutcome { targets })
@@ -443,15 +542,35 @@ impl ConfigTransaction {
 struct Staged {
     current: Option<Vec<u8>>,
     candidate: String,
+    indentation_warning: Option<String>,
 }
 
-fn stage(target: &PlannedTarget, validate: &Validator<'_>) -> Result<Staged, ConfigWriteError> {
+fn stage(target: &PlannedTarget, validate: &Validator<'_>, resolver: &Resolver) -> Result<Staged, ConfigWriteError> {
     let path = &target.resolved;
     let changed = || ConfigWriteError::Changed { path: path.clone() };
+    // Resolved once for the target, and only if a value is rendered with no
+    // example to copy; a discovery failure falls back to the default.
+    let preference = OnceCell::new();
+    let warning = RefCell::new(None);
+    let fallback = || {
+        *preference.get_or_init(|| {
+            resolver.resolve(path).unwrap_or_else(|reason| {
+                let message = fallback_warning(path, &reason);
+                tracing::warn!("{message}");
+                *warning.borrow_mut() = Some(message);
+                Indentation::default()
+            })
+        })
+    };
     let current = read_optional(path)?;
     let (original, mut candidate) = match (&target.base, &current) {
         (Base::Create { initial }, None) => (None, initial.clone()),
-        (Base::Create { .. }, Some(_)) => return Err(changed()),
+        (Base::Generated { value }, None) => {
+            let text = biscuit_file::to_yaml_string(value, fallback())
+                .map_err(|source| ConfigWriteError::Layout { path: path.clone(), source: Box::new(source) })?;
+            (None, text)
+        }
+        (Base::Create { .. } | Base::Generated { .. }, Some(_)) => return Err(changed()),
         (Base::Existing(SourceExpectation::Current), None) => {
             return Err(ConfigWriteError::Io {
                 path: path.clone(),
@@ -475,15 +594,16 @@ fn stage(target: &PlannedTarget, validate: &Validator<'_>) -> Result<Staged, Con
             (Some(text), text.to_string())
         }
     };
+    let layout = Layout::new(&fallback, !matches!(target.base, Base::Generated { .. }));
     for edits in &target.edit_batches {
         if !edits.is_empty() {
-            candidate = edit_yaml_paths(&candidate, edits)
+            candidate = edit_yaml_paths_in_layout(&candidate, edits, &layout)
                 .map_err(|source| ConfigWriteError::UnsupportedEdit { path: path.clone(), source: Box::new(source) })?;
         }
     }
     validate(&ValidationCandidate { target: path, original, candidate: &candidate })
         .map_err(|refusal| ConfigWriteError::ValidationFailed { path: path.clone(), refusal })?;
-    Ok(Staged { current, candidate })
+    Ok(Staged { current, candidate, indentation_warning: warning.into_inner() })
 }
 
 /// A held target lock, released when dropped. The lock file stays.

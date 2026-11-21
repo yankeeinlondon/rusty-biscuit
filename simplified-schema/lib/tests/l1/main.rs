@@ -55,3 +55,4 @@ mod template_types_passive;
 mod test_layout;
 mod validation_contract;
 mod yaml_schema_envelope;
+mod yaml_serializer_guard;

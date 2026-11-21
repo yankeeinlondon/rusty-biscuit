@@ -12,13 +12,14 @@
 //! shared with the plain-YAML editor ([`crate::yaml_edit`]); this module is its
 //! Markdown adapter, supplying the frontmatter envelope.
 
-use super::node_edit::{self, Envelope, differences, unsupported, would_change};
+use super::node_edit::{self, Envelope, Layout, differences, unsupported, would_change};
 use super::write::{
     apply_terminators, new_block_terminator, new_frontmatter_block, preceding_terminator,
 };
 use crate::markdown::{FrontmatterMap, Markdown, MarkdownError, extract_frontmatter_block};
-use biscuit_file::serde_yaml_ng;
+use biscuit_file::Indentation;
 use simplified_schema::completion::PathStep;
+use std::cell::OnceCell;
 use std::ops::Range;
 
 /// One change to make to a document's frontmatter text.
@@ -78,7 +79,33 @@ pub fn edit_frontmatter_paths(
     expected: &FrontmatterMap,
     edits: &[PathEdit<'_>],
 ) -> Result<String, PathEditRefusal> {
-    let text = node_edit::apply_edits(&Frontmatter, source, expected, edits)?;
+    edit_frontmatter_paths_with_indentation(source, expected, edits, Indentation::default)
+}
+
+/// [`edit_frontmatter_paths`], laying out a new collection that has no
+/// authored example in the frontmatter with the preference `fallback`
+/// returns for the file the caller saves.
+///
+/// `fallback` is asked at most once, and only when a changed value needs a
+/// layout: when `source` already holds `expected`, `source` is returned as it
+/// is and nothing is resolved.
+///
+/// ## Errors
+///
+/// As [`edit_frontmatter_paths`].
+pub fn edit_frontmatter_paths_with_indentation(
+    source: &str,
+    expected: &FrontmatterMap,
+    edits: &[PathEdit<'_>],
+    fallback: impl Fn() -> Indentation,
+) -> Result<String, PathEditRefusal> {
+    // Edits that already hold change nothing, so a repeated save keeps the
+    // authored bytes and resolves no layout, as the plain-YAML editor does.
+    if reload_values(source).is_ok_and(|original| original == *expected) {
+        return Ok(source.to_string());
+    }
+    let layout = Layout::new(&fallback, true);
+    let text = node_edit::apply_edits(&Frontmatter, source, expected, edits, &layout)?;
     node_edit::verify_edited(&Frontmatter, &text, expected, edits)?;
     Ok(text)
 }
@@ -100,18 +127,38 @@ pub fn edited_document_text(
     edited: &Markdown,
     edits: &[PathEdit<'_>],
 ) -> Result<String, PathEditRefusal> {
+    edited_document_text_with_indentation(edited, edits, Indentation::default)
+}
+
+/// [`edited_document_text`] for a document saved to a destination whose
+/// preference `fallback` returns. The editor uses it for a new collection with
+/// no authored example, and the whole-frontmatter fallback writes with it.
+///
+/// `fallback` is asked at most once, and never when `edited` still holds the
+/// values of the text it was loaded from: that text is returned unchanged.
+///
+/// ## Errors
+///
+/// As [`edited_document_text`].
+pub fn edited_document_text_with_indentation(
+    edited: &Markdown,
+    edits: &[PathEdit<'_>],
+    fallback: impl Fn() -> Indentation,
+) -> Result<String, PathEditRefusal> {
+    let resolved = OnceCell::new();
+    let fallback = || *resolved.get_or_init(&fallback);
     let expected = edited.frontmatter().as_map();
     let Some(source) = edited.source_text() else {
-        return serialized_document_text(edited);
+        return serialized_document_text(edited, fallback());
     };
-    match edit_frontmatter_paths(source, expected, edits) {
-        Err(PathEditRefusal::UnsupportedForm { .. }) => serialized_document_text(edited),
+    match edit_frontmatter_paths_with_indentation(source, expected, edits, fallback) {
+        Err(PathEditRefusal::UnsupportedForm { .. }) => serialized_document_text(edited, fallback()),
         result => result,
     }
 }
 
-fn serialized_document_text(edited: &Markdown) -> Result<String, PathEditRefusal> {
-    let text = serialized_into_source(edited)?;
+fn serialized_document_text(edited: &Markdown, indentation: Indentation) -> Result<String, PathEditRefusal> {
+    let text = serialized_into_source(edited, indentation)?;
     let reloaded = reload_values(&text)?;
     match differences(edited.frontmatter().as_map(), &reloaded).first() {
         Some(path) => Err(would_change(path)),
@@ -121,17 +168,17 @@ fn serialized_document_text(edited: &Markdown) -> Result<String, PathEditRefusal
 
 /// The frontmatter serialized between the source's own fences.
 ///
-/// `Markdown::as_string` is not enough when there is a source: the loaded body
-/// has lost its final line break and its line endings.
-fn serialized_into_source(edited: &Markdown) -> Result<String, PathEditRefusal> {
+/// `Markdown::as_string_with_indentation` is not enough when there is a
+/// source: the loaded body has lost its final line break and its line endings.
+fn serialized_into_source(edited: &Markdown, indentation: Indentation) -> Result<String, PathEditRefusal> {
     let Some(source) = edited.source_text() else {
-        return Ok(edited.as_string());
+        return Ok(edited.as_string_with_indentation(indentation));
     };
     let map = edited.frontmatter().as_map();
     let yaml = if map.is_empty() {
         String::new()
     } else {
-        serde_yaml_ng::to_string(map)
+        biscuit_file::to_yaml_string(map, indentation)
             .map_err(|error| unsupported(format!("the frontmatter could not be serialized: {error}")))?
     };
     let frontmatter =

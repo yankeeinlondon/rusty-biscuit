@@ -1,9 +1,12 @@
 //! The nested frontmatter text editor, through its public functions, with the
 //! expected values coming from the same pure edits the commands make.
 
+use biscuit_file::Indentation;
 use darkmatter::markdown::hash::{
-    PathEdit, PathEditRefusal, edit_frontmatter_paths, edited_document_text,
+    PathEdit, PathEditRefusal, edit_frontmatter_paths, edit_frontmatter_paths_with_indentation, edited_document_text,
+    edited_document_text_with_indentation,
 };
+use std::cell::Cell;
 use darkmatter::markdown::{FrontmatterMap, Markdown};
 use serde_json::{Value, json};
 use simplified_schema::{PropertyPath, RemovalPlan, set_at};
@@ -122,7 +125,7 @@ fn missing_parents_are_created_inside_the_nearest_block_mapping() {
         text,
         SHARED_PARENT.replace(
             "    since: 0x10\n",
-            "    since: 0x10\n    social:\n      site:\n        url: x.dev\n"
+            "    since: 0x10\n    social:\n        site:\n            url: x.dev\n"
         )
     );
 }
@@ -131,13 +134,13 @@ fn missing_parents_are_created_inside_the_nearest_block_mapping() {
 fn a_new_top_level_key_goes_at_the_end_of_the_frontmatter() {
     let source = "---\na: 1\n# closing note\n---\nBody\n";
     let text = set(source, "b.c", json!(2)).unwrap();
-    assert_eq!(text, "---\na: 1\n# closing note\nb:\n  c: 2\n---\nBody\n");
+    assert_eq!(text, "---\na: 1\n# closing note\nb:\n    c: 2\n---\nBody\n");
 }
 
 #[test]
 fn an_empty_block_or_absent_frontmatter_gains_the_key() {
-    assert_eq!(set("---\n---\nBody\n", "a.b", json!(1)).unwrap(), "---\na:\n  b: 1\n---\nBody\n");
-    assert_eq!(set("Body\n", "a.b", json!(1)).unwrap(), "---\na:\n  b: 1\n---\nBody\n");
+    assert_eq!(set("---\n---\nBody\n", "a.b", json!(1)).unwrap(), "---\na:\n    b: 1\n---\nBody\n");
+    assert_eq!(set("Body\n", "a.b", json!(1)).unwrap(), "---\na:\n    b: 1\n---\nBody\n");
     assert_eq!(set("# only a comment\n", "a", json!(1)).unwrap(), "---\na: 1\n---\n# only a comment\n");
     assert_eq!(set("---\n# note\n---\nBody\n", "a", json!(1)).unwrap(), "---\n# note\na: 1\n---\nBody\n");
 }
@@ -192,7 +195,7 @@ fn a_key_inside_a_sequence_item_is_replaced_and_appended_at_the_items_indent() {
 #[test]
 fn a_whole_item_can_become_a_mapping_or_a_scalar() {
     let text = set(SEQUENCES, "tags.2", json!({"k": 1, "l": [2]})).unwrap();
-    assert_eq!(text, SEQUENCES.replace("  - three\n", "  - k: 1\n    l:\n    - 2\n"));
+    assert_eq!(text, SEQUENCES.replace("  - three\n", "  - k: 1\n    l:\n        - 2\n"));
     let text = set(SEQUENCES, "people.0", json!("gone")).unwrap();
     assert_eq!(text, SEQUENCES.replace("- name: Ann   # lead\n  age: 30\n", "- gone\n"));
 }
@@ -209,7 +212,7 @@ fn an_item_with_no_value_or_on_its_own_line_can_be_replaced() {
 fn a_scalar_becomes_a_container_and_keeps_its_comment() {
     let source = "---\nauthor: Ken   # why\nnext: 1\n---\n";
     let text = set(source, "author", json!({"name": "Bob"})).unwrap();
-    assert_eq!(text, "---\nauthor:   # why\n  name: Bob\nnext: 1\n---\n");
+    assert_eq!(text, "---\nauthor:   # why\n    name: Bob\nnext: 1\n---\n");
 }
 
 #[test]
@@ -230,7 +233,7 @@ fn a_replaced_container_keeps_its_childrens_column() {
 fn an_empty_value_is_filled_in_after_its_colon() {
     let source = "---\na:   # note\nb:\nc: 1\n---\n";
     assert_eq!(set(source, "a", json!(1)).unwrap(), "---\na: 1   # note\nb:\nc: 1\n---\n");
-    assert_eq!(set(source, "b", json!({"k": 1})).unwrap(), "---\na:   # note\nb:\n  k: 1\nc: 1\n---\n");
+    assert_eq!(set(source, "b", json!({"k": 1})).unwrap(), "---\na:   # note\nb:\n    k: 1\nc: 1\n---\n");
 }
 
 #[test]
@@ -378,7 +381,7 @@ fn the_fallback_keeps_the_fences_and_body_bytes_of_a_crlf_document() {
     let document = edited_by_set(source, "author.name", json!("Bob"));
     let target = path("author.name");
     let text = edited_document_text(&document, &[PathEdit::Set(steps_of(&target, &document))]).unwrap();
-    assert_eq!(text, "---\r\nauthor:\r\n  name: Bob\r\n---\r\nBody  \r\n\r\nMore\r\n");
+    assert_eq!(text, "---\r\nauthor:\r\n    name: Bob\r\n---\r\nBody  \r\n\r\nMore\r\n");
 }
 
 #[test]
@@ -487,7 +490,7 @@ fn an_indented_root_is_refused_and_serialization_writes_it() {
     let document = edited_by_set(source, "a.b", json!(2));
     let target = path("a.b");
     let text = edited_document_text(&document, &[PathEdit::Set(steps_of(&target, &document))]).unwrap();
-    assert_eq!(text, "---\na:\n  b: 2\nc: 2\n---\nBody\n");
+    assert_eq!(text, "---\na:\n    b: 2\nc: 2\n---\nBody\n");
 }
 
 #[test]
@@ -592,7 +595,7 @@ fn text_that_only_looks_like_structure_is_not_mistaken_for_it() {
 fn a_document_built_in_memory_is_serialized() {
     let mut document = Markdown::new("Body\n".to_string());
     set_at(document.frontmatter_mut().as_map_mut(), &path("a.b"), json!(1)).unwrap();
-    assert_eq!(edited_document_text(&document, &[]).unwrap(), "---\na:\n  b: 1\n---\nBody\n");
+    assert_eq!(edited_document_text(&document, &[]).unwrap(), "---\na:\n    b: 1\n---\nBody\n");
 }
 
 #[test]
@@ -626,4 +629,135 @@ fn only_the_named_node_changes_across_a_read_write_read_round_trip() {
     assert_eq!(reloaded["author"]["social"], json!({"tags": ["a", ""]}));
     assert!(!reloaded.contains_key("title"));
     assert_eq!(rm(&removed, &["author.social.tags.0", "author.social.tags.1"]).map(|text| values(&text)["author"]["social"].clone()).unwrap(), json!({"tags": []}));
+}
+
+/// A frontmatter value whose authored spelling differs from the standard
+/// style: quoted, and commented.
+const AUTHORED_SAME: &str = "---\ntitle: 'same' # keep\n---\nBody\n";
+
+/// A fallback that counts how often the editor asked for it.
+fn counting_fallback(calls: &Cell<usize>) -> impl Fn() -> Indentation + '_ {
+    move || {
+        calls.set(calls.get() + 1);
+        Indentation::spaces(std::num::NonZeroU8::new(2).unwrap())
+    }
+}
+
+/// `md set`'s edit of `source` under a counted fallback.
+fn set_counted(source: &str, target: &str, value: Value, calls: &Cell<usize>) -> Result<String, PathEditRefusal> {
+    let target = path(target);
+    let mut expected = values(source);
+    set_at(&mut expected, &target, value).expect("the pure edit applies");
+    let steps = target.resolve_map(&expected).steps().to_vec();
+    edit_frontmatter_paths_with_indentation(source, &expected, &[PathEdit::Set(steps)], counting_fallback(calls))
+}
+
+#[test]
+fn setting_a_quoted_scalar_to_its_own_value_keeps_the_source_and_resolves_nothing() {
+    let calls = Cell::new(0);
+
+    let text = set_counted(AUTHORED_SAME, "title", json!("same"), &calls).unwrap();
+
+    assert_eq!(text, AUTHORED_SAME);
+    assert_eq!(calls.get(), 0, "a no-op needs no layout");
+}
+
+#[test]
+fn setting_a_block_mapping_to_its_own_value_keeps_its_quotes_and_inner_comment() {
+    let source = "---\nmeta:\n  # inner\n  name: 'same' # keep\n---\nBody\n";
+    let calls = Cell::new(0);
+
+    let text = set_counted(source, "meta", json!({"name": "same"}), &calls).unwrap();
+
+    assert_eq!(text, source);
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn setting_a_block_sequence_to_its_own_value_keeps_its_quoted_item_and_comment() {
+    let source = "---\ntags:\n  - 'same' # keep\n---\nBody\n";
+    let calls = Cell::new(0);
+
+    let text = set_counted(source, "tags", json!(["same"]), &calls).unwrap();
+
+    assert_eq!(text, source);
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn an_unchanged_document_is_saved_as_its_source_bytes_without_resolving() {
+    let document = edited_by_set(AUTHORED_SAME, "title", json!("same"));
+    let target = path("title");
+    let calls = Cell::new(0);
+
+    let text = edited_document_text_with_indentation(
+        &document,
+        &[PathEdit::Set(steps_of(&target, &document))],
+        counting_fallback(&calls),
+    )
+    .unwrap();
+
+    assert_eq!(text, AUTHORED_SAME);
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn control_a_changed_value_with_no_local_example_uses_the_fallback_once() {
+    let document = edited_by_set(AUTHORED_SAME, "meta", json!({"child": {"leaf": 1}}));
+    let target = path("meta");
+    let calls = Cell::new(0);
+
+    let text = edited_document_text_with_indentation(
+        &document,
+        &[PathEdit::Set(steps_of(&target, &document))],
+        counting_fallback(&calls),
+    )
+    .unwrap();
+
+    assert_eq!(text, "---\ntitle: 'same' # keep\nmeta:\n  child:\n    leaf: 1\n---\nBody\n");
+    assert_eq!(calls.get(), 1);
+}
+
+/// `edited_document_text_with_indentation` of `document` after `meta` was set
+/// to a nested mapping, under a two-space fallback; the text and the number
+/// of times the fallback was asked.
+fn nested_meta_saved_with_two_spaces(document: &Markdown, edits: &[PathEdit<'_>]) -> (String, usize) {
+    let calls = Cell::new(0);
+    let text = edited_document_text_with_indentation(document, edits, counting_fallback(&calls)).unwrap();
+    (text, calls.get())
+}
+
+#[test]
+fn a_document_built_in_memory_is_serialized_with_the_callers_indentation() {
+    let mut document = Markdown::new("Body\n".to_string());
+    set_at(document.frontmatter_mut().as_map_mut(), &path("meta"), json!({"child": {"leaf": 1}})).unwrap();
+
+    let (text, calls) = nested_meta_saved_with_two_spaces(&document, &[]);
+
+    assert_eq!(text, "---\nmeta:\n  child:\n    leaf: 1\n---\nBody\n");
+    assert_eq!(calls, 1);
+}
+
+#[test]
+fn control_flow_style_frontmatter_falls_back_to_the_callers_indentation() {
+    let source = "---\nmeta: {child: 0}\n---\nBody\n";
+    let document = edited_by_set(source, "meta.child", json!({"leaf": 1}));
+    let target = path("meta.child");
+
+    let (text, calls) = nested_meta_saved_with_two_spaces(&document, &[PathEdit::Set(steps_of(&target, &document))]);
+
+    assert_eq!(text, "---\nmeta:\n  child:\n    leaf: 1\n---\nBody\n");
+    assert_eq!(calls, 1, "resolved once across the refused edit and the fallback");
+}
+
+#[test]
+fn control_an_empty_mapping_replaced_in_place_uses_the_callers_indentation() {
+    let source = "---\nmeta: {}\n---\nBody\n";
+    let document = edited_by_set(source, "meta", json!({"child": {"leaf": 1}}));
+    let target = path("meta");
+
+    let (text, calls) = nested_meta_saved_with_two_spaces(&document, &[PathEdit::Set(steps_of(&target, &document))]);
+
+    assert_eq!(text, "---\nmeta:\n  child:\n    leaf: 1\n---\nBody\n");
+    assert_eq!(calls, 1);
 }

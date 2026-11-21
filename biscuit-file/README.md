@@ -6,6 +6,7 @@ A Rust library and CLI for working with files and file formats.
 
 - **Convert data formats** -- Move data freely between JSON, JSON5, YAML, and TOML
 - **Extract PDF content** -- Pull text or Markdown from PDF documents
+- [**Write YAML with a chosen indentation**](./docs/topics/yaml-writing.md) -- serialize any value as YAML laid out at the destination's width (four spaces by default), checked to parse back to the same value
 - **Read Markdown frontmatter** -- Extract and convert the YAML or TOML metadata block from Markdown files
 - [**Analyze and repair YAML source**](./lib/README.md#yaml-source-analysis-and-repair) -- produce span-aware diagnostics, inspect certainty, and safely apply deterministic edits
 - **Detect file types** -- Automatically identify files using extensions and magic bytes

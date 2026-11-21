@@ -13,7 +13,9 @@ use biscuit_terminal::output::{OutputTarget, WidthRequest};
 use clap::CommandFactory as _;
 use color_eyre::eyre::{Context, Report, Result, eyre};
 use darkmatter::markdown::cleanup::{reflow_to_width, strip_incidental_newlines};
-use darkmatter::markdown::hash::{PathEdit, PathEditRefusal, edited_document_text};
+use biscuit_file::Indentation;
+use darkmatter::config::write::destination_indentation;
+use darkmatter::markdown::hash::{PathEdit, PathEditRefusal, edited_document_text_with_indentation};
 use darkmatter::markdown::output::command::{CommandValue, EditData, RemovedData, SetData, prose_document};
 use darkmatter::markdown::schemas::completion::declared_shape;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationOptions, frontmatter_as_json};
@@ -133,16 +135,23 @@ fn set_value(
     data.value = value;
 
     let steps = path.resolve_map(md.frontmatter().as_map()).steps().to_vec();
-    let edited = edited_document_text(&md, &[PathEdit::Set(steps)]).map_err(refused_edit)?;
+    // A saved document is laid out for its file; printed output, which has no
+    // destination, uses the default.
+    let destination = if save { Some(resolve_file_path(input, request.launch_context()?)?) } else { None };
+    // Asked only when the value changed and needs a layout.
+    let indentation = || destination.as_deref().map_or_else(Indentation::default, destination_indentation);
+    let edited = edited_document_text_with_indentation(&md, &[PathEdit::Set(steps)], indentation).map_err(refused_edit)?;
     let output = run.output();
     let width = output.explicit_width.then_some(output.options.width);
     let text = at_width(edited, width);
     data.document = Some(text.clone());
 
-    if save {
-        let resolved = resolve_file_path(input, request.launch_context()?)?;
-        std::fs::write(&resolved, &text).wrap_err_with(|| format!("Failed to write to {resolved:?}"))?;
-        data.saved = true;
+    if let Some(resolved) = destination {
+        // A value that already holds leaves the file as it is, unwritten.
+        if md.source_text() != Some(text.as_str()) {
+            std::fs::write(&resolved, &text).wrap_err_with(|| format!("Failed to write to {resolved:?}"))?;
+            data.saved = true;
+        }
         if !run.is_data() {
             let prose = darkmatter::markdown::output::command::empty_document();
             return Ok(Completed::success(CommandValue::new(data, prose).with_terminal(|_| String::new()).with_markdown(String::new())));
@@ -441,7 +450,8 @@ fn rm_value(
     let plan = RemovalPlan::new(md.frontmatter().as_map(), paths)?;
     plan.apply(md.frontmatter_mut().as_map_mut());
     let edits: Vec<PathEdit<'_>> = plan.targets().map(PathEdit::Remove).collect();
-    let text = edited_document_text(&md, &edits).map_err(refused_edit)?;
+    let text = edited_document_text_with_indentation(&md, &edits, || destination_indentation(&resolved))
+        .map_err(refused_edit)?;
     std::fs::write(&resolved, text).wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
 
     let removed = props.to_vec();

@@ -4,7 +4,7 @@ Shared test lifecycle helpers for the Rusty Biscuit workspace.
 
 ## What it provides
 
-This crate solves eight common pain points when writing tests in a Rust workspace:
+This crate solves nine common pain points when writing tests in a Rust workspace:
 
 1. **Tracing output in tests** — `trace_phase!` macro and `init_test_tracing()` to emit structured spans around setup/body/teardown phases.
 2. **Safe environment variable mutation** — `EnvGuard` RAII guard that restores env vars after test completion, even when tests panic.
@@ -14,6 +14,7 @@ This crate solves eight common pain points when writing tests in a Rust workspac
 6. **Proving the arguments a program received** — `argv_recorder`, the body of a native executable that records its argument vector. A consuming package declares one thin `[[bin]]` whose `main` returns `test_toolkit::argv_recorder::main()`; its tests copy that binary onto the child's `PATH`, point `ARGV_RECORDER_FILE` at a file, and read every run back with `read_argv_records`. Optional `ARGV_RECORDER_STDOUT` and `ARGV_RECORDER_STDERR` values emit stream probes after a successful record, so redirection tests can use the same native executable on every OS.
 7. **Counting allocations** — `alloc_count`, a global allocator that counts allocations, bytes, and peak live bytes, for benches that make allocation claims.
 8. **Launching "the user's editor"** — `fake_editor`, the body of a native fake text editor. A consuming package declares one thin `[[bin]]` whose `main` returns `test_toolkit::fake_editor::main()` and points `EDITOR` at it. Environment variables drive it: record its arguments (`FAKE_EDITOR_RECORD`, in the `argv_recorder` format), write or atomically replace the target (the last argument), delete it, exit with a code, print to either stream, read a stdin line, report which streams were terminals (`read_stdio_report`), spawn a sleeping child and record its PID (`read_pids`), ignore `SIGTERM` on Unix, pause on a marker file until the test removes it, or create a ready marker and hold until killed. A held or spawned process exits on its own after two minutes, so a failed test cannot leak it. The variables and their order are documented on the module.
+9. **One YAML writer** — `serializer_guard`, the source guard that fails on a production call to a YAML backend's document serializer outside a package's reasoned allowlist.
 
 ## Usage
 
@@ -322,6 +323,41 @@ Exit codes: the wrapped command's status, or `99` when the command succeeded but
 leaked processes were found. Pass `--warn-only` to report without failing,
 `--root <path>` to override the attribution root, and `--settle-ms <n>` to tune
 the grace period before the final snapshot.
+
+### `serializer_guard` — one YAML writer
+
+Production YAML documents go through `biscuit_file::to_yaml_string`. Each
+package that depends on a YAML backend (`serde_yaml`, `serde_yaml_ng`, or
+`biscuit-file` with its `yaml` feature) scans its own production source from
+one Level 1 test, listing only the direct calls a contract keeps:
+
+```rust
+use test_toolkit::serializer_guard::{Allow, assert_package};
+
+const ALLOWED: &[Allow] = &[Allow {
+    file: "src/markdown/hash/mod.rs",
+    symbol: "hash_frontmatter_map",
+    reason: "strict frontmatter hash input: the backend bytes are hashed",
+}];
+
+#[test]
+fn yaml_serializer_guard() {
+    assert_package(&biscuit_test_harness::manifest_dir!().join("src"), ALLOWED);
+}
+```
+
+A site is a path, called or passed as a function value, that resolves to a
+backend's `to_string`, `to_writer`, or `Serializer`. Resolution follows the
+crate's `use` declarations (module and leaf aliases, groups, globs, and
+re-exports between its modules) and `biscuit_file::serde_yaml_ng`, so changing
+the import cannot hide a call; a method call such as `value.to_string()` is
+never a site. Only modules a production target compiles are scanned, and
+anything gated on `test` or marked `#[test]` is skipped. A failure names the
+file, line, enclosing symbol, and resolved call. An entry that matches no site
+fails as stale, so the list cannot outlive the calls it names.
+
+`tests/serializer_guard_coverage.rs` reads the workspace manifests and fails
+when a member that reaches a YAML backend has no guard test.
 
 ## Running tests
 

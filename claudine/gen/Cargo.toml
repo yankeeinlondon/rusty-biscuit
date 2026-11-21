@@ -23,7 +23,7 @@ terminal-tests = ["dep:serial_test", "dep:test-toolkit"]
 [dependencies]
 # Internal
 claudine-catalog-types = { path = "../catalog-types" }
-biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference", "yaml"] }
 darkmatter = { path = "../../darkmatter/lib" }
 simplified-schema = { path = "../../simplified-schema/lib" }
 sniff = { path = "../../sniff/lib" }

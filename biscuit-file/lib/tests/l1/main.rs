@@ -49,3 +49,5 @@ mod test_layout;
 mod yaml_corpus;
 mod yaml_mutation;
 mod yaml_safety;
+mod yaml_serializer_guard;
+mod yaml_writing;

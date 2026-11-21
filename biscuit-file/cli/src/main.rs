@@ -5,7 +5,8 @@
 
 use biscuit_file::json5::{to_json5_compact, to_json5_pretty};
 use biscuit_file::{
-    FileReference, FileType, Json5, Pdf, Toml, Yaml, detect_file_type, to_portable_string,
+    FileReference, FileType, Indentation, Json5, Pdf, Toml, Yaml, detect_file_type,
+    to_portable_string, to_yaml_string,
 };
 use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 use color_eyre::eyre::{Result, WrapErr, bail};
@@ -345,9 +346,10 @@ fn emit_structured(
     let output = match format.unwrap_or(OutputFormat::Json) {
         OutputFormat::Json => format_json(json_value, compact)?,
         OutputFormat::Json5 => format_json5(json_value, compact),
-        OutputFormat::Yaml => {
-            serde_yaml_ng::to_string(json_value).wrap_err("Failed to convert to YAML")?
-        }
+        // Standard output has no destination file, so the layout is the
+        // writer's default rather than any repository's preference.
+        OutputFormat::Yaml => to_yaml_string(json_value, Indentation::default())
+            .wrap_err("Failed to convert to YAML")?,
         OutputFormat::Toml => {
             let toml_value: toml::Value = serde_json::from_value(
                 serde_json::to_value(json_value).wrap_err("Failed to convert JSON value")?,
@@ -378,7 +380,9 @@ fn process_toml(input: &str, format: Option<OutputFormat>, compact: bool) -> Res
 fn process_yaml(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let yaml = Yaml::from_bytes(content).wrap_err("Failed to parse YAML")?;
     if matches!(format, Some(OutputFormat::Yaml)) {
-        let output = serde_yaml_ng::to_string(yaml.value()).wrap_err("Failed to serialize YAML")?;
+        let output = yaml
+            .to_yaml_string(Indentation::default())
+            .wrap_err("Failed to serialize YAML")?;
         println!("{output}");
         return Ok(());
     }

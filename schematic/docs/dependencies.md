@@ -67,6 +67,14 @@
 
     _Tags: errors, macros_
 
+### Development Dependencies
+
+- [biscuit-test-harness](../../biscuit-test-harness) _v0.1.0_ and [test-toolkit](../../tools/test-toolkit) _v0.1.0_
+
+    _`manifest_dir!()` and the YAML `serializer_guard` over this crate's `src/`._
+
+    _Tags: workspace, testing_
+
 ---
 
 ## schematic-definitions
@@ -157,6 +165,16 @@
 
     _Tags: workspace_
 
+- [sniff](../../sniff/lib) _v0.1.0_
+
+    _Local workspace dependency (default features only): resolves the
+    indentation a YAML OpenAPI export's destination file asks for (its
+    worktree's EditorConfig or formatter settings) before the document is
+    rendered. No `schematic-*` crate is reachable from Sniff's default
+    features, so the dependency adds no cycle._
+
+    _Tags: workspace, formatting_
+
 - [serde](https://github.com/serde-rs/serde) _v1.0_ [📄](https://serde.rs)
 
     _Serialization framework; `ValidationDiagnostic` derives `Serialize`._
@@ -188,6 +206,14 @@
     _Secure cross-platform temporary file/directory creation with automatic cleanup._
 
     _Tags: testing, filesystem, cleanup_
+
+- [git2](https://github.com/rust-lang/git2-rs) _v0.20_ [📄](https://docs.rs/git2)
+
+    _libgit2 bindings (default features off), used only to initialize the
+    fixture worktree whose `.editorconfig` the YAML OpenAPI indentation tests
+    resolve. Already a workspace dependency of Sniff, so it adds no crate._
+
+    _Tags: testing, git_
 
 - [biscuit-test-harness](../../biscuit-test-harness) _v0.1.0_
 

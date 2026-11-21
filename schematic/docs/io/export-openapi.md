@@ -489,7 +489,9 @@ The rules behind the table:
   bound either would change (`9223372036854775808`, `18446744073709551616`,
   `0.10000000000000000001`, or a stored schema's `x-schematic-exact` text)
   is carried beside the document, and `serialize` writes its exact decimal
-  text in place of the stand-in. The written document never contains
+  text in place of the stand-in. The text is substituted after the YAML
+  layout (see [YAML layout](#yaml-layout)), so the indentation never
+  respells a number. The written document never contains
   `x-schematic-exact`, and a document without such a bound serializes exactly
   as before.
 - `"default": null` is dropped: `openapiv3`, which the importer parses with,
@@ -527,6 +529,57 @@ generic `PaginatedResponse<T>` structs do export under keys such as
 `PaginatedResponse<Repository>`, which OpenAPI 3.0.3's key pattern
 (`^[a-zA-Z0-9.\-_]+$`) does not allow; the name comes from the definition type
 itself.
+
+## YAML layout
+
+A YAML document (`--openapi-format yaml`) is indented the way its
+destination file asks, and JSON output is always pretty-printed with two
+spaces, unaffected by any setting.
+
+- **Written to a file** (`schematic-gen generate --openapi-out …`, or
+  `write_openapi_document` and its wrappers): before rendering, the
+  generator asks Sniff which indentation the destination file
+  (`<dir>/<module>.yaml`, which need not exist yet) wants. Sniff reads the
+  settings of the Git worktree that will contain the file: an
+  `.editorconfig` section matching it, or a formatter configuration such as
+  Prettier's. With nothing stated, the default is **four spaces**.
+- **Returned as a string** (`schematic_define::openapi::serialize`,
+  `schematic_gen::export::openapi::render_openapi_document`): there is no
+  destination, so YAML uses four spaces. Pass an explicit width with
+  `serialize_with_indentation(doc, format, indentation)`, or a destination
+  path with `render_openapi_document_for(doc, format, path)`.
+- When the destination cannot be identified (for example, a parent path is
+  a regular file), the generator prints a warning naming the file and uses
+  four spaces.
+
+For example, with this `.editorconfig` at the worktree root:
+
+```ini
+[*.yaml]
+indent_size = 2
+```
+
+`openapi/widgets.yaml` is written as
+
+```yaml
+openapi: 3.0.3
+info:
+  title: widgets
+```
+
+and without it as
+
+```yaml
+openapi: 3.0.3
+info:
+    title: widgets
+```
+
+Only indentation changes: the document parses to the same values at every
+width, and a mapping inside a list item keeps its keys aligned two columns
+past the dash (`- in: query` / `  name: limit`). The layout rules are
+biscuit-file's YAML writer's; see
+[Writing YAML](../../../biscuit-file/docs/topics/yaml-writing.md).
 
 ## Default Artifact Generation
 

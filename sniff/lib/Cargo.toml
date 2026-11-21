@@ -8,7 +8,7 @@ license = "AGPL-3.0-only"
 [dependencies]
 async-trait = "0.1"
 base64 = "0.22"
-biscuit-file = { path = "../../biscuit-file/lib", features = ["toml", "yaml"] }
+biscuit-file = { path = "../../biscuit-file/lib", features = ["toml", "yaml", "json5"] }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"

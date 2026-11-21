@@ -19,7 +19,10 @@
 //! - [`export`] - Export a `RestApi` to an OpenAPI 3.0.3 document
 //! - [`ExportOptions`] - Configuration options for export
 //! - [`ExportFormat`] - Output format (JSON or YAML)
-//! - [`serialize`] - Serialize an OpenAPI document to string
+//! - [`serialize`] - Serialize an OpenAPI document to string (YAML at the
+//!   default four-space indentation)
+//! - [`serialize_with_indentation`] - The same, with YAML laid out at a
+//!   destination's indentation
 //!
 //! ### Vendor Extensions
 //!
@@ -99,5 +102,5 @@ pub use import::{
     OpenApiImportOptions, OpenApiImportResult, RefResolver, ResponseClassification,
     classify_responses,
 };
-pub use options::{ExportFormat, ExportOptions, serialize};
+pub use options::{ExportFormat, ExportOptions, serialize, serialize_with_indentation};
 pub use source::OpenApiSource;

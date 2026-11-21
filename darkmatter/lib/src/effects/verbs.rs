@@ -1,5 +1,6 @@
 //! Verb implementations for the side-effect engine.
 
+use crate::config::write::destination_indentation;
 use crate::effects::EffectEngine;
 use crate::effects::error::EffectError;
 use crate::effects::fs_write::{append_guarded, atomic_write_guarded, ensure_within};
@@ -38,13 +39,19 @@ impl EffectEngine {
     }
 
     /// Serializes, optionally re-hashes, and atomically writes the document.
+    ///
+    /// The frontmatter is re-serialized whole, nested with the indentation
+    /// preference resolved for the target file (four spaces, with a warning,
+    /// when it cannot be resolved). A verb whose edit changed no value returns
+    /// before calling this, so the file keeps its authored bytes.
     fn save(&self, raw_path: &str, md: &Markdown) -> Result<(), EffectError> {
         let path = self.resolve(raw_path)?;
         let opts = MdHashOptions::default();
-        let serialized = md.as_string();
+        let indentation = destination_indentation(&path);
+        let serialized = md.as_string_with_indentation(indentation);
         let has_hash = md.frontmatter().as_map().contains_key(&opts.property);
         let serialized = if self.auto_rehash() && has_hash {
-            md.stamp_baseline(&serialized, &opts, chrono::Utc::now(), Change::Known)
+            md.stamp_baseline_with_indentation(&serialized, &opts, chrono::Utc::now(), Change::Known, || indentation)
                 .map_err(|e| EffectError::Markdown(e.to_string()))?
                 .text
                 .unwrap_or(serialized)
@@ -98,13 +105,15 @@ impl EffectEngine {
             .frontmatter()
             .as_map()
             .get(prop)
-            .cloned()
-            .unwrap_or(Value::Null);
+            .cloned();
+        if prior.as_ref() == Some(&value) {
+            return Ok(value);
+        }
         md.frontmatter_mut()
             .as_map_mut()
             .insert(prop.to_string(), value);
         self.save(file, &md)?;
-        Ok(prior)
+        Ok(prior.unwrap_or(Value::Null))
     }
 
     /// `merge_frontmatter(file, obj)` → merged object (shallow).
@@ -114,13 +123,16 @@ impl EffectEngine {
             prop: "<obj>".to_string(),
         })?;
         let (_, mut md) = self.load(file)?;
-        {
+        let changed = incoming
+            .iter()
+            .any(|(k, v)| md.frontmatter().as_map().get(k) != Some(v));
+        if changed {
             let map = md.frontmatter_mut().as_map_mut();
             for (k, v) in incoming {
                 map.insert(k.clone(), v.clone());
             }
+            self.save(file, &md)?;
         }
-        self.save(file, &md)?;
         let merged: serde_json::Map<String, Value> = md
             .frontmatter()
             .as_map()
@@ -133,11 +145,9 @@ impl EffectEngine {
     /// `delete_frontmatter(file, prop)` → removed value (or null).
     pub fn delete_frontmatter(&self, file: &str, prop: &str) -> Result<Value, EffectError> {
         let (_, mut md) = self.load(file)?;
-        let removed = md
-            .frontmatter_mut()
-            .as_map_mut()
-            .shift_remove(prop)
-            .unwrap_or(Value::Null);
+        let Some(removed) = md.frontmatter_mut().as_map_mut().shift_remove(prop) else {
+            return Ok(Value::Null);
+        };
         self.save(file, &md)?;
         Ok(removed)
     }

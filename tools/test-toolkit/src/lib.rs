@@ -71,6 +71,13 @@
 //! binaries explicitly (`autotests = false`): every `tests/` source must be
 //! reached from a declared `[[test]]` root. Each such package calls it from a
 //! test inside its own Level 1 binary.
+//!
+//! ## YAML serializer guard
+//!
+//! [`serializer_guard`] fails on a production call to a YAML backend's
+//! document serializer that bypasses `biscuit_file::to_yaml_string`. Each
+//! package that depends on a YAML backend calls it over its own `src/` from
+//! one of its Level 1 tests, with a reasoned allowlist.
 
 pub mod alloc_count;
 pub mod archive_guard;
@@ -78,6 +85,7 @@ pub mod argv_recorder;
 pub mod backend;
 pub mod evidence;
 pub mod fake_editor;
+pub mod serializer_guard;
 pub mod spool;
 pub mod test_layout;
 

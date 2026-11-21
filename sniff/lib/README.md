@@ -10,6 +10,7 @@
 - **Filesystem Usage Queries**: `filesystem::query::query_path_usage` finds observable processes holding a file or directory tree, with a shared scheduling budget and explicit coverage. Supports Linux/WSL2 inotify, macOS descriptors/cwd, and Windows handle owners/modules. See [filesystem usage queries](../docs/topics/filesystem-query.md).
 - **Process Trees**: `process::ProcessTree` owns a spawned child and every process it starts, so a caller can stop or release them together; `process::ForegroundHandoff` lends such a child the terminal's foreground on Unix and gives it back afterwards, so an owned editor or prompt can read the keyboard. See [process trees](../docs/topics/process-trees.md).
 - **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig, blast radius, justfile detection, recent commits
+- **Indentation Resolution**: `filesystem::indentation` answers which indentation a worktree wants for a file or extension, ranking the root `.editorconfig`, fifteen formatters' configuration files, and built-in language conventions, with provenance and diagnostics. See [indentation resolution](../docs/topics/indentation.md).
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
 - **Programs Detection**: 10 categories (editors, utilities, package managers, TTS, terminals, headless audio, AI tools, notification helpers, test runners)
 - **Services Detection**: Init system detection and service listing across systemd, launchd, OpenRC, etc.
@@ -402,6 +403,7 @@ Comprehensive filesystem analysis including Git, monorepo detection, language br
 3. **Language Analysis** (`filesystem::languages`) - File extension-based language detection
 4. **File Type Classification** (`filesystem::file_types`) - Broad file association (programming, config, docs, etc.)
 5. **EditorConfig** (`filesystem::formatting`) - Formatting rule detection
+   - **Indentation** (`filesystem::indentation`) - Per-file indentation from EditorConfig, formatter configs, and language conventions ([topic](../docs/topics/indentation.md))
 6. **Document Discovery** (`filesystem::docs`) - Markdown documents with content hashing
 7. **Blast Radius** (`filesystem::blast_radius`) - Impact analysis for changed source files
 8. **Justfile Detection** (`filesystem::just`) - Justfile discovery and recipe parsing

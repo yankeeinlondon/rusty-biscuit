@@ -20,7 +20,7 @@ This design translates those requirements into a concrete library API, error mod
 
 ## Non-Goals
 
-- Format-preserving editing (comments, anchors, whitespace). This library is read/convert/validate.
+- Format-preserving editing (comments, anchors, whitespace). This library reads, converts, and validates YAML, and writes new YAML from a value: see [Writing YAML](../topics/yaml-writing.md) for the laid-out writer (`to_yaml_string`), which does not carry over an existing file's comments or layout.
 - Full YAML 1.2 feature parity beyond what the selected parser supports.
 - Round-trip fidelity across YAML <-> JSON/TOML conversions.
 

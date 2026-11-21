@@ -6,6 +6,7 @@ use tracing::instrument;
 
 use super::analyze::{YamlAnalysis, YamlDiagnostic, YamlRepair, analyze_yaml};
 use super::location::YamlLocation;
+use crate::Indentation;
 
 /// Source tracking for YAML content.
 #[derive(Debug, Clone)]
@@ -28,6 +29,19 @@ pub enum YamlError {
     /// YAML parsing error.
     #[error("YAML parse error: {0}")]
     Parse(#[from] serde_yaml_ng::Error),
+
+    /// The YAML backend could not serialize the caller's value.
+    ///
+    /// Raised by [`to_yaml_string`](super::to_yaml_string); the `From`
+    /// conversion stays [`YamlError::Parse`], so a serialization failure is
+    /// mapped to this variant explicitly.
+    #[error("YAML serialize error: {0}")]
+    Serialize(#[source] serde_yaml_ng::Error),
+
+    /// The laid-out YAML could not be produced, or did not reparse to the
+    /// backend's value in the same mapping order.
+    #[error("YAML layout error: {0}")]
+    Layout(String),
 
     /// JSON conversion error.
     #[error("JSON conversion error: {0}")]
@@ -316,6 +330,19 @@ impl Yaml {
     #[must_use]
     pub fn value(&self) -> &serde_yaml_ng::Value {
         &self.value
+    }
+
+    /// Serializes the parsed value as YAML laid out with `indentation`.
+    ///
+    /// Unlike [`Yaml::source_text`], this never returns authored text: it
+    /// writes the value through [`to_yaml_string`](super::to_yaml_string), so
+    /// comments and the authored layout are not carried over.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`YamlError::Serialize`] or [`YamlError::Layout`].
+    pub fn to_yaml_string(&self, indentation: Indentation) -> Result<String, YamlError> {
+        super::write::to_yaml_string(&self.value, indentation)
     }
 
     /// Returns the source of this YAML document.

@@ -541,11 +541,22 @@ Helper methods: `is_unchanged()`, `is_cosmetic_only()`, `has_broken_links()`, `s
 
 ### `as_string() -> String`
 
-Serializes the full document back to a string, including YAML frontmatter between `---` delimiters (if present).
+Serializes the full document back to a string, including YAML frontmatter between `---` delimiters (if present). The frontmatter is re-serialized whole, nested four spaces per level; comments and authored layout are not kept.
 
 ```rust
 let output = md.as_string();
 assert!(output.starts_with("---\n"));
+```
+
+### `as_string_with_indentation(indentation) -> String`
+
+`as_string` for a document you save to a file: nested values use `indentation`, usually the destination's preference from `darkmatter::config::write::destination_indentation(path)`.
+
+```rust
+use darkmatter::config::write::destination_indentation;
+
+let text = md.as_string_with_indentation(destination_indentation(&path));
+std::fs::write(&path, text)?;
 ```
 
 ### `as_ast() -> MarkdownResult<Node>`

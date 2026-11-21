@@ -16,14 +16,15 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 use openapiv3::{LinkOperation, OpenAPI, ReferenceOr};
 use schematic_define::RestApi;
+use biscuit_file::Indentation;
 use schematic_define::openapi::{
-    ExportFormat, ExportOptions, export, serialize,
+    ExportFormat, ExportOptions, export, serialize, serialize_with_indentation,
 };
 
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
 use schematic_definitions::naming::resolve_module_name;
-use crate::validation::{ensure_no_errors, validate_openapi};
+use crate::validation::{ensure_no_errors, ensure_openapi_exportable};
 
 /// Writes an OpenAPI specification file to the specified directory.
 ///
@@ -74,7 +75,7 @@ pub fn write_openapi(
     options: &ExportOptions,
     dir: &Path,
 ) -> Result<std::path::PathBuf, GeneratorError> {
-    ensure_no_errors(Output::OpenApi, validate_openapi(&[api]))?;
+    ensure_openapi_exportable(&[api])?;
 
     if !dir.exists() {
         return Err(GeneratorError::OutputDirNotFound(dir.display().to_string()));
@@ -182,7 +183,7 @@ pub fn build_openapi_grouped(
         !apis.is_empty(),
         "build_openapi_grouped requires at least one API"
     );
-    ensure_no_errors(Output::OpenApi, validate_openapi(apis))?;
+    ensure_openapi_exportable(apis)?;
 
     let mut docs: Vec<(String, OpenAPI)> = Vec::with_capacity(apis.len());
     for api in apis {
@@ -204,7 +205,8 @@ pub fn build_openapi_grouped(
     Ok(merged)
 }
 
-/// Serializes `doc` exactly as [`write_openapi_document`] writes it.
+/// Serializes `doc` with no destination: YAML is laid out at
+/// [`Indentation::default`] (four spaces per level).
 ///
 /// ## Errors
 ///
@@ -214,7 +216,45 @@ pub fn render_openapi_document(doc: &OpenAPI, format: ExportFormat) -> Result<St
         .map_err(|e| GeneratorError::ConfigError(format!("OpenAPI serialization failed: {}", e)))
 }
 
-/// Serializes `doc` and writes it to `<dir>/<file_stem>.<ext>`.
+/// Serializes `doc` as it is written to `destination`, which need not
+/// exist: YAML takes the indentation Sniff resolves for that file (its
+/// worktree's EditorConfig or formatter settings), and JSON is unaffected.
+///
+/// When the destination cannot be identified, YAML falls back to
+/// [`Indentation::default`] with a warning on standard error naming it.
+///
+/// ## Errors
+///
+/// [`GeneratorError::ConfigError`] when serialization fails.
+pub fn render_openapi_document_for(
+    doc: &OpenAPI,
+    format: ExportFormat,
+    destination: &Path,
+) -> Result<String, GeneratorError> {
+    let indentation = match format {
+        ExportFormat::Json => return render_openapi_document(doc, format),
+        ExportFormat::Yaml => destination_indentation(destination),
+    };
+    serialize_with_indentation(doc, format, indentation)
+        .map_err(|e| GeneratorError::ConfigError(format!("OpenAPI serialization failed: {}", e)))
+}
+
+fn destination_indentation(destination: &Path) -> Indentation {
+    match sniff::filesystem::indentation::resolve_for_path(destination) {
+        Ok(resolved) => resolved.indentation(),
+        Err(error) => {
+            eprintln!(
+                "warning: {}: could not resolve the indentation preference ({error}); using {} spaces",
+                destination.display(),
+                Indentation::default().width
+            );
+            Indentation::default()
+        }
+    }
+}
+
+/// Serializes `doc` with [`render_openapi_document_for`] and writes it to
+/// `<dir>/<file_stem>.<ext>`.
 ///
 /// ## Errors
 ///
@@ -230,12 +270,12 @@ pub fn write_openapi_document(
     if !dir.exists() {
         return Err(GeneratorError::OutputDirNotFound(dir.display().to_string()));
     }
-    let content = render_openapi_document(doc, format)?;
     let extension = match format {
         ExportFormat::Json => "json",
         ExportFormat::Yaml => "yaml",
     };
     let file_path = dir.join(format!("{}.{}", file_stem, extension));
+    let content = render_openapi_document_for(doc, format, &file_path)?;
     fs::write(&file_path, content).map_err(|source| GeneratorError::WriteError {
         path: file_path.display().to_string(),
         source,

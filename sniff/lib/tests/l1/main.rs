@@ -22,6 +22,7 @@ mod committed_tree;
 mod focused_provider;
 mod git_parity;
 mod host_capability_cache;
+mod indentation;
 mod integration;
 mod lockfile_fixtures;
 mod lockfile_isolation;
@@ -49,3 +50,4 @@ mod uv_with_install_plan;
 mod windows_app_paths_orphan;
 #[cfg(target_os = "windows")]
 mod windows_find_program_priority;
+mod yaml_serializer_guard;

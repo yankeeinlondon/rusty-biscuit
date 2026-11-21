@@ -254,6 +254,13 @@ let options = ExportOptions::new()
 let openapi_doc = export(&api, &options)?;
 ```
 
+`openapi::serialize(&doc, format)` lays YAML out at four spaces (no destination);
+`serialize_with_indentation(&doc, format, indentation)` takes an explicit
+`biscuit_file::Indentation`. `schematic-gen`'s `write_openapi_document` and
+`generate --openapi-format yaml` resolve the destination file's indentation with
+Sniff (`render_openapi_document_for`) before rendering; JSON is unaffected. Exact
+numbers are substituted after the layout (`schematic/docs/io/export-openapi.md#yaml-layout`).
+
 Component schemas convert faithfully to OAS 3.0.3 (`define/src/openapi/export/conversion.rs`;
 rules and examples in `schematic/docs/io/export-openapi.md#how-component-schemas-convert`):
 

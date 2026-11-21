@@ -166,13 +166,21 @@ pub fn validate_rust_client_in(
 /// become the document's `components.schemas`), and that every `$ref`
 /// inside those components resolves too.
 pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
+    openapi_checks(apis, true)
+}
+
+/// [`validate_openapi`], without the warning-only vocabulary findings
+/// unless `warnings`.
+fn openapi_checks(apis: &[&RestApi], warnings: bool) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
         check_routes(api, Output::OpenApi, &mut diagnostics);
         check_export_filename(api, Output::OpenApi, &mut diagnostics);
         check_schema_references(api, Output::OpenApi, &mut diagnostics);
         check_constraints(api, Output::OpenApi, &mut diagnostics);
-        diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::OpenApi));
+        if warnings {
+            diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::OpenApi));
+        }
     }
     check_stem_case_collisions(apis, Output::OpenApi, &mut diagnostics);
     diagnostics
@@ -185,16 +193,45 @@ pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
 /// example the collection leaves out because none validating against its
 /// schema could be built ([`Feature::ExampleValue`]).
 pub fn validate_postman(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
+    postman_checks(apis, true)
+}
+
+/// [`validate_postman`], without the warning-only vocabulary and example
+/// findings unless `warnings`.
+fn postman_checks(apis: &[&RestApi], warnings: bool) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
         check_routes(api, Output::Postman, &mut diagnostics);
         check_export_filename(api, Output::Postman, &mut diagnostics);
         check_constraints(api, Output::Postman, &mut diagnostics);
-        diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::Postman));
-        diagnostics.extend(crate::export::postman::export_diagnostics(api));
+        if warnings {
+            diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::Postman));
+            diagnostics.extend(crate::export::postman::export_diagnostics(api));
+        }
     }
     check_stem_case_collisions(apis, Output::Postman, &mut diagnostics);
     diagnostics
+}
+
+/// `ensure_no_errors(Output::OpenApi, validate_openapi(apis))`, the gate of
+/// the OpenAPI writers. The vocabulary findings are only warnings and cost
+/// a whole export, so they are computed only to accompany an error.
+pub(crate) fn ensure_openapi_exportable(apis: &[&RestApi]) -> Result<(), GeneratorError> {
+    if openapi_checks(apis, false).iter().any(ValidationDiagnostic::is_error) {
+        return ensure_no_errors(Output::OpenApi, validate_openapi(apis));
+    }
+    Ok(())
+}
+
+/// `ensure_no_errors(Output::Postman, validate_postman(apis))`, the gate of
+/// the Postman writers. The vocabulary and example findings are only
+/// warnings and cost a whole collection build, so they are computed only to
+/// accompany an error.
+pub(crate) fn ensure_postman_exportable(apis: &[&RestApi]) -> Result<(), GeneratorError> {
+    if postman_checks(apis, false).iter().any(ValidationDiagnostic::is_error) {
+        return ensure_no_errors(Output::Postman, validate_postman(apis));
+    }
+    Ok(())
 }
 
 /// Turns blocking `diagnostics` into [`GeneratorError::Validation`].

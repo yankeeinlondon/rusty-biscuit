@@ -358,6 +358,10 @@ Topic page: `schematic/docs/io/export-postman.md`. Non-obvious facts:
 - A value that cannot be built is never emitted: the body stays empty and
   `validate_postman` reports `example-value` (built by
   `export::postman::export_diagnostics`, i.e. a second collection build).
+  The writers' gates (`validation::ensure_postman_exportable`, and
+  `ensure_openapi_exportable`, whose vocabulary warnings cost a whole
+  OpenAPI export) skip those warning-only findings unless an error is
+  reported with them.
   Shipped APIs report none; `postman_runnable::every_shipped_example_validates`
   validates every body, saved response, and stream frame independently.
 - Parameter variables are location-prefixed (`path_owner`, `query_page`,
@@ -550,7 +554,7 @@ crates outside the checkout and compiles them offline:
 | `slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message` | the `lib.rs` ABI assert fires with its message |
 | `slow_real_apis_compile_offline` | all 18 real APIs compile |
 | `slow_query_wire_matches_pre_split_baseline` | query request lines match `tests/fixtures/wire_baseline/query_request_lines.txt` |
-| `generated_rest_code_references_the_runtime_and_defines_none_of_it` (fast) | generated REST code uses `schematic_runtime` and defines no runtime of its own |
+| `generated_rest_code_references_the_runtime_and_defines_none_of_it::` (fast; one case per `common::generation_groups` group, one for the crate root) | generated REST code uses `schematic_runtime` and defines no runtime of its own |
 
 After modifying response handling:
 

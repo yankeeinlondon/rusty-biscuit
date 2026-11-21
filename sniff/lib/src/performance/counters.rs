@@ -104,6 +104,14 @@ pub const QUERY_PATH_LOOKUPS: &str = "filesystem.query.path_lookups";
 pub const QUERY_PARENT_LOOKUPS: &str = "filesystem.query.parent_lookups";
 
 // ---------------------------------------------------------------------------
+// Indentation resolution (`filesystem::indentation`)
+// ---------------------------------------------------------------------------
+
+/// EditorConfig and formatter configuration files parsed for an indentation
+/// lookup: one per distinct file read, however many rows share it.
+pub const INDENT_CONFIG_PARSES: &str = "filesystem.indentation.config_parses";
+
+// ---------------------------------------------------------------------------
 // Repository structure
 // ---------------------------------------------------------------------------
 

@@ -75,7 +75,8 @@ md hash docs/ --body
 | `detailed` | nested YAML object: `frontmatter`, nullable `preamble`, per-section tuples |
 
 All flat hashes are 16-char lowercase hex values. `detailed` prints a nested
-YAML object whose `sections` are `[level, "heading", content_hash]` tuples.
+YAML object, indented four spaces per level, whose `sections` are
+`[level, "heading", content_hash]` tuples.
 
 ### Kind Selection
 

@@ -825,7 +825,7 @@ mod set_paths {
     fn a_dotted_path_never_writes_a_literal_key_and_an_escaped_one_does() {
         let fixture = with_document("paths-set-literal", "---\ntitle: Notes\n---\n# Body\n");
         let saved = set_saved(&fixture, "a.b", "1");
-        assert_eq!(saved, "---\ntitle: Notes\na:\n  b: 1\n---\n# Body\n");
+        assert_eq!(saved, "---\ntitle: Notes\na:\n    b: 1\n---\n# Body\n");
 
         let saved = set_saved(&fixture, r"a\.b", "2");
         assert!(saved.contains("a.b: 2\n"), "{saved}");
@@ -1728,5 +1728,85 @@ mod set_declared_values {
             let code = refusal_code(&fixture, &["set", "doc.md", "version", "abc"]);
             assert_eq!(code, json!("dm.schema.constraint"));
         }
+    }
+}
+
+// =============================================================================
+//                              UNCHANGED SAVES
+// =============================================================================
+
+mod unchanged_saves {
+    use super::*;
+    use std::time::{Duration, SystemTime};
+
+    /// Authored spelling a rewrite would lose: quotes, a comment, and the
+    /// body's final line break.
+    const AUTHORED_SAME: &str = "---\ntitle: 'same' # keep\n---\nBody\n";
+
+    /// `doc.md` holding `content` in a Git worktree whose `.editorconfig` asks
+    /// for two-space Markdown, dated in the past so a rewrite of identical
+    /// bytes still shows in its mtime.
+    fn two_space_document(name: &str, content: &str) -> (CliProcessFixture, SystemTime) {
+        let fixture = CliProcessFixture::named(name);
+        assert!(fixture.initialize_repository(), "git init");
+        fixture.write_file("cwd/.editorconfig", "root = true\n\n[*.md]\nindent_style = space\nindent_size = 2\n");
+        fixture.write_file("cwd/doc.md", content);
+        let past = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        std::fs::File::options().write(true).open(fixture.cwd().join("doc.md")).unwrap().set_modified(past).unwrap();
+        (fixture, past)
+    }
+
+    fn assert_unwritten(fixture: &CliProcessFixture, content: &str, past: SystemTime) {
+        assert_eq!(read_document(fixture), content);
+        let modified = std::fs::metadata(fixture.cwd().join("doc.md")).unwrap().modified().unwrap();
+        assert_eq!(modified, past, "the file was rewritten");
+    }
+
+    #[test]
+    fn setting_a_quoted_scalar_to_its_own_value_leaves_the_file_unwritten() {
+        let (fixture, past) = two_space_document("unchanged-save-scalar", AUTHORED_SAME);
+
+        let (code, stdout, stderr) = run_md(&fixture, &["set", "doc.md", "title", "same", "--save"]);
+
+        assert_eq!(code, Some(0), "{stdout}{stderr}");
+        assert_eq!(stdout, "");
+        assert_unwritten(&fixture, AUTHORED_SAME, past);
+    }
+
+    #[test]
+    fn an_unchanged_save_reports_that_nothing_was_saved() {
+        let (fixture, past) = two_space_document("unchanged-save-json", AUTHORED_SAME);
+
+        let (code, stdout, stderr) = run_md(&fixture, &["set", "doc.md", "title", "same", "--save", "--output", "json"]);
+
+        assert_eq!(code, Some(0), "{stdout}{stderr}");
+        let value: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"));
+        assert_eq!(value["saved"], serde_json::json!(false), "{value}");
+        assert_eq!(value["document"], serde_json::json!(AUTHORED_SAME), "{value}");
+        assert_unwritten(&fixture, AUTHORED_SAME, past);
+    }
+
+    #[test]
+    fn setting_a_block_mapping_or_sequence_to_its_own_value_keeps_its_comments() {
+        for (name, content, path, value) in [
+            ("unchanged-save-mapping", "---\nmeta:\n  # inner\n  name: 'same' # keep\n---\nBody\n", "meta", "{name: 'same'}"),
+            ("unchanged-save-sequence", "---\ntags:\n  - 'same' # keep\n---\nBody\n", "tags", "['same']"),
+        ] {
+            let (fixture, past) = two_space_document(name, content);
+
+            let (code, stdout, stderr) = run_md(&fixture, &["set", "doc.md", path, value, "--save"]);
+
+            assert_eq!(code, Some(0), "{path}: {stdout}{stderr}");
+            assert_unwritten(&fixture, content, past);
+        }
+    }
+
+    #[test]
+    fn control_a_changed_value_is_written_with_the_destinations_width() {
+        let (fixture, _past) = two_space_document("unchanged-save-control", AUTHORED_SAME);
+
+        let text = set_saved(&fixture, "meta", "{child: {leaf: 1}}");
+
+        assert_eq!(text, "---\ntitle: 'same' # keep\nmeta:\n  child:\n    leaf: 1\n---\nBody\n");
     }
 }

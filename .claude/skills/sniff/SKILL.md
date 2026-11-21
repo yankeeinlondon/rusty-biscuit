@@ -221,6 +221,32 @@ section of `query/tests.rs`.
 (device inventory that spawns `diskutil`). Its `SpaceSource` trait is the
 test seam. Contract: `sniff/docs/topics/available-space.md`.
 
+`filesystem::indentation` answers which indentation a worktree wants for a
+path or extension (`resolve_for_path`, `resolve_for_extension`,
+`resolve_summary`, `RepoIndentation` for many lookups). It is focused: no
+request plan or walk, only `filesystem::git::repo_root` and the root's config
+files. Internals: `catalog.rs` is the formatter and convention table (row
+order is rank order; a shared path must have one `Dialect`), `inputs.rs` loads
+each distinct path once in parallel (`INDENT_CONFIG_PARSES` counter) into a
+type-preserving `Node`, `editorconfig.rs` holds a hand-written EditorConfig
+glob matcher (backtracking, signed numeric ranges as predicates; globset
+cannot nest braces) plus the property fold over `formatting::scan_editorconfig`,
+the one ordered scan both the formatting report and this module project from,
+and `formatters.rs` holds the per-row readers on shared `Reader` validators.
+Every entry point ends in `mod.rs::resolve`. Configuration problems are
+`skipped` diagnostics, never errors. Tests: work counts in
+`filesystem/indentation/tests.rs`, behavior through the public API in
+`tests/l1/indentation.rs` (one control and one defaults fixture per row, a
+`wiring!` row per key read). Contract:
+[indentation resolution](../../../sniff/docs/topics/indentation.md).
+The CLI is `sniff repo indent [<ext>]` (`commands/mod.rs` early arm, renderer
+`cli/src/output/filesystem/indentation.rs`); clap validates the extension with
+`normalize_extension`, `--json` serializes the library value unchanged, and
+bare `sniff repo --json` inserts `resolve_summary` under `indent` beside, not
+inside, the pure `build_aggregate_value` projection. CLI tests:
+`cli/tests/l1/repo_indent.rs` (wiring only; one control and one malformed file
+per loader). Usage: `sniff/docs/cli/repo_indent.md`.
+
 `SniffConfig` remains a compatibility surface, but new code should use request
 plans.
 

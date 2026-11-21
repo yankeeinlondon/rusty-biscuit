@@ -7,6 +7,17 @@
 
 ## Recent Dependency Notes
 
+- `tools/test-toolkit` adds `syn` 2 (`full`, `parsing`, `visit`) and
+  `proc-macro2` 1 with `span-locations` as regular dependencies (2026-11-20)
+  for `serializer_guard`, which parses a package's production source once and
+  resolves its `use` declarations to find direct YAML serializer calls; the
+  line in each failure needs `span-locations`. Both are already in the
+  lockfile, with that feature already enabled by `claudine-cli`,
+  `claudine/lib`, and `unchained-ai/model_id`, so no package is added.
+  `biscuit-file-cli`, `content-policy`, `model-citizen`, `biscuit-tui`,
+  `research`, and `schematic-define` gain `test-toolkit` (and, where missing,
+  `biscuit-test-harness`) as development dependencies for their guard tests;
+  every crate they bring is already in `Cargo.lock`.
 - `repo-deps` (`scripts/`) adds a `ci-push` binary and a library target
   (2026-11-10). Its `local-tools` feature gains optional `gix` (pinned
   `=0.90.0` with sniff's read features, without `merge`), `git2` 0.20 with

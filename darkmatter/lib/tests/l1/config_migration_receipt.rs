@@ -113,7 +113,7 @@ fn an_interrupted_cleanup_completes_later() {
     );
     assert!(!fixture.legacy.exists());
     assert!(!fixture.receipt().exists());
-    assert_eq!(std::fs::read_to_string(&fixture.target).unwrap(), "# mine\nnetwork: deny\nshell-commands:\n- prefix ls\n");
+    assert_eq!(std::fs::read_to_string(&fixture.target).unwrap(), "# mine\nnetwork: deny\nshell-commands:\n    - prefix ls\n");
 }
 
 #[test]

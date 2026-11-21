@@ -99,6 +99,12 @@ These flags apply to all `sniff repo` subcommands:
 | [`has-merge-conflict`](./repo_has-merge-conflict.md) | Exit 0 if there are merge conflicts, otherwise 1, `-v` lists conflict files |
 | [`state`](./repo_state.md) | Working-tree identity: an id over `HEAD` plus the content of every changed path |
 
+### Formatting
+
+| Subcommand | Description |
+|------------|-------------|
+| [`indent`](./repo_indent.md) | Indentation to write a file type with (`sniff repo indent yaml`), the configuration that decided it, and whether the repository's sources agree; without an extension, the default plus every file type that differs |
+
 ## Package Filtering
 
 Many subcommands accept an optional `filter` positional argument:
@@ -147,6 +153,7 @@ When `sniff repo` is invoked without a subcommand and with `--json`, the output 
 - Change data is grouped into four `ScopeBucket` objects: `dirty`, `staged`, `unstaged`, and `untracked`. Each bucket contains `files`, `source_code`, `documentation`, `packages`, and `package_areas` arrays.
 - `git_status` is a lean aggregate projection with current branch, config, compact file changes, and dirty/staged/unstaged/untracked counts. Use `sniff repo git-status --json` for the focused rich shape.
 - `recent_commits`, `source_code_changes`, and `documentation_changes` embed the **same bare JSON arrays** that `sniff repo recent-commits --json`, `sniff repo source-code-changes --json`, and `sniff repo documentation-changes --json` emit with default options: the last 10 commits, collected once and projected three ways. There is no period label or filter envelope, and there is no time window, so in a quiet repository these commits can reach arbitrarily far back. Remote links come from locally recorded remote-tracking refs only.
+- `indent` holds the same summary `sniff repo indent --json` prints: `{ default, overrides: { ext: … }, skipped }` (see [`repo_indent.md`](./repo_indent.md#json-output---json)). It is the only part of the aggregate that reads `.editorconfig` and formatter configuration files.
 - **Excluded children:** `hash` (requires a parameter), `remote`, and `pr` (network-primary) are omitted from the aggregate. No network requests are made by the aggregate.
 
 ```bash

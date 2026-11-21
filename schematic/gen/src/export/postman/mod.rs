@@ -10,10 +10,9 @@ use std::path::{Path, PathBuf};
 
 use schematic_define::RestApi;
 
-use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
 use schematic_definitions::naming::resolve_module_name;
-use crate::validation::{ensure_no_errors, validate_postman};
+use crate::validation::ensure_postman_exportable;
 
 mod auth;
 mod collection;
@@ -62,7 +61,7 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 /// assert_eq!(path.file_name().unwrap(), "test.postman_collection.json");
 /// ```
 pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf, GeneratorError> {
-    ensure_no_errors(Output::Postman, validate_postman(&[api]))?;
+    ensure_postman_exportable(&[api])?;
     let collection = build_postman_collection(api);
     let module_name = resolve_module_name(api);
     let filename = format!("{}.postman_collection.json", module_name);
@@ -116,7 +115,7 @@ pub fn write_postman_grouped(
     dir: &Path,
     dry_run: bool,
 ) -> Result<PathBuf, GeneratorError> {
-    ensure_no_errors(Output::Postman, validate_postman(apis))?;
+    ensure_postman_exportable(apis)?;
     let collection = build_postman_collection_grouped(apis, module_name);
     let filename = format!("{}.postman_collection.json", module_name);
     let path = dir.join(&filename);
@@ -202,7 +201,7 @@ pub fn render_postman_environment(apis: &[&RestApi], module_name: &str) -> Resul
 /// [`GeneratorError::Validation`] when [`validate_postman`] reports an error
 /// (nothing is written), or a serialization or write error.
 pub fn write_postman_environment(apis: &[&RestApi], module_name: &str, dir: &Path, dry_run: bool) -> Result<PathBuf, GeneratorError> {
-    ensure_no_errors(Output::Postman, validate_postman(apis))?;
+    ensure_postman_exportable(apis)?;
     let path = dir.join(format!("{module_name}.postman_environment.json"));
     if dry_run {
         return Ok(path);

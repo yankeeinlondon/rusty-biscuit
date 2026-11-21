@@ -769,6 +769,8 @@ fn stable_aggregate_json(json: &Value) -> Value {
         "recent_commits": stable_commit_family(&json["recent_commits"]),
         "source_code_changes": stable_commit_family(&json["source_code_changes"]),
         "documentation_changes": stable_commit_family(&json["documentation_changes"]),
+        // Deterministic: worktree-relative paths, sorted overrides.
+        "indent": json["indent"],
     })
 }
 
