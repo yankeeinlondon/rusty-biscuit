@@ -13,9 +13,12 @@ recurrence: false
 reviewed_by: codex/gpt-6.1-sol
 created: "2026-11-20T22:43:32-08:00"
 spec: 2026-11-20-contextual-indents/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-11-20-contextual-indents/spec.md`"
 feature: 2026-11-20-contextual-indents/review-1.md
+log: /home/build/coding/rusty-biscuit/claudine/features/2026-11-20-contextual-indents/log.md
+implemented_by: claude/opus
+next: 2026-11-20-contextual-indents/review-2.md
 ---
 
 # Review of Contextual Indents
