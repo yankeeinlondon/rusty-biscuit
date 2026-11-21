@@ -45,7 +45,7 @@ decisions_for_review:
     - |-
         Phase 1 ends with nine new regression tests failing on purpose. The plan treats them as a baseline to record before moving straight to Phase 2, but the phase's completion rule also asks for every test to pass. I kept them failing and visible rather than hiding them with #[ignore], a feature gate, or assertions inverted to match today's behavior. Each of those would leave a test that cannot catch the defect and would have to be undone in Phase 2. The trade-off is that the area's full test run is red between Phase 1 and Phase 2. If a reviewer wants every phase green, the nine tests would need to be marked or split out, and the marks removed when Phase 2 lands.
     - |-
-        Four existing library tests (sequence group framing) fail whenever the shell's LANG is a non-UTF-8 locale such as LANG=C. The header glyph then becomes ">" instead of the arrow these tests look for. I did not fix them: they are in code this fix never touches, they pass under a UTF-8 locale, and changing how the locale picks glyphs (or forcing one in the tests) is a separate decision. I ran the full gate under LANG=C.UTF-8 instead. A reviewer may prefer making those tests independent of the locale; that is a small, separate change in claudine/lib/src/composition/sequence/task/tests.rs.
+        Four existing library tests (sequence group framing) fail when the effective locale is non-UTF-8, such as LANG=C with no UTF-8 LC_ALL or LC_CTYPE override. The header glyph then becomes ">" instead of the arrow these tests look for. I did not fix them: they are in code this fix never touches, they pass under a UTF-8 locale, and changing how the locale picks glyphs (or forcing one in the tests) is a separate decision. I ran the full gate under LANG=C.UTF-8 instead. A reviewer may prefer making those tests independent of the locale; that is a small, separate change in claudine/lib/src/composition/sequence/task/tests.rs.
     - |-
         The plan asked for a retry-and-resume recovery case modeled on existing tests. I added only the retry process test (document_loop_retry_does_not_replace_startup_source) and left resume to its existing coverage in ctx_per_run.rs and lifecycle_traces.rs, because both recoveries take the same fresh-read path the retry test pins. If a reviewer wants resume pinned against the retained source too, it is one more test in loop_startup_source.rs using a provider that reports a session (resume needs one).
     - |-
@@ -259,7 +259,7 @@ under 1 on 16 cores):
   four **pre-existing** library failures,
   `claudine::composition::sequence::task::tests::group_framing::{a_cap_of_one_preserves_the_group_bar_at_the_same_left_edge, a_members_body_output_lands_on_the_data_channel_not_the_status_one, every_member_task_opens_and_closes_exactly_one_stream, every_body_line_carries_its_own_tasks_bar}`.
   They fail alone too, and pass with a scrubbed environment. Bisecting the
-  environment shows `LANG=C` alone causes them: a non-UTF-8 locale renders the
+  environment showed a non-UTF-8 effective locale causes them: it renders the
   group header glyph `▶` as `>`, and these tests look for `▶`. This phase does
   not touch the library, so they are unrelated to it.
 - `LANG=C.UTF-8 just test`: stopped on
@@ -585,7 +585,7 @@ cores.
 - `LANG=C.UTF-8 just lint`: exit 0, no warnings.
 - `LANG=C.UTF-8 just test --max-fail=30`: **12,676 run, 12,676 passed, 15
   skipped**, `🐢 L1 run recorded: 12676 test(s), none at or above 5.0s`, exit
-  0. `LANG=C.UTF-8` is used because this host's `LANG=C` breaks four
+  0. `LANG=C.UTF-8` is used because a non-UTF-8 effective locale breaks four
   unrelated group-framing tests (see Phase 1).
 - `just check-tier-coverage claudine`: nothing stranded.
 - `git diff --check`: clean.
@@ -613,3 +613,15 @@ No local OS test rigs (`BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`,
 `BUILD_MACOS`) are configured on this host, so cross-OS evidence is left to
 CI. The new tests use the native fixture binaries and portable file
 rewrites, with no `cfg` gate.
+
+## Review correction — 2026-11-21
+
+The statements that `LANG=C` alone always breaks the four group-framing
+tests were too broad. `LANG=C just test-library group_framing` passed all
+12 tests during review because this session inherited `LC_ALL=C.UTF-8`
+and `LC_CTYPE=C.UTF-8`. Setting all three explicitly with
+`LANG=C LC_ALL=C LC_CTYPE=C just test-library group_framing --max-fail=10`
+reproduced exactly the four recorded failures (8 passed, 4 failed).
+The statements above now name the effective locale; the original run
+outcomes remain historical evidence. The test defect is recorded in
+review-1.md for repair and requires no author decision.
