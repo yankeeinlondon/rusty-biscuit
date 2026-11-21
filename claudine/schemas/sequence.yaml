@@ -17,13 +17,68 @@
 kind: schema-trigger
 match:
     group:
+        - kind: literal(sequence; required)
         - sequence: string(required)
         - sequence: number(required)
         - sequence: boolean(required)
         - sequence: object(required)
         - sequence: "unknown[](required)"
 $schema:
-    sequence: "steps@./sequence-types.yaml -> the sequence's steps: an inline list, or a reference to one"
-    template: "object -> defaults merged into every item of this document's inline `sequence:` list"
+    sequence: "steps(required) -> the sequence's steps: an inline list, or a reference to one"
+    template: |-
+        object -> key/values which are _composed_ with each step's state; these key/values are then merged with the existing key/values from the step. This allows for expressions like: `slug: {{ dasherize(name) }}`, etc.
     $state: "schema -> the schema each step's normalized state in this document's inline `sequence:` list must satisfy; root `$schema` describes the document itself"
     fail_fast: "null -> removed: a sequence document has no fail_fast; set fail_fast on a group object"
+types:
+    steps:
+        - "step[] -> an inline list of steps"
+        - "string -> a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`"
+    step:
+        - "string -> shorthand for `{ name: <string> }`"
+        - number
+        - boolean
+        - task
+    task:
+        name: "string(not-empty) -> the step or leg name"
+        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
+        with: "object -> a prompt task's frontmatter values for the document it runs"
+        prompt: "string -> the prompt file reference"
+        shell: "unknown -> a shell command; the task parser checks its form"
+        side_effect: "unknown -> a side effect; the task parser checks its arguments"
+        task: "unknown -> a referenced task; the task parser checks its form"
+        sequence: "steps -> a nested sequence"
+        group:
+            - group
+            - "string -> a group file reference"
+        operation: "string -> the task operation"
+        flow: "string -> the task flow"
+        timeout: "string -> the per-command shell timeout, such as 45s"
+        loop: "loop@./lifecycle.yaml -> an inline sequence's loop, beside `sequence:`"
+        $schema: "schema -> an inline sequence's check of the values it sees at its turn, judged before its `initialize`; beside `sequence:`"
+        $state: "schema -> the schema each of this inline sequence's own steps' normalized state must satisfy; beside `sequence:`"
+        template: "object -> defaults merged into every item of this inline sequence's own list; beside `sequence:`"
+        initialize: "initialize-stack@./lifecycle.yaml -> actions run before the container starts; shell-free"
+        start: "stack@./lifecycle.yaml -> actions run when the container starts"
+        blocked: "stack@./lifecycle.yaml -> actions run when the container is blocked"
+        success: "stack@./lifecycle.yaml -> actions run after the container succeeds"
+        failure: "stack@./lifecycle.yaml -> actions run after the container fails"
+        cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
+        finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
+        "<string>": "unknown -> authored step data, read as `seq.<key>`; the task parser rejects reserved keys"
+    group:
+        name: "string(not-empty) -> the container name"
+        tasks: "task[](required; min(1)) -> named legs; the task parser checks unique names"
+        variables: "object -> bindings scoped to this group, read as `group.<variable>`"
+        description: "string -> the container summary"
+        operation: "string -> default operation for prompt legs"
+        flow: "string -> default flow for prompt legs"
+        fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
+        max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
+        loop: "loop@./lifecycle.yaml -> the group's loop, beside `tasks:`"
+        initialize: "initialize-stack@./lifecycle.yaml -> actions run before the group starts; shell-free"
+        start: "stack@./lifecycle.yaml -> actions run when the group starts"
+        blocked: "stack@./lifecycle.yaml -> actions run when the group is blocked"
+        success: "stack@./lifecycle.yaml -> actions run after the group succeeds"
+        failure: "stack@./lifecycle.yaml -> actions run after the group fails"
+        cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
+        finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
