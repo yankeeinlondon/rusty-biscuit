@@ -2,9 +2,30 @@
 total_phases: 4
 created: 2026-11-20
 status: planned
-phase: 1
+phase: 2
 agent: codex/gpt-6.2-sol
 yolo: true
+source_files_during_phase_1:
+- biscuit-file/lib/src/indentation.rs
+- biscuit-file/lib/src/lib.rs
+- biscuit-file/lib/src/yaml/mod.rs
+- biscuit-file/lib/src/yaml/types.rs
+- biscuit-file/lib/src/yaml/write.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/yaml_writing.rs
+- biscuit-file/justfile
+docs_updated_during_phase_1:
+- biscuit-file/README.md
+- biscuit-file/lib/README.md
+- biscuit-file/docs/design/yaml-design.md
+docs_created_during_phase_1:
+- biscuit-file/docs/topics/yaml-writing.md
+skills_files_updated_during_phase_1:
+- .claude/skills/biscuit-file/SKILL.md
+- .claude/skills/biscuit-file/references/api.md
+- .claude/skills/biscuit-file/references/architecture.md
+packages:
+- biscuit-file
 ---
 
 # Contextual Indents Implementation Plan
@@ -36,10 +57,10 @@ These rules apply across all phases; each task names the rules it implements.
 
 Implements the **API and ownership** and **Layout engine** rules.
 
-- [ ] **Build YAML Writer**
+- [x] **Build YAML Writer**
   - Implement the public types, feature gates, writer, wrapper, and typed layout errors. Enable the locked span-parser dependency under `yaml`.
   - Exercise the layout at widths 1, 2, 4, 8, 10, and 255 with nested maps, scalar lists, compact map/list items, empty collections, tags, complex keys, non-finite numbers, quoted and block scalars (asserting block scalars stay block scalars where representable, and each double-quoted fallback trigger), Unicode, blank lines, and chomping. Round-trip the existing biscuit-file YAML corpus through `Yaml::to_yaml_string` and assert value/order and layout separately. Verify feature-disabled type exports.
-- [ ] **Document YAML Writing**
+- [x] **Document YAML Writing**
   - Add `biscuit-file/docs/topics/yaml-writing.md`, link it from the YAML design and overview, and update the biscuit-file repo skill and dependency inventory. Run the biscuit-file L1 and lint recipes.
 
 ## Phase 2 — Sniff Resolution
