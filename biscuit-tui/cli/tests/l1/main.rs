@@ -25,3 +25,4 @@ mod keyboard_protocol;
 mod test_layout;
 mod text_area_input_output;
 mod text_input_output;
+mod yaml_serializer_guard;

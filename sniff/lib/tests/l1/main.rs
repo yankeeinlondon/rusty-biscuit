@@ -50,3 +50,4 @@ mod uv_with_install_plan;
 mod windows_app_paths_orphan;
 #[cfg(target_os = "windows")]
 mod windows_find_program_priority;
+mod yaml_serializer_guard;
