@@ -407,3 +407,14 @@ A cross-compile is compile evidence only and does not count.
    rig. When the saving is 10 ms or more, move `wt`'s `EXEPATH` helper into
    sniff, call it from a plain `main` before the Tokio runtime starts, and
    switch `wt` to the moved copy.
+
+   *Measured 2026-11-21 on `$BUILD_WIN` (Git 2.55 `mingw64`, PowerShell,
+   sniff built 2026-11-11):* without `EXEPATH`, `sniff repo git-status --json`
+   started one traced Git process (`git.exe --exec-path`, plus its launcher
+   and console host). With `EXEPATH` set to `C:\Program Files\Git`, it
+   started none. Wall time was 1676/1638 ms without and 1650/1630 ms with,
+   a saving of about 8–26 ms. That clears the 10 ms gate, but it is close to
+   run-to-run noise and about 1% of the run. The author kept the change in
+   scope. Before implementing, repeat the measurement with this branch's
+   build. Most of the Windows wall time is the working-tree status walk,
+   which is outside this fix.
