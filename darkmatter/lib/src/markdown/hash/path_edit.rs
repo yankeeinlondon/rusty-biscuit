@@ -168,11 +168,11 @@ fn serialized_document_text(edited: &Markdown, indentation: Indentation) -> Resu
 
 /// The frontmatter serialized between the source's own fences.
 ///
-/// `Markdown::as_string` is not enough when there is a source: the loaded body
-/// has lost its final line break and its line endings.
+/// `Markdown::as_string_with_indentation` is not enough when there is a
+/// source: the loaded body has lost its final line break and its line endings.
 fn serialized_into_source(edited: &Markdown, indentation: Indentation) -> Result<String, PathEditRefusal> {
     let Some(source) = edited.source_text() else {
-        return Ok(edited.as_string());
+        return Ok(edited.as_string_with_indentation(indentation));
     };
     let map = edited.frontmatter().as_map();
     let yaml = if map.is_empty() {
