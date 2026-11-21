@@ -1,8 +1,8 @@
 ---
 area: claudine
 status: finalized-spec
-reviewed: false
-reviewed_by: "codex/default"
+reviewed: true
+reviewed_by: "codex/gpt-6.2-sol"
 reviewed_on: "2026-11-20"
 review_iterations: 0
 needs_rulings: false
@@ -32,9 +32,9 @@ owner: Ken Snyder <ken@ken.net>
 
 # Contextual Indents
 
-The repository's YAML output uses libyaml's emitter style. Lists sit at the
-same column as their key, and nested mappings are indented by two spaces,
-whatever indentation the project uses. `~/.claudine/config.yaml` shows this:
+Some YAML writers in the repository use the backend's default layout.
+For example, a generated configuration can place a list at the same
+indentation as its key:
 
 ```yaml
 permissions:
@@ -43,9 +43,9 @@ permissions:
   - ./*.md
 ```
 
-That is valid YAML, but it is harder to read than the indented form, and it
-ignores this repository's own `.editorconfig`, which asks for four spaces in
-`*.yaml`. This feature has three parts:
+The layout is valid YAML. Newly generated files should use the destination's
+indentation preference, with four spaces as the default when there is none.
+This feature has three parts:
 
 1. **Sniff resolves indentation.** Given a repository and a file (or a file
    extension), Sniff answers "what indentation does this project want here?"
@@ -58,19 +58,17 @@ ignores this repository's own `.editorconfig`, which asks for four spaces in
 
 ## Indentation Policy
 
-Sniff reads formatting settings at the Git worktree root. Every source that
-exists for the file type gives an **opinion**, and the opinions are ranked
-in this order:
+Sniff reads formatting settings at the Git worktree root. Each applicable
+source contributes an **opinion**. Rank those opinions in this order:
 
 1. the root `.editorconfig`;
-2. the file type's formatter configuration, when one is present. A present
-   configuration means the project uses that formatter, so a value it leaves
-   unstated takes **that formatter's documented default** (Biome's tabs,
-   Prettier's two spaces), not Sniff's fallback;
+2. the file type's supported, enabled formatter configuration. An omitted
+   value takes **that formatter's documented default**, such as Biome's
+   tabs or Prettier's two spaces;
 3. the file type's built-in language convention, for languages with one
    canonical formatter (`gofmt`, `rustfmt`, PEP 8);
-4. the fallback of four spaces, which applies only when no opinion
-   exists and is never compared with the others.
+4. the fallback of four spaces, which supplies any unresolved property and
+   is the authority only when there are no opinions.
 
 The highest-ranked opinion is the **authority**; the rest are
 **alternative authorities**. The resolved style and width each come from
@@ -79,7 +77,14 @@ only `indent_style` takes its width from the next opinion. **Consensus**
 holds when every opinion agrees on each value it states; zero or one
 opinion is a consensus. A generic `[*]` rule can therefore override
 formatter settings for every file while the result still shows the
-disagreement. Files outside a worktree use the fallback.
+disagreement. The fallback never participates in consensus or appears among
+alternative authorities. Files outside a worktree use the fallback without
+consulting worktree configuration or language conventions.
+
+> **Reader’s note.** Sniff puts EditorConfig first so generated files follow
+> the repository’s general editing policy. Some formatters give their own
+> settings priority. The alternative opinions show where a later formatter
+> run may change the generated indentation.
 
 ```yaml
 # sniff repo indent ts --json, with .editorconfig at 4 spaces and a bare biome.json
@@ -105,7 +110,7 @@ skipped: []
 flowchart TD
     start([Output path or file extension]) --> gather[Read every present config concurrently]
     gather --> ec[EditorConfig opinion from matching sections]
-    gather --> fmt[One opinion per present formatter, defaults filling unstated values]
+    gather --> fmt[One opinion per applicable formatter, with its defaults]
     fmt --> any{Any formatter opinion?}
     any -- no --> conv[Convention opinion, if the language has one]
     ec --> rank[Rank opinions: EditorConfig, formatters in table order, convention]
@@ -126,8 +131,10 @@ forward slashes on every platform. Follow EditorConfig's glob syntax,
 including escaped literals, numeric ranges, and basename matching for a
 pattern without a slash. Merge matching sections from top to bottom one
 property at a time. `unset` clears an earlier value and allows fallback.
-The EditorConfig opinion's `via` lists, in file order, the matching sections
-that set an indentation property.
+Emit an EditorConfig opinion only when the merged settings state a style
+or a width. Its `via` lists matching sections that supplied a valid
+indentation setting or cleared one, in file order. Invalid settings leave
+previous valid assignments in place.
 The root-only search is a deliberate limit on discovery. [EditorConfig specification](https://spec.editorconfig.org/)
 
 | Effective settings | Resolution |
@@ -166,24 +173,33 @@ reader, which Sniff already depends on.
 | `lua` `luau` | `stylua.toml`, `.stylua.toml` | `indent_type`, `indent_width` | Tabs, width 4 |
 | `c` `h` `cc` `cpp` `cxx` `hh` `hpp` `hxx` `m` `mm` `proto` | `.clang-format`, `_clang-format` | `IndentWidth`, `UseTab`, and `BasedOnStyle` from the built-in preset table below | LLVM preset |
 
-Every row with a present configuration contributes one opinion, ranked in
-table order. Within a row, the formatter itself reads only the first readable
-candidate that declares it, so Sniff uses that one; any later candidate in
-the same row that also exists is reported in `skipped` as shadowed. A
-manifest without its formatter key is skipped quietly, as is a Biome
-configuration with `formatter.enabled: false` (or the language block's
-equivalent). An unreadable or unparseable candidate is recorded and the
-next candidate is tried. Values the configuration leaves unstated take that
-row's formatter default, so a formatter opinion always states both values;
-`via` lists only the keys actually read. This keeps Sniff's fallback from
-contradicting a formatter the project visibly uses: a `biome.json` that
-only enables linting rules still means tab-indented JavaScript.
+Each row contributes at most one opinion, ranked in table order. Sniff
+uses the first readable, parseable candidate that declares the formatter,
+in the order shown. Record subsequent existing candidates in the same row
+as shadowed. A manifest without its formatter key contributes nothing.
+Record an unreadable or unparseable candidate and continue to the next
+one. An explicitly disabled formatter contributes no opinion and still
+shadows lower-priority files in the row. For Biome, use the language's
+`formatter.enabled` when present, then the global setting.
+
+> **Reader’s note.** The table specifies Sniff's deterministic search
+> order. Taplo and yamlfmt can choose between simultaneous candidates in
+> a different order. A shadowing diagnostic identifies the additional
+> file so the discrepancy can be traced.
+
+Values the configuration leaves unstated take that row's formatter default,
+so a formatter opinion always states both values; `via` lists only the keys
+actually read. This keeps Sniff's fallback from contradicting a formatter
+the project visibly uses: a `biome.json` that only enables linting rules
+still means tab-indented JavaScript.
 
 #### Concurrent reads
 
-Build the distinct set of candidate files from the EditorConfig file and
-every row, then probe, read, and parse them concurrently with rayon, as
-`filesystem/just.rs` already does. Read and parse each file at most once per
+Build the distinct set of candidate files from EditorConfig and the
+relevant formatter rows for a single target. Summary mode and reusable
+`RepoIndentation::load` use all supported rows. Probe candidates and read
+and parse independent files concurrently, following Sniff's existing
+repository discovery patterns. Read and parse each file at most once per
 lookup, even when several rows or file types share it (`package.json`,
 `deno.json`, `pyproject.toml`). Collect results by table position, not
 completion order, so output stays deterministic. Summary mode and callers
@@ -194,14 +210,19 @@ Value mapping, where the formatter's own vocabulary is not a plain
 style/width pair:
 
 - Taplo's `indent_string` of only spaces gives that many spaces; one or
-  more tabs gives tabs at the normal width fallback. Other strings are
+  more tabs gives tabs with the formatter’s default width. Other strings are
   diagnosed and ignored.
 - StyLua's `indent_type` is `Tabs` or `Spaces`.
-- clang-format's `UseTab: Never` means spaces; every other value means tabs.
+- clang-format's `UseTab: Never` means spaces. Recognized modes that
+  permit tabs for block indentation give a tabs preference. Diagnose
+  unknown values and use the selected preset's style.
   `BasedOnStyle` reads a small built-in table, not external files: `LLVM`,
   `Google`, `Chromium`, `Mozilla`, and `GNU` indent 2 spaces; `WebKit` and
-  `Microsoft` indent 4. A multi-document file uses the document whose
-  `Language` matches the file type, then the document without `Language`.
+  `Microsoft` indent 4. Layer settings from the matching `Language`
+  document over settings from the document without `Language`, then
+  fill remaining properties from the selected preset. A file with no
+  applicable document gives no opinion. Diagnose unsupported presets
+  and use LLVM defaults for the properties the file leaves unresolved.
 
 Apply matching Prettier overrides in file order, with later values taking
 precedence per property. Match `files` and `excludeFiles` against the
@@ -212,11 +233,14 @@ It does not execute JavaScript configs (`.prettierrc.js`,
 `prettier.config.*`), load shared presets or `extends` chains (including a
 string-valued `prettier` key in `package.json`), evaluate formatter
 include/ignore rules (apart from Prettier override selection), or apply
-Biome's top-level path overrides, Taplo's `[[rule]]` tables, or Deno's
-legacy `fmt.options` block. Report each encountered unsupported config form
-in the lookup diagnostics so readers can tell why results may differ from
-their formatter. A JavaScript-only configuration still gives an opinion,
-stating that formatter's defaults.
+Biome's and dprint's top-level path overrides or Taplo's `[[rule]]`
+tables. For Deno, accept legacy `fmt.options` values when the corresponding
+flat setting is absent. Report unsupported forms in lookup diagnostics.
+An unsupported executable config or preset reference with no local
+settings gives no opinion on its own. A supported local config with an
+unsupported inheritance directive contributes its local values and uses
+the row defaults for the remaining properties. Diagnose invalid individual
+values and continue with the applicable formatter defaults.
 [Prettier configuration](https://prettier.io/docs/configuration),
 [Biome configuration](https://biomejs.dev/reference/configuration/),
 [Deno formatter](https://docs.deno.com/runtime/reference/cli/fmt/),
@@ -257,10 +281,14 @@ result. Consensus is computed on the opinions, before adjustment.
   applies the same conversion to a tabs preference passed directly by a
   caller. Markdown frontmatter uses the containing Markdown file's settings
   and this same YAML conversion at the writer boundary.
-- **Make recipes require tabs.** For `mk` and the Make basenames above, Sniff
-  reports tabs at the resolved width if the selected style is spaces. A
-  generic `[*] indent_style = space`, like this repository's, would
-  otherwise produce a Makefile that does not run.
+- **Make recipe lines require a prefix.** A tab is Make's default
+  recipe prefix. Sniff reports the file's general indentation preference,
+  using the Make convention when applicable. A writer generating recipes
+  must handle the prefix separately, including any custom recipe prefix.
+
+> **Reader’s note.** A Makefile contains rules, assignments, and recipes.
+> Applying a file-wide tab requirement would override legitimate project
+> settings and could put a recipe prefix on a line that is not a recipe.
 
 ## Sniff Library API
 
@@ -320,7 +348,7 @@ impl ResolvedIndentation {
 pub struct IndentAdjustment {
     /// The style ranking selected before the format constraint applied.
     pub requested: IndentStyle,
-    pub reason: AdjustmentReason, // YamlForbidsTabs | MakeRequiresTabs
+    pub reason: AdjustmentReason, // YamlForbidsTabs
 }
 
 pub struct IndentationDiagnostic {
@@ -350,12 +378,18 @@ pub struct RepoIndentation { /* … */ }
 
 impl RepoIndentation {
     pub fn load(repo_root: &Path) -> Result<Self>;
-    pub fn resolve_for_path(&self, path: &Path) -> ResolvedIndentation;
+    pub fn resolve_for_path(&self, path: &Path) -> Result<ResolvedIndentation>;
     pub fn resolve_for_extension(&self, ext: &str) -> ResolvedIndentation;
 }
 ```
 
-The free functions load a `RepoIndentation` and resolve one target.
+The free functions load only the inputs for one target and share the
+same resolution logic as `RepoIndentation`. A snapshot's path method
+accepts absolute paths inside its worktree, matches them relative to that
+root, and returns an error for a path outside it rather than matching it
+against the snapshot's rules. A snapshot does not detect nested
+repositories; callers that need automatic discovery use the free function,
+or load a separate snapshot for the nested repository.
 
 Use existing Sniff worktree discovery, including linked worktrees and
 nested Git repositories. For new output files, find the worktree from the
@@ -369,8 +403,11 @@ surfaces the reason through its existing diagnostics.
 Extension lookup strips one leading dot, normalizes ASCII case for file-type
 selection, and matches a synthetic root basename such as `file.yaml` for
 extension patterns. Ignore filename-specific rules and directory-scoped rules
-for this lookup, even if a rule could match the synthetic basename. Exact
-paths use their real basename and can match rules such as `[Makefile]` or
+for this lookup. Apply `[*]` and basename-wide suffix patterns such
+as `[*.yaml]` or `[*.{yaml,yml}]`. Apply the same restriction to
+Prettier overrides: a rule whose include or exclude depends on a
+particular basename or directory is deferred to path lookup. Exact paths
+use their real basename and can match rules such as `[Makefile]` or
 `[docs/**.md]`.
 
 `Indentation` and `IndentStyle` belong to biscuit-file and Sniff re-exports
@@ -395,7 +432,7 @@ also: rustfmt.toml  4 spaces
 consensus: yes
 ```
 
-When the authority states only one value, plain output names the opinion
+When the authority states only one value, plain output names the opinion or fallback
 that supplied the other. Each alternative authority is listed with its
 values, and a disagreeing value is highlighted.
 
@@ -430,8 +467,11 @@ The summary-level `skipped` list deduplicates diagnostics across all queries,
 including extensions whose effective indentation matches the default. Add
 the summary payload under `indent` in `sniff repo --json` as required by
 the [Sniff JSON output contract](../../../sniff/docs/topics/json-output.md).
-Calculate it only for those two commands so unrelated repository queries
-avoid formatter configuration reads.
+Calculate it only for `sniff repo indent` and `sniff repo --json` so
+unrelated repository queries avoid formatter configuration reads.
+Preserve the existing plain `sniff repo` default and the JSON shapes of
+other focused commands. Summary `default` uses only the generic
+EditorConfig rules and can differ from the four-space fallback.
 
 ## biscuit-file YAML Writer
 
@@ -440,6 +480,10 @@ biscuit-file gains a single YAML serialization entry point:
 ```rust
 pub fn to_yaml_string<T: Serialize>(value: &T, indentation: Indentation) -> Result<String, YamlError>;
 ```
+
+Expose the indentation types with or without biscuit-file's `yaml`
+feature. Gate only the YAML writer and its wrapper method on that
+feature.
 
 Add a matching formatted-output method to biscuit-file's
 [`Yaml`](../../../biscuit-file/lib/src/yaml/types.rs) wrapper, which holds
@@ -472,7 +516,10 @@ double-quoted string when a block scalar cannot express the layout.
 Before returning, compare the parsed formatted document with the parsed
 backend output using YAML values, including tagged values and non-string
 mapping keys. Compare mapping order separately where the value comparison
-ignores it. A layout or semantic failure returns `YamlError` before any
+ignores it. The comparison must treat an unchanged YAML non-finite
+number, including NaN, as equivalent. Preserve serializer errors as
+typed errors and report layout or equivalence failures through the
+same result type. A layout or semantic failure returns `YamlError` before any
 caller replaces a file. Callers without a destination use
 `Indentation::default()` (four spaces).
 
@@ -496,14 +543,22 @@ caller replaces a file. Callers without a destination use
 - **Edits to existing text.** Claudine and Darkmatter keep
   [`ConfigTransaction`](../../../darkmatter/lib/src/config/write.rs),
   Darkmatter's shared lock, validation and atomic write service. Pass
-  resolved indentation as a fallback to its edit path. Determine local
-  layout from the text re-read under the lock. Prefer the touched
+  resolved indentation as a fallback to its edit path. Resolve it for
+  the same effective destination the transaction writes. Resolve each
+  destination once per write and keep discovery out of parsers, schema
+  validation, editor diagnostics, and no-op paths. Determine local
+  layout from the text re-read under the lock. Keep the transaction’s
+  validation and replacement checks. Prefer the touched
   collection's indentation, then the nearest comparable block, then the
   resolved preference. Preserve comments, ordering, and untouched text,
   including existing indentless sequences. Apply the same approach to
   frontmatter edits in DMLS and Darkmatter's Markdown editing paths.
-  New documents and newly inserted collections with no local example use
-  the shared layout. Existing no-op saves stay byte-identical.
+  New documents use the shared layout for both the initial skeleton and
+  the edits that complete it. A generated stub has no authored local
+  examples. In an existing document, local style may be inferred only
+  from actual collection structure, so whitespace inside multiline
+  values cannot become an indentation example. When a newly inserted
+  collection has no local example, use the shared layout. Existing no-op saves stay byte-identical.
 - **Byte-sensitive and internal uses.** Preserve existing encoding for
   Darkmatter's frontmatter hash and simplified-schema's declaration
   fingerprint. Audit other consumers before changing output used as a
@@ -550,8 +605,8 @@ caller replaces a file. Callers without a destination use
   states no indentation (formatter default applies, not the fallback),
   ranking and value filling across opinions, consensus with agreeing,
   disagreeing, and partial opinions, shadowed candidates, each shared file
-  read once, the YAML and Make constraints, style-only and
-  size-only sections, explicit `unset`, `indent_size = tab`, conflicting
+  read once, the YAML constraint and Make recipe distinction, style-only
+  and size-only sections, explicit `unset`, `indent_size = tab`, conflicting
   tab and level widths, path-scoped sections, formatter overrides, malformed
   configs, new paths, linked worktrees, and paths outside a repository;
 - document under `sniff/docs/topics/indentation.md` and update the `sniff`
@@ -567,10 +622,13 @@ caller replaces a file. Callers without a destination use
 
 ### Phase 4: Migrate writers
 
-Phase 4 can run in parallel per package once Phase 2 lands.
+Phase 4 starts after Phases 1 and 2. Land shared editor and transaction
+support before migrating callers that use it. Consumer-only migrations
+can then proceed independently.
 
 - migrate whole-document output and thread the indentation fallback through
-  existing editors;
+  existing editors. Cover Claudine setup and legacy JSON migration through
+  their normal entry points. Preserve migration read-back and backup handling;
 - add the serializer guard and check that retained hashes and fingerprints
   match their pre-migration values;
 - update affected output fixtures, check parsed values and exact layout,
