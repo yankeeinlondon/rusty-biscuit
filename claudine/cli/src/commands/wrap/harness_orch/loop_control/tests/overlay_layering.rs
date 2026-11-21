@@ -1061,6 +1061,8 @@ struct StagedBootRun {
     /// The stabilized prompt, when the boot produced one.
     prompt: Option<String>,
     epoch: Option<claudine::invocation_context::DocumentEpochWork>,
+    /// What the boot handed the owning loop as its retained source.
+    stabilized_source: Option<crate::commands::wrap::harness_orch::RetainedLoopSource>,
     events: Vec<Emitted>,
     log: Vec<String>,
     dir: PathBuf,
@@ -1262,6 +1264,7 @@ fn run_staged_boot(route: BootRoute, initial: &str, stabilized: &str, approve_sh
         start_error: None,
         prompt: None,
         epoch: None,
+        stabilized_source: None,
         events: Vec::new(),
         log: Vec::new(),
         dir: dir.clone(),
@@ -1286,6 +1289,7 @@ fn run_staged_boot(route: BootRoute, initial: &str, stabilized: &str, approve_sh
         }
     }
     run.epoch = document.materialized.document_epoch.as_ref().map(|epoch| epoch.work_snapshot());
+    run.stabilized_source = prompt.prompt_state.stabilized_source.take();
     run.events = emitter.events();
     run.log = std::fs::read_to_string(&fx.log_path)
         .unwrap_or_default()
@@ -1476,4 +1480,13 @@ finalize:\n  - append_line: [events.log, rewritten-finalize]\n\
         "a shell action before start never reaches a shell runner"
     );
     assert!(run.log.contains(&"rewritten-blocked".to_string()), "blocked still ran: {:?}", run.log);
+
+    let retained = run.stabilized_source.expect("the successful stabilization retains its read");
+    assert_eq!(retained.source.original_text, stabilized, "the retained source is the rewritten root");
+    let approved = retained.approvals.exact().cloned().collect::<Vec<_>>();
+    assert_eq!(
+        (approved, retained.approvals.templates().count()),
+        (vec!["echo approved-by-harness".to_string()], 0),
+        "the retained approval set is exactly what the stabilized read earned"
+    );
 }

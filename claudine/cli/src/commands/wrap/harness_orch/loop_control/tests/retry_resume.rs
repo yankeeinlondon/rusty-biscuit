@@ -153,9 +153,14 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     // unlike ctx.cwd above, this value is never portable-converted.
     let expected_spec = fx._dir.path().join("spec.md").display().to_string();
     assert_eq!(retried.frontmatter["spec"], serde_json::json!(expected_spec));
-    guard.set_config(retried.lifecycle.clone().unwrap());
+    crate::commands::wrap::composition::staged_boot::install_prepared_lifecycle(
+        &mut guard,
+        retried.lifecycle.clone().unwrap(),
+        retried.compose_context.clone().unwrap(),
+        retried.document_epoch.as_ref(),
+        None,
+    );
     let start = run_start_lifecycle_event(
-        &state,
         &mut guard,
         &retried,
         &fx.source_path,
@@ -226,9 +231,14 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     assert_eq!(resumed.prompt, "continue");
     assert_eq!(resumed.frontmatter["prepared_cwd"], serde_json::json!(expected_cwd));
     assert_eq!(resumed.frontmatter["spec"], serde_json::json!(expected_spec));
-    guard.set_config(resumed.lifecycle.clone().unwrap());
+    crate::commands::wrap::composition::staged_boot::install_prepared_lifecycle(
+        &mut guard,
+        resumed.lifecycle.clone().unwrap(),
+        resumed.compose_context.clone().unwrap(),
+        resumed.document_epoch.as_ref(),
+        None,
+    );
     let start = run_start_lifecycle_event(
-        &state,
         &mut guard,
         &resumed,
         &fx.source_path,

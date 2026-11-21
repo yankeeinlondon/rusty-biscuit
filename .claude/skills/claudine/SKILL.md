@@ -292,6 +292,33 @@ task whose document declares `loop:` runs through
 `PromptTaskRequest.loop_values`/`StepComposeContext.loop_values` carry an
 enclosing container's `loop.*` into non-looping documents.
 
+**Document-loop read boundary.** `compose/prep.rs::build_and_run_loop` keeps
+one `RetainedLoopSource { source, approvals }` (CLI-private,
+`wrap/harness_orch/types.rs`): eager pass 1 that owns the verdict retains the
+caller-resolved source, a staged pass 1 its post-`initialize` reread, and a
+delegated pass 1 (proxy target without `initialize`) consumes
+`SingleCompositionOutcome::stabilized_source`, set only by successful
+attempt-1 stabilization in `loop_control.rs`; never reload the root after the
+provider returns. Every later ordinary pass is one arm: fresh `DocumentEpoch`,
+caller/proxy inputs reapplied with the startup approvals, template audit,
+`CompositionKind::prepare_staged` with `DocumentEntryReason::LoopIteration` +
+`SchemaStage::SkipLaunchVerdict` (defaults applied, schema attached,
+`schema_verdict_deferred == false`), lifecycle audit; a missing retention is
+`LoopIterationFailed`. The root need not exist (`prepare_harness_plan_phase`
+skips its existence check only for `Compose` + `LoopIteration`). A later
+inline pass baselines on the live file bytes (`prepare_inline_on`), prompt
+still from the retained source. Retry/resume read disk, audit lifecycle
+shells under the frozen policy, and install before the harness plan parse
+(`install_recovery_preparation`). Every route installs actions and context
+together through `staged_boot::install_prepared_lifecycle` (ledger kept, one
+`Lifecycle` consumer); the gate reads the attempt's
+`HarnessPromptState::pass_preparation` (`LoopPassPreparation`). A sequence
+`prompt:` task reads its document per invocation through the same path.
+Tests: `cli/tests/l1/loop_startup_source.rs`, `overlay_layering.rs`
+(`stabilized_*`), `prepare/service/tests.rs::loop_iteration_skips_the_launch_verdict_without_deferring_it`.
+User docs: [Looping → What each pass reads](topics/flow-control/looping.md#what-each-pass-reads),
+[Composition → Which read a loop keeps](topics/composition.md#which-read-a-loop-keeps).
+
 **`break`, `prep`, dry run.** A `break` records `LoopBreak { reason, code }`
 in its nearest loop's `LoopBreakSlot` (`LoopAmbient.breaks`, shared by every
 page whose innermost loop it is; `LoopFrame::pending_break`) and ends its

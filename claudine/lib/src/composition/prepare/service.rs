@@ -54,6 +54,15 @@ pub enum SchemaStage {
     /// Frontmatter is still coerced to its declared types; a violation is
     /// simply not this read's failure to report.
     DeferToStabilizedReread,
+    /// Compose an ordinary later loop pass from the source whose verdict the
+    /// loop's first pass already reached: no verdict is reached and none is
+    /// owed, so the result is never marked deferred.
+    ///
+    /// Defaults and coercion still shape the frontmatter, and the launch schema
+    /// is still resolved and attached for the completion verdict. An inline
+    /// pass takes its reconciliation baseline from the file as it reads now
+    /// (the previous pass's deliverable), not from the retained source.
+    SkipLaunchVerdict,
 }
 
 /// One request to prepare one document.
@@ -127,10 +136,10 @@ pub fn prepare_document_selecting(
     let view = crate::composition::resolve::composition_view(source);
     let source = &*view;
 
-    // A deferred read withholds the verdict at both layers that can reach one:
-    // Darkmatter's compose-time stage (via the option) and this crate's
-    // post-shell re-validation (by taking the schema-free composer). Skipping
-    // only one of the two would still fail the document before its `initialize`.
+    // A deferred or skipped read withholds the verdict at both layers that can
+    // reach one: Darkmatter's compose-time stage (via the option) and this
+    // crate's post-shell re-validation (by taking the schema-free composer).
+    // Skipping only one of the two would still reach a verdict.
     let mut prepared = match (schema, mode) {
         (SchemaStage::Validate, CompositionMode::ChainedDocument) => {
             crate::composition::schema::prepare_direct_with_schema_and_prompt_selecting(source, options, prompt_source, select)?
@@ -148,6 +157,12 @@ pub fn prepare_document_selecting(
         (SchemaStage::DeferToStabilizedReread, CompositionMode::InlineFrontmatterPrompt) => {
             options.defer_schema_verdict = true;
             super::prepare_inline_selecting(source, options, select)?
+        }
+        // The pending flag stays false, so a schema that cannot be prepared
+        // still surfaces as its typed error.
+        (SchemaStage::SkipLaunchVerdict, mode) => {
+            options.defer_schema_verdict = false;
+            super::prepare_loop_iteration(source, options, mode, prompt_source, select)?
         }
     };
     prepared.entry = entry;

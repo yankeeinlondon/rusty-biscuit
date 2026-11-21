@@ -20,6 +20,8 @@ fn compose_state(source_path: &Path, input_layers: CallerInputLayers) -> Harness
         invocation_context: None,
         epoch_context: None,
         document_epoch: None,
+        stabilized_source: None,
+        pass_preparation: None,
         source_context: None,
     }
 }

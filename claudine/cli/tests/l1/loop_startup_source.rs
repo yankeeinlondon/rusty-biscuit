@@ -12,8 +12,8 @@
 //!
 //! The provider is the compiled `claudine-fake-goose` in plan mode: each
 //! launch records its prompt as `launch-<n>.txt` under a directory outside
-//! the fixture repository, and `FAKE_FIRST_REWRITE_*` lets launch 1 rewrite
-//! the root. Edits made before or during `initialize` go through the
+//! the fixture repository, and `FAKE_FIRST_REWRITE_*` / `FAKE_SECOND_REWRITE_*`
+//! let launch 1 or 2 rewrite a file. Edits made before or during `initialize` go through the
 //! `claudine-fake-editor` installed as `code` (`edit` lifecycle action) or as
 //! `rewrite-source` on `PATH` (a body `::shell` directive). Every effect is a
 //! file write the test reads back; nothing waits on time.
@@ -88,6 +88,14 @@ impl LoopRun {
         fs::write(&content, bytes).unwrap();
         let target = self.cwd().join(document);
         self.with("FAKE_FIRST_REWRITE_PATH", target).with("FAKE_FIRST_REWRITE_FROM", content)
+    }
+
+    /// Bytes launch 2 of the provider writes over `file`.
+    fn second_launch_rewrites(self, file: &str, bytes: &str) -> Self {
+        let content = self.fixture.workspace_path().join("second-launch-rewrite.md");
+        fs::write(&content, bytes).unwrap();
+        let target = self.cwd().join(file);
+        self.with("FAKE_SECOND_REWRITE_PATH", target).with("FAKE_SECOND_REWRITE_FROM", content)
     }
 
     /// Installs the fake editor on `PATH` as `rewrite-source`.
@@ -642,4 +650,96 @@ ORIGINAL-BODY pass={{ loop.count }}
         "the next ordinary pass returns to the startup source:\n{}",
         prompts[2]
     );
+}
+
+// ---------------------------------------------------------------------------
+// The looping guide's example runs as written
+// ---------------------------------------------------------------------------
+
+/// The "What each pass reads" example in the looping guide: a `set` carries a
+/// value into the next pass, the gate reads `progress.md` again, and an edit
+/// to the root during pass 1 reaches only the next run.
+#[test]
+fn looping_guide_example_keeps_the_root_and_carries_set_values() {
+    let guide = include_str!("../../../docs/topics/flow-control/looping.md");
+    let example = guide
+        .split_once("## What each pass reads")
+        .and_then(|(_, section)| section.split_once("```markdown\n"))
+        .and_then(|(_, rest)| rest.split_once("```"))
+        .expect("looping.md keeps its what-each-pass-reads example")
+        .0;
+    let run = LoopRun::new("loop-startup-guide-example")
+        .first_launch_rewrites("loop.md", "---\nloop:\n  until: \"true\"\n---\nEDITED-BODY\n")
+        .second_launch_rewrites("progress.md", "---\ndone: true\n---\n");
+    run.committed("progress.md", "---\ndone: false\n---\n");
+    run.committed("loop.md", example);
+
+    let outcome = run.run("guide", "ok,ok,ok", &["compose", "--goose", "loop.md"]);
+
+    let prompts = run.prompts("guide");
+    assert_eq!(outcome.code, Some(0), "{}", outcome.output);
+    assert_eq!(prompts.len(), 2, "the gate after pass 2 reads `done: true`\n{}", outcome.output);
+    assert!(prompts[0].contains("Pass 1; the previous pass was none."), "{}", prompts[0]);
+    assert!(
+        prompts[1].contains("Pass 2; the previous pass was 1."),
+        "pass 1's `set` carries into pass 2:\n{}",
+        prompts[1]
+    );
+    assert!(
+        !prompts[1].contains("EDITED-BODY"),
+        "pass 2 composes the kept root, not pass 1's rewrite:\n{}",
+        prompts[1]
+    );
+
+    let fresh = run.fresh_run("fresh", &["compose", "--goose", "loop.md"]);
+    let fresh_prompts = run.prompts("fresh");
+    assert_eq!(fresh.code, Some(0), "{}", fresh.output);
+    assert_eq!(fresh_prompts.len(), 1, "{}", fresh.output);
+    assert!(fresh_prompts[0].contains("EDITED-BODY"), "a new run reads the rewrite:\n{}", fresh_prompts[0]);
+}
+
+/// The looping guide's `inline-compose` sentinel example: an explicit
+/// `frontmatter('task.md', 'done')` read sees the agent's edit, so the loop
+/// ends after the pass that set it.
+#[test]
+fn looping_guide_inline_sentinel_reads_the_live_file() {
+    let guide = include_str!("../../../docs/topics/flow-control/looping.md");
+    let snippet = guide
+        .split_once("then loop on an explicit read of that property")
+        .and_then(|(_, rest)| rest.split_once("```yaml\n"))
+        .and_then(|(_, rest)| rest.split_once("```"))
+        .expect("looping.md keeps its inline sentinel example")
+        .0;
+    let frontmatter: String =
+        snippet.lines().map(|line| format!("{}\n", line.strip_prefix("  ").unwrap_or(line))).collect();
+    let finished = frontmatter.replace("done: false", "done: true");
+    let run = LoopRun::new("loop-startup-inline-sentinel")
+        .first_launch_rewrites("task.md", &format!("---\n{finished}---\nFinished body.\n"));
+    run.committed("task.md", &format!("---\n{frontmatter}---\nInitial body.\n"));
+
+    let outcome = run.run("sentinel", "ok,ok,ok", &["inline-compose", "--goose", "task.md"]);
+
+    assert_eq!(outcome.code, Some(0), "{}", outcome.output);
+    assert_eq!(run.prompts("sentinel").len(), 1, "the gate after pass 1 reads `done: true`\n{}", outcome.output);
+}
+
+/// The control for the example above: a bare `done` reads the document the
+/// loop kept at startup, so the agent's `done: true` never ends the loop.
+#[test]
+fn a_bare_inline_sentinel_reads_the_kept_document() {
+    let document = |done: bool, body: &str| {
+        format!(
+            "---\nloop:\n  until: \"done == true\"\n  max: 2\ndone: {done}\nprompt: \"Set `done: true` when finished.\"\n---\n{body}\n"
+        )
+    };
+    let run = LoopRun::new("loop-startup-bare-sentinel")
+        .first_launch_rewrites("task.md", &document(true, "Pass one body."))
+        .second_launch_rewrites("task.md", &document(true, "Pass two body."));
+    run.committed("task.md", &document(false, "Initial body."));
+
+    let outcome = run.run("bare", "ok,ok,ok", &["inline-compose", "--goose", "task.md"]);
+
+    assert_eq!(run.prompts("bare").len(), 2, "{}", outcome.output);
+    assert_ne!(outcome.code, Some(0), "the cap is reached with `done` still false\n{}", outcome.output);
+    assert!(outcome.output.contains("loop limit exceeded"), "the cap failure is reported:\n{}", outcome.output);
 }

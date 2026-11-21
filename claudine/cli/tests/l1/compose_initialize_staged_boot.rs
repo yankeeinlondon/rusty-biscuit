@@ -259,10 +259,10 @@ fn a_looping_target_first_iteration_includes_what_initialize_created() {
     );
 }
 
-/// A sequence task has no command-level coordinator, so its prompt's `initialize`
-/// proxy is adopted inside the provider harness. The adopted target's boot must
-/// read only its lifecycle surface before its own `initialize`, exactly like a
-/// target the command coordinator adopts.
+/// A sequence prompt task carries its own task ledger, so its prompt's
+/// `initialize` proxy surfaces to the command-level coordinator, which adopts
+/// the target as it does for `compose`. The adopted target's boot must read
+/// only its lifecycle surface before its own `initialize`.
 #[test]
 fn a_sequence_task_proxy_target_initialize_creates_a_file_its_body_includes() {
     let staged = Staged::new("staged-boot-sequence-task");

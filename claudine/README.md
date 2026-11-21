@@ -176,6 +176,14 @@ loop initialization persist into subsequent iterations. An absent destination
 key in a `set` mapping reads as null during that mapping's snapshot evaluation;
 null interpolated into text renders empty.
 
+A document loop keeps the read of its document that its first pass was judged
+from (after `initialize`, when the document declares one) and composes every
+later pass from it, with fresh loop values, `set` writes, and working-tree
+context. An edit to the document's own file during a run is seen by the next
+run, a `retry` or `resume`, or a new sequence task; carry values between passes
+with `set` or `loop.action`, or read another file explicitly. See
+[what each pass reads](./docs/topics/flow-control/looping.md#what-each-pass-reads).
+
 For eager file parameters with a schema `match(...)` glob, a partial path triggers confirmation or a file chooser before `initialize` reads it. This also works with `-y`; missing unrelated parameters remain deferred until after initialization. See [Composition](./docs/topics/composition.md#provided-partial-file-references) for the matching rules and interactive gates.
 
 Sequence prompts read their current row and prior results through the

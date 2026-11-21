@@ -573,6 +573,20 @@ loop iterations, sequence steps run inline, and `retry`, `resume`, and
 `proxy` re-entry. `compose` and `sequence` documents composed directly never
 stamp their source and are not checked.
 
+**A later loop iteration baselines on the live file.** An `inline-compose`
+loop uses its document twice. Its prompt, lifecycle, and schema come from the
+read the loop kept at startup (see
+[Which read a loop keeps](#which-read-a-loop-keeps)), but the file is also the
+deliverable. Each later ordinary iteration therefore reads the file once,
+before any composition effect, and uses those bytes for this rehearsal, the
+body hash, and the closure's change detection, repair, and rollback. A
+`retry` or `resume` of that iteration keeps the same baseline. An iteration
+whose agent leaves the file as the previous iteration left it fails with
+*document not updated*, and the previous iteration's edit stays in place.
+A file that cannot be read at that point fails the iteration with
+`CompositionError::InlineArtifactUnreadable`, naming the path, before anything
+is composed.
+
 Passing the check only says the document was editable when the run started.
 If the agent writes frontmatter the closure cannot edit, for example by
 indenting the keys itself, the closure still refuses it and the
@@ -1261,7 +1275,7 @@ both before anything is written or dispatched.
 
 ### Loop Execution
 
-A frontmatter `loop:` block turns the prompt into a repeating run. The first iteration runs `initialize` once; later iterations re-enter at `start` without re-running `initialize` or schema validation. Each iteration is a composition run of its own: it captures its own `ctx`, so it observes what earlier iterations changed, and it audits the commands its own state produces. `success`, `failure`, and `finalize` fire once per iteration, and the loop condition is evaluated at the post-`finalize` gate after any `loop:` lifecycle concerns.
+A frontmatter `loop:` block turns the prompt into a repeating run. The first iteration runs `initialize` once; later iterations re-enter at `start` without re-running `initialize` or schema validation. Later iterations compose the document the loop kept when its first iteration was judged, not a new read of the file, so an edit to the document during a run is seen by the next run (see [Which read a loop keeps](#which-read-a-loop-keeps)). Each iteration is a composition run of its own: it captures its own `ctx`, so it observes what earlier iterations changed, and it audits the commands its own state produces. `success`, `failure`, and `finalize` fire once per iteration, and the loop condition is evaluated at the post-`finalize` gate after any `loop:` lifecycle concerns.
 
 The condition is checked at the **end** of each iteration, against the state that iteration ran with, and the actions are applied only when the loop continues. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](flow-control/looping.md#iteration-semantics) for the full counting table.
 
@@ -1475,6 +1489,8 @@ A document declaring an `initialize` lifecycle stack defers the full invocation-
 The verdict is instead reached by the **stabilized reread**: canonical preparation re-reads the document after `initialize` returns and validates that read. A violation that survives `initialize` is therefore reported *after* the document's own `initialize` has run and *through* its own `blocked`/`finalize` stacks, as the same typed `CompositionError` a directly-invoked document reports. A proxied target follows the identical order through its staged bootstrap, which is what makes the diagnostic route-independent.
 
 Documents without an `initialize` are unaffected: nothing can change their frontmatter between the read and the verdict, so they are judged where they are read.
+
+**The stabilized reread is the read a loop keeps.** A looping document that declares `initialize` composes every later iteration from this reread, with the caller's inputs, the proxy overlay, and the shell approvals it earned. An edit `initialize` makes is therefore part of every iteration, and an edit made after it is not. The lifecycle actions the reread produced are installed together with the `ctx.*`/`env.*` context it composed against, so `start`, and `blocked`/`finalize` when the reread's checks fail, render the values the prompt saw. When the reread itself fails to load or compose, the bootstrap's actions and context handle the failure. See [Which read a loop keeps](#which-read-a-loop-keeps).
 
 ### User Config
 
@@ -1699,11 +1715,85 @@ Every entry into canonical preparation declares **why**, and each reason has exa
 | Proxy target | a fresh read from disk | yes | yes | recognized from this document |
 | Retry | a fresh read from disk | no | yes | inherits the active document's |
 | Resume | a fresh read from disk | no | yes | inherits the active document's |
-| Next loop iteration | the stamped structural plan | no | shell audit only | reuses the owning loop's plan |
+| Next loop iteration | the document the loop kept at startup | no | shell audit only | reuses the owning loop's plan |
 
 The table describes live entry. Direct documents with an authored `initialize` key and newly adopted proxy targets use staged boot; direct documents without that key retain eager preparation. A proxy target reads fresh because the handoff commits to a document the source may never have touched.
 
-`initialize` fires once per **active document**, not once per attempt: a retry or resume re-enters a document that has already initialized. A loop iteration skips schema validation because iteration 1 already judged the document it re-materializes. Every row is still a new composition run with its own `ctx` capture, and every row audits the command bytes its own state produces (see [Pre-Flight — Re-Audits](pre-flight-checks.md#re-audits-handoffs-retries-and-loop-iterations)).
+`initialize` fires once per **active document**, not once per attempt: a retry or resume re-enters a document that has already initialized. A loop iteration skips schema validation because iteration 1 already judged the document it composes again: it reaches no verdict and leaves none pending, while schema defaults still apply and the schema still judges completion. Every row is still a new composition run with its own `ctx` capture, and every row audits the command bytes its own state produces (see [Pre-Flight — Re-Audits](pre-flight-checks.md#re-audits-handoffs-retries-and-loop-iterations)).
+
+### Which read a loop keeps
+
+A document loop keeps one read of its root document: the read that its first
+iteration's launch verdict judged. Which read that is depends on how the first
+iteration started:
+
+| First iteration | The kept read |
+| --- | --- |
+| no `initialize`, judged before launch | the document as the command (or the handoff) resolved it |
+| `initialize`, staged by the command | the reread after `initialize` |
+| a proxy target without its own `initialize` | the provider harness's stabilized read, exactly as it validated it |
+
+The kept read carries its resolved text, the caller's records and resolution
+anchors, the anchored proxy overlay, and the shell approvals it earned. Each
+later ordinary iteration composes it again with that iteration's own values:
+the `loop.*` values, runtime `set` writes and loop actions, and a fresh capture
+of the working tree. It reaches no launch verdict, and its template and
+lifecycle commands are audited deny-only against the kept approvals, so a value
+that changes a command beyond them is refused. The root file need not still
+exist: an iteration reads nothing from it.
+
+Everything else keeps its own read boundary:
+
+- **Retry and resume** read the document from disk for that attempt and judge
+  it under their own entry reason. Their lifecycle commands are audited under
+  the loop's frozen shell policy, and their actions are installed with their
+  own context before the attempt's harness plan is checked, so the attempt's
+  `start`, `blocked`, and `finalize` use that read. The next ordinary iteration
+  returns to the kept read.
+- **A proxy** ends the loop; the target starts from its own file.
+- **A sequence task** resolves and reads its document when the task starts, so
+  each task invocation keeps its own read.
+- **Includes and explicit reads** (`::file`, `frontmatter("progress.md",
+  "done")`) read disk whenever an iteration composes or evaluates them.
+
+Each preparation hands its lifecycle actions, its `ctx.*`/`env.*` context, and
+its document epoch over together. A reread after `initialize` extends the
+epoch's snapshot instead of capturing a new one: a group already observed keeps
+its value, and a group only the reread names is observed on demand. The loop's
+gate, condition, and actions after an iteration read that iteration's
+preparation, including one made by a retry or resume, with `set` writes from
+the shared runtime state layered over it. `current.*` stays an event-time read.
+
+```mermaid
+sequenceDiagram
+    participant Cmd as Command
+    participant Harness as Provider harness
+    participant Disk as Root file
+    participant Events as Lifecycle events
+    Cmd->>Disk: Read the root (bootstrap)
+    Cmd->>Events: Run initialize once
+    Cmd->>Disk: Reread after initialize
+    Cmd->>Cmd: Audit commands, reach the verdict, keep this read
+    Cmd->>Events: Install its actions with its context and epoch
+    Cmd->>Harness: Iteration 1
+    Harness-->>Cmd: Iteration 1's preparation (for the gate)
+    loop Each later iteration
+        Cmd->>Cmd: Compose the kept read with new loop values and a fresh epoch
+        Cmd->>Events: Install its actions with its context
+        Cmd->>Harness: Iteration N (no verdict pending)
+        opt retry or resume
+            Harness->>Disk: Read the root for this attempt
+            Harness->>Events: Install the attempt's actions with its context
+        end
+        Harness-->>Cmd: The preparation the iteration ran with
+    end
+```
+
+For a proxy target without its own `initialize`, the provider harness makes
+the judged read during iteration 1 and returns it to the command with that
+iteration's result. Reading the file again after the provider returned could
+adopt an edit the provider made, so the command never does; the later
+iterations are the same as on the staged route.
 
 ### Retry and resume re-entry
 

@@ -137,6 +137,14 @@ pub(crate) struct SingleCompositionOutcome {
     /// [`SurfacedHandoff::Request`]: claudine::composition::SurfacedHandoff::Request
     /// [`SurfacedHandoff::Committed`]: claudine::composition::SurfacedHandoff::Committed
     pub handoff: Option<claudine::composition::SurfacedHandoff>,
+    /// The source a harness stabilized reread validated on this run's first
+    /// attempt; an owning loop composes its later passes from it. `None` on
+    /// every run that did not stabilize in the harness.
+    pub stabilized_source: Option<crate::commands::wrap::harness_orch::RetainedLoopSource>,
+    /// The preparation the run's last executed attempt installed, which the
+    /// owning loop's gate and condition read. `None` when the harness never
+    /// installed one (dry run, a run ended before its provider attempt).
+    pub pass_preparation: Option<crate::commands::wrap::harness_orch::LoopPassPreparation>,
 }
 
 /// Execute a composition request through the wrapper-grade pipeline, returning
@@ -166,13 +174,14 @@ pub(crate) fn execute_composition_request_inner(
     )
 }
 
-/// Execute a single composition attempt using an externally-managed lifecycle
-/// guard.
+/// Execute one loop pass using an externally-managed lifecycle guard.
 ///
-/// Used by the loop engine for iteration 2+. The caller has already emitted
-/// `initialize` and run schema/shell preflight once; this function skips those
-/// and emits only `start`, the terminal event, and `finalize` through the
-/// shared guard.
+/// Used by the loop engine for every pass. The caller has already emitted
+/// `initialize` and installed the pass's prepared lifecycle and context on
+/// `guard`; this function emits only `start`, the terminal event, and
+/// `finalize` through it. `skip_preflight` is set for a later pass, whose
+/// source was judged when the loop started and whose commands the caller
+/// audited.
 pub(crate) fn execute_composition_attempt(
     request: CompositionExecutionRequest,
     verbose: u8,

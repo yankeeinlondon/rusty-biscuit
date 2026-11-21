@@ -241,6 +241,8 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         invocation_context: None,
         epoch_context: None,
         document_epoch: None,
+        stabilized_source: None,
+        pass_preparation: None,
         source_context: None,
     }
 }

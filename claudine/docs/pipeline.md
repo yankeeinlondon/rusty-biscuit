@@ -131,8 +131,56 @@ preflight reaches `start`. Non-shell initialization effects remain available.
 The B4–B6 tables describe the eager path; staged documents defer the body audit
 and full preparation until step 4 above. Loop seed preparation uses the
 bootstrap surface; iteration 1 composes the stabilized reread. Retry/resume
-reread and audit without another initialization. Later loop iterations reuse
-the audited structural plan.
+reread and audit without another initialization.
+
+**Which read a loop keeps.** A document loop keeps exactly one read of its
+root, together with the shell approvals that read earned: the read whose
+launch verdict iteration 1 reached.
+
+- No `initialize` (eager): the source the caller or handoff resolved.
+- `initialize`, staged by the command: the reread from step 4.
+- A proxy target without its own `initialize`: the provider harness's
+  stabilized read, returned with iteration 1's result. The command never reads
+  the file again after the provider returns, because the provider may have
+  edited it.
+
+Each later ordinary iteration composes the kept read again (B6) with a fresh
+document epoch, its own loop values and runtime `set` writes, and the caller
+and proxy inputs reapplied. It reaches no launch verdict and leaves none
+pending; its template and lifecycle commands are audited deny-only against the
+kept approvals. It reads nothing from the root file, so a deleted or edited
+root affects only the next run. Retry and resume read the root from disk for
+their attempt, audit its lifecycle commands under the frozen shell policy, and
+install its actions and context before the attempt's harness plan is checked;
+the next ordinary iteration returns to the kept read. A later `inline-compose`
+iteration also reads the live file once, before composition, as the baseline
+for change detection and rollback (F3); its prompt still comes from the kept
+read.
+
+Every preparation installs its lifecycle actions together with the
+`ctx.*`/`env.*` context and document epoch it composed against, so no event
+renders new actions with an older snapshot. A reread after `initialize`
+extends the same epoch: groups already observed keep their values. When a
+reread fails to load or compose, the previous actions and their context handle
+the failure. The loop gate (F5) evaluates against the preparation the
+iteration ran with, including a retry's or resume's.
+
+```mermaid
+flowchart TD
+    B[bootstrap read] --> I[initialize, once]
+    I --> R[reread after initialize]
+    R --> V[audit + launch verdict]
+    V --> K[(kept read + approvals)]
+    V --> P1[iteration 1]
+    P1 --> G{loop gate}
+    G -->|continue| N[compose the kept read:<br/>new loop values, fresh epoch,<br/>deny-only audit, no verdict]
+    K -.-> N
+    N --> PN[iteration N]
+    PN --> G
+    PN -. retry / resume .-> D[read the root from disk for this attempt]
+    D --> PN
+    G -->|done| E[loop ends]
+```
 
 `--dry-run` retains the eager discovery path without initialization effects or
 dynamic proxy traversal, so generated includes can still be missing. Sequences
@@ -159,7 +207,7 @@ the template body so Darkmatter can run them non-interactively.
 |---|------|-------|
 | B5.1 | **Resolve `LoopExecutionOptions`** [M] | `--max-iterations` flag > `CLAUDINE_MAX_ITERATIONS` env > `loop.max` frontmatter > built-in default. |
 | B5.2 | **`resolve_loop_config(source)`** [M] | Returns `Some` when `loop:` frontmatter is present. |
-| B5.3 | **Branch: loop vs single-shot** [M] | When looping, every iteration re-runs B6 → F. When single-shot, B6 → F runs once. |
+| B5.3 | **Branch: loop vs single-shot** [M] | When looping, every iteration re-runs B6 → F, composing the read the loop kept at startup (see B4). When single-shot, B6 → F runs once. |
 
 ### B6. Per-iteration template composition
 

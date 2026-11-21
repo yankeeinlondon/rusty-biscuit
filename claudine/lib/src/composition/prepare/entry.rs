@@ -25,7 +25,9 @@ pub enum DocumentEntryReason {
     Retry,
     /// The same document, re-entered against a compatible live session.
     Resume,
-    /// The same document, refreshed for the next document-loop iteration.
+    /// An ordinary later pass of a document loop, composed from the source the
+    /// loop retained at startup rather than reread from disk. A retry or resume
+    /// within a pass is [`Self::Retry`]/[`Self::Resume`], which read fresh.
     LoopIteration,
 }
 
@@ -39,9 +41,10 @@ pub enum SourceBasis {
     /// document (an `initialize` side effect, an inline closure rewrite, a
     /// loop mutation).
     FreshRead,
-    /// The structural plan stamped when the loop's active document was first
-    /// prepared. A loop iteration re-materializes against it and therefore
-    /// cannot introduce command bytes the audit never saw.
+    /// The source the loop retained when its first pass reached the launch
+    /// verdict. A later pass composes it with its own loop values and runtime
+    /// state, and audits the commands those values produce against the
+    /// startup approvals, so it cannot introduce command bytes nothing approved.
     StampedStructuralPlan,
 }
 
@@ -67,10 +70,12 @@ pub struct PreparationStages {
     /// `initialize` runs once per *active document*, not once per attempt: a
     /// retry or resume re-enters a document that has already initialized.
     pub emits_initialize: bool,
-    /// Whether this entry runs schema validation and the full shell audit.
+    /// Whether this entry reaches the launch schema verdict and runs the full
+    /// shell audit.
     ///
-    /// A loop iteration does not: it re-materializes against an already-audited
-    /// structural plan, so there is nothing new to validate or approve.
+    /// A loop iteration does not: its source was judged when the loop started.
+    /// It still audits, deny-only, the template and lifecycle commands its own
+    /// values produce.
     pub full_validation: bool,
     /// Who owns the document loop for this entry.
     pub loop_ownership: LoopOwnership,
