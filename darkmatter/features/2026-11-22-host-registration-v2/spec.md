@@ -1,7 +1,34 @@
 ---
 kind: feature
 created: 2026-11-22
-status: draft-spec
+status: human-in-the-loop
+reviewed: true
+reviewed-by: "codex/gpt-6.2-sol"
+reviewed-on: "2026-11-22"
+review-iterations: 0
+needs-rulings: true
+required-rulings:
+    - Choose how publishing keeps a complete registration readable during updates.
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed-by: string -> the agent and model used in the spec review
+    reviewed-on: date -> the date the spec was reviewed
+    review-iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented-by: string -> the agent who implemented the plan
 area: darkmatter
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -15,9 +42,11 @@ next-spec: 2026-11-22-claudine-doctor
 
 # Host registration v2
 
-This spec spans `darkmatter/` (the manifest format, host selection, trigger
-merging, DMLS) and `claudine/` (what it registers and how it publishes). The
-two sides change the same contract, so they land together.
+This spec covers the registration contract shared by Darkmatter and
+Claudine. Darkmatter loads the registration for its `md` command and the
+Darkmatter language server (DMLS). Claudine supplies and publishes the
+files they read. The changes land together and build on SimplifiedSchema's
+YAML kind definitions and object composition rules.
 
 ## Why this exists
 
@@ -25,23 +54,23 @@ Host registration lets `md` and DMLS type a host's documents (Claudine's, for
 example) without running the host. Investigating a failed `claudine sequence`
 pre-flight showed several problems with how it works today:
 
-1. **The registration was silently missing.** `~/.claudine/darkmatter-host.yaml`
+1. **The registration entry was missing.** `~/.claudine/darkmatter-host.yaml`
    existed, but `~/.darkmatter.yaml` had `register: []` and an inline
-   `permissions` block. Nothing reported it, and nothing repaired it: each
-   Claudine launch refreshes its manifest but never touches
-   `~/.darkmatter.yaml`.
+   `permissions` block. Claudine refreshed the manifest at startup and
+   left the missing entry undetected.
 2. **Versioned revision folders pile up.** Each publish writes
    `~/.claudine/darkmatter-host/<version>-<digest>/schemas/`, and nothing
-   removes old ones. There is only ever one `claudine` binary per host, so
-   the versions protect against nothing.
+   removes old ones. A separate set of files lets readers finish loading a
+   release while another is published. Keeping every release indefinitely is
+   unnecessary.
 3. **Every `claudine` command checks the published files** and republishes
    when they are stale. That puts filesystem work on every command for
    something that changes only at install or upgrade.
 4. **`claudine/schemas/` serves two audiences.** It mixes schemas that help
    inside this repository with schemas shipped to every user, so the embed
-   list is kept by hand and has drifted (`review.yaml` is in the folder but
-   not embedded; `sequence-types.yaml` was deleted from the folder but is
-   still embedded).
+   list is kept by hand and still points at the deleted
+   `sequence-types.yaml`. Repository-only files such as `review.yaml`
+   belong outside the published bundle.
 5. **The identifying trigger is a separate file with a special role.**
    `claudine-document.yaml` only decides which documents are Claudine's. The
    triggers already say that through their own `match:`.
@@ -57,8 +86,8 @@ pre-flight showed several problems with how it works today:
 ```mermaid
 flowchart LR
     R["claudine/registration/<br/>(source, in the repo)"] -->|"embedded at build"| B["claudine binary"]
-    B -->|"setup, update,<br/>registrations publish"| P["~/.claudine/registrations/darkmatter/<br/>manifest.yaml + schemas/"]
-    C["~/.darkmatter.yaml<br/>register: [manifest.yaml]"] --> P
+    B -->|"setup, update,<br/>registrations publish"| P["~/.claudine/registrations/darkmatter/<br/>manifest.yaml + published files"]
+    C["~/.darkmatter.yaml<br/>register entry"] --> P
     P -->|"passive read"| D["md / DMLS"]
     B -->|"registrations (JSON)"| X["claudine doctor, people"]
 ```
@@ -67,77 +96,110 @@ flowchart LR
 
 ### 1. Source folder: `claudine/registration/`
 
-- **Everything in `claudine/registration/` is registered, and nothing else
-  is.** The build embeds the whole folder by enumerating it (a build script
-  or an equivalent compile-time listing), so there is no hand-kept list to
-  drift. The folder holds registration files only; its explanation lives in
-  `claudine/docs/`, not in a README inside it.
-- Allowed file kinds:
+- The build enumerates the regular YAML files in `claudine/registration/`
+  recursively and embeds them in sorted repository-relative path order.
+  Reject unexpected files, symlinks, and paths that collide on
+  case-insensitive filesystems. Cargo must rebuild when a file is added,
+  changed, moved, or removed. Keep the folder's explanation in
+  `claudine/docs/`.
+- Allowed file kinds are:
 
-  | `kind:` | Use |
+  | `kind` | Use |
   |---|---|
-  | `schema-trigger` | types the documents its `match:` selects |
-  | `yaml-schema` | defines a YAML document kind (for example, `kind: sequence` files) |
-  | `namespace-schema` | defines one host namespace (see 4) |
-  | `schema` with `types` and **no** `$schema` | a library of reusable types for the other files |
+  | `schema-trigger` | Selects and types Markdown documents |
+  | `yaml-schema` | Defines a YAML document kind, such as `kind: sequence` |
+  | `namespace-schema` | Declares one expression global |
+  | `schema` with `types` and no `$schema` | Supplies reusable types |
 
-  A `kind: schema` with a `$schema`, or any other kind, fails the build test
-  and is refused by Darkmatter when loading a registration.
-- Files may import only each other (relative paths within the folder) and
-  Darkmatter's built-in schemas (`name@darkmatter:…`). An import that leaves
-  the folder breaks once the files are published, so it fails the build
-  test. (The current draft `inline-composition.yaml` imports
-  `content-policy/schemas/…`; it must vendor or drop that import.)
-- `claudine/schemas/` becomes an ordinary repository schemas folder: schemas
-  that help when editing this repository, discovered by Darkmatter's normal
-  schema search, never embedded or published. Files that exist only for
-  registration move to `claudine/registration/`, and `claudine-document.yaml`
-  is deleted.
-- The generated companion artifacts (today `claudine/lib/generated/shipped.json`
-  and `globals.lifecycle.json`) are regenerated from `claudine/registration/`
-  by `just shipped-schemas`. The lifecycle artifact keeps its current format
-  in this spec; it is published beside the schemas and named in the manifest
-  (see 3).
+  Reject any other kind or a `kind: schema` with a `$schema` both in
+  Claudine's build check and when Darkmatter loads a registration. Function
+  catalogs and generated artifacts have separate manifest fields.
+- A file reference in a registered schema resolves through biscuit-file's
+  [`FileReference`](../../../biscuit-file/lib/src/file_reference/mod.rs),
+  which interprets the authored path relative to its declaring file. Allow
+  explicit relative references to listed members within the bundle and
+  supported built-in Darkmatter schema references. Apply this to indirect
+  imports, schema payload references, and file-backed examples. Reject
+  unlisted targets, paths that escape after resolution, and remote
+  references. A portable bundle cannot rely on search roots, environment
+  variables, or a checkout. Bundle the types that inline composition uses
+  from [content-policy's schema](../../../content-policy/schemas/content-policy.yaml),
+  including required imports. Verify the copy against its source.
+- Extend the `schema-trigger` envelope to admit an optional `description`
+  (a string) and an optional `types` table, alongside `kind`, `match`, and
+  `$schema`. A trigger's `types` are local to that trigger: its `$schema`
+  can name them, and other files cannot import them (shared types still
+  belong in a types-only library). The envelope stays closed to every
+  other key. This applies to every trigger, registered or not, so update
+  the trigger definition in `simplified-schema/schemas/schema-trigger.yaml`
+  and trigger discovery together. Repair the draft triggers' match
+  conditions and broken imports before shipping them. For example,
+  `composition.yaml` needs a real `match` and a defined
+  `common-attributes` type. `inline-composition.yaml` uses `group` for
+  alternatives and needs qualifying required keys in each branch.
+- Leave repository-only schemas, such as `review.yaml`, in
+  `claudine/schemas/`. Move registration-only files out of schema discovery
+  so another copy cannot apply as an ordinary trigger. Update repository
+  references to moved types and point Claudine's own composition and sequence
+  validation at the same embedded definitions.
+- Retire `globals.yaml`. Namespace schemas (see 4) replace it, and
+  `claudine/schemas/globals.yaml` and its `globals.lifecycle.json` are
+  deleted. Darkmatter's legacy host-catalog discovery, which reads a
+  `globals.yaml` and `globals.lifecycle.json` found in a schema root for a
+  host that is not registered, is removed with it: Claudine is the only
+  host that used it, so the `Legacy` host-selection result goes too.
+- Regenerate `claudine/lib/generated/shipped.json` and the lifecycle
+  artifact from the same sources through `just shipped-schemas`. Keep
+  the installed binary, the generator, and the build check on one inventory.
+  Verify the bundle in isolation from the repository and user schema roots.
+  Check Claudine's own compose, inline-compose, and sequence entry points
+  against the embedded definitions as part of the migration.
 
 ### 2. Published layout and who writes it
 
-```text
-~/.claudine/registrations/darkmatter/
-├── manifest.yaml
-└── schemas/            the files of claudine/registration/, same relative paths
-```
+The stable entry point is
+`~/.claudine/registrations/darkmatter/manifest.yaml`. The manifest points
+to a complete set of published files. Preserve the source tree's relative
+paths within that set so imports work. The publication protocol and exact
+member paths depend on the decision under [Open questions](#open-questions).
 
-- **No version folders.** One binary per host means one set of files.
-- **Who writes:** Claudine's setup, the future `claudine update`, and the
-  hidden `claudine registrations publish` (which `just install` in the
-  Claudine area calls, so a development install republishes too). **No other
-  command reads or writes these files.** The per-command refresh in
-  `claudine/cli/src/main.rs` (around `HostRevision::claudine()` and
-  `registration::publish`) is removed.
-- **How:** each file is written to a temporary name in its folder and renamed
-  into place, so a reader never sees a truncated file. A file not in the
-  embedded set is deleted. The manifest is written last.
-- **Hand edits** are allowed but unsupported. Publishing overwrites them
-  without asking, and `claudine doctor` reports a modified file as "modified,
-  will be replaced on the next publish." The supported way to customize a
-  registered schema is a trigger in one of Darkmatter's schema locations
-  (`SCHEMAS_DIR`, `~/schemas`, a repository `schemas/` folder), which already
-  layers above the registered ones.
-- **Old layout:** there are no users to migrate, so publishing simply deletes
-  `~/.claudine/darkmatter-host.yaml` and `~/.claudine/darkmatter-host/`, and
-  setup (and `doctor --fix`) replaces the old `register` entry with the new
-  one.
+- Claudine setup and the hidden `claudine registrations publish` command
+  publish the bundle. Call the hidden command from Claudine's
+  `just install` and from future update and doctor repair flows. Remove
+  the startup refresh from Claudine's normal commands. Darkmatter and
+  DMLS continue to read the installation passively, and doctor will
+  inspect the installed files on demand.
+- Serialize cooperating publishers. An identical publish is a no-op.
+  Readers use one complete release or report a registration failure.
+  The publisher must account for interruption, concurrent readers, and
+  retry, including file replacement on Windows.
+- The publisher owns its output. Doctor can compare installed files with
+  the embedded bytes and report edits that repair will replace. Continue
+  to use ordinary Darkmatter schema roots to override Markdown trigger
+  properties. Those overrides still have higher precedence than the
+  registered trigger layer.
+- Make republishing and upgrading separate from editing configuration.
+  Setup and doctor repair publish first, then replace Claudine's old entry
+  in the user configuration. Clean up the old default manifest and
+  revision tree only after the configuration change succeeds. Limit
+  cleanup to Claudine-owned paths. Report a symlink or junction that
+  obstructs publication or cleanup and leave its target alone. Preserve
+  unrelated registrations.
 
 ### 3. Manifest format 2
 
+This example shows the fields common to both publication options, with
+direct member paths for illustration. The final publication protocol also
+defines the fields needed to verify or locate the complete set.
+
 ```yaml
-# ~/.claudine/registrations/darkmatter/manifest.yaml (written by Claudine)
+# ~/.claudine/registrations/darkmatter/manifest.yaml
 kind: darkmatter-host
 format_version: 2
 host: claudine
 version: "0.1.0"
 files:
-    - ./schemas/claudine.yaml
+    - ./schemas/composition.yaml
     - ./schemas/inline-composition.yaml
     - ./schemas/formal-sequence-file.yaml
     - ./schemas/sequence.yaml
@@ -145,20 +207,40 @@ files:
     - ./schemas/group.yaml
     - ./schemas/loop.yaml
     - ./schemas/lifecycle-events.yaml
-lifecycle: ./schemas/globals.lifecycle.json
+    - ./schemas/shared.yaml
+lifecycle: ./globals.lifecycle.json
 functions: []
 ```
 
-- `files` lists every registered file. Darkmatter loads exactly these and
-  classifies each one by its own `kind:`. **The order of `files` means
-  nothing** (see 5).
-- `identify`, `triggers`, and `globals` are gone. `lifecycle` and `functions`
-  stay as they are today; `functions` is replaced by
-  `2026-11-22-expression-and-mutation-schemas`.
-- Format 1 is removed in the same change. Darkmatter refuses a format 1
-  manifest with a `dm.host.registration` warning that names format 2.
-- The envelope schema `darkmatter/schemas/darkmatter-host.yaml` is updated
-  to match.
+- The envelope is closed. Require each field above, including the integer
+  version `2` and an explicit `functions: []` for a host with no function
+  catalogs. The encoder includes every bundled library. The loader
+  classifies each `files` member by its own `kind` and rejects duplicates
+  after resolving paths. Resolve local member references from the manifest
+  directory using its captured file context. The same bundle boundary
+  covers the separately listed lifecycle file and function pairs. Report
+  the failed field and source location.
+- `files` order has no effect on loading, layering, or host agreement.
+  Compute the host's content revision from the normalized manifest meaning
+  and addressed member bytes, sorting the unordered file list. Preserve
+  equivalent installs' identity when copied to another root. Continue to
+  collapse equal claims and report conflicting claims for the same host.
+- Remove `identify`, `triggers`, and `globals`. Keep the `functions`
+  catalog and facts pairs and their freshness checks until
+  `2026-11-22-expression-and-mutation-schemas` replaces them.
+- Update Darkmatter's [manifest envelope](../../schemas/darkmatter-host.yaml).
+  Refuse format 1 with a `dm.host.registration` warning that explains
+  format 2 and points the user to the host's setup or update command.
+  Reinstalling Claudine and rerunning setup is the supported way to refresh
+  the user entry. Report obsolete repository entries so their owners can
+  update them.
+- Preserve all-or-nothing loading, dependency tracking, and diagnostic
+  locations. Registering a host continues to supply analysis information
+  only. A manifest or its files cannot grant permissions, fetch remote
+  resources, install handlers, or run host code. Reuse existing schema
+  preparation rules for deferred expressions and the existing grant check
+  wherever a consumer explicitly evaluates a permitted template. Validate
+  the resulting member references against the same bundle boundary.
 
 ### 4. `kind: namespace-schema`
 
@@ -174,101 +256,169 @@ $schema:
 types: {}
 ```
 
-- `namespace` is required and must be a valid expression identifier.
-- A host may not declare a namespace `md` owns (`fm`, `ctx`, `current`,
-  `env`, `err`, `timing`), and may not declare the same namespace twice. Each
-  is a `dm.host.registration` error naming both files.
-- The namespace files together replace `globals.yaml`. Which events may read
-  each namespace stays in the generated lifecycle artifact. A `when` property
-  that moves that decision into the file is a later spec.
-- The `kind: namespace-schema` definition ships with simplified-schema's
-  other kind definitions (`simplified-schema/schemas/`), so DMLS checks
-  namespace files like any other schema file.
+- Require `kind`, `namespace`, and a mapping-valued `$schema`. Allow
+  `description` and local `types` under a closed envelope. Resolve the
+  payload as one object with the namespace file as the import and diagnostic
+  origin. Use the expression parser's root identifier rules. Reject names
+  reserved by Darkmatter's global and expression binding rules. Report a
+  reserved name on its declaration and a duplicate on both declarations.
+- Assemble the namespace definitions into one host global catalog. Preserve
+  namespace descriptions, named type scopes, property locations, and
+  lifecycle availability. A namespace schema registers one global and does
+  not become a general-purpose `$schema` target or a YAML document kind
+  selector. Ship its kind definition with SimplifiedSchema so the CLI and
+  DMLS can check its envelope and payload.
+- **Reader note.** The current lifecycle artifact verifies the exact bytes of
+  one `globals.yaml` file. With separate namespace files, use a new
+  lifecycle artifact format version for manifest format 2. Retain the
+  event data shape. Define `catalog_hash` as the BLAKE3 hash, through
+  biscuit-hash, of a canonical JSON map from each namespace file's
+  bundle-relative slash-separated path to the BLAKE3 hash of its exact
+  bytes. Include every transitive bundled file used by those namespace
+  definitions in the map. Read and hash the same bytes used to prepare the
+  catalog. Generate and verify the hash with the same library code. The
+  older artifact version and its single-file byte check are removed with
+  legacy discovery.
+- Refuse missing, malformed, or stale artifacts, a host name mismatch, and
+  event bindings that name an undeclared host namespace. Retain the existing
+  rules for Darkmatter's own bindings. Moving availability to a `when`
+  property is future work.
 
-### 5. A document's host, without an identifying trigger
+### 5. Selecting a document's host
 
-- A document belongs to a registered host when **at least one of the host's
-  triggers matches it**. The ambiguity rules are unchanged: two hosts
-  matching one document is `Ambiguous`.
-- The safety rule the identifying trigger enforced now applies to **every
-  registered trigger**: each `match:` alternative must require at least one
-  non-null top-level key that `md` does not own
-  (`simplified-schema/lib/src/triggers/identify.rs`). A registered trigger
-  that fails it makes the whole registration unusable, with a
-  `dm.host.identify_too_broad` warning naming the trigger file. Refusing the
-  whole host, rather than dropping one trigger, keeps a host from being
-  half-applied.
-- `kind` is not a key `md` owns (it is not in Darkmatter's baseline schema),
-  so a match on `kind: literal(sequence; required)` identifies a document.
-  A test pins this down.
-- `yaml-schema` files are selected by `kind` as they are today. A YAML
-  document a host's `yaml-schema` claims also belongs to that host.
+- For Markdown, choose a host when any of its registered triggers matches
+  the document's authored frontmatter and path. Use the same match result
+  to decide which payloads apply. When more than one host matches, or
+  competing manifests for the same host match, keep the existing ambiguity
+  behavior and diagnostics.
+- Every registered trigger must pass SimplifiedSchema's
+  [`admit_identifying_trigger`](../../../simplified-schema/lib/src/triggers/identify.rs),
+  which proves that each matching alternative requires a non-null top-level
+  key outside Darkmatter's baseline properties, event keys, and globals.
+  Shared events, path tests, and exclusions alone can't identify a host.
+  Reject the entire registration with `dm.host.identify_too_broad` on the
+  offending trigger.
+- Evaluate ordinary trigger conditions, including required literal values.
+  The old identifying evaluator treated a required property as present for
+  any non-null value, so it would treat `kind: other` as a match for
+  `kind: literal(sequence; required)`. Ordinary matching still requires
+  the value `sequence`. For Claudine fields that identify by presence, carry
+  forward the existing alternatives covering each non-null YAML type. This
+  keeps malformed values such as `sequence: 42` in Claudine's validation.
+  A document with only shared events still uses Darkmatter's types.
+- For YAML, explicitly include registered `yaml-schema` definitions in the
+  kind lookup used by `md schema validate` and the DMLS YAML analysis. Reuse
+  today's rules to determine which kind or kinds a definition claims.
+  Built-in and local definitions retain precedence and their existing
+  failure rules. Consult registered definitions only for a kind that
+  lookup can establish is unclaimed. A selected kind still takes
+  precedence over the document's root `$schema`, as in existing YAML
+  validation. When that tier is needed, multiple
+  different definitions claiming the same kind give a kind-selection error
+  naming the competing definitions. A selected registered definition
+  identifies its host for YAML schema analysis. YAML is checked as a whole
+  document and receives no Markdown trigger layer or lifecycle execution.
+  Include the registration revision in DMLS's YAML contract cache identity
+  and refresh those contracts when the registration changes.
 
 ### 6. When two of a host's triggers declare the same property
 
-Darkmatter applies a host's matching triggers as one layer. When two of them
-declare the same top-level property, it compares the two declarations with
-SimplifiedSchema's `is_subtype` (types only):
+Resolve named types and object composition before comparing declarations.
+Use SimplifiedSchema's
+[`is_definition_subtype_with_definitions`](../../../simplified-schema/lib/src/simplified/subtype.rs),
+which compares property types including unions and resolved references. It
+ignores constraints, presence, defaults, and descriptions. Compare those
+separately before using the relation to choose a complete declaration.
 
-| `a` ⊆ `b` | `b` ⊆ `a` | Result |
-|---|---|---|
-| yes | no | `a` is narrower: `a` applies |
-| no | yes | `b` is narrower: `b` applies |
-| yes | yes | equivalent: allowed only if the declarations are identical (constraints, `required`, default, description); otherwise a conflict |
-| no | no | conflict |
+| Underlying type comparison | Result |
+|---|---|
+| Exactly one type is narrower | Use its full declaration when all other rules and metadata agree |
+| Types are equivalent both ways | Coalesce identical resolved declarations |
+| Types are incomparable, or remaining rules or metadata differ | Report a conflict |
 
-```yaml
-# claudine.yaml
-agent: string
-# inline-composition.yaml
-agent: enum(claude, codex)    # narrower, so it applies whichever file is listed first
-```
+For example, `agent: enum(claude, codex)` narrows `agent: string` when
+their other settings agree. A required string and an optional enum
+conflict because using the enum would change presence as well as type.
+Compare effective null admission, constraints, defaults, descriptions,
+and examples, including nested rules where the underlying shape is
+equivalent. Keep the winning declaration's source location. Choose the
+lexically first bundle path to represent identical declarations. For
+three or more declarations, check every pair so that a narrower third
+declaration cannot hide a conflict between two broader ones.
 
-- A conflict is a `dm.host.trigger_conflict` error on the document, naming
-  both trigger files and the property. It is judged among the triggers that
-  actually matched, because two triggers that never match the same document
-  may declare the same name differently. The result is cached by the set of
-  matched triggers.
-- The outcome never depends on order, which is why the manifest's `files`
-  order means nothing.
-- Objects with different fields and arrays with different items are never
-  subtypes, so they are conflicts. Merging constraints between equivalent
-  types is not attempted.
-- **Scope:** only between triggers of the same host. Layering between layers
-  is unchanged: repository triggers override host triggers, and the
-  document's own `$schema` overrides both.
+- Use the same checked merge for every consumer. Compare only payloads of
+  triggers that matched, including properties inherited through
+  `$extends`. Cache reusable results by host revision and matched trigger
+  set. Any comparison that depends on deferred values must use the existing
+  preparation rules and cannot be cached across different resolved inputs.
+- Support one root union among the matching payloads. Merge ordinary
+  properties into each arm independently, preserving arm order and the
+  relationship among properties inside each arm. A key defines an
+  alternative if some arms omit it or its resolved declaration differs
+  by arm. Keep those
+  keys, such as inline composition's `prompt` and `sections`, owned by the
+  union. When multiple payloads contribute, refuse multiple
+  root unions, nondefault root constraints, or a competing declaration of
+  an alternative-defining key. Move shared fields to a types library and
+  use `$extends` to give one trigger ownership of a compound rule.
+  Inline composition requires the selected arm's `prompt` or `sections`
+  value and allows the other key to be absent or null.
+- Report `dm.host.trigger_conflict` on the document with the host, affected
+  property or root rule, and both trigger paths. Treat it as a schema
+  preparation error. Validation and composition fail, and DMLS shows the
+  error and omits schema features that need the failed layer. A higher
+  layer does not clear the conflict.
+- Keep the established precedence after the host layer is successfully
+  built. Ordinary schema-root triggers override it, and the document's
+  own `$schema` overrides both. Preserve duplicate-file suppression and
+  the existing `--disable schema-triggers` behavior. Claudine's in-process
+  host bindings remain authoritative when it runs its own documents.
 
-### 7. DMLS waits for registration changes to settle
+### 7. DMLS groups registration reloads
 
-DMLS already watches every registration file and reloads on change
-(`darkmatter/docs/topics/host-registration.md`, "Changes are followed without
-a restart"). Today it merges events per path within one batch
-(`darkmatter/dmls/src/workspace/watch.rs`, `coalesce_changes`), so a publish
-that spans several batches reloads several times, and a reload partway
-through can read old and new files together.
+DMLS watches registration files across workspace boundaries. A burst of
+change notifications can arrive in several batches. Group changes to a
+configuration's registration inputs across batches and queue an off-thread
+reload once they have been quiet for a settle window. The window is one
+named constant with an initial value of 300 ms. That value is a common
+editor-debounce starting point, not a measurement: a publish writes about a
+dozen small files, and the window only needs to outlast one publish. Tune
+it after measuring a real publish. Ordinary document edits and unrelated
+configuration invalidation continue on their existing schedules. Keep the
+existing save fallback for editors that cannot watch the relevant folders.
 
-- Changes to registration-watched paths (configuration files, manifests,
-  their files) are debounced: DMLS reloads once, about 300 ms after the last
-  such change. The exact window is a tunable constant.
-- Document edits are not debounced by this; only registration reloads are.
+- Track the manifest, dependencies, missing candidates, and the directories
+  needed to observe creation, deletion, and replacement. Update watches
+  and reanalyze affected open Markdown and YAML documents when the latest
+  load completes. A newer queued load supersedes results from an older
+  in-flight load. An unchanged revision needs no reanalysis.
+- Keep the last loaded view during the short wait. If the completed reload
+  finds the current registration broken, clear that host view and publish
+  the located warning. When files are restored, refresh the view and clear
+  the warning. The publishing protocol provides consistency for concurrent
+  reads, including command-line reads that have no debounce.
+- Test the reload timing with a controlled clock or queue. Exercise a burst
+  spanning batches, a newer change during a load, and a repair that
+  clears stale diagnostics.
 
 ### 8. Hidden `claudine registrations` command
 
 Lists, prints, and publishes what Claudine registers. It reads the same
-embedded set the publish step writes, so the two cannot disagree. Output is
-JSON.
+embedded set used by the publisher. Listing and inspection work without an
+installed registration and report what the running binary would publish.
+The output is JSON.
 
 ```yaml
 $schema:
     registrations:
-        - function(() => file[])
+        - "function(() => file[])"
         - "function((filepath: string) => file_details)"
 types:
     file_kind: enum(manifest, schema-trigger, schema, yaml-schema, namespace-schema, lifecycle)
     file:
         kind: file_kind(required) -> the file's kind within the registration
-        filepath: string(required) -> relative to the registration root
-        hash: string(required) -> xxHash (XXH64, hex) of the exact contents, via biscuit-hash
+        filepath: string(required) -> published path relative to the registration root, using forward slashes
+        hash: string(required) -> XXH64 of the exact published bytes, as 16 lowercase hexadecimal digits
     file_details:
         kind: file_kind(required)
         filepath: string(required)
@@ -276,35 +426,58 @@ types:
         contents: string(required)
 ```
 
-- `claudine registrations` prints `file[]`, the manifest included.
-- `claudine registrations <filepath>` prints that file's `file_details`; an
-  unknown path is an error with a non-zero exit.
-- `claudine registrations publish` writes the files (see 2).
-- The hash is a hex string, not a JSON number: a 64-bit number is rounded by
-  `jq`, JavaScript, and many other parsers.
-- Binary `contents` (images, audio) may be needed later. It would add an
-  encoding field; it is not part of this spec.
+- `claudine registrations` prints a `file[]` sorted by `filepath`, including
+  the manifest and lifecycle artifact. Use biscuit-hash, seed 0, for
+  these fingerprints. Hex text preserves all 64 bits in JSON consumers.
+- `claudine registrations <filepath>` accepts a path exactly as listed
+  and prints its `file_details`. An unknown path exits nonzero. Lookup
+  uses the embedded inventory and requires no filesystem path resolution.
+  The published files are UTF-8, so decoding `contents` and re-encoding
+  it as UTF-8 reproduces the bytes that were hashed.
+- `claudine registrations publish` publishes without changing the user
+  configuration. It prints a JSON list in the same shape after a
+  successful publish, including when the installation was already
+  current. On failure it exits nonzero and reports the cause on stderr.
+- Expose the inventory in the Claudine library so doctor can inspect it
+  without spawning a command. Distinguish the active published set from
+  any retained release or staging area allowed by the publication
+  decision, so doctor can tell expected files from stray ones.
 
 ### 9. Setup and Darkmatter's configuration
 
-The setup sequence stays as documented in
-`claudine/docs/topics/configuration.md` (publish, write Claudine's config and
-complete the `permissions` handshake, register the manifest), with the new
-manifest path. Two behaviors are pinned down by tests, because this host
-showed both broken:
+Keep the sequence documented in
+[Claudine's configuration guide](../../../claudine/docs/topics/configuration.md#darkmatters-permissions).
+Publish first, complete the permissions handshake, and register the
+manifest last. Continue to write through the existing locked config
+transaction. Replace only entries that resolve to Claudine's known old
+default manifest, including equivalent spellings. Deduplicate the new
+entry and preserve other registrations, comments, and settings. Register
+the new manifest even when an existing permissions conflict leaves the
+inline block in force. If publishing fails, leave the existing
+configuration in place.
 
-- `md init` run on an existing `~/.darkmatter.yaml` keeps every `register`
-  entry and a `permissions` reference to Claudine's configuration.
-- Setup run when `~/.darkmatter.yaml` already exists with an inline
-  `permissions` block and no `register` entry ends with the block moved and
-  the entry added.
+Verify the following using temporary home and repository directories:
+
+- `md init` on an existing configuration preserves registration entries
+  and a `permissions` reference to Claudine's configuration.
+- Setup copies an inline block to an absent or matching destination and
+  registers the new manifest even with `register: []`. When the
+  destination has a different block or Darkmatter points to another
+  file, preserve the existing permissions and report the conflict where
+  the handshake already does.
+- Setup is safe to rerun after an interrupted config write. An old
+  reference is replaced even if the old manifest is missing, and a
+  repository-owned entry is not rewritten by user setup.
 
 ## Removed
 
 - `claudine/schemas/claudine-document.yaml` and the manifest's `identify`
   field.
 - Manifest format 1, its `triggers` and `globals` fields, and `globals.yaml`.
-- `~/.claudine/darkmatter-host.yaml` and the versioned revision folders.
+- Darkmatter's legacy host-catalog discovery and the `Legacy` host-selection
+  result, along with lifecycle artifact format 1.
+- Claudine’s old `~/.claudine/darkmatter-host.yaml` entry point and
+  unbounded release history.
 - The per-command registration refresh.
 - The hand-kept embed list in `claudine/lib/src/composition/schema/bundle.rs`.
 
@@ -312,7 +485,7 @@ showed both broken:
 
 - `darkmatter/docs/topics/host-registration.md`: manifest format 2, host
   selection without `identify`, the trigger rule, overlap narrowing, the
-  debounce.
+  reload behavior, and registered YAML kind selection.
 - `claudine/docs/topics/schemas.md` and `claudine/schemas/README.md` (the
   latter cut down to what `claudine/schemas/` now is): the registration
   folder, the published layout, who writes it, hand edits.
@@ -320,32 +493,95 @@ showed both broken:
 - `claudine/docs/cli/`: the hidden `registrations` command, documented for
   maintainers.
 - `simplified-schema/docs/topics/language/schema-documents.md`: the
-  `namespace-schema` kind.
-- The `darkmatter`, `claudine`, and `use-dmls` skills, then
-  `just publish-skills` where a caller skill changed.
+  `namespace-schema` kind and what it can define.
+- The affected package READMEs, the Darkmatter, Claudine, and
+  SimplifiedSchema repo skills, and affected caller skills such as
+  `use-dmls`. Run `just publish-skills` in each area with a caller skill
+  change.
 
 ## Phases
 
-1. **Darkmatter:** manifest format 2, the `namespace-schema` kind, host
-   selection without `identify`, the per-trigger safety rule, overlap
-   narrowing, the DMLS debounce. Tested with fixture hosts.
-2. **Claudine:** the `claudine/registration/` folder and its build-time
-   embedding and build test, the namespace files replacing `globals.yaml`,
-   regenerated artifacts, the new publish layout, removal of the
-   per-command refresh, the `registrations` command, the setup tests in 9.
-3. **Docs and skills** as listed above.
+1. **SimplifiedSchema and Darkmatter:** after object composition is ready
+   and the publication protocol is settled, implement the envelope and
+   kind, catalog and artifact loading, Markdown and YAML host selection,
+   trigger merging, and DMLS reloads. Verify with fixture hosts.
+2. **Claudine:** migrate and check the embedded inventory, regenerate the
+   artifacts, then wire up publication, installation, the inventory
+   command, and setup. Remove the startup refresh and exercise the normal
+   composition and sequence commands against the new bundle.
+3. **Docs and skills:** update the listed sources alongside the behavior
+   each phase changes.
+
+## Acceptance criteria
+
+- A complete bundle works outside this checkout. Missing or unlisted
+  imports, path escapes, duplicate members or namespaces, stale artifacts,
+  and invalid trigger matches refuse the host with source locations.
+  Reordering `files` produces the same host revision and schema.
+- A Markdown file with only shared events stays with Darkmatter. A wrong
+  literal kind fails the trigger match, and malformed Claudine-specific
+  values still receive Claudine validation. Different hosts identifying
+  a document produce ambiguity. A registered YAML kind validates through
+  the CLI and DMLS with the same precedence and collision behavior.
+- Check equivalent declarations, strict narrowing, constraint and presence
+  conflicts, a three-way overlap, and conflicting triggers that never
+  match together. Valid inline composition accepts exactly one of
+  `prompt` or `sections`; another matching trigger cannot loosen that
+  rule. Repository overrides still apply to a successfully prepared layer.
+- Interrupt publication and overlap it with a reader and a second
+  publisher. No reader accepts a mix of releases, and a retry converges
+  on the embedded inventory. An identical publish leaves the manifest
+  and member timestamps alone. DMLS reloads the new view and clears
+  repaired warnings without a restart.
+- Compare inventory paths, hashes, and details with published bytes.
+  Verify setup and ordinary Claudine commands through their normal entry
+  points, including that ordinary commands neither read nor refresh the
+  published bundle.
 
 ## Open questions
 
-- **The `schema-trigger` envelope.** It accepts only `kind`, `match`, and
-  `$schema` today; `md schema validate` ignores a trigger that also has
-  `description`, `types`, or `name`. The draft registration files use all
-  three. Either the envelope admits `description` and `types` (and possibly
-  `name`) in this spec, or the drafts move their types into a types-only
-  library and drop the extra keys.
-- **Legacy host catalogs.** Darkmatter still falls back to a `globals.yaml`
-  plus `globals.lifecycle.json` found in schema roots for a host that is not
-  registered. Claudine no longer needs it. Remove it here, or leave it for a
-  later cleanup?
-- **Debounce window.** 300 ms is a starting point; confirm or adjust once it
-  runs in an editor.
+### How should publication keep a complete registration readable?
+
+Readers open the manifest and its member files separately. Writing the
+manifest last cannot protect a reader that already opened the previous
+manifest. Decide whether an interrupted publish may leave the host
+temporarily unavailable, since this choice changes the format on disk and
+what doctor needs to check.
+
+1. **Use a stable manifest with bounded, immutable release directories.**
+   Stage a complete release in the publication root, then atomically
+   replace `manifest.yaml` to name that release's files. Name the release
+   directory from its content and keep the active release and its immediate
+   predecessor. Clean completed older releases and abandoned staging
+   directories under the publisher lock. A reader whose old files disappear
+   after two publishes checks whether the manifest changed and retries once
+   against the current manifest. Record the expected BLAKE3 digests for
+   every member in the manifest and verify the bytes used for loading.
+   A repair of an edited member restores only the original bytes for that
+   content-addressed directory. It never puts a different release there.
+   The deterministic paths let the inventory describe the exact bytes and
+   destinations without reading the installation.
+   - **Pros:** A failed or interrupted publish leaves the last complete
+     release available. Readers stay lock-free, and the manifest remains
+     the only stable registration path.
+   - **Cons:** The publisher must manage retained directories and cleanup
+     retries, and a reader may need a retry if it spans two upgrades.
+     Doctor must recognize the retained release.
+2. **Use fixed member paths and a manifest with a digest for every member.**
+   Replace member files individually and write the manifest last. The
+   loader verifies the bytes it uses against the BLAKE3 digests before accepting
+   the profile. On a mismatch, reread the manifest once and retry if it
+   changed. Include the lifecycle and function artifacts in the digest
+   check. If publishing was interrupted, rerun publication to repair the
+   files.
+   - **Pros:** The disk layout stays simple, with one member tree and
+     stable paths for inspection. Readers still cannot accept mixed
+     content.
+   - **Cons:** Concurrent readers can see a registration failure during a
+     normal upgrade. Interruption can leave the installation unusable
+     until setup or doctor repairs it.
+
+**Recommendation:** Use bounded, immutable release directories. Retaining
+one predecessor addresses the disk growth that motivated the redesign and
+keeps a working registration available after a failed update. It also
+avoids relying on editor debounce to hide a partially written bundle.
