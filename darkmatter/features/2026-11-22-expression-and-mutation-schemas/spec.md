@@ -1,7 +1,7 @@
 ---
 kind: feature
 created: 2026-11-22
-status: human-in-the-loop
+status: finalized-spec
 area: darkmatter
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -33,9 +33,7 @@ reviewed: true
 reviewed-by: "codex/gpt-6.2-sol"
 reviewed-on: "2026-11-22"
 review-iterations: 0
-needs-rulings: true
-required-rulings:
-    - Choose how hosts can add and execute custom lifecycle mutations.
+needs-rulings: false
 ---
 
 # Expression and mutation schemas
@@ -137,8 +135,8 @@ types:
 
 ### Publish and load the declarations
 
-- The manifest moves to `format_version: 3`. Put the new catalog kinds in
-  `files` and remove the `functions` field, including empty lists. Keep the
+- The manifest moves to `format_version: 3`. Put a host's
+  `expression-schema` catalogs in `files` and remove the `functions` field, including empty lists. Keep the
   published manifest path and the separate `lifecycle` field introduced by host
   registration v2. A reader and publisher must agree on the format. An
   unsupported-version diagnostic names the version read and tells the user to
@@ -163,8 +161,14 @@ types:
   catalogs and collisions with built-in names or aliases. Each host has its own
   set, so different hosts can use the same name. Only the selected host's
   declarations apply to a document. Manifest order never decides which callable
-  wins. Host lifecycle action names must also be unique in that host and cannot
-  take a built-in action's spelling or a reserved stack key such as `when`.
+  wins.
+- **Hosts cannot add lifecycle actions in this spec.** `mutation-schema`
+  describes Darkmatter's built-in actions only. A host manifest that lists a
+  `mutation-schema` file is refused with a `dm.host.registration` diagnostic
+  saying host-defined actions are not supported. Host services that exist
+  today (such as `say` and `retry`) are unchanged. Letting a host register
+  its own actions, with a runtime handler, event admission, and narrowing
+  after the action, is a separate later spec.
 - Build the published inventory and the `claudine registrations` listing from
   the same embedded set. Enumerate the two schema kinds and any expression
   facts companions in the inventory's file kinds. Verify the source set before
@@ -193,8 +197,6 @@ types:
   lifecycle action restrictions, and execution permissions. Defer `when` on
   expression, mutation, and namespace schemas together. A second source of
   event availability could let the editor accept an action the host rejects.
-  The ruling below determines how a host declares and admits a custom mutation
-  into its existing event rules.
 - Host registration v2 removes legacy schema-root host discovery, so a
   host's callable catalogs reach Darkmatter only through a registered
   manifest. A catalog file found in a schema root is never an implicit
@@ -235,31 +237,5 @@ types:
 - The publisher, listing, and doctor agree on all published members. Verify the
   unsupported-version diagnostic and the upgrade in the existing install
   location.
-- Once the custom mutation ruling is resolved, show that a permitted lifecycle
-  action gets the same operand checks in the editor and host, a disallowed
-  action fails in the appropriate scope, and passive checks never dispatch it.
-
-## Open Questions
-
-### How can hosts add and execute custom lifecycle mutations?
-
-The current lifecycle parser and executor know a fixed set of actions, including
-host services such as `say` and `retry`. Publishing a signature alone cannot tell
-the parser where an action is legal, the executor how to dispatch it, or the
-analyzer which values a successful action might change. An analyzer that keeps a
-type fact after the action invalidates it can give incorrect advice about later
-calls.
-
-| Option | Pros | Cons |
-|---|---|---|
-| **Add a host-local registration for signature-backed actions.** The host binds each declaration to a Rust handler and explicitly admits it to events through its runtime registry. Publish the corresponding passive action and event data. Use the existing operand binding and stack rules, and conservatively discard narrowing on document values the action could change. | Fulfills host extension with matching editor, CLI, and runtime checks. Keeps existing action syntax, event restrictions, and execution authority. | Extends the lifecycle parser, executor, schema projection, and artifact. Conservative narrowing may cause extra warnings after an action. |
-| **Ship the mutation kind for built-ins first.** Keep host lifecycle actions limited to the existing services and defer registration of new mutation actions. | Delivers the catalog migration without changing lifecycle dispatch or the artifact format. | Hosts still need Darkmatter code changes for new actions, so this phase delivers only the expression side of the host extension goal. |
-
-**Recommendation.** Add the host-local registration. Require the host's
-runtime and passive event declarations to agree on the admitted actions, and
-require any custom handler to use the host's existing permission checks for
-writes and other effects. Keep `md compose`'s existing foreign-event projection.
-In a shared event, a host-only action follows the existing behavior for
-unsupported host verbs, with a warning and no dispatch. Begin with conservative
-narrowing after the action. More precise tracking of what a handler can change
-can be added independently when there is a demonstrated need.
+- A host manifest that lists a `mutation-schema` file is refused, and the
+  built-in actions keep their current event rules and operand checks.
