@@ -17,6 +17,10 @@
 //! - a profile is published only when all of it loads: no partial globals,
 //!   functions, lifecycle events, or trigger payloads are ever exposed.
 //!
+//! [`bundle::load_snapshot`] reads a format 2 manifest, which lists every
+//! bundle file with its digest, into one verified snapshot; profiles are
+//! still loaded from format 1 manifests.
+//!
 //! Registration is passive: it writes nothing, fetches nothing, prompts for
 //! nothing, installs no function handler, and runs no command. A profile is
 //! analysis data, never runtime authority.
@@ -28,6 +32,7 @@
 //!
 //! User-facing guide: `darkmatter/docs/topics/host-registration.md`.
 
+pub mod bundle;
 pub mod manifest;
 mod selection;
 

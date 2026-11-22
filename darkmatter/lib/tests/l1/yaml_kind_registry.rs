@@ -132,14 +132,15 @@ fn validated(result: Result<YamlOutcome, SchemaError>) -> darkmatter::markdown::
 // ── Shipped definitions ────────────────────────────────────────────────────
 
 #[test]
-fn the_shipped_registry_claims_schema_yaml_schema_and_schema_trigger() {
+fn the_shipped_registry_claims_the_four_envelope_kinds() {
     let registry = darkmatter::markdown::schemas::shipped_kind_registry();
     let claimed: Vec<&str> = registry.claims().map(|(kind, _)| kind).collect();
-    assert_eq!(claimed, ["schema", "schema-trigger", "yaml-schema"]);
+    assert_eq!(claimed, ["namespace-schema", "schema", "schema-trigger", "yaml-schema"]);
     for (kind, path) in [
         ("schema", "simplified-schema/schemas/schema.yaml"),
         ("yaml-schema", "simplified-schema/schemas/yaml-schema.yaml"),
         ("schema-trigger", "simplified-schema/schemas/schema-trigger.yaml"),
+        ("namespace-schema", "simplified-schema/schemas/namespace-schema.yaml"),
     ] {
         assert_eq!(healthy_source(&registry, kind), DefinitionSource::Shipped(path));
     }
@@ -150,12 +151,13 @@ fn the_shipped_registry_claims_schema_yaml_schema_and_schema_trigger() {
             PathBuf::from("simplified-schema/schemas/schema.yaml"),
             PathBuf::from("simplified-schema/schemas/yaml-schema.yaml"),
             PathBuf::from("simplified-schema/schemas/schema-trigger.yaml"),
+            PathBuf::from("simplified-schema/schemas/namespace-schema.yaml"),
         ]
     );
 }
 
 /// Each shipped file, as compiled in, validates against the shipped
-/// registry: all three through `yaml-schema.yaml`, which therefore validates
+/// registry: all four through `yaml-schema.yaml`, which therefore validates
 /// itself.
 #[test]
 fn each_shipped_definition_validates_against_the_shipped_yaml_schema_definition() {
@@ -168,11 +170,39 @@ fn each_shipped_definition_validates_against_the_shipped_yaml_schema_definition(
             include_str!("../../../../simplified-schema/schemas/yaml-schema.yaml"),
         ),
         ("simplified-schema/schemas/schema-trigger.yaml", include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml")),
+        (
+            "simplified-schema/schemas/namespace-schema.yaml",
+            include_str!("../../../../simplified-schema/schemas/namespace-schema.yaml"),
+        ),
     ] {
         let validation = validated(schemas.validate_yaml_document(text, Path::new(path)));
         assert_eq!(validation.route, Route::Kind("yaml-schema".into()), "{path}");
         assert_eq!(validation.definition, "built-in simplified-schema/schemas/yaml-schema.yaml");
         assert!(validation.report.valid, "{path}: {:?}", validation.report.problems);
+    }
+}
+
+/// A `types` table names a type `$extends` like any other: a definition
+/// holding one claims its kind, and the definition and a `kind: schema`
+/// library holding one are each valid documents of their shipped kind.
+#[test]
+fn a_types_table_entry_named_extends_is_an_ordinary_declaration() {
+    let fixture = Fixture::new();
+    let definition = fixture.package().join("schemas/roster.yaml");
+    let text = ROSTER_DEFINITION.replace("types:\n", "types:\n    $extends: string\n");
+    write(&definition, &text);
+    let document = fixture.package().join("docs/roster.yaml");
+    let context = fixture.context(&document, &[]);
+    assert_eq!(healthy_source(&registry(&context), "roster"), DefinitionSource::File(definition.clone()));
+
+    let schemas = DarkmatterSchemas::new(context).with_kind_registry(darkmatter::markdown::schemas::shipped_kind_registry());
+    for (path, text, kind) in [
+        (definition, text.as_str(), "yaml-schema"),
+        (fixture.package().join("schemas/library.yaml"), "kind: schema\ntypes:\n    $extends: string\n", "schema"),
+    ] {
+        let validation = validated(schemas.validate_yaml_document(text, &path));
+        assert_eq!(validation.route, Route::Kind(kind.into()), "{text}");
+        assert!(validation.report.valid, "{text}: {:?}", validation.report.problems);
     }
 }
 

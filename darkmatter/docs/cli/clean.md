@@ -403,7 +403,7 @@ file, or `null` for a trigger embedded in a host program:
     "source": "darkmatter.schema",
     "code": "dm.schema.invalid_trigger",
     "path": "/repo/schemas/memory.yaml",
-    "message": "ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: schema-trigger envelope supports only `kind`, `match`, and `$schema`; found unknown keys: name, description"
+    "message": "ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: schema-trigger envelope supports only `kind`, `name`, `description`, `match`, `$schema`, and `types`; found unknown keys: title, notes"
   }
 ]
 ```

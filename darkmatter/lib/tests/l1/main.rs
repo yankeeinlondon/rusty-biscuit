@@ -152,6 +152,7 @@ mod expression_strict_equality;
 mod expression_type_scope;
 mod host_functions;
 mod host_registration;
+mod host_registration_snapshot;
 mod host_selection;
 mod foreign_document_compose;
 #[cfg(feature = "effects-instrumentation")]
