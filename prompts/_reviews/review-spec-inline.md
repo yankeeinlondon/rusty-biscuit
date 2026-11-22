@@ -7,7 +7,7 @@ basename: "{{ basename(spec) }}"
 dir: "{{ dirname(spec) }}"
 
 start:
-    message: "👀 reviewing the specification `{{[parent_dir(spec)}}` _in_ **{{ctx.repo}}** repo [**branch:** {{ctx.branch}}, **agent:** {{ctx.agent}}/{{ctx.model}}, **host:** {{ctx.hostname}}]"
+    message: "👀 reviewing the specification `{{ parent_dir(spec) }}` _in_ **{{ctx.repo}}** repo [**branch:** {{ctx.branch}}, **agent:** {{ctx.agent}}/{{ctx.model}}, **host:** {{ctx.hostname}}]"
 success:
     say: |-
         {{
