@@ -1,14 +1,12 @@
 ---
 kind: feature
 created: 2026-11-22
-status: human-in-the-loop
+status: finalized-spec
 reviewed: true
 reviewed-by: "codex/gpt-6.2-sol"
 reviewed-on: "2026-11-22"
 review-iterations: 0
-needs-rulings: true
-required-rulings:
-    - Decide whether a schema-trigger may carry an optional `name`.
+needs-rulings: false
 $schema:
     status: |-
         enum(
@@ -130,9 +128,25 @@ flowchart LR
   `$schema`. A trigger's `types` are local to that trigger: its `$schema`
   can name them, and other files cannot import them (shared types still
   belong in a types-only library). The envelope stays closed to every
-  other key. This applies to every trigger, registered or not, so update
-  the trigger definition in `simplified-schema/schemas/schema-trigger.yaml`
-  and trigger discovery together. Repair the draft triggers' match
+  other key except `name` (below). This applies to every trigger,
+  registered or not, so update the trigger definition in
+  `simplified-schema/schemas/schema-trigger.yaml` and trigger discovery
+  together.
+- Admit an optional `name` on `schema-trigger` files and on types-only
+  `kind: schema` libraries (the two kinds the drafts give one), and update
+  `schema-trigger.yaml` and `schema.yaml` in `simplified-schema/schemas/`.
+  - It is a kebab-case identifier: lowercase letters, digits, and inner
+    single dashes, starting with a letter (`inline-compose-schema`).
+  - It must be unique among the files of one registration, and among the
+    files of one schema root. A duplicate is reported on both files.
+  - It is a display label, never a reference: imports and every other
+    lookup still use the file path. Diagnostics, `md schema triggers`, and
+    the `claudine registrations` listing show it beside the path, for
+    example `inline-compose-schema (schemas/inline-composition.yaml)`.
+    `claudine registrations` adds it to each `file` and `file_details`
+    entry as an optional `name`.
+  - A file without one is shown by its path alone, as today.
+- Repair the draft triggers' match
   conditions and broken imports before shipping them. For example,
   `composition.yaml` needs a real `match` and a defined
   `common-attributes` type. `inline-composition.yaml` uses `group` for
@@ -452,10 +466,12 @@ types:
         kind: file_kind(required) -> the file's kind within the registration
         filepath: string(required) -> published path relative to the registration root, using forward slashes
         hash: string(required) -> XXH64 of the exact published bytes, as 16 lowercase hexadecimal digits
+        name: string -> the file's optional display name, when it declares one
     file_details:
         kind: file_kind(required)
         filepath: string(required)
         hash: string(required)
+        name: string
         contents: string(required)
 ```
 
