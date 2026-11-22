@@ -8,7 +8,7 @@ reviewed-on: "2026-11-22"
 review-iterations: 0
 needs-rulings: true
 required-rulings:
-    - Choose how publishing keeps a complete registration readable during updates.
+    - Decide whether a schema-trigger may carry an optional `name`.
 $schema:
     status: |-
         enum(
@@ -160,8 +160,35 @@ flowchart LR
 The stable entry point is
 `~/.claudine/registrations/darkmatter/manifest.yaml`. The manifest points
 to a complete set of published files. Preserve the source tree's relative
-paths within that set so imports work. The publication protocol and exact
-member paths depend on the decision under [Open questions](#open-questions).
+paths within that set so imports work.
+
+```text
+~/.claudine/registrations/darkmatter/
+├── manifest.yaml           lists every member and its BLAKE3 digest
+├── globals.lifecycle.json
+└── schemas/…               the files of claudine/registration/
+```
+
+There is one member tree at fixed paths. There are no release or
+version folders.
+
+- **Publishing.** Take the publisher lock. Write each changed member to a
+  temporary name beside it and rename it into place (with retry for
+  Windows file replacement). Delete members no longer in the inventory.
+  Write the manifest last, the same way. An identical publish writes
+  nothing.
+- **Reading.** The loader hashes the exact bytes it uses for each member
+  and compares them with the manifest's digest. On any mismatch or
+  missing member it reads the manifest again once and retries if the
+  manifest changed. If the files still do not match, it refuses the host
+  with a located `dm.host.registration` diagnostic. A reader therefore
+  never accepts a mix of two publishes. At worst it reports the host as
+  briefly unavailable during an upgrade.
+- **Interruption.** A publish that stops partway leaves files that do not
+  match the manifest, so the host is unavailable until the next publish.
+  `claudine doctor` reports this state and `doctor --fix` repairs it by
+  publishing again. A stray temporary file left by an interrupted rename is
+  removed by the next publish.
 
 - Claudine setup and the hidden `claudine registrations publish` command
   publish the bundle. Call the hidden command from Claudine's
@@ -188,10 +215,6 @@ member paths depend on the decision under [Open questions](#open-questions).
 
 ### 3. Manifest format 2
 
-This example shows the fields common to both publication options, with
-direct member paths for illustration. The final publication protocol also
-defines the fields needed to verify or locate the complete set.
-
 ```yaml
 # ~/.claudine/registrations/darkmatter/manifest.yaml
 kind: darkmatter-host
@@ -210,7 +233,17 @@ files:
     - ./schemas/shared.yaml
 lifecycle: ./globals.lifecycle.json
 functions: []
+digests:
+    ./schemas/composition.yaml: "<64 hex digits>"
+    # … one entry per member above, including the lifecycle artifact
+    ./globals.lifecycle.json: "<64 hex digits>"
 ```
+
+- `digests` maps every member path (each `files` entry, the lifecycle
+  artifact, and each function catalog and facts file) to the BLAKE3 hash of
+  its exact bytes, as 64 lowercase hexadecimal digits, computed with
+  biscuit-hash. A member without a digest, or a digest without a member,
+  refuses the manifest.
 
 - The envelope is closed. Require each field above, including the integer
   version `2` and an explicit `functions: []` for a host with no function
@@ -439,9 +472,9 @@ types:
   successful publish, including when the installation was already
   current. On failure it exits nonzero and reports the cause on stderr.
 - Expose the inventory in the Claudine library so doctor can inspect it
-  without spawning a command. Distinguish the active published set from
-  any retained release or staging area allowed by the publication
-  decision, so doctor can tell expected files from stray ones.
+  without spawning a command. Anything in the publication root that is
+  not an inventory member (other than a leftover temporary file from an
+  interrupted rename) is a stray file for doctor to report.
 
 ### 9. Setup and Darkmatter's configuration
 
@@ -477,7 +510,7 @@ Verify the following using temporary home and repository directories:
 - Darkmatter's legacy host-catalog discovery and the `Legacy` host-selection
   result, along with lifecycle artifact format 1.
 - Claudine’s old `~/.claudine/darkmatter-host.yaml` entry point and
-  unbounded release history.
+  versioned revision folders.
 - The per-command registration refresh.
 - The hand-kept embed list in `claudine/lib/src/composition/schema/bundle.rs`.
 
@@ -502,7 +535,7 @@ Verify the following using temporary home and repository directories:
 ## Phases
 
 1. **SimplifiedSchema and Darkmatter:** after object composition is ready
-   and the publication protocol is settled, implement the envelope and
+   is ready, implement the envelope and
    kind, catalog and artifact loading, Markdown and YAML host selection,
    trigger merging, and DMLS reloads. Verify with fixture hosts.
 2. **Claudine:** migrate and check the embedded inventory, regenerate the
@@ -529,7 +562,9 @@ Verify the following using temporary home and repository directories:
   `prompt` or `sections`; another matching trigger cannot loosen that
   rule. Repository overrides still apply to a successfully prepared layer.
 - Interrupt publication and overlap it with a reader and a second
-  publisher. No reader accepts a mix of releases, and a retry converges
+  publisher. No reader accepts files that do not match the manifest's
+  digests, an interrupted publish leaves the host refused until the next
+  publish, and a retry converges
   on the embedded inventory. An identical publish leaves the manifest
   and member timestamps alone. DMLS reloads the new view and clears
   repaired warnings without a restart.
@@ -537,51 +572,3 @@ Verify the following using temporary home and repository directories:
   Verify setup and ordinary Claudine commands through their normal entry
   points, including that ordinary commands neither read nor refresh the
   published bundle.
-
-## Open questions
-
-### How should publication keep a complete registration readable?
-
-Readers open the manifest and its member files separately. Writing the
-manifest last cannot protect a reader that already opened the previous
-manifest. Decide whether an interrupted publish may leave the host
-temporarily unavailable, since this choice changes the format on disk and
-what doctor needs to check.
-
-1. **Use a stable manifest with bounded, immutable release directories.**
-   Stage a complete release in the publication root, then atomically
-   replace `manifest.yaml` to name that release's files. Name the release
-   directory from its content and keep the active release and its immediate
-   predecessor. Clean completed older releases and abandoned staging
-   directories under the publisher lock. A reader whose old files disappear
-   after two publishes checks whether the manifest changed and retries once
-   against the current manifest. Record the expected BLAKE3 digests for
-   every member in the manifest and verify the bytes used for loading.
-   A repair of an edited member restores only the original bytes for that
-   content-addressed directory. It never puts a different release there.
-   The deterministic paths let the inventory describe the exact bytes and
-   destinations without reading the installation.
-   - **Pros:** A failed or interrupted publish leaves the last complete
-     release available. Readers stay lock-free, and the manifest remains
-     the only stable registration path.
-   - **Cons:** The publisher must manage retained directories and cleanup
-     retries, and a reader may need a retry if it spans two upgrades.
-     Doctor must recognize the retained release.
-2. **Use fixed member paths and a manifest with a digest for every member.**
-   Replace member files individually and write the manifest last. The
-   loader verifies the bytes it uses against the BLAKE3 digests before accepting
-   the profile. On a mismatch, reread the manifest once and retry if it
-   changed. Include the lifecycle and function artifacts in the digest
-   check. If publishing was interrupted, rerun publication to repair the
-   files.
-   - **Pros:** The disk layout stays simple, with one member tree and
-     stable paths for inspection. Readers still cannot accept mixed
-     content.
-   - **Cons:** Concurrent readers can see a registration failure during a
-     normal upgrade. Interruption can leave the installation unusable
-     until setup or doctor repairs it.
-
-**Recommendation:** Use bounded, immutable release directories. Retaining
-one predecessor addresses the disk growth that motivated the redesign and
-keeps a working registration available after a failed update. It also
-avoids relying on editor debounce to hide a partially written bundle.
