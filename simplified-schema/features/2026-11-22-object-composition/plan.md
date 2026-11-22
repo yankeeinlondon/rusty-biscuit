@@ -59,6 +59,32 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter/named_references.rs
+- darkmatter/dmls/src/providers/frontmatter/composition_tests.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/named_types.rs
+- darkmatter/dmls/src/diagnostics/named_types.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/object_composition_editor.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+docs_updated_during_phase_4:
+- simplified-schema/README.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/local-type-references.md
+- simplified-schema/docs/topics/diagnostics.md
+- darkmatter/docs/topics/schemas/parsing/grammar.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/docs/use-skills/use-dmls/schemas.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/simplified-schema/SKILL.md
+- darkmatter/docs/use-skills/use-dmls/schemas.md
 ---
 
 # Object composition implementation plan
@@ -171,21 +197,21 @@ Checkpoint: run the export and cursor slices after integration. Reparse exported
 
 ### Wave 2
 
-- [ ] Complete schema operands
+- [x] Complete schema operands
   - Own `providers/frontmatter.rs` and `providers/frontmatter/named_references.rs`. Implement Rule 13 using the Phase 3 cursor role. For incomplete YAML, use the schema-authoring state's semantic paths and the existing flow and indentation scanners to find scalar, flow-sequence and block-sequence operands. Normalize quoted keys through the YAML scanner. Preserve the exact implicit root-union arm when deriving local candidates.
   - Preserve the ordinary eligible local and external name suggestions and import-path conventions. Filter known ineligible targets through the passive catalogs, including alias chains, and replace only the active portion of the operand. Do not run the resolver or read files in a completion request.
 
-- [ ] Track editor dependencies
+- [x] Track editor dependencies
   - Own `overlay/{mod,named_types}.rs` and `diagnostics/{named_types,frontmatter,codes}.rs`. Collect composition targets in authored AST traversal and in tolerant YAML collection even when a sibling has malformed syntax. Reuse open-buffer reads and existing cache invalidation. Hydrate the catalog with transitive alias targets through the existing overlay read boundary where required for eligibility filtering.
   - Project the full failing operand at its authored site and the terminal target declaration as related information for a known ineligible definition. For an indirect composition failure, keep navigation back to the receiver and a related location at the failing declaration. Retain typed causes for missing-file watches. Reuse the existing named-type diagnostic code family.
 
-- [ ] Update author guidance
+- [x] Update author guidance
   - Own the SimplifiedSchema README, `simplified-schema/docs/topics/language/{objects-and-named-types,index,local-type-references}.md`, `simplified-schema/docs/topics/diagnostics.md`, `darkmatter/docs/topics/schemas/parsing/grammar.md`, `.claude/skills/simplified-schema/SKILL.md`, and `darkmatter/docs/use-skills/use-dmls/schemas.md`. Explain the two composition forms with runnable examples, authored scope, lookup and collisions, order and replacement, origin, constraints and patterns, recursion with one child edge, YAML export, and the migration for literal `$extends`. Use a compact Mermaid flow for assembly, selection, and child resolution.
   - Correct the older rejection of nested mappings in `objects-and-named-types.md` using the existing `parse_mapping_atom` behavior as authority. Document the new diagnostic from Rules 2 and 10 and the exact hover and completion behavior. State that composed-root layers can still validate together and have no single authored YAML export. Keep the README an overview, and use current topic pages as the skill's references. Leave publication for Phase 5.
 
 ### Tasks after Wave 2
 
-- [ ] Exercise editor sessions
+- [x] Exercise editor sessions
   - Add `darkmatter/dmls/tests/l1/object_composition_editor.rs` and register it in the existing L1 harness. Follow the `LspWorkspace` and `LspFixture` patterns in `recursive_schema_editor.rs`. Cover valid and partially typed operands in both forms, including quoted and flow/block list items, completion edits and filtered suggestions, implicit union-arm scopes, hover and go-to-definition, and a diagnostic on the second of two operands that name the same file.
   - Open an importer and imported file in the test session with unchanged disk contents. Change the imported definition in its buffer from an eligible object to an ineligible type and back to an object with renamed and newly required members. Wait on the existing diagnostics/session synchronization, then assert the error appears and clears, supplied-value diagnostics refer to the correct document, and reading a consuming Markdown document through the session offers the new keys with the old keys absent. Add a missing-file appearance case using the existing watched-file path. Run in L1 with no real editor or terminal.
 

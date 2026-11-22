@@ -125,31 +125,73 @@ decisions-for-review:
         payload (one allocation per lookup; 8 call sites in
         `projection.rs` and `typing.rs`), or shrink `SchemaShape` by merging
         `composition` and `composed_sites` into one boxed field.
+    - |-
+        Phase 4: a Markdown document's inline `$schema` is now resolved with
+        the open editor buffers and with the resolver's read and probe
+        records, so an unsaved edit of an imported file, or a missing import
+        that appears, refreshes the importer. Before, that path read only
+        disk and recorded no probes, which also affected ordinary
+        `Name@file` imports. Every dependency the overlay cache records for
+        such a document is now hashed from the open buffer when one exists.
+        Alternative: keep Markdown importers on disk, which contradicts the
+        spec's unsaved-refresh requirement. Undoing it is about 30 lines in
+        `overlay/mod.rs` (`schema_for`, `collect_dep_hashes`).
+    - |-
+        Phase 4: `SchemaError::ComposedMember` (a lowering failure inside a
+        copied member) is reported with the named-type code
+        `dm.schema.invalid_type_definition` at the member's declaration,
+        like the other composition errors, rather than as
+        `dm.schema.prepare` on the whole `$schema`. Reverting is a one-line
+        change in `diagnostics/named_types.rs::is_named_type_error`.
+    - |-
+        Phase 4: the editor's import catalog follows alias and composition
+        targets of imported definitions into further files, at most 32 files,
+        resolving each from the importing file's folder but with the
+        consuming document's schema roots, since the imported file's own
+        roots are not known there. Only exported definitions that are
+        aliases or that compose at their top level are followed, not targets
+        nested inside their properties. A target that is not followed is
+        treated as unknown, so completion keeps it. Alternative: follow every
+        target in each imported file, which reads more files per keystroke.
+    - |-
+        Phase 4: `simplified_schema::simplified::grammar::parse_extends_operand`
+        is now public, so DMLS can read a `$extends` item from a buffer that
+        does not parse as a whole. Alternative: a new public wrapper with a
+        narrower signature. Either way it is one function.
+    - |-
+        Phase 4: `$extends` completion is routed by a check in
+        `providers/frontmatter.rs` that runs before the meta-schema kind
+        lookup, rather than by adding a new kind to `MetaSchemaKind` in
+        `overlay/schema.rs`. While a buffer does not parse, local names come
+        from the buffer with the cursor's line blanked and each entry parsed
+        on its own; a one-line flow `$schema: {...}` then falls back to
+        names without definitions, so nothing is filtered there. Moving the
+        check into the kind lookup is a small change.
 message-to-agent: |-
-    Phase 3 landed the authored export and the cursor role. For Phase 4:
+    Phase 4 landed DMLS operand completion, dependency tracking, diagnostics,
+    the editor-session tests (`darkmatter/dmls/tests/l1/object_composition_editor.rs`),
+    and the documentation. For Phase 5:
 
-    - Cursor API (`simplified/cursor.rs`, reexported at the crate root):
-      `SchemaCursorRole::CompositionOperand { part, operand_span }` with
-      `CompositionOperandPart::{Name, Reference { name }}`. `token` and
-      `token_span` cover the active half only (the name, or the text after
-      `@`); `operand_span` covers the whole operand typed so far. After
-      `...` the existing type-definition locators report it, with a path
-      ending in `Spread(i)`. For a `$extends` scalar or one framed sequence
-      item, call `locate_composition_operand_cursor(text, offset, cursor)`
-      or `locate_composition_operand_cursor_in_scalar`; their path is
-      always root, so the caller adds the `$extends` / `union_arm(i)` path.
-    - `darkmatter/dmls/src/providers/frontmatter.rs::type_definition_completions`
-      has a placeholder arm `SchemaCursorRole::CompositionOperand { .. } =>
-      return Vec::new()`. Phase 4 replaces it with real operand completion.
-    - Existing limitation, not caused by this feature: a block-mapping
-      value written as a multi-line quoted scalar (for example
-      `p: '{ a: string,\n    n: number }'`) fails to load with "could not
-      project SimplifiedSchema expression spans through YAML source", with
-      or without a spread. Single-line quoted, folded (`>-`), anchored, and
-      aliased values work. Avoid it in DMLS fixtures.
-    - Pre-existing breakage from earlier phases is unchanged. `just lint`
-      in `darkmatter/` stops on `darkmatter-cli`'s L1 tests, which
-      `include_str!` the deleted `claudine/schemas/sequence-types.yaml`.
+    - `darkmatter/docs/use-skills/use-dmls/schemas.md` has a new subsection
+      "Reusing an object's properties"; `md compose` on it succeeds. Publish
+      with `just publish-skills` and check the installed copy.
+    - Pre-existing failures, unchanged by this phase:
+      `simplified-schema` `shipped_corpus::claudine_bundle_and_its_triggers_resolve_from_supplied_sources`
+      (reads the deleted `claudine/sequence.yaml` sequence types), plus the
+      Darkmatter failures recorded in the Phase 4 log (`shipped_schema_corpus::*`,
+      `darkmatter-cli` L1 not compiling because it `include_str!`s the deleted
+      `claudine/schemas/sequence-types.yaml`, and
+      `claudine_schema_discovery::removed_sequence_keys_are_reported_at_their_paths`).
+      `claudine` itself does not compile (`composition/schema/bundle.rs`
+      `include_str!`s the same deleted file), so Phase 5's root
+      `cargo check -p claudine ...` will fail for that reason alone.
+    - The documentation subagent observed that `md schema validate` rejects a
+      `types` table entry named `$extends` even with a valid operand value
+      (admission parses `types` as a schema object; see the Phase 1 decision).
+      The docs say to avoid such a name.
+    - Two passive DMLS paths still read disk: the re-assembly after a slot
+      failure in `overlay/mod.rs::schema_for`, and the related-location text
+      lookup in `diagnostics/named_types.rs::file`.
 source_files_during_phase_2:
     - simplified-schema/lib/src/errors.rs
     - simplified-schema/lib/src/lib.rs
@@ -181,6 +223,32 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/src/providers/frontmatter/composition_tests.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/object_composition_editor.rs
+    - simplified-schema/lib/src/simplified/grammar.rs
+docs_updated_during_phase_4:
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/language/objects-and-named-types.md
+    - simplified-schema/docs/topics/language/index.md
+    - simplified-schema/docs/topics/language/local-type-references.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/simplified-schema/SKILL.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
 ---
 
 # Implementation Log for 2026-11-22-object-composition (5 phases)
@@ -599,3 +667,160 @@ instead, and all of them work.
 
 No `docs/` page changed: the plan assigns composition documentation to
 Phase 4.
+
+## Phase 4
+
+### How the work was split
+
+Three subagents ran in parallel, each limited to its own files. The
+coordinator then wrote the session tests, registered them, fixed two stale
+DMLS docs and the grammar module's EBNF, and ran the gates.
+
+- **Operand completion** (`providers/frontmatter.rs`,
+  `providers/frontmatter/named_references.rs`, new
+  `providers/frontmatter/composition_tests.rs`).
+  - The placeholder arm for `SchemaCursorRole::CompositionOperand` became
+    real completion.
+    - Before `@`: eligible local names (a keyword-colliding name is
+      spelled `Name@this`) and imported `Name@target` names. The edit
+      replaces the whole operand typed so far (`operand_span`).
+    - After `@`: `this`, the files that export the name, and the same path
+      suggestions `$schema:` values get. The edit replaces only the
+      reference half.
+    - No keywords, arrays, scaffolds or constraints are offered.
+  - Filtering follows alias chains with a visited set, locally and into the
+    catalog. It drops unions, arrays, primitives (including `object`),
+    functions, slots, tuples, alias cycles, the receiving declaration, and
+    objects whose local operands lead back to the receiver. A target it
+    cannot see is kept. Completion runs no resolver and reads no file.
+  - `$extends` values are read with the operand locators in the scalar,
+    quoted-key, flow-sequence-item and block-sequence-item forms. This
+    happens only in schema-object positions: standalone `$schema` and
+    `types.X` mappings, the frontmatter `$schema` declaration, and
+    frontmatter values whose recorded owner is a schema or type definition.
+    A `$extends` data key and a `types` table key keep their old behavior.
+  - The local scope keeps the exact implicit root-union arm.
+  - Hover and go-to-definition already worked through
+    `AuthoredDeclaration::reference_at`, because Phase 1 projects each
+    operand's `ImportName` span. Tests now cover them.
+- **Dependencies and diagnostics** (`overlay/{mod,named_types}.rs`,
+  `diagnostics/{named_types,frontmatter,codes}.rs`; `parse_extends_operand`
+  in `simplified/grammar.rs` made public).
+  - The catalog collects inline-spread and `$extends` targets from the
+    authored AST and from tolerant YAML, so one malformed sibling or item
+    hides nothing else.
+  - The catalog follows imported aliases and compositions into further
+    files, at most 32 (`MAX_TRANSITIVE_FILES`), through the existing
+    buffer-aware read. The new `NamedTypeCatalog::imported_from` gives
+    access to those files.
+  - Markdown `$schema` resolution (`OverlayCache::schema_for`) now uses
+    open buffers and records the resolver's reads and probes, so an unsaved
+    import edit or a newly created missing file refreshes the importer.
+    This was a gap for every Markdown named-type import, not only for
+    composition.
+  - `file_failures` and the error-dependency walk look through
+    `CompositionReference` and `ComposedMember` to the typed cause.
+  - The three composition errors use `dm.schema.invalid_type_definition`.
+    - `InvalidCompositionTarget` is ranged on the whole operand, with
+      "`name` is defined here" related at the final declaration, even
+      through an alias in another file.
+    - An indirect failure ranges this document's reference into the other
+      file and relates the operand there.
+    - Operands are told apart by source path, never by spelling.
+- **Documentation**: listed under `docs_updated_during_phase_4`. The main
+  page (`objects-and-named-types.md`) gained an "Object Composition"
+  section. It covers both forms, lookup, order and replacement, origin,
+  constraints and patterns, the eligible targets and error table,
+  recursion, export, migration, and DMLS behavior, with a Mermaid flow. The
+  page's old claim that nested YAML mappings are rejected was corrected to
+  match `parse_mapping_atom`. The coordinator also updated
+  `darkmatter/docs/topics/schemas/dmls-schema-support.md` (code table and
+  notes 7 and 8) and `darkmatter/dmls/docs/diagnostics.md`
+  (`relatedInformation`), which the diagnostics subagent reported as stale.
+  The grammar module's EBNF (`simplified/grammar.rs` `//!`) now has the
+  `spread` member. Publication of the caller skill is left to Phase 5.
+
+### Requirement-to-test mapping
+
+The session tests are in `darkmatter/dmls/tests/l1/object_composition_editor.rs`,
+registered in `tests/l1/main.rs` (the L1 binary). They run in-process over
+`LspFixture` with no editor or terminal.
+
+| Requirement | Test |
+| --- | --- |
+| Completion after `...` (empty and partial), in a scalar `$extends`, a quoted key and value, a flow item and a block item. Labels are exact, and ineligible primitive, union, array, opaque `object` and alias-cycle names, plus the receiver, are filtered. `string@this` is offered for a keyword collision. The edit range covers the typed operand | `operand_completion_offers_eligible_objects_in_both_forms` |
+| An imported `Name@./file` offered for a partial flow item, ineligible imported targets filtered, and a reference-half edit that starts after `@` | `operand_completion_offers_imported_names_and_the_reference_half` |
+| Implicit root-union arm scopes (frontmatter), and a standalone `types` table filtered for `$extends` | `operand_completion_keeps_implicit_root_union_arms_apart` |
+| Hover and go-to-definition on a spread, a flow item, and an imported operand | `hover_and_definition_follow_operands_of_both_forms` |
+| Of two operands into one file, only the ineligible second one is ranged, with the target's declaration as related information | `an_ineligible_second_operand_into_a_shared_file_is_reported_on_that_operand` |
+| Importer and imported file both open with their disk text. A buffer edit to a list reports the error; editing back to an object with a renamed and a newly required member clears it, judges `id: a` in the consuming document as a type mismatch at its value, and offers `code` with `price` absent | `an_unsaved_imported_definition_edit_refreshes_the_importer` |
+| A missing imported file is reported on the operand and clears once the file is created and reported through the watched-file path | `a_missing_imported_file_appearing_clears_the_operand_error` |
+
+The subagents' unit tests:
+
+- `providers::frontmatter::composition_tests::*` (18 tests). They cover
+  each cursor form, filtering, the receiver rule, root-union arm scope,
+  negative controls (a `$extends` data key, a `types` table key, no
+  keywords or scaffolds), hover and definition, and flow-item framing.
+- `overlay::named_types::tests::{composition_operands_are_targets_of_the_authored_declaration, tolerant_collection_keeps_operands_beside_malformed_members, imported_aliases_and_compositions_hydrate_their_files}`.
+- `overlay::tests::{a_missing_composition_target_keeps_its_cause_and_its_appearance_refreshes, an_unsaved_edit_of_a_composed_file_refreshes_the_importer, a_composition_target_file_failure_is_located_in_that_file}`.
+- `diagnostics::frontmatter::tests::{an_ineligible_local_composition_target_ranges_the_whole_operand, an_ineligible_imported_target_ranges_its_own_operand_and_relates_the_terminal_declaration, a_missing_composition_file_ranges_the_operand_with_the_named_type_code, an_indirect_composition_failure_navigates_back_to_the_receiver}`.
+
+The Input Robustness Matrix does not apply. This phase adds no loader or
+field validator: completion and the tolerant catalog are passive editor
+readings, and `$extends` validation is the Phase 1 validator, which is
+unchanged.
+
+Not covered: `ComposedMember` routing has no direct test, because no simple
+fixture triggers that error.
+
+### Verification
+
+- Subagent slices:
+  - `cargo nextest run -p darkmatter-lsp --lib -E 'test(/composition|frontmatter|named_ref|completion/)'`:
+    277 passed.
+  - `... -E 'test(/named_type|composition|overlay|diagnostic/)'`: 314 passed.
+  - `cargo nextest run -p simplified-schema -E 'test(composition)'`: 83 passed.
+- Checkpoint:
+  `cargo nextest run -p darkmatter-lsp --test l1 -E 'test(object_composition_editor)'`:
+  7/7, each under 0.2 s.
+- `simplified-schema`:
+  - `just test --no-fail-fast`: 2471/2472, `L1 run recorded: 2472
+    test(s), none at or above 5.0s`.
+  - `just test-minimal --no-fail-fast`: 2091/2092.
+  - The one failure in both legs is the pre-existing
+    `shipped_corpus::claudine_bundle_and_its_triggers_resolve_from_supplied_sources`
+    ("unknown named type `steps` in embedded `claudine/sequence.yaml`").
+  - `just lint`: passes.
+  - `just check-tier-coverage simplified-schema`: nothing stranded.
+- `darkmatter`:
+  - `just test --no-fail-fast` does not get past compilation, because
+    `darkmatter-cli`'s L1 tests `include_str!` the deleted
+    `claudine/schemas/sequence-types.yaml` (removed in `8f33de0d7`, before
+    this feature). So I ran the recipe's other three packages with its
+    features:
+    `cargo nextest run --no-fail-fast -p darkmatter -p darkmatter-lsp -p zed-dmls-cli --features darkmatter/effects-instrumentation,darkmatter/work-counters,darkmatter-lsp/effects-instrumentation`.
+    Result: 14875/14879, 10 skipped, no `SLOW` lines, load average about 2–3.
+  - The four failures are the pre-existing ones from Phase 3: three
+    `darkmatter::l1 shipped_schema_corpus::*` tests and
+    `darkmatter-lsp::l1 claudine_schema_discovery::removed_sequence_keys_are_reported_at_their_paths`.
+  - `just lint`: the library leg passes, and the CLI leg fails on the same
+    `include_str!`.
+    `cargo clippy -p darkmatter-lsp -p zed-dmls-cli --all-targets -- -D warnings`:
+    clean.
+  - `just check-tier-coverage darkmatter` cannot list the area for the same
+    reason (`darkmatter-cli` does not compile). No new test or module name
+    carries a tier marker, and the session tests are declared in the
+    `tests/l1/main.rs` binary.
+- Dependents: `cargo check --locked -p claudine -p claudine-cli` fails on
+  `claudine/lib/src/composition/schema/bundle.rs`, which `include_str!`s
+  the same deleted file. That predates this feature, and `claudine/` is
+  untouched. The only library change this phase is making
+  `parse_extends_operand` public, which cannot break a consumer.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gives packages `darkmatter-lsp, simplified-schema, test-toolkit,
+  claudine, darkmatter, darkmatter-cli` and change_class `package`, so the
+  gates were run. Earlier phases are still uncommitted.
+- No cross-OS check. The new code is in-memory editor logic. The tests'
+  file use is temporary files through the existing resolver, and the
+  expected paths come from `biscuit_file::canonicalize_simplified`.
