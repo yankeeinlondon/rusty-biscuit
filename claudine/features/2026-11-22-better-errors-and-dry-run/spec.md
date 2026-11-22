@@ -1,7 +1,7 @@
 ---
 kind: feature
 created: 2026-11-22
-status: draft-spec
+status: human-in-the-loop
 area: claudine
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -28,9 +28,13 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented-by: string -> the agent who implemented the plan
-reviewed: false
+reviewed: true
+reviewed-by: "codex/gpt-6.2-sol"
+reviewed-on: "2026-11-22"
 review-iterations: 0
-needs-rulings: false
+needs-rulings: true
+required-rulings:
+    - Whether new dry-run errors may stop a real sequence before its first task
 ---
 
 # Better errors and a diagnostic dry run
@@ -117,12 +121,12 @@ neither the task, the resolved path, nor the directory it searched. It also
 aborts the dry run, so `find`'s provider problem and the two misplaced keys are
 never reported.
 
-## What the code says (corrections to the brief)
+## Current behavior
 
-The brief for this spec stated several beliefs as hypotheses. Where the code
-disagrees, the code is right, and the design below follows it.
+These details explain what the motivating runs reported and which behavior
+the new checks need to preserve.
 
-| Belief | What the code does |
+| Question | Current behavior |
 |---|---|
 | `agent` and `model` on a task are "not valid task keys; silently ignored" | Task objects are **open by design** (`claudine/schemas/sequence-types.yaml`: "an undeclared key is authored step data, read as `seq.<key>`"). Both keys are kept as step data. They do not affect the provider, because provider selection reads only caller setters, the task's `with:`, and the prompt's frontmatter (`composition/sequence/preflight/providers.rs::predict_key`). A schema validator therefore cannot call them unknown. The same keys **are** rejected in a `kind: task` file and in a group leg, which use the closed `parse_task_object`. |
 | `kind: sequence` is deprecated | It is current (`flow-control/sequences.md`). Only the old `kind: sequence` + `list:` form is gone. It is not listed as a removed spelling. |
@@ -135,25 +139,26 @@ disagrees, the code is right, and the design below follows it.
 ## Goals
 
 - `claudine sequence <file> --dry-run` reports every finding it can establish
-  passively, grouped by task, then exits non-zero only if an error-severity
-  finding exists.
+  passively, grouped by task. Findings that establish a failure exit with
+  status 1. Usage errors have their own exit status.
 - A dry run of `claudine sequence`, `compose`, or `inline-compose` has no side effects: no
   shell, no network, no provider, no file write, no prompt.
-- A real run's preflight uses the same pass, so a failed preflight shows the
-  same full report and no task starts.
+- A real run reuses the checks for its existing preflight failures and
+  reports independent problems it can prove. Advancing failures currently
+  found during task execution needs an [author decision](#open-questions).
 - Every finding and error follows one message standard: what, where, why, and
   how to fix it.
-- The finding type, the collector, file-reference findings, empty-body
-  detection, schema-driven key checks, and report rendering exist once, in
-  Darkmatter or below, and `md`, DMLS, and Claudine all use them.
+- Darkmatter shares document findings across `md`, its language server
+  (DMLS), and Claudine. Terminal commands share report rendering. DMLS
+  sends findings to the editor with its existing diagnostic protocol.
 - After Phase 1, `md compose` on a document with a missing `::file` and an
   empty body reports both problems, at the same quality as Claudine and from
   the same code.
 
 ## Non-goals
 
-- Closing sequence task objects. Step data stays open (decided 2026-11-22; see
-  [Open questions](#open-questions)).
+- Closing sequence task objects. Step data stays open and can still be read
+  through `seq`.
 - Changing how a sequence passes state to its children. Defined and default
   values (`default-values`), and what `--<provider>` and `--model` mean for
   each task, belong to `2026-11-18-ergonomic-sequences`. This spec's
@@ -161,7 +166,7 @@ disagrees, the code is right, and the design below follows it.
 - Fixing every error message in either package. The cut line is in
   [Sweep and cut line](#sweep-and-cut-line).
 - A new `md` command. `md compose` and `md validate refs` adopt the shared
-  collector; a standalone `md check` is an open question.
+  collector. Revisit a standalone check command after using those reports.
 - Any change to `err.*` codes or `when:` matching for errors that exist today.
 
 ## Ownership
@@ -179,58 +184,42 @@ empty.
 
 | Capability | Owner | What the other side consumes | Why |
 |---|---|---|---|
-| The finding type: code, severity, message, location, related locations, fix hint, trail, and its JSON form | **Darkmatter**: extend `compose::expression::diagnostics::Diagnostic` | Claudine produces the same record for its own findings | One record already reaches `md --output json`, DMLS, and the CLI. A second type would split every renderer. |
+| The finding type: code, severity, message, location, related locations, fix hint, trail, and its JSON form | **Darkmatter**: extend [`Diagnostic`](../../../darkmatter/lib/src/markdown/compose/expression/diagnostics.rs), the record the CLI sends in machine output | Claudine produces the same record for its own findings | One record already reaches `md --output json`, DMLS, and the CLI. A second type would split every renderer. |
 | Severity | **Darkmatter** `Severity` (`error`, `warning`, `info`), unchanged | Claudine | It already exists, and a blocking policy never changes it. |
 | Collecting findings across a document tree without stopping | **Darkmatter**: a new `findings` module (`FindingSink`, `FindingReport`) | Claudine's sequence walk pushes into the same sink | `md compose`'s pre-composition checks need the same collection. |
 | "How we got here": transclusion chain, iteration, task path | **Darkmatter** `Trail`, which unifies `included_via` and `iteration_path` and adds host frames | Claudine pushes `task`, `group`, and `sequence` frames | It is the same idea in three places today. Hosts add frames; they do not invent a second trail. |
 | Reporting a missing or unresolvable file reference | **Darkmatter** finding builder over **biscuit-file**'s `DetailedResolution` | Claudine calls it for `prompt:`, `task:`, `group:`, and `sequence:` references with its own construct phrase | Resolution and the probe record are biscuit-file's. Rendering them is a document fact. Today Claudine has two renderings and the sequence path has none. |
-| Unknown keys, removed keys, near-miss suggestions | **Simplified Schema** (the validator) with **Darkmatter**'s `catalog::suggest_strings` | DMLS and the Claudine runtime read the validator's problems | The schema is the source of truth. Today DMLS and the runtime check different things. |
+| Unknown keys, removed keys, near-miss suggestions | **Simplified Schema** for key checks and suggestions, using the existing ranking algorithm moved below Darkmatter | DMLS and the Claudine runtime read the validator's problems | The schema is the source of truth. Today DMLS and the runtime check different things. |
 | Empty-composition result and its cause | **Darkmatter** compose outcome | Claudine decides whether empty is fatal for a provider launch | Only the composer knows which blocks it excluded. |
 | Grouped report rendering for terminal, plain, and data output | **Darkmatter** `FindingReport` (a `renderable::CommandOutput`), generalized from the `md validate refs` report | Claudine renders the dry-run report and the preflight failure through it | The reference report already groups problems by subject, shows trails, and closes with a tally. Generalize it rather than write a second one. |
 | The task tree, the provider chain, provider requirements, lifecycle | **Claudine** | Pushes findings into Darkmatter's sink | Agent knowledge. |
 | Failure identity (`err.*` facets: category, disposition, origin, detail) | **Claudine**, unchanged | | See below. |
 
-### Option A: amended, not replaced
+### Document findings and lifecycle errors
 
-`error-architecture.md` says Claudine owns diagnostic identity and lower layers
-have none ("Option A"). That is already only half true. Darkmatter's
-`Diagnostic` carries `dm.*` codes that `md --output json` and DMLS publish.
-Option A was really about the **failure facets** that a lifecycle `when:`
-clause matches. This spec writes that distinction down:
+The [Claudine error architecture](../../docs/topics/error-architecture.md#where-diagnostic-identity-lives)
+assigns the fields matched by lifecycle `when:` clauses, such as `err.code`
+and `err.detail`, to Claudine. Darkmatter already publishes `dm.*` codes for
+document findings. The report uses those codes for the problems it shows.
+The error returned by a real run still has Claudine's lifecycle fields.
 
-- **Finding identity is shared.** A finding's `code` names the authoring
-  mistake. Document facts use Darkmatter's `dm.*` namespace. Claudine's
-  findings use Claudine catalog codes (`composition.*`). Both use one record.
-- **Failure identity stays Claudine's.** When a finding stops a real run, the
-  error the run returns, and therefore `err.code`, `err.category`, and
-  `err.detail`, is still a Claudine catalog projection. A Darkmatter finding
-  never becomes an `err.*` value directly.
+- Keep the typed error the existing run would return. Select it in the old
+  preflight order, including the order within each stage. When an earlier
+  stage still needs input or an approval, let it resolve before returning a
+  later error. Keep the same lifecycle routing and retry behavior.
+- `CheckFailed` owns the report. Under the existing diagnostic selector it
+  is a `Semantic` wrapper that supplies its lifecycle fields and persisted
+  cause information from the selected typed error. It renders the report
+  once and has no new public failure code.
+- Project typed document failures through the Claudine wrapper their
+  original boundary already uses. A missing target can occur during
+  sequence resolution, prompt loading, or Darkmatter transclusion. Guard
+  the supported combinations of finding and boundary, and verify all
+  lifecycle fields against the old failure.
 
-What this costs:
-
-1. **One mapping table.** Each `dm.*` code that can stop a Claudine run maps to
-   one Claudine catalog code, for example `dm.reference.missing_document` to
-   `composition.invalid_file_reference`. A guard fails when a `dm.*` code a
-   Claudine run can surface has no row.
-2. **A third diagnostic role.** A failed preflight now carries a whole report
-   but must keep today's `err.code`. The new `CompositionError::CheckFailed`
-   has the role **`Aggregate`**: it owns rendering (the full report) and
-   delegates facets to its **primary** error, the first error-severity finding
-   in report order. `select_effective_diagnostic` treats `Aggregate` like
-   `Transparent` for facets and like `Semantic` for rendering. The registry
-   and role guards learn the new role.
-3. **Typed errors are kept.** Each error-severity Claudine finding keeps the
-   typed `CompositionError` it was projected from, so the primary is a real
-   error and not a restored snapshot.
-
-Rejected alternatives:
-
-- **Option A unchanged.** Darkmatter findings would have to be re-wrapped as
-  Claudine errors to be reported at all. That is today's model, and it is why
-  `md` and Claudine render the same missing file in three different ways.
-- **Darkmatter owns failure facets too.** This would move `err.*` and the
-  catalog into Darkmatter, a cross-area contract in exchange for no user
-  benefit in this spec.
+> **Reader's note.** The first row can belong to a task the old preflight
+> never reached. Choosing the lifecycle error in the existing failure order
+> keeps the same `when:` clauses matching when reports are grouped by task.
 
 ## The finding model
 
@@ -242,15 +231,19 @@ JSON form.
 | Field | Status | Meaning |
 |---|---|---|
 | `code`, `severity`, `message`, `source`, `span`, `expected_type`, `actual_type` | existing | unchanged |
-| `hint` | **new**, `Option<String>` | the one concrete next step. Required for `error` and `warning` (see [Enforcement](#enforcement)). |
+| `hint` | **new**, `Option<String>` | the next step. Required for new actionable findings in scope (see [Enforcement](#enforcement)). |
 | `related` | **new**, `Vec<RelatedLocation { source, message }>` | other places that matter, such as the finding that blocked this check or the declaration a key conflicts with. DMLS maps these to LSP `relatedInformation`. |
 | `trail` | **new**, `Trail` | how the problem was reached, outermost first (see below) |
-| `iteration_path`, `included_via` | existing, now **projections** of `trail` | kept in JSON so existing consumers keep working |
+| `iteration_path`, `included_via` | existing, now **projections** of `trail` | preserve existing JSON, including `[]` versus omitted `included_via` |
 | `reference_details`, `data_location`, `grants_needed`, `schema_default` | existing | unchanged |
 
 `message` states **what** failed and **why**, in the author's terms, and never
 names a cause the producer has not established. `hint` states how to fix it.
-`source` states where.
+`source` states where. Omit new fields when they have no value. In JSON,
+tag trail frames with `kind` (`included`, `iteration`, or `host`). A host
+frame has a separate `host` noun and authored property path. Use the
+existing portable-path and authored-position conventions. Update the
+published compose output schema with these additions.
 
 ### The trail
 
@@ -259,15 +252,15 @@ A `Trail` is a list of frames, outermost first:
 ```rust
 pub enum TrailFrame {
     /// Reached through a transclusion at this authored position.
-    Included { file: ComposeSource, line: Option<usize> },
+    Included { file: String, line: Option<usize> },
     /// Inside a `::map`/`::filter` item.
     Iteration { collection: String, position: IterationPosition },
     /// A host construct, such as a Claudine task.
-    Host { kind: &'static str, label: String, property: String, file: PathBuf, line: Option<usize> },
+    Host { host: &'static str, label: String, property: String, source: Option<DiagnosticSource> },
 }
 ```
 
-`kind` is a host-owned noun such as `task`, `group`, or `sequence`. `property`
+`host` is a host-owned noun such as `task`, `group`, or `sequence`. `property`
 is the authored path (`sequence[1].prompt`). The renderer prints a trail as one
 line: `task metadata (sequence[1]) → _frontmatter.md`.
 
@@ -286,23 +279,28 @@ two kinds.
 pub struct FindingSink { /* ordered findings and subjects */ }
 
 impl FindingSink {
-    pub fn push(&mut self, finding: Diagnostic);
+    pub fn push(&mut self, subject: &SubjectId, finding: Diagnostic) -> FindingId;
     /// Record that `check` could not run for `subject`, and which finding
     /// blocked it. Emits one `dm.check.not_checked` info finding.
-    pub fn not_checked(&mut self, subject: &Trail, check: &str, blocked_by: Option<FindingId>);
+    pub fn not_checked(&mut self, subject: &SubjectId, check: &str, reason: &str, blocked_by: Option<FindingId>);
     pub fn has_errors(&self) -> bool;
     pub fn finish(self) -> FindingReport;
 }
 ```
 
 - A **subject** is what findings are grouped under: a document for `md`, or a
-  task for Claudine. A subject is identified by its trail.
+  task for Claudine. Identify a task by its occurrence in the graph. Two
+  tasks can share a file or label, and a finding can point to a more
+  specific property without changing its subject.
 - **Not checked** findings replace silence. When a missing prompt file means
   that task's provider and inputs cannot be checked, the sink records one
   `info` finding per skipped check, with `related` pointing at the finding that
-  blocked it. A blocked check never invents a second error.
-- The sink keeps findings in walk order. The report sorts nothing except by
-  subject, so output is deterministic.
+  blocked it when that finding has a proven location. A deferred value can
+  block a check without producing an error.
+- Register subjects in authored order and preserve check order within
+  each subject. Deduplicate equivalent findings for the same subject,
+  authored location, and typed cause. Keep separate findings for distinct
+  task occurrences, including when both load the same document.
 
 ### Codes
 
@@ -311,16 +309,17 @@ impl FindingSink {
 | `dm.*` | Darkmatter, in the `COMPOSE_DIAGNOSTIC_CODES` catalog | `dm.reference.missing_document`, `dm.schema.removed_key`, `dm.schema.near_miss_key`, `dm.compose.empty_body`, `dm.check.not_checked` |
 | Claudine catalog (`composition.*`) | Claudine, in `diagnostics/registry.rs` | `composition.provider_unresolved`, `composition.selection_key_as_data`, `composition.no_executable`, `composition.model_required` |
 
-Each new code is declared once with its severity. `dm.schema.deprecated_key`,
+Each new code is declared once. The producing check assigns severity. `dm.schema.deprecated_key`,
 which DMLS declares and never emits, is removed; `dm.schema.removed_key`
 replaces it.
 
 ### Blocking
 
-No new policy is added. Error-severity findings block. In `md`, the existing
-`--allow`/`--deny`/`--disable` policy still decides whether a warning blocks,
-and the new `dm.*` codes join its catalog. Claudine does not gain a policy
-flag in this spec.
+Claudine dry runs fail on error-severity findings. `md compose` keeps its
+reference recoveries, warning policy, and disabled operations. Recovering
+a missing transclusion still uses `dm.reference.missing_transclusion` and
+produces the same result as today. New policy-addressable warnings join
+the existing catalog.
 
 ## Dry run as a diagnostic pass
 
@@ -335,93 +334,105 @@ claudine sequence _fleet.yaml --dry-run --json    # the check as data, for CI
 
 ```mermaid
 flowchart TD
-    A[claudine sequence file --dry-run] --> B[Stage 1: check pass<br/>passive, collects every finding]
-    B --> C{any error-severity finding?}
-    C -- yes --> D[print the full report<br/>exit 1, preview skipped]
-    C -- no --> E[print the report<br/>warnings and info only]
-    E --> F[Stage 2: preview<br/>composes every step passively]
-    F --> G[exit 0]
+    A[Check the document without effects] --> B{Errors or JSON requested?}
+    B -- Yes --> D[Emit the report and return its exit status]
+    B -- No --> E[Render the checked preview]
+    E --> G[Emit one report and show the preview on success]
 ```
 
-**A dry run has no side effects.** Neither stage runs a shell command, makes a
-network request, launches a provider, writes a file, fires a lifecycle event,
-or prompts. This reverses two documented behaviors: today the preview runs
-`$( … )` expansions and fetches approved remote transclusions, and on a
-terminal it asks for missing inputs.
+Both stages allow local read-only inspection through the invocation's
+existing context and permissions. Neither stage runs a command or provider,
+requests network access, writes a file or cache, fires a lifecycle event,
+asks a question, or starts background work such as pre-warming. Enter the
+dry-run branch before staged initialization, source-shell execution,
+approval, or effectful preparation. When a command would produce the
+sequence list, report the list as deferred and its children as unchecked.
 
-- **Stage 1, the check pass,** is new. It reports every finding it can
-  establish.
-- **Stage 2, the preview,** is today's per-step rendering, now passive. It runs
-  only when Stage 1 found no error. With `--json`, Stage 2 never runs, so
-  stdout holds exactly one JSON value.
-
-The preview composes through a Darkmatter **passive compose** option
-(**Darkmatter**-owned), which `md` can use too:
+The check stage runs the passive evaluation needed to discover document
+failures and retains the result for preview. JSON and human mode use
+the same verdict. The preview stage formats the checked result. If it
+cannot render the preview, report the formatting failure, withhold
+partial preview output, and exit 1. Track deferred values through authored
+syntax so a placeholder cannot become an executable, a path to resolve, a schema value,
+or a false condition.
 
 | Construct | In the preview |
 |---|---|
-| `$( … )` in frontmatter, and `::shell` in the body | Left as written and marked: `$(date +%F)` *(not run in a dry run)*. A value derived from it shows the expression, not a guess. |
-| A remote `::file`, `::code`, `prologue:`, or `epilogue:` URL | Not fetched; shown as the reference with *(not fetched in a dry run)*. |
-| A missing input | Left as its placeholder (`{{ topic }}`) and marked *(no value)*. The check pass has already reported it. |
-| A `shell:` task | `would run `<command>``, as today. |
-| A `side_effect:` task, `loop:`, `when:`, inline `$schema`, `prep` | As today (already passive). |
+| Frontmatter `$(…)`, `::shell`, and command-backed sequence sources | Show the authored construct and mark it as skipped. Keep dependent expressions pending. |
+| Remote includes and data reads, including `load_data` and schema slots | Mark the authored site as deferred. Check syntax and settled policy only. Apply the existing permission gate to local reads, and leave values pending when they need approval. |
+| A missing input | Keep the placeholder and mark it as missing. |
+| `shell:` or `side_effect:` tasks | Describe the planned operation without dispatching it. |
+| Task guards, loops, runtime schemas, and preparation output | Describe them without entering a task, evaluating runtime state, or invoking interactive preparation. Show a Markdown `::block` with an unknown condition as conditional. |
 
-**`--dry-run-shell` is removed** from `claudine sequence`, `compose`, and
-`inline-compose`. It ran each `shell:` task for real during the preview, which
-a dry run cannot do. Passing it is a usage error (exit `2`) naming the
-replacement:
+Use Darkmatter's existing request context, authored syntax, and effect
+classifications. Enforce passive mode at the shared dispatch boundaries
+for commands, remote reads, schema slots, and other effectful calls so a
+nested document or callback cannot reactivate an effect. Keep passive preview
+results out of normal composition caches.
+
+**`--dry-run-shell` is removed** from `sequence`, `compose`, and
+`inline-compose`. Whenever interpreted as a Claudine option, it is a usage
+error. Existing help precedence and the `--` boundary for forwarded
+arguments still apply.
 
 ```text
-error: `--dry-run-shell` was removed: a dry run runs no commands.
-  hint: use `--dry-run` to check and preview, or run the sequence
+error: `--dry-run-shell` was removed. Dry runs skip commands.
+  hint: use `--dry-run` to check and preview, or run the command without it
 ```
 
 ### What the check pass walks
 
-The pass walks the whole tree that a real run's preflight would load: the root
+The pass walks the available task tree: the root
 document, every task, inline and referenced nested sequences, groups (inline,
 referenced, and catalog entries), `kind: task` files, and every prompt
 document. In each prompt document it also walks frontmatter transclusions
 (`prologue:`, `epilogue:`) and body references (`::file`, `::code`), using the
 condition-blind walk that Darkmatter's preflight already does.
 
-It reuses Claudine's existing preflight machinery (`preflight::Loader`,
-`discover_sequence_inputs`, provider prediction) with one change: **a failure
-in one subtree becomes findings, and the walk continues with its siblings.**
-The loader's documented rule "preflight never degrades to best-effort"
-(`preflight/mod.rs`) changes to: preflight collects every finding, then
-refuses to start if any is an error.
+Reuse the [Claudine preflight loader](../../lib/src/composition/sequence/preflight/mod.rs),
+which builds the task graph and detects cycles, along with its input discovery
+and provider prediction. A failed subtree becomes findings and the walk
+continues with siblings whose boundaries are known. A root parse failure
+reports the root problem and leaves the task walk unchecked. Keep cycle
+checks, catalog entry identity, and source reuse. Share loaded sources and
+prepared values within the invocation so each new check does not reread or
+reparse the same document.
 
 ### How each effectful check is handled
 
 | Check that normally has an effect | In the check pass |
 |---|---|
 | A frontmatter value written as `$( … )` | Not run. A check that needs its value is reported as `not checked` ("depends on a shell expansion"). |
-| A remote `::file` or `::code` URL | Not fetched. The reference is checked for syntax and fetch policy only. |
-| A provider's installed state | Read from the same passive host snapshot provider prediction already uses. |
+| A remote `::file` or `::code` URL | Check syntax and settled policy. A settled refusal is an error. An available approval is pending, and remote content remains unchecked. |
+| A provider's installed state | Reuse read-only PATH and configuration observations. Skip process-backed version probes and catalog refreshes. |
 | A model a provider requires | Read from flags, environment variables, and the provider's config file (reading a file is passive). |
 | Missing required inputs | Judged against frontmatter prepared with shells disabled (`prepare_sequence_document_values`), never by composing. No prompt is shown. |
 | Shell command approval | Not asked: a dry run runs no command, so it approves none. A real run asks as today. |
 | A task `when:` guard and an inline container's `$schema` | Not evaluated, as today. The task is checked as if it runs. |
-| A value only known at launch (`seq.*`, `loop.*`, a runtime `set`) | Reported as `not checked` when a check needs it. Provider prediction already classifies these as "decided at launch". |
+| A value only known at launch (`seq.*`, `loop.*`, a runtime `set`) | Record the dependent check as unchecked. Static values in those scopes can still be checked when prediction proves them. |
 
 ### Severity
 
-- **error**: a real run would fail.
-- **warning**: suspicious, ignored, or likely a mistake, but a real run would
-  proceed.
-- **info**: context, including `not checked`.
+An **error** is a proven failure for the invocation being rehearsed. A
+**warning** describes an actionable concern or a problem the real command
+could resolve by asking. **Info** gives context, including checks that depend
+on unavailable data.
 
-**Problems a real run resolves by asking.** A missing input or an unresolved
-provider does not fail a run that can ask: on a terminal, the run shows its
-review screen or input prompt. The check pass reports these as `warning` when
-the run it rehearses could ask (stdin and stderr are terminals and `--silent`
-is not set), and as `error` otherwise. The message says which: "a
-non-interactive run fails here; an interactive run asks you to choose". This
-keeps a CI dry run honest: it fails exactly when the CI run would.
-
-Removed grammar is refused by the parser today, so a removed key is an
-**error**, not a warning.
+Use each real command's own rules to decide whether it can ask. Sequence
+provider review uses stderr's terminal status and the selection outcome.
+An explicitly invalid provider that the real selector refuses is an error
+even on a terminal. Direct and inline composition use their target resolver,
+including the configured preferred-agent fallback where eligible. For
+missing inputs, use the shared interactive-input policy (configuration,
+stdin, stderr, and `--silent`), check whether the schema shape can be
+collected, and preserve the mode's rule about when the input is required.
+A real command that would refuse the input produces an error in dry run.
+An eligible bare-name picker or file-input chooser is described as a pending
+choice when an existing passive search proves matches. If a search cannot
+complete passively, mark the choice unchecked. The same rules apply in JSON
+mode. Provider explanations show where each input came from and whether it
+can be used. Apply the existing redaction of secret-shaped values to both
+report formats.
 
 ### Exit status
 
@@ -433,57 +444,51 @@ Removed grammar is refused by the parser today, so a removed key is an
 
 ### Report formats
 
-**Terminal and plain** (stderr, like today's dry-run status lines): grouped by
-subject, the root document first, then tasks in authored order, nested tasks
-under their container. Each finding is one row with its severity, message,
-location, and hint. `not checked` findings for one subject fold into one line.
-A summary closes the report. The full layout is in
-[Before and after](#before-and-after).
+The human report goes to stderr, starting with the root document and showing
+tasks in authored order. Each row includes its severity, message, location
+when known, and fix. List unchecked checks together under their subject and
+end with counts. Use biscuit-terminal components and existing stream-based
+plain rendering. Keep stdout available for the command's existing preview.
 
-**`--json`** (stdout): one value, shaped like Darkmatter's `DocumentEnvelope`
-so one parser reads both tools:
+`--json` requires `--dry-run`. It emits one report on stdout and skips the
+preview. Keep document load and parse failures inside that report. Usage
+errors stay on stderr and emit no JSON. The report shares `file`,
+`outcome`, and diagnostic records with Darkmatter's
+[document output](../../../darkmatter/docs/cli/data-contracts.md).
+Claudine's `summary` counts diagnostics by severity. Darkmatter's
+`DocumentEnvelope.summary` counts references and keeps its existing shape.
+Use `null` for `file` when no input path exists. Suppress human progress
+and preview text in JSON mode. Claudine still refuses `-o` and `--output`.
 
-```json
-{
-  "file": "/work/renderers/_fleet.yaml",
-  "outcome": "failure",
-  "diagnostics": [ { "code": "…", "severity": "error", "…": "…" } ],
-  "summary": { "errors": 3, "warnings": 2, "info": 2 }
-}
-```
+### A real run uses the same checks
 
-Each element of `diagnostics` is the shared `Diagnostic` record, unchanged.
-`--json` requires `--dry-run`. It matches `claudine doctor --json`. Claudine's
-refusal of `-o`/`--output` stays as it is.
+A real sequence reuses checks at the existing boundaries, with the inputs
+and state available there. Root `initialize` can create files or assign
+values before the task graph is built. Keep real input collection, provider
+review, and shell authorization in their existing order. Where a preflight
+failure is already determined, collect independent passive findings, render
+the report once, and return the typed preflight error described in
+[Document findings and lifecycle errors](#document-findings-and-lifecycle-errors).
 
-### A real run uses the same pass
-
-A real `claudine sequence` run calls the same check pass at the point where
-preflight runs today: after the root `initialize` and before any task starts.
-If the report holds an error, the run prints it, starts no task, and returns
-`CompositionError::CheckFailed` (see [Option A](#option-a-amended-not-replaced)).
-`err.code` is the primary error's code, exactly what the first error would
-have produced before this change, so existing `when:` clauses keep matching.
-
-Warnings from the check are printed before the first task, as today's
-preflight warnings are. Problems a real run resolves by asking are not
-reported as findings in a real interactive run; they go to the review screen
-or input prompt as today.
+On successful preflight, print new advisory warnings before the first task.
+Let real prompts resolve eligible input and provider gaps, then recheck
+findings that depended on their answers. Preserve closed approval on retry,
+the frozen plan, and task order. Advancing additional runtime failures to
+preflight requires the [author decision](#open-questions).
 
 ### Other commands
 
-- **`claudine compose` and `claudine inline-compose` `--dry-run`** become
-  passive in Phase 1: their preview uses passive compose, and inline-compose
-  already writes nothing back. In Phase 3 they also run the same check pass
-  over one document: its references, schema findings, empty body, provider,
-  and model requirement.
-- **Provider wrappers** (`claudine claude … --dry-run`) take a prompt string,
-  not a document. Out of scope.
-- **`md`** gains no `--dry-run` and no new command. `md compose`'s existing
-  pre-composition checks (references, call check, schema verdict) push into
-  the shared sink, so a failing `md compose` prints every finding from those
-  families instead of stopping at the first family. `md validate refs` renders
-  through the shared `FindingReport` with byte-identical output.
+- `claudine compose` and `claudine inline-compose` use the same passive
+  flow for one document. Inline preview leaves the input file intact.
+  The checks use the applicable command's target and input rules.
+- `md compose` collects independent findings available at the existing
+  pre-composition boundary. In lifecycle mode, keep that boundary after
+  `initialize`. For stdin, preserve existing reference eligibility. Keep
+  the passive call gate ahead of expressions and effects. If a bad call or
+  failed preparation prevents a check from reaching a verdict, record the
+  later check as unchecked. Share the existing data memo and read set.
+- `md validate refs` reuses the report renderer and preserves its existing
+  text, machine output, and exit behavior.
 
 ## Checks
 
@@ -492,17 +497,47 @@ derived from it rather than hand-written.
 
 | Code | Severity | Owner | Source of truth | Reports |
 |---|---|---|---|---|
-| `dm.reference.missing_document` | error | Darkmatter (builder), biscuit-file (resolution) | `FileReference::resolve_detailed` | A reference that matches no file, for every form: task `prompt:`, `task:`, `group:`, nested `sequence:`, group catalog entries, frontmatter `prologue:`/`epilogue:`, body `::file`/`::code`, and `@`/`&`/`^` magic paths. States the task and key (trail), the reference as written, the resolved candidate path, the directory it was resolved against, the locations searched (magic roots for `@` references), up to three similar existing files, and that the file must exist before a real run. Existing `dm.reference.missing_transclusion` keeps its code for body constructs. |
-| `dm.schema.unknown_key` | per schema | Simplified Schema | the document's schemas | A key a closed object does not declare, now with a near-miss suggestion when one is close. Severity stays what the schema and DMLS decide today. |
-| `dm.schema.near_miss_key` | warning | Simplified Schema | the schema's declared keys | A key an **open** object accepts as data, but which is a near miss of a declared key (`promt` beside `prompt`, `whne` beside `when`). Suggests the declared key. Uses `catalog::suggest_strings`. |
+| `dm.reference.missing_document` | error | Darkmatter (builder), biscuit-file (resolution) | [biscuit-file's detailed resolution result](../../../biscuit-file/lib/src/file_reference/mod.rs) | A confirmed no-match for a Claudine document-valued reference such as `prompt:`, `task:`, `group:`, or `sequence:`. Existing Darkmatter constructs use their current codes, including `dm.reference.missing_transclusion`. Retain the written reference, its base, and the candidates actually checked. Show a resolved candidate when resolution provides one. Keep ambiguity, policy refusal, and I/O errors distinct. |
+| `dm.schema.unknown_key` | per schema | Simplified Schema | the effective schema | A key a closed object does not declare. Add a suggestion when one is close and preserve existing severity. |
+| `dm.schema.near_miss_key` | warning | Simplified Schema | the effective sequence step declaration | A key an open step accepts as data but which closely resembles a declared field, such as `promt` beside `prompt`. Only explicitly opted-in objects emit this advisory. |
 | `dm.schema.removed_key` | error | Simplified Schema | the new `removed(…)` declaration | A removed key, with its replacement as the hint. |
-| `dm.compose.empty_body` | warning in `md`; Claudine decides | Darkmatter | the compose outcome | A composition whose body is empty, with the cause that applies: the document has no body, its body is only whitespace, or every block was excluded, listing each excluded `::block` with its condition and location. |
+| `dm.compose.empty_body` | warning in `md`; error for a proven empty provider prompt | Darkmatter | the compose result or a separately proven passive outcome | Empty authored body, whitespace, all contributing blocks excluded, or an empty rendered result with no proven cause. A partially evaluated body with an unknown contribution is unchecked. |
 | `composition.selection_key_as_data` | warning | Claudine | provider prediction's selection keys (`agent`, `model`) | A task carrying `agent` or `model` as step data. Says it is read as `seq.agent` and does not choose the provider, and that `with: { agent: … }` does. |
-| `composition.no_executable` | error when the source has no body | Claudine | the task grammar and the source format | A task with no executable. In a document with a body it is `info` ("composes the body of `release.md`"). In a YAML, JSON, or JSON5 source, which has no body, it is an error. This reuses and makes reachable `SequenceStepNotExecutable`. |
+| `composition.no_executable` | error when the source has no body | Claudine | the task grammar and the source format | A task with no executable. In a document with a body it is `info` ("composes the body of `release.md`"). In a YAML, JSON, or JSON5 source, which has no body, it is an error. Reuse the typed empty-prompt cause when returning a real failure at its existing boundary. A dry-run finding has its own code. |
 | `composition.provider_unresolved` | error or warning (see [asking](#severity)) | Claudine | provider prediction and `select_target` | A provider-launching task whose provider cannot be decided. Lists the chain in order and marks each link `empty`, `not installed`, `ambiguous`, or `unknown`, linking to a `selection_key_as_data` finding when one explains the gap. |
 | `composition.model_required` | error | Claudine | `ProviderInfo::model_required_in_non_tty` and `exec_prep::resolve_model_and_validate` | A task whose resolved provider requires a model for a non-interactive run (OpenCode today) when none is found in flags, the provider's model variable, `MODEL`, hints, or the provider's configured default. Sequence tasks never run interactively, so this is always an error. A task decided at launch is `not checked`. |
-| `composition.missing_properties` (existing code) | error or warning (see [asking](#severity)) | Claudine, over Darkmatter's schema verdict | each prompt's `$schema` | An input a prompt's `$schema` requires and that neither `with:`, caller setters, nor the enclosing document supplies. One finding per input, under its task. |
+| `composition.missing_properties` (existing code) | error or warning (see [asking](#severity)) | Claudine, over Darkmatter's schema verdict | each prompt's `$schema` | An input still missing after existing value preparation applies caller input, scoped values, and schema defaults. Preserve required-key presence semantics and defer gaps that depend on runtime work. One finding per input, under its task. |
 | `dm.check.not_checked` | info | Darkmatter | the sink | A check that could not run and why, with the blocking finding in `related`. |
+
+### Reference suggestions and empty body
+
+Suggest up to three nearby files for a confirmed local no-match using the
+resolver's recorded search locations. Reuse the existing Claudine search
+and biscuit-file's literal-glob hint. Use the originating request context
+and permissions. Preserve search-root order and reuse each permitted
+directory listing within the invocation. Keep the existing bounded
+repository search for top-level bare-name suggestions. Nested reference
+suggestions stay within the resolver's permitted search directories.
+
+Record the reason for an empty result while evaluating page blocks, with
+authored positions for the blocks that account for the result. When a
+reference failure stops `md compose`, report a prospective empty body only
+if passive evaluation can prove it independently. A condition-blind
+reference walk can discover a missing file. The block condition still has
+to be evaluated passively to prove which content would survive. Keep the
+current rule for broken references inside excluded blocks, including
+existing recovery policy.
+
+### Suggestions for accepted step data
+
+Move the existing string ranking below Darkmatter so Simplified Schema
+can use it without introducing a reverse dependency. Preserve `md clean`'s
+current suggestions. Use the effective declaration for each object,
+including imports and composition. Emit open-object advice only for an
+explicitly opted-in sequence step with a unique close candidate.
+Legitimate extension keys declared by a pattern, removed keys, and the
+dedicated `agent` and `model` checks take precedence. Keep these advisories
+out of strict validation failures.
 
 ### Removed spellings
 
@@ -517,17 +552,28 @@ $schema:
 # claudine/schemas/sequence-types.yaml, task:
     setup: "removed(use a preceding `side_effect:` task for an action or `shell:` task for a command)"
     teardown: "removed(use a group's `finalize:`; wrap a single task in a group of one)"
-    execution: "removed(groups run concurrently, so omit it; for ordered work use a nested `sequence:`)"
+    execution: "removed(omit execution; use a nested sequence for ordered work)"
     fail_fast: "removed(`fail_fast` belongs on a `group:` object only)"
+
+# claudine/schemas/sequence-types.yaml, group:
+    execution: "removed(omit execution; use a nested sequence for ordered work)"
 ```
 
-- A `removed(…)` key validates as absent-only. The validator emits
-  `dm.schema.removed_key` with the replacement as the hint, so DMLS,
-  `md schema validate`, and Claudine's check pass all report it from the same
-  declaration.
-- The parser's `RemovedGrammar` sites read the replacement from the shipped
-  schema, so the text exists once. A parity test fails if the parser refuses a
-  key the schema does not declare `removed`, or the other way round.
+- A `removed(…)` declaration applies to a named object property. Its presence
+  is forbidden even when the authored value is null. Lower it as a false
+  property schema. Store replacement metadata on the owning object, since
+  a boolean JSON Schema has no annotation fields. For the same key, report
+  the removal once even if a pattern also matches. Reject
+  combinations with defaults or required declarations. Omit removed keys
+  from completion and near-miss candidates. Validation preserves the
+  authored value for reporting.
+- Simplified Schema returns a typed problem and replacement hint.
+  Darkmatter projects it as `dm.schema.removed_key`. The Claudine parser
+  uses the same prepared, owner-specific declaration for its existing typed
+  refusal. Verify coverage at the root, on sequence steps, in groups, and
+  in group legs and standalone task files wherever the parser currently
+  refuses the key. Keep the closed-field grammar for standalone task files
+  and group legs even where the editor currently uses an open step schema.
 - `execution` gets one replacement for both of today's value-dependent
   messages. The parser may still add the value-specific sentence.
 - Container events on a non-inline task are a placement rule, not a removed
@@ -538,10 +584,8 @@ $schema:
 
 - **`2026-11-22-claudine-doctor`** reports unknown configuration keys with the
   same validator. Its `stray-config-keys` rows gain near-miss suggestions from
-  this spec's Phase 2 at no extra cost. Its report keeps its own row format
-  (one row per check). The finding record is compatible, so a later change
-  could render doctor rows through `FindingReport`, but this spec does not
-  require it.
+  this work when doctor displays the shared validator hint. Doctor keeps
+  one row per check.
 - **`2026-11-18-ergonomic-sequences`** replaces `prompt:` with `compose:`,
   `inline-compose:`, and `sequence:` verbs. Every message in this spec takes
   its construct noun from one table keyed by executable
@@ -555,8 +599,7 @@ $schema:
 
 ## The error-message standard
 
-Every user-facing error and finding in Claudine and Darkmatter states four
-things.
+New and revised errors in the scope of this spec state four things.
 
 1. **What failed, in the author's terms.** Name the construct by the noun the
    author wrote (`prompt:` of task `metadata`, not "external sequence file"),
@@ -572,8 +615,8 @@ things.
 Rules that go with it:
 
 - **Nouns come from the construct.** A reference's noun comes from the
-  construct that holds it (`ReferenceConstruct`, extended with Claudine's
-  executables), never from the function that loaded it.
+  authored construct. Claudine supplies the noun for its executable fields
+  and Darkmatter supplies the wording for its directives.
 - **Context travels as data.** Task, key, and transclusion context ride on
   the trail and typed fields. A message is never assembled by concatenating
   context at the top level.
@@ -601,12 +644,12 @@ Line by line: *what* is the first line, *where* is `at …`, *why* is
 
 | Mechanism | Owner | Fails when |
 |---|---|---|
-| **Typestate builder.** Findings are built with `Finding::error(code, message).at(source).hint(…)`. An `error` or `warning` without a hint does not compile. | Darkmatter | a new finding skips the fix step |
-| **Catalog snapshot guard.** Every code in `COMPOSE_DIAGNOSTIC_CODES` and in Claudine's catalog that a finding can carry has a fixture and a rendered snapshot (terminal plain and JSON). | both | a code has no snapshot, or a snapshot names no fixture |
+| **Finding builder.** New actionable errors and warnings in scope use a builder that requires a hint. Existing diagnostics can be projected with their current optional hint. | Darkmatter | a new finding skips the fix step |
+| **Catalog snapshot guard.** Every new or changed report code in this spec has a fixture and a rendered snapshot (terminal plain and JSON). | both | a code has no snapshot, or a snapshot names no fixture |
 | **Catch-all burn-down guard.** `render/provider.rs`'s `_ =>` arm (header "composition failed") may render only variants on an allowlist in `error_guards/`, each with a burn-down tag. A new variant reaching it fails. A stale entry fails. | Claudine | a new sequence error falls through to "composition failed" |
 | **Site guard.** A `CompositionError` variant whose name starts with `Sequence` must carry a `site` (or `source_path` plus `property`) field. `syn` scan, beside the existing `error_guards`. | Claudine | a sequence error loses its task and key |
 | **Noun guard.** Literal construct nouns ("external sequence file", "external YAML file") are refused in `#[error]` strings and `status_block` bodies outside the noun table. | Claudine | a message hard-codes a noun |
-| **Mapping guard.** Every `dm.*` code a Claudine run can surface maps to one Claudine catalog code. | Claudine | the Option A mapping drifts |
+| **Mapping guard.** Each blocking document finding at a changed Claudine failure boundary retains the typed cause and the original wrapper. | Claudine | a document finding loses its lifecycle identity |
 | **Parity tests.** DMLS and the check pass report the same schema findings for the same document (see [Tests](#tests)). | Darkmatter, Claudine | the editor and the runtime disagree |
 
 ## Inventory
@@ -617,10 +660,10 @@ refers to the four rules of the standard (What, Where, Why, Fix).
 | Site | Current text | Breaks | Replacement | Owner |
 |---|---|---|---|---|
 | `SequenceExternalLoad` from `source.rs::resolve_sequence_reference`, used for `prompt:`, `task:`, `group:`, and `sequence:` references | `failed to load external sequence file: ./_frontmatter.md: file not found` | What (wrong noun), Where (no task, key, resolved path, or base), Fix | `dm.reference.missing_document` through the shared builder, with the construct noun and task trail. The variant splits: reference resolution goes to the builder; a parse failure of a loaded file keeps a `SequenceSourceParse` variant naming the file | Darkmatter (builder), Claudine (call sites, split) |
-| `SequenceExternalLoad` from `data.rs` (parse and read failures) | `failed to load external sequence file: <path>: <cause>` | What (noun: it may be a group or task file) | `SequenceSourceParse { construct, path, cause }` with the noun from the construct that referenced it | Claudine |
+| `SequenceExternalLoad` from `data.rs` (parse and read failures) | `failed to load external sequence file: <path>: <cause>` | What (noun: it may be a group or task file) | Separate typed read and parse failures with the noun from the construct that referenced the file | Claudine |
 | `ComposedBodyEmpty`, rendered in `render/provider.rs` | `composed prompt is empty` … "every block in the body was stripped by its `when` condition (or the body was empty to begin with)" … hint about `::block when=` | Why (lists causes it has not established), What (no task) | Carries Darkmatter's `EmptyBodyCause`. Renders only that cause: "has no body", "contains only whitespace", or "all 2 blocks were excluded: `::block when=\"draft\"` at doc.md:4, …". The hint follows the cause. In a sequence it carries the task trail | Darkmatter (cause), Claudine (render) |
 | Bodyless source plus a task with no executable (Phase 1c, `phase1c.rs`) | the `ComposedBodyEmpty` block above, naming the sequence file | What, Why | `composition.no_executable` at check time: "task `metadata` has no executable, so it would compose the body of `_fleet.yaml`, and a YAML file has no body". Hint: "add an executable such as `prompt: ./metadata.md`" | Claudine |
-| `SequenceStepNotExecutable` (`iterate.rs`) | names the step, but unreachable in chained mode | | Becomes the typed error behind `composition.no_executable`. Phase 1c and iterate agree on one "has an executable" test (today they read `plan.steps[i].executable` and `graph.steps[i].task`) | Claudine |
+| `SequenceStepNotExecutable` (`iterate.rs`) | names the step, but unreachable in chained mode | | Reuse the same executable check for the diagnostic and the real run. Keep the existing typed real failure where it applies and use a task-specific message. | Claudine |
 | Dry-run provider rows (`providers.rs::plan_rows`) | `metadata → no provider` | Why, Fix; also severity (a non-interactive run fails) | `composition.provider_unresolved` with the chain. The `Unresolved` target already holds `state`; prediction records each empty link | Claudine |
 | `SequenceExclusiveExecutable` | `…a step may declare at most one of prompt/shell/side_effect/group/task` | What (omits `sequence`, the sixth executable), Where (index only) | List from `EXECUTABLE_KEYS`; carry the site | Claudine |
 | `SequenceStepNameMissing`, `SequenceStepNameWrongType`, `SequenceReservedStateKey`, `SequenceInvalidTaskField` | `sequence step at index {index} …` (zero-based) | Where (no file or property; `origin` and `property` are in scope but dropped) | Carry the site; render `sequence[2]` in its file, one-based in prose to match `SequenceStepNotExecutable` | Claudine |
@@ -631,7 +674,7 @@ refers to the four rules of the standard (What, Where, Why, Fix).
 | `SequenceSelectionFailed` | `sequence selection failed for N step(s): {failures:?}` (Debug formatting) | What | Nothing outside tests constructs it. Delete it | Claudine |
 | First-error abort in graph build and input discovery (`preflight/mod.rs`, `inputs.rs`) | (behavior) | collects nothing | Push findings and continue with siblings | Claudine |
 | Darkmatter reference failure in `md compose` | stops at the reference family | collects one family | Pushes into the shared sink with the call check and schema verdict | Darkmatter |
-| `TransclusionError::Io` for a missing `::file` in `md compose` | `TransclusionError: I/O failure` / `File not found: ./missing.md` / hint `Check file existence and permissions.` | Where (no file or line), Why (permissions not established), What (no construct) | `dm.reference.missing_document`'s rendering through the shared builder: the construct, the location, the resolved path, and one hint for the cause that applies. A permission failure keeps its own `io` hint | Darkmatter |
+| `TransclusionError::Io` for a missing `::file` in `md compose` | `TransclusionError: I/O failure` / `File not found: ./missing.md` / hint `Check file existence and permissions.` | Where (no file or line), Why (permissions not established), What (no construct) | the existing reference code rendered through the shared builder: the construct, the location, the resolved path, and one hint for the cause that applies. A permission failure keeps its own `io` hint | Darkmatter |
 | `PageBlockError::UnterminatedBlock` excerpt | the gutter numbers lines from the start of the body (`> 1 │ ::block …` for file line 4) | Where (the number is not a file position) | Number excerpt lines in the file's frame (`loaded_source_context_for_errors`), as the errors skill already requires | Darkmatter |
 | Schema problems with no suggestion (`ValidationProblem` `UnknownKey`) | `` `x` is not declared `` | Fix | Add the near-miss suggestion as the hint; move the matching out of `md clean` into the validator | Simplified Schema, Darkmatter |
 
@@ -662,7 +705,7 @@ The same patterns elsewhere, found while building the inventory.
 | Configuration errors | `2026-11-22-claudine-doctor` owns them. |
 | Darkmatter expression and call-check messages | Already located, coded, and collected by the passive call check. |
 | The passive call check stopping at the first rejected call | Fixable, but expression typing has its own collection rules. Follow-up. |
-| Any `md` command other than `compose` and `validate refs` | No motivating case. |
+| Other `md` changes | Only shared key diagnostics affect `md clean` and `md schema validate`. No new command. |
 
 **The cut line:** a site is in scope when it is on the sequence load,
 compose, or dry-run path, or when a mechanism this spec builds fixes it with
@@ -674,7 +717,7 @@ no new design. Everything else waits for a follow-up spec.
 
 Before: see [the motivating sessions](#the-motivating-sessions).
 
-After (`--dry-run`, stderr not a terminal, `--plain` layout):
+After (`--dry-run`, stderr redirected, plain layout):
 
 ```text
 Checking renderers/_fleet.yaml (passive: nothing runs)
@@ -702,7 +745,7 @@ task metadata (sequence[1])
       hint: add an executable such as `prompt: ./metadata.md`
   ℹ not checked: provider, inputs (no executable)
 
-Check failed: 2 errors, 2 warnings, 2 not checked. Preview skipped.
+Check failed: 2 errors, 2 warnings, 3 checks not run. Preview skipped.
 ```
 
 The numbered chain shows today's links. Once `2026-11-18-ergonomic-sequences`
@@ -731,7 +774,7 @@ task metadata (sequence[1])
       hint: create renderers/_frontmatter.md before a real run, or correct the reference
   ℹ not checked: provider, inputs (the prompt file could not be read)
 
-Check failed: 2 errors, 2 warnings, 2 not checked. Preview skipped.
+Check failed: 2 errors, 2 warnings, 3 checks not run. Preview skipped.
 ```
 
 The find findings are no longer hidden behind the missing file.
@@ -748,9 +791,11 @@ The find findings are no longer hidden behind the missing file.
       "severity": "warning",
       "message": "`agent: opencode` is step data (read as `seq.agent`), not the task's provider",
       "source": { "file": "/work/renderers/_fleet.yaml", "line": 5, "column": 7, "inserted": false },
-      "trail": [{ "host": "task", "label": "find", "property": "sequence[0].agent" }],
+      "trail": [{ "kind": "host", "host": "task", "label": "find", "property": "sequence[0].agent" }],
       "hint": "to choose the provider, move it into the task's inputs: `with: { agent: opencode }`",
-      "related": [],
+      "span": null,
+      "expected_type": null,
+      "actual_type": null,
       "iteration_path": []
     },
     {
@@ -762,13 +807,16 @@ The find findings are no longer hidden behind the missing file.
       "construct": "prompt:",
       "reference": "./_frontmatter.md",
       "failure": "no-match",
-      "trail": [{ "host": "task", "label": "metadata", "property": "sequence[1].prompt" }],
+      "included_via": [],
+      "trail": [{ "kind": "host", "host": "task", "label": "metadata", "property": "sequence[1].prompt" }],
       "hint": "create renderers/_frontmatter.md before a real run, or correct the reference",
-      "related": [],
+      "span": null,
+      "expected_type": null,
+      "actual_type": null,
       "iteration_path": []
     }
   ],
-  "summary": { "errors": 2, "warnings": 2, "info": 2 }
+  "summary": { "errors": 2, "warnings": 2, "info": 3 }
 }
 ```
 
@@ -777,6 +825,7 @@ The find findings are no longer hidden behind the missing file.
 ```markdown
 ---
 title: Release notes
+draft: false
 ---
 ::block when="draft"
 ::file ./missing.md
@@ -792,32 +841,29 @@ Before (`md compose notes.md`, observed 2026-11-22):
 ┃ Check file existence and permissions.
 ```
 
-This message breaks three rules of the standard. It gives no file or line
-(Where). Its hint names permissions, a cause nobody established (Why). It never
-mentions the empty body (one problem reported). The transclusion fails even
-though its block is excluded, because `draft` is unset. With the `::file` line
-removed, the same document composes to a single newline and exits `0` without
-a word: Darkmatter has no empty-body detection.
+The message omits the file and position and gives a permissions hint for
+a missing target. In the observed case, an unset `draft` excluded the block,
+but the reference check still reported its missing target. This fixture uses
+an explicit false value so passive evaluation can prove the condition.
 
 After: one report, from the same sink and renderer Claudine uses.
 
 ```text
 notes.md
-  ✗ file not found in `::file`  `./missing.md`  notes.md:5:1
+  ✗ file not found in `::file`  `./missing.md`  notes.md:6:1
       resolved to ./missing.md (relative to notes.md)
       hint: create missing.md, or correct the reference
-  ⚠ the composed body is empty: its only block was excluded
-      `::block when="draft"` at notes.md:4:1 (`draft` is not set)
+  ⚠ the body would be empty: its only block is excluded
+      `::block when="draft"` at notes.md:5:1 (`draft` is false)
       hint: set `draft`, or add content outside the block
 
 Checked notes.md: 1 error, 1 warning
 ```
 
-The empty-body finding comes from a condition-blind walk, so it is reported
-even though composition stopped at the reference. The reference stays an error
-because today's composer fails on it (see open question 6). A cause that cannot be
-established passively (a `when=` that reads a `$( … )` value) is reported as
-`not checked`.
+The reference check finds the missing target. Independent passive
+evaluation proves that `draft: false` excludes the only body content. If
+the condition depends on a shell result, report the empty-body check as
+unchecked.
 
 ## Documentation to update
 
@@ -834,14 +880,13 @@ this spec.
   table, the asking rule, and that preflight collects every finding. Replace
   the "Composition shell work still runs" callout with the passive-preview
   table.
-- `claudine/docs/cli/compose.md` and `inline-compose.md`: the passive dry run
-  and the removed `--dry-run-shell` (Phase 1).
-- `claudine/docs/topics/error-architecture.md`: the amended Option A, the
-  `Aggregate` role, the `dm.*` mapping, and the new guards.
-- `claudine/docs/topics/pre-flight-checks.md`: preflight collects, then
-  refuses.
-- `claudine/docs/cli/compose.md` and `inline-compose.md`: the check pass
-  (Phase 3).
+- `claudine/docs/topics/composition.md` and `claudine/docs/topics/output.md`:
+  passive checks, preview output, and the removal of `--dry-run-shell` for
+  direct and inline composition.
+- `claudine/docs/topics/error-architecture.md`: shared document findings,
+  selection of the typed cause, and the new guards.
+- `claudine/docs/topics/pre-flight-checks.md`: which checks collect
+  independent findings and which existing boundaries can refuse a run.
 
 **Darkmatter**
 
@@ -867,7 +912,7 @@ this spec.
 **Skills**
 
 - Repo skills: `.claude/skills/darkmatter/errors.md` (the builder, standard,
-  and sink), `.claude/skills/claudine/` (check pass, `Aggregate`),
+  and sink), `.claude/skills/claudine/` (check pass and typed cause),
   `.claude/skills/simplified-schema/`.
 - Caller skills: `use-claudine` (dry run and `--json`), `use-darkmatter` (the
   diagnostic fields), and `use-dmls` (removed and near-miss findings). Then run
@@ -888,38 +933,52 @@ produces none, so a check cannot pass by firing on everything.
 - `insta` snapshots of the plain terminal report and of `--json` for every
   fixture, rendered at width 80 with `NO_COLOR=1`.
 - The catalog snapshot guard ([Enforcement](#enforcement)) ties every code to
-  a fixture.
+  a fixture for each new or changed report code.
 - `md validate refs` output is snapshotted before and after the move to
   `FindingReport` and must be byte-identical.
 
 ### Parity
 
-- **DMLS and the runtime.** For every schema fixture (unknown key, near-miss,
-  removed key), the DMLS diagnostics' codes, ranges, and messages equal the
-  check pass's findings for the same document. Run in the Darkmatter area,
-  with the Claudine shipped schemas loaded through the same trigger bundle.
-- **Removed grammar.** The parser's refused keys equal the schema's
-  `removed(…)` declarations.
-- **Preflight and dry run.** A real run's refused preflight prints the same
-  findings as `--dry-run` for the same fixture, and its `err.code` equals the
-  primary finding's mapped code (the code before this change).
+- **DMLS and the runtime.** Load the same schema revision through DMLS's
+  registered host path and Claudine's embedded bundle. For the same authored
+  input compare code, message, and hint. Compare ranges after converting to
+  the editor's negotiated position encoding. Cover unknown keys, opted-in
+  near-misses, and removed keys.
+- **Removed grammar.** For each applicable object, test absent, null, and
+  non-null keys. Keep `group.fail_fast` legal and report `group.execution`
+  with its replacement. Verify that opted-in advice does not reject
+  valid step data or appear on arbitrary open objects.
+- **Preflight and dry run.** With identical inputs and a failure both
+  surfaces can prove, compare the shared findings. Add a fixture where the
+  first displayed row differs from the old primary failure. Check all
+  lifecycle fields, including the persisted result, against the prior
+  behavior. Cover an earlier `initialize` or task writing a value or file
+  needed later, as governed by the [author decision](#open-questions).
 
 ### Exit status and passivity
 
-- Exit status `0`, `1`, and `2` for each fixture class, and the report printed
-  before a non-zero exit.
-- A passivity fixture with a `$( … )` frontmatter value and a `::shell` body
-  directive that each write a marker file, a `shell:` task that writes
-  another, a remote `::file` on a loopback responder, and a missing required
-  input. For `sequence`, `compose`, and `inline-compose` with `--dry-run`,
-  through both stages, on a terminal and off one: no marker exists afterwards,
-  the responder saw no request, no prompt was shown, no lifecycle event fired,
-  and the preview shows each construct marked as not run.
-- `--dry-run-shell` on each of the three commands exits `2` with the
-  removed-flag message.
-- The asking rule: the same fixture yields a warning with a terminal on stdin
-  and stderr and an error without one. Use the CLI process fixture's PTY path,
-  never a focused terminal window.
+- Test exit 0 for a successful check, 1 for document failures, and 2 for
+  usage failures. Assert stream separation and a single parseable JSON
+  result for successful checks and document failures. Verify preview
+  suppression after an error and when JSON was requested.
+- Use separate preview-eligible and blocked fixtures. Cover each command's
+  effect-capable entry points, including shell-frontmatter and body
+  directives, a command-backed sequence source, a `shell:` task, remote
+  includes and data/schema reads, and an input that would prompt in a real
+  run. Use marker-file commands and a loopback responder. Assert that no
+  effect, cache write, prompt, or lifecycle event occurred and that an
+  eligible human preview marks its deferred constructs.
+- On all three commands, verify the targeted error for `--dry-run-shell`,
+  the requirement that `--json` accompany `--dry-run`, and help and
+  forwarding boundaries.
+- Exercise provider review and input collection separately. Cover redirected
+  streams, `--silent`, disabled input prompting, unsupported input shapes,
+  and invalid provider hints. Use the area's CLI fixture with injected
+  terminal observations where sufficient. Use a focus-safe terminal harness
+  only where a real terminal is required, with the repository's tier rules.
+- Verify that `md compose` keeps its reference recovery and warning policy,
+  and that a failed passive call check still prevents effects. Use the
+  repository test toolkit and area test recipes.
 
 ### Cross-platform paths
 
@@ -940,11 +999,11 @@ writing these):
 
 Each task is labeled with the package that owns it.
 
-### Phase 1: shared foundation, and both sessions end to end
+### Phase 1 — Shared findings and passive dry runs
 
 - **Darkmatter:** extend `Diagnostic` with `hint`, `related`, and `trail`,
   keeping `iteration_path` and `included_via` as projections. Add the
-  typestate finding builder.
+  finding builder.
 - **Darkmatter:** add `findings::{FindingSink, FindingReport}` and
   `dm.check.not_checked`. Extract the `md validate refs` renderer into
   `FindingReport`, byte-identical.
@@ -953,7 +1012,8 @@ Each task is labeled with the package that owns it.
   moving Claudine's suggestion search down.
 - **Darkmatter:** compose reports `EmptyBodyCause`; add
   `dm.compose.empty_body`; `md compose` pushes reference, call-check,
-  schema-verdict, and empty-body findings into one sink.
+  schema-verdict, and empty-body findings into one sink when each can be
+  established independently.
 - **Claudine:** add the check pass over the preflight loader, collecting
   instead of aborting; `composition.no_executable`,
   `composition.selection_key_as_data`, and `composition.provider_unresolved`
@@ -962,22 +1022,23 @@ Each task is labeled with the package that owns it.
 - **Darkmatter:** the passive compose option: `$( … )`, `::shell`, and remote
   fetches are left as written and marked, and missing inputs keep their
   placeholders.
-- **Claudine:** dry-run Stage 1 and the passive Stage 2 for `sequence`,
-  `compose`, and `inline-compose`; no prompting in a dry run; remove
-  `--dry-run-shell`; `--json`; exit statuses. A real run's preflight uses the
-  pass; `CheckFailed` with the `Aggregate` role; the `dm.*` mapping table.
+- **Claudine:** ship the passive check and preview flow for all three
+  document commands together. Include missing-input and model checks,
+  removal of `--dry-run-shell`, `--json`, and the exit contracts. The real
+  sequence reuses the existing checks and returns a report with the typed
+  cause at its existing preflight boundary.
 - **Claudine:** the site, catch-all, noun, and mapping guards for every site
   this phase touches.
 - **Both:** the session fixtures, the `md` equivalent fixture, and their
   snapshots.
 
-### Phase 2: schema-derived checks
+### Phase 2 — Schema-derived checks
 
-- **Simplified Schema:** `removed(<replacement>)` and `dm.schema.removed_key`;
-  near-miss suggestions for unknown keys in closed objects and
-  `dm.schema.near_miss_key` for open objects.
-- **Darkmatter:** move `md clean`'s suggestion into the validator; DMLS emits
-  `related` and hints; remove `dm.schema.deprecated_key`.
+- **Simplified Schema:** add `removed(<replacement>)`, key suggestions for
+  closed objects, and opt-in advice for open objects.
+- **Darkmatter:** use the shared suggestions in `md clean` and project the
+  typed schema findings. DMLS publishes the hints and related locations.
+  Remove the unused `dm.schema.deprecated_key`.
 - **Claudine:** move `fail_fast`, `setup`, `teardown`, and `execution` into the
   shipped schemas as `removed(…)`; the parser reads the replacements from them;
   run `just shipped-schemas`.
@@ -985,49 +1046,39 @@ Each task is labeled with the package that owns it.
   group, and task document passively.
 - **Both:** the DMLS and runtime parity test; the removed-grammar parity test.
 
-### Phase 3: agent-level checks and the other dry runs
-
-- **Claudine:** `composition.model_required`; passive missing-input findings
-  (`composition.missing_properties`) with the asking rule.
-- **Claudine:** `claudine compose` and `claudine inline-compose` `--dry-run`
-  run the check pass for one document.
-
-### Phase 4: the rest of the inventory
+### Phase 3 — Remaining error sites
 
 - **Claudine:** split `SequenceExternalLoad`; give every `Sequence*` variant a
   site; fix `SequenceExclusiveExecutable`, `expect_reference`, and
   `parse_task_object`; delete `SequenceSelectionFailed`; empty the catch-all
   allowlist for sequence variants.
 - **Darkmatter:** apply the standard to any reference or schema message the
-  catalog snapshot guard still flags.
+  scoped snapshot guard still flags.
 
 ## Open questions
 
-1. **Should `iteration_path` and `included_via` stay in JSON?** This repository
-   has no external users, so they could simply be replaced by `trail`.
-   *Recommendation:* keep them as projections for this spec, because DMLS and
-   several `md` tests read them, and remove them in a follow-up once every
-   consumer reads `trail`.
-2. **Should a standalone `md check <file>` exist?** It would expose the shared
-   check pass for plain documents, with no composition. *Recommendation:* not
-   in this spec. Revisit once `md compose`'s collected report has been used,
-   since it may already be enough.
-3. **Should the asking rule also apply to `claudine compose --dry-run`?**
-   *Recommendation:* yes, in Phase 3, for consistency. It is listed here because
-   compose falls back to `preferred_agent` in a non-interactive run and a
-   sequence does not, so the rule's outcome differs between the two commands.
-4. **Should sequence task objects eventually close?** Decided 2026-11-22: they
-   stay open in this spec, with the `selection_key_as_data` and near-miss
-   warnings. *Recommendation:* raise it again in
-   `2026-11-18-ergonomic-sequences`, which already reshapes the task verbs and
-   could move step data under one key at the same time.
-5. **Should Claudine gain `--allow`/`--deny` for warnings?** *Recommendation:*
-   no, not until someone needs a warning to block a run. The severity model is
-   ready for it.
-6. **Should a transclusion inside an excluded `::block` fail composition?**
-   Today `md compose` fails on a missing `::file` even when its block's
-   condition is false (observed 2026-11-22). This spec reports it as an error
-   because a real run fails. *Recommendation:* keep that for this spec, which
-   is about reporting. Decide separately whether excluded blocks should resolve
-   their transclusions at all, since that changes composition semantics and
-   approval inventory.
+### Should a newly detected dry-run error stop a real sequence before its first task?
+
+A dry run can find an empty prompt or a missing reference in a later task.
+Today some failures are discovered only at that task's turn. Moving them to
+preflight changes which lifecycle handler sees the failure. It can also
+prevent earlier tasks from creating the missing file or supplying a value.
+
+- **Keep the existing real-run failure points.** Dry run reports static
+  problems with their scope. Real runs collect more detail for existing
+  preflight failures and preserve recovery and task order. A static
+  dry-run error can still describe a problem a real run could avoid by
+  changing its inputs during execution.
+- **Advance only failures proven independent of earlier tasks.** Some
+  structural problems stop a run before it does unnecessary work. This
+  requires an explicit list and changes when lifecycle handlers see even
+  those errors.
+- **Make every proven dry-run error a real-run preflight blocker.** A static
+  fixture gets the closest agreement between the two reports. This requires
+  a new lifecycle contract and can stop sequences that prepare data or files
+  as they run.
+
+**Recommendation** — Keep the existing real-run failure points. Each
+diagnostic can still explain what the check could prove from today's
+inputs. Real sequences keep the order in which they prepare inputs and
+handle failures.
