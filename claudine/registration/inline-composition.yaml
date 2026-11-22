@@ -1,0 +1,33 @@
+name: inline-compose-schema
+kind: schema-trigger
+description: detects an inline-compose prompt and provides additional schema properties
+match:
+    some:
+        - kind: literal("inline-compose")
+        - prompt: string
+        - sections: object
+
+$schema:
+    # either a `prompt` or a `sections` property but not both
+    - prompt: |-
+          string -> a _composable_ prompt which will be sent to an agent (_after being composed_). Intended to be used with **claudine's** `inline-compose` operation.
+      sections: null
+      hash: hash
+      last_updated: last_updated
+      content-policy: policy@content-policy/schemas/content.policy.yaml
+      agent: agent
+    - prompt: null
+      sections: |-
+          object -> Claudine's `inline-compose` operation can take a key/value object as the "sections" property. The "keys" represent heading sections
+      hash: hash
+      last_updated: last_updated
+      content-policy: policy@content-policy/schemas/content.policy.yaml
+      agent: agent
+types:
+    hash: |-
+        string -> a managed hash value from Claudine that is _content aware_:
+
+        - changes like whitespace additions/removal that have no semantic effect on the Markdown will not impact the hash
+        - the properties `last_updated`, `hash`, and `content-policy` are not included in the hash
+    last_updated: |-
+        date -> a _managed_ property that indicates the last time the document was updated by **Claudine**. Format is ISO standard YYYY-MM-DD.

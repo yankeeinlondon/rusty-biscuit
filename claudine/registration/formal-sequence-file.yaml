@@ -1,0 +1,13 @@
+kind: yaml-schema
+description: A formal YAML sequence file
+$schema:
+    kind: literal(sequence;required)
+    description: string
+    template: object
+    $schema: |-
+        schema -> The global `fm` schema for frontmatter that the sequence has. This can be useful for ensuring that parameters being passed into the sequence are both _typed_ and _available_ for the sequence.
+
+        See the `$state` schema for defining the schema for each step's `seq` state.
+    $state: |-
+        schema -> The shape for state in each step in the sequence. This defines what properties will eventually be made available off the `seq` namespace.
+    sequence: sequence@./sequence.yaml
