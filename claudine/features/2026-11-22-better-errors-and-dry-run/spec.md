@@ -1,7 +1,7 @@
 ---
 kind: feature
 created: 2026-11-22
-status: human-in-the-loop
+status: finalized-spec
 area: claudine
 owner: Ken Snyder <ken@ken.net>
 related:
