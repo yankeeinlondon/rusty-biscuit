@@ -182,10 +182,6 @@ fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
         },
         EmbeddedDocument { path: "claudine/lifecycle.yaml", text: include_str!("../../../../claudine/schemas/lifecycle.yaml") },
         EmbeddedDocument { path: "claudine/linking.yaml", text: include_str!("../../../../claudine/schemas/linking.yaml") },
-        EmbeddedDocument {
-            path: "claudine/sequence-types.yaml",
-            text: include_str!("../../../../claudine/schemas/sequence-types.yaml"),
-        },
         EmbeddedDocument { path: "claudine/sequence.yaml", text: include_str!("../../../../claudine/schemas/sequence.yaml") },
     ];
     // Claudine's documents name Darkmatter's shipped partials through the

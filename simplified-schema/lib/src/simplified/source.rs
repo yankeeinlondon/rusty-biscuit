@@ -24,10 +24,11 @@ use crate::expression::scan::scan_expression_at;
 use super::grammar;
 use super::yaml_scalar::{self, DecodedScalar};
 use super::{
-    Constraint, DefinitionFailure, DynamicElement, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
+    Constraint, DefinitionFailure, DynamicElement, MappingMode, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
     SchemaShape, SchemaRoot, SimplifiedType, Slot, TypeExpr, parse_property_definition_located,
-    parse_schema_declaration_located, parse_yaml_schema,
+    parse_schema_declaration_located_as, parse_yaml_schema,
 };
+use super::types::{Extends, ObjectComposition};
 
 /// One segment in a structural path through a schema declaration.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
@@ -35,8 +36,12 @@ use super::{
 pub enum SchemaSourcePathSegment {
     /// A literal or pattern mapping property.
     Property(String),
-    /// An arm of a property-level or root-level union.
+    /// An arm of a property-level or root-level union, or an item of a
+    /// `$extends` sequence (which follows the YAML node tree).
     UnionArm(usize),
+    /// The zero-based `...Name` spread of an inline object body, counted
+    /// among that object's spreads only.
+    Spread(usize),
 }
 
 /// A structural path used to query a [`SchemaSourceMap`].
@@ -63,6 +68,15 @@ impl SchemaSourcePath {
         path
     }
 
+    /// Returns a child path for the `index`-th spread of an inline object.
+    /// A `$extends` operand is addressed as YAML is nested instead:
+    /// `path.property("$extends")`, then `.union_arm(index)` for an item.
+    pub fn spread(&self, index: usize) -> Self {
+        let mut path = self.clone();
+        path.0.push(SchemaSourcePathSegment::Spread(index));
+        path
+    }
+
     /// Borrows the structural segments in this path.
     pub fn segments(&self) -> &[SchemaSourcePathSegment] {
         &self.0
@@ -78,8 +92,8 @@ impl SchemaSourcePath {
     }
 }
 
-/// Renders properties joined by `.` and union arms as `[N]`; the root is
-/// `<root>`.
+/// Renders properties joined by `.`, union arms as `[N]`, and spreads as
+/// `[...N]`; the root is `<root>`.
 impl std::fmt::Display for SchemaSourcePath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.0.is_empty() {
@@ -90,6 +104,7 @@ impl std::fmt::Display for SchemaSourcePath {
                 SchemaSourcePathSegment::Property(name) if index == 0 => f.write_str(name)?,
                 SchemaSourcePathSegment::Property(name) => write!(f, ".{name}")?,
                 SchemaSourcePathSegment::UnionArm(arm) => write!(f, "[{arm}]")?,
+                SchemaSourcePathSegment::Spread(spread) => write!(f, "[...{spread}]")?,
             }
         }
         Ok(())
@@ -351,6 +366,9 @@ pub enum SchemaSpanKind {
     ImportName,
     /// The file-reference portion to the right of `@`.
     ImportReference,
+    /// A complete composition operand, `Name` or `Name@reference`, without
+    /// the `...` of a spread.
+    CompositionOperand,
     /// One property-level or root-level union arm.
     UnionArm,
     /// A complete schema file reference.
@@ -486,7 +504,7 @@ pub fn parse_schema_declaration_with_source(
     yaml_source: &str,
     source_offset: usize,
 ) -> Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure> {
-    let parsed = parse_schema_declaration_located(value).map_err(|failure| {
+    let parsed = parse_schema_declaration_located_as(value, MappingMode::Object).map_err(|failure| {
         locate_definition_failure(failure, value, yaml_source, source_offset)
     })?;
     let located = locate_yaml_value(yaml_source).map_err(unlocated_failure)?;
@@ -555,7 +573,11 @@ pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefin
         .map(|payload| (recognized.payload_key(), payload))
         .into_iter()
         .chain(recognized.local_types().map(|types| ("types", types)))
-        .find_map(|(key, payload)| parse_schema_declaration_located(payload).err().map(|failure| (key, payload, failure)))?;
+        .find_map(|(key, payload)| {
+            parse_schema_declaration_located_as(payload, MappingMode::of_carrier(key))
+                .err()
+                .map(|failure| (key, payload, failure))
+        })?;
     // A failure on no property is the declaration's own shape, not a definition.
     if !failure
         .path
@@ -577,7 +599,18 @@ pub(crate) fn parse_keyed_declaration(
     key: &str,
     source_offset: usize,
 ) -> Result<SchemaDeclaration, LocatedDefinitionFailure> {
-    parse_schema_declaration_located(value)
+    parse_keyed_declaration_as(value, mapping_source, key, source_offset, MappingMode::Object)
+}
+
+/// [`parse_keyed_declaration`], reading the outer mapping in `mode`.
+fn parse_keyed_declaration_as(
+    value: &YamlValue,
+    mapping_source: &str,
+    key: &str,
+    source_offset: usize,
+    mode: MappingMode,
+) -> Result<SchemaDeclaration, LocatedDefinitionFailure> {
+    parse_schema_declaration_located_as(value, mode)
         .map_err(|failure| locate_keyed_failure(failure, value, mapping_source, key, source_offset))
 }
 
@@ -806,7 +839,9 @@ pub(super) fn parse_standalone_schema_payload_with_source(
     yaml_source: &str,
     payload_key: &str,
 ) -> Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure> {
-    let parsed = parse_keyed_declaration(value, yaml_source, payload_key, 0)?;
+    // A `types` carrier is a table of named declarations; `$schema` is a
+    // schema object.
+    let parsed = parse_keyed_declaration_as(value, yaml_source, payload_key, 0, MappingMode::of_carrier(payload_key))?;
     project_standalone_payload(parsed, value, yaml_source, payload_key).map_err(unlocated_failure)
 }
 
@@ -967,7 +1002,7 @@ fn project_located_shape_suggestions(
         return Err(projection_error());
     };
     for pair in pairs {
-        if pair.key == "$constraints" {
+        if pair.key == "$constraints" || is_extends_directive(shape, &pair.key) {
             continue;
         }
         let definition = match shape.properties.get_mut(&pair.key) {
@@ -2112,6 +2147,12 @@ fn project_shape_source(
             )?;
             continue;
         }
+        if let Some(ObjectComposition::Extends(extends)) = shape.composition.as_deref()
+            && pair.key == "$extends"
+        {
+            project_extends_source(extends, &pair.value, &property_path, source_offset, source_map)?;
+            continue;
+        }
         let definition = shape.properties.get(&pair.key).or_else(|| {
             super::PatternKey::parse(&pair.key).ok().and_then(|key| {
                 shape
@@ -2129,6 +2170,82 @@ fn project_shape_source(
             source_offset,
             source_map,
         )?;
+    }
+    Ok(())
+}
+
+/// Whether `key` of `shape`'s mapping is its `$extends` directive rather
+/// than a member (a `types` table keeps `$extends` as a type name).
+fn is_extends_directive(shape: &SchemaShape, key: &str) -> bool {
+    key == "$extends" && matches!(shape.composition.as_deref(), Some(ObjectComposition::Extends(_)))
+}
+
+/// Records the spans of a `$extends` value located as `located`, whose path
+/// is `path`: its whole value, and each operand at `path` (a scalar) or at
+/// its item index (a sequence).
+fn project_extends_source(
+    extends: &Extends,
+    located: &LocatedValue,
+    path: &SchemaSourcePath,
+    source_offset: usize,
+    source_map: &mut SchemaSourceMap,
+) -> Result<(), SchemaError> {
+    source_map.insert(path, SchemaSpanKind::Definition, offset_span(&located.span, source_offset));
+    match (extends, &located.kind) {
+        (Extends::Scalar(_), LocatedKind::Scalar(scalar)) => {
+            project_operand_scalar(scalar, &located.span, path, source_offset, source_map)
+        }
+        (Extends::Sequence(operands), LocatedKind::Sequence(items)) if operands.len() == items.len() => {
+            for (index, item) in items.iter().enumerate() {
+                let item_path = path.union_arm(index);
+                let span = offset_span(&item.span, source_offset);
+                source_map.insert(&item_path, SchemaSpanKind::UnionArm, span.clone());
+                source_map.insert(&item_path, SchemaSpanKind::Definition, span);
+                let LocatedKind::Scalar(scalar) = &item.kind else {
+                    return Err(projection_error());
+                };
+                project_operand_scalar(scalar, &item.span, &item_path, source_offset, source_map)?;
+            }
+            Ok(())
+        }
+        _ => Err(projection_error()),
+    }
+}
+
+/// Records the operand written as the whole of `scalar`. An alias names its
+/// anchor's text, not this node's, so only its own span is the operand.
+fn project_operand_scalar(
+    scalar: &DecodedScalar,
+    span: &Range<usize>,
+    path: &SchemaSourcePath,
+    source_offset: usize,
+    source_map: &mut SchemaSourceMap,
+) -> Result<(), SchemaError> {
+    if scalar.decoded().starts_with('*') {
+        source_map.insert(path, SchemaSpanKind::CompositionOperand, offset_span(span, source_offset));
+        return Ok(());
+    }
+    project_operand_range(scalar, path, 0..scalar.decoded().len(), source_offset, source_map)
+}
+
+/// Records the composition operand written in `range` of `scalar`: the whole
+/// operand, its name, and the file reference after `@` when it has one.
+fn project_operand_range(
+    scalar: &DecodedScalar,
+    path: &SchemaSourcePath,
+    range: Range<usize>,
+    source_offset: usize,
+    source_map: &mut SchemaSourceMap,
+) -> Result<(), SchemaError> {
+    let source = scalar.decoded();
+    let operand = trim_local(source, range);
+    insert_projected(scalar, path, SchemaSpanKind::CompositionOperand, operand.clone(), source_offset, source_map)?;
+    let name = leading_identifier(source, operand.clone()).ok_or_else(projection_error)?;
+    insert_projected(scalar, path, SchemaSpanKind::ImportName, name.clone(), source_offset, source_map)?;
+    let after_name = trim_local(source, name.end..operand.end);
+    if source.as_bytes().get(after_name.start) == Some(&b'@') {
+        let reference = trim_local(source, after_name.start + 1..operand.end);
+        insert_projected(scalar, path, SchemaSpanKind::ImportReference, reference, source_offset, source_map)?;
     }
     Ok(())
 }
@@ -2398,9 +2515,15 @@ fn project_inline_shape_range(
     let expression = trim_local(source, range.start..expression_end);
     let close = inline_object_end(source, expression.clone()).ok_or_else(projection_error)?;
     let body = expression.start + 1..close;
+    let mut spreads = 0;
     for pair in split_top_level(source, body, ExpressionContext::ObjectBody, b',') {
         let pair = trim_local(source, pair);
         if pair.start == pair.end {
+            continue;
+        }
+        if source[pair.clone()].starts_with("...") {
+            project_operand_range(scalar, &path.spread(spreads), pair.start + 3..pair.end, source_offset, source_map)?;
+            spreads += 1;
             continue;
         }
         let colon = find_top_level_byte(source, pair.clone(), ExpressionContext::ObjectBody, b':')

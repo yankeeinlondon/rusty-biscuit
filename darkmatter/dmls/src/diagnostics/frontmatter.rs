@@ -1686,7 +1686,7 @@ fn enclosing_entry_span(
             .iter()
             .map_while(|segment| match segment {
                 SchemaSourcePathSegment::Property(key) => Some(key.as_str()),
-                SchemaSourcePathSegment::UnionArm(_) => None,
+                SchemaSourcePathSegment::UnionArm(_) | SchemaSourcePathSegment::Spread(_) => None,
             }),
     );
     (1..=keys.len())

@@ -122,7 +122,8 @@ pub use schema::{SchemaSource, repository_scope_catalog};
 #[cfg(feature = "work-counters")]
 pub use simplified::alias_search_work;
 pub use simplified::{
-    Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar,
+    Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, CompositionOperand, Constraint, DRAFT_2020_12, DecodedScalar,
+    Extends, InlineSpread, ObjectComposition,
     DynamicElement, DynamicKind, DynamicList, Slot, TemplateConstraintKind,
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
     PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,

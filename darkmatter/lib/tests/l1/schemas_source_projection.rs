@@ -547,6 +547,7 @@ fn render_path(path: &SchemaSourcePath) -> String {
         .map(|segment| match segment {
             SchemaSourcePathSegment::Property(name) => name.clone(),
             SchemaSourcePathSegment::UnionArm(index) => format!("#{index}"),
+            SchemaSourcePathSegment::Spread(index) => format!("...{index}"),
         })
         .collect::<Vec<_>>()
         .join(".")

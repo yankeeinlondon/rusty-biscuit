@@ -2899,6 +2899,7 @@ impl ImportEngine<'_> {
             properties,
             pattern_keys,
             constraints: shape.constraints,
+            composition: None,
         })
     }
 

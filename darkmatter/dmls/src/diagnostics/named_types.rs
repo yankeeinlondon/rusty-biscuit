@@ -280,7 +280,7 @@ impl<'a> NamedTypeScope<'a> {
         for segment in site.path.segments() {
             match segment {
                 SchemaSourcePathSegment::Property(name) => keys.push(name),
-                SchemaSourcePathSegment::UnionArm(_) => break,
+                SchemaSourcePathSegment::UnionArm(_) | SchemaSourcePathSegment::Spread(_) => break,
             }
         }
         (keys.len() > 1)

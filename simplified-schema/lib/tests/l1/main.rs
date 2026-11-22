@@ -25,6 +25,7 @@ mod input_robustness;
 mod located_failures;
 mod located_schema_errors;
 mod not_empty_values;
+mod object_composition;
 mod path_lookup_guard;
 mod property_paths;
 mod quote_the_slot;

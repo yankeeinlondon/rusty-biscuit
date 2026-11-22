@@ -127,7 +127,7 @@ use crate::errors::{GrammarRelated, SchemaError};
 use super::alphanumeric::AlphanumericOption;
 use super::narrowing;
 use super::types::{
-    CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
+    CallExample, CompositionOperand, Constraint, ExampleOutcome, FunctionParameter, InlineSpread, ObjectComposition, FunctionParameters, FunctionType,
     DynamicElement, DynamicKind, DynamicList, NarrowsClause, NarrowsKind, PatternKey, PatternKeyDef, PropertyAtom,
     PropertyDef, SchemaShape, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr,
     TemplateConstraintKind, narrows_target_problem,
@@ -174,6 +174,41 @@ pub fn parse_type_expr(property: &str, input: &str) -> Result<PropertyAtom, Sche
 pub fn parse_type_definition(property: &str, input: &str) -> Result<PropertyDef, SchemaError> {
     let mut parser = Parser::new(property, input);
     parser.parse_definition()
+}
+
+/// Parses the whole text of one `$extends` operand: a named object type
+/// written as `Name` or `Name@reference`, with nothing after it.
+///
+/// ## Errors
+///
+/// [`SchemaError::Grammar`] with the byte span of the offending text, as for
+/// an inline `...Name` spread, and for text after the operand.
+pub(crate) fn parse_extends_operand(property: &str, input: &str) -> Result<CompositionOperand, SchemaError> {
+    let mut parser = Parser::new(property, input);
+    let operand = parser.parse_composition_operand(OperandSite::Extends)?;
+    parser.lex.skip_ws();
+    let rest = parser.lex.pos;
+    if rest < input.len() {
+        let hint = if input.as_bytes()[rest] == b',' {
+            "; write several operands as a YAML sequence, `[a, b]`"
+        } else {
+            ""
+        };
+        return parser.err(
+            format!("unexpected text after the `$extends` operand{hint}"),
+            rest..input.trim_end().len().max(rest + 1),
+        );
+    }
+    Ok(operand)
+}
+
+/// Where a composition operand is written, which words its errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperandSite {
+    /// `...Name` in an inline object body.
+    Spread,
+    /// A `$extends` value or sequence item.
+    Extends,
 }
 
 // ── Lexer ────────────────────────────────────────────────────────────────
@@ -664,6 +699,21 @@ fn arms_to_def(mut arms: Vec<PropertyAtom>) -> PropertyDef {
         PropertyDef::Single(arms.pop().expect("one arm"))
     } else {
         PropertyDef::Union(arms)
+    }
+}
+
+/// An inline object's shape: its written members and, when it has any
+/// spreads, their authored positions.
+fn inline_shape(
+    properties: indexmap::IndexMap<String, PropertyDef>,
+    pattern_keys: Vec<PatternKeyDef>,
+    spreads: Vec<InlineSpread>,
+) -> SchemaShape {
+    SchemaShape {
+        properties,
+        pattern_keys,
+        composition: (!spreads.is_empty()).then(|| Box::new(ObjectComposition::Inline(spreads))),
+        ..Default::default()
     }
 }
 
@@ -1726,11 +1776,20 @@ impl<'a> Parser<'a> {
                 ..Default::default()
             });
         }
+        let mut spreads: Vec<InlineSpread> = Vec::new();
         loop {
             self.lex.skip_ws();
             // A key is either a `<...>` pattern key or a literal identifier
-            // (unquoted, per Decision #8).
-            if self.lex.peek_byte() == Some(b'<') {
+            // (unquoted, per Decision #8); `...Name` composes another object.
+            if self.starts_with("...") {
+                self.lex.pos += 3;
+                let operand = self.parse_composition_operand(OperandSite::Spread)?;
+                spreads.push(InlineSpread {
+                    literals_before: properties.len(),
+                    patterns_before: pattern_keys.len(),
+                    operand,
+                });
+            } else if self.lex.peek_byte() == Some(b'<') {
                 let (key, _key_span) = self.read_inline_pattern_key()?;
                 self.lex.skip_ws();
                 self.expect_byte(b':', "expected `:` after inline object pattern key")?;
@@ -1767,20 +1826,12 @@ impl<'a> Parser<'a> {
                     // Trailing comma is legal: `{ foo: string, }`.
                     if self.lex.peek_byte() == Some(b'}') {
                         self.lex.pos += 1;
-                        return Ok(SchemaShape {
-                            properties,
-                            pattern_keys,
-                            ..Default::default()
-                        });
+                        return Ok(inline_shape(properties, pattern_keys, spreads));
                     }
                 }
                 Some(b'}') => {
                     self.lex.pos += 1;
-                    return Ok(SchemaShape {
-                        properties,
-                        pattern_keys,
-                        ..Default::default()
-                    });
+                    return Ok(inline_shape(properties, pattern_keys, spreads));
                 }
                 Some(other) => {
                     let span = self.lex.pos..self.lex.pos + 1;
@@ -1801,6 +1852,80 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+    }
+
+    /// Reads one composition operand at the cursor (after `...`, or a whole
+    /// `$extends` value): a type name, then optionally `@` and a file
+    /// reference read with the delimiters of the current nesting.
+    ///
+    /// The operand names an object whose members are copied, so it takes
+    /// none of a reference's postfixes: a constraint list, `[]`, a
+    /// description, or a template slot is an error here, as is a bare
+    /// built-in keyword (`string@this` names a local type called `string`).
+    fn parse_composition_operand(&mut self, site: OperandSite) -> Result<CompositionOperand, SchemaError> {
+        self.lex.skip_ws();
+        let start = self.lex.pos;
+        let what = match site {
+            OperandSite::Spread => "`...`",
+            OperandSite::Extends => "`$extends`",
+        };
+        if self.opens_slot() {
+            let end = slot_end(self.lex.bytes, start).unwrap_or(start + 2);
+            return self.err(
+                format!("{what} names an object type; a `{{{{ … }}}}` template cannot be composed"),
+                start..end,
+            );
+        }
+        let (name, name_span) = self.lex.read_ident();
+        if name.is_empty() {
+            let end = self.src[start..].chars().next().map_or(start, |c| start + c.len_utf8());
+            return self.err(format!("expected a named object type after {what}"), start..end);
+        }
+        let after_name = self.lex.pos;
+        self.lex.skip_ws();
+        let next = self.lex.pos;
+        if self.opens_slot() {
+            let end = slot_end(self.lex.bytes, next).unwrap_or(next + 2);
+            return self.err(SlotPosition::TypeName.refusal().expect("refused"), name_span.start..end);
+        }
+        if self.starts_with("->") {
+            return self.err(
+                "a composition operand takes no description; describe the receiving property instead",
+                next..next + 2,
+            );
+        }
+        let reference = match self.lex.peek_byte() {
+            Some(b'(' | b'[') => {
+                return self.err(
+                    "a composition operand takes no constraint list or `[]`; it names an object \
+                     whose members are copied, so write constraints on the receiving object",
+                    next..next + 1,
+                );
+            }
+            Some(b'@') => {
+                self.lex.pos += 1;
+                Some(self.read_fileref()?)
+            }
+            _ => {
+                self.lex.pos = after_name;
+                None
+            }
+        };
+        if reference.is_none() && SimplifiedType::is_keyword(&name) {
+            let message = match site {
+                OperandSite::Spread => format!(
+                    "`...{name}` names the built-in `{name}` type, which has no members to compose; \
+                     write `...{name}@this` to compose a local type named `{name}`"
+                ),
+                OperandSite::Extends => format!(
+                    "`$extends` is reserved for object composition and needs a named object type, \
+                     but `{name}` is the built-in `{name}` type; write `{name}@this` to compose a local \
+                     type named `{name}`, or use raw JSON Schema to declare a literal `$extends` property"
+                ),
+            };
+            return self.err(message, name_span);
+        }
+        Ok(CompositionOperand { name, reference })
     }
 
     /// Reads a single inline object property name: ASCII alphanumerics plus
