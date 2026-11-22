@@ -27,8 +27,8 @@ packages:
     - darkmatter-lsp
 decisions-for-review:
     - |-
-        A `types` table reads `$extends` as an ordinary type name only in the
-        standalone parsers, as the plan says (table mode for the `types`
+        At Phase 1, a `types` table read `$extends` as an ordinary type name
+        only in the standalone parsers, as the plan said (table mode for the `types`
         carrier in `parse_standalone_schema_payload_with_source` and in
         `locate_standalone_definition_failure`). The plan did not foresee that
         envelope admission checks `types` first with the `schema(mapping)`
@@ -45,6 +45,15 @@ decisions-for-review:
         touches `MappingMode` in `simplified/mod.rs`, its two callers in
         `simplified/source.rs`, and the test
         `composition_extends_in_a_types_table_is_an_ordinary_type_name`.
+
+        Review correction (2026-11-22, iteration 2): the admission behavior
+        described above is historical, not the current limitation. R1-F5
+        made `schema(mapping)` read a declaration table in admission,
+        validation, and trigger matching. `$extends: string` now loads in
+        every supported table envelope. Verified through the public-factory
+        `composition_extends_in_a_types_table_loads_through_every_envelope`
+        test in both passing simplified-schema feature builds and the
+        Darkmatter type-table registry test (13/13 scoped host tests).
     - |-
         `SchemaShape::composition` is `Option<Box<ObjectComposition>>`, not the
         `Option<ObjectComposition>` the plan names. Unboxed, it grew every
@@ -167,31 +176,6 @@ decisions-for-review:
         on its own; a one-line flow `$schema: {...}` then falls back to
         names without definitions, so nothing is filtered there. Moving the
         check into the kind lookup is a small change.
-message-to-agent: |-
-    Phase 4 landed DMLS operand completion, dependency tracking, diagnostics,
-    the editor-session tests (`darkmatter/dmls/tests/l1/object_composition_editor.rs`),
-    and the documentation. For Phase 5:
-
-    - `darkmatter/docs/use-skills/use-dmls/schemas.md` has a new subsection
-      "Reusing an object's properties"; `md compose` on it succeeds. Publish
-      with `just publish-skills` and check the installed copy.
-    - Pre-existing failures, unchanged by this phase:
-      `simplified-schema` `shipped_corpus::claudine_bundle_and_its_triggers_resolve_from_supplied_sources`
-      (reads the deleted `claudine/sequence.yaml` sequence types), plus the
-      Darkmatter failures recorded in the Phase 4 log (`shipped_schema_corpus::*`,
-      `darkmatter-cli` L1 not compiling because it `include_str!`s the deleted
-      `claudine/schemas/sequence-types.yaml`, and
-      `claudine_schema_discovery::removed_sequence_keys_are_reported_at_their_paths`).
-      `claudine` itself does not compile (`composition/schema/bundle.rs`
-      `include_str!`s the same deleted file), so Phase 5's root
-      `cargo check -p claudine ...` will fail for that reason alone.
-    - The documentation subagent observed that `md schema validate` rejects a
-      `types` table entry named `$extends` even with a valid operand value
-      (admission parses `types` as a schema object; see the Phase 1 decision).
-      The docs say to avoid such a name.
-    - Two passive DMLS paths still read disk: the re-assembly after a slot
-      failure in `overlay/mod.rs::schema_for`, and the related-location text
-      lookup in `diagnostics/named_types.rs::file`.
 source_files_during_phase_2:
     - simplified-schema/lib/src/errors.rs
     - simplified-schema/lib/src/lib.rs
@@ -249,6 +233,59 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/simplified-schema/SKILL.md
     - darkmatter/docs/use-skills/use-dmls/schemas.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source-code:
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/simplified/grammar.rs
+    - simplified-schema/lib/src/simplified/mod.rs
+    - simplified-schema/lib/src/simplified/source.rs
+    - simplified-schema/lib/src/simplified/types.rs
+    - simplified-schema/lib/src/yaml_documents/semantic.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/object_composition.rs
+    - simplified-schema/lib/tests/l1/shipped_corpus.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/resolve/composition.rs
+    - simplified-schema/lib/src/resolve/graph.rs
+    - simplified-schema/lib/src/schema/layer.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/src/triggers/assemble.rs
+    - simplified-schema/lib/src/triggers/finding.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - simplified-schema/lib/src/schema/export.rs
+    - simplified-schema/lib/src/simplified/serialize.rs
+    - simplified-schema/lib/src/simplified/cursor.rs
+    - simplified-schema/lib/tests/l1/object_composition_export.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/src/providers/frontmatter/composition_tests.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/object_composition_editor.rs
+documentation:
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/language/objects-and-named-types.md
+    - simplified-schema/docs/topics/language/index.md
+    - simplified-schema/docs/topics/language/local-type-references.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
+    - .claude/skills/simplified-schema/SKILL.md
+completed-phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-11-22-object-composition (5 phases)
@@ -655,13 +692,19 @@ editor reading.
 
 ### Pre-existing limitation found
 
-A block-mapping value written as a multi-line quoted scalar, such as
-`p: '{ a: string,\n    n: number }'`, fails to load with "could not
-project SimplifiedSchema expression spans through YAML source". This
-happens with or without a spread, in the line locator in
-`simplified/source.rs`. It is outside this feature, so I did not fix it.
-The export test covers folded (`>-`), anchored, and aliased operands
-instead, and all of them work.
+At Phase 3, a block-mapping value written as a multi-line quoted scalar,
+such as `p: '{ a: string,\n    n: number }'`, failed source projection with
+or without a spread. That limitation was subsequently repaired under
+R1-F2; the loader now accepts both quote styles across lines. The export
+test also covers folded (`>-`), anchored, and aliased operands.
+
+Review correction (2026-11-22, iteration 2): the earlier current-tense
+statement that these values fail to load is no longer true. Verified the
+repair through `composition_objects_wrapped_across_lines_load_and_lower_like_one_line`
+and `composition_extends_operand_wrapped_inside_its_reference_loads` in the
+passing default (2,483 tests) and minimal (2,103 tests) `just test` runs.
+Editor completion has separate remaining scalar-continuation gaps, recorded
+as R2-F1 in review-2.md.
 
 ### Docs
 
@@ -771,8 +814,15 @@ field validator: completion and the tolerant catalog are passive editor
 readings, and `$extends` validation is the Phase 1 validator, which is
 unchanged.
 
-Not covered: `ComposedMember` routing has no direct test, because no simple
-fixture triggers that error.
+Not covered: DMLS `ComposedMember` routing has no direct test.
+
+Review correction (2026-11-22): the earlier explanation that no simple
+fixture triggers `ComposedMember` was incorrect. A composed target with
+a function-typed member produces it; the existing public-API test
+`composition_a_copied_members_lowering_failure_names_its_declaration`
+asserts that exact error and passed in the review's `just test` run
+(nextest run `98f2842b-3473-4165-94e3-0356100389cb`). That test proves the
+library error, while the DMLS routing remains untested directly.
 
 ### Verification
 
@@ -824,3 +874,158 @@ fixture triggers that error.
 - No cross-OS check. The new code is in-memory editor logic. The tests'
   file use is temporary files through the existing resolver, and the
   expected paths come from `biscuit_file::canonicalize_simplified`.
+
+## Phase 5
+
+### Scope
+
+Phase 5 changed no source file. It regenerated and compared the shipped
+artifacts, ran the package gates, published the caller skills, and
+recorded the evidence. The only files edited are this log, the plan, and
+the spec's frontmatter.
+
+### Shipped artifacts
+
+- `just shipped-schemas` (root) refused before writing anything. The
+  `claudine` generator does not compile, because
+  `claudine/lib/src/composition/schema/bundle.rs` still uses `include_str!`
+  on `claudine/schemas/sequence-types.yaml`. Commit `8f33de0d7`, made
+  before this feature, deleted that file. The script works all or nothing,
+  so no artifact changed.
+- So I ran the two lower generators directly and compared their output
+  with the checked-in files:
+  - `cargo run --quiet -p simplified-schema --example shipped_schemas`:
+    identical to `simplified-schema/lib/generated/shipped.json` (`cmp`).
+  - `cargo run --quiet -p darkmatter --example shipped_schemas -- --lower simplified-schema=<fresh>`:
+    identical to `darkmatter/lib/generated/shipped.json` (`cmp`).
+  - Claudine's artifact cannot be generated on this tree, for the reason
+    above. No Claudine schema source uses composition, and the new AST field
+    is left out of the serialized form when it is empty. So nothing in
+    this feature can change that artifact.
+
+### Gates
+
+Load average was 2–12 during the runs. No subagents were used.
+
+- `simplified-schema`:
+  - `just test --no-fail-fast`: 2471/2472. The recipe records
+    `L1 run recorded: 2472 test(s), none at or above 5.0s`.
+  - The recipe stops after its first leg fails, so I ran
+    `just test-minimal --no-fail-fast` on its own: 2091/2092.
+  - The single failure in both legs is the pre-existing
+    `shipped_corpus::claudine_bundle_and_its_triggers_resolve_from_supplied_sources`.
+    The test passes only the inline `$schema` of `claudine/schemas/sequence.yaml`,
+    but `8f33de0d7` moved that trigger's `steps` type into a sibling
+    `types:` table ("unknown named type `steps`").
+  - `just lint`: passes on all three feature sets.
+  - `just check-tier-coverage simplified-schema`: nothing stranded.
+  - `just slow-tests fresh`: fresh, 0 slow.
+- `darkmatter`:
+  - `just test` stops at compilation, because `darkmatter-cli`'s L1 binary
+    uses `include_str!` on the same deleted file. So I ran
+    `cargo nextest run --no-fail-fast -p darkmatter -p darkmatter-lsp -p zed-dmls-cli --features darkmatter/effects-instrumentation,darkmatter/work-counters,darkmatter-lsp/effects-instrumentation`.
+    Result: 14875/14879, 10 skipped, no `SLOW` lines.
+  - The four failures are the pre-existing ones recorded in Phases 3 and 4.
+    All are Claudine schema files the author changed before this feature:
+    - three `shipped_schema_corpus::*` tests. A trigger envelope has
+      `description`/`types`, `lifecycle-events.yaml` has no `match`, and
+      `sequence.yaml` has `types`.
+    - `claudine_schema_discovery::removed_sequence_keys_are_reported_at_their_paths`.
+  - `just lint`: the library leg passes, and `darkmatter-cli --all-targets`
+    fails on the `include_str!`. These pass:
+    - `cargo clippy -p darkmatter-cli --lib --bins -- -D warnings`
+    - `cargo clippy -p darkmatter-lsp -p zed-dmls-cli --all-targets -- -D warnings`
+    - `just check-zed`
+- Dependents and `darkmatter-cli` tests:
+  - `cargo check --locked -p claudine -p claudine-cli -p claudine-gen -p messenger --features messenger/research`
+    fails only on the deleted include. To prove that the consumers compile
+    against this feature, I temporarily restored the file from
+    `8f33de0d7^`, ran the check, and deleted the file again. `git status`
+    afterwards shows only this feature's planning files. With the file
+    restored:
+    - the `cargo check`: clean.
+    - `cargo clippy -p darkmatter-cli --all-targets -- -D warnings`: clean.
+    - `cargo nextest run --no-fail-fast -p darkmatter-cli --features test-fixtures`:
+      2644/2648, no `SLOW`. The four failures are all sequence-trigger
+      cases in `claudine_schema_bundle`, caused by the same in-flight
+      `sequence.yaml` change.
+- Scope (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: []`, `change_class: documentation`. Only the plan, the log,
+  and the spec's frontmatter changed, but the gates above ran anyway, as
+  the plan's verification task requires.
+- No cross-OS check. This phase changed no code.
+
+### Caller skill publication
+
+- `cargo build --locked -p darkmatter-cli --bin md` built `md`. With
+  `target/debug` first on `PATH`, I ran `just publish-skills` from
+  `darkmatter/`. It published `use-darkmatter` and `use-dmls` to
+  `~/.claude/skills/`.
+- The installed `use-dmls/schemas.md` contains "Reusing an object's
+  properties (`...name`, `$extends`)". Its example shows both forms: root
+  `$extends`, an inline `{ ...events, price: … }`, and a list `$extends`
+  with an imported operand. It also has the rule bullets and the editor
+  bullets. A diff against the canonical
+  `darkmatter/docs/use-skills/use-dmls/schemas.md` section shows only line
+  wrapping, which composition normalizes. The canonical file was not
+  edited in this phase.
+
+### Example diagnostics (built `md`, fixtures under a temp dir)
+
+`DARKMATTER_NO_BASELINE_SCHEMA=1 md schema validate --output plain --schema <schema> doc.md doc2.md`:
+
+- Ineligible target (`order: "{ ...tags, total: number }"`, `tags: "string[]"`):
+  `$schema.order[...0]: \`tags\` cannot be composed into an object: it is a list, not an object`
+- Cycle (`a: "{ ...b, x: string }"`, `b: "{ ...a, y: string }"`):
+  `named types form a cycle that never descends into a child value: types.b[...0] -> \`a\`, types.a[...0] -> \`b\``
+- Composed compared with handwritten. The composed schema is
+  `$extends: events`, `price: number(min(0))`, `source: string`, with
+  `events: "{ id: string(required), price: number }"`. The handwritten
+  one is `id: string(required)`, `price: number(min(0))`,
+  `source: string`, with the same `types` table. Both report the same
+  text for `doc.md` (`price: -3`) and `doc2.md` (`id` missing):
+  `price -3 is less than the minimum of 0 (at line 3, column 8)` and
+  `id is a required property (at line 2, column 1)`.
+  - Without a `types` table, the handwritten file is refused as a "global
+    catalog". That is Darkmatter's existing envelope rule
+    (`catalog.rs::is_global_catalog`: `kind: schema`, a `$schema` mapping,
+    and no `types`). It is not part of this feature, and it would apply in
+    the same way to a composed root without `types`.
+  - The library-level equivalence is
+    `object_composition::composition_the_spec_example_behaves_like_its_handwritten_equivalent`,
+    together with the subtype and soft-validation siblings.
+- Unsaved-buffer session: rerunning
+  `cargo nextest run -p darkmatter-lsp --features effects-instrumentation --test l1 -E 'test(object_composition_editor)'`
+  passes 7/7, each under 0.15 s. That includes
+  `an_unsaved_imported_definition_edit_refreshes_the_importer`: an
+  unsaved edit that turns the imported target into a list reports the error
+  on the operand. Editing it back to an object with a renamed member and a
+  newly required member clears the error, reports `id: a` as a type
+  mismatch at its value, and offers `code` with `price` absent.
+
+### Spec acceptance check
+
+Each acceptance bullet in the spec maps to a test recorded in Phases 1–4:
+
+- position, trailing comma, and duplicate cases: Phase 1/2 `object_composition::*`
+- `$extends` carriers, placement, and the YAML positions: the Phase 1 matrix
+- targets and error table: Phase 2
+- whole-property replacement, origins, and skipped members: Phase 2,
+  including Darkmatter's `schemas_named_type_merge`
+- patterns: Phase 2
+- recursion locally, across files, and in cycles: Phase 2
+- handwritten comparison, subtype, soft, and round trip:
+  Phase 2 plus `object_composition_export`
+- disk, embedded, and transitive tracking: Phase 2
+- DMLS: Phase 4
+
+Every phase's tasks in the plan are checked.
+
+### Departures from the spec
+
+The feature itself has no new departures; the earlier phases' departures
+are listed in `decisions-for-review`. The Phase 5 departure is in
+verification only. The Claudine artifact could not be regenerated, and
+the `darkmatter` recipes could not run as written, because of the deleted
+`sequence-types.yaml`. They were replaced by the direct generator
+comparison and the per-package runs above.

@@ -3,7 +3,7 @@ kind: plan
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 4
+phase: 6
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -85,6 +85,59 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
 - .claude/skills/simplified-schema/SKILL.md
 - darkmatter/docs/use-skills/use-dmls/schemas.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source-code:
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/yaml_documents/semantic.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/object_composition.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/named_types.rs
+- darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+- darkmatter/lib/tests/l1/schemas_source_projection.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/resolve/composition.rs
+- simplified-schema/lib/src/resolve/graph.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/triggers/assemble.rs
+- simplified-schema/lib/src/triggers/finding.rs
+- darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/cursor.rs
+- simplified-schema/lib/tests/l1/object_composition_export.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/dmls/src/providers/frontmatter/named_references.rs
+- darkmatter/dmls/src/providers/frontmatter/composition_tests.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/named_types.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/object_composition_editor.rs
+documentation:
+- simplified-schema/README.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/local-type-references.md
+- simplified-schema/docs/topics/diagnostics.md
+- darkmatter/docs/topics/schemas/parsing/grammar.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/docs/use-skills/use-dmls/schemas.md
+- .claude/skills/simplified-schema/SKILL.md
+completed-phase: 5
+implemented: true
 ---
 
 # Object composition implementation plan
@@ -221,15 +274,15 @@ Checkpoint: pass the focused DMLS provider and LSP session cases. Verify declara
 
 ### Tasks
 
-- [ ] Check shipped artifacts
+- [x] Check shipped artifacts
   - Run root `just shipped-schemas` after the parser and resolver changes, before the full suites. The recipes prepare SimplifiedSchema, Darkmatter, and Claudine artifacts in dependency order. Expect byte-identical outputs because the tracked scan found no shipped composition and the new authored AST field is omitted when empty. Correct any incidental serialized drift at the source and confirm the three artifacts remain byte-identical.
 
-- [ ] Verify affected packages
+- [x] Verify affected packages
   - Run `just test` and `just lint` from `simplified-schema/` to cover default and minimal feature sets, and `just test` and `just lint` from `darkmatter/` to cover the library and editor together. In the root run `cargo check --locked -p claudine -p claudine-cli -p claudine-gen -p messenger --features messenger/research` for the other direct manifest consumers. The public change adds authored shape metadata, and the repository search found no direct struct-literal migrations in those crates.
   - Resolve failures in the changed paths and rerun failing slices followed by the affected final recipe. Use standard workspace L1 configuration. Run the derived suites sequentially on the same host. The new coverage uses in-process and hermetic LSP cases, and needs no L2, L3, live services, or CI workflow changes. Do not run `cargo fmt`.
 
-- [ ] Publish caller skills
+- [x] Publish caller skills
   - From `darkmatter/`, run `just publish-skills` with the repository `md` built from the final tree on `PATH`. Build it with `cargo build --locked -p darkmatter-cli --bin md` from the root and put that build’s debug binary directory first on `PATH` for publication. Check the installed `use-dmls` skill for both composition forms and intact examples. Keep the canonical edit in `docs/use-skills/`.
 
-- [ ] Record verification results
+- [x] Record verification results
   - Record scope, commands and results, acceptance evidence, and any departures from the spec in `implementation-log.md` beside this plan. Include example diagnostics for an ineligible target and cycle, one composed and handwritten comparison, and the unsaved-buffer session result. Check each phase's completed tasks against the spec before marking it complete. Hand the finished implementation into the review cycle with the active feature directory in place.

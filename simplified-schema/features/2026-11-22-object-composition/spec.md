@@ -30,8 +30,11 @@ $schema:
 reviewed: true
 reviewed-by: "codex/gpt-6.2-sol"
 reviewed-on: "2026-11-22"
-review-iterations: 0
+review-iterations: 4
+completed: true
 needs-rulings: false
+implemented: true
+implemented-by: "claude/opus"
 ---
 
 # Object composition with `...spread` and `$extends`
