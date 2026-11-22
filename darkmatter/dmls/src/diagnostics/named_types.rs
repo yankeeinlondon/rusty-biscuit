@@ -2,10 +2,12 @@
 //!
 //! An unknown name, contradictory constraints on a reused type, an operation a
 //! union-typed reference cannot take, a type cycle that never descends into a
-//! child value, and an over-deep reference chain are defects of the
+//! child value, an over-deep reference chain, and a composition operand that
+//! names no object (or cannot be looked up) are defects of the
 //! schema, not of a document value. Each is ranged on
-//! the consuming reference's name when this document wrote it, and lists the
-//! declarations that took part as `relatedInformation`, wherever they live.
+//! the consuming reference's name when this document wrote it (the whole
+//! operand, for a composition), and lists the declarations that took part as
+//! `relatedInformation`, wherever they live.
 //!
 //! The resolver addresses every location structurally
 //! ([`SchemaReferenceSite`], [`SchemaConstraintOrigin`]); this module turns
@@ -40,6 +42,9 @@ pub(crate) fn is_named_type_error(error: &SchemaError) -> bool {
             | SchemaError::UnionReference { .. }
             | SchemaError::NonDescendingCycle { .. }
             | SchemaError::ImportCycle { .. }
+            | SchemaError::InvalidCompositionTarget { .. }
+            | SchemaError::CompositionReference { .. }
+            | SchemaError::ComposedMember { .. }
     )
 }
 
@@ -169,6 +174,59 @@ impl<'a> NamedTypeScope<'a> {
                 }));
                 self.site_span(site)
             }
+            SchemaError::InvalidCompositionTarget { name, site, definition, .. } => {
+                if site.source != self.this {
+                    related.extend(self.operand_location(site).map(|location| DiagnosticRelatedInformation {
+                        location,
+                        message: format!("`{name}` is composed here"),
+                    }));
+                }
+                related.extend(self.definition_location(definition).map(|location| {
+                    DiagnosticRelatedInformation {
+                        location,
+                        message: format!("`{name}` is defined here"),
+                    }
+                }));
+                self.operand_span(site).or_else(|| self.fallback.clone())
+            }
+            SchemaError::CompositionReference { operand, site, source } => {
+                if site.source != self.this {
+                    related.extend(self.operand_location(site).map(|location| DiagnosticRelatedInformation {
+                        location,
+                        message: format!("`{operand}` is composed here"),
+                    }));
+                }
+                // A target file that loaded but failed is located in it.
+                let failed = match source.as_ref() {
+                    SchemaError::ReferencedSchema { path, source } => Some((path, source.as_ref())),
+                    error @ SchemaError::SchemaDocument { path, .. } => Some((path, error)),
+                    _ => None,
+                };
+                if let Some((path, failure)) = failed {
+                    related.extend(referenced_definition_related(self.ctx, path, failure).unwrap_or_default());
+                }
+                self.operand_span(site)
+                    .or_else(|| self.target_span(source))
+                    .or_else(|| self.fallback.clone())
+            }
+            // Ranged on the copied member's declaration when this document
+            // wrote it, else on this document's way into the file that did.
+            SchemaError::ComposedMember { site, .. } => {
+                if site.source == self.this {
+                    self.declaration
+                        .as_ref()
+                        .and_then(|declaration| {
+                            declaration.source_map.spans(&site.path, SchemaSpanKind::Definition).first().cloned()
+                        })
+                        .or_else(|| self.fallback.clone())
+                } else {
+                    related.extend(self.definition_location(site).map(|location| DiagnosticRelatedInformation {
+                        location,
+                        message: "the copied member is declared here".to_string(),
+                    }));
+                    self.reference_into(&site.source).or_else(|| self.fallback.clone())
+                }
+            }
             // Ranged on the first reference of the cycle this document wrote;
             // every other reference of the cycle is related information.
             SchemaError::NonDescendingCycle { cycles } => {
@@ -250,6 +308,22 @@ impl<'a> NamedTypeScope<'a> {
                 .or_else(|| self.fallback.clone());
         }
         self.reference_into(&site.source).or_else(|| self.fallback.clone())
+    }
+
+    /// The primary range of a composition operand: the whole operand when
+    /// this document wrote it, its name when only that was projected, else
+    /// [`Self::site_span`]'s fallbacks short of the document-wide one. The
+    /// operand is addressed by its path, never by its spelling, so two
+    /// operands naming the same file stay apart.
+    fn operand_span(&self, site: &SchemaReferenceSite) -> Option<Range<usize>> {
+        if site.source == self.this
+            && let Some(span) = self.declaration.as_ref().and_then(|declaration| {
+                declaration.source_map.spans(&site.path, SchemaSpanKind::CompositionOperand).first().cloned()
+            })
+        {
+            return Some(span);
+        }
+        self.site_span(site).filter(|span| Some(span) != self.fallback.as_ref())
     }
 
     /// The authored target of a reference whose file could not be selected
@@ -339,6 +413,20 @@ impl<'a> NamedTypeScope<'a> {
             .first()?
             .clone();
         self.file_location(path, &file.text, span)
+    }
+
+    /// The whole composition operand at `site` in the schema file that wrote
+    /// it, else its name ([`Self::site_location`]).
+    fn operand_location(&self, site: &SchemaReferenceSite) -> Option<Location> {
+        if let SchemaSourceId::File(path) = &site.source
+            && let Some(file) = self.file(path)
+            && let Some(document) = file.document.as_ref()
+            && let Some(span) =
+                document.resolution_source_map().spans(&site.path, SchemaSpanKind::CompositionOperand).first().cloned()
+        {
+            return self.file_location(path, &file.text, span);
+        }
+        self.site_location(site)
     }
 
     /// The definition a named-type error names, in whichever source holds it.

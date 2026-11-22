@@ -143,6 +143,65 @@ $schema:
 The `file` in `Name@file` uses the same roots: a bare name is searched for
 in them, and `./` means beside the importing file.
 
+### Reusing an object's properties (`...name`, `$extends`)
+
+Copy the properties of a named object type into another object, then
+override what differs. Write `...name` inside an inline object, or
+`$extends` in a YAML schema mapping:
+
+```yaml
+kind: schema
+$schema:
+    $extends: events                                # the root gets id and price
+    source: string
+    snapshot: "{ ...events, price: number(min(0)) }"
+    order:
+        $extends: [events, person@people.yaml]     # a nonempty list, applied in order
+        total: number
+types:
+    events: "{ id: string(required), price: number }"
+```
+
+- **Later wins, as a whole property.** Entries apply left to right, and
+  `$extends` applies before the mapping's own keys wherever it is written.
+  `{ ...events, id: number }` makes `id` an optional number: its
+  `required`, default, and description are gone too.
+- **Operands are plain names:** `events`, `events@this`, or
+  `name@file.yaml`, looked up like any named type. Write `string@this` for a
+  local type named after a built-in. No `(…)`, `[]`, `->`, or template on the
+  operand; a postfix after the object (`"{ ...events }(required)"`) applies
+  to the property.
+- **Only one declared object composes.** A primitive, `object`, a union, a
+  list, or a function is an error at the operand, and so is a name or file
+  that does not resolve, even when every copied property is overridden.
+  `a: "{ ...b }"` with `b: "{ ...a }"` is a cycle error, but recursion
+  through a child value works: `base: "{ children: branch[] }"` with
+  `branch: "{ ...base, label: string }"`.
+- **The target's own object constraints are not copied;** the receiving
+  object's `$constraints` judge the merged properties. Copied properties
+  resolve names, examples, and defaults in the file that declared them, and
+  never become new type names.
+- **`$extends` is reserved in schema mappings.** A schema that used it as a
+  property name, such as `$extends: string`, now gets an error explaining the
+  reservation; declare a literal `$extends` property in a JSON Schema file
+  instead. Documents may still hold a `$extends` data key.
+
+In the editor:
+
+- **Completion** works right after `...`, in a `$extends` value, and in each
+  flow (`[a, b]`) or block (`- a`) list item, while the operand is still
+  incomplete. It offers local type names (as `Name@this` when the name is
+  also a built-in, such as `string@this`) and imported `Name@./file.yaml`
+  names. It leaves out
+  targets it knows cannot compose (non-objects, alias cycles), keeps names it
+  cannot check, and never offers keywords or constraints there.
+- **Hover and go-to-definition** work on operands in both forms.
+- **A failing operand** is underlined as a whole, as
+  `dm.schema.invalid_type_definition`, with the target's declaration as
+  related information.
+- **Editing an imported target,** even in an unsaved buffer, refreshes the
+  receiving schema's diagnostics and its property completions.
+
 ## Schema triggers
 
 A trigger applies a schema to documents that match its conditions, so

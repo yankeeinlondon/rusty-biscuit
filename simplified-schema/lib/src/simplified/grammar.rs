@@ -39,7 +39,10 @@
 //! reference        := identifier ( "(" item_constraints ")" )?
 //!                                 ( "[]" ( "(" arr_constraints ")" )? )?
 //!                     ( "@" fileref )?
-//! property_list    := property_def ( "," ws* property_def )* ","?
+//! property_list    := member ( "," ws* member )* ","?
+//! member           := property_def | spread
+//! spread           := "..." ws* operand                     (composition)
+//! operand          := identifier ( ws* "@" fileref )?       (no postfix)
 //! property_def     := ( identifier | pattern_key ) ws* ":" ws* type_expr_string
 //! pattern_key      := "<" pattern_body ">"                   (Feature C)
 //! ws               := <whitespace or line-break>
@@ -183,7 +186,7 @@ pub fn parse_type_definition(property: &str, input: &str) -> Result<PropertyDef,
 ///
 /// [`SchemaError::Grammar`] with the byte span of the offending text, as for
 /// an inline `...Name` spread, and for text after the operand.
-pub(crate) fn parse_extends_operand(property: &str, input: &str) -> Result<CompositionOperand, SchemaError> {
+pub fn parse_extends_operand(property: &str, input: &str) -> Result<CompositionOperand, SchemaError> {
     let mut parser = Parser::new(property, input);
     let operand = parser.parse_composition_operand(OperandSite::Extends)?;
     parser.lex.skip_ws();

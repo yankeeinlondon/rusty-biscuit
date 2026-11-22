@@ -100,7 +100,10 @@ pub mod code {
     pub const FM_YAML_PARSE: &str = darkmatter::markdown::compose::report_diagnostics::FRONTMATTER_PARSE_CODE;
     /// The `$schema` value is not a valid schema shape.
     pub const SCHEMA_INVALID_SHAPE: &str = "dm.schema.invalid_schema_shape";
-    /// A semantic `type-definition` value does not parse as one property definition.
+    /// A semantic `type-definition` value does not parse as one property
+    /// definition, or a named-type reference or composition operand does not
+    /// resolve to a usable definition (unknown name, conflict, cycle, a
+    /// composed target that is no object or cannot be looked up).
     pub const SCHEMA_INVALID_TYPE_DEFINITION: &str = "dm.schema.invalid_type_definition";
     /// The schema could not be resolved, merged, or compiled.
     pub const SCHEMA_PREPARE: &str = simplified_schema::SCHEMA_PREPARE_CODE;

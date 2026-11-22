@@ -113,6 +113,33 @@ flowchart LR
 define `postcode`, the `UnknownNamedType` error would name `contacts.yaml` as
 the schema searched.
 
+### Composition operands
+
+The operand of `...name` or `$extends` (see
+[Object Composition](objects-and-named-types.md#object-composition-name-and-extends))
+is looked up by every rule above: bare names, `Name@this`, `Name@file`,
+embedded imports, names a host supplies, forward references, and `@this`
+for a local type that shares a built-in's name (`...string@this`; a bare
+`...string` is a grammar error). Two rules matter more here than for an
+ordinary reference:
+
+- **Copied keys add no names.** The local names are still the ones the
+  author wrote. In a schema without a `types` table, a property that
+  `$extends` brings into the root is a property, not a new local type:
+
+  ```yaml
+  $schema:
+      $extends: base
+      base: "{ helper: { q: string } }"
+      x: "{ ...helper }"      # UnknownNamedType: `helper` is not a local name
+  ```
+
+- **A copied property keeps its defining file.** With
+  `$extends: address@./contacts.yaml`, the copied `postcode` property still
+  means `contacts.yaml`'s `postcode`, exactly as it does for `home` above.
+  Each inline arm of a root union resolves its operands among its own
+  entries.
+
 ## Inheriting Constraints
 
 A named type carries all of its constraints wherever you use it, including
@@ -291,7 +318,9 @@ The full eligibility, counting, and fallback rules are in
 When Darkmatter serializes a type expression, a local reference is written
 bare. The one exception is a local type whose name is also a built-in:
 it is written `string@this`, because bare `string` would mean the built-in. A
-cross-file reference keeps its target (`person@./people.yaml`). Parsing the
+cross-file reference keeps its target (`person@./people.yaml`). A
+composition operand is written as authored: `...events` stays bare and
+`...events@this` keeps its `@this`. Parsing the
 written form gives back the same reference, so serialization never changes a
 schema's meaning. Editing one value in a document does not respell untouched
 references, so an existing `person@this` stays as written.

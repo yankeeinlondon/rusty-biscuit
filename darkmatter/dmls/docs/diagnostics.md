@@ -821,6 +821,14 @@ Some diagnostics attach secondary locations:
   location is the type's definition. The values use the same excerpt as the
   library's message (see
   [Merging use-site constraints](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#merging-use-site-constraints)).
+- A composition operand (`...name` or a `$extends` item) whose target is
+  not a named object is a `dm.schema.invalid_type_definition` ranged on the
+  whole operand, related to the target's final declaration with
+  `` `name` is defined here ``, even when an alias in another file reaches it.
+  When the failure is inside an imported file, the diagnostic ranges this
+  document's reference into that file and relates the failing operand there.
+  Two operands into the same file are told apart by position, so only the
+  failing one is ranged.
 - `dm.transclusion.cycle` lists the transclusion ancestry that forms the cycle.
 - A schema failure of an [observed property value](#observed-property-values)
   that comes straight from a local data file points at the failing value in

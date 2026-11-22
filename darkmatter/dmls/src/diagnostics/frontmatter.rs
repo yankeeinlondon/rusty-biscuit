@@ -3116,4 +3116,105 @@ mod tests {
             );
         });
     }
+
+    /// The one composition diagnostic, as `(range text, [related (file name,
+    /// line, related text, message)])`. Related text is read from the file
+    /// it points into, so each location is checked by what it covers.
+    fn composition_diagnostic(root: &Path, text: &str, diagnostics: &[Diagnostic]) -> (String, Vec<(String, String, String)>) {
+        let found: Vec<&Diagnostic> = diagnostics
+            .iter()
+            .filter(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_INVALID_TYPE_DEFINITION))
+            .collect();
+        assert_eq!(found.len(), 1, "{diagnostics:#?}");
+        let diagnostic = found[0];
+        let related = diagnostic
+            .related_information
+            .iter()
+            .flatten()
+            .map(|related| {
+                let path = crate::workspace::uri_to_file_path(&related.location.uri).expect("file uri");
+                let source = if path == root.join("doc.md") {
+                    text.to_string()
+                } else {
+                    std::fs::read_to_string(&path).expect("related file")
+                };
+                let range = related.location.range;
+                let line = source.lines().nth(range.start.line as usize).unwrap_or_default();
+                assert_eq!(range.start.line, range.end.line, "{related:?}");
+                let covered = line[range.start.character as usize..range.end.character as usize].to_string();
+                (path.file_name().unwrap().to_string_lossy().into_owned(), covered, related.message.clone())
+            })
+            .collect();
+        (ranged_text(text, diagnostic).to_string(), related)
+    }
+
+    #[test]
+    fn an_ineligible_local_composition_target_ranges_the_whole_operand() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  rows: 'string[]'\n  order: '{ ...rows@this, price: number }'\n---\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            let (ranged, related) = composition_diagnostic(&root, text, diagnostics);
+            assert_eq!(ranged, "rows@this");
+            assert_eq!(
+                related,
+                [("doc.md".to_string(), "'string[]'".to_string(), "`rows@this` is defined here".to_string())]
+            );
+        });
+    }
+
+    /// Of two operands naming the same file, only the failing second one is
+    /// ranged, and the related location is the terminal declaration an
+    /// alias in that file reaches.
+    #[test]
+    fn an_ineligible_imported_target_ranges_its_own_operand_and_relates_the_terminal_declaration() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("types.yaml"), "$schema:\n  base: '{ id: string }'\n  rows: list@./lists.yaml\n").unwrap();
+        std::fs::write(root.join("lists.yaml"), "$schema:\n  list: 'number[]'\n").unwrap();
+        let text = "---\n$schema:\n  order:\n    $extends: [base@./types.yaml, rows@./types.yaml]\n    price: number\n---\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            let (ranged, related) = composition_diagnostic(&root, text, diagnostics);
+            assert_eq!(ranged, "rows@./types.yaml");
+            assert_eq!(
+                related,
+                [(
+                    "lists.yaml".to_string(),
+                    "'number[]'".to_string(),
+                    "`rows@./types.yaml` is defined here".to_string()
+                )]
+            );
+        });
+    }
+
+    #[test]
+    fn a_missing_composition_file_ranges_the_operand_with_the_named_type_code() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  order:\n    $extends: base@./missing.yaml\n    price: number\n---\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            let (ranged, related) = composition_diagnostic(&root, text, diagnostics);
+            assert_eq!(ranged, "base@./missing.yaml");
+            assert!(related.is_empty(), "{related:?}");
+            assert!(diagnostics.iter().all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_PREPARE)), "{diagnostics:#?}");
+        });
+    }
+
+    /// A composition that fails inside an imported file is ranged on this
+    /// document's reference into it, with the failing operand and the
+    /// target's declaration there as related locations.
+    #[test]
+    fn an_indirect_composition_failure_navigates_back_to_the_receiver() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("a.yaml"), "$schema:\n  rows: 'string[]'\n  wrap: '{ ...rows, id: string }'\n").unwrap();
+        let text = "---\n$schema:\n  order: wrap@./a.yaml\n---\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            let (ranged, related) = composition_diagnostic(&root, text, diagnostics);
+            assert_eq!(ranged, "wrap");
+            assert_eq!(
+                related,
+                [
+                    ("a.yaml".to_string(), "rows".to_string(), "`rows` is composed here".to_string()),
+                    ("a.yaml".to_string(), "'string[]'".to_string(), "`rows` is defined here".to_string()),
+                ]
+            );
+        });
+    }
 }

@@ -178,6 +178,30 @@ structurally:
   a conflict reached through several imports points at each declaration.
 - **`NonDescendingCycle`** lists every `CycleReference` of each rejected
   cycle, with its site, its target, and the source that declares the target.
+  A loop of `...name` / `$extends` and alias hops is reported this way too,
+  each hop at the operand or alias that wrote it.
+- **Composition errors** point at the operand, the `...name` or `$extends`
+  item that failed (see
+  [Object Composition](language/objects-and-named-types.md#object-composition-name-and-extends)):
+  - `InvalidCompositionTarget { name, site, definition, reason }`: the
+    operand resolved to something that is not one declared object. `name` is
+    the operand as written, `site` the operand, `definition` the declaration
+    that decided it (through aliases, the type they reach), and `reason` a
+    `CompositionTargetKind`: `Primitive`, `OpaqueObject`, `Union`, `Array`
+    (a list or tuple), `Callable`, or `Template`.
+  - `CompositionReference { operand, site, source }`: the operand could not
+    be looked up because its file failed to resolve or load, or the chain of
+    composition and alias hops passed the 32-level limit. `source` keeps the
+    original cause (`NoMatch`, `SchemaDocument`, `ImportCycle`, …).
+  - An operand that names no type is the ordinary `UnknownNamedType`, at
+    the operand.
+  - `ComposedMember { site, source }`: lowering failed inside a member that
+    was copied in; `site` is the member's declaration, and `source` the
+    failure, whose property path names the receiving object.
+
+  ```text
+  $schema.order[...0]: `label` cannot be composed into an object: it is a primitive type, not an object
+  ```
 - **`ReferencedSchema`** wraps an error raised inside another schema file
   with that file's `path`, so per-property detail survives while the
   diagnostic points at the file that authored it.
@@ -195,6 +219,20 @@ file's spans are filled in; a reference in the inline `$schema` has none,
 because the resolver received a YAML value, not text. The caller that holds
 the document projects its own range from the
 [source-aware parsers](#source-aware-parsing-and-located-failures).
+
+### Composition in the editor
+
+DMLS reports a composition failure as `dm.schema.invalid_type_definition`,
+like other named-type failures, ranged on the **whole failing operand**
+(`label@./types.yaml`, not just `label`), whether it is written after `...`
+or as a `$extends` value or list item. When the target's declaration is
+known, it is attached as related information; for a failure further down a
+chain, the diagnostic stays on the receiver's operand and relates the
+declaration that failed. Editing an imported target, including in an
+unsaved buffer, refreshes the receiving schema's diagnostics and property
+completions. Completion, hover, and go-to-definition on operands are
+described in the `use-dmls` skill and the
+[DMLS schema support](../../../darkmatter/docs/topics/schemas/dmls-schema-support.md) page.
 
 ### Where a schema came from
 
@@ -343,7 +381,10 @@ assert_eq!(&source[failure.authored_span.unwrap()], "nope");
 
 - **`path`** is structural, never rebuilt from a message. Mapping keys are
   literal (`"a.b"` is one key), and sequence members, including root-union
-  arms, are zero-based `union_arm` indexes. A property call starts at that
+  arms, are zero-based `union_arm` indexes. A `...name` operand is a
+  `Spread(i)` segment, the `i`-th spread of its inline object, displayed
+  `[...i]` (`order[...0]`), and a `$extends` list item is a `union_arm`
+  under `$extends` (`$extends[1]`). A property call starts at that
   definition, a declaration call at the declaration, and the standalone
   helper at the envelope, so its paths begin with `types` or `$schema`.
 - **The node that introduced the violation is the one reported.** In
@@ -416,10 +457,13 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `ConflictingDefaults`   | One object location declares different defaults for one property: on two object arms of a union, or in raw JSON Schema. Carries the location's `pointer`, the `property`, and each `default` keyword's pointer (`declarations`). Raised when the schema is lowered or prepared, before any value, except for a key that no schema names and several patterns or catch-alls select with different defaults: that conflict depends on the key, so it is reported by validation, inside `ValidationFailure::Unprepared`, only when the key needs its default. See [Applying defaults](./validation.md#applying-defaults). |
 | `RecursiveDefault`      | Applying defaults would never end: a `$ref` chain returns to itself without describing a child value (`path` is `None`), or a default keeps creating another defaulted parent (`path` names where it repeats). `reference` is the reference, or the `default` keyword's pointer. |
 | `ImportCycle`           | A chain of named-type references (bare or `Name@file`) that never repeats a type is deeper than 32 levels. A type that refers back to itself is not this error. |
-| `NonDescendingCycle`    | Named types form a cycle that never passes through a child value (an alias cycle, a self-union, or a cycle through a `function(...)` signature). Carries every reference of each rejected cycle as a `CycleReference` with its site, target, and, in a schema file, its span. See [Recursive Named Types](language/objects-and-named-types.md#recursive-named-types). |
+| `NonDescendingCycle`    | Named types form a cycle that never passes through a child value (an alias cycle, a self-union, a cycle through a `function(...)` signature, or a loop of `...name` / `$extends` and alias hops). Carries every reference of each rejected cycle as a `CycleReference` with its site, target, and, in a schema file, its span. See [Recursive Named Types](language/objects-and-named-types.md#recursive-named-types). |
 | `UnresolvedReference`   | A local `$ref` names no definition in the schema it was written in, or a chain of references never reaches a schema. Carries the schema's label, the reference, and its JSON Pointer location. |
 | `UnsupportedMergeReference` | A schema joined at a merge (a baseline or a root-union arm; a trigger payload reports it inside `TriggerPayloadNotMergeable`) uses a reference form whose meaning would change at the merged root (`$id`, an anchor, a dynamic or external reference, or a local reference outside `#/$defs/…`). See [JSON Schema Baseline Restrictions](../../../darkmatter/docs/topics/schemas/definition.md#json-schema-baseline-restrictions). |
 | `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
+| `InvalidCompositionTarget` | A `...name` or `$extends` operand resolved to a type that is not one object with a declared shape. Carries the operand as written, its site, the deciding `definition` site, and a `CompositionTargetKind`. See [Eligible targets and errors](language/objects-and-named-types.md#eligible-targets-and-errors). |
+| `CompositionReference`  | A composition operand could not be looked up: its file failed to resolve or load, or the composition chain passed 32 levels. Carries the operand, its site, and the original cause as `source`. |
+| `ComposedMember`        | Lowering failed inside a member copied in by composition. Carries the member's declaration site and the failure as `source`. |
 | `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintParticipant`: its `origin` (a `SchemaConstraintOrigin`) and the `constraint` value that took part. See [Merging use-site constraints](language/objects-and-named-types.md#merging-use-site-constraints). |
 | `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](language/unions.md#named-union-references). |
 | `ReferenceCycle`        | A `$schema` file-reference chain revisits a file it is already resolving; `chain` lists the files in visit order. |
