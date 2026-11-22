@@ -16,20 +16,20 @@ $schema:
     name: string -> short kebab-case name for the feature directory; derived from the requirements when omitted
 kind: "expression function"
 kinds: "expression functions"
-catalog_command: "claudine context --expressions"
-spec_dir: "{{ ctx.repo_root + '/darkmatter/features/' + ctx.today + '-' + (name || 'add-expressions') }}"
+catalog-command: "claudine context --expressions"
+spec-dir: "{{ ctx.repo_root + '/darkmatter/features/' + ctx.today + '-' + (name || 'add-expressions') }}"
 interactive: true
 initialize:
     - when: "!file_exists(ctx.repo_root + '/darkmatter/schemas/partials/functions.yaml')"
       then:
           - error: "The **add-expressions** prompt must run inside the rusty-biscuit checkout: it edits `darkmatter/schemas/partials/functions.yaml`, which was not found under `{{ctx.repo_root}}`."
 start:
-    stderr: "Starting an interactive session to add expression functions; the agent will clarify the requirements, write a spec to `{{spec_dir}}`, then implement it."
+    stderr: "Starting an interactive session to add expression functions; the agent will clarify the requirements, write a spec to `{{spec-dir}}`, then implement it."
     say: "Starting the add expressions session."
 success:
-    stderr: "The expression-function session finished; spec and implementation are under `{{spec_dir}}`."
+    stderr: "The expression-function session finished; spec and implementation are under `{{spec-dir}}`."
     say: "The expression functions have been added and are ready for review."
-    message: "✅  expression functions added in **{{ctx.repo}}** (spec: `{{spec_dir}}`, {{ctx.agent}}/{{ctx.model}})"
+    message: "✅  expression functions added in **{{ctx.repo}}** (spec: `{{spec-dir}}`, {{ctx.agent}}/{{ctx.model}})"
 failure:
     say: "Adding the expression functions failed."
     message: "❌  the add-expressions session failed in **{{ctx.repo}}** ({{ctx.agent}}/{{ctx.model}}: {{err.msg}})"

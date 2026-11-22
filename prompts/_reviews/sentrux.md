@@ -50,8 +50,8 @@ To complete the task:
 
 - save all your suggestions to the file: `{{root}}/{{area}}/reviews/{{ctx.today}}-sentrux/review-1.md`
 - add a `suggestions` frontmatter property to the review file which is the number of suggestions across all priorities
-- add a `suggestions_critical` frontmatter property to the review file which is the number of suggestions which are marked as being "critical"
-- add a `suggestions_urgent` frontmatter property to the review file which is the number of suggestions which are marked as being "urgent"
+- add a `suggestions-critical` frontmatter property to the review file which is the number of suggestions which are marked as being "critical"
+- add a `suggestions-urgent` frontmatter property to the review file which is the number of suggestions which are marked as being "urgent"
 - once the suggestions are saved to the Markdown body of the review file and the frontmatter properties above are saved too then you are done with the review
 
 ::end-block

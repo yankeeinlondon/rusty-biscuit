@@ -3,7 +3,7 @@ name: summary-and-suggest
 description: Provides a summary of recent activitity in a given area of the monorepo along with suggestions for improvements
 timeframe: "2 weeks"
 today: "{{ctx.today}}"
-review_dir: "@{{ctx.area}}/reviews/{{today}}-summary-and-suggest"
+review-dir: "@{{ctx.area}}/reviews/{{today}}-summary-and-suggest"
 ---
 
 ## Context
@@ -77,11 +77,11 @@ sniff repo recent-commits "{{timeframe}}" --package-area "{{ctx.area}}" --plain 
 - before starting, determine your strategy for use of sub-agents, you should favor acting as an Orchestrator so that you may preserve as much of your context window as possible
 - Once your strategy is clear, you will go about researching the changes over the past {{timeframe}} as best you see fit
 - This strategy MUST result in:
-    - Writing the review document to `{{review_dir}}/review.md` which completes all sections mentioned
+    - Writing the review document to `{{review-dir}}/review.md` which completes all sections mentioned
     - Add and save the following frontmatter properties to the same review document:
         - `agent` set to '{{env.AGENT}}'
         - `created` set to '{{ctx.now}}'
-        - `date_range` specify the date range we looked at
+        - `date-range` specify the date range we looked at
         - `interactive` set to '{{env.INTERACTIVE}}'
         - `model` set to '{{env.MODEL || "default"}}'
         - `suggestions` set to a numeric value based on the number of suggestions you have provided

@@ -8,7 +8,7 @@ $schema:
     
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 underlying: "{{ spec || review }}"
-ground_truth: |-
+ground-truth: |-
     {{ 
         design && spec
             ? 'specification document (_with supporting design document_)'
@@ -86,7 +86,7 @@ Your high level task is to convert the following documents into a high confidenc
 ::end-block
 
 - Only when a choice is a genuine **product decision** that neither the source document nor the code can settle (user-visible behavior, scope, removing a capability) may you leave it open, and then the plan cannot be executed:
-    - do not write the plan; instead set `needs_rulings: true` and add the questions to `required_rulings` in the frontmatter of {{ underlying }}
+    - do not write the plan; instead set `needs-rulings: true` and add the questions to `required-rulings` in the frontmatter of {{ underlying }}
     - end with the failure message, naming each required ruling
     - a technical choice with a defensible best answer is never a product decision; make it
 
@@ -115,7 +115,7 @@ Your high level task is to convert the following documents into a high confidenc
 - Before saving, re-read the plan as the implementer would: every task must be executable without a decision that is not already written down. Search it for deferral wording ("if", "either", "decide", "choice", "TBD", "revisit", "author review", "as needed") and replace each deferred choice with a rule
 
 - Add frontmatter to the plan document and set:
-    - `total_phases` property to the number of phases defined in this plan
+    - `total-phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
     - `status` set to "planned"
     - `phase` set this to the starting phase number; usually 1 but may be 0 sometimes

@@ -15,20 +15,20 @@ $schema:
     name: string -> short kebab-case name for the feature directory; derived from the requirements when omitted
 kind: "context variable"
 kinds: "context variables"
-catalog_command: "claudine context"
-spec_dir: "{{ ctx.repo_root + '/darkmatter/features/' + ctx.today + '-' + (name || 'add-context-variables') }}"
+catalog-command: "claudine context"
+spec-dir: "{{ ctx.repo_root + '/darkmatter/features/' + ctx.today + '-' + (name || 'add-context-variables') }}"
 interactive: true
 initialize:
     - when: "!file_exists(ctx.repo_root + '/darkmatter/docs/schemas/darkmatter.yaml')"
       then:
           - error: "The **add-context-variables** prompt must run inside the rusty-biscuit checkout: it edits `darkmatter/docs/schemas/darkmatter.yaml`, which was not found under `{{ctx.repo_root}}`."
 start:
-    stderr: "Starting an interactive session to add context variables; the agent will clarify the requirements, write a spec to `{{spec_dir}}`, then implement it."
+    stderr: "Starting an interactive session to add context variables; the agent will clarify the requirements, write a spec to `{{spec-dir}}`, then implement it."
     say: "Starting the add context variables session."
 success:
-    stderr: "The context-variable session finished; spec and implementation are under `{{spec_dir}}`."
+    stderr: "The context-variable session finished; spec and implementation are under `{{spec-dir}}`."
     say: "The context variables have been added and are ready for review."
-    message: "✅  context variables added in **{{ctx.repo}}** (spec: `{{spec_dir}}`, {{ctx.agent}}/{{ctx.model}})"
+    message: "✅  context variables added in **{{ctx.repo}}** (spec: `{{spec-dir}}`, {{ctx.agent}}/{{ctx.model}})"
 failure:
     say: "Adding the context variables failed."
     message: "❌  the add-context-variables session failed in **{{ctx.repo}}** ({{ctx.agent}}/{{ctx.model}}: {{err.msg}})"

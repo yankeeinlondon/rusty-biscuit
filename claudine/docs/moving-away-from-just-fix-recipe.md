@@ -56,7 +56,7 @@ area directory. It accepts exactly one spec, plus an optional `--use-defaults`.
 4. **Loop for at most five cycles.**
 
 The "latest review" is `review-{N}.md` beside the spec, where `N` is the
-spec's `review_iterations`. Each cycle is:
+spec's `review-iterations`. Each cycle is:
 
 ```mermaid
 flowchart TD
@@ -90,8 +90,8 @@ on disk, and the recipe reads it back with `md get`:
 
 | File | Fields the cycle depends on | Written by |
 |---|---|---|
-| the spec | `implemented`, `review_iterations`, `completed` | implementer (`implemented`), review agent (the rest) |
-| `review-{N}.md` | `ready`, `findings`, `blocked`, `human_in_the_loop`, `human_resolved`, `implemented` | review agent; rulings session; implementer |
+| the spec | `implemented`, `review-iterations`, `completed` | implementer (`implemented`), review agent (the rest) |
+| `review-{N}.md` | `ready`, `findings`, `blocked`, `human-in-the-loop`, `human-resolved`, `implemented` | review agent; rulings session; implementer |
 | `log.md` | an "Implementation of Review Findings #N" section, a finding ledger, a completion report | implementer |
 
 Because state is on disk, each step can be run, inspected, or rerun on its
@@ -123,7 +123,7 @@ the spec's frontmatter.
 
 None of the prompts declares `loop:`, a sequence, a group, `break`, `prep`,
 or `proxy`. The recipe never uses `claudine sequence` or `inline-compose`.
-Some inputs are never supplied today: `next_spec` (so feature-review's
+Some inputs are never supplied today: `next-spec` (so feature-review's
 next-spec refresh never runs) and `retry` (implement-suggestions accepts it,
 but nothing retries a failed implementation).
 
@@ -232,18 +232,18 @@ flowchart LR
 
 ```yaml
 # sequences/review-cycle.md — the reusable unit
-$schema: { spec: "file(required)", next_spec: file, max_cycles: "number(default(5))" }
+$schema: { spec: "file(required)", next-spec: file, max_cycles: "number(default(5))" }
 loop: { until: "<latest ready>", max: "{{max_cycles}}", gate: [ <not boolean>, <all blocked> ] }
 sequence:
   - { name: rulings, when: "<waiting>", sequence: "@sequences/rulings-gate.md", with: { … } }
   - { name: implement, when: "<unimplemented>", compose: "@prompts/_implement/implement-suggestions.md", session: { … } }
   - { name: review, compose: "@prompts/_reviews/feature-review.md",
-      with: { spec: "{{spec}}", next_spec: "{{next_spec}}" }, session: { … } }
+      with: { spec: "{{spec}}", next-spec: "{{next-spec}}" }, session: { … } }
 ```
 
 A pipeline over several specs is then one `sequence: "@sequences/review-cycle.md"`
-step per spec, each with `with: { spec: a, next_spec: b }`. That finally
-supplies `next_spec`, so feature-review's next-spec refresh starts running.
+step per spec, each with `with: { spec: a, next-spec: b }`. That finally
+supplies `next-spec`, so feature-review's next-spec refresh starts running.
 
 - **Relies on:** everything A relies on, plus the upcoming `sequence` step
   action, specifically `with:` on it, because a referenced sequence cannot read
@@ -259,7 +259,7 @@ supplies `next_spec`, so feature-review's next-spec refresh starts running.
   separate exit codes are ever wanted (for example "needs a human"), the loop
   would have to move up to the root document.
 - **Prompt changes:** those in A, plus a real test for feature-review's
-  now-live `next_spec` branch. human-rulings could raise an error itself when
+  now-live `next-spec` branch. human-rulings could raise an error itself when
   rulings stay unresolved (today it only warns), which would remove the
   wrapper's `finalize` check.
 
@@ -306,7 +306,7 @@ initialize:
 | Fidelity to today's behavior | closest | close | loose |
 | Cap | `loop.max` | `loop.max`, set per caller | hand-written arithmetic |
 | Dry-run and visibility | good | good, per layer | poor |
-| Reusable in multi-spec pipelines; supplies `next_spec` | no | yes | awkward |
+| Reusable in multi-spec pipelines; supplies `next-spec` | no | yes | awkward |
 | Main risk | repeated "latest review" expression | depends on `with:` for sequence steps | interactive switch mid-chain; scattered control flow |
 
 ## Recommendation
@@ -316,7 +316,7 @@ initialize:
 1. **Stage 1, when the `compose` step action lands:** write
    `sequences/review-cycle.md` and have the `just fix` shim call it directly.
    At this stage it *is* Approach A, but written so another sequence can call
-   it: its inputs (`spec`, `next_spec`, `max_cycles`) are declared in its
+   it: its inputs (`spec`, `next-spec`, `max_cycles`) are declared in its
    schema, and it reads nothing from a caller's frontmatter.
 2. **Stage 2, when the `sequence` step action accepts `with:`:** add the
    `fix.md` entry layer and the `rulings-gate.md` wrapper, and start using the
@@ -327,7 +327,7 @@ Why B over the others:
 - **The cycle is the unit worth reusing.** This repository is moving toward
   pipelines of specs run back to back. A review cycle that is itself a
   callable sequence is what those pipelines need, and it is the only design
-  that supplies `next_spec` naturally. A gives a cycle no other sequence can
+  that supplies `next-spec` naturally. A gives a cycle no other sequence can
   call; C ties the reusable prompts to one workflow.
 - **It costs almost nothing over A.** Stage 1 is A with its inputs declared
   up front. If the `sequence` step action slips, Stage 1 still fully replaces
@@ -337,7 +337,7 @@ Why B over the others:
   errors. B does not need exit codes from `break`, which only the root loop
   can set.
 - **The prompts stay reusable.** B changes only their wording and makes the
-  dormant `next_spec` path live. C would rewrite all three.
+  dormant `next-spec` path live. C would rewrite all three.
 - **It puts the composability work where it pays.** B is the design that
   actually uses the new step actions as intended: compose for a single
   session, sequence for a reusable flow. It is therefore also a realistic

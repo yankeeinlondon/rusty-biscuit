@@ -17,9 +17,9 @@ Claudine's lifecycle hooks read this file's **frontmatter** to decide what to te
 | `summary` | string | every stage | one or two sentences a person can take in from a phone notification or a spoken message; no Markdown tables, no raw logs |
 | `failures` | object[] | diagnose | one entry per failing test or gate |
 | `issue` | string | diagnose, triage | a self-contained briefing for the fixing agent |
-| `fix_requested` | boolean | triage | whether the caller asked for the failures to be fixed |
+| `fix-requested` | boolean | triage | whether the caller asked for the failures to be fixed |
 | `staged` | string[] | fix | the repository-relative paths the fix staged for commit |
-| `pr_url` | string | open | the pull request URL |
+| `pr-url` | string | open | the pull request URL |
 
 `status` values:
 
@@ -44,9 +44,9 @@ Each `failures` entry has:
   commit: "61f085043"               # the introducing commit, when attribution is `branch` and it was found
   confidence: high                  # high | medium | low
   cause: "one sentence naming the root cause, not the symptom"
-  fix_branch: "fix/ci-worker-budget" # where the repair belongs; omit when nothing in the repository needs repairing
+  fix-branch: "fix/ci-worker-budget" # where the repair belongs; omit when nothing in the repository needs repairing
 ```
 
-`fix_branch` follows from the attribution. A `branch` or `working-tree` failure is repaired on `branch`. A `base` failure is not this pull request's to repair: its fix belongs on its own branch cut from `{{base}}`, so name one (for example `fix/<short-topic>`). An `environment` failure has no `fix_branch`.
+`fix-branch` follows from the attribution. A `branch` or `working-tree` failure is repaired on `branch`. A `base` failure is not this pull request's to repair: its fix belongs on its own branch cut from `{{base}}`, so name one (for example `fix/<short-topic>`). An `environment` failure has no `fix-branch`.
 
 The body of the report (below the frontmatter) is free-form Markdown for the detailed write-up.

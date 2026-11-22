@@ -17,7 +17,7 @@ cyan := '\033[36m'
 # Stand-in for the coming sequence support: alternate implement → review on an
 # implemented spec until a review marks it production ready (at most 5 cycles).
 # A review is ready only when it has no findings, so nothing follows it.
-# A review that sets `human_in_the_loop` pauses the cycle for an interactive
+# A review that sets `human-in-the-loop` pauses the cycle for an interactive
 # rulings session, then the cycle continues; a review that marks every finding
 # blocked without asking for a ruling ends it, because another cycle would
 # change nothing.
@@ -81,7 +81,7 @@ fix +args:
     # review's `ready`, and a ready review also sets the spec's `completed`.
     latest_review() {
         local iterations
-        iterations="$(md get --output plain "${spec}" review_iterations)" || return 1
+        iterations="$(md get --output plain "${spec}" review-iterations)" || return 1
         [[ "${iterations}" =~ ^[0-9]+$ ]] && (( iterations > 0 )) && echo "${dir}/review-${iterations}.md"
         return 0
     }
@@ -110,13 +110,13 @@ fix +args:
         echo "${answer:-${default}}"
     }
 
-    # A review waits on a human while it has `human_in_the_loop` items and the
-    # author has not set `human_resolved: true`.
+    # A review waits on a human while it has `human-in-the-loop` items and the
+    # author has not set `human-resolved: true`.
     waiting_on_human() {
         local items
-        items="$(md get --output plain "$1" human_in_the_loop)"
+        items="$(md get --output plain "$1" human-in-the-loop)"
         [[ -n "${items}" && "${items}" != "null" && "${items}" != "[]" ]] \
-            && [[ "$(md get --output plain "$1" human_resolved)" != "true" ]]
+            && [[ "$(md get --output plain "$1" human-resolved)" != "true" ]]
     }
     collect_rulings() {
         local review="$1"
@@ -180,7 +180,7 @@ fix +args:
             continue
         fi
         if [[ "$(md get --output plain "${review}" blocked)" == "true" ]]; then
-            echo -e "{{ red }}ERROR:{{ reset }} $(just _link "${review}") marks every finding blocked but asks for no ruling ({{ italic }}human_in_the_loop{{ reset }} is empty), so another cycle would change nothing." >&2
+            echo -e "{{ red }}ERROR:{{ reset }} $(just _link "${review}") marks every finding blocked but asks for no ruling ({{ italic }}human-in-the-loop{{ reset }} is empty), so another cycle would change nothing." >&2
             exit 1
         fi
     done

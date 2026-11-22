@@ -2,10 +2,10 @@
 $schema:
     reusable: boolean -> a flag to indicate that this prompt is intended to be a reusable snippet
     stage: enum(design,implementation,fix,review) -> allows a caller to specify the stage of the lifecycle they are in
-    docs_root: string(required)
+    docs-root: string(required)
     spec: string(required) -> the default filename spec's get in this repo
 reusable: true
-docs_root: "docs"
+docs-root: "docs"
 spec: "{{ env.SPEC_FILE || 'spec.md' }}"
 design: "{{ env.DESIGN_FILE || 'design.md' }}"
 ---
@@ -34,7 +34,7 @@ There are five _sources_ of knowledge that Agents can draw deep knowledge from (
     ::block when="file_exists('^system-prompt.md')"
     - this repo DOES take advantage of this
 
-    The system prompt is automatic: every agent starts with it. It must therefore never contradict the other sources below, and it must stay general; anything specific to one package, one workflow, or one point in time belongs in a skill or a `{{docs_root}}/` page, not here.
+    The system prompt is automatic: every agent starts with it. It must therefore never contradict the other sources below, and it must stay general; anything specific to one package, one workflow, or one point in time belongs in a skill or a `{{docs-root}}/` page, not here.
     ::end-block
     ::block when="!file_exists('^system-prompt.md')"
     - this repo DOES NOT take advantage of this feature
@@ -90,9 +90,9 @@ There are five _sources_ of knowledge that Agents can draw deep knowledge from (
 
     There is no need to be overly precious on whether a specification is a "feature" or a "fix", usually it's pretty clear but there's no real harm if a specification is miscategorized. What's important is that you know where to find them, the naming conventions used, and what a spec is **for**:
 
-    - **a spec is a snapshot in time.** It records what was decided, why, and what the implementation must achieve, as of its date. Once its review cycle closes it moves to `_completed` and is not maintained. It is never the place to learn how something behaves *now*; that is the `{{docs_root}}/` tree (source 5 below)
+    - **a spec is a snapshot in time.** It records what was decided, why, and what the implementation must achieve, as of its date. Once its review cycle closes it moves to `_completed` and is not maintained. It is never the place to learn how something behaves *now*; that is the `{{docs-root}}/` tree (source 5 below)
     - a spec can be dense, because its readers were part of the decision; that is fine for a spec and wrong for a doc
-    - **a spec may link to a `{{docs_root}}/` page; a `{{docs_root}}/` page never links to, or names, a spec or fix**, by path or by `{date}-{name}`. A doc that says "tracked in `2026-…`" has delegated its content to a snapshot that will move and go stale
+    - **a spec may link to a `{{docs-root}}/` page; a `{{docs-root}}/` page never links to, or names, a spec or fix**, by path or by `{date}-{name}`. A doc that says "tracked in `2026-…`" has delegated its content to a snapshot that will move and go stale
     - when an implementation departs from its spec, correct the docs and record the departure in the implementation log; leave the spec saying what was decided
 
     ::block when="ctx.is_monorepo"
@@ -108,12 +108,12 @@ There are five _sources_ of knowledge that Agents can draw deep knowledge from (
     - inside each feature/fix folder is the required specification file: `{{spec}}`
     - in some cases you may find a technical design file ({{design}}) in the same directory
 
-5. The `{{docs_root}}/` tree
+5. The `{{docs-root}}/` tree
 
-    **This is the current record of how the repo behaves.** Where a spec says what was decided on a date, a `{{docs_root}}/` page says what is true today, and it changes in the same commit as the behavior it describes.
+    **This is the current record of how the repo behaves.** Where a spec says what was decided on a date, a `{{docs-root}}/` page says what is true today, and it changes in the same commit as the behavior it describes.
 
     ::block when="ctx.is_monorepo"
-    - each package area keeps its own `{{docs_root}}/` directory; the repo root's `{{docs_root}}/` holds what crosses areas
+    - each package area keeps its own `{{docs-root}}/` directory; the repo root's `{{docs-root}}/` holds what crosses areas
     ::end-block
     - **the audience is a developer with no experience of this repository.** Lead with what the reader can do, give a compact example for each rule, and use a Mermaid diagram wherever a flow, lifecycle, or state change is easier to see than to read. A page that only a repo veteran can follow is not finished
     - **planned behavior is documented before it is built.** When a decision is made but the code has not landed, write the behavior into the page and mark it **planned**; the change that lands the code removes the marker. A marker that outlives its implementation is a defect of that change

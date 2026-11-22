@@ -4,10 +4,10 @@ $schema:
     design: file(match(**/*design*.md)) -> the design file (_optional_) that compliments the spec
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
-    spec_name: string -> the name of the spec (which is really just the spec's folder name)
-    next_spec: file(match(**/*spec*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT spec in the sequence
-    next_plan: file(match(**/*plan*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT plan in the sequence
-    human_in_the_loop: string[] -> filled out with review items when it has determined that a human review is required
+    spec-name: string -> the name of the spec (which is really just the spec's folder name)
+    next-spec: file(match(**/*spec*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT spec in the sequence
+    next-plan: file(match(**/*plan*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT plan in the sequence
+    human-in-the-loop: string[] -> filled out with review items when it has determined that a human review is required
 description: |-
     Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
 
@@ -24,112 +24,112 @@ description: |-
     
     2. **Next-spec refresh** (_in a multi-spec pipeline_)
 
-        In the first review -- but _only_ when a `next_spec` is passed and no human ruling is pending -- the next spec and plan are
-        refreshed against what this spec actually built, and the outcome is recorded as `next_spec_refresh` on the review file.
+        In the first review -- but _only_ when a `next-spec` is passed and no human ruling is pending -- the next spec and plan are
+        refreshed against what this spec actually built, and the outcome is recorded as `next-spec-refresh` on the review file.
     
 dir: "{{dirname(spec)}}"
 design: |-
     {{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}
-iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
+iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review-iterations') || 0) + 1  : 1   }}"
 review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
 # A sibling of `spec` in whatever form `spec` arrived, as the implement router
 # does. `decrement_file_index(review)` is not used because it re-anchors a
 # relative `review` on this document's directory, and a sequence step passes a
 # repo-relative `dir`.
-previous_review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (iteration - 1) + '.md') : null }}"
-spec_name: "{{ parent_dir(spec) }}"
-next_plan: |-
+previous-review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (iteration - 1) + '.md') : null }}"
+spec-name: "{{ parent_dir(spec) }}"
+next-plan: |-
     {{
-        next_spec
-            ? replace(next_spec, "spec","plan")
+        next-spec
+            ? replace(next-spec, "spec","plan")
             : null
     }}
 
 
-feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
+feature-or-fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 initialize:
     # Reviewing before the author has ruled would review code the rulings are
     # about to change.
-    - when: "previous_review && file_exists(previous_review) && !is_empty(frontmatter(previous_review, 'human_in_the_loop')) && frontmatter(previous_review, 'human_resolved') != true"
+    - when: "previous-review && file_exists(previous-review) && !is_empty(frontmatter(previous-review, 'human-in-the-loop')) && frontmatter(previous-review, 'human-resolved') != true"
       then:
-          - warn: "{{basename(previous_review)}} is waiting on a human: run `just fix {{spec}}` in a terminal to record the rulings"
-          - error: "{{basename(previous_review)}} is waiting on a human"
+          - warn: "{{basename(previous-review)}} is waiting on a human: run `just fix {{spec}}` in a terminal to record the rulings"
+          - error: "{{basename(previous-review)}} is waiting on a human"
 start:
-    message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
+    message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature-or-fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
-    - when: "!is_empty(frontmatter(review, 'human_in_the_loop'))"
+    - when: "!is_empty(frontmatter(review, 'human-in-the-loop'))"
       then:
           - message: |-
                 🛑  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** needs your rulings before the cycle can continue:
 
-                {{ as_ordered_list(frontmatter(review, 'human_in_the_loop') || []) }}
+                {{ as_ordered_list(frontmatter(review, 'human-in-the-loop') || []) }}
     - when: "frontmatter(review,'ready') == true"
       then:
-          - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
+          - success: "{{feature-or-fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
           - message: |-
                 ✅  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** completed successfully (_**production ready**_)
           - effect: small-group-cheer
-    - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
+    - when: "frontmatter(review,'ready') == true && frontmatter(review,'human-review') == true"
       then:
           - message: |-
-                🤷  {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- requires human review. Review items include:
+                🤷  {{feature-or-fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- requires human review. Review items include:
 
-                {{ as_ordered_list(frontmatter(review,"human_review_items") || []) }}    
+                {{ as_ordered_list(frontmatter(review,"human-review-items") || []) }}    
           - info: |-
-                review #{{iteration}} of `{{ upper(feature_or_fix) + ' ' + parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items') || [])}} items):
+                review #{{iteration}} of `{{ upper(feature-or-fix) + ' ' + parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human-review-items') || [])}} items):
     
-                {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
+                {{ as_ordered_list(frontmatter(review, 'human-review-items') || []) }}
     - when: "frontmatter(review,'ready') != true"
       then:
           - warn: |-
-                {{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>
+                {{feature-or-fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>
           - message: |-
-                ⚠️  review #{{iteration}} for the _{{feature_or_fix}}_ `{{parent_dir(spec)}}` in the **{{ctx.area_description || ctx.repo}}** _completed_ but is NOT production ready! Findings include:
+                ⚠️  review #{{iteration}} for the _{{feature-or-fix}}_ `{{parent_dir(spec)}}` in the **{{ctx.area_description || ctx.repo}}** _completed_ but is NOT production ready! Findings include:
 
                 {{ as_ordered_list( frontmatter(review,"findings") || [] ) }}
 
                 {{ 
-                    frontmatter(review,'human_review') == true
-                        ? '- in addition to the code findings blocking readiness there are some rulings that require **human review**:\n' + as_ordered_list( frontmatter(review, 'human_review_items') || [] )
+                    frontmatter(review,'human-review') == true
+                        ? '- in addition to the code findings blocking readiness there are some rulings that require **human review**:\n' + as_ordered_list( frontmatter(review, 'human-review-items') || [] )
                         : '- no _human review_ is required at this point'
                 }}
           - effect: sad-trombone
 failure:
     stderr: |-
-        {{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!
+        {{feature-or-fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!
     message: |-
-        💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
+        💥 {{feature-or-fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
 finalize:
     # Read the refresh outcome after the agent writes the review file.
-    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'refreshed'"
+    - when: "!err && next-spec && file_exists(review) && frontmatter(review, 'next-spec-refresh') == 'refreshed'"
       message: |-
-        - the next spec in the pipeline, `{{parent_dir(next_spec)}}`, and its plan were refreshed:
+        - the next spec in the pipeline, `{{parent_dir(next-spec)}}`, and its plan were refreshed:
 
-        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+        {{ frontmatter(review, 'next-spec-refresh-summary') }}
       info: |-
-        - the next spec in the pipeline, {{link(next_spec)}}, and its plan were refreshed:
+        - the next spec in the pipeline, {{link(next-spec)}}, and its plan were refreshed:
 
-        {{ frontmatter(review, 'next_spec_refresh_summary') }}
-    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'not-needed'"
+        {{ frontmatter(review, 'next-spec-refresh-summary') }}
+    - when: "!err && next-spec && file_exists(review) && frontmatter(review, 'next-spec-refresh') == 'not-needed'"
       message: |-
-        - the next spec in the pipeline, `{{parent_dir(next_spec)}}`, was checked and needed no refresh
+        - the next spec in the pipeline, `{{parent_dir(next-spec)}}`, was checked and needed no refresh
       info: |-
-        - the next spec in the pipeline, {{link(next_spec)}}, was checked and needed no refresh
-    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'blocked'"
+        - the next spec in the pipeline, {{link(next-spec)}}, was checked and needed no refresh
+    - when: "!err && next-spec && file_exists(review) && frontmatter(review, 'next-spec-refresh') == 'blocked'"
       message: |-
-        - refreshing the next spec in the pipeline, `{{parent_dir(next_spec)}}`, hit a blocking decision:
+        - refreshing the next spec in the pipeline, `{{parent_dir(next-spec)}}`, hit a blocking decision:
 
-        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+        {{ frontmatter(review, 'next-spec-refresh-summary') }}
       info: |-
-        - refreshing the next spec in the pipeline, {{link(next_spec)}}, hit a blocking decision:
+        - refreshing the next spec in the pipeline, {{link(next-spec)}}, hit a blocking decision:
 
-        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+        {{ frontmatter(review, 'next-spec-refresh-summary') }}
       stop: null
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 
-> - {{capitalize(feature_or_fix)}}: `{{parent_dir(spec)}}`
+> - {{capitalize(feature-or-fix)}}: `{{parent_dir(spec)}}`
 > - Review File (_output_): `@{{review}}`
 > - Review Iteration: #{{iteration}}
 
@@ -137,7 +137,7 @@ finalize:
 
 ## Context
 
-You are performing a review of the functionality defined by the `{{spec_name}}` spec:
+You are performing a review of the functionality defined by the `{{spec-name}}` spec:
 
 ::block when="spec"
 - **Specification:** "@{{spec}}"
@@ -146,10 +146,10 @@ You are performing a review of the functionality defined by the `{{spec_name}}` 
 - **Technical Design:** "@{{design}}"
 ::end-block
 
-::block when="previous_review"
+::block when="previous-review"
 ### Previous Finding Verification
 
-This is iteration #{{iteration}} of the review/fix cycle. Read @{{previous_review}}
+This is iteration #{{iteration}} of the review/fix cycle. Read @{{previous-review}}
 and its implementation log (the repair's `### Finding Ledger`) before reviewing
 new work. Completion flags and log summaries are claims to verify against the
 implementation, not evidence.
@@ -184,7 +184,7 @@ a change is a **high** finding until the change is done (cite it as
 
 The implementation ran unattended and was told to decide rather than stop.
 Before comparing it with the spec, have two sub-agents read, in parallel, the
-implementation log in `{{dir}}` (starting with its `decisions_for_review`
+implementation log in `{{dir}}` (starting with its `decisions-for-review`
 frontmatter list and any "Decided during implementation" heading) and the spec
 (including any decision that pre-authorizes bounded implementer autonomy).
 Each returns lists, not prose:
@@ -196,7 +196,7 @@ Each returns lists, not prose:
 Judge each item with "Stopping for a human" below. Record every item that does
 not need a human under `## Implementation decisions (informational)` in the
 review body; they never stop the cycle. Only an item that passes the readiness
-rules' **worth the author's time** test also goes in `human_review_items`;
+rules' **worth the author's time** test also goes in `human-review-items`;
 expect most runs to have none.
 ::end-block
 
@@ -206,7 +206,7 @@ When the implementation log or implementation record in `{{dir}}` states
 something about behavior that you have verified to be false (for example, it
 says a command fails when a direct run shows it succeeds), correct that
 statement in place and add a dated note saying what was wrong, what is true,
-and how you verified it. This is not a finding and not a `human_review_items`
+and how you verified it. This is not a finding and not a `human-review-items`
 entry. It applies only to those two records: a false statement in code, tests,
 a `docs/` page, or a skill is a finding, and the spec is never edited this way.
 
@@ -252,12 +252,12 @@ When at least one item meets the test:
 
 - still do the full spec review below, so the repair after the rulings can fix
   every finding in the same cycle
-- write at most **5** items to `human_in_the_loop`, ranked by the rework a
+- write at most **5** items to `human-in-the-loop`, ranked by the rework a
   wrong choice would cause; each item says, in plain language that assumes no
   knowledge of this repository, what it is, which test it meets, 2–4 options
   with pros and cons, your recommendation and why, and which findings wait on
   it. Use YAML's `|-` for long items; Markdown and Mermaid are allowed
-- set `human_resolved` to `false`, and set `blocked` and `has_blocked_findings`
+- set `human-resolved` to `false`, and set `blocked` and `has-blocked-findings`
   as the readiness rules describe; a finding is blocked only when it waits on
   one of these items
 - end the review body with a `## Human rulings` heading and one
@@ -265,7 +265,7 @@ When at least one item meets the test:
 - the `just fix` loop collects the rulings interactively and then continues;
   do not try to stop it yourself
 
-When no item meets the test, set `human_in_the_loop` to `null`.
+When no item meets the test, set `human-in-the-loop` to `null`.
 
 ## Spec Review
 
@@ -361,7 +361,7 @@ finding goes in the titled findings and the frontmatter `findings`
 list, including one discovered in a robustness or verification section, so the
 repair inventory is complete.
 
-::block when="previous_review"
+::block when="previous-review"
 ### Recurrence
 
 Compare each finding in this review with the findings of every earlier review
@@ -427,21 +427,21 @@ test is at the wrong level under "Findings" with severity at least "high".
 - Save the following frontmatter properties to the review file (@{{review}}):
     - set `$schema` to "feature-review.yaml"
     ::file "../_ready.md"
-    - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
-    - set `human_in_the_loop` (and `human_resolved: false`) only as "Stopping for a human" describes; otherwise set `human_in_the_loop` to `null`
+    - set `reviewed-by` property to "{{ctx.agent}}/{{ctx.model}}" 
+    - set `human-in-the-loop` (and `human-resolved: false`) only as "Stopping for a human" describes; otherwise set `human-in-the-loop` to `null`
     - set `recurrence` to `true` when any finding repeats the class of a finding in an earlier review (see "Recurrence" above), otherwise `false`
     - set `created` property to "{{ctx.now}}"
     - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
     - set `implemented` property to `false`
-    - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
-    - set the `{{feature_or_fix}}` property to "{{ parent_dir(review) }}/{{ basename(review) }}"
+    - set `description` property to "A **{{feature-or-fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
+    - set the `{{feature-or-fix}}` property to "{{ parent_dir(review) }}/{{ basename(review) }}"
     ::block when="iteration > 1"
-    - set the `previous` property to "{{parent_dir(previous_review)}}/{{basename(previous_review)}}"
+    - set the `previous` property to "{{parent_dir(previous-review)}}/{{basename(previous-review)}}"
     ::end-block
 ::block when="iteration >  1"
-- Now set the frontmatter properties of the _previous review_ located at @{{previous_review}}:
+- Now set the frontmatter properties of the _previous review_ located at @{{previous-review}}:
     - set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
-    - leave its `implemented` and `implemented_by` unchanged: they record the
+    - leave its `implemented` and `implemented-by` unchanged: they record the
       implementer's claim, and this review's verification table records your
       own assessment
 ::end-block
@@ -451,45 +451,45 @@ test is at the wrong level under "Findings" with severity at least "high".
 The spec file which underpins the requirements for this feature review needs to have it's frontmatter properties updated too:
 
 - the spec file is located at: {{spec}}
-- Set the `review_iterations` Frontmatter property to '{{iteration}}'
+- Set the `review-iterations` Frontmatter property to '{{iteration}}'
 - if you set the review's `ready` property to `true` then set the spec file's `completed` property to `true`
 
 
-::block when="iteration == 1 && !is_empty(next_spec)"
+::block when="iteration == 1 && !is_empty(next-spec)"
 
 ### Spec and Plan Refresh
 
 We are in a multi-plan based implementation:
 
-- the next spec is '{{next_spec}}', it has a plan located at '{{next_plan}}'
+- the next spec is '{{next-spec}}', it has a plan located at '{{next-plan}}'
 - both the **spec** and the **plan** were written _before_ the current spec was implemented
 - we must now refresh the next spec and plan based on:
     - what was learned and built while implementing this spec (its implementation log, the landed code, and this review's findings)
     - every decision recorded in this review, adopted or ruled
-- skip this section when "Stopping for a human" requires a ruling; the next spec then stays `refresh_required: true` until the blocking decisions are ruled
+- skip this section when "Stopping for a human" requires a ruling; the next spec then stays `refresh-required: true` until the blocking decisions are ruled
 
-Refresh the next spec ({{next_spec}}):
+Refresh the next spec ({{next-spec}}):
 
 - check its "Refresh notes" (or similar) section and every assumption it makes about this spec: symbol names, file paths, contracts, serialized formats, counts, version constants, and builder or runtime surfaces; verify each against the landed code, not against this spec's text
 - correct stale facts in place and add a dated reader note summarizing what changed and why; keep decided requirements unless the landed code forces a change, and say so when it does
 - resolve choices using "Stopping for a human": adopt a recommendation that stays within the spec and author rulings and record it; request a ruling only when that test requires one
-- set its `refresh_required` frontmatter property to `false`
+- set its `refresh-required` frontmatter property to `false`
 
-Refresh the next plan ({{next_plan}}):
+Refresh the next plan ({{next-plan}}):
 
 - update rules and tasks that cite stale names, files, counts, or prerequisites; a prerequisite gate that the landed code now satisfies must say so, listing the actual symbols and locations, and must not wait on rulings already recorded
-- if its implementation log already exists from a run that stopped at a prerequisite gate, set that log's `human_review` to `false`, remove its `human_review_items` and `message_to_agent`, append a dated note explaining the refresh, and set the plan's `phase` back to the first phase that did no real work
+- if its implementation log already exists from a run that stopped at a prerequisite gate, set that log's `human-review` to `false`, remove its `human-review-items` and `message-to-agent`, append a dated note explaining the refresh, and set the plan's `phase` back to the first phase that did no real work
 
 Record the outcome on this review file ({{review}}):
 
-- `next_spec_refresh`: `refreshed`, `not-needed`, or `blocked` (only when a blocking decision stops the refresh)
-- `next_spec_refresh_summary`: a short Markdown list of what changed, or of the blocking decision
+- `next-spec-refresh`: `refreshed`, `not-needed`, or `blocked` (only when a blocking decision stops the refresh)
+- `next-spec-refresh-summary`: a short Markdown list of what changed, or of the blocking decision
 
 ::end-block
 
 ### Summarize
 
-- Summarize to the caller whether the review deemed the {{feature_or_fix}} to be **production ready**, the new findings by ID, and (after the first review) the outcome of every previous finding, distinguishing a partial repair from a newly found sibling.
+- Summarize to the caller whether the review deemed the {{feature-or-fix}} to be **production ready**, the new findings by ID, and (after the first review) the outcome of every previous finding, distinguishing a partial repair from a newly found sibling.
 
 
 **IMPORTANT:**

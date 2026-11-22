@@ -6,4 +6,4 @@ $schema:
     scope: string -> the parent directory in which this review was saved (_this typically helps to scope the review_)
     baseline: string -> the review file (_including the parent directory for scoping purposes_)
     implemented: boolean -> whether the suggestions in this review have been implemented
-    follow_up_review: string -> the filename of the review that followed _this_ review to validate whether the suggestions here we actually implemented
+    follow-up-review: string -> the filename of the review that followed _this_ review to validate whether the suggestions here we actually implemented

@@ -1,7 +1,7 @@
 ---
 # The OS most unlike this host, when a build host for it is declared
 # (`BUILD_WIN`/`BUILD_LINUX`); `ctx.os` alone cannot tell WSL from Linux
-cross_os_target: |-
+cross-os-target: |-
     {{
         env.WSL_DISTRO_NAME
             ? (env.BUILD_WIN ? 'windows' : null)
@@ -13,28 +13,28 @@ cross_os_target: |-
     }}
 # Where a cross-OS failure is recorded: the including prompt's spec, else its
 # review, else its plan
-os_failing_file: "{{ spec || review || plan || null }}"
+os-failing-file: "{{ spec || review || plan || null }}"
 ---
 # OS Testing
 
 All functionality must work across Windows, macOS, Linux, and WSL2/Ubuntu. Keep this in mind while implementing, but be aware that the CI/CD pipeline WILL test cross-OS functionality, so it is NOT a strict requirement that you do so as part of your work. Your current host runs **{{ ctx.os }}**, so do most of your testing here. Where your work carries OS-level risk (for example, a lot of work around file paths, or an OS-specific crate), use the 'os' agent skill to learn about OS variance before you change that code.
 
-::block when="cross_os_target"
+::block when="cross-os-target"
 ## Cross-OS Check
 
 If (and only if) the work you've done has notable cross-OS risks, run a cross-OS test at the end of your implementation cycle to make sure you haven't accidentally broken anything on another OS:
 
-- test **{{ cross_os_target }}** by running `just cross-check <package> --os {{ cross_os_target }}` for each package you touched directly
+- test **{{ cross-os-target }}** by running `just cross-check <package> --os {{ cross-os-target }}` for each package you touched directly
 
-If you hit any failing tests (regardless of whether you believe they came from your changes) you need to attempt to fix them on **{{ cross_os_target }}**. Make at most three attempts. If **{{ cross_os_target }}** is still failing after the third attempt:
+If you hit any failing tests (regardless of whether you believe they came from your changes) you need to attempt to fix them on **{{ cross-os-target }}**. Make at most three attempts. If **{{ cross-os-target }}** is still failing after the third attempt:
 
-::block when="os_failing_file"
-- set the `os_failing` frontmatter property of {{ os_failing_file }} to `{{ cross_os_target }}`
+::block when="os-failing-file"
+- set the `os-failing` frontmatter property of {{ os-failing-file }} to `{{ cross-os-target }}`
 ::end-block
-::block when="!os_failing_file"
-- there is no spec, review, or plan for this task, so report that **{{ cross_os_target }}** is failing in your final summary
+::block when="!os-failing-file"
+- there is no spec, review, or plan for this task, so report that **{{ cross-os-target }}** is failing in your final summary
 ::end-block
-- you may NOT finish this phase of the work with any failing tests on **{{ ctx.os }}**, but it is OK to continue to the next phase while **{{ cross_os_target }}** is still failing after your third fix attempt. Sometimes a bug can only be fixed properly by running directly on the failing OS; this will be flagged later in the process so that it gets done (this is not your concern directly)
+- you may NOT finish this phase of the work with any failing tests on **{{ ctx.os }}**, but it is OK to continue to the next phase while **{{ cross-os-target }}** is still failing after your third fix attempt. Sometimes a bug can only be fixed properly by running directly on the failing OS; this will be flagged later in the process so that it gets done (this is not your concern directly)
 ::end-block
 
 ## Local OS Testing Rigs

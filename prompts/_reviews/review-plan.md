@@ -10,9 +10,9 @@ description: >-
     - if there are any related docs such as a `spec`, `design`, or `review` document that the plan was based on then this review will try to identify those files and give the reviewing agent the context which these supplemental docs provide.
     - you may also explicitly pass in file references to these docs if the naming convention is non-standard
 # Sibling documents, found by the naming convention when they were not passed in.
-spec_doc: "{{ spec ? spec : file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md' : null }}"
-design_doc: "{{ design ? design : file_exists(dirname(plan) + '/design.md') ? dirname(plan) + '/design.md' : null }}"
-review_doc: |-
+spec-doc: "{{ spec ? spec : file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md' : null }}"
+design-doc: "{{ design ? design : file_exists(dirname(plan) + '/design.md') ? dirname(plan) + '/design.md' : null }}"
+review-doc: |-
     {{
         review
             ? review
@@ -33,14 +33,14 @@ failure:
 ## Context
 
 - **Plan:** {{plan}}
-::block when="spec_doc"
-- **Specification:** {{spec_doc}} (the plan must deliver everything it requires)
+::block when="spec-doc"
+- **Specification:** {{spec-doc}} (the plan must deliver everything it requires)
 ::end-block
-::block when="design_doc"
-- **Design:** {{design_doc}}
+::block when="design-doc"
+- **Design:** {{design-doc}}
 ::end-block
-::block when="review_doc && file_exists(review_doc)"
-- **Review:** {{review_doc}} (the plan must address every finding in it)
+::block when="review-doc && file_exists(review-doc)"
+- **Review:** {{review-doc}} (the plan must address every finding in it)
 ::end-block
 
 The plan will be executed phase by phase by agents running unattended. Any
@@ -74,7 +74,7 @@ recommendation.
 
 On the plan ({{plan}}), set:
 
-- `plan_reviewed` to `true`
-- `plan_reviewed_by` to "{{ctx.agent}}/{{ctx.model}}"
-- `plan_reviewed_on` to "{{ctx.today}}"
-- `total_phases` to the number of phases in the plan, if it is not already set
+- `plan-reviewed` to `true`
+- `plan-reviewed-by` to "{{ctx.agent}}/{{ctx.model}}"
+- `plan-reviewed-on` to "{{ctx.today}}"
+- `total-phases` to the number of phases in the plan, if it is not already set

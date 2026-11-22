@@ -2,12 +2,12 @@
 $prompt:
     actor: string(required) -> how we will refer to the human/caller (_by default we use 'caller'_)
     mermaid: boolean(required) -> boolean flag indicating whether the idea of using mermaid diagrams to illustrte ideas should be included (_default is `true`_)
-    only_bullets: boolean(required) -> boolean flag that when set to `true` indicates that the preamble should not be rendered, only the bullet points.
+    only-bullets: boolean(required) -> boolean flag that when set to `true` indicates that the preamble should not be rendered, only the bullet points.
 actor: "caller"
-only_bullets: false
+only-bullets: false
 mermaid: true
 ---
-::block when="!only_bullets"
+::block when="!only-bullets"
 # Writing Clearly
 
 > **IMPORTANT:** when interacting with the {{ actor }} -- either through an interactive session or via your logged messages in a non-interactive session -- it's critical that you communicate in a way that the {{ actor }} can understand. If you fail to do this you will get back poor responses and poor decision making. This is one of the biggest causes for problems in the current human/agent interaction loop.

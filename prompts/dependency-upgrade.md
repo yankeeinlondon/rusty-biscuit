@@ -1,6 +1,6 @@
 ---
 description: Plan evidence-based upgrades and dependency alignment across a Rust workspace, preserving intentional differences.
-depends_on:
+depends-on:
     binaries:
         - python3
         - cargo
@@ -201,11 +201,11 @@ Write an idiomatic Markdown plan with:
 Create `reviews/{{ctx.today}}-dependency-upgrade/plan.md` relative to
 `{{ctx.repo_root}}`. Include valid YAML frontmatter in the initial write:
 
-- `start_phase`: integer index of the first phase, normally 1; use 0 for a distinct
+- `start-phase`: integer index of the first phase, normally 1; use 0 for a distinct
   evidence-recovery or prerequisite phase.
 - `phases`: integer index of the last phase, not the number of phases.
 
-Number phases contiguously from `start_phase` through `phases`, inclusive. Verify
+Number phases contiguously from `start-phase` through `phases`, inclusive. Verify
 that the frontmatter matches the body, artifact/source links are accurate, and
 every firm recommendation has supporting evidence. If the destination already
 exists, read it first and preserve execution status or author annotations; do not
