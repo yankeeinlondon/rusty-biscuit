@@ -54,49 +54,133 @@ decisions-for-review:
         it unboxed and box the large enum variants instead, which changes
         widely used public enums. Readers match with
         `shape.composition.as_deref()`.
+    - |-
+        Phase 2: a copied member's origin reaches the lowerer through a hidden
+        field, `SchemaShape::composed_sites` (`#[doc(hidden)]`,
+        `#[serde(skip)]`, and equal to every other value under `PartialEq`),
+        not through a transient map passed beside the shape as the plan
+        describes. Lowering takes a bare `SchemaShape` from many callers, so a
+        side map would have meant threading a new parameter through every
+        lowering entry point. The field is never serialized and never
+        affects equality, so records and comparisons are unchanged.
+        Alternative: a side table keyed by shape identity, threaded through
+        `object_body_from_shape` and its callers.
+    - |-
+        Phase 2: the content-only no-file check extends `external_reference`
+        (in `schema/layer.rs`) to composition operands rather than adding a
+        no-file namespace mode. It runs before any probe or read, as the
+        plan requires, but it is conservative: an operand that names another
+        file makes the schema unpreparable from content even when every member
+        it contributes is replaced. That matches Rule 7, which resolves an
+        operand even when it contributes nothing.
+    - |-
+        Phase 2: assembled results are cached per `(DefKey, depth)`, so the
+        depth limit stays exact when the same target is reached at different
+        depths. `InvalidCompositionTarget.name` is the operand as written
+        (for example `alias`), and `definition` points at the declaration
+        that decided the kind. Target kinds: a tuple is reported as a list
+        (`Array`), and only `object` and `$ref` are `OpaqueObject`; every
+        other primitive is `Primitive`.
+    - |-
+        Phase 3: in a property union written as a YAML sequence, only an arm
+        whose object uses `$extends` is exported as a mapping; every other
+        arm stays a type-expression string, as before. The plan says to
+        "route mapping unions through write_atom". The parsed model does not
+        record whether an arm was authored as a mapping, and writing every
+        object arm as a mapping would change the export of schemas that
+        do not compose. Alternative: export every inline-object arm through
+        the block writer, which changes existing output. Redoing it is a
+        one-line change in `write_def` (`schema/export.rs`) plus the
+        expectations in `object_composition_export.rs`.
+    - |-
+        Phase 3: when `select` takes a named type from a root that has no
+        `types` table (the root's own properties act as the table) and that
+        root uses `$extends`, the copied table drops the root's `$extends`.
+        The plan does not cover this case. Otherwise the export would write
+        `$extends` inside `types:`, where it reads back as an ordinary type
+        name rather than a directive. The root's operands are not
+        declarations, so the set of named types is unchanged. Alternative:
+        refuse such an export with `ExportUnsupported`. The change is in
+        `Layer::select` (`schema/layer.rs`).
+    - |-
+        Phase 3: the composition cursor role is
+        `CompositionOperand { part: Name | Reference { name }, operand_span }`.
+        A spread operand's cursor path ends in `Spread(i)`, the same address
+        the source map uses for that operand. `token_span` covers the
+        active half (the name, or the text after `@`), and `operand_span`
+        covers the whole operand up to the cursor. The `$extends`
+        entry points read one operand the caller has already framed, and
+        report a root path. The plan asked only for "name versus
+        import-path state and the raw replacement range". Alternatives:
+        reuse the existing `ImportReference` role for the reference half
+        (DMLS could then not tell a composition reference from an ordinary
+        import), or leave out `operand_span`. Changing this touches
+        `simplified/cursor.rs` and its tests, and the Phase 4 DMLS consumer.
+    - |-
+        Phase 3: changing `SchemaShape` in Phase 2 made Darkmatter's
+        `Declaration::Found(Cow<PropertyDef>)` trip clippy's
+        `large_enum_variant` lint. The `Declaration` enum is a short-lived
+        lookup result, and I allowed the lint on it, as Darkmatter already
+        does for several similar enums. Alternatives: box the `Found`
+        payload (one allocation per lookup; 8 call sites in
+        `projection.rs` and `typing.rs`), or shrink `SchemaShape` by merging
+        `composition` and `composed_sites` into one boxed field.
 message-to-agent: |-
-    Phase 1 landed the authored model only. `SchemaShape::composition` is
-    `Option<Box<ObjectComposition>>` (match it with `.as_deref()`); a spread's
-    `literals_before`/`patterns_before` count the members written before it.
-    Resolution does NOT expand composition yet: `ImportEngine::expand_shape`
-    in `resolve.rs` sets `composition: None`, so today a composed object
-    silently loses its operands when resolved or lowered. Phase 2 must
-    replace that with real assembly and add the lowering guard (Rule 12).
+    Phase 3 landed the authored export and the cursor role. For Phase 4:
 
-    Parsing entry points: `grammar::parse_extends_operand` (whole `$extends`
-    text) and `Parser::parse_composition_operand` (shared with `...`).
-    `MappingMode::{Object, Table}` in `simplified/mod.rs` decides whether
-    `$extends` is reserved; only the standalone `types` carrier uses `Table`.
-    Source paths: `path.spread(i)` for inline spreads; `$extends` operands
-    are at `path.property("$extends")` (scalar) or `.union_arm(i)` (list
-    items), with `SchemaSpanKind::CompositionOperand`, `ImportName`, and
-    `ImportReference` spans. Phase 1 tests are in
-    `simplified-schema/lib/tests/l1/object_composition.rs` (all named
-    `composition_*`); extend that file in Phase 2 as the plan says.
-
-    Deferred from Phase 1's robustness matrix to Phase 2 because they need
-    resolution: the positive Markdown control through
-    `SimplifiedSchema::try_from_markdown` (the invalid Markdown case is in
-    place) and the trigger-payload field-wiring case through
-    `resolve_embedded_trigger_payload`/`prepare_trigger_bundle`.
-
-    The tree at HEAD has pre-existing failures that are not from this
-    feature. Commit 8f33de0d7 deleted
-    `claudine/schemas/sequence-types.yaml` and moved its types into the
-    `sequence.yaml` trigger's `types:` table, which trigger envelopes do not
-    support yet (host-registration-v2). Phase 1 removed the dead
-    `include_str!` from two tests so they compile
-    (`simplified-schema/lib/tests/l1/shipped_corpus.rs` and
-    `darkmatter/dmls/tests/l1/claudine_schema_discovery.rs`), but these
-    still fail with or without this feature's changes:
-    `shipped_corpus::claudine_bundle_and_its_triggers_resolve_from_supplied_sources`
-    (simplified-schema), three `shipped_schema_corpus::*` tests (darkmatter,
-    about `lifecycle-events.yaml` and `sequence.yaml` trigger keys), and
-    `claudine_schema_discovery::removed_sequence_keys_are_reported_at_their_paths`
-    (darkmatter-lsp). Claudine itself does not compile at HEAD
-    (`claudine/lib/src/composition/schema/bundle.rs` and three Claudine
-    tests still `include_str!` the deleted file), so Phase 5's
-    `cargo check -p claudine …` fails until that is fixed.
+    - Cursor API (`simplified/cursor.rs`, reexported at the crate root):
+      `SchemaCursorRole::CompositionOperand { part, operand_span }` with
+      `CompositionOperandPart::{Name, Reference { name }}`. `token` and
+      `token_span` cover the active half only (the name, or the text after
+      `@`); `operand_span` covers the whole operand typed so far. After
+      `...` the existing type-definition locators report it, with a path
+      ending in `Spread(i)`. For a `$extends` scalar or one framed sequence
+      item, call `locate_composition_operand_cursor(text, offset, cursor)`
+      or `locate_composition_operand_cursor_in_scalar`; their path is
+      always root, so the caller adds the `$extends` / `union_arm(i)` path.
+    - `darkmatter/dmls/src/providers/frontmatter.rs::type_definition_completions`
+      has a placeholder arm `SchemaCursorRole::CompositionOperand { .. } =>
+      return Vec::new()`. Phase 4 replaces it with real operand completion.
+    - Existing limitation, not caused by this feature: a block-mapping
+      value written as a multi-line quoted scalar (for example
+      `p: '{ a: string,\n    n: number }'`) fails to load with "could not
+      project SimplifiedSchema expression spans through YAML source", with
+      or without a spread. Single-line quoted, folded (`>-`), anchored, and
+      aliased values work. Avoid it in DMLS fixtures.
+    - Pre-existing breakage from earlier phases is unchanged. `just lint`
+      in `darkmatter/` stops on `darkmatter-cli`'s L1 tests, which
+      `include_str!` the deleted `claudine/schemas/sequence-types.yaml`.
+source_files_during_phase_2:
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/resolve/composition.rs
+    - simplified-schema/lib/src/resolve/graph.rs
+    - simplified-schema/lib/src/schema/layer.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/src/simplified/mod.rs
+    - simplified-schema/lib/src/simplified/types.rs
+    - simplified-schema/lib/src/triggers/assemble.rs
+    - simplified-schema/lib/src/triggers/finding.rs
+    - simplified-schema/lib/tests/l1/object_composition.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - simplified-schema/lib/src/schema/export.rs
+    - simplified-schema/lib/src/schema/layer.rs
+    - simplified-schema/lib/src/simplified/serialize.rs
+    - simplified-schema/lib/src/simplified/cursor.rs
+    - simplified-schema/lib/src/simplified/mod.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/object_composition_export.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Implementation Log for 2026-11-22-object-composition (5 phases)
@@ -259,3 +343,259 @@ changes (`3b66ddc90 feat(simplified-schema): add object composition
 syntax`) and the plan and log (`9f6ef9e9d`). This agent made no commits.
 The committed tree includes the final boxed field. The log body and the
 plan/log frontmatter written after that are uncommitted.
+
+## Phase 2
+
+### What was built
+
+- **Assembly** (`lib/src/resolve/composition.rs`, new). `ImportEngine::assemble`
+  turns a shape's `composition` into its winning members: inline spreads
+  apply in place, between the literals and patterns written around them;
+  `$extends` operands apply in order before the mapping's own members. A
+  replaced literal keeps its first position (Rule 6). Patterns are
+  deduplicated by their emitted key, computed against the final literal
+  names with the same `emitted_pattern_key` the lowerer uses, so two
+  spellings with the same regex (including one created by the
+  literal-exclusion wrapper) collide and distinct overlapping patterns both
+  stay. Each winner keeps its declaring namespace and source path
+  (`Member`). Targets are classified (Rule 8): a union, list or tuple,
+  primitive, opaque `object` or `$ref`, function, or slot is refused with
+  `InvalidCompositionTarget`. Alias chains are followed for assembly only.
+  Composition hops share the named-type depth limit (32), and a loop of
+  spread and alias hops is a `NonDescendingCycle` that locates every edge.
+  Assembled results are cached per `(DefKey, depth)`.
+- **Resolver wiring** (`resolve.rs`, `resolve/graph.rs`). Graph discovery,
+  both expansion passes, and the default walk read the assembled winners.
+  Each member expands in its own namespace and path, and a member from
+  another namespace is rehomed (`rehome_definition`) so its slots,
+  examples, and defaults stay anchored in the declaring file (Rule 9).
+  `shape_has_imports` counts composition, so the no-import fast path still
+  applies to schemas with neither.
+- **Origins and errors** (`errors.rs`, `triggers/finding.rs`). New
+  `SchemaError::{InvalidCompositionTarget, CompositionReference,
+  ComposedMember}` and the public `CompositionTargetKind`, with terminal
+  `BlockError` arms. Lookup and resolution failures keep their cause under
+  `CompositionReference`, and trigger classification walks into it.
+- **Lowering** (`simplified/convert.rs`, `simplified/types.rs`). The shared
+  object lowering refuses a shape whose `composition` is still present
+  (Rule 12). A resolved shape carries a hidden, non-serialized
+  `composed_sites` table, so a copied member's lowering failure is wrapped
+  in `ComposedMember` naming its declaration.
+- **Content-only reads** (`schema/layer.rs`). `external_reference` also
+  returns a composition operand that names a file, so the content APIs
+  refuse it with `ResolutionUnavailable` before any probe or read.
+
+### Requirement → test mapping
+
+All in `simplified-schema/lib/tests/l1/object_composition.rs` unless noted.
+The `disk` module is `feature = "file"`.
+
+| Requirement | Tests |
+| --- | --- |
+| Rule 5–6 placement and replacement | `composition_the_spec_example_behaves_like_its_handwritten_equivalent`, `composition_spread_applies_in_place_and_later_entries_replace_earlier_ones`, `composition_extends_applies_its_operands_in_order_before_the_mapping` |
+| Whole-declaration replacement (requiredness, default, description, example) | `composition_replacing_a_member_replaces_its_whole_declaration`, `disk::composition_winning_examples_resolve_from_their_declaring_file` |
+| Every YAML object position, root unions | `composition_extends_resolves_in_every_schema_object_position`, `composition_root_union_arms_keep_their_own_local_names` |
+| Local, aliased, `@this` built-in collision, empty targets | `composition_targets_local_aliased_keyword_named_and_empty_objects` |
+| Target qualifiers discarded; receiver constraints apply | `composition_copies_members_and_never_the_target_objects_own_qualifiers` |
+| Pattern emitted-key collisions, overlap, catch-alls, literal precedence, pattern-only closure | `composition_patterns_replace_by_emitted_key_and_distinct_patterns_overlap`, `composition_catch_alls_replace_and_literals_keep_precedence` |
+| Rule 8 ineligible targets | `composition_rejects_every_ineligible_target_at_its_operand` |
+| Fully replaced operand still checked | `composition_operands_resolve_even_when_every_member_is_replaced` |
+| Cycles, depth 32/33, mixed alias chain | `composition_a_loop_of_composition_and_alias_hops_reports_every_reference`, `composition_hops_count_toward_the_named_type_depth_limit` |
+| Base/branch recursion, recursive target outside its cycle | `composition_a_cycle_through_a_child_value_is_ordinary_recursion`, `composition_a_recursive_target_outside_its_cycle_keeps_its_own_type`, `disk::composition_recursion_through_a_spread_works_across_two_files` |
+| Authored namespace never gains copied names; `Layer::select` | `composition_copied_names_are_not_local_names` |
+| Host-supplied locals | `composition_with_host_supplied_local_types` |
+| Merged semantics: subtype, `DefinitionTable`, strict and soft validation | `composition_subtype_answers_like_the_handwritten_object`, `composition_the_recursive_comparison_uses_the_definition_table`, `composition_soft_validation_repairs_and_defaults_like_the_handwritten_object` |
+| Rule 12 lowering guard; copied member failure at its declaration | `composition_lowering_refuses_an_unresolved_operand`, `composition_a_copied_members_lowering_failure_names_its_declaration` |
+| Content-only APIs read no file; Markdown control | `composition_content_reads_no_file_for_an_imported_operand`, `composition_markdown_frontmatter_resolves` |
+| Transitive imports and probes; failing target keeps cause | `disk::composition_imports_record_the_target_and_its_transitive_files`, `disk::composition_a_target_file_that_fails_keeps_its_cause` |
+| Rule 9 origins: names, examples, defaults, slots | `disk::composition_a_copied_member_resolves_names_where_it_was_declared`, `disk::composition_winning_examples_resolve_from_their_declaring_file`, `disk::composition_default_files_name_the_winning_declaration`, `disk::composition_a_winning_slot_evaluates_in_its_declaring_file` (instrumented slot host) |
+| Embedded payloads, runtime and prepared | `embedded::composition_resolves_in_an_embedded_trigger_payload_at_runtime_and_prepared`, `embedded::composition_failures_in_an_embedded_trigger_keep_their_cause`, unit test `triggers::assemble::…::composition_in_an_embedded_payload_reads_bundle_documents_only` (virtual reads vs empty disk dependencies) |
+| Terminal `BlockError` arms | unit test `errors::…::composition_errors_name_the_operand_the_declaration_and_the_cause` (`terminal` feature, run by `just test`) |
+| Darkmatter `AppliedDefault.origin` | `darkmatter/lib/tests/l1/schemas_named_type_merge.rs::composed_default_origin_names_the_file_of_the_winning_declaration` |
+
+`composition_markdown_frontmatter_resolves` is gated on `feature = "file"`
+because `try_from_markdown` and `SchemaSource` exist only there; the first
+minimal run failed to compile until it was gated.
+
+### Verification
+
+- Checkpoint: `cargo nextest run -p simplified-schema -E 'test(/named_type|recurs|template|embedded|import|composition|shared_type|trigger/)'`:
+  512/513, the one failure pre-existing (below). `test(composition_)`: 64/64.
+- `just test --no-fail-fast` (default leg, `work-counters,terminal`):
+  2452/2453, none at or above 5.0 s (load average about 10).
+- `just test-minimal --no-fail-fast`: 2073/2074.
+- `just lint`: passes.
+- `just check-tier-coverage simplified-schema`: nothing stranded.
+- Dependents, serially and filtered:
+  - `cargo nextest run -p darkmatter -E 'test(/schema/)'`: 1963/1966.
+  - `cargo nextest run -p darkmatter-lsp -E 'test(/named_type|schema|frontmatter|diagnostic/)'`: 679/680.
+  - `cargo nextest run -p test-toolkit -E 'test(/schema/)'`: 5/5.
+  - `cargo check -p claudine`: fails at HEAD (missing
+    `claudine/schemas/sequence-types.yaml`), unchanged by this phase.
+- `affected_scope.py` over the working tree: `darkmatter`,
+  `simplified-schema`, `test-toolkit`, `claudine`.
+- No cross-OS check: resolution and lowering are in-memory; the only file
+  access goes through the existing namespace resolver, and the disk tests
+  compare canonicalized paths.
+
+### Pre-existing failures (unchanged from Phase 1)
+
+`shipped_corpus::claudine_bundle_and_its_triggers_resolve_from_supplied_sources`
+(simplified-schema, both legs), the three `shipped_schema_corpus::*` tests
+(darkmatter; causes are `claudine/schemas/lifecycle-events.yaml` and
+`sequence.yaml` trigger keys `description`/`types`), and
+`claudine_schema_discovery::removed_sequence_keys_are_reported_at_their_paths`
+(darkmatter-lsp). All are about committed Claudine schemas, not composition.
+
+### Docs
+
+No `docs/` page changed: the plan assigns the composition documentation and
+skill updates to Phase 4.
+
+## Phase 3
+
+### What was built
+
+- **Inline serializer** (`simplified/serialize.rs`). `write_inline_object`
+  writes each `...Name` spread at its recorded position. For each spread
+  it writes the literal and pattern members that come before it, then the
+  spread, and it writes the remaining members at the end. Members between
+  two spreads therefore come out literals first, the normalization Rule 1
+  allows. An object with spreads also writes its pattern members, with the
+  key text the block export uses. `pattern_key_text` moved here from
+  `export.rs` so both writers share it. A new `composition_operand_text`
+  writes `Name` or `Name@reference`. Spread-free objects serialize exactly
+  as before.
+- **YAML export** (`schema/export.rs`):
+  - `write_shape` writes `$extends` first, in its scalar or sequence form.
+  - `write_atom` keeps an object with spreads as a string, even when it
+    would otherwise be written as a block mapping.
+  - A property-union arm whose object uses `$extends` is written as a
+    mapping, so the directive survives. Every other arm keeps the string
+    form.
+  - The loss check now lets an object with spreads carry pattern members.
+    It still refuses `$constraints`, and pattern members on any object
+    without spreads. It also refuses an object that uses `$extends` inside
+    a type expression, which the parser cannot produce.
+  - Layered export returns `ExportUnsupported` when any layer's root
+    composes, or when a lower layer contributes a property that composes.
+    A nested composition in the top layer is still exported.
+  - Anchors, aliases, and folded scalars are written as their decoded
+    operand text.
+- **Derived-root selection export** (`schema/layer.rs`, `export.rs`).
+  `AuthoredSchema` has a new `selected` field, which `Layer::select` sets
+  to the selected name. When the selected root is an object with spreads,
+  the export writes `$schema: { $extends: "Name@this" }` beside the
+  authored `types` table. If `Name@this` does not read back through the
+  operand grammar as that name (for example `type.v2`), the export
+  returns `ExportUnsupported`. When the table is a root that uses
+  `$extends`, `select` drops the root's directive from the copied table
+  (see decisions-for-review).
+- **Cursor** (`simplified/cursor.rs`; reexported from `simplified` and the
+  crate root):
+  - A new role, `SchemaCursorRole::CompositionOperand { part,
+    operand_span }`, with `CompositionOperandPart::{Name, Reference {
+    name }}`.
+  - In an inline object, `...` at a key position starts an operand. The
+    inline-object frame counts its spreads, so the cursor path ends in
+    `Spread(i)`. A `,` returns the cursor to a key position.
+  - New entry points `locate_composition_operand_cursor` and
+    `locate_composition_operand_cursor_in_scalar` read one `$extends`
+    scalar or framed sequence item. They use the same decoder
+    (`decode_partial_scalar_at` / `DecodedScalar::prefix_at`) and the same
+    lexer identifier rule as the existing locators, so name, `@this`, and
+    file-path states share one authority for edit ranges.
+- **DMLS** (`providers/frontmatter.rs`). The new variant gets a
+  no-completion arm, so the exhaustive match still compiles and `...`
+  offers nothing, as before. Phase 4 adds the real completion.
+- **Darkmatter lint** (`markdown/compose/expression/scope/projection.rs`).
+  Phase 2's `SchemaShape::composed_sites` pushed `Declaration` over
+  clippy's `large_enum_variant` limit. The lint is now allowed on that
+  enum, with a reason comment (see decisions-for-review).
+
+### Requirement-to-test mapping
+
+The export tests are in `simplified-schema/lib/tests/l1/object_composition_export.rs`,
+registered in `tests/l1/main.rs`. Each case uses the public API in process
+and round-trips: export, check that the reparsed authored model
+(`parse_standalone_schema_document`: declaration plus `types`) equals the
+original, check that the reparsed schema prepares equal JSON Schema, and
+check that a second export is byte-identical.
+
+| Requirement | Tests |
+| --- | --- |
+| Spread first, middle, last; spreads-only; repeats; trailing comma; replacement keeps first insertion position | `composition_export_writes_each_spread_at_its_position` |
+| Pattern members around spreads; a pattern-only object with no spread is still refused where it must be a string | `composition_export_keeps_pattern_members_around_spreads` |
+| Arrays, `\|` unions, flow-sequence arms, nested objects, pattern values, receiving postfix and description | `composition_export_keeps_spreads_in_arrays_unions_and_nested_objects` |
+| Explicit `@this`, including a built-in collision (`string@this`) | `composition_export_keeps_explicit_local_references` |
+| `$extends` scalar/sequence written before members; placement independence; property-union mapping arm; requiredness kept | `composition_export_writes_extends_before_the_mapping_members` |
+| Root-union arm directives | `composition_export_keeps_root_union_arm_directives` |
+| Anchor, alias, folded operand, aliased spread value: decoded on write | `composition_export_writes_decoded_operands_for_anchors_aliases_and_folds` |
+| `Layer::select` validation (including the recursive child) and derived-root export; mapping-composed selection; source schema still exports its named declaration | `composition_export_of_a_selected_inline_composition_extends_the_selection` |
+| Selection from a composed root drops the root's directive | `composition_export_of_a_selection_from_a_composed_root_omits_the_roots_directive` |
+| Selected name not writable as an operand → `ExportUnsupported` | `composition_export_of_a_selection_whose_name_is_not_an_operand_is_unsupported` |
+| Layered refusal (root composition in either layer, composing lower-layer property) and retained top-layer nested composition | `composition_export_refuses_layers_it_cannot_flatten` |
+| Legacy output for objects that do not compose | `composition_export_leaves_uncomposed_objects_unchanged` |
+| Imported operands with path punctuation reparsed through `try_from_yaml` with the original path and context; same imports recorded | `disk::composition_export_reparses_imported_operands_in_the_same_context` (`feature = "file"`) |
+| Serializer unit round trip, canonical spellings | `simplified::serialize::tests::composition_spreads_round_trip_at_their_positions` |
+| Cursor: empty and partial operand after `...`, before/after `@`, before a receiving postfix | `simplified::cursor::tests::composition_cursor_after_an_ellipsis_names_an_operand` |
+| Cursor: nested objects, object arrays, flow and `\|` union arms | `composition_cursor_follows_nested_objects_arrays_and_union_arms` |
+| Cursor: single/double-quoted, escapes, multiline plain scalars | `composition_cursor_projects_through_quoted_and_multiline_scalars` |
+| Cursor negative controls: literal keys, ellipsis in a description, `...` outside an object or in a value, in an argument | `composition_cursor_ignores_keys_descriptions_and_document_data` |
+| `$extends` operand entry points, quoted, offset, refusals, decoded multiline scalar with anchor | `composition_cursor_reads_a_whole_extends_operand` |
+
+The Input Robustness Matrix does not apply: this phase adds no loader or
+field validator. The export is a writer, and the cursor is a tolerant
+editor reading.
+
+### Verification
+
+- Checkpoint: `cargo nextest run -p simplified-schema -E 'test(composition_export)'`
+  13/13; `--lib -E 'test(composition_cursor)'` 5/5;
+  `test(composition_spreads_round_trip)` 1/1.
+- `just test --no-fail-fast` (simplified-schema, default leg): 2471/2472,
+  `L1 run recorded: 2472 test(s), none at or above 5.0s` (load average
+  about 5–8). The one failure is the pre-existing
+  `shipped_corpus::claudine_bundle_and_its_triggers_resolve_from_supplied_sources`.
+  `just test` stops after the default leg fails, so I ran the minimal leg
+  separately.
+- `just test-minimal --no-fail-fast`: 2091/2092, the same single
+  pre-existing failure.
+- `just lint` (simplified-schema): passes.
+- `just check-tier-coverage simplified-schema`: nothing stranded.
+- Dependents, serially and filtered:
+  - `cargo nextest run -p darkmatter-lsp --no-fail-fast -E 'test(/named_type|schema|frontmatter|cursor|completion/)'`:
+    658/659. The failure is the pre-existing
+    `claudine_schema_discovery::removed_sequence_keys_are_reported_at_their_paths`.
+  - `cargo nextest run -p darkmatter --no-fail-fast -E 'test(/schema|export|simplified_yaml/)'`:
+    1974/1977. The failures are the pre-existing `shipped_schema_corpus::*`
+    tests.
+  - `cargo clippy -p darkmatter -p darkmatter-lsp --all-targets -- -D warnings`:
+    clean after the `Declaration` allow. Before it, the library failed on
+    `large_enum_variant`, a regression from Phase 2.
+  - `just lint` in `darkmatter/` still fails at the `darkmatter-cli` leg.
+    Its L1 tests do not compile because they `include_str!` the deleted
+    `claudine/schemas/sequence-types.yaml`. This breakage was there at
+    HEAD before this phase (see Phase 1).
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`:
+  packages `darkmatter, darkmatter-lsp, simplified-schema, test-toolkit,
+  claudine`, change_class `package`. Phase 2 is still uncommitted, so the
+  working tree also holds its changes. The gates were therefore run.
+- No cross-OS check. The export and cursor are in-memory string work, and
+  the one disk test writes and reads a temporary directory through the
+  existing resolver.
+
+### Pre-existing limitation found
+
+A block-mapping value written as a multi-line quoted scalar, such as
+`p: '{ a: string,\n    n: number }'`, fails to load with "could not
+project SimplifiedSchema expression spans through YAML source". This
+happens with or without a spread, in the line locator in
+`simplified/source.rs`. It is outside this feature, so I did not fix it.
+The export test covers folded (`>-`), anchored, and aliased operands
+instead, and all of them work.
+
+### Docs
+
+No `docs/` page changed: the plan assigns composition documentation to
+Phase 4.

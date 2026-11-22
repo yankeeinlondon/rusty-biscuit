@@ -3,7 +3,7 @@ kind: plan
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 2
+phase: 4
 agent: codex/gpt-6.2-sol
 yolo: true
 source_files_during_phase_1:
@@ -28,6 +28,37 @@ packages:
 - simplified-schema
 - darkmatter
 - darkmatter-lsp
+source_files_during_phase_2:
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/composition.rs
+- simplified-schema/lib/src/resolve/graph.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/triggers/assemble.rs
+- simplified-schema/lib/src/triggers/finding.rs
+- simplified-schema/lib/tests/l1/object_composition.rs
+- darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/cursor.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/object_composition_export.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Object composition implementation plan
@@ -101,19 +132,19 @@ Checkpoint: pass the grammar and source-map slices with `cargo nextest run -p si
 
 ### Tasks
 
-- [ ] Assemble winning members
+- [x] Assemble winning members
   - Implement Rules 5–8 in `resolve/composition.rs` and wire `expand_imports`, `graph.rs`, and `recursive.rs`. Keep alias resolution for assembly separate from ordinary value expansion. Reuse the no-import fast path for schemas with neither imports nor composition and include composition in `schema_has_imports` and its nested walkers.
   - Keep receiver and source paths distinct. Reuse assembled winners in discovery, both expansion passes, recursive body expansion, and the default walk. Ensure a copied child in a recursive body uses the existing definition queue. Hold the origin for each occurrence even when that occurrence shares its target with another spread.
   - Test local, imported and aliased targets, a built-in collision selected with `@this`, an explicit empty object, and all invalid targets from the spec. Cover aliases with object annotations, authored-only names and exports, explicit and implicit root-union scopes, host-supplied locals through `expand_named_types_with_locals`, and a receiver and file defining the same child type name.
   - Exercise 32 and 33 hops including a mixed alias/operand chain, a pure spread/alias cycle with locations, an ordinary recursive object used outside its cycle, the allowed base/branch cycle locally and across two files, and the same base independently referenced as an ordinary value. Assert lowering and nested validation to prove the recursive definition is usable.
 
-- [ ] Preserve winning origins
+- [x] Preserve winning origins
   - Implement Rules 9–10 with the resolver and lowerer. Carry the typed target and lookup errors through their existing error wrappers, including the terminal `BlockError` implementation in `errors.rs`; follow the biscuit-terminal skill and the existing status block pattern. Carry `CompositionReference` causes through trigger error classification in `triggers/{assemble,finding}.rs`. Retain operand and origin context in the embedded public failure from `resolve_embedded_trigger_payload`.
   - Stamp and rehome winners before `slots::apply_active`, slot collection, and example resolution; keep inherited slots anchored in the declaring file. Preserve ordinary named reference behavior and wrapper precedence. Keep the content-only no-file check at namespace selection, before any probe or read.
   - Test whole-definition replacement including loss of requiredness, defaults, descriptions and examples; test two real files with the same relative example spelling, and assert the winning file and default origin via the library's resolver and Darkmatter's `EffectiveSchema`. Assert `AppliedDefault.origin` in a Darkmatter L1 case. Use an invalid example path and instrumented slot host on replaced declarations to show no read or call. A checked operand with a fully replaced contribution still fails on its missing target. Test a copied member's conversion failure at its declaration and an invalid supplied value at its instance location.
   - Test transitive imports and probe tracking, an invalid imported document retaining its original cause, no file reads from content-only APIs, and runtime plus prepared embedded payloads using `resolve_embedded_trigger_payload` and `prepare_trigger_bundle`. The complete embedded fixture uses a trigger with `$extends: common-attributes@./shared.yaml` and a shared type containing at least one required property and one optional local override. Include a transitive bundle member and assert virtual reads versus empty disk dependencies.
 
-- [ ] Prove merged semantics
+- [x] Prove merged semantics
   - Add the unresolved guard from Rule 12 to shared lowering. Exercise public JSON Schema and `SimplifiedSchema` validation using a handwritten equivalent with equal property order. Assert strict errors, soft repairs/defaults, required keys and a resolved `SimplifiedSchema::property` lookup. Use a common `DefinitionTable` for the case with stored recursive definitions. Preserve public `Layer::select` eligibility from its authored table.
   - Cover spread first, middle and last, spreads-only objects, trailing comma, overwrite in both directions, and duplicate authored literals across a spread. Cover every YAML mapping position from the robustness matrix and prove placement independence.
   - Check pattern collisions using distinct authored spellings with the same emitted regex, including a collision induced by the literal exclusion wrapper, and assert both validators still apply for distinct overlapping patterns. Test catch-all replacement, literal precedence, pattern-only closure, and receiver `closed` and key-count rules. Verify copied target-level constraints and object markers are discarded while an ordinary use of the target retains them. Keep existing constraint-level `allOf` and nested `$ref` behavior.
@@ -125,12 +156,12 @@ Checkpoint: pass the `object_composition` cases and the existing named-type, rec
 
 ### Wave 1
 
-- [ ] Round-trip composition
+- [x] Round-trip composition
   - Own `schema/export.rs` and `simplified/serialize.rs`. Implement Rule 11. Emit pattern entries in the inline serializer for spread-containing inline shapes using the same key text as block export. Allow pattern keys in the export loss check for spread-containing inline shapes because their serializer writes them. Keep the loss check for `$constraints` on objects serialized inline and for pattern keys on other inline shapes. Route mapping unions through `write_atom` and keep scalar arms on the existing expression path. Refuse a layered export as specified in Rule 11, and preserve legacy output for non-composed shapes.
   - Add export tests in a separate `simplified-schema/lib/tests/l1/object_composition_export.rs`. Round-trip both operand forms, arrays and union arms, explicit `@this`, imported references with path punctuation, spread positions among literal and pattern entries, and repeats. Compare the prepared JSON Schema and verify stable insertion order. Have the coordinator register the test module in `main.rs` after the wave.
   - Test `Layer::select` validation of a composed named object and the derived-root export rule from Phase 1. Test that the original schema still exports and reparses with the spread in its authored named declaration.
 
-- [ ] Recognize operand cursors
+- [x] Recognize operand cursors
   - Own `simplified/cursor.rs` and its unit cases. Implement the tolerant operand role and state from Rule 13, with a public scalar-operand cursor entry point for DMLS's YAML `$extends` discovery. Keep one decoder and raw edit range authority for name, `@this`, and file-path states.
   - Test an empty and partial operand immediately after `...`, before and after `@`, inside quoted YAML and multiline scalars, in nested object arrays and union arms, and before a receiving postfix. Cover bare literal keys, a description containing an ellipsis, and document data as negative controls. The YAML sequence framing belongs to the DMLS task in Phase 4; this cursor takes the scalar or partial item located by that framing.
 
