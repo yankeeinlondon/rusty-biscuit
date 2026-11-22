@@ -1,7 +1,7 @@
 ---
 kind: feature
 created: 2026-11-22
-status: human-in-the-loop
+status: finalized-spec
 area: claudine
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -34,9 +34,7 @@ reviewed: true
 reviewed-by: codex/gpt-6.2-sol
 reviewed-on: "2026-11-22"
 review-iterations: 0
-needs-rulings: true
-required-rulings:
-    - Decide the severity of a miss in another installed Windows shell, and whether shell probes run startup profiles.
+needs-rulings: false
 ---
 
 # `claudine doctor`
@@ -236,29 +234,15 @@ not installed is skipped and not reported.
 - Keep three outcomes distinct in the report: the shell is absent, the
   probe failed (timeout, crash), or the lookup completed and found no
   executable.
-- Whether a probe runs the shell's startup profiles, and what severity a
-  miss in a shell other than the invoking one gets, are open (see below).
-
-## Open Questions
-
-### How should a miss in another installed Windows shell be reported?
-
-The author has decided that native Windows probes each installed shell.
-Two details remain:
-
-- **Severity.** A miss in the invoking process is an `error` on every OS.
-  A miss in another installed shell could also be an `error`, or a `warn`
-  so that a shell the user never opens cannot fail the run (or CI).
-- **Startup profiles.** Running a shell without its profile (`pwsh
-  -NoProfile`, `bash --norc --noprofile`) is fast and side-effect free, but
-  can miss `PATH` entries the user adds in a profile. Running with the
-  profile is closer to the user's session, but a profile can be slow,
-  prompt, or fail.
-
-**Recommendation.** `warn` for a miss in another shell, and probe without
-profiles, saying so in the finding ("a fresh PowerShell without your
-profile cannot find `claudine`"). The invoking process stays the source of
-the `error`.
+- Run each probe **without** the shell's startup files (`pwsh -NoProfile`,
+  `bash --norc --noprofile`), so a probe is fast, has no side effects, and
+  never runs the user's own profile code. Say so in the finding, for
+  example: "a fresh Git Bash without your startup files cannot find
+  `claudine`."
+- A miss in the invoking process is an `error` on every OS. A miss or a
+  failed probe in another installed shell is a `warn`: it is listed with
+  its remedy but cannot fail the run, so a shell the user never opens
+  cannot fail `doctor` or a CI step that runs it.
 
 ## Documentation to update
 
