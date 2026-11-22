@@ -30,6 +30,10 @@
 //! definition with two or more sites whose value is **structured** (an object
 //! or dictionary, a tuple, or a list or union of something structured) is
 //! selected for storage as a shared definition.
+//!
+//! A composed object contributes the edges of its winning members (see
+//! `composition`), each attributed to the declaration that wrote it. A
+//! composition target is not itself a node: only its members are read.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -166,6 +170,16 @@ impl ImportEngine<'_> {
         from: Option<usize>,
         graph: &mut Graph,
     ) {
+        // A composed object's edges are its winning members', each written
+        // in its declaring namespace and descending from this position. A
+        // signature is never expanded, so it is walked as written.
+        if shape.composition.is_some() && !position.in_function {
+            let assembled = self.walk_members(shape, namespace, path);
+            for member in assembled.literals.values().chain(assembled.patterns.iter().map(|(_, member)| member)) {
+                self.discover_def(&member.def, &member.namespace, &member.path, position, from, graph);
+            }
+            return;
+        }
         for (name, def) in &shape.properties {
             self.discover_def(def, namespace, &path.property(name.as_str()), position, from, graph);
         }
@@ -529,7 +543,7 @@ fn tarjan(successors: &[Vec<usize>]) -> Vec<Vec<usize>> {
 /// file's source map. Runs only on the error path; a reference in the inline
 /// `$schema` keeps `None` for the consumer that holds the document text to
 /// project, as for [`SchemaError::UnknownNamedType`].
-fn locate_reference_spans(cycles: &mut [Vec<CycleReference>]) {
+pub(super) fn locate_reference_spans(cycles: &mut [Vec<CycleReference>]) {
     let mut maps: HashMap<PathBuf, Option<crate::SchemaSourceMap>> = HashMap::new();
     for reference in cycles.iter_mut().flatten() {
         let SchemaSourceId::File(path) = &reference.site.source else {

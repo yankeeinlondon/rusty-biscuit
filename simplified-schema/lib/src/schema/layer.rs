@@ -108,6 +108,11 @@ pub(super) struct AuthoredSchema {
     pub(super) local_types: Option<SchemaShape>,
     pub(super) envelope: StandaloneSchemaEnvelope,
     pub(super) categories: Option<Vec<SchemaCategory>>,
+    /// The `local_types` entry this schema was selected from by
+    /// [`Layer::select`]. An object composed with `...` spreads has no
+    /// mapping form, so its export writes the root as `$extends` of this
+    /// name.
+    pub(super) selected: Option<String>,
 }
 
 /// The expanded declaration and the stored definitions its references
@@ -250,6 +255,7 @@ impl Layer {
             local_types: None,
             envelope: StandaloneSchemaEnvelope::Pure,
             categories: None,
+            selected: None,
         };
         // A root union's inline arms are parsed again when one arm is a
         // file reference; each projects through the same located value.
@@ -280,6 +286,7 @@ impl Layer {
                 local_types: document.local_types,
                 envelope: document.envelope,
                 categories: document.categories,
+                selected: None,
             };
             return resolve_authored(authored, Site::File, path, binding);
         }
@@ -578,8 +585,8 @@ impl AuthoredSchema {
 }
 
 /// The first reference `authored` makes to another file, as written: a
-/// whole-file reference, a root-union file arm, a `Name@file` import, or an
-/// `example(./file)`.
+/// whole-file reference, a root-union file arm, a `Name@file` import or
+/// composition operand, or an `example(./file)`.
 fn external_reference(authored: &AuthoredSchema) -> Option<String> {
     let root = match &authored.declaration {
         SchemaDeclaration::Reference(reference) => return Some(reference.file_reference().raw().to_string()),
@@ -597,6 +604,17 @@ fn external_reference(authored: &AuthoredSchema) -> Option<String> {
             }
         }
     }
+    // A composition operand that names another file reads it, whichever
+    // members later win, so its reference is found before assembly.
+    let external_operand = |shape: &SchemaShape| {
+        shape.composition.as_deref()?.operands().into_iter().find_map(|operand| {
+            let reference = operand.reference.as_deref().filter(|reference| reference.trim() != LOCAL_REFERENCE)?;
+            Some(format!("{}@{reference}", operand.name))
+        })
+    };
+    if let Some(operand) = shapes.iter().find_map(|shape| external_operand(shape)) {
+        return Some(operand);
+    }
     let mut found = None;
     for def in shapes
         .into_iter()
@@ -605,6 +623,11 @@ fn external_reference(authored: &AuthoredSchema) -> Option<String> {
         visit_def(def, &mut |atom| {
             if found.is_some() {
                 return;
+            }
+            if let TypeExpr::InlineObject(shape) = &atom.ty
+                && let Some(operand) = external_operand(shape)
+            {
+                found = Some(operand);
             }
             if let TypeExpr::Imported { name, reference } = &atom.ty
                 && reference != LOCAL_REFERENCE
@@ -684,11 +707,16 @@ impl Layer {
             _ => None,
         };
         let authored_shape = object(authored_def).ok_or_else(|| selection("not an object type"))?;
+        // A root used as the table may compose; its operands are not
+        // declarations, and a `types` table has no `$extends`.
+        let mut table = table.clone();
+        table.composition = None;
         let selected = AuthoredSchema {
             declaration: SchemaDeclaration::Schema(SchemaRoot::Single(authored_shape)),
-            local_types: Some(table.clone()),
+            local_types: Some(table),
             envelope: StandaloneSchemaEnvelope::Pure,
             categories: None,
+            selected: Some(name.to_string()),
         };
         let (mut root, mut definitions) = match expanded_def.and_then(object) {
             Some(shape) => (SchemaRoot::Single(shape), Arc::clone(&typed.definitions)),

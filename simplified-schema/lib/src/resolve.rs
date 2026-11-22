@@ -1132,6 +1132,9 @@ fn load_guarded_in_context(
         | SchemaError::NonDescendingCycle { .. }
         | SchemaError::ConstraintConflict { .. }
         | SchemaError::UnionReference { .. }
+        | SchemaError::InvalidCompositionTarget { .. }
+        | SchemaError::CompositionReference { .. }
+        | SchemaError::ComposedMember { .. }
         | SchemaError::Aggregate { .. } => SchemaError::ReferencedSchema {
             path: canonical.clone(),
             source: Box::new(source),
@@ -2262,6 +2265,14 @@ pub(crate) fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<Resolve
 // copies. Engine caches end with the expansion; each file's latest parsed
 // revision and the shipped tables can outlive it in the process memos below.
 
+/// The atoms of a definition: itself, or a union's arms.
+fn def_atoms(def: &PropertyDef) -> &[PropertyAtom] {
+    match def {
+        PropertyDef::Single(atom) => std::slice::from_ref(atom),
+        PropertyDef::Union(arms) => arms,
+    }
+}
+
 /// Hard cap on named-type import expansion depth. Mirrors the inline-object
 /// depth cap so import chains cannot bypass the recursion guard indefinitely.
 const MAX_IMPORT_DEPTH: usize = 32;
@@ -2360,6 +2371,13 @@ struct ImportEngine<'a> {
     /// the host's read hooks: every probe and read is admitted before it
     /// happens. `None` for every other expansion, which reads as it always has.
     template_gate: Option<crate::slots::reads::ReadGate>,
+    /// The composition and alias hops of the assembly running now, each
+    /// definition with the reference that reached it (see `composition`).
+    /// Empty whenever no assembly is running.
+    composition_stack: Vec<(DefKey, crate::errors::CycleReference)>,
+    /// Each composition target's assembled members, by definition and the
+    /// depth it was assembled at (a shallower assembly has more depth left).
+    assembled_cache: HashMap<(DefKey, usize), Arc<composition::Assembled>>,
 }
 
 /// Where an expansion reads the namespaces its imports name. This is all that
@@ -2406,6 +2424,8 @@ impl<'a> ImportEngine<'a> {
             arm_use: false,
             force_inline: false,
             template_gate: crate::slots::reads::current_gate(),
+            composition_stack: Vec::new(),
+            assembled_cache: HashMap::new(),
         }
     }
 }
@@ -2881,6 +2901,9 @@ impl ImportEngine<'_> {
         current: &Namespace,
         path: &SchemaSourcePath,
     ) -> Result<SchemaShape, SchemaError> {
+        if let Some(assembled) = self.assemble(&shape, current, path)? {
+            return self.expand_assembled(assembled, shape.constraints, current);
+        }
         let mut properties = IndexMap::with_capacity(shape.properties.len());
         for (name, def) in shape.properties {
             let property_path = path.property(name.as_str());
@@ -2899,8 +2922,43 @@ impl ImportEngine<'_> {
             properties,
             pattern_keys,
             constraints: shape.constraints,
-            composition: None,
+            ..SchemaShape::default()
         })
+    }
+
+    /// Expands a composed object's winning members, each in the namespace
+    /// and at the path that declared it, under the receiver's own object
+    /// constraints. A member copied from another namespace is rehomed there,
+    /// as an imported definition is: its slots evaluate, and its relative
+    /// examples resolve, in the file that wrote it.
+    fn expand_assembled(
+        &mut self,
+        assembled: composition::Assembled,
+        constraints: Vec<Constraint>,
+        current: &Namespace,
+    ) -> Result<SchemaShape, SchemaError> {
+        let composed_sites = assembled.sites();
+        let mut properties = IndexMap::with_capacity(assembled.literals.len());
+        for (name, member) in assembled.literals {
+            properties.insert(name, self.expand_member(member, current)?);
+        }
+        let mut pattern_keys = Vec::with_capacity(assembled.patterns.len());
+        for (key, member) in assembled.patterns {
+            pattern_keys.push(PatternKeyDef { key, def: self.expand_member(member, current)? });
+        }
+        Ok(SchemaShape { properties, pattern_keys, constraints, composition: None, composed_sites })
+    }
+
+    fn expand_member(&mut self, member: composition::Member, current: &Namespace) -> Result<PropertyDef, SchemaError> {
+        let def = self.expand_property_def(member.def, &member.namespace, &member.path)?;
+        if member.namespace.key == current.key {
+            return Ok(def);
+        }
+        let expanded = match def {
+            PropertyDef::Single(atom) => ExpandedDef::Single(Box::new(atom), AtomProvenance::default()),
+            PropertyDef::Union(arms) => ExpandedDef::Union(arms),
+        };
+        Ok(self.rehome_definition(expanded, &member.namespace.key)?.into_def())
     }
 
     fn expand_property_def(
@@ -3104,13 +3162,25 @@ impl ImportEngine<'_> {
         walk: &mut DefaultWalk,
         out: &mut Vec<(Vec<String>, PathBuf)>,
     ) {
+        if shape.composition.is_some() {
+            // The winners, each in the file that declared it, under the
+            // receiving names.
+            let assembled = self.walk_members(shape, current, &SchemaSourcePath::root());
+            for (name, member) in &assembled.literals {
+                let mut nested = Vec::new();
+                for atom in def_atoms(&member.def) {
+                    self.atom_default_files(atom, &member.namespace, walk, &mut nested);
+                }
+                out.extend(nested.into_iter().map(|(mut path, file)| {
+                    path.insert(0, name.clone());
+                    (path, file)
+                }));
+            }
+            return;
+        }
         for (name, def) in &shape.properties {
-            let atoms: &[PropertyAtom] = match def {
-                PropertyDef::Single(atom) => std::slice::from_ref(atom),
-                PropertyDef::Union(arms) => arms,
-            };
             let mut nested = Vec::new();
-            for atom in atoms {
+            for atom in def_atoms(def) {
                 self.atom_default_files(atom, current, walk, &mut nested);
             }
             out.extend(nested.into_iter().map(|(mut path, file)| {
@@ -4744,7 +4814,8 @@ fn schema_has_imports(schema: &SchemaRoot) -> bool {
 }
 
 fn shape_has_imports(shape: &SchemaShape) -> bool {
-    shape.properties.values().any(def_has_imports)
+    shape.composition.is_some()
+        || shape.properties.values().any(def_has_imports)
         || shape.pattern_keys.iter().any(|pk| def_has_imports(&pk.def))
 }
 
@@ -7568,6 +7639,7 @@ mod reserved_namespace {
 mod searched_tests;
 
 pub mod buffers;
+mod composition;
 mod graph;
 mod inspect;
 mod select;

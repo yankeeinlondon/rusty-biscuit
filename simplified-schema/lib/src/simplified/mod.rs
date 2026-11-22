@@ -34,7 +34,8 @@ pub use definitions::{
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, definition_pointer,
 };
 pub use cursor::{
-    SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_schema_declaration_cursor,
+    CompositionOperandPart, SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_composition_operand_cursor,
+    locate_composition_operand_cursor_in_scalar, locate_schema_declaration_cursor,
     locate_schema_declaration_cursor_in_scalar, locate_type_definition_cursor,
     locate_type_definition_cursor_in_scalar,
 };
@@ -468,6 +469,7 @@ fn parse_schema_shape(
         pattern_keys,
         constraints,
         composition,
+        ..Default::default()
     })
 }
 

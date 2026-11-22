@@ -71,6 +71,58 @@ pub struct SchemaShape {
     /// Boxed so an ordinary shape (and every atom holding one) stays small.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<Box<ObjectComposition>>,
+
+    /// Set only by resolution, on a shape it assembled from a composition:
+    /// where each member copied from another object was declared, so a
+    /// lowering failure inside one names its declaration. Never serialized,
+    /// and ignored by equality, so a composed object equals its handwritten
+    /// equivalent.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub composed_sites: ComposedSites,
+}
+
+/// The declarations of the members a resolved object copied through
+/// composition, by literal property name and by pattern-key position. See
+/// [`SchemaShape::composed_sites`].
+#[doc(hidden)]
+#[derive(Clone, Default)]
+pub struct ComposedSites(Option<std::sync::Arc<ComposedSiteTable>>);
+
+#[doc(hidden)]
+#[derive(Default)]
+pub struct ComposedSiteTable {
+    pub(crate) literals: IndexMap<String, super::SchemaReferenceSite>,
+    pub(crate) patterns: Vec<Option<super::SchemaReferenceSite>>,
+}
+
+impl ComposedSites {
+    pub(crate) fn new(table: ComposedSiteTable) -> Self {
+        Self((!table.literals.is_empty() || table.patterns.iter().any(Option::is_some)).then(|| std::sync::Arc::new(table)))
+    }
+
+    /// The declaration of the copied literal member `name`.
+    pub(crate) fn literal(&self, name: &str) -> Option<&super::SchemaReferenceSite> {
+        self.0.as_ref()?.literals.get(name)
+    }
+
+    /// The declaration of the copied pattern member at `index`.
+    pub(crate) fn pattern(&self, index: usize) -> Option<&super::SchemaReferenceSite> {
+        self.0.as_ref()?.patterns.get(index)?.as_ref()
+    }
+}
+
+// Transient lowering context, never part of what a shape means.
+impl PartialEq for ComposedSites {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for ComposedSites {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ComposedSites")
+    }
 }
 
 impl SchemaShape {

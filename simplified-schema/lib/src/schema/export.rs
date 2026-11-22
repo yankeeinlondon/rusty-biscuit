@@ -8,6 +8,10 @@
 //! forms that keep every pattern key, `$constraints` entry, and per-arm
 //! description. Anything the serializer would have to drop is refused with
 //! [`SimplifiedSchemaError::ExportUnsupported`] instead.
+//!
+//! Composition is written as authored, never as its merged members: a
+//! mapping's `$extends` keeps its scalar or sequence form, and an inline
+//! object with `...Name` spreads stays one type-expression string.
 
 use std::sync::Arc;
 
@@ -16,11 +20,11 @@ use serde_yaml_ng::{Mapping, Value as YamlValue};
 
 use super::layer::{Authored, AuthoredSchema};
 use super::{SimplifiedSchema, SimplifiedSchemaError};
-use crate::simplified::serialize::serialize_property_atom;
+use crate::simplified::serialize::{composition_operand_text, pattern_key_text, serialize_property_atom};
 use crate::simplified::standalone::{visit_atom, visit_def};
 use crate::simplified::{
-    Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaDeclaration, SchemaRoot,
-    SchemaShape, StandaloneSchemaEnvelope, TypeExpr,
+    Constraint, Extends, ObjectComposition, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaDeclaration,
+    SchemaRoot, SchemaShape, StandaloneSchemaEnvelope, TypeExpr,
 };
 
 impl SimplifiedSchema {
@@ -76,7 +80,10 @@ fn unsupported(reason: &str) -> SimplifiedSchemaError {
 /// The layers merged with whole-property replacement, highest first: the top
 /// layer's document, plus each lower layer's properties no higher layer
 /// declares. A copied property may not refer to named types, which resolve
-/// in the layer that declared them.
+/// in the layer that declared them, nor compose an object.
+///
+/// No layer's root may compose: one flattened root cannot say which members
+/// each layer's operands contributed, or in which scope they resolve.
 fn write_layered(layers: &[Arc<super::layer::Layer>]) -> Result<Mapping, SimplifiedSchemaError> {
     let mut shapes = Vec::with_capacity(layers.len());
     for layer in layers {
@@ -86,6 +93,11 @@ fn write_layered(layers: &[Arc<super::layer::Layer>]) -> Result<Mapping, Simplif
         let Some(SchemaRoot::Single(shape)) = authored.schema() else {
             return Err(unsupported("only object-schema layers combine into one document"));
         };
+        if shape.composition.is_some() {
+            return Err(unsupported(
+                "a layer's root composes another object, which a single merged document cannot express",
+            ));
+        }
         shapes.push((authored, shape));
     }
     let (top, top_shape) = shapes[0];
@@ -100,6 +112,11 @@ fn write_layered(layers: &[Arc<super::layer::Layer>]) -> Result<Mapping, Simplif
                     "`{name}` comes from a lower layer and refers to that layer's named types"
                 )));
             }
+            if composes(def) {
+                return Err(unsupported(&format!(
+                    "`{name}` comes from a lower layer and composes an object from that layer's named types"
+                )));
+            }
             merged.properties.insert(name.clone(), def.clone());
         }
     }
@@ -108,8 +125,17 @@ fn write_layered(layers: &[Arc<super::layer::Layer>]) -> Result<Mapping, Simplif
         local_types: top.local_types.clone(),
         envelope: top.envelope,
         categories: top.categories.clone(),
+        selected: top.selected.clone(),
     };
     write_document(&combined)
+}
+
+fn composes(def: &PropertyDef) -> bool {
+    let mut found = false;
+    visit_def(def, &mut |atom| {
+        found |= matches!(&atom.ty, TypeExpr::InlineObject(shape) if shape.composition.is_some());
+    });
+    found
 }
 
 fn refers_to_named_type(def: &PropertyDef) -> bool {
@@ -126,7 +152,7 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
             if let Some(categories) = &authored.categories {
                 document.insert("categories".into(), write_categories(categories));
             }
-            document.insert("$schema".into(), write_declaration(&authored.declaration)?);
+            document.insert("$schema".into(), write_declaration(authored)?);
             if let Some(types) = &authored.local_types {
                 document.insert("types".into(), YamlValue::Mapping(write_shape(types)?));
             }
@@ -140,7 +166,7 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
             if let Some(types) = &authored.local_types {
                 document.insert("types".into(), YamlValue::Mapping(write_shape(types)?));
             }
-            document.insert("$schema".into(), write_declaration(&authored.declaration)?);
+            document.insert("$schema".into(), write_declaration(authored)?);
         }
         StandaloneSchemaEnvelope::Tagged => {
             document.insert("kind".into(), "schema".into());
@@ -151,11 +177,11 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
                 // An exported `$schema` beside its `types` table.
                 Some(types) => {
                     document.insert("types".into(), YamlValue::Mapping(write_shape(types)?));
-                    document.insert("$schema".into(), write_declaration(&authored.declaration)?);
+                    document.insert("$schema".into(), write_declaration(authored)?);
                 }
                 // The `types` table is the payload.
                 None => {
-                    document.insert("types".into(), write_declaration(&authored.declaration)?);
+                    document.insert("types".into(), write_declaration(authored)?);
                 }
             }
         }
@@ -175,9 +201,17 @@ fn write_categories(categories: &[SchemaCategory]) -> YamlValue {
     )
 }
 
-fn write_declaration(declaration: &SchemaDeclaration) -> Result<YamlValue, SimplifiedSchemaError> {
-    match declaration {
+fn write_declaration(authored: &AuthoredSchema) -> Result<YamlValue, SimplifiedSchemaError> {
+    match &authored.declaration {
         SchemaDeclaration::Reference(reference) => Ok(reference.file_reference().raw().into()),
+        // A selected named object composed with `...` spreads has no mapping
+        // form; the root extends the selection, whose inline expression is
+        // in the `types` table written beside it.
+        SchemaDeclaration::Schema(SchemaRoot::Single(shape))
+            if matches!(shape.composition.as_deref(), Some(ObjectComposition::Inline(_))) =>
+        {
+            Ok(YamlValue::Mapping(write_selected_root(authored.selected.as_deref())?))
+        }
         SchemaDeclaration::Schema(SchemaRoot::Single(shape)) => Ok(YamlValue::Mapping(write_shape(shape)?)),
         SchemaDeclaration::Schema(SchemaRoot::Union(arms)) => arms
             .iter()
@@ -190,10 +224,45 @@ fn write_declaration(declaration: &SchemaDeclaration) -> Result<YamlValue, Simpl
     }
 }
 
-/// A block-form object: literal properties, pattern keys, then
+/// `{ $extends: "Name@this" }` for the selected type `Name`, refused when
+/// `Name` cannot be written as a composition operand.
+fn write_selected_root(selected: Option<&str>) -> Result<Mapping, SimplifiedSchemaError> {
+    let Some(name) = selected else {
+        return Err(unsupported("an inline object with `...` spreads has no mapping form for a schema root"));
+    };
+    let operand = format!("{name}@this");
+    let parsed = crate::simplified::grammar::parse_extends_operand("$extends", &operand);
+    if !parsed.is_ok_and(|parsed| parsed.name == name) {
+        return Err(unsupported(&format!(
+            "the selected type `{name}` composes with `...` spreads, and its name cannot be written as the \
+             `$extends` operand of an exported root"
+        )));
+    }
+    let mut mapping = Mapping::new();
+    mapping.insert("$extends".into(), operand.into());
+    Ok(mapping)
+}
+
+/// A block-form object: `$extends`, literal properties, pattern keys, then
 /// `$constraints`.
+///
+/// An inline object with `...` spreads never reaches here (see
+/// [`write_atom`]); its spread positions have no mapping form.
 fn write_shape(shape: &SchemaShape) -> Result<Mapping, SimplifiedSchemaError> {
     let mut mapping = Mapping::new();
+    match shape.composition.as_deref() {
+        Some(ObjectComposition::Extends(Extends::Scalar(operand))) => {
+            mapping.insert("$extends".into(), composition_operand_text(operand).into());
+        }
+        Some(ObjectComposition::Extends(Extends::Sequence(operands))) => {
+            let operands = operands.iter().map(|operand| composition_operand_text(operand).into()).collect();
+            mapping.insert("$extends".into(), YamlValue::Sequence(operands));
+        }
+        Some(ObjectComposition::Inline(_)) => {
+            return Err(unsupported("an inline object with `...` spreads has no block mapping form"));
+        }
+        None => {}
+    }
     for (name, def) in &shape.properties {
         mapping.insert(name.as_str().into(), write_def(def)?);
     }
@@ -204,15 +273,6 @@ fn write_shape(shape: &SchemaShape) -> Result<Mapping, SimplifiedSchemaError> {
         mapping.insert("$constraints".into(), YamlValue::Mapping(write_object_constraints(&shape.constraints)?));
     }
     Ok(mapping)
-}
-
-fn pattern_key_text(key: &PatternKey) -> String {
-    match key {
-        PatternKey::CatchAll => "<string>".into(),
-        PatternKey::Starting(prefix) => format!("<starting::{prefix}>"),
-        PatternKey::Ending(suffix) => format!("<ending::{suffix}>"),
-        PatternKey::Pattern(pattern) => format!("<pattern::{pattern}>"),
-    }
 }
 
 /// A block object's `$constraints` mapping; the inverse of the parser's.
@@ -247,13 +307,21 @@ fn write_object_constraints(constraints: &[Constraint]) -> Result<Mapping, Simpl
 }
 
 /// One property: a nested block object, a sequence of union arms, or a type
-/// expression string.
+/// expression string. A union arm is a string unless its object composes
+/// with `$extends`, which only a mapping arm can write.
 fn write_def(def: &PropertyDef) -> Result<YamlValue, SimplifiedSchemaError> {
     match def {
         PropertyDef::Single(atom) => write_atom(atom),
         PropertyDef::Union(atoms) => atoms
             .iter()
-            .map(|atom| expression(atom).map(YamlValue::String))
+            .map(|atom| match &atom.ty {
+                TypeExpr::InlineObject(shape)
+                    if matches!(shape.composition.as_deref(), Some(ObjectComposition::Extends(_))) =>
+                {
+                    write_atom(atom)
+                }
+                _ => expression(atom).map(YamlValue::String),
+            })
             .collect::<Result<Vec<_>, _>>()
             .map(YamlValue::Sequence),
     }
@@ -263,8 +331,11 @@ fn write_atom(atom: &PropertyAtom) -> Result<YamlValue, SimplifiedSchemaError> {
     match &atom.ty {
         // The parser moves a block object's presence flags onto its atom, so
         // they return to the block's `$constraints`.
+        // An object with `...` spreads is written inline, where each spread
+        // keeps its position among the members.
         TypeExpr::InlineObject(shape)
             if !atom.is_array
+                && !matches!(shape.composition.as_deref(), Some(ObjectComposition::Inline(_)))
                 && atom.description.is_none()
                 && atom
                     .constraints
@@ -283,20 +354,26 @@ fn write_atom(atom: &PropertyAtom) -> Result<YamlValue, SimplifiedSchemaError> {
 }
 
 /// `atom` as one type-expression string, refused when an inline object
-/// inside it carries pattern keys or `$constraints`, which the inline form
-/// does not write.
+/// inside it carries what the inline form does not write: `$constraints`,
+/// a `$extends` directive, or pattern keys in an object without `...`
+/// spreads (an object with spreads writes its pattern keys inline).
 fn expression(atom: &PropertyAtom) -> Result<String, SimplifiedSchemaError> {
-    let mut lossy = false;
+    let mut lossy = None;
     visit_atom(atom, &mut |inner| {
-        if let TypeExpr::InlineObject(shape) = &inner.ty {
-            lossy |= !shape.pattern_keys.is_empty() || !shape.constraints.is_empty();
+        let TypeExpr::InlineObject(shape) = &inner.ty else { return };
+        let spreads = matches!(shape.composition.as_deref(), Some(ObjectComposition::Inline(_)));
+        if !shape.constraints.is_empty() || (!spreads && !shape.pattern_keys.is_empty()) {
+            lossy.get_or_insert(
+                "an inline object inside a type expression has pattern keys or `$constraints`, which only the \
+                 block form writes",
+            );
+        }
+        if matches!(shape.composition.as_deref(), Some(ObjectComposition::Extends(_))) {
+            lossy.get_or_insert("an object that composes with `$extends` inside a type expression has no inline form");
         }
     });
-    if lossy {
-        return Err(unsupported(
-            "an inline object inside a type expression has pattern keys or `$constraints`, which only the \
-             block form writes",
-        ));
+    match lossy {
+        Some(reason) => Err(unsupported(reason)),
+        None => Ok(serialize_property_atom(atom)),
     }
-    Ok(serialize_property_atom(atom))
 }

@@ -241,6 +241,17 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
             let first = cycles.first()?.first()?;
             return host_file(&first.site.source, trigger);
         }
+        // An operand written in the trigger names the file whose target
+        // failed: the declaration it reached, or the cause's own file.
+        SchemaError::InvalidCompositionTarget { site, definition, .. } => {
+            return host_file(&site.source, trigger).or_else(|| host_file(&definition.source, trigger));
+        }
+        SchemaError::CompositionReference { site, source, .. } => {
+            return host_file(&site.source, trigger).or_else(|| related_path(source, trigger));
+        }
+        SchemaError::ComposedMember { site, source } => {
+            return host_file(&site.source, trigger).or_else(|| related_path(source, trigger));
+        }
         SchemaError::TriggerLoad { source, .. } => return related_path(source, trigger),
         SchemaError::Aggregate { .. }
         | SchemaError::Grammar { .. }

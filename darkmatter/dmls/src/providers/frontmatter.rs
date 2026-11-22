@@ -501,6 +501,8 @@ pub(crate) fn type_definition_completions(
         // The file half of `Name@reference` names a schema file, not a type
         // keyword — the catalog must not leak into it.
         SchemaCursorRole::ImportReference { .. } => return Vec::new(),
+        // A composition operand names an object type, never a keyword.
+        SchemaCursorRole::CompositionOperand { .. } => return Vec::new(),
         SchemaCursorRole::Type => {}
     }
 

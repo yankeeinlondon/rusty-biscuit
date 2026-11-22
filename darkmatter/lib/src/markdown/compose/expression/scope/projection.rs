@@ -201,6 +201,9 @@ pub(crate) enum VariableClass<'p> {
 }
 
 /// A top-level declaration lookup.
+// A short-lived lookup result, matched at once; boxing `Found` would add an
+// allocation per lookup to save stack space no caller keeps.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Declaration<'s> {
     /// The projected definition; owned when root-union arms or layers were
     /// folded into it.

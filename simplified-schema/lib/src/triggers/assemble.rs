@@ -1434,4 +1434,30 @@ mod tests {
             "x.yml"
         );
     }
+
+    /// A composed embedded payload reads the trigger, its operand, and the
+    /// operand's own operand as virtual bundle paths, and names no file.
+    #[test]
+    fn composition_in_an_embedded_payload_reads_bundle_documents_only() {
+        const FILES: &[(&str, &str)] = &[
+            ("base.yaml", "kind: schema\ntypes:\n  base: \"{ origin: string }\"\n"),
+            ("shared.yaml", "kind: schema\ntypes:\n  common: \"{ ...base@./base.yaml, id: string(required) }\"\n"),
+            ("trigger.yaml", "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  $extends: common@./shared.yaml\n"),
+        ];
+        let bundle = crate::embedded::EmbeddedSchemaBundle::new("composed", FILES);
+        let envelope = parse_trigger_envelope_from_str(FILES[2].1).unwrap().expect("a trigger");
+        let trigger = LoadedTrigger {
+            source: TriggerSource::Embedded { bundle: "composed".into(), name: "trigger.yaml".into() },
+            envelope,
+            pattern_cwd: PathBuf::new(),
+            bundle: Some(bundle),
+            text: None,
+        };
+        let (payload, reads) = resolve_embedded_trigger_payload(&trigger, ShippedSources::NONE).expect("resolves");
+        assert!(payload.dependencies.is_empty(), "{:?}", payload.dependencies);
+        let mut reads: Vec<String> = reads.iter().map(|path| path.display().to_string()).collect();
+        reads.sort();
+        assert_eq!(reads, ["composed/base.yaml", "composed/shared.yaml", "composed/trigger.yaml"]);
+        assert_eq!(payload.json_schema["required"], serde_json::json!(["id"]));
+    }
 }

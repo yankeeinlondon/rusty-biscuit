@@ -26,6 +26,7 @@ mod located_failures;
 mod located_schema_errors;
 mod not_empty_values;
 mod object_composition;
+mod object_composition_export;
 mod path_lookup_guard;
 mod property_paths;
 mod quote_the_slot;
