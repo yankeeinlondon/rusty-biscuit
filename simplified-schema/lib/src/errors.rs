@@ -21,6 +21,7 @@
 //!   fails the dialect's meta-schema.
 //! - [`SchemaError::RemoteUnsupported`] — a `$schema` value is an `http(s)://`
 //!   URL; remote schemas are not supported in v1.
+//! - [`SchemaError::BundleBoundary`] — a bundle scope refused a reference.
 //! - [`SchemaError::Baseline`] — the baseline schema could not be loaded or
 //!   violates the "simple object schema" restriction.
 //! - [`SchemaError::BuildValidator`] — `jsonschema` rejected the lowered JSON
@@ -183,6 +184,10 @@ pub enum NotSchemaReason {
     /// applied to documents by their `kind`, so it is neither a `$schema`
     /// target nor a `Name@file` import source.
     SelectedByKind,
+    /// A `kind: namespace-schema` document: it declares a host namespace
+    /// for a host's global catalog, so it is neither a `$schema` target nor
+    /// a `Name@file` import source, and its `types` are private to it.
+    NamespaceCatalog,
 }
 
 impl NotSchemaReason {
@@ -194,7 +199,7 @@ impl NotSchemaReason {
             NotSchemaReason::TypesOnly => Some("use a named-type import (`Name@file.yaml`) to reuse its types"),
             NotSchemaReason::JsonMissingDialect => Some(DECLARE_DIALECT_HINT),
             NotSchemaReason::NotAMapping if is_json_path(path) => Some(DECLARE_DIALECT_HINT),
-            NotSchemaReason::SelectedByKind => {
+            NotSchemaReason::SelectedByKind | NotSchemaReason::NamespaceCatalog => {
                 Some("move shared types into a `kind: schema` file and import them from there")
             }
             NotSchemaReason::NotAMapping | NotSchemaReason::NoSchemaProperty => None,
@@ -219,6 +224,9 @@ impl fmt::Display for NotSchemaReason {
             NotSchemaReason::JsonMissingDialect => "it does not declare its JSON Schema dialect in `$schema`",
             NotSchemaReason::SelectedByKind => {
                 "it is a `yaml-schema`; it is selected by `kind`, not referenced"
+            }
+            NotSchemaReason::NamespaceCatalog => {
+                "it is a `namespace-schema`; it declares a host namespace and is read only by a host's catalog"
             }
         })
     }
@@ -590,6 +598,11 @@ pub enum SchemaError {
     /// A `$schema` value is a remote URL; v1 only supports local references.
     #[error("remote $schema references are not supported in this version: `{reference}`")]
     RemoteUnsupported { reference: String },
+
+    /// A [`bundle`](crate::resolve::bundle) scope in force refused a schema
+    /// reference before anything was probed or read.
+    #[error("schema reference `{reference}` is refused: {boundary}")]
+    BundleBoundary { reference: String, boundary: crate::resolve::bundle::BundleBoundary },
 
     /// The baseline schema could not be loaded, parsed, or violates the
     /// "simple object schema" restriction documented in the spec.
@@ -1357,6 +1370,15 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     Prose::escape_text(reference)
                 )))
                 .hint("Download the schema locally and reference it with a relative or absolute path."),
+
+            SchemaError::BundleBoundary { reference, boundary } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema reference outside the bundle"))
+                .body(Prose::new(format!(
+                    "<cyan>{}</cyan> is refused: {}",
+                    Prose::escape_text(reference),
+                    Prose::escape_text(&boundary.to_string())
+                )))
+                .hint("Name a listed member of the bundle with a `./` or `../` reference from the file that uses it."),
 
             SchemaError::Baseline { message, source } => {
                 let mut body = vec![Prose::new(format!(

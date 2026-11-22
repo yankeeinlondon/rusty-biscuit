@@ -66,10 +66,11 @@ use crate::coercion::{ContentFormat, content_error};
 use crate::file_context::resolve_document_file_ref;
 use crate::simplified::{
     Constraint, DynamicElement, DynamicKind, DynamicList, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaRoot, SchemaShape, SimplifiedType,
-    TypeExpr, declaration_options_payload, parse_schema_declaration, parse_type_definition_value,
-    serialize_property_atom, serialize_property_def,
+    TypeExpr, declaration_options_payload, parse_type_definition_value, serialize_property_atom,
+    serialize_property_def,
 };
 use crate::simplified::narrowing::{ContainerAdmission, container_admission};
+use crate::simplified::{MappingMode, parse_schema_declaration_located_as};
 
 /// Format name registered for eager `file(eager)` SimplifiedSchema atoms and
 /// for raw JSON Schema authors who want existence-checking.
@@ -815,6 +816,11 @@ impl SchemaOptions {
     /// Judges a declaration carrier. Parse-only: a reference carrier, or a
     /// reference arm of a root union, is never followed, so `property(...)`
     /// skips it (`crate::claims` checks the resolved declaration).
+    ///
+    /// A `mapping` carrier is read as a table of named declarations, the way
+    /// the standalone parser reads a `types` table: its own `$extends` key
+    /// names a declaration rather than composing, while every entry's value
+    /// is still a schema object.
     fn judge(&self, instance: &Value) -> Result<(), String> {
         if self.mapping && !instance.is_object() {
             let carrier = match instance {
@@ -827,7 +833,8 @@ impl SchemaOptions {
             };
             return Err(format!("the declaration must be a mapping, not {carrier}"));
         }
-        let declaration = parse_schema_instance(instance)?;
+        let mode = if self.mapping { MappingMode::Table } else { MappingMode::Object };
+        let declaration = parse_schema_instance(instance, mode)?;
         if self.properties.is_empty() {
             return Ok(());
         }
@@ -859,9 +866,9 @@ fn parse_type_definition_instance(instance: &Value) -> Result<PropertyDef, Strin
     parse_type_definition_value("<instance>", &yaml).map_err(|error| error.to_string())
 }
 
-fn parse_schema_instance(instance: &Value) -> Result<SchemaDeclaration, String> {
+fn parse_schema_instance(instance: &Value, mode: MappingMode) -> Result<SchemaDeclaration, String> {
     let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
-    parse_schema_declaration(&yaml).map_err(|error| error.to_string())
+    parse_schema_declaration_located_as(&yaml, mode).map_err(|failure| crate::errors::SchemaError::from(failure).to_string())
 }
 
 struct DarkmatterTypeDefinitionKeyword {

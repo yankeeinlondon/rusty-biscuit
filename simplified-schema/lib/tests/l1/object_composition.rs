@@ -288,8 +288,6 @@ fn nested_shape(definition: &PropertyDef) -> &SchemaShape {
 
 #[test]
 fn composition_extends_in_a_types_table_is_an_ordinary_type_name() {
-    // Envelope admission still checks the table with the schema-object
-    // grammar, so the entry's definition is one an operand could also be.
     for source in [
         "kind: schema\ntypes:\n  $extends: other\n  other: number\n",
         "kind: schema\n$schema:\n  a: string\ntypes:\n  $extends: other\n  other: number\n",
@@ -300,6 +298,116 @@ fn composition_extends_in_a_types_table_is_an_ordinary_type_name() {
         let PropertyDef::Single(atom) = &types.properties["$extends"] else { panic!("{source}: one atom") };
         assert_eq!(atom.ty, TypeExpr::local("other"), "{source}");
     }
+}
+
+/// The `$extends` declaration of a schema built through the public factory,
+/// after checking it lowers.
+#[track_caller]
+fn extends_declaration(source: &str) -> PropertyDef {
+    let schema = SimplifiedSchema::try_from(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    schema.to_json_schema().unwrap_or_else(|error| panic!("{source} lowers: {error}"));
+    schema.named_type("$extends").unwrap_or_else(|| panic!("{source}: no `$extends` type")).def().clone()
+}
+
+/// Envelope admission judges a `types` table as the table parser reads it,
+/// so a type named `$extends` loads whatever its definition is, in every
+/// envelope that carries a table.
+#[test]
+fn composition_extends_in_a_types_table_loads_through_every_envelope() {
+    let string = parse_type_definition("$extends", "string").unwrap();
+    for source in [
+        "kind: schema\ntypes:\n  $extends: string\n",
+        "kind: schema\n$schema:\n  a: string\ntypes:\n  $extends: string\n",
+        "$schema:\n  a: string\ntypes:\n  $extends: string\n",
+        "kind: yaml-schema\n$schema:\n  kind: literal(roster; required)\ntypes:\n  $extends: string\n",
+    ] {
+        assert_eq!(extends_declaration(source), string, "{source}");
+    }
+
+    let object = extends_declaration("kind: schema\ntypes:\n  $extends:\n    a: string\n");
+    let shape = nested_shape(&object);
+    assert_eq!(shape.composition, None);
+    assert_eq!(shape.properties.keys().collect::<Vec<_>>(), ["a"]);
+
+    let union = extends_declaration("kind: schema\ntypes:\n  $extends: [string, number]\n");
+    assert_eq!(union, parse_type_definition("$extends", "string | number").unwrap());
+
+    let alias = extends_declaration("kind: schema\ntypes:\n  $extends: other\n  other: string\n");
+    assert_eq!(alias, parse_type_definition("$extends", "other").unwrap(), "control: an alias of `other`");
+}
+
+/// Only the table itself is read as a table: `$extends` stays a directive in
+/// the exported root, a nested object, a mapping union arm, and a mapping
+/// entry of the table.
+#[test]
+fn composition_extends_stays_a_directive_beside_a_types_table() {
+    for source in [
+        "kind: schema\n$schema:\n  $extends: string\ntypes:\n  a: string\n",
+        "kind: schema\n$schema:\n  nested:\n    $extends: string\ntypes:\n  a: string\n",
+        "kind: schema\n$schema:\n  choice:\n    - number\n    - $extends: string\ntypes:\n  a: string\n",
+        "kind: schema\ntypes:\n  order:\n    $extends: string\n",
+    ] {
+        let error = SimplifiedSchema::try_from(source).err().unwrap_or_else(|| panic!("{source} must be refused"));
+        assert!(error.to_string().contains("`$extends` is reserved for object composition"), "{source}: {error}");
+    }
+}
+
+/// The envelopes that carry a `types` table, with `ENTRY` standing for the
+/// table's first entry.
+const TABLE_ENVELOPES: [&str; 4] = [
+    "kind: schema\ntypes:\n  ENTRY\n  b: string\n",
+    "kind: schema\n$schema:\n  a: string\ntypes:\n  ENTRY\n  b: string\n",
+    "$schema:\n  a: string\ntypes:\n  ENTRY\n  b: string\n",
+    "kind: yaml-schema\n$schema:\n  kind: literal(roster; required)\ntypes:\n  ENTRY\n  b: string\n",
+];
+
+/// A `types` table holds named declarations only: object metadata and
+/// pattern keys written directly in it are refused with a located error in
+/// every envelope, never applied to a root or silently dropped.
+#[test]
+fn composition_types_table_refuses_object_only_keys_in_every_envelope() {
+    for (entry, key, value, message) in [
+        ("$constraints:\n    min-keys: 5", "$constraints", "min-keys: 5", "`$constraints` belongs inside a declaration's object"),
+        ("'<string>': number", "<string>", "number", "pattern key `<string>` belongs inside a declaration's object"),
+    ] {
+        for envelope in TABLE_ENVELOPES {
+            let source = envelope.replace("ENTRY", entry);
+            let error = SimplifiedSchema::try_from(source.as_str())
+                .err()
+                .unwrap_or_else(|| panic!("{source} must be refused"));
+            assert!(error.to_string().contains(message), "{source}: {error}");
+            if source.starts_with("kind:") {
+                let (located, path, text) = located(&source);
+                assert!(located.contains("a `types` table holds named declarations"), "{source}: {located}");
+                assert_eq!(path, SchemaSourcePath::root().property("types").property(key), "{source}");
+                assert_eq!(text, value, "{source}");
+            }
+        }
+    }
+}
+
+/// Inside a declaration's object the same keys keep their object meaning.
+#[test]
+fn composition_types_table_entries_keep_object_only_keys() {
+    let source = "kind: schema\n$schema:\n  m: map\ntypes:\n  map:\n    '<string>': number\n    $constraints:\n      max-keys: 1\n";
+    let schema = SimplifiedSchema::try_from(source).unwrap_or_else(|error| panic!("{error}"));
+    assert!(schema.validate_strict(&json!({ "m": { "x": 1 } })).is_ok());
+    assert!(schema.validate_strict(&json!({ "m": { "x": 1, "y": 2 } })).is_err(), "max-keys applies");
+    assert!(schema.validate_strict(&json!({ "m": { "x": "a" } })).is_err(), "the pattern applies");
+}
+
+/// A `schema(mapping)` value is judged as a `types` table is.
+#[test]
+fn composition_schema_mapping_value_refuses_object_only_keys() {
+    let schema = SimplifiedSchema::try_from("$schema:\n  x: schema(mapping)\n").unwrap();
+    for table in [json!({ "$constraints": { "min-keys": 1 }, "b": "string" }), json!({ "<string>": "number" })] {
+        let refused = schema.validate_strict(&json!({ "x": table })).expect_err("refused");
+        assert!(format!("{refused:?}").contains("a `types` table holds named declarations"), "{refused:?}");
+    }
+    let entry = json!({ "x": { "map": { "<string>": "number", "$constraints": { "max-keys": 1 } } } });
+    assert!(schema.validate_strict(&entry).is_ok(), "an entry's object keeps them");
+    let object = SimplifiedSchema::try_from("$schema:\n  x: schema\n").unwrap();
+    assert!(object.validate_strict(&json!({ "x": { "<string>": "number" } })).is_ok(), "control: a schema object");
 }
 
 /// A valid standalone schema: one edit per robustness cell replaces the
@@ -1465,4 +1573,46 @@ mod embedded {
             .expect_err("an invalid directive fails preparation");
         assert!(error.to_string().contains("$extends"), "{error}");
     }
+}
+
+// ── Presentations that cross line breaks ─────────────────────────────────
+
+/// Every YAML presentation of one object definition loads through the public
+/// factory and lowers exactly as the one-line, single-quoted spelling does:
+/// quoting styles fold their line breaks before the grammar reads the text,
+/// so wrapping a value never changes or rejects it.
+#[test]
+fn composition_objects_wrapped_across_lines_load_and_lower_like_one_line() {
+    let schema = |payload: &str| format!("kind: schema\n$schema:\n{payload}types:\n  base: '{{ id: string }}'\n");
+    for (one_line, wrapped) in [
+        ("  p: '{ a: string, n: number }'\n", [
+            "  p: '{ a: string,\n    n: number }'\n",
+            "  p: \"{ a: string,\n    n: number }\"\n",
+            "  p: >-\n    { a: string,\n      n: number }\n",
+        ]),
+        ("  p: '{ ...base, n: number }'\n", [
+            "  p: '{ ...base,\n    n: number }'\n",
+            "  p: \"{ ...base,\n    n: number }\"\n",
+            "  p: >-\n    { ...base,\n      n: number }\n",
+        ]),
+    ] {
+        for wrapped in wrapped {
+            assert_same_lowering(&schema(wrapped), &schema(one_line));
+        }
+    }
+}
+
+/// A quoted `$extends` operand wrapped after `@` folds to `base@ this`, which
+/// the operand grammar reads as the local reference `base@this`.
+#[test]
+fn composition_extends_operand_wrapped_inside_its_reference_loads() {
+    let wrapped = "kind: schema\n$schema:\n  $extends: 'base@\n    this'\n  n: number\ntypes:\n  base: '{ id: string }'\n";
+    assert_eq!(yaml(wrapped)["$schema"]["$extends"], YamlValue::String("base@ this".into()));
+    let one_line = "kind: schema\n$schema:\n  $extends: base@this\n  n: number\ntypes:\n  base: '{ id: string }'\n";
+    assert_same_lowering(wrapped, one_line);
+    let map = source_map("$extends: 'base@\n    this'\nn: number\n");
+    let operand = SchemaSourcePath::root().property("$extends");
+    let source = "$extends: 'base@\n    this'\nn: number\n";
+    assert_eq!(texts(source, &map, &operand, SchemaSpanKind::ImportName), ["base"]);
+    assert_eq!(texts(source, &map, &operand, SchemaSpanKind::ImportReference), ["this"]);
 }

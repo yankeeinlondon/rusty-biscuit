@@ -54,6 +54,13 @@ pub struct TriggerDocumentRecord {
     /// The document's file name inside the bundle.
     pub name: String,
     pub outcome: TriggerOutcomeRecord,
+    /// A trigger's `name` label; absent from the record when it has none,
+    /// as in records written before labels existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// A trigger's `description`; absent from the record when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// How discovery classifies a bundle document.
@@ -149,13 +156,23 @@ pub fn prepare_trigger_bundle(
         message: format!("document `{name}` does not prepare: {error}"),
     };
     let mut documents = Vec::with_capacity(bundle.files().len());
+    if let Some((label, documents)) = super::discovery::duplicate_bundle_names(&bundle).into_iter().next() {
+        return Err(SchemaError::EmbeddedBundle {
+            bundle: bundle.name().to_string(),
+            message: format!("documents {} share the name `{label}`", documents.join(", ")),
+        });
+    }
     for (name, text) in bundle.sorted_files() {
-        let outcome = match parse_trigger_envelope_from_str(text).map_err(|error| failed(name, error))? {
+        let envelope = parse_trigger_envelope_from_str(text).map_err(|error| failed(name, error))?;
+        let label = envelope.as_ref().and_then(|envelope| envelope.name.clone());
+        let description = envelope.as_ref().and_then(|envelope| envelope.description.clone());
+        let outcome = match envelope {
             None => TriggerOutcomeRecord::NotTrigger,
             Some(envelope) => match envelope.payload.as_ref() {
                 None => TriggerOutcomeRecord::MatcherOnly,
                 Some(payload) => {
-                    let (resolved, _) = resolve_embedded_payload(Some(payload), bundle, name, mode, cache, sources)
+                    let (resolved, _) =
+                        resolve_embedded_payload(Some(payload), envelope.types.as_ref(), bundle, name, mode, cache, sources)
                         .map_err(|error| failed(name, error))?;
                     TriggerOutcomeRecord::Payload(Box::new(PayloadRecord {
                         digest: CanonicalDigestRecord::of(&resolved.json_schema),
@@ -175,7 +192,7 @@ pub fn prepare_trigger_bundle(
                 }
             },
         };
-        documents.push(TriggerDocumentRecord { name: name.to_string(), outcome });
+        documents.push(TriggerDocumentRecord { name: name.to_string(), outcome, label, description });
     }
     Ok(TriggerBundleRecord { bundle: bundle.name().to_string(), documents })
 }
@@ -201,6 +218,8 @@ pub struct PreparedTriggerBundle {
     /// `{bundle}/{file}`, sorted by identity.
     sources: Vec<SourceFingerprint>,
     entries: HashMap<String, PreparedEntry>,
+    /// Each trigger document's recorded `(name, description)`.
+    labels: HashMap<String, (Option<String>, Option<String>)>,
     /// Whether a supplied file table (by address and length) matched
     /// `sources`, so each table is hashed once.
     matched: Mutex<Vec<(usize, usize, bool)>>,
@@ -239,6 +258,7 @@ impl PreparedTriggerBundle {
         let prefix = format!("{}/", record.bundle);
         let mut sources = Vec::with_capacity(record.documents.len());
         let mut entries = HashMap::with_capacity(record.documents.len());
+        let mut labels = HashMap::with_capacity(record.documents.len());
         let mut previous: Option<String> = None;
         for (index, document) in record.documents.into_iter().enumerate() {
             let at = format!("{pointer}/documents/{index}");
@@ -255,6 +275,7 @@ impl PreparedTriggerBundle {
                 .find(|source| source.identity == identity)
                 .ok_or_else(|| RecordError::new(format!("{at}/name"), format!("`{identity}` is not a source of this artifact")))?;
             sources.push(source.clone());
+            labels.insert(document.name.clone(), (document.label, document.description));
             let entry = match document.outcome {
                 TriggerOutcomeRecord::NotTrigger => PreparedEntry::NotTrigger,
                 TriggerOutcomeRecord::MatcherOnly => PreparedEntry::MatcherOnly,
@@ -296,7 +317,7 @@ impl PreparedTriggerBundle {
             ));
         }
         sources.sort_by(|left, right| left.identity.cmp(&right.identity));
-        Ok(Self { bundle: record.bundle, sources, entries, matched: Mutex::new(Vec::new()) })
+        Ok(Self { bundle: record.bundle, sources, entries, labels, matched: Mutex::new(Vec::new()) })
     }
 
     /// The bundle name the records were prepared for.
@@ -346,6 +367,9 @@ impl PreparedTriggerBundle {
         // The text matched its fingerprint, so this parse succeeded during
         // generation; anything else falls back rather than trusting the record.
         let envelope = parse_trigger_envelope_from_str(text).ok()??;
+        if self.labels.get(name) != Some(&(envelope.name.clone(), envelope.description.clone())) {
+            return None;
+        }
         let payload = match (entry, envelope.payload.is_some()) {
             (PreparedEntry::MatcherOnly, false) => ResolvedPayload::matcher_only(),
             (PreparedEntry::Payload(payload), true) => (**payload).clone(),

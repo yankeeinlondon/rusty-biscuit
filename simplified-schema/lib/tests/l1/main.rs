@@ -5,6 +5,7 @@
 
 mod claimed_values;
 mod alias_positions;
+mod bundle_resolution;
 mod closed_roots;
 mod coercion_core;
 mod container_contracts;
@@ -22,6 +23,7 @@ mod expression_syntax;
 mod foundations;
 mod identifying_triggers;
 mod input_robustness;
+mod kind_envelopes;
 mod located_failures;
 mod located_schema_errors;
 mod not_empty_values;
@@ -56,5 +58,6 @@ mod template_type_results;
 mod template_types_passive;
 mod test_layout;
 mod validation_contract;
+mod yaml_kind_selection;
 mod yaml_schema_envelope;
 mod yaml_serializer_guard;

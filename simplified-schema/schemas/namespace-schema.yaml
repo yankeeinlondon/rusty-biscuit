@@ -1,0 +1,13 @@
+kind: yaml-schema
+description: |-
+    The definition of a `kind: namespace-schema` document: a YAML file that
+    declares one host namespace, the global a host's expressions read (such
+    as `seq` or `loop`). It is a dedicated catalog input: never a `$schema`
+    target, a `Name@file` import source, or a YAML document kind selector.
+$schema:
+    kind: literal(namespace-schema; required) -> the document kind that claims this definition
+    namespace: string(required) -> the global the namespace declares; case-sensitive
+    description: string -> what the namespace is for
+    $schema: schema(required) -> the namespace's value, written as one mapping (an object schema, not a table); `{}` declares no properties
+    types: schema(mapping) -> named types local to this file; its `$schema` can name them, other files cannot import them
+    $constraints: { closed: true }

@@ -207,3 +207,50 @@ fn markdown_frontmatter_yaml_failure_points_into_the_whole_document() {
         assert_eq!(*span, at..at, "{text:?}: {error}");
     }
 }
+
+/// Each YAML presentation of a value that crosses a line break, with `@C` where
+/// a constraint call goes, and the one-line spelling it decodes to.
+const WRAPPED: &[(&str, &str, &str)] = &[
+    ("plain", "  p: string(max(9);\n    @C)\n", "  p: 'string(max(9); @C)'\n"),
+    ("single-quoted", "  p: '{ a: string,\n    n: string(@C) }'\n", "  p: '{ a: string, n: string(@C) }'\n"),
+    ("single-quoted blank line", "  p: 'string(max(9);\n\n    @C)'\n", "  p: \"string(max(9);\\n@C)\"\n"),
+    ("single-quoted escape", "  p: '{ a: string(suggest(''x'')),\n    n: string(@C) }'\n", "  p: \"{ a: string(suggest('x')), n: string(@C) }\"\n"),
+    ("double-quoted escape", "  p: \"{ \\u0061: string,\n    n: string(@C) }\"\n", "  p: '{ a: string, n: string(@C) }'\n"),
+    ("double-quoted escaped break", "  p: \"{ a: string, n: str\\\n    ing(@C) }\"\n", "  p: '{ a: string, n: string(@C) }'\n"),
+    ("double-quoted sequence item", "  p:\n  - number\n  - \"string(max(9);\n      @C)\"\n", "  p: [number, 'string(max(9); @C)']\n"),
+    ("flow mapping", "  p: { a: string,\n    n: 'string(@C)' }\n", "  p: { a: string, n: 'string(@C)' }\n"),
+    ("flow sequence", "  p: [number,\n    'string(@C)']\n", "  p: [number, 'string(@C)']\n"),
+    ("quoted flow item", "  p: [number, 'string(max(9);\n    @C)']\n", "  p: [number, 'string(max(9); @C)']\n"),
+    ("plain flow item", "  p: [number, string(max(9);\n    @C)]\n", "  p: [number, 'string(max(9); @C)']\n"),
+    ("literal strip", "  p: |-\n    string(@C)\n", "  p: 'string(@C)'\n"),
+    ("folded keep", "  p: >+\n    string(max(9);\n      @C)\n  q: number\n", "  p: \"string(max(9);\\n  @C)\\n\"\n  q: number\n"),
+    ("literal indent indicator", "  p: |2-\n      string(@C)\n", "  p: '  string(@C)'\n"),
+    ("quoted key", "  \"p\": 'string(max(9);\n    @C)'\n", "  p: 'string(max(9); @C)'\n"),
+];
+
+/// A wrapped value loads and lowers as its one-line spelling does, and a
+/// grammar error inside it is ranged on the rejected token where it is
+/// authored, on its continuation line, in YAML and Markdown, LF and CRLF.
+#[test]
+fn values_wrapped_across_lines_load_and_locate_their_errors() {
+    for (label, wrapped, one_line) in WRAPPED {
+        let document = |payload: &str, call: &str| format!("kind: schema\n$schema:\n{}", payload.replace("@C", call));
+        let lowered = |text: &str| {
+            let schema = SimplifiedSchema::try_from(text).unwrap_or_else(|error| panic!("{label}: {text:?}: {error}"));
+            (*schema.to_json_schema().unwrap_or_else(|error| panic!("{label}: {error}"))).clone()
+        };
+        assert_eq!(lowered(&document(wrapped, "min(1)")), lowered(&document(one_line, "min(1)")), "{label}");
+
+        let yaml = document(wrapped, "nope(1)");
+        let markdown = format!("---\n{yaml}---\nbody\n");
+        for text in [yaml.clone(), crlf(&yaml), markdown.clone(), crlf(&markdown)] {
+            let error = document_error(SimplifiedSchema::try_from(text.as_str()));
+            let SchemaError::SchemaDocument { span: Some(span), .. } = &error else {
+                panic!("{label}: expected a located schema-document error, got {error:?}");
+            };
+            let at = text.find("nope").expect("fixture holds the token");
+            assert_eq!(&text[span.clone()], "nope", "{label}: {text:?}: {error}");
+            assert_eq!(span.start, at, "{label}: {text:?}");
+        }
+    }
+}

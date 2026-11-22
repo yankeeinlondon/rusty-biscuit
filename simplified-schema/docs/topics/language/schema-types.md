@@ -157,7 +157,7 @@ parse-only.
 
 | Option | On | The declaration must |
 | --- | --- | --- |
-| `mapping` | `schema` | be written as a mapping, not a list (a root union) or a reference string. |
+| `mapping` | `schema` | be written as a mapping, not a list (a root union) or a reference string. The mapping is read as a table of named declarations, as a `types` table is: its own `$extends` key names a declaration instead of composing, a `$constraints` or pattern key of its own is refused, and each entry's value is still read as a schema. |
 | `property(NAME, type-definition(...))` | `schema` | declare `NAME` in every inline mapping it exports, and that property's declaration must satisfy the inner `type-definition(...)` options. |
 | `forms(K, ...)` | `type-definition` | build every top-level alternative as a non-array atom with one of the listed type keywords. |
 | `declared-required` | `type-definition` | be marked `required`, with no alternative that admits null. |

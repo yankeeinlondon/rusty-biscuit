@@ -418,8 +418,8 @@ fn reaches(scope: &CompositionScope, name: &str, receiver: &str, visited: &mut B
 /// The local namespace for an operand at `offset`, and the type receiving it.
 ///
 /// The current buffer's declaration is used when it parses. Otherwise each
-/// entry is parsed on its own from the buffer with the cursor's line blanked,
-/// since that line holds the operand being typed; and when even that is not
+/// entry is parsed on its own from the buffer with the cursor's lines blanked,
+/// since they hold the operand being typed; and when even that is not
 /// YAML, only the names the tolerant passive reading finds are offered.
 /// For an implicit root union, only the arm holding the cursor is local.
 fn composition_scope(ctx: &DocumentContext, offset: usize, state: &SchemaCursor) -> CompositionScope {
@@ -458,8 +458,15 @@ fn receiving_object_path(ctx: &DocumentContext, offset: usize, state: &SchemaCur
 fn standalone_types_table(ctx: &DocumentContext) -> bool {
     matches!(
         ctx.overlay.map(|overlay| &overlay.schema_authoring),
-        Some(SchemaAuthoringState::Standalone { model: Some(model), .. }) if model.local_types.is_some()
+        Some(SchemaAuthoringState::Standalone { model: Some(model), .. }) if names_types_table(model)
     )
+}
+
+/// Whether a standalone document's local namespace is its `types` table:
+/// beside an exported `$schema`, or as the payload of a `types`-only
+/// document, whose declaration is that table.
+fn names_types_table(model: &simplified_schema::StandaloneSchemaDocument) -> bool {
+    model.local_types.is_some() || !model.exports_schema
 }
 
 type LocalNames = (Vec<(String, Option<PropertyDef>)>, bool);
@@ -468,8 +475,10 @@ type LocalNames = (Vec<(String, Option<PropertyDef>)>, bool);
 /// it is an explicit `types` table.
 fn fresh_namespace(ctx: &DocumentContext, offset: usize) -> Option<LocalNames> {
     let overlay = ctx.overlay?;
+    let mut types_only = false;
     let declaration = match &overlay.schema_authoring {
         SchemaAuthoringState::Standalone { model: Some(model), stale: false, .. } => {
+            types_only = names_types_table(model);
             AuthoredDeclaration::standalone(model)
         }
         SchemaAuthoringState::Standalone { .. } => return None,
@@ -488,7 +497,7 @@ fn fresh_namespace(ctx: &DocumentContext, offset: usize) -> Option<LocalNames> {
     };
     let path = arm.map_or_else(SchemaSourcePath::root, |index| SchemaSourcePath::root().union_arm(index));
     let (shape, root) = declaration.local_namespace(&path)?;
-    let types_table = root == SchemaSourcePath::root().property("types");
+    let types_table = types_only || root == SchemaSourcePath::root().property("types");
     let names = shape
         .properties
         .iter()
@@ -497,11 +506,16 @@ fn fresh_namespace(ctx: &DocumentContext, offset: usize) -> Option<LocalNames> {
     Some((names, types_table))
 }
 
-/// The namespace read entry by entry from the buffer with the cursor's line
-/// blanked, and whether it is an explicit `types` table.
+/// The namespace read entry by entry from the buffer with the cursor's
+/// lines blanked, and whether it is an explicit `types` table.
+///
+/// The blanked lines run from the one the cursor's value starts on, so that
+/// a flow sequence or quoted scalar continued onto the cursor's line does
+/// not leave its opening half behind unclosed.
 fn tolerant_namespace(ctx: &DocumentContext, offset: usize) -> Option<LocalNames> {
     let overlay = ctx.overlay?;
-    let blanked = blank_line(ctx.text, offset);
+    let from = super::continued_value_anchor(ctx, offset).unwrap_or(offset);
+    let blanked = blank_lines(ctx.text, from, offset);
     let standalone = matches!(overlay.schema_authoring, SchemaAuthoringState::Standalone { .. });
     let source = if standalone { blanked.as_str() } else { frontmatter_body(&blanked) };
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).ok()?;
@@ -519,22 +533,22 @@ fn tolerant_namespace(ctx: &DocumentContext, offset: usize) -> Option<LocalNames
     let names = mapping
         .iter()
         .filter_map(|(key, value)| Some((key.as_str()?, value)))
-        // In a schema object these keys are directives and patterns, not
-        // names; a `types` table has neither.
-        .filter(|(key, _)| types_table || !(key.starts_with('<') || matches!(*key, "$extends" | "$constraints")))
+        // Patterns and `$constraints` are never names (a `types` table
+        // refuses them); `$extends` is a name only in a `types` table.
+        .filter(|(key, _)| !(key.starts_with('<') || *key == "$constraints" || (!types_table && *key == "$extends")))
         .map(|(key, value)| (key.to_string(), parse_property_definition(key, value).ok()))
         .collect();
     Some((names, types_table))
 }
 
-/// `text` with the line holding `offset` replaced by spaces, keeping every
-/// other byte offset.
-fn blank_line(text: &str, offset: usize) -> String {
-    let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+/// `text` with the lines from the one holding `from` through the one holding
+/// `offset` replaced by spaces, keeping every byte offset and line break.
+fn blank_lines(text: &str, from: usize, offset: usize) -> String {
+    let start = text[..from].rfind('\n').map_or(0, |index| index + 1);
     let end = text[offset..].find('\n').map_or(text.len(), |index| offset + index);
     let mut blanked = String::with_capacity(text.len());
     blanked.push_str(&text[..start]);
-    blanked.extend(std::iter::repeat_n(' ', end - start));
+    blanked.extend(text[start..end].bytes().map(|byte| if byte == b'\n' { '\n' } else { ' ' }));
     blanked.push_str(&text[end..]);
     blanked
 }

@@ -2,7 +2,8 @@
 //! schema mapping) through an in-memory LSP session: operand completion while
 //! the operand is still being typed, in both forms and in quoted, flow, and
 //! block sequence items, with ineligible targets filtered and implicit
-//! root-union arms kept apart; hover and go-to-definition on operands; a
+//! root-union arms kept apart, also on a line a flow list, a quoted scalar,
+//! or a literal or folded block scalar is continued onto; hover and go-to-definition on operands; a
 //! diagnostic ranged on the one failing operand when two name the same file;
 //! and refresh of the importer when the imported definition changes in an
 //! unsaved buffer or a missing imported file appears.
@@ -423,5 +424,119 @@ fn a_missing_imported_file_appearing_clears_the_operand_error() {
     );
     let diagnostics = latest_diagnostics(&mut fixture, &document.uri);
     assert!(diagnostics.is_empty(), "the created file resolves the operand: {diagnostics:#?}");
+    fixture.shutdown();
+}
+
+/// Operands on a line after the one holding their directive: the items of a
+/// `$extends` flow sequence continued onto later lines, and a spread in a
+/// quoted object definition that wraps. Completion offers the eligible
+/// names, hover and go-to-definition reach the named declaration, and an
+/// ineligible operand's diagnostic is ranged on that operand.
+#[test]
+fn operands_on_continuation_lines_complete_navigate_and_report() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = session(&workspace);
+    let frontmatter = concat!(
+        "$schema:\n",
+        "  events: \"{ id: string(required) }\"\n",
+        "  audit: \"{ by: string }\"\n",
+        "  snapshot: \"{ price: number,\n",
+        "    ...events }\"\n",
+        "  order:\n",
+        "    $extends: [audit,\n",
+        "      events]\n",
+        "    total: number\n",
+        "order:\n",
+        "  id: a\n",
+        "  by: b\n",
+        "snapshot:\n",
+        "  id: c\n",
+    );
+    let (document, diagnostics) = open_text(&mut fixture, &workspace, "continued.md", &markdown(frontmatter));
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let events_key = range_of(&document.text, "events", 0);
+    for (case, at) in [
+        ("wrapped spread", offset(&document.text, "...events", 0, 4)),
+        ("continued flow item", offset(&document.text, "  events]", 0, 3)),
+    ] {
+        let markup = hover_at(&mut fixture, &document, at);
+        assert!(markup.contains("Defined in: this schema"), "{case}: {markup}");
+        let locations = request(&mut fixture, "textDocument/definition", &document, at);
+        assert_eq!(locations, json!([{ "uri": document.uri, "range": events_key }]), "{case}");
+    }
+    for (case, needle) in [("wrapped spread", "...ev"), ("continued flow item", "      ev")] {
+        let typed = frontmatter.replacen(&needle.replace("ev", "events"), needle, 1);
+        let (document, _) = open_text(&mut fixture, &workspace, "typing.md", &markdown(&typed));
+        let at = offset(&document.text, needle, 0, needle.len());
+        let items = completion_items(&mut fixture, &document, at);
+        assert_eq!(sorted_labels(&items), ["events"], "{case}: {items:#?}");
+        assert_eq!(item(&items, "events")["textEdit"]["range"], range(&document.text, at - 2, at), "{case}");
+    }
+
+    let ineligible = concat!(
+        "$schema:\n",
+        "  events: \"{ id: string }\"\n",
+        "  label: string\n",
+        "  order:\n",
+        "    $extends: [events,\n",
+        "      label]\n",
+        "order: {}\n",
+    );
+    let (document, diagnostics) = open_text(&mut fixture, &workspace, "ineligible.md", &markdown(ineligible));
+    let errors = type_definition_errors(&diagnostics);
+    assert_eq!(errors.len(), 1, "{diagnostics:#?}");
+    assert_eq!(errors[0]["range"], range_of(&document.text, "label", 1), "{:#?}", errors[0]);
+
+    // The standalone shape the defect was found in.
+    let standalone = "kind: schema\n$schema:\n  $extends: [base,\n    b]\ntypes:\n  base: '{ id: string }'\n";
+    let (document, _) = open_text(&mut fixture, &workspace, "root.yaml", standalone);
+    let at = offset(&document.text, "    b]", 0, 5);
+    assert_eq!(sorted_labels(&completion_items(&mut fixture, &document, at)), ["base"]);
+    fixture.shutdown();
+}
+
+/// Operands on a continuation line of a scalar: a spread in a folded
+/// frontmatter definition, also after an explicit property on that line,
+/// and the reference half of a wrapped quoted
+/// `$extends` scalar and block-sequence item. Each offers exactly the
+/// eligible completion, replacing the operand typed so far, and a folded
+/// standalone `$extends` offers no ordinary type keyword.
+#[test]
+fn operands_in_block_scalars_and_wrapped_quotes_complete() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = session(&workspace);
+    for (case, frontmatter, needle, expected) in [
+        ("folded spread", "$schema:\n  base: '{ id: string }'\n  event: >-\n    { at: string,\n      ...b }\n", "...b", "base"),
+        (
+            "folded spread after a property",
+            "$schema:\n  base: '{ id: string }'\n  event: >-\n    { at: string,\n      next: number, ...b }\n",
+            "...b",
+            "base",
+        ),
+        (
+            "wrapped scalar $extends",
+            "$schema:\n  base: '{ id: string }'\n  event:\n    $extends: 'base@\n      th'\n",
+            "      th",
+            "this",
+        ),
+        (
+            "wrapped block item",
+            "$schema:\n  base: '{ id: string }'\n  event:\n    $extends:\n      - 'base@\n        th'\n",
+            "        th",
+            "this",
+        ),
+    ] {
+        let (document, _) = open_text(&mut fixture, &workspace, "continued.md", &markdown(frontmatter));
+        let at = offset(&document.text, needle, 0, needle.len());
+        let items = completion_items(&mut fixture, &document, at);
+        assert_eq!(sorted_labels(&items), [expected], "{case}: {items:#?}");
+        let typed = needle.trim_start().trim_start_matches("...").len();
+        assert_eq!(item(&items, expected)["textEdit"]["range"], range(&document.text, at - typed, at), "{case}");
+    }
+
+    let standalone = "kind: schema\ntypes:\n  base: '{ id: string }'\n  event:\n    $extends: >-\n      b\n";
+    let (document, _) = open_text(&mut fixture, &workspace, "folded.yaml", standalone);
+    let at = offset(&document.text, "      b", 0, 7);
+    assert_eq!(sorted_labels(&completion_items(&mut fixture, &document, at)), ["base"]);
     fixture.shutdown();
 }

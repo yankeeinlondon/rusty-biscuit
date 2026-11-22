@@ -10,9 +10,11 @@ $schema:
       $schema: schema(required) -> the exported document schema (an inline mapping or union, or a reference to a schema file)
       types: schema(mapping; not-empty) -> reusable named types; these names are not document properties
       $constraints: { closed: true }
+    # the types-only form: only a library that exports no `$schema` may carry a `name`
     - kind: literal(schema; required) -> the document kind that claims this definition
+      name: string(pattern('^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$')) -> a kebab-case display label shown beside the file's path; unique within its schema root; never a reference
       description: string(not-empty) -> what the schema is for
       categories: string[](not-empty) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
-      $schema: schema(not-empty) -> the exported document schema (an inline mapping or union, or a reference to a schema file)
+      $schema: null -> a types-only library exports no document schema
       types: schema(mapping; required; not-empty) -> reusable named types; these names are not document properties
       $constraints: { closed: true }

@@ -19,7 +19,8 @@ use simplified_schema::{
     ValidationProblemCode, SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
     SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value, LocatedDefinitionFailure, LocatedRelated,
     locate_standalone_definition_failure, parse_property_definition_with_source, parse_type_definition_value,
-    parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema,
+    parse_schema_declaration, parse_schema_declaration_with_source, parse_schema_table, parse_schema_table_with_source,
+    parse_yaml_schema,
 };
 use simplified_schema::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};
@@ -726,6 +727,7 @@ fn semantic_authored_diagnostics(
                 MetaSchemaKind::TypeDefinition => {
                     parse_type_definition_value(&entry.key, &yaml).map(|_| ())
                 }
+                MetaSchemaKind::Schema if value.table => parse_schema_table(&yaml).map(|_| ()),
                 MetaSchemaKind::Schema => parse_schema_declaration(&yaml).map(|_| ()),
             };
             match result {
@@ -746,7 +748,7 @@ fn semantic_authored_diagnostics(
         // source-aware parser only locates the failure they reported.
         // A declaration failure on no property is the declaration's own shape,
         // which keeps the whole value, as a standalone envelope's does.
-        let located = locate_meta_type_failure(ctx.text, value_span.clone(), kind, &entry.key)
+        let located = locate_meta_type_failure(ctx.text, value_span.clone(), kind, value.table, &entry.key)
             .filter(|failure| failure.error.to_string() == error.to_string())
             .filter(|failure| {
                 kind == MetaSchemaKind::TypeDefinition
@@ -791,11 +793,13 @@ fn semantic_authored_diagnostics(
 /// the value parses or is not YAML on its own.
 ///
 /// The value is re-parsed in place (the text before it on its first line
-/// replaced with spaces), so the parser reads the authored columns.
+/// replaced with spaces), so the parser reads the authored columns. A
+/// `table` schema value is read as a table of named declarations.
 fn locate_meta_type_failure(
     text: &str,
     value_span: std::ops::Range<usize>,
     kind: MetaSchemaKind,
+    table: bool,
     key: &str,
 ) -> Option<LocatedDefinitionFailure> {
     let line_start = text[..value_span.start].rfind('\n').map_or(0, |index| index + 1);
@@ -806,6 +810,7 @@ fn locate_meta_type_failure(
         MetaSchemaKind::TypeDefinition => {
             parse_property_definition_with_source(key, &yaml, &source, line_start).err()
         }
+        MetaSchemaKind::Schema if table => parse_schema_table_with_source(&yaml, &source, line_start).err(),
         MetaSchemaKind::Schema => parse_schema_declaration_with_source(&yaml, &source, line_start).err(),
     }
 }
@@ -870,7 +875,7 @@ fn semantic_problem_range(
     let entry = ast.entry_or_ancestor(&problem.path)?;
     let span = if kind == SemanticProblemKind::TypeDefinition {
         let value_span = complete_flow_value_span(ctx.text, entry.value_span.clone());
-        locate_meta_type_failure(ctx.text, value_span, MetaSchemaKind::TypeDefinition, &entry.key)
+        locate_meta_type_failure(ctx.text, value_span, MetaSchemaKind::TypeDefinition, false, &entry.key)
             .and_then(|failure| failure.authored_span.or(failure.value_span))
             .unwrap_or_else(|| entry.value_span.clone())
     } else {
@@ -2498,6 +2503,55 @@ mod tests {
                     .all(|diagnostic| code_of(diagnostic) != Some(code::SCHEMA_INVALID_SHAPE)),
                 "resolution is distinct from semantic reference syntax: {diagnostics:#?}"
             );
+        });
+    }
+
+    /// A `schema(mapping)` value is a table of named declarations, located
+    /// as the library judges it: `$extends` there is a type name, and a
+    /// `$constraints` key written directly in it is the error.
+    #[test]
+    fn a_mapping_schema_value_is_located_as_a_table() {
+        let doc = |declaration: &str, value: &str| {
+            format!("---\n$schema:\n  defs: '{declaration}'\ndefs:\n{value}---\n\nbody\n")
+        };
+        let shape_errors = |text: &str| {
+            diagnostics_for(text, |diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_INVALID_SHAPE))
+                    .map(|diagnostic| (ranged_text(text, diagnostic).to_string(), diagnostic.message.clone()))
+                    .collect::<Vec<_>>()
+            })
+        };
+
+        let valid = doc("schema(mapping)", "  $extends: string\n  b: number\n");
+        diagnostics_for(&valid, |diagnostics| assert!(diagnostics.is_empty(), "{diagnostics:#?}"));
+
+        let broken = doc("schema(mapping)", "  $extends: string\n  b: string(nope)\n");
+        let found = shape_errors(&broken);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].0, "nope", "{found:#?}");
+        assert!(!found[0].1.contains("$extends"), "{found:#?}");
+
+        let constrained = doc("schema(mapping)", "  $constraints: { min-keys: 1 }\n  b: number\n");
+        let found = shape_errors(&constrained);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].0, "{ min-keys: 1 }", "{found:#?}");
+        assert!(found[0].1.contains("a `types` table holds named declarations"), "{found:#?}");
+
+        // A table that parses but misses a required declaration keeps the
+        // judge's own message, not one from reading the table as an object.
+        let missing = doc(
+            "schema(mapping; property(kind, type-definition(forms(literal))))",
+            "  $extends: string\n",
+        );
+        diagnostics_for(&missing, |diagnostics| {
+            let messages: Vec<&str> = diagnostics
+                .iter()
+                .filter(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_INVALID_SHAPE))
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect();
+            assert_eq!(messages, ["the schema must declare `kind`"], "{diagnostics:#?}");
         });
     }
 

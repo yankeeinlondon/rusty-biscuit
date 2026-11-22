@@ -105,7 +105,7 @@ Claudine's trigger bundle consists of eight ordinary disk files in
 | `document.yaml` | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that `claudine.yaml` and `inline-compose.yaml` import |
 | `claudine.yaml` | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, for a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | inline-compose's document metadata, for a non-null `prompt` with no non-null `sequence` |
-| `sequence.yaml` | trigger (`kind: schema-trigger`) | sequence steps and root metadata, for a non-null `sequence` |
+| `sequence.yaml` | trigger (`kind: schema-trigger`) | sequence steps and root metadata, for a non-null `sequence` or `kind: sequence` |
 
 DMLS needs no configuration for them. A document whose package area is
 `claudine/` finds them through the package-area root, so a misspelled verb, a
@@ -491,7 +491,7 @@ standalone schema file. Five library errors are projected this way:
 - The primary range is the consuming reference's name, for bare, `@this`, and
   cross-file spellings alike, including a reference written in a YAML block
   scalar (`|`, `>-`). A presentation the schema grammar cannot project, such
-  as a quoted value continued across lines, falls back to the property entry.
+  as a tagged value continued across lines, falls back to the property entry.
 - A conflict lists every declaration that took part as
   `relatedInformation`, with its value: the inherited
   `` `min(5)` is declared here `` in `types.yaml` beside the use site's
@@ -529,7 +529,7 @@ standalone schema file. Five library errors are projected this way:
   resolved type, as `dm.schema.invalid_suggestion`. An invalid candidate the
   type inherits is reported in the file that declared it.
 
-In a schema file, an invalid definition is ranged at the token the grammar rejected, such as an unknown constraint name, rather than the whole value. The same holds for the core types: an unknown, repeated, misplaced, or mixed `alphanumeric` option is ranged on the option, and a non-null default on `null` (`null(default(1))`) on its argument. A native YAML null definition (`review: null`, `review: ~`, or `review:` with no value) is the `null` type and produces no diagnostic, while a quoted `""` is still *expected a type name*. A value that breaks a type is an ordinary value diagnostic: under a schema whose `initialize` actions exclude `{ shell: shell(required) }`, a `shell` action there is ranged on that list item, exactly as `md schema validate` reports it. This also holds for the two line-wrapped spellings the schema grammar accepts, a plain value continued onto more-indented lines and a list whose `-` sits at its parent key's column (see [Source-Aware Presentation Boundary](../../../../simplified-schema/docs/topics/language/types.md#source-aware-presentation-boundary)). Hover and completion work on continuation lines and indentless list items too, and select the same schema node as the conventional spelling.
+In a schema file, an invalid definition is ranged at the token the grammar rejected, such as an unknown constraint name, rather than the whole value. The same holds for the core types: an unknown, repeated, misplaced, or mixed `alphanumeric` option is ranged on the option, and a non-null default on `null` (`null(default(1))`) on its argument. A native YAML null definition (`review: null`, `review: ~`, or `review:` with no value) is the `null` type and produces no diagnostic, while a quoted `""` is still *expected a type name*. A value that breaks a type is an ordinary value diagnostic: under a schema whose `initialize` actions exclude `{ shell: shell(required) }`, a `shell` action there is ranged on that list item, exactly as `md schema validate` reports it. This also holds for the line-wrapped spellings the schema grammar accepts: a plain value continued onto more-indented lines, a quoted value or flow collection continued across lines, and a list whose `-` sits at its parent key's column (see [Source-Aware Presentation Boundary](../../../../simplified-schema/docs/topics/language/types.md#source-aware-presentation-boundary)). Hover and completion work on continuation lines and indentless list items too, and select the same schema node as the conventional spelling.
 
 These editing rules also apply when `$schema` and `types` share a document,
 with or without `kind: schema`:
@@ -555,7 +555,24 @@ types:
     ma
 ```
 
-With the cursor after `ma`, DMLS offers the same constraints it offers once the file loads, and the edit replaces only `ma`; `&e` (or a tag such as `!!str`) stays as written. DMLS decides which line holds the value from its indentation, the dash column for a sequence item, and then reads that value as YAML does, so only a plain scalar continues: a quoted or block value, a flow collection, an alias, or a comment ends it, and a dedented sibling key is never part of it. The cursor must be inside the value, at its end, or after trailing spaces or tabs on its last line. Recognizing the value runs nothing and loads no import. Ranges are converted to the editor's negotiated position encoding (UTF-8 or UTF-16).
+With the cursor after `ma`, DMLS offers the same constraints it offers once the file loads, and the edit replaces only `ma`; `&e` (or a tag such as `!!str`) stays as written. DMLS decides which line holds the value from its indentation, the dash column for a sequence item, and then reads that value as YAML does. A plain scalar, a single- or double-quoted scalar (also before its closing quote is typed), and a literal (`|`) or folded (`>`) block scalar with any chomping or indentation indicator all continue; an alias ends the value, a comment line ends a plain scalar, and a dedented sibling key is never part of it. A line the value reaches is part of it however it looks: inside a quoted or block scalar, a line such as `next: number,`, `- item`, or `# note` is the scalar's text, not a new key, list item, or comment. The cursor must be inside the value, at its end, or after trailing spaces or tabs on its last line, and before a quoted value's closing quote.
+
+The same reading applies to composition operands. Here the cursor after `...b` on the folded line offers only `base`, even though `next: number,` before it looks like a YAML key, and the cursor after `th` offers `this`:
+
+```yaml
+---
+$schema:
+  base: '{ id: string }'
+  event: >-
+    { at: string,
+      next: number, ...b }
+  audit:
+    $extends: 'base@
+      th'
+---
+```
+
+Frontmatter that does not parse at all (an open quote, or a block scalar whose only line so far is indentation) is read over the last frontmatter that did, so completion continues while such a value is being typed in an open editor. Recognizing the value runs nothing and loads no import. Ranges are converted to the editor's negotiated position encoding (UTF-8 or UTF-16).
 
 ### Completion
 
@@ -579,7 +596,7 @@ While *authoring a schema* — inside an inline `$schema` value, a `type-definit
 - `alphanumeric` options inside `alphanumeric(` before the first `;`, leaving out the options already written there; after the `;`, only constraints
 - definition scaffolds: `{}`, `[]`, and `Name@./types.yaml`
 - constraint keywords from the [`SimplifiedSchema` Constraints](./schema-constraints.md) catalog, **filtered by the subject type's accepted-constraint list** — `min(` is not offered under a `boolean`, and the postfix `[](...)` list offers only the array-level constraint surface
-- keys of a schema object's `$constraints:` mapping, leaving out the keys already written there: a declaration's root (or a root-union arm) is offered `min-keys`, `max-keys`, `uncounted-keys`, `closed`, and `not-empty`, and a property's object is also offered `required` and `generated`. A flag is inserted with its only value (`closed: true`); a counted key leaves its value to you (`min-keys: `)
+- keys of a schema object's `$constraints:` mapping, leaving out the keys already written there: a declaration's root (or a root-union arm) is offered `min-keys`, `max-keys`, `uncounted-keys`, `closed`, and `not-empty`, and a property's object is also offered `required` and `generated`. A flag is inserted with its only value (`closed: true`); a counted key leaves its value to you (`min-keys: `). A table of named declarations (a standalone `types:` table, or a frontmatter value typed `schema(mapping)`) has no object of its own, so a `$constraints:` written directly in it is offered nothing and is diagnosed as a grammar error
 
   ```yaml
   $schema:
@@ -809,7 +826,7 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 5. Enum choices rigid; `suggest(...)` candidates advisory — they never validate.
 6. Alternatives combine; an authored `literal(...)` discriminant that selects one union arm narrows key completion to it, per item in a `U[]` list.
 7. Unknown names, constraint conflicts, cycles that never descend into a child value, unsupported union postfixes, and composition operands that cannot be composed are `dm.schema.invalid_type_definition` at the reference (the whole operand for composition), with related locations for conflicting declarations, the cycle's other references, and the union's definition. A recursive type that descends is supported at any depth (see [Recursive types](#recursive-types)).
-8. Local names offered bare; `name@this` only for a built-in collision; imported names with their target. After `...` and in a `$extends` scalar or sequence item only named object types are offered: known non-objects, alias cycles, and the receiving type are omitted, and a target DMLS cannot read passively is kept. Editing an imported file, including in an unsaved buffer, refreshes the importer's diagnostics and completions.
+8. Local names offered bare (never a pattern key or `$constraints`; a type named `$extends` only from a `types` table); `name@this` only for a built-in collision; imported names with their target. After `...` and in a `$extends` scalar or sequence item of a schema object (not one written directly in a `types` table or a `schema(mapping)` value, where `$extends` names a type and its value is offered type definitions), including an item of a `$extends: [a,` list continued onto a later line, and a `$extends` scalar, a block-sequence item, or a spread continued across lines in any scalar presentation (plain, quoted with or without its closing quote, literal, or folded), only named object types are offered: known non-objects, alias cycles, and the receiving type are omitted, and a target DMLS cannot read passively is kept. Editing an imported file, including in an unsaved buffer, refreshes the importer's diagnostics and completions.
 9. Go-to-definition on every reference spelling; whole-file `$schema` references also render as links.
 10. Pattern keys validate but are not offered as completions — an inline object's keys are the author's own.
 11. Authored pattern-key definitions hover in schema documents; consumers hover the value definition only where the shape resolves it.
@@ -866,7 +883,7 @@ The programmatic seam is the **`darkmatter` library itself** (`darkmatter::markd
 - **`EffectiveSchema`** carries the assembled result: `validate_with_positions(...)` for source-spanned problems, `dependencies()` for the files the schema depends on (what DMLS content-hash watches), and `advisories()` for non-fatal findings.
 - **`resolve::expand_named_types`** expands the named-type references of a schema held in memory, using that schema (not the file on disk) as `this`, so an unsaved buffer resolves. **`resolve::named_type_reference_path`** returns the file an explicit `Name@target` selects, using the resolver's own lookup. DMLS uses both for standalone schema files.
 - **`parse_standalone_schema_document`** is the passive classifier for standalone schema files a document loads (a `$schema` target, a `Name@file` import). An open YAML buffer claiming `kind: schema` or `kind: yaml-schema` is read with **`parse_selected_standalone_schema_document`** instead, from the copy its selected definition accepted, so that definition alone decides the file's shape.
-- **The shared catalogs** — `schema_type_descriptors()`, `schema_constraint_descriptors()`, `block_constraint_descriptors()` (the `$constraints:` keys), `suggestions_for_path()`, `select_literal_discriminant_arm()`, and the tolerant cursor parsers `locate_schema_declaration_cursor(...)` / `locate_type_definition_cursor(...)` with their decoded-scalar forms `locate_schema_declaration_cursor_in_scalar(...)` / `locate_type_definition_cursor_in_scalar(...)` (over `decode_plain_scalar_node(...)`), and the located-failure parsers described in [Source-Aware Parsing and Located Failures](../../../../simplified-schema/docs/topics/diagnostics.md#source-aware-parsing-and-located-failures) — are public. DMLS uses these authorities when constructing completion and hover responses, which keeps their schema vocabulary aligned with library validation. A documentation generator, linter, or custom editor can build on the same primitives, while still owning its presentation and request-specific behavior.
+- **The shared catalogs** — `schema_type_descriptors()`, `schema_constraint_descriptors()`, `block_constraint_descriptors()` (the `$constraints:` keys), `suggestions_for_path()`, `select_literal_discriminant_arm()`, and the tolerant cursor parsers `locate_schema_declaration_cursor(...)` / `locate_type_definition_cursor(...)` with their decoded-scalar forms `locate_schema_declaration_cursor_in_scalar(...)` / `locate_type_definition_cursor_in_scalar(...)` / `locate_composition_operand_cursor_in_scalar(...)` (over `decode_scalar_node_prefix(...)` or `decode_plain_scalar_node(...)`), and the located-failure parsers described in [Source-Aware Parsing and Located Failures](../../../../simplified-schema/docs/topics/diagnostics.md#source-aware-parsing-and-located-failures) — are public. DMLS uses these authorities when constructing completion and hover responses, which keeps their schema vocabulary aligned with library validation. A documentation generator, linter, or custom editor can build on the same primitives, while still owning its presentation and request-specific behavior.
 
 The pattern in practice: a host application (Claudine is the worked example) authors its vocabulary as schema *data* — trigger schemas plus the libraries they import — embeds the files in its binary as an `EmbeddedSchemaBundle` for its own runtime (`DarkmatterSchemas::with_embedded_trigger_bundle`, consulted only for trigger names no schema root holds), and ships the same files on disk where the editor discovers them in the schema roots. One schema artifact, zero server code, the same validation rules everywhere; see [Embedded trigger bundles](./definition.md#embedded-trigger-bundles).
 

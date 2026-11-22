@@ -89,6 +89,21 @@ pub enum DefinitionSource {
     Shipped(&'static str),
     /// A file in one of the context's schema roots.
     File(PathBuf),
+    /// A definition a registered host supplies; selected only for a kind no
+    /// shipped or local definition claims ([`super::select::select_with_registered`]).
+    Registered(RegisteredSource),
+}
+
+/// The identity of a registered host's definition.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RegisteredSource {
+    /// The registered host's name.
+    pub host: String,
+    /// The definition's bundle-relative path, slash-separated.
+    pub path: String,
+    /// Where its text was read: the installed file, or a virtual identity for
+    /// an embedded bundle. Errors and duplicate claims name it.
+    pub file: PathBuf,
 }
 
 impl DefinitionSource {
@@ -99,15 +114,18 @@ impl DefinitionSource {
         match self {
             Self::Shipped(path) => PathBuf::from(path),
             Self::File(path) => path.clone(),
+            Self::Registered(source) => source.file.clone(),
         }
     }
 
-    /// A label for messages: the file's path, or `built-in <path>`.
+    /// A label for messages: the file's path, `built-in <path>`, or
+    /// `<host>:<path>` for a registered definition.
     #[must_use]
     pub fn label(&self) -> String {
         match self {
             Self::Shipped(path) => format!("built-in {path}"),
             Self::File(path) => path.display().to_string(),
+            Self::Registered(source) => format!("{}:{}", source.host, source.path),
         }
     }
 }
@@ -145,7 +163,8 @@ impl KindDefinition {
 pub enum Claim {
     /// Exactly one definition claims it.
     Healthy(Arc<KindDefinition>),
-    /// More than one definition claims it; the paths are sorted.
+    /// More than one definition claims it; the paths are sorted (registered
+    /// definitions by host, then definition path).
     Duplicate(Vec<PathBuf>),
     /// The one definition that claims it failed.
     Reserved {
@@ -154,6 +173,108 @@ pub enum Claim {
         /// Why it failed.
         defect: Arc<SchemaError>,
     },
+}
+
+/// A registered host's `kind: yaml-schema` definition, for
+/// [`RegisteredKinds`].
+#[derive(Debug, Clone)]
+pub struct RegisteredDefinition {
+    source: RegisteredSource,
+    definition: Arc<KindDefinition>,
+    sameness: String,
+}
+
+impl RegisteredDefinition {
+    /// The definition `source` names, whose `$schema` the host already
+    /// resolved as `resolved`. Its claimed kinds are read by the same rule as
+    /// a shipped or local definition's.
+    ///
+    /// `sameness` says which entries are copies of one definition: entries
+    /// claiming a kind with equal `sameness` collapse into one claim, and
+    /// entries with different `sameness` are a duplicate claim. A host
+    /// decides it (for example from host, revision, and path).
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::SchemaDocument`] naming `source.file` when the export
+    /// claims no finite set of kinds, as for a local definition.
+    pub fn new(source: RegisteredSource, resolved: ResolvedSchema, sameness: impl Into<String>) -> Result<Self, SchemaError> {
+        let kinds = claimed_kinds(&resolved, &source.file)?;
+        let definition = KindDefinition { source: DefinitionSource::Registered(source.clone()), resolved, kinds };
+        Ok(Self { source, definition: Arc::new(definition), sameness: sameness.into() })
+    }
+
+    /// The prepared definition; its [`KindDefinition::source`] is
+    /// [`DefinitionSource::Registered`].
+    #[must_use]
+    pub fn definition(&self) -> &Arc<KindDefinition> {
+        &self.definition
+    }
+
+    #[allow(missing_docs)]
+    #[must_use]
+    pub fn sameness(&self) -> &str {
+        &self.sameness
+    }
+
+    #[allow(missing_docs)]
+    #[must_use]
+    pub fn source(&self) -> &RegisteredSource {
+        &self.source
+    }
+}
+
+/// The kinds registered hosts' definitions claim: the lowest-priority tier
+/// of YAML kind selection, consulted only for a kind a [`KindRegistry`]
+/// establishes is unclaimed ([`super::select::select_with_registered`]).
+///
+/// Each kind holds a [`Claim::Healthy`] or, for two or more different
+/// definitions, a [`Claim::Duplicate`] naming each definition's
+/// [`RegisteredSource::file`] sorted by host, then definition path.
+#[derive(Debug, Clone, Default)]
+pub struct RegisteredKinds {
+    claims: BTreeMap<String, Claim>,
+}
+
+impl RegisteredKinds {
+    /// Indexes `definitions` by the kinds each claims.
+    #[must_use]
+    pub fn new(definitions: impl IntoIterator<Item = RegisteredDefinition>) -> Self {
+        let mut by_kind: BTreeMap<String, Vec<RegisteredDefinition>> = BTreeMap::new();
+        for definition in definitions {
+            for kind in definition.definition.kinds() {
+                by_kind.entry(kind.clone()).or_default().push(definition.clone());
+            }
+        }
+        let claims = by_kind
+            .into_iter()
+            .map(|(kind, mut claimants)| {
+                claimants.sort_by(|a, b| a.source().cmp(b.source()));
+                let mut seen = BTreeSet::new();
+                // The first copy in host/path order stands for its equals.
+                claimants.retain(|claimant| seen.insert(claimant.sameness.clone()));
+                let claim = if let [single] = claimants.as_slice() {
+                    Claim::Healthy(Arc::clone(&single.definition))
+                } else {
+                    Claim::Duplicate(claimants.iter().map(|claimant| claimant.source().file.clone()).collect())
+                };
+                (kind, claim)
+            })
+            .collect();
+        Self { claims }
+    }
+
+    /// The claim on `kind`, compared exactly; `None` when no registered
+    /// definition claims it.
+    #[must_use]
+    pub fn claim(&self, kind: &str) -> Option<&Claim> {
+        self.claims.get(kind)
+    }
+
+    /// Every claimed kind and its claim, in kind order.
+    pub fn claims(&self) -> impl Iterator<Item = (&str, &Claim)> {
+        self.claims.iter().map(|(kind, claim)| (kind.as_str(), claim))
+    }
 }
 
 /// A failure that leaves the registry unable to say what some file claims.
@@ -515,7 +636,7 @@ pub fn prepare_shipped(
     mode: PreparationMode<'_>,
 ) -> Result<KindDefinition, SchemaError> {
     let resolved = crate::resolve::prepare_embedded_yaml_schema_with_mode(path, documents, sources, mode)?;
-    let kinds = claimed_values(&resolved, "kind").map_err(|problem| claim_error(Path::new(path), &problem))?;
+    let kinds = claimed_kinds(&resolved, Path::new(path))?;
     Ok(KindDefinition { source: DefinitionSource::Shipped(path), resolved, kinds })
 }
 
@@ -558,8 +679,14 @@ fn prepare_candidate(
     sources: ShippedSources,
 ) -> Result<KindDefinition, SchemaError> {
     let resolved = crate::resolve::prepare_yaml_schema_text(file, text, schema_roots, context, sources)?;
-    let kinds = claimed_values(&resolved, "kind").map_err(|problem| claim_error(file, &problem))?;
+    let kinds = claimed_kinds(&resolved, file)?;
     Ok(KindDefinition { source: DefinitionSource::File(file.to_path_buf()), resolved, kinds })
+}
+
+/// The kinds `resolved`, the export of the definition at `file`, claims:
+/// the one rule for shipped, local, and registered definitions.
+fn claimed_kinds(resolved: &ResolvedSchema, file: &Path) -> Result<Vec<String>, SchemaError> {
+    claimed_values(resolved, "kind").map_err(|problem| claim_error(file, &problem))
 }
 
 /// The error for a definition whose export claims no finite set of kinds.

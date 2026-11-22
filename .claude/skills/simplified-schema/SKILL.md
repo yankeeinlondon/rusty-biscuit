@@ -108,8 +108,14 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   resolver walk reads those winners; the resolved shape has `composition:
   None`, and lowering refuses a shape that still has one. Export writes the
   authored form (`schema/export.rs`), and `$extends` is reserved only in
-  `MappingMode::Object` (a `types` table is `Table`). A composition hop never
-  descends, so a spread/alias-only loop is `NonDescendingCycle`. Rules and
+  `MappingMode::Object` (a `types` table is `Table`, and so is a
+  `schema(mapping)` value, which is how envelope admission judges `types`:
+  `format.rs::SchemaOptions::judge`, `triggers/matcher.rs::scalar_conforms`).
+  Table mode refuses `$constraints` and pattern keys of its own
+  (`simplified/mod.rs::parse_schema_shape`), and `parse_schema_table` /
+  `parse_schema_table_with_source` are its public parsers (DMLS uses them for
+  `schema(mapping)` values, `FrontmatterSchemaValue::table`).
+  A composition hop never descends, so a spread/alias-only loop is `NonDescendingCycle`. Rules and
   errors: [Object Composition](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#object-composition-name-and-extends).
   Tests: `tests/l1/{object_composition,object_composition_export}.rs`.
 - **Templates are passive, resolution replays, and a template type is the
@@ -160,6 +166,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Build from a file (`file` feature) | `try_from_yaml`, `try_from_markdown`, `try_from_json_schema`, `resolve` (by extension), each taking `impl Into<SchemaSource>` |
 | Use a captured context / editor buffer | `SchemaSource::from(path).bound(ctx).with_text(buffer)` |
 | Resolve over every unsaved buffer (targets, imports, examples, unsaved-only files) | `resolve::buffers::with(&SourceBuffers, \|\| …)` (thread-scoped; reads and selection only) |
+| Resolve against a checked bundle's bytes only (listed `./`/`../` members and host built-ins; everything else refused unread) | `resolve::bundle::with(&BundleSources::on_disk(root, bytes)?, \|\| …)` → `(T, BundleReads { attempted, missing, served })`; `BundleSources::embedded(name, bytes)` for a virtual root ([details](../../../simplified-schema/docs/topics/selecting-schema-files.md#resolving-inside-a-bundle)) |
 | Several resolutions in one host operation reading each file once | `resolve::buffers::with_reads_retained(\|\| …)`; read a file you will resolve with `resolve::buffers::read_to_string` (test builds count opens in `observed::Observed::opened`) |
 | One named type as its own schema | `schema.select("Person")` |
 | Resolve a template, drop replaced properties, slot positions and texts | see [templates.md](templates.md#slot-and-template-apis) |
@@ -169,7 +176,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Inspect | `query(path)`, `property`, `properties`, `named_type` → `TypeDefinition`; `FunctionView` |
 | Export | `to_json_schema()`, `to_simplified_yaml()`; `provenance()` lists files read |
 | Lower-level compile once | `Prepared::new(Arc<Value>, base_dir, ctx)` then `validate_strict`/`validate_soft` |
-| Parse only | `parse_yaml_schema`, `parse_schema_declaration`, `parse_property_definition`, `parse_standalone_schema_document` |
+| Parse only | `parse_yaml_schema`, `parse_schema_declaration`, `parse_schema_table`, `parse_property_definition`, `parse_standalone_schema_document` |
 | Lower only | `to_json_schema`, `to_json_schema_with_definitions` (needed once a `TypeExpr::Ref` exists) |
 | Strings a schema claims for a property | `claimed_values(&resolved, "kind")` → `Vec<String>` / `ClaimProblem` |
 

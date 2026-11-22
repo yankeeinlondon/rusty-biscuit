@@ -58,7 +58,7 @@ flowchart TD
 | `roots` | `SchemaRoots::for_document`, the five schema roots of a document's context (`SCHEMAS_DIR`, package, package area, tree root, `~/schemas`) that bare file names and triggers are looked up in; `SchemaSearchRoot`, `SchemaRootKind` |
 | `triggers` | Schema triggers: the `match` grammar, the `kind: schema-trigger` envelope parser and lint, the matcher, discovery in the schema roots (`scan`, `scan_with_embedded`, `scan_with_source`, `TriggerRegistry`), payload assembly, prepared bundles (`prepare_trigger_bundle`), the `dm.schema.invalid_trigger` finding (`SCHEMA_INVALID_TRIGGER_CODE`), and identifying triggers (`admit_identifying_trigger`, `identifies`; see [Identifying Triggers](#identifying-triggers)) |
 | `embedded` | Documents compiled into a binary: `EmbeddedDocument`, a host's reserved namespace (`ShippedSources`), and `EmbeddedSchemaBundle`, a host's trigger bundle |
-| `yaml_documents` | Whole YAML documents: the one loader (`load_yaml_document`, `LoadedYamlDocument`), the kinds a context can select (`KindRegistry`, `KindHost`, `ShippedDefinition`), selection by `kind` or root `$schema` (`select`, `Selection`), and the checks of the language's own kinds (`CHECKED_KINDS`) |
+| `yaml_documents` | Whole YAML documents: the one loader (`load_yaml_document`, `LoadedYamlDocument`), the kinds a context can select (`KindRegistry`, `KindHost`, `ShippedDefinition`), registered hosts' definitions (`RegisteredDefinition`, `RegisteredKinds`), selection by `kind` or root `$schema` (`select`, `select_with_registered`, `Selection`), and the checks of the language's own kinds (`CHECKED_KINDS`) |
 | `validation`, `positions` | `ValidationProblem` and its codes, JSON Pointers, and where a problem sits in its source text (`PositionMap::byte_range`) |
 | `completion`, `frontmatter_shape` | Which definition governs a frontmatter path, and union-aware completion choices |
 | `slots` | Finding the `{{ … }}` slots of a template without evaluating them (`collect_slots`, `has_dynamic`, `reachable_slots`), and the `SLOT_NOT_ALLOWED_IN_KIND_CODE` finding for a slot in a kinded document; see [Slots](./language/slots.md) |
@@ -242,6 +242,71 @@ Darkmatter wraps these with its own `darkmatter:` sources
 (`darkmatter::markdown::schemas::{shipped_sources, kind_host}` and its
 `triggers::scan*` wrappers), so a Darkmatter caller gets exactly the
 resolution Darkmatter uses.
+
+### Registered Definitions: the Lowest Kind Tier
+
+A host can also offer `kind: yaml-schema` definitions that do not live in the
+document's schema roots, such as the definitions a registered host installs.
+These form a separate, lower-priority tier: they can select a document's
+`kind` only when the document's own registry has established that no shipped
+or local definition claims it.
+
+Wrap each definition the host has already resolved in a
+`RegisteredDefinition`, collect them into a `RegisteredKinds`, and select with
+`select_with_registered`:
+
+```rust
+use simplified_schema::yaml_documents::{
+    RegisteredDefinition, RegisteredKinds, RegisteredSource, select_with_registered,
+};
+
+let source = RegisteredSource {
+    host: "claudine".into(),                         // the registered host
+    path: "schemas/action.yaml".into(),              // bundle-relative definition path
+    file: installed.join("schemas/action.yaml"),     // where its text was read
+};
+// `resolved` is the definition's `$schema`, resolved by the host.
+let definition = RegisteredDefinition::new(source, resolved, "claudine@<revision>:schemas/action.yaml")?;
+let registered = RegisteredKinds::new([definition]);
+let selection = select_with_registered(&registry, Some(&registered), &document)?;
+```
+
+The kinds a registered definition claims are read by the same rule as a
+local definition's (its `$schema`'s `kind` declaration), and a definition
+that claims no finite set of kinds fails `RegisteredDefinition::new` with the
+same `SchemaDocument` error, naming `file`.
+
+For a document with a string `kind`, selection runs in this order; the first
+step that decides wins:
+
+```mermaid
+flowchart TD
+    R{a schema root could not be read?} -- yes --> E1[KindSelection: RootUnreadable]
+    R -- no --> L{a shipped or local definition claims the kind?}
+    L -- "one, healthy" --> K1[that definition]
+    L -- "several, or failed" --> E2[KindSelection: Duplicate / Reserved]
+    L -- no --> I{a local definition failed before revealing its kind?}
+    I -- yes --> E3[KindSelection: Unavailable]
+    I -- no --> G{registered definitions claiming the kind}
+    G -- one --> K2[the registered definition]
+    G -- "several different" --> E4[KindSelection: Duplicate]
+    G -- none --> S[root $schema, or not validated]
+```
+
+- A registered definition never shadows a local failure: a kind the local
+  registry cannot rule out stays a `KindSelection` error.
+- A selected kind, registered or not, takes precedence over the document's
+  root `$schema`.
+- Copies of one definition collapse: entries that claim a kind with an equal
+  `sameness` key (the third argument of `RegisteredDefinition::new`, which
+  the host decides, for example from host, revision, and path) count as one
+  claim. Entries with different keys are a `Duplicate`, whose `files` are the
+  definitions' `file`s sorted by host, then definition path.
+- The selected definition's `source()` is
+  `DefinitionSource::Registered(RegisteredSource)`, so the caller learns its
+  host and definition path; its `label()` is `<host>:<path>`.
+- `select(registry, document)` is `select_with_registered(registry, None,
+  document)`.
 
 An `http://` or `https://` schema, import, or example reference is
 `SchemaError::RemoteUnsupported`.

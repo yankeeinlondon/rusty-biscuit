@@ -82,7 +82,10 @@ The value and default rules built on presence are in [defaults.md](defaults.md).
 - Judged parse-only on the authored declaration in `format.rs`
   (`SchemaOptions::judge`, `TypeDefinitionOptions::judge`): reference carriers
   and arms are skipped, named-type alternatives pass `forms` and `container`
-  provisionally.
+  provisionally. A `mapping` carrier parses in `MappingMode::Table` (a
+  `types` table's reading, so its own `$extends` is a name and its own
+  `$constraints` and pattern keys are refused); the trigger
+  matcher skips its bare `schema` check for such an atom so the two agree.
 - `container` is `Constraint::Container` in the grammar and serializer; it
   judges with `simplified::narrowing::container_admission`
   (`Container` / `Provisional` / `NotContainer`); `denotes_container` is true

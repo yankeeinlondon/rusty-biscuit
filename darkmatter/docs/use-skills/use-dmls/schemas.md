@@ -114,7 +114,7 @@ $schema:
 |---|---|---|
 | informal schema (no `kind`) | `$schema` (required), `types`, `description`, `categories` | a `$schema` target |
 | `kind: schema` | `$schema` and/or `types`, `description`, `categories` | a `$schema` target if it has `$schema`; otherwise a **type library** for imports |
-| `kind: schema-trigger` | **only** `kind`, `match`, `$schema` | applies automatically to matching Markdown documents; never named in `$schema` |
+| `kind: schema-trigger` | **only** `kind`, `match`, `$schema`, and optionally `name`, `description`, `types` (local to the trigger) | applies automatically to matching Markdown documents; never named in `$schema` |
 | `kind: yaml-schema` | `kind`, `$schema` (required), `types`, `description`, `categories` | applies automatically to **YAML files** whose `kind` it claims |
 | `.json` | a Draft 2020-12 JSON Schema | a `$schema` target. It validates, but adds no completion or hover |
 

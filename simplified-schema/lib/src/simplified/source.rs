@@ -504,7 +504,31 @@ pub fn parse_schema_declaration_with_source(
     yaml_source: &str,
     source_offset: usize,
 ) -> Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure> {
-    let parsed = parse_schema_declaration_located_as(value, MappingMode::Object).map_err(|failure| {
+    parse_schema_declaration_with_source_as(value, yaml_source, source_offset, MappingMode::Object)
+}
+
+/// [`parse_schema_declaration_with_source`] for a table of named
+/// declarations, as [`parse_schema_table`](super::parse_schema_table) reads
+/// one.
+///
+/// ## Errors
+///
+/// As [`parse_schema_declaration_with_source`].
+pub fn parse_schema_table_with_source(
+    value: &YamlValue,
+    yaml_source: &str,
+    source_offset: usize,
+) -> Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure> {
+    parse_schema_declaration_with_source_as(value, yaml_source, source_offset, MappingMode::Table)
+}
+
+fn parse_schema_declaration_with_source_as(
+    value: &YamlValue,
+    yaml_source: &str,
+    source_offset: usize,
+    mode: MappingMode,
+) -> Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure> {
+    let parsed = parse_schema_declaration_located_as(value, mode).map_err(|failure| {
         locate_definition_failure(failure, value, yaml_source, source_offset)
     })?;
     let located = locate_yaml_value(yaml_source).map_err(unlocated_failure)?;
@@ -915,9 +939,9 @@ impl LocatedSchemaValue {
     /// located entry agrees with `value` node for node, scalar for scalar:
     /// a value that is not what the text says has no proven position.
     ///
-    /// The mapping is read with the frontmatter grammar (comments, tags,
-    /// multi-line quoted scalars, and other keys' presentations around the
-    /// entry are tolerated); only the entry itself must be locatable.
+    /// The mapping is read with the frontmatter grammar (comments, tags, and
+    /// other keys' presentations around the entry are tolerated); only the
+    /// entry itself must be locatable.
     pub(crate) fn locate(mapping_source: &str, key: &str, source_offset: usize, value: &YamlValue) -> Option<Self> {
         let located = locate_yaml_value_with(mapping_source, LocatorGrammar::Tolerant).ok()?;
         let LocatedKind::Mapping(pairs) = located.kind else {
@@ -1147,9 +1171,9 @@ pub struct SchemaValueEntry {
 /// reads that key at column 0 and its siblings as continuation text.
 ///
 /// The grammar is strict: indentless block sequences, literal and folded
-/// block scalars, and plain scalars continued onto more-indented lines are
-/// followed, and every non-comment line must belong to the value. Tags,
-/// multi-line quoted scalars, and empty (null) values are not.
+/// block scalars, quoted scalars and flow collections on one line or several,
+/// and plain scalars continued onto more-indented lines are followed, and
+/// every non-comment line must belong to the value. Tags are not.
 ///
 /// ## Returns
 ///
@@ -1162,9 +1186,8 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
 }
 
 /// [`locate_schema_value`] for a document's frontmatter, which also follows a
-/// multi-line quoted scalar, a tag, and an empty value instead of giving up,
-/// follows a flow collection across lines and past its comments, and does not
-/// require every line to belong to the value.
+/// tag instead of giving up, follows a flow collection past its comments, and
+/// does not require every line to belong to the value.
 ///
 /// Schema documents keep [`locate_schema_value`]'s strict grammar, which
 /// rejects those presentations.
@@ -1231,17 +1254,17 @@ struct SourceLine {
 /// Which YAML presentations [`BlockLocator`] follows.
 ///
 /// Both grammars accept a block sequence aligned with its parent key
-/// (`key:\n- a`), including after a mapping-value anchor, and a plain scalar
-/// continued onto more-indented lines.
+/// (`key:\n- a`), including after a mapping-value anchor, a plain scalar
+/// continued onto more-indented lines, and quoted scalars and flow
+/// collections that cross line breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LocatorGrammar {
     /// The closed schema-document grammar. Every non-comment source line must
     /// belong to the located node, so a presentation the locator does not
     /// model fails instead of leaving lines unread.
     Strict,
-    /// Frontmatter lookup, which also follows tags, multi-line quoted
-    /// scalars, empty (null) values, compact sequence items wider than `- `,
-    /// multi-line flow collections, and comments beside a node.
+    /// Frontmatter lookup, which also follows tags, compact sequence items
+    /// wider than `- `, and comments beside a node.
     Tolerant,
 }
 
@@ -1566,18 +1589,18 @@ impl BlockLocator<'_> {
 }
 
 impl BlockLocator<'_> {
-    /// Locates a value that starts inside a line. A plain scalar continued
-    /// onto more-indented lines is followed and those lines consumed; the
-    /// tolerant grammar also follows block scalars and quoted scalars that
-    /// may span lines. `parent_indent` is the column of the holding mapping
-    /// key or sequence entry.
+    /// Locates a value that starts inside a line. Block scalars, quoted
+    /// scalars, flow collections, and plain scalars continued onto
+    /// more-indented lines are followed and their lines consumed.
+    /// `parent_indent` is the column of the holding mapping key or sequence
+    /// entry.
     fn inline_value(
         &mut self,
         range: Range<usize>,
         parent_indent: usize,
     ) -> Result<LocatedValue, SchemaError> {
         let raw = &self.source[range.clone()];
-        if self.tolerant && raw.starts_with(['[', '{']) {
+        if raw.starts_with(['[', '{']) {
             return self.flow_collection(range.start);
         }
         let continues = self
@@ -1587,13 +1610,12 @@ impl BlockLocator<'_> {
         let multi_line = if self.tolerant {
             is_block_scalar_header(raw) || raw.starts_with(['\'', '"']) || continues
         } else {
-            // A literal or folded block scalar, the form multi-line type
-            // expressions such as `function(...)` signatures are written in,
-            // or a continued plain scalar: a quoted, tagged, anchored, or
-            // aliased first line stays single-line here, so its continuation
-            // lines go unconsumed and the strict grammar rejects the document.
+            // A tagged, anchored, or aliased first line stays single-line
+            // here, so its continuation lines go unconsumed and the strict
+            // grammar rejects the document.
             is_block_scalar_header(raw)
-                || (continues && !raw.starts_with(['\'', '"', '[', '{', '!', '&', '*']))
+                || raw.starts_with(['\'', '"'])
+                || (continues && !raw.starts_with(['!', '&', '*']))
         };
         if !multi_line {
             let grammar = if self.tolerant { LocatorGrammar::Tolerant } else { LocatorGrammar::Strict };
@@ -1623,7 +1645,8 @@ impl BlockLocator<'_> {
         while self.lines.get(self.next).is_some_and(|line| line.content_start <= end) {
             self.next += 1;
         }
-        locate_inline(self.source, start..end + 1, LocatorGrammar::Tolerant)
+        let grammar = if self.tolerant { LocatorGrammar::Tolerant } else { LocatorGrammar::Strict };
+        locate_inline(self.source, start..end + 1, grammar)
     }
 }
 
@@ -1766,12 +1789,32 @@ fn locate_inline(
             kind: LocatedKind::Mapping(pairs),
         });
     }
-    let (scalar, consumed) = yaml_scalar::decode_scalar_at(raw, range.start)
-        .ok_or_else(projection_error)?;
+    let (scalar, end) = if raw.contains(['\n', '\r']) {
+        flow_scalar_across_lines(source, range.clone()).ok_or_else(projection_error)?
+    } else {
+        let (scalar, consumed) = yaml_scalar::decode_scalar_at(raw, range.start)
+            .ok_or_else(projection_error)?;
+        (scalar, range.start + consumed)
+    };
     Ok(LocatedValue {
-        span: range.start..range.start + consumed,
+        span: range.start..end,
         kind: LocatedKind::Scalar(scalar),
     })
+}
+
+/// The scalar authored as the whole of `range`, an entry of a flow
+/// collection that crosses a line break, folded the way YAML folds a flow
+/// scalar. `None` for node properties or an alias, which the single-line
+/// form does not model either, and when the decoded scalar does not end at
+/// `range.end`.
+fn flow_scalar_across_lines(source: &str, range: Range<usize>) -> Option<(DecodedScalar, usize)> {
+    if source[range.clone()].starts_with(['!', '&', '*']) {
+        return None;
+    }
+    // Bounded at the entry's end, a plain scalar stops at the flow indicator
+    // after it. Parent column `0` only rejects a continuation at column zero.
+    let (scalar, end) = yaml_scalar::decode_scalar_node(&source[..range.end], range.start, 0)?;
+    (end == range.end).then_some((scalar, end))
 }
 
 /// One entry of a flow collection, past the comments the tolerant grammar reads
@@ -2999,9 +3042,8 @@ pub fn parse_yaml_schema_with_source(
 /// Projects expression-relative suggestion spans through YAML scalar quoting
 /// and escaping into byte ranges in the caller's source document.
 ///
-/// Plain, single-quoted, and double-quoted YAML scalars are supported, including
-/// a plain scalar continued onto more-indented lines, CRLF input, and UTF-8
-/// text. A projection mismatch is a grammar error rather than a silently
+/// Plain, single-quoted, double-quoted, and block YAML scalars are supported,
+/// including scalars continued across lines, CRLF input, and UTF-8 text. A projection mismatch is a grammar error rather than a silently
 /// approximate range.
 ///
 /// Each suggestion-bearing atom takes the first later scalar in source order
@@ -3223,9 +3265,9 @@ fn projection_error() -> SchemaError {
 /// Every block mapping or sequence value in `source` that may be a type
 /// expression, decoded, in source order.
 ///
-/// A plain scalar continued onto more-indented lines is decoded whole and its
-/// continuation lines are not read again as values of their own; flow
-/// sequences and quoted scalars are read on their first line.
+/// A plain, quoted, or block scalar is decoded whole, across lines, and its
+/// later lines are not read again as values of their own; flow sequences are
+/// read on their first line.
 fn scan_value_scalars(source: &str) -> Vec<DecodedScalar> {
     let mut scalars = Vec::new();
     let mut line_start = 0;
@@ -3285,7 +3327,7 @@ fn mapping_value_offset(line: &str) -> Option<usize> {
 }
 
 /// Decodes the value at `base`, whose first line is `raw`. Returns where a
-/// plain scalar decoded through [`yaml_scalar::decode_scalar_node`] ends.
+/// scalar decoded through [`yaml_scalar::decode_scalar_node`] ends.
 fn scan_value(
     source: &str,
     raw: &str,
@@ -3314,8 +3356,8 @@ fn scan_value(
         }
         return None;
     }
-    let plain = !is_block_scalar_header(raw) && !raw.starts_with(['\'', '"', '{', '!', '&', '*']);
-    if plain && let Some((scalar, end)) = yaml_scalar::decode_scalar_node(source, base, holder) {
+    let node = !raw.starts_with(['{', '!', '&', '*']);
+    if node && let Some((scalar, end)) = yaml_scalar::decode_scalar_node(source, base, holder) {
         out.push(scalar);
         return Some(end);
     }
@@ -3724,6 +3766,18 @@ mod tests {
         ] {
             let span = candidate_span(yaml, 0);
             assert!(yaml[span].contains("caf"), "{yaml:?}");
+        }
+    }
+
+    #[test]
+    fn source_suggestion_spans_follow_quoted_and_block_scalars_across_lines() {
+        for yaml in [
+            "value: 'string(suggest(alpha,\n  gamma))'\nnext: string(suggest(delta))\n",
+            "value: \"string(suggest(alpha,\n  \\\n  gamma))\"\nnext: string(suggest(delta))\n",
+            "value: |-\n  string(suggest(alpha,\n  gamma))\nnext: string(suggest(delta))\n",
+        ] {
+            assert_eq!(suggestion_candidates(yaml, "value"), ["alpha", "gamma"], "{yaml:?}");
+            assert_eq!(suggestion_candidates(yaml, "next"), ["delta"], "{yaml:?}");
         }
     }
 

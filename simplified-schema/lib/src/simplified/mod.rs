@@ -52,14 +52,15 @@ pub use source::{
     SchemaValueEntry, SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
     locate_standalone_definition_failure,
     mapping_separator,
-    parse_property_definition_with_source, parse_schema_declaration_with_source,
+    parse_property_definition_with_source, parse_schema_declaration_with_source, parse_schema_table_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,
 };
 pub use source::locate_frontmatter_value;
 pub(crate) use source::{LocatedSchemaValue, parse_keyed_declaration, project_keyed_declaration_spans};
 pub use standalone::{
-    SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_selected_standalone_schema_document,
-    parse_standalone_schema_document, parse_standalone_schema_document_with_mode,
+    NamespaceSchemaDocument, SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
+    parse_namespace_schema_document, parse_selected_standalone_schema_document, parse_standalone_schema_document,
+    parse_standalone_schema_document_with_mode,
 };
 pub use types::{
     CallExample, CompositionOperand, Constraint, DynamicElement, DynamicKind, DynamicList, ExampleOutcome, Extends, FunctionParameter,
@@ -70,7 +71,7 @@ pub use types::{
 pub use yaml_scalar::alias_search_work;
 pub use yaml_scalar::{
     DecodedScalar, decode_alias_definition, decode_partial_scalar_at, decode_scalar,
-    decode_plain_scalar_node, decode_scalar_at, decode_scalar_node,
+    decode_plain_scalar_node, decode_scalar_at, decode_scalar_node, decode_scalar_node_prefix,
 };
 
 use indexmap::IndexMap;
@@ -100,6 +101,22 @@ pub enum SchemaDeclaration {
 /// grammar.
 pub fn parse_schema_declaration(value: &YamlValue) -> Result<SchemaDeclaration, SchemaError> {
     parse_schema_declaration_located(value).map_err(SchemaError::from)
+}
+
+/// Parses one complete declaration whose outer mapping is a table of named
+/// declarations: a `types` table, or a `schema(mapping)` value.
+///
+/// Each entry is a named declaration, so `$extends` is an ordinary name,
+/// while `$constraints` and pattern keys are refused: a table has no object
+/// of its own for them to apply to. Every entry's mapping is read as a
+/// schema object, exactly as [`parse_schema_declaration`] reads one.
+///
+/// ## Errors
+///
+/// As [`parse_schema_declaration`], plus a [`SchemaError::Grammar`] for a
+/// `$constraints` or pattern key written directly in the table.
+pub fn parse_schema_table(value: &YamlValue) -> Result<SchemaDeclaration, SchemaError> {
+    parse_schema_declaration_located_as(value, MappingMode::Table).map_err(SchemaError::from)
 }
 
 /// A semantic failure from the shared schema parser together with the
@@ -142,8 +159,9 @@ pub(crate) fn parse_schema_declaration_located(
 ///
 /// A schema object reserves `$extends` for composition. A standalone `types`
 /// table is a table of named declarations, where `$extends` is an ordinary
-/// key; only that outer mapping is a table, and every entry value is read as
-/// a schema object again.
+/// key and the object-only `$constraints` and pattern keys are refused; only
+/// that outer mapping is a table, and every entry value is read as a schema
+/// object again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MappingMode {
     /// A schema object mapping.
@@ -421,6 +439,28 @@ fn parse_schema_shape(
         // matching. It is reserved only inside authored schema objects, so it
         // imposes no restriction on user frontmatter data.
         refuse_key_slot(key_str, context, path)?;
+        // A table has no object of its own for these to apply to: in a
+        // `types`-only document they would bind the payload root, and beside
+        // a `$schema` nothing reads them.
+        if mode == MappingMode::Table {
+            let construct = if key_str == "$constraints" {
+                Some("`$constraints`".to_string())
+            } else if types::PatternKey::is_pattern_key(key_str) {
+                Some(format!("pattern key `{key_str}`"))
+            } else {
+                None
+            };
+            if let Some(construct) = construct {
+                return Err(DefinitionFailure::at(&path.property(key_str))(SchemaError::Grammar {
+                    property: key_str.to_string(),
+                    message: format!(
+                        "a `types` table holds named declarations; {construct} belongs inside a declaration's object"
+                    ),
+                    span: 0..0,
+                    related: Vec::new(),
+                }));
+            }
+        }
         if key_str == "$constraints" {
             constraints.append(&mut parse_dollar_constraints(
                 context,

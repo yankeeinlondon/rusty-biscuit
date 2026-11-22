@@ -168,6 +168,14 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
             }
             document.insert("$schema".into(), write_declaration(authored)?);
         }
+        // The factories refuse a namespace schema, so none is ever exported.
+        StandaloneSchemaEnvelope::NamespaceSchema => {
+            return Err(crate::errors::SchemaError::NotASchemaDocument {
+                path: std::path::PathBuf::new(),
+                reason: crate::errors::NotSchemaReason::NamespaceCatalog,
+            }
+            .into());
+        }
         StandaloneSchemaEnvelope::Tagged => {
             document.insert("kind".into(), "schema".into());
             if let Some(categories) = &authored.categories {

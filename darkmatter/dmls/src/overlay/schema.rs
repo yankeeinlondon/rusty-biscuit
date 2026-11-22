@@ -25,7 +25,7 @@ use simplified_schema::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, DocumentTemplate, EffectiveSchema, SiteSchema, darkmatter_base_json_schema_ref, effective_property_shape};
 use simplified_schema::triggers::TriggerRegistry;
 use simplified_schema::{
-    DefKey, Definition, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaAdvisory,
+    Constraint, DefKey, Definition, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaAdvisory,
     SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SchemaRoot, SimplifiedType,
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, ValidationStage, mapping_separator,
 };
@@ -53,6 +53,10 @@ pub struct FrontmatterSchemaValue {
     pub pointer: String,
     /// Every semantic meta-type arm on the effective property definition.
     pub kinds: Vec<MetaSchemaKind>,
+    /// Whether every `schema` arm carries the `mapping` option, so the value
+    /// is a table of named declarations (read as a standalone `types` table
+    /// is) rather than a schema object.
+    pub table: bool,
     /// Document-relative span of the complete authored value.
     pub value_span: Range<usize>,
 }
@@ -247,17 +251,18 @@ pub fn frontmatter_authoring(
         if schema_reference && path.len() > 1 && path[0] == "$schema" {
             continue;
         }
-        let kinds = if schema_reference && path == ["$schema"] {
-            vec![MetaSchemaKind::Schema]
+        let (kinds, table) = if schema_reference && path == ["$schema"] {
+            (vec![MetaSchemaKind::Schema], false)
         } else {
             def_at_path(&shape, &path, definitions)
-                .map(|definition| meta_schema_kinds(&definition, definitions))
+                .map(|definition| (meta_schema_kinds(&definition, definitions), is_schema_table(&definition, definitions)))
                 .unwrap_or_default()
         };
         if !kinds.is_empty() {
             values.push(FrontmatterSchemaValue {
                 pointer: entry.pointer.clone(),
                 kinds,
+                table,
                 value_span: entry.value_span.clone(),
             });
         }
@@ -689,6 +694,33 @@ struct FlowFrame {
 /// inline objects, and constraint lists inside it stay the business of the
 /// shared tolerant type-expression cursor authority.
 pub(crate) fn flow_value_cursor(text: &str, offset: usize) -> Option<FlowCursor> {
+    let frames = flow_frames(text, offset)?;
+    let root_start = frames.first()?.start;
+    // Sequences carry no key of their own, so a cursor in one is authoring the
+    // value of the nearest enclosing mapping entry — the same reading block
+    // presentation gives `key: [a, b`.
+    let mapping = frames.iter().rposition(|frame| frame.mapping)?;
+    let frame = &frames[mapping];
+    Some(FlowCursor {
+        root_start,
+        ancestors: frames[..=mapping].iter().filter_map(|f| f.label.clone()).collect(),
+        key: frame.key.clone()?,
+        value_start: frame.value_start.unwrap_or(offset),
+    })
+}
+
+/// The offset of the `[` opening a flow sequence that holds `offset` and is
+/// itself a block value (no flow mapping encloses it), however many lines
+/// it spans; `None` elsewhere. [`flow_value_cursor`] has no key to report
+/// for such a cursor, which belongs to the block key above the bracket.
+pub(crate) fn block_flow_sequence_start(text: &str, offset: usize) -> Option<usize> {
+    let frames = flow_frames(text, offset)?;
+    let root = frames.first()?;
+    (!frames.iter().any(|frame| frame.mapping)).then_some(root.start)
+}
+
+/// The flow collections enclosing `offset`, outermost first.
+fn flow_frames(text: &str, offset: usize) -> Option<Vec<FlowFrame>> {
     let prefix = text.get(..offset)?;
     let mut frames: Vec<FlowFrame> = Vec::new();
     let mut quote: Option<char> = None;
@@ -789,18 +821,7 @@ pub(crate) fn flow_value_cursor(text: &str, offset: usize) -> Option<FlowCursor>
         }
     }
 
-    let root_start = frames.first()?.start;
-    // Sequences carry no key of their own, so a cursor in one is authoring the
-    // value of the nearest enclosing mapping entry — the same reading block
-    // presentation gives `key: [a, b`.
-    let mapping = frames.iter().rposition(|frame| frame.mapping)?;
-    let frame = &frames[mapping];
-    Some(FlowCursor {
-        root_start,
-        ancestors: frames[..=mapping].iter().filter_map(|f| f.label.clone()).collect(),
-        key: frame.key.clone()?,
-        value_start: frame.value_start.unwrap_or(offset),
-    })
+    Some(frames)
 }
 
 fn note_flow_value_start(frames: &mut [FlowFrame], index: usize) {
@@ -897,6 +918,16 @@ fn meta_schema_kinds(definition: &PropertyDef, definitions: &dyn DefinitionLooku
         }
     }
     kinds
+}
+
+/// Whether `definition` has a `schema` arm and every one carries `mapping`.
+fn is_schema_table(definition: &PropertyDef, definitions: &dyn DefinitionLookup) -> bool {
+    let mut schema_arms = alternatives(definition, definitions)
+        .into_iter()
+        .filter(|atom| matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Schema)))
+        .peekable();
+    schema_arms.peek().is_some()
+        && schema_arms.all(|atom| atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Mapping)))
 }
 
 fn atoms(definition: &PropertyDef) -> &[PropertyAtom] {

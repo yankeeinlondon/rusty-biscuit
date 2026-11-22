@@ -281,6 +281,13 @@ impl Layer {
     ) -> Result<Self, SimplifiedSchemaError> {
         let named = path.clone().unwrap_or_else(|| PathBuf::from(CONTENT));
         if let Some(document) = parse_standalone_schema_document(text, &named)? {
+            if document.envelope == StandaloneSchemaEnvelope::NamespaceSchema {
+                return Err(SchemaError::NotASchemaDocument {
+                    path: named,
+                    reason: crate::errors::NotSchemaReason::NamespaceCatalog,
+                }
+                .into());
+            }
             let authored = AuthoredSchema {
                 declaration: document.declaration,
                 local_types: document.local_types,

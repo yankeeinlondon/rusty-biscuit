@@ -877,6 +877,8 @@ $schema:
 
 `$constraints` (dollar-prefixed, mirroring `$schema`) is **reserved only inside authored schema objects**: it is stripped before shape assembly and never participates in literal/pattern key matching. Flag constraints are written `name: true`. This does **not** reserve `$constraints` in user frontmatter data — only the schema-authoring language uses the sentinel.
 
+A `types` table, and a value typed `schema(mapping)`, is a table of named declarations rather than an object, so `$constraints` written directly in it is a grammar error ("a `types` table holds named declarations; `$constraints` belongs inside a declaration's object"); so is a pattern key such as `"<string>"`. Put the block inside the declaration it constrains: `types: { pair: { "<string>": unknown, $constraints: { max-keys: 1 } } }`.
+
 Key counts judge the value after [defaults are applied](../validation.md#applying-defaults):
 a key a default inserts counts like a written one, so adding a default to a
 property of a counted object can change whether a value passes. Use
@@ -1103,10 +1105,14 @@ mapping the schema grammar reads as an object:
   are rejected. A comma inside one string (`$extends: "a, b"`) is rejected
   with the hint to write a YAML sequence, `[a, b]`.
 - **The `types` table itself is not an object.** `$extends` placed directly
-  under `types:` would be the name of a type, not a directive. Do not use it
-  as a type name: `$` is not an identifier character, so no reference can
-  name it, and the envelope check of a schema file reads the `types` table
-  with the object grammar, so `md schema validate` rejects the file.
+  under `types:` is the name of a type, not a directive, whatever its
+  definition is: `types: { $extends: string }` declares a string type. The
+  envelope check of a schema file reads the table the same way. It is a poor
+  type name all the same: `$` is not an identifier character, so no
+  reference can name it. A mapping entry of the table is an object again, so
+  `types: { order: { $extends: base } }` composes. Unlike `$extends`,
+  `$constraints` and pattern keys directly under `types:` are refused (see
+  [Object Arity Constraints](#object-arity-constraints-min-keys--max-keys)).
 
 ### Which names an operand can use
 

@@ -177,16 +177,17 @@ pub fn locate_schema_declaration_cursor(
     locate_in(&value_source[..relative], value_offset, SchemaSourcePath::root(), true)
 }
 
-/// Locates the authoring state of `cursor` inside a plain scalar already
-/// decoded from `source`, as [`locate_type_definition_cursor`] does for raw
-/// value text.
+/// Locates the authoring state of `cursor` inside a scalar already decoded
+/// from `source`, as [`locate_type_definition_cursor`] does for raw value
+/// text.
 ///
 /// `scalar` is the result of
-/// [`decode_plain_scalar_node`](super::decode_plain_scalar_node) on `source`,
-/// so a value that continues onto later lines is read as YAML folds it and any
-/// anchor or tag before it stays outside every reported range. Use it when the
-/// value cannot be read from a parsed document, such as a definition still
-/// being typed.
+/// [`decode_plain_scalar_node`](super::decode_plain_scalar_node) or
+/// [`decode_scalar_node_prefix`](super::decode_scalar_node_prefix) on
+/// `source`, so a value that continues onto later lines is read as YAML folds
+/// it and any anchor or tag before it stays outside every reported range. Use
+/// it when the value cannot be read from a parsed document, such as a
+/// definition still being typed.
 ///
 /// ## Returns
 ///
@@ -202,8 +203,8 @@ pub fn locate_type_definition_cursor_in_scalar(
     scan_decoded(&scalar.prefix_at(source, cursor)?, 0, SchemaSourcePath::root())
 }
 
-/// [`locate_schema_declaration_cursor`] for a plain scalar already decoded
-/// from `source`; see [`locate_type_definition_cursor_in_scalar`].
+/// [`locate_schema_declaration_cursor`] for a scalar already decoded from
+/// `source`; see [`locate_type_definition_cursor_in_scalar`].
 pub fn locate_schema_declaration_cursor_in_scalar(
     source: &str,
     scalar: &DecodedScalar,
@@ -256,8 +257,8 @@ pub fn locate_composition_operand_cursor(
     operand_decoded(&scalar, value_offset)
 }
 
-/// [`locate_composition_operand_cursor`] for a plain scalar already decoded
-/// from `source`; see [`locate_type_definition_cursor_in_scalar`].
+/// [`locate_composition_operand_cursor`] for a scalar already decoded from
+/// `source`; see [`locate_type_definition_cursor_in_scalar`].
 pub fn locate_composition_operand_cursor_in_scalar(
     source: &str,
     scalar: &DecodedScalar,

@@ -342,7 +342,7 @@ the line of the top-level key it falls under, column 1.
 ## Source-Aware Parsing and Located Failures
 
 An editor or linter that underlines a schema error needs to know *where* the
-rejected text was written, not just what was wrong. Three passive functions
+rejected text was written, not just what was wrong. Four passive functions
 return that location along with the semantic error. None of them reads a
 file, resolves an import, or evaluates anything.
 
@@ -350,11 +350,12 @@ file, resolves an import, or evaluates anything.
 |---|---|---|---|
 | `parse_property_definition_with_source(property, &value, yaml_source, source_offset)` | one property definition | `SourceAware<PropertyDef>` | `LocatedDefinitionFailure` |
 | `parse_schema_declaration_with_source(&value, yaml_source, source_offset)` | one whole declaration, such as a frontmatter `$schema` value | `SourceAware<SchemaDeclaration>` | `LocatedDefinitionFailure` |
+| `parse_schema_table_with_source(&value, yaml_source, source_offset)` | a table of named declarations, such as a value typed `schema(mapping)`, read as a `types` table is | `SourceAware<SchemaDeclaration>` | `LocatedDefinitionFailure` |
 | `locate_standalone_definition_failure(source)` | a whole standalone schema file | — | `Option<LocatedDefinitionFailure>` |
 
 A successful `SourceAware<T>` holds the same `value` the source-free parser
 returns and a `source_map` of authored byte ranges. The source-free parsers
-(`parse_property_definition`, `parse_schema_declaration`, `parse_yaml_schema`)
+(`parse_property_definition`, `parse_schema_declaration`, `parse_schema_table`, `parse_yaml_schema`)
 still return `Result<_, SchemaError>` with the same variants and messages.
 
 A failure carries five fields:
@@ -398,7 +399,7 @@ assert_eq!(&source[failure.authored_span.unwrap()], "nope");
   `tags: []`, a wrong-type arm `tags: [string, 7]`, an aliased value), when
   the presentation is outside the
   [source-aware boundary](language/types.md#source-aware-presentation-boundary) (such as a
-  quoted scalar continued across lines anywhere in the document), or when the
+  tagged scalar continued across lines anywhere in the document), or when the
   authored text does not decode to the parsed value. `value_span` is then the
   rejected value when that can still be located, and `None` otherwise. The
   `error` is always returned; a missing location never hides it.
@@ -416,17 +417,27 @@ envelope or declaration-shape error, including an envelope its definition
 rejects, which `parse_standalone_schema_document` reports inside
 `SchemaError::SchemaDocument`.
 
-For partial input, where no document parses yet, two helpers read a plain
+For partial input, where no document parses yet, these helpers read a
 scalar the way YAML folds it:
 
+- `decode_scalar_node_prefix(source, start, parent_indent, cursor)` decodes
+  the part of the scalar node at `start` written before `cursor`, in every
+  presentation: plain, single- or double-quoted, literal (`|`), and folded
+  (`>`). A quoted scalar is read only up to the cursor, so one whose closing
+  quote has not been typed yet still decodes; for `event: 'base@` followed by
+  the line `  th`, the prefix at the end is `base@ th`. It returns `None`
+  for an alias, a collection, an empty value (whatever follows on later
+  lines is another node), and a cursor outside the scalar (past its closing
+  quote or its last line).
 - `decode_plain_scalar_node(source, start, parent_indent)` decodes the plain
   scalar whose node starts at `start`, after any same-line anchor or tag,
   and returns its decoded map and end offset. It returns `None` for a quoted
   or block scalar, a collection, an alias, a comment, an empty value, and an
   anchor whose scalar starts on a later line.
-- `locate_type_definition_cursor_in_scalar(source, &scalar, cursor)` and
-  `locate_schema_declaration_cursor_in_scalar(source, &scalar, cursor)` are
-  the cursor parsers over that decoded scalar. An anchor or tag never enters
+- `locate_type_definition_cursor_in_scalar(source, &scalar, cursor)`,
+  `locate_schema_declaration_cursor_in_scalar(source, &scalar, cursor)`, and
+  `locate_composition_operand_cursor_in_scalar(source, &scalar, cursor)` are
+  the cursor parsers over a scalar either helper decoded. An anchor or tag never enters
   the reported token. The cursor must sit inside the scalar, at its end, or
   after trailing spaces or tabs on its last line.
 
@@ -447,6 +458,7 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `UnsupportedJsonDialect` | A referenced `.json` file declares a `$schema` dialect other than exactly `https://json-schema.org/draft/2020-12/schema` (an empty string or a trailing `#` included). Carries the `path` and the `declared` text. |
 | `InvalidJsonSchema`     | A referenced `.json` file declares the Draft 2020-12 dialect but fails its meta-schema (checked offline). Distinct from a format rejection. Carries the `path` and the validator's message. |
 | `RemoteUnsupported`     | `http://` / `https://` `$schema` references are rejected in v1.                                           |
+| `BundleBoundary`        | A bundle scope refused a reference that is not a listed member reached by `./` or `../` (see [Selecting a schema file](./selecting-schema-files.md#resolving-inside-a-bundle)). |
 | `SchemaDocument`        | A recognized standalone schema document (informal, `kind: schema`, or `kind: yaml-schema` envelope) fails its envelope definition ([details](#an-envelope-its-definition-rejects)) or has a payload the parser rejects, or a schema document's text is not a schema (not valid YAML or strict JSON, or an untagged `$schema` mapping with an unsupported top-level key, whose message adds the `.json` migration when `$schema` is a `json-schema.org` URI); carries the document `path`, and, for a rejected definition, the typed cause as `source` and its byte `span` in the supplied text ([details](#a-rejected-definition-in-a-schema-document)); an envelope rejection carries a `span` and no `source`. |
 | `FrontmatterShape`      | `$schema` is present but is not a mapping, sequence, or string.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
@@ -487,7 +499,7 @@ the document's `kind` has no single usable definition. `cause` is a
 
 | Cause | Meaning |
 |---|---|
-| `Duplicate { files }` | Two or more definitions claim the kind; every file is named, sorted by path. |
+| `Duplicate { files }` | Two or more definitions claim the kind; every file is named, sorted by path (registered definitions, which are consulted only for a kind no shipped or local definition claims, sorted by host, then definition path). |
 | `Reserved { file, defect }` | The one definition claiming the kind failed; `defect` is its failure. |
 | `Unavailable { file, defect }` | No healthy definition claims the kind, and `file` failed before revealing what it claims. |
 | `RootUnreadable { root, defect }` | A folder searched for definitions could not be read. |

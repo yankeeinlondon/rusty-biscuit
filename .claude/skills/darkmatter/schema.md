@@ -1308,9 +1308,10 @@ completion, hover, and `dm.expression.*` diagnostics.
 
 Source spans come from one locator in `simplified/source.rs` with two
 grammars. Strict (schema documents) and tolerant (frontmatter) share
-indentless sequences, plain scalars continued onto more-indented lines, and
-literal/folded block scalars; only tolerant follows tags, quoted
-continuations, and empty values. Strict fails unless every non-comment line belongs to the value, and
+indentless sequences, plain scalars continued onto more-indented lines,
+literal/folded block scalars, quoted scalars and flow collections that cross
+line breaks, and empty values; only tolerant follows tags and comments inside
+a flow collection. Strict fails unless every non-comment line belongs to the value, and
 checks each decoded scalar against `serde_yaml_ng` before projecting. A
 source-aware slice must start at a line boundary (indentation included) or be
 dedented, because indentation decides where a continuation ends; DMLS widens
@@ -1363,9 +1364,21 @@ restricted to plain scalars (same-line tags/anchors skipped; quoted, block,
 flow, alias, comment, empty, and later-line-property values are `None`, and
 so is a value whose start is a line break: content on later lines is another
 node); use it, not a prefix blacklist, to recognize a continuable plain
-holder. `locate_type_definition_cursor_in_scalar` /
-`locate_schema_declaration_cursor_in_scalar` (`cursor.rs`) read a completion
-cursor through that decoded map, so anchors and tags stay outside the edited
+holder. `decode_scalar_node_prefix` (`yaml_scalar.rs`) is the editor's
+reader of a holder in any presentation (plain, quoted even before the closing
+quote, literal, folded) up to the cursor; DMLS's `continued_scalar_cursor`
+(type definitions) and `composition_value` (`$extends` scalars and block
+items) both use it, the latter before the standalone-model fallback so a
+continued `$extends` never reaches ordinary type keywords. It also picks the
+holder: DMLS's `scalar_holders` takes the outermost earlier candidate line
+whose scalar reaches the cursor, so a `key:`, `- `, or `#` line inside a
+quoted or block scalar is content, never a mapping entry, item, or comment
+(`line_cursor`, `composition_value`, `continued_value_anchor`, and ordinary
+`schema_completion` all ask it before reading the line's own key).
+`locate_type_definition_cursor_in_scalar` /
+`locate_schema_declaration_cursor_in_scalar` /
+`locate_composition_operand_cursor_in_scalar` (`cursor.rs`) read a completion
+cursor through either decoded map, so anchors and tags stay outside the edited
 token; a cursor is accepted inside the scalar, at its end, or after trailing
 spaces/tabs on its last line, and nowhere else.
 

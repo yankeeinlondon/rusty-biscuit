@@ -220,10 +220,21 @@ pub(super) fn is_open(path: &Path) -> bool {
 /// ## Errors
 ///
 /// The file read's I/O error; [`std::io::ErrorKind::PermissionDenied`] when
-/// a [`guarded`] scope refuses `path`.
+/// a [`guarded`] scope refuses `path`, or a [`bundle`](super::bundle) scope
+/// in force lists no member at it (a listed member's verified bytes are
+/// served instead of any buffer or file).
 pub fn read(path: &Path) -> std::io::Result<Vec<u8>> {
     if !permitted(path) {
         return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the host refused the read"));
+    }
+    if let Some(served) = super::bundle::read(path) {
+        let bytes = served?;
+        if RECORDING.with_borrow(|frames| !frames.is_empty())
+            && let Ok(text) = std::str::from_utf8(&bytes)
+        {
+            record(path, &Arc::from(text));
+        }
+        return Ok(bytes);
     }
     if let Some(text) = text(path) {
         record(path, &text);

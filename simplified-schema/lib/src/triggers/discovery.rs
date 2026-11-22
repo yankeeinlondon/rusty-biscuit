@@ -17,6 +17,13 @@
 //!   filesystems.
 //! - The first root wins by trigger **filename** with no merging; a shadowed
 //!   file is never evaluated.
+//! - A `name` label is unique within one root and within one embedded
+//!   bundle, judged over every file there before shadowing: each
+//!   `kind: schema-trigger` file and each `types`-only `kind: schema` file
+//!   that declares a valid `name`. Every participant of a duplicate is an
+//!   [`InvalidTriggerFinding`] located at its `name`, and no participant
+//!   is installed as a trigger. A shadowed file is read for its `name` and
+//!   nothing else.
 //! - A file whose `kind` is absent or a string other than `schema-trigger`
 //!   is silently ignored. A file that claims the envelope but is malformed,
 //!   one claiming it with the spelling before the rename, and a null or
@@ -195,6 +202,16 @@ pub struct LoadedTrigger {
 }
 
 impl LoadedTrigger {
+    /// The trigger as a human diagnostic names it: `name (source)` when its
+    /// envelope declares a `name`, its source alone otherwise.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match &self.envelope.name {
+            Some(name) => format!("{name} ({})", self.source),
+            None => self.source.to_string(),
+        }
+    }
+
     /// A trigger read from the file `path` outside schema-root discovery (a
     /// host registration names it), with `text` the bytes the caller read
     /// and parsed into `envelope`. Its payload resolves from `path`'s folder
@@ -303,14 +320,21 @@ impl TriggerRegistry {
         let mut skipped = Vec::new();
         // Asked only once a document survives filename selection.
         let mut prepared: Option<Option<&'static super::prepared::PreparedTriggerBundle>> = None;
+        let embedded = |name: &str| TriggerSource::Embedded { bundle: bundle.name().to_string(), name: name.to_string() };
+        let mut duplicated = BTreeSet::new();
+        for (label, documents) in duplicate_bundle_names(&bundle) {
+            for document in &documents {
+                let text = bundle.files().iter().find(|(file, _)| file == document).map_or("", |(_, text)| *text);
+                let others: Vec<String> = documents.iter().filter(|other| *other != document).cloned().collect();
+                skipped.push(duplicate_name_finding(embedded(document), text, &label, &others));
+                duplicated.insert(document.clone());
+            }
+        }
         for (name, text) in bundle.sorted_files() {
-            if self.claimed_names.contains(name) {
+            if self.claimed_names.contains(name) || duplicated.contains(name) {
                 continue;
             }
-            let source = TriggerSource::Embedded {
-                bundle: bundle.name().to_string(),
-                name: name.to_string(),
-            };
+            let source = embedded(name);
             let descriptor = bundle.prepared();
             let served = descriptor
                 .and_then(|descriptor| *prepared.get_or_insert_with(|| (descriptor.provider)()))
@@ -336,7 +360,7 @@ impl TriggerRegistry {
                     };
                     loaded.push((trigger, payload));
                 }
-                Err(cause) => skipped.push(InvalidTriggerFinding::new(source, cause)),
+                Err(cause) => skipped.push(InvalidTriggerFinding::new(source, cause).with_name(static_declared_name(text))),
             }
         }
         // A programmatic registry resolves payloads on demand; keep its
@@ -507,6 +531,84 @@ fn load_embedded_trigger(
         .or_default()
         .push((reads, loaded.clone()));
     Ok(loaded)
+}
+
+// ── Name labels ─────────────────────────────────────────────────────────────
+
+/// The `name` label `text` declares, read leniently: a string `name` on a
+/// `kind: schema-trigger` document or on a `kind: schema` document without
+/// a `$schema` export (a `types`-only library) that is a valid name
+/// ([`super::envelope::is_valid_name`]). `None` for every other document,
+/// including text that is not YAML; an invalid name is its envelope's
+/// failure, never a label.
+pub(crate) fn declared_name(text: &str) -> Option<String> {
+    // Most schema files declare no label; skip their YAML parse.
+    if !text.contains("name") {
+        return None;
+    }
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).ok()?;
+    let map = value.as_mapping()?;
+    let labeled = match map.get("kind").and_then(serde_yaml_ng::Value::as_str)? {
+        super::envelope::ENVELOPE_KIND => true,
+        "schema" => map.get("$schema").is_none_or(serde_yaml_ng::Value::is_null),
+        _ => false,
+    };
+    let name = map.get("name")?.as_str().filter(|name| super::envelope::is_valid_name(name))?;
+    labeled.then(|| name.to_string())
+}
+
+/// [`declared_name`] of a bundle document's `'static` text, memoized for
+/// the process by the text's address.
+fn static_declared_name(text: &'static str) -> Option<String> {
+    type Memo = std::sync::Mutex<HashMap<(usize, usize), Option<String>>>;
+    static NAMES: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
+    let key = (text.as_ptr() as usize, text.len());
+    let memo = NAMES.get_or_init(Default::default);
+    if let Some(name) = memo.lock().expect("declared name memo poisoned").get(&key) {
+        return name.clone();
+    }
+    let name = declared_name(text);
+    memo.lock().expect("declared name memo poisoned").insert(key, name.clone());
+    name
+}
+
+/// The labels `declared` holds more than once, in order of first
+/// declaration, each with its participants in declaration order.
+fn duplicates<T: Clone + PartialEq>(declared: Vec<(T, String)>) -> Vec<(String, Vec<T>)> {
+    let mut groups: Vec<(String, Vec<T>)> = Vec::new();
+    for (participant, label) in declared {
+        match groups.iter_mut().find(|(seen, _)| *seen == label) {
+            Some((_, participants)) => participants.push(participant),
+            None => groups.push((label, vec![participant])),
+        }
+    }
+    groups.retain(|(_, participants)| participants.len() > 1);
+    groups
+}
+
+/// The labels two or more of `bundle`'s documents declare, each with the
+/// document names declaring it in sorted file order.
+pub(crate) fn duplicate_bundle_names(bundle: &EmbeddedSchemaBundle) -> Vec<(String, Vec<String>)> {
+    let declared = bundle
+        .sorted_files()
+        .into_iter()
+        .filter_map(|(name, text)| static_declared_name(text).map(|label| (name.to_string(), label)))
+        .collect();
+    duplicates(declared)
+}
+
+/// The finding for `source`, one of the files declaring `label`, located at
+/// its `name` in `text`; `others` are the other participants.
+fn duplicate_name_finding(source: TriggerSource, text: &str, label: &str, others: &[String]) -> InvalidTriggerFinding {
+    let others = others.iter().map(|other| format!("`{other}`")).collect::<Vec<_>>().join(", ");
+    let cause = SchemaError::TriggerMatch {
+        message: format!("`name`: `{label}` is also declared by {others} in the same schema source; every file declaring it is ignored"),
+        span: None,
+    };
+    let positions = super::envelope::TriggerSourcePositions::new(text);
+    let cause = super::envelope::locate_trigger_error(cause, &positions);
+    InvalidTriggerFinding::new(source, cause).located_in(&positions).with_name(Some(label.to_string()))
 }
 
 // ── Per-root file enumeration ───────────────────────────────────────────────
@@ -760,12 +862,38 @@ pub fn scan_with_source(
     crate::note_work!(TriggerDiscovery);
     let roots = SchemaRoots::for_document(context)?;
 
-    // Apply filename shadowing: the first root wins by filename.
+    // Apply filename shadowing: the first root wins by filename. Labels are
+    // judged per root first, over the files shadowing will drop too.
     let mut first_by_name: HashMap<String, PathBuf> = HashMap::new();
     let mut unshadowed: Vec<(RootFile, &Path)> = Vec::new();
     let mut shadowed: Vec<ShadowedFile> = Vec::new();
+    let mut texts: HashMap<PathBuf, std::sync::Arc<str>> = HashMap::new();
+    let mut labels: HashMap<PathBuf, String> = HashMap::new();
+    let mut findings: Vec<InvalidTriggerFinding> = Vec::new();
+    let mut duplicated: BTreeSet<PathBuf> = BTreeSet::new();
     for root in roots.searched() {
-        for path in source.root_files(&root.path)? {
+        let files = source.root_files(&root.path)?;
+        let mut declared = Vec::new();
+        for path in &files {
+            let text = source.root_file_text(path)?;
+            if let Some(label) = declared_name(&text) {
+                labels.insert(path.clone(), label.clone());
+                declared.push((path.clone(), label));
+            }
+            texts.insert(path.clone(), text);
+        }
+        for (label, participants) in duplicates(declared) {
+            for path in &participants {
+                let others: Vec<String> = participants
+                    .iter()
+                    .filter(|other| *other != path)
+                    .map(|other| other.display().to_string())
+                    .collect();
+                findings.push(duplicate_name_finding(TriggerSource::File(path.clone()), &texts[path], &label, &others));
+                duplicated.insert(path.clone());
+            }
+        }
+        for path in files {
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
@@ -788,9 +916,15 @@ pub fn scan_with_source(
     // current document matches it.
     let mut triggers: Vec<LoadedTrigger> = Vec::new();
     let mut payloads = Vec::new();
-    let mut findings: Vec<InvalidTriggerFinding> = Vec::new();
     for (file, pattern_cwd) in &unshadowed {
-        let content = source.root_file_text(&file.path)?;
+        if duplicated.contains(&file.path) {
+            continue;
+        }
+        let content = match texts.remove(&file.path) {
+            Some(content) => content,
+            None => source.root_file_text(&file.path)?,
+        };
+        let label = labels.remove(&file.path);
         let trigger_source = TriggerSource::File(file.path.clone());
         let envelope = match parse_trigger_envelope_from_str(&content) {
             // Not a schema trigger — silently ignored.
@@ -801,7 +935,7 @@ pub fn scan_with_source(
                 // and the finding's line share a single map.
                 let positions = super::envelope::TriggerSourcePositions::new(&content);
                 let cause = super::envelope::locate_trigger_error(cause, &positions);
-                findings.push(InvalidTriggerFinding::new(trigger_source, cause).located_in(&positions));
+                findings.push(InvalidTriggerFinding::new(trigger_source, cause).located_in(&positions).with_name(label));
                 continue;
             }
         };
@@ -822,7 +956,8 @@ pub fn scan_with_source(
             }
             Err(cause) => findings.push(
                 InvalidTriggerFinding::new(trigger.source, cause)
-                    .with_observations(observed.read.into_iter().collect(), observed.searched.into_iter().collect()),
+                    .with_observations(observed.read.into_iter().collect(), observed.searched.into_iter().collect())
+                    .with_name(trigger.envelope.name.clone()),
             ),
         }
     }

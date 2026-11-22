@@ -345,6 +345,60 @@ pub fn resolve_authored_yaml_schema(
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
+    resolve_authored_with_types(value, owner, None, authored, base_dir, schema_roots, request_context, shipped)
+}
+
+/// [`resolve_authored_yaml_schema`] for a trigger file `trigger`'s
+/// `$schema` value beside its `types` table, `types`: an inline payload
+/// names those types as its own, and no other file can reach them.
+///
+/// ## Errors
+///
+/// As [`resolve_authored_yaml_schema`], plus the parser's error for a
+/// `types` value that is not a table of named types.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_trigger_payload_value(
+    value: &YamlValue,
+    types: Option<&YamlValue>,
+    trigger: &Path,
+    authored: Option<&AuthoredSchemaValue>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let types = types.map(parse_trigger_types).transpose()?;
+    resolve_authored_with_types(
+        value,
+        InlineOwner::Trigger(trigger),
+        types.as_ref(),
+        authored,
+        base_dir,
+        schema_roots,
+        request_context,
+        shipped,
+    )
+}
+
+/// A trigger's `types` table as the named types its payload resolves with.
+pub(crate) fn parse_trigger_types(types: &YamlValue) -> Result<SchemaShape, SchemaError> {
+    match crate::simplified::parse_schema_table(types)? {
+        SchemaDeclaration::Schema(SchemaRoot::Single(shape)) => Ok(shape),
+        _ => Err(SchemaError::FrontmatterShape { message: "a trigger's `types` must be a mapping of named types".into() }),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_authored_with_types(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    local_types: Option<&SchemaShape>,
+    authored: Option<&AuthoredSchemaValue>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
     let located = authored.and_then(|authored| authored.locate(value));
     let kept = located.as_ref().and(authored).map(|authored| crate::slots::pending::AuthoredText {
         value: Arc::new(match owner {
@@ -354,11 +408,12 @@ pub fn resolve_authored_yaml_schema(
         document: matches!(owner, InlineOwner::Document),
     });
     resolving_entry(
-        || resolve_owned_value(value, owner, located.as_ref(), base_dir, schema_roots, request_context, shipped),
+        || resolve_owned_value(value, owner, local_types, located.as_ref(), base_dir, schema_roots, request_context, shipped),
         kept,
         || {
             let value = value.clone();
             let located = located.clone();
+            let local_types = local_types.cloned();
             let trigger = match owner {
                 InlineOwner::Document => None,
                 InlineOwner::Trigger(path) => Some(path.to_path_buf()),
@@ -368,7 +423,7 @@ pub fn resolve_authored_yaml_schema(
             let context = request_context.clone();
             Arc::new(move || {
                 let owner = trigger.as_deref().map_or(InlineOwner::Document, InlineOwner::Trigger);
-                resolve_owned_value(&value, owner, located.as_ref(), &base_dir, &schema_roots, &context, shipped)
+                resolve_owned_value(&value, owner, local_types.as_ref(), located.as_ref(), &base_dir, &schema_roots, &context, shipped)
             })
         },
     )
@@ -425,10 +480,13 @@ fn resolving_entry(
     }
 }
 
-/// [`resolve_yaml_schema_owned_by`] without the template handle.
+/// [`resolve_yaml_schema_owned_by`] without the template handle;
+/// `local_types` are the named types an inline mapping names as its own.
+#[allow(clippy::too_many_arguments)]
 fn resolve_owned_value(
     value: &YamlValue,
     owner: InlineOwner<'_>,
+    local_types: Option<&SchemaShape>,
     located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
@@ -450,6 +508,7 @@ fn resolve_owned_value(
         YamlValue::Mapping(_) => resolve_inline_mapping(
             value,
             owner,
+            local_types,
             located,
             base_dir,
             schema_roots,
@@ -477,13 +536,16 @@ pub fn resolve_catalog_declaration(
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_inline_mapping(value, InlineOwner::Document, None, base_dir, &[], request_context, shipped)
+    resolve_inline_mapping(value, InlineOwner::Document, None, None, base_dir, &[], request_context, shipped)
 }
 
-/// Resolves the inline `$schema` mapping `value` authored by `owner`.
+/// Resolves the inline `$schema` mapping `value` authored by `owner`, with
+/// `local_types` as its named types when given.
+#[allow(clippy::too_many_arguments)]
 fn resolve_inline_mapping(
     value: &YamlValue,
     owner: InlineOwner<'_>,
+    local_types: Option<&SchemaShape>,
     located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
@@ -508,7 +570,7 @@ fn resolve_inline_mapping(
     };
     let (mut schema, imports, default_files) = expand_imports(
         schema,
-        None,
+        local_types,
         base_dir,
         owner.root(),
         &SchemaSourcePath::root(),
@@ -1135,6 +1197,7 @@ fn load_guarded_in_context(
         | SchemaError::InvalidCompositionTarget { .. }
         | SchemaError::CompositionReference { .. }
         | SchemaError::ComposedMember { .. }
+        | SchemaError::BundleBoundary { .. }
         | SchemaError::Aggregate { .. } => SchemaError::ReferencedSchema {
             path: canonical.clone(),
             source: Box::new(source),
@@ -1353,15 +1416,18 @@ pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<Stand
 /// [`parse_standalone_schema_document`] for a file named as a `$schema`
 /// target or a `Name@file` import source, where a `kind: yaml-schema`
 /// document is refused as selected by `kind`
-/// ([`NotSchemaReason::SelectedByKind`]), whether or not its envelope is
-/// well formed: naming it is the mistake to report. Hosts reading a
+/// ([`NotSchemaReason::SelectedByKind`]) and a `kind: namespace-schema`
+/// document as a catalog input ([`NotSchemaReason::NamespaceCatalog`]),
+/// whether or not its envelope is well formed: naming it is the mistake to
+/// report. Hosts reading a
 /// referenced file themselves (an editor's import catalog) use this too.
 ///
 /// ## Errors
 ///
 /// As [`parse_standalone_schema_document`], plus
 /// [`SchemaError::NotASchemaDocument`] with
-/// [`NotSchemaReason::SelectedByKind`].
+/// [`NotSchemaReason::SelectedByKind`] or
+/// [`NotSchemaReason::NamespaceCatalog`].
 pub fn parse_referenced_schema_document(
     text: &str,
     path: &Path,
@@ -1380,13 +1446,17 @@ pub fn parse_referenced_schema_document_with_mode(
     path: &Path,
     mode: PreparationMode<'_>,
 ) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
-    let selected_by_kind = || SchemaError::NotASchemaDocument {
-        path: path.to_path_buf(),
-        reason: NotSchemaReason::SelectedByKind,
+    let refused = |envelope| {
+        let reason = match envelope {
+            StandaloneSchemaEnvelope::YamlSchema => NotSchemaReason::SelectedByKind,
+            StandaloneSchemaEnvelope::NamespaceSchema => NotSchemaReason::NamespaceCatalog,
+            StandaloneSchemaEnvelope::Pure | StandaloneSchemaEnvelope::Tagged => return None,
+        };
+        Some(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason })
     };
     match crate::simplified::parse_standalone_schema_document_with_mode(text, path, mode) {
-        Ok(Some(document)) if document.envelope == StandaloneSchemaEnvelope::YamlSchema => Err(selected_by_kind()),
-        Err(_) if crate::simplified::standalone::claims_yaml_schema(text) => Err(selected_by_kind()),
+        Ok(Some(document)) => refused(document.envelope).map_or(Ok(Some(document)), Err),
+        Err(error) => Err(crate::simplified::standalone::claimed_envelope(text).and_then(refused).unwrap_or(error)),
         other => other,
     }
 }
@@ -1822,6 +1892,20 @@ pub fn prepare_embedded_inline_schema_with_mode(
     shipped: ShippedSources,
     mode: PreparationMode<'_>,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    prepare_embedded_inline_with_types(value, None, importer, documents, bundle, shipped, mode)
+}
+
+/// [`prepare_embedded_inline_schema_with_mode`] with `local_types` as the
+/// mapping's named types: an embedded trigger's `types` table.
+pub(crate) fn prepare_embedded_inline_with_types(
+    value: &YamlValue,
+    local_types: Option<&SchemaShape>,
+    importer: &str,
+    documents: &[EmbeddedDocument<'_>],
+    bundle: &str,
+    shipped: ShippedSources,
+    mode: PreparationMode<'_>,
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let schema = parse_yaml_schema(value)?;
     if matches!(schema, SchemaRoot::Union(_)) {
         return Err(SchemaError::SchemaDocument {
@@ -1831,7 +1915,7 @@ pub fn prepare_embedded_inline_schema_with_mode(
             span: None,
         });
     }
-    lower_embedded_schema(schema, None, importer, documents, bundle, Sharing::Automatic, shipped, mode)
+    lower_embedded_schema(schema, local_types, importer, documents, bundle, Sharing::Automatic, shipped, mode)
 }
 
 /// [`prepare_embedded_inline_schema`] for one global catalog declaration,
@@ -3790,6 +3874,7 @@ pub(crate) fn rehome_atom_examples(
                     }
                     _ => resolve_example_path(reference, base_dir, this_file, schema_roots, request_context, searched)?,
                 };
+                bundle::note_rehomed(&path);
                 if let Some(resolved) = path.to_str() {
                     *reference = resolved.to_string();
                 }
@@ -3836,6 +3921,9 @@ pub(crate) fn rehome_atom_examples(
 /// the given path when canonicalization fails (it should not, since the path
 /// was just resolved on disk).
 pub fn canonical_path(path: &Path) -> PathBuf {
+    if let Some(identity) = bundle::identity(path) {
+        return identity;
+    }
     biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
@@ -5026,6 +5114,7 @@ fn resolve_one_example(
             read
         }
     };
+    bundle::check_example(reference, &path, &bytes)?;
     let object = super::example::validate_example_bytes(reference, &bytes)?;
     // Layer 3: the example's `returns` must match the property it annotates.
     // Applied here (not inside the byte cache) so the same file validated
@@ -7639,6 +7728,7 @@ mod reserved_namespace {
 mod searched_tests;
 
 pub mod buffers;
+pub mod bundle;
 mod composition;
 mod graph;
 mod inspect;
