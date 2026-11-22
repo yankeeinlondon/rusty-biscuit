@@ -3,9 +3,84 @@ kind: plan
 total-phases: 6
 created: 2026-11-22
 status: planned
-phase: 1
+phase: 2
 agent: codex/gpt-6.2-sol
 yolo: true
+packages:
+- simplified-schema
+- darkmatter
+- darkmatter-cli
+- darkmatter-lsp
+- claudine
+- claudine-cli
+source_files_during_phase_1:
+- simplified-schema/schemas/namespace-schema.yaml
+- simplified-schema/schemas/schema-trigger.yaml
+- simplified-schema/schemas/schema.yaml
+- simplified-schema/lib/generated/shipped.json
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/bundle.rs
+- simplified-schema/lib/src/resolve/buffers.rs
+- simplified-schema/lib/src/resolve/select.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/shipped/registry.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/triggers/assemble.rs
+- simplified-schema/lib/src/triggers/discovery.rs
+- simplified-schema/lib/src/triggers/envelope.rs
+- simplified-schema/lib/src/triggers/finding.rs
+- simplified-schema/lib/src/triggers/mod.rs
+- simplified-schema/lib/src/triggers/prepared.rs
+- simplified-schema/lib/src/yaml_documents/mod.rs
+- simplified-schema/lib/src/yaml_documents/registry.rs
+- simplified-schema/lib/src/yaml_documents/select.rs
+- simplified-schema/lib/tests/l1/bundle_resolution.rs
+- simplified-schema/lib/tests/l1/kind_envelopes.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/shipped_artifacts.rs
+- simplified-schema/lib/tests/l1/yaml_kind_selection.rs
+- darkmatter/schemas/darkmatter-host.yaml
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/registration/bundle.rs
+- darkmatter/lib/src/config/registration/manifest.rs
+- darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+- darkmatter/lib/src/markdown/output/command/data.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/l1/host_registration_snapshot.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+- darkmatter/lib/tests/l1/yaml_kind_registry.rs
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/dmls/src/providers/frontmatter/schema_value_hover.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/schema/shipped.rs
+- claudine/lib/tests/l1/invalid_trigger_findings.rs
+- claudine/cli/tests/l1/invalid_trigger_warnings.rs
+docs_updated_during_phase_1:
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/selecting-schema-files.md
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/cli/clean.md
+- darkmatter/dmls/docs/diagnostics.md
+- claudine/docs/topics/schemas.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/SKILL.md
+- darkmatter/docs/use-skills/use-dmls/schemas.md
 ---
 
 # Host registration v2 implementation plan
@@ -54,24 +129,24 @@ Start on the tree containing the completed `2026-11-22-object-composition` prere
 
 16. **Debounce only registration work.** Extend `dmls/src/overlay/hosts.rs::HostRegistrations` with a deadline and generation per existing configuration key, retaining the last `InstalledHosts` while dirty. Drive deadlines from the router loop and send work through its existing registry worker. Watch events reset the deadline across batches, and save fallback queues the same input refresh. Stamp `HostPreparation` and `PreparedHosts` with the generation; ignore stale completions and start the latest job after its deadline. Keep watch inputs for failures and refresh watch coverage after every accepted completion. Use effective revision and diagnostic comparison separately so a watch/fingerprint-only change needs no document analysis; a broken or repaired view updates diagnostics and invalidates affected Markdown and YAML contracts. Include the installed host version in `YamlContractStore::key` and pass the same loaded view to off-thread YAML preparation. Keep the ordinary trigger, document, and config invalidation paths on their current schedules. Existing `HostRegistrations::{begin,install,invalidate_paths}`, `RegistryQueue` in `router.rs`, and `workspace/watch.rs::schema_watch_registration` provide these seams. The spec's approximate file count gives no duration measurement. Run the one Phase 5 sample on Linux; no broader performance spike is part of this feature.
 
-- [ ] **Fixture bootstrap**
+- [x] **Fixture bootstrap**
   - Restore compile-time fixture inputs before the Phase 2 and 3 checkpoints. Point the existing includes of the deleted `claudine/schemas/sequence-types.yaml` in SimplifiedSchema's `shipped_corpus.rs`, Darkmatter CLI's `claudine_schema_bundle.rs`, and DMLS's `claudine_schema_discovery.rs` at the checked-in `darkmatter/lib/benches/fixtures/claudine-schemas/sequence-types.yaml` for those intermediate runs. Phase 4 moves these live test consumers to the v2 inventory. Claudine's own deleted-file imports are fixed by its Phase 4 embed cutover and stay outside the earlier test targets.
 
 ### Wave 1
 
-- [ ] **Kind envelopes**
+- [x] **Kind envelopes**
   - Own SimplifiedSchema kind files, `envelope.rs`, and the trigger envelope/discovery/prepared label path. Add per-root duplicate diagnostics, trigger-local type tests, and namespace exclusion from ordinary schema-target selection. Exercise the prerequisite by resolving a library import through `$extends` and asserting inherited property provenance.
-- [ ] **Manifest envelope**
+- [x] **Manifest envelope**
   - Own `darkmatter/schemas/darkmatter-host.yaml` and `config/registration/manifest.rs`. Add the v2 reader, normalized member specification, raw manifest locations, and the upgrade diagnostic. Implement initial manifest shape tests using the public loader once the snapshot task lands.
 
 ### Wave 2
 
-- [ ] **Bundle resolver**
+- [x] **Bundle resolver**
   - Own SimplifiedSchema resolution and read scopes. Implement the disk and embedded bundle inputs from Rules 3–4. Exercise static imports, nested object composition, payload indirection, examples, and permission-checked template results through the registered loader in Phase 2.
-- [ ] **YAML claims**
+- [x] **YAML claims**
   - Own SimplifiedSchema `yaml_documents/{registry,select}.rs`. Add the pre-resolved definition constructor and unclaimed-lookup seam while preserving the existing public selection entry point. Prove built-in and local error precedence through that entry point.
 
-- [ ] **Verified snapshot**
+- [x] **Verified snapshot**
   - Wire Phase 1 outputs in `config/registration/{bundle.rs,manifest.rs}` and `registration.rs`. Implement normalized paths, byte table, digest verification, one retry, and revision identity. Add deterministic read controls in the fixture loader to prove changed-manifest retry, unchanged-manifest refusal, and two releases never being combined. Keep refusal paths for missing inputs. Use focused nextest verification of the new source and loader tests at the Phase 2 checkpoint.
 
 ## Phase 2 — Passive host profiles
