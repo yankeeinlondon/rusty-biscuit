@@ -32,9 +32,7 @@ reviewed: true
 reviewed-by: "codex/gpt-6.2-sol"
 reviewed-on: "2026-11-22"
 review-iterations: 0
-needs-rulings: true
-required-rulings:
-    - Whether new dry-run errors may stop a real sequence before its first task
+needs-rulings: false
 ---
 
 # Better errors and a diagnostic dry run
@@ -138,14 +136,19 @@ the new checks need to preserve.
 
 ## Goals
 
-- `claudine sequence <file> --dry-run` reports every finding it can establish
-  passively, grouped by task. Findings that establish a failure exit with
-  status 1. Usage errors have their own exit status.
-- A dry run of `claudine sequence`, `compose`, or `inline-compose` has no side effects: no
-  shell, no network, no provider, no file write, no prompt.
-- A real run reuses the checks for its existing preflight failures and
-  reports independent problems it can prove. Advancing failures currently
-  found during task execution needs an [author decision](#open-questions).
+- `claudine sequence <file> --dry-run` gives as many insights as it can. It
+  composes everything that cannot mutate anything, catches every error as a
+  finding, and reports all of them together, grouped by task. It exits `0`
+  when it observed no problem and `2` when it observed any error or warning.
+- A dry run of `claudine sequence`, `compose`, or `inline-compose` runs no
+  shell command, launches no provider, writes no file, fires no lifecycle
+  event, and never prompts.
+- A user who runs `--dry-run` never gets the standard error report. Every
+  failure, including one that would abort a real run, is a finding in the
+  dry-run report.
+- A real run keeps its existing stop points. Where it already stops at
+  preflight, it reports every preflight problem together instead of the
+  first one.
 - Every finding and error follows one message standard: what, where, why, and
   how to fix it.
 - Darkmatter shares document findings across `md`, its language server
@@ -315,7 +318,8 @@ replaces it.
 
 ### Blocking
 
-Claudine dry runs fail on error-severity findings. `md compose` keeps its
+A Claudine dry run blocks nothing: it exits `2` when it observed any error
+or warning (see [Exit status](#exit-status)). `md compose` keeps its
 reference recoveries, warning policy, and disabled operations. Recovering
 a missing transclusion still uses `dm.reference.missing_transclusion` and
 produces the same result as today. New policy-addressable warnings join
@@ -326,49 +330,72 @@ the existing catalog.
 ### What the user does
 
 ```sh
-claudine sequence _fleet.yaml --dry-run           # check, then preview if clean
-claudine sequence _fleet.yaml --dry-run --json    # the check as data, for CI
+claudine sequence _fleet.yaml --dry-run           # every observation, plus a preview of what composed
+claudine sequence _fleet.yaml --dry-run --json    # the same observations as data, for CI
 ```
 
-### Two stages
+### The principle
+
+**A dry run gives as many insights as possible without mutating anything.**
+It composes as much as it can, including evaluating expression functions,
+which are not allowed to mutate the file system. It skips only what can
+mutate: shell commands and the other effects listed below. An error met along
+the way is caught and recorded as a finding, and the walk goes on, so one
+problem never hides the next.
 
 ```mermaid
 flowchart TD
-    A[Check the document without effects] --> B{Errors or JSON requested?}
-    B -- Yes --> D[Emit the report and return its exit status]
-    B -- No --> E[Render the checked preview]
-    E --> G[Emit one report and show the preview on success]
+    A[Check the task tree] --> B[Compose each task<br/>everything except mutating effects]
+    B --> C[Catch every error as a finding<br/>and continue with the next task]
+    C --> D[Print the report and the preview of what composed]
+    D --> E{any error or warning?}
+    E -- no --> F[exit 0]
+    E -- yes --> G[exit 2]
 ```
 
-Both stages allow local read-only inspection through the invocation's
-existing context and permissions. Neither stage runs a command or provider,
-requests network access, writes a file or cache, fires a lifecycle event,
-asks a question, or starts background work such as pre-warming. Enter the
-dry-run branch before staged initialization, source-shell execution,
-approval, or effectful preparation. When a command would produce the
-sequence list, report the list as deferred and its children as unchecked.
+### What runs and what does not
 
-The check stage runs the passive evaluation needed to discover document
-failures and retains the result for preview. JSON and human mode use
-the same verdict. The preview stage formats the checked result. If it
-cannot render the preview, report the formatting failure, withhold
-partial preview output, and exit 1. Track deferred values through authored
-syntax so a placeholder cannot become an executable, a path to resolve, a schema value,
-or a false condition.
-
-| Construct | In the preview |
+| Construct | In a dry run |
 |---|---|
-| Frontmatter `$(…)`, `::shell`, and command-backed sequence sources | Show the authored construct and mark it as skipped. Keep dependent expressions pending. |
-| Remote includes and data reads, including `load_data` and schema slots | Mark the authored site as deferred. Check syntax and settled policy only. Apply the existing permission gate to local reads, and leave values pending when they need approval. |
-| A missing input | Keep the placeholder and mark it as missing. |
-| `shell:` or `side_effect:` tasks | Describe the planned operation without dispatching it. |
-| Task guards, loops, runtime schemas, and preparation output | Describe them without entering a task, evaluating runtime state, or invoking interactive preparation. Show a Markdown `::block` with an unknown condition as conditional. |
+| Expressions (`{{ … }}`) and expression functions, `::block when=`, `::map`, `::filter` | Evaluated, as in a real run. |
+| Local reads (`::file`, `::code`, `prologue:`/`epilogue:`, local `load_data`, schema slots) | Read under the existing file-read permission. A read that would need approval is not prompted for; it is an `info` finding ("needs read approval; a real run asks"), and content that depends on it is not checked. |
+| Remote reads (the same constructs with a URL) | Fetched when the captured `network` permission already allows it. Under `ask`, not fetched: an `info` finding ("needs network approval; a real run asks"). Under `deny`, the same refusal a real run reports, as an error finding. |
+| Frontmatter `$( … )`, `::shell`, and a command-backed sequence source | Not run. Shown as written and marked skipped. Checks that depend on their output are `not checked`; a command-backed sequence list leaves its children unchecked. |
+| `shell:` and `side_effect:` tasks | Described, not dispatched. |
+| Lifecycle events (`initialize`, `start`, …) | Do not fire. Values they would write are `not checked` where a later check needs them. |
+| Provider launch, `edit`, `prep` targets, messaging, speech and pre-warming | Not run. |
+| A missing input | Never prompted for. The placeholder stays in the preview, marked missing, and the input is a finding. |
+| Task guards, loops, runtime schemas | Described without entering a task or evaluating runtime state. A `::block` whose condition depends on a skipped value is shown as conditional. |
+| Caches | Nothing is written. Dry-run results stay out of the normal composition caches. |
 
-Use Darkmatter's existing request context, authored syntax, and effect
-classifications. Enforce passive mode at the shared dispatch boundaries
-for commands, remote reads, schema slots, and other effectful calls so a
-nested document or callback cannot reactivate an effect. Keep passive preview
-results out of normal composition caches.
+Enforce this at Darkmatter's shared dispatch boundaries for commands,
+remote reads, schema slots, and other effectful calls, using its existing
+effect classifications, so a nested document or callback cannot turn an
+effect back on (**Darkmatter**-owned). An expression function the catalog
+classifies as effectful is not called and is reported as skipped. Enter the
+dry-run branch before staged initialization, source-shell execution, or
+approval. Track skipped values through authored syntax, so a placeholder can
+never become an executable, a path to resolve, a schema value, or a false
+condition.
+
+### The preview
+
+The preview shows each task that composed, in order. A task that could not
+compose shows its findings in place of its preview, and the tasks after it
+are still previewed. A failure while rendering one task's preview is a
+finding for that task. With `--json`, composition still runs (it is how the
+findings are found), but no preview text is printed.
+
+### Never the standard error report
+
+Under `--dry-run`, nothing reaches the CLI's standard error report (the
+`StatusBlock` error rendering a failed real run prints). Every failure is a
+finding in the dry-run report, in both the human and the JSON form. That
+includes a root document that cannot be read or parsed, an invalid
+configuration, a schema that fails to load, and an unexpected internal error
+caught at the dry-run boundary (reported as `internal.bug` with its message).
+The one exception is a command-line usage error such as an unknown flag,
+which clap reports with its usage message before any dry run starts.
 
 **`--dry-run-shell` is removed** from `sequence`, `compose`, and
 `inline-compose`. Whenever interpreted as a Claudine option, it is a usage
@@ -403,10 +430,10 @@ reparse the same document.
 | Check that normally has an effect | In the check pass |
 |---|---|
 | A frontmatter value written as `$( … )` | Not run. A check that needs its value is reported as `not checked` ("depends on a shell expansion"). |
-| A remote `::file` or `::code` URL | Check syntax and settled policy. A settled refusal is an error. An available approval is pending, and remote content remains unchecked. |
+| A remote `::file` or `::code` URL | Fetched when `network` already allows it. A settled refusal is an error. A fetch that would need approval is an `info` finding, and its content remains unchecked. |
 | A provider's installed state | Reuse read-only PATH and configuration observations. Skip process-backed version probes and catalog refreshes. |
 | A model a provider requires | Read from flags, environment variables, and the provider's config file (reading a file is passive). |
-| Missing required inputs | Judged against frontmatter prepared with shells disabled (`prepare_sequence_document_values`), never by composing. No prompt is shown. |
+| Missing required inputs | Judged by the same value preparation a real run uses, with shell expansions skipped. No prompt is shown. An input whose value depends on a skipped command is `not checked`. |
 | Shell command approval | Not asked: a dry run runs no command, so it approves none. A real run asks as today. |
 | A task `when:` guard and an inline container's `$schema` | Not evaluated, as today. The task is checked as if it runs. |
 | A value only known at launch (`seq.*`, `loop.*`, a runtime `set`) | Record the dependent check as unchecked. Static values in those scopes can still be checked when prediction proves them. |
@@ -438,9 +465,13 @@ report formats.
 
 | Situation | Exit |
 |---|---|
-| No error-severity finding (the preview, if run, succeeded) | `0` |
-| At least one error-severity finding | `1`, after the full report is printed |
-| Usage error (for example `--json` without `--dry-run`, or the removed `--dry-run-shell`) | `2` |
+| No problem observed: the report holds only `info` findings, or none | `0` |
+| At least one `error` or `warning` finding, including any failure caught during the dry run | `2`, after the full report is printed |
+| Usage error (an unknown flag, `--json` without `--dry-run`, or the removed `--dry-run-shell`) | `2`, from clap's usage message, with no report |
+
+A script tells a usage error from observed problems by the output: a usage
+error prints clap's message on stderr and no report (and, with `--json`, no
+JSON on stdout). A dry run never exits `1`.
 
 ### Report formats
 
@@ -450,8 +481,9 @@ when known, and fix. List unchecked checks together under their subject and
 end with counts. Use biscuit-terminal components and existing stream-based
 plain rendering. Keep stdout available for the command's existing preview.
 
-`--json` requires `--dry-run`. It emits one report on stdout and skips the
-preview. Keep document load and parse failures inside that report. Usage
+`--json` requires `--dry-run`. It emits one report on stdout and prints no
+preview text. Every failure, including a document that cannot be loaded or
+parsed, stays inside that report. Usage
 errors stay on stderr and emit no JSON. The report shares `file`,
 `outcome`, and diagnostic records with Darkmatter's
 [document output](../../../darkmatter/docs/cli/data-contracts.md).
@@ -473,8 +505,15 @@ the report once, and return the typed preflight error described in
 On successful preflight, print new advisory warnings before the first task.
 Let real prompts resolve eligible input and provider gaps, then recheck
 findings that depended on their answers. Preserve closed approval on retry,
-the frozen plan, and task order. Advancing additional runtime failures to
-preflight requires the [author decision](#open-questions).
+the frozen plan, and task order.
+
+**A real run keeps its existing stop points** (decided 2026-11-22). A
+problem a real run meets only at a task's turn, such as a later prompt that
+composes to an empty body, still surfaces at that turn through that task's
+lifecycle. It is not moved to preflight, because root `initialize` and
+earlier tasks can create the files and values later tasks need, and because
+moving it would change which lifecycle handler sees it. `--dry-run` is where
+an author sees every problem up front.
 
 ### Other commands
 
@@ -720,7 +759,7 @@ Before: see [the motivating sessions](#the-motivating-sessions).
 After (`--dry-run`, stderr redirected, plain layout):
 
 ```text
-Checking renderers/_fleet.yaml (passive: nothing runs)
+Dry run of renderers/_fleet.yaml (no commands run)
 
 task find (sequence[0])
   ⚠ `agent: opencode` is step data (read as `seq.agent`), not the task's provider
@@ -745,23 +784,23 @@ task metadata (sequence[1])
       hint: add an executable such as `prompt: ./metadata.md`
   ℹ not checked: provider, inputs (no executable)
 
-Check failed: 2 errors, 2 warnings, 3 checks not run. Preview skipped.
+Dry run found 2 errors and 2 warnings; 3 checks not run. Previewed 1 of 2 tasks.
 ```
 
 The numbered chain shows today's links. Once `2026-11-18-ergonomic-sequences`
 lands, the same finding lists that spec's defined and default links instead,
 in its order.
 
-Exit status `1`. On a terminal, the provider finding is a warning ("an
-interactive run asks you to choose") and the exit status depends only on the
-`metadata` error.
+Exit status `2`. The preview of `find`'s composed prompt follows the report
+on stdout. On a terminal, the provider finding is a warning ("an interactive
+run asks you to choose"); the exit status is `2` either way.
 
 ### Run 2
 
 After (same conditions, `metadata` now has `prompt: ./_frontmatter.md`):
 
 ```text
-Checking renderers/_fleet.yaml (passive: nothing runs)
+Dry run of renderers/_fleet.yaml (no commands run)
 
 task find (sequence[0])
   … the same three findings as Run 1 …
@@ -774,7 +813,7 @@ task metadata (sequence[1])
       hint: create renderers/_frontmatter.md before a real run, or correct the reference
   ℹ not checked: provider, inputs (the prompt file could not be read)
 
-Check failed: 2 errors, 2 warnings, 3 checks not run. Preview skipped.
+Dry run found 2 errors and 2 warnings; 3 checks not run. Previewed 1 of 2 tasks.
 ```
 
 The find findings are no longer hidden behind the missing file.
@@ -897,7 +936,7 @@ this spec.
 - `darkmatter/docs/errors/composition-problems.md`: the new stopping rule
   (collect across families) and `dm.compose.empty_body`.
 - `darkmatter/docs/cli/compose.md` and `validate.md`: the shared report.
-- The Darkmatter library docs for the passive compose option (what it leaves
+- The Darkmatter library docs for the dry-run compose option (what it leaves
   unexpanded and how it marks it).
 - `darkmatter/docs/topics/schemas/dmls-schema-support.md`: removed keys,
   near-miss suggestions, and related locations.
@@ -953,15 +992,27 @@ produces none, so a check cannot pass by firing on everything.
   first displayed row differs from the old primary failure. Check all
   lifecycle fields, including the persisted result, against the prior
   behavior. Cover an earlier `initialize` or task writing a value or file
-  needed later, as governed by the [author decision](#open-questions).
+  needed later: the real run still succeeds, because it keeps its stop
+  points, while the dry run reports the dependent check as not checked.
 
 ### Exit status and passivity
 
-- Test exit 0 for a successful check, 1 for document failures, and 2 for
-  usage failures. Assert stream separation and a single parseable JSON
-  result for successful checks and document failures. Verify preview
-  suppression after an error and when JSON was requested.
-- Use separate preview-eligible and blocked fixtures. Cover each command's
+- Test exit 0 when only `info` findings (or none) are observed, 2 when any
+  error or warning is, and 2 with clap's usage message and no report for a
+  usage error. A dry run never exits 1. Assert stream separation and a single
+  parseable JSON result for every non-usage outcome, including an unreadable
+  root document and an invalid configuration.
+- Never the standard error report: for every failure fixture under
+  `--dry-run`, assert that stderr holds no standard `StatusBlock` error
+  report, only the dry-run report.
+- The preview continues past a failed task: a fixture whose second of three
+  tasks fails to compose previews the first and third.
+- Expressions run: a fixture whose body reads `file_exists(...)` and a
+  `::block when=` over a literal composes as in a real run.
+- Network follows permission: with a loopback responder, `network: allow`
+  fetches, `ask` records an `info` finding with no request, `deny` reports
+  the real run's refusal.
+- Use separate fixtures for each kind of effect. Cover each command's
   effect-capable entry points, including shell-frontmatter and body
   directives, a command-backed sequence source, a `shell:` task, remote
   includes and data/schema reads, and an input that would prompt in a real
@@ -1019,9 +1070,10 @@ Each task is labeled with the package that owns it.
   `composition.selection_key_as_data`, and `composition.provider_unresolved`
   with the recorded chain; route sequence references through the Darkmatter
   builder.
-- **Darkmatter:** the passive compose option: `$( … )`, `::shell`, and remote
-  fetches are left as written and marked, and missing inputs keep their
-  placeholders.
+- **Darkmatter:** the dry-run compose option: expressions evaluate;
+  `$( … )`, `::shell`, and effectful functions are left as written and
+  marked; reads follow the captured permissions without prompting; missing
+  inputs keep their placeholders; every failure is returned as a finding.
 - **Claudine:** ship the passive check and preview flow for all three
   document commands together. Include missing-input and model checks,
   removal of `--dry-run-shell`, `--json`, and the exit contracts. The real
@@ -1055,30 +1107,23 @@ Each task is labeled with the package that owns it.
 - **Darkmatter:** apply the standard to any reference or schema message the
   scoped snapshot guard still flags.
 
+## Decisions
+
+Recorded 2026-11-22, after review.
+
+1. **A dry run gives as many insights as possible.** It composes everything
+   that cannot mutate, including expression functions; skips shell commands
+   and other mutating effects; catches every error as a finding; and never
+   shows the standard error report. See [The principle](#the-principle).
+2. **Exit status.** `0` when no error or warning was observed, `2` when one
+   was. Usage errors also exit `2`, with clap's message and no report.
+3. **Network reads follow the captured permission.** `allow` fetches, `ask`
+   becomes an `info` finding instead of a prompt, `deny` is the real run's
+   refusal.
+4. **A real run keeps its existing stop points.** It reports every preflight
+   problem together where it already stops at preflight, and moves nothing
+   else forward. See [A real run uses the same checks](#a-real-run-uses-the-same-checks).
+
 ## Open questions
 
-### Should a newly detected dry-run error stop a real sequence before its first task?
-
-A dry run can find an empty prompt or a missing reference in a later task.
-Today some failures are discovered only at that task's turn. Moving them to
-preflight changes which lifecycle handler sees the failure. It can also
-prevent earlier tasks from creating the missing file or supplying a value.
-
-- **Keep the existing real-run failure points.** Dry run reports static
-  problems with their scope. Real runs collect more detail for existing
-  preflight failures and preserve recovery and task order. A static
-  dry-run error can still describe a problem a real run could avoid by
-  changing its inputs during execution.
-- **Advance only failures proven independent of earlier tasks.** Some
-  structural problems stop a run before it does unnecessary work. This
-  requires an explicit list and changes when lifecycle handlers see even
-  those errors.
-- **Make every proven dry-run error a real-run preflight blocker.** A static
-  fixture gets the closest agreement between the two reports. This requires
-  a new lifecycle contract and can stop sequences that prepare data or files
-  as they run.
-
-**Recommendation** — Keep the existing real-run failure points. Each
-diagnostic can still explain what the check could prove from today's
-inputs. Real sequences keep the order in which they prepare inputs and
-handle failures.
+None.
