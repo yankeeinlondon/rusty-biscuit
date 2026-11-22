@@ -24,8 +24,8 @@ not support:
 
 ```yaml
 kind: schema-trigger
-name: Memory Trigger
-description: TODO
+title: Memory Trigger
+notes: TODO
 match:
 ```
 
@@ -34,7 +34,7 @@ document goes to stdout, and stderr carries one warning naming the trigger,
 the reason, and that it was ignored:
 
 ```text
-ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: schema-trigger envelope supports only `kind`, `match`, and `$schema`; found unknown keys: name, description
+ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: schema-trigger envelope supports only `kind`, `name`, `description`, `match`, `$schema`, and `types`; found unknown keys: title, notes
 ```
 
 The warning blames the trigger, never the document being composed, and it is
@@ -105,8 +105,9 @@ file's kind checks cover the trigger grammar: `$path` globs, an empty `match`
 list, a vacuous match, `min-match` count bounds, and match-safe conditions
 (see [Kind Checks](./definition.md#kind-checks)); which keys the file may
 have is its definition's question alone. Discovery for a Markdown document
-loads a trigger with the trigger parser, which accepts only `kind`, `match`,
-and `$schema`. Validate a trigger file
+loads a trigger with the trigger parser, which accepts only `kind`, `name`,
+`description`, `match`, `$schema`, and `types`, and refuses an explicit `null`
+for `name`, `description`, and `types`. Validate a trigger file
 with `md schema validate`, which exits `1` and reports the
 problem as `"kind": "kind_check"` in JSON. DMLS publishes the same check on
 the open trigger file as a `dm.schema.kind_check` error on the quoted glob

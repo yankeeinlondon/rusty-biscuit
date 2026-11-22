@@ -24,6 +24,7 @@ use super::discovery::TriggerSource;
 pub struct InvalidTriggerFinding {
     source: TriggerSource,
     identity: TriggerSource,
+    name: Option<String>,
     cause: Arc<SchemaError>,
     cause_path: Option<PathBuf>,
     position: Option<(usize, usize)>,
@@ -69,6 +70,7 @@ impl InvalidTriggerFinding {
         Self {
             source,
             identity,
+            name: None,
             cause: Arc::new(cause),
             cause_path,
             position,
@@ -98,10 +100,35 @@ impl InvalidTriggerFinding {
         self
     }
 
+    /// This finding for a file whose `name` label is `name`, so its human
+    /// message shows `name (path)`.
+    #[must_use]
+    pub(crate) fn with_name(mut self, name: Option<String>) -> Self {
+        self.name = name;
+        self
+    }
+
     /// The skipped trigger: a schema-root file or an embedded bundle document.
     #[must_use]
     pub fn source(&self) -> &TriggerSource {
         &self.source
+    }
+
+    /// The valid `name` label the skipped file declares; it may be the
+    /// duplicated name the cause reports.
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// The file as a human diagnostic names it: `name (source)` for a
+    /// labeled file, its source alone otherwise.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match &self.name {
+            Some(name) => format!("{name} ({})", self.source),
+            None => self.source.to_string(),
+        }
     }
 
     /// The trigger's full identity: its normalized path (see
@@ -157,17 +184,17 @@ impl InvalidTriggerFinding {
         Self::SOURCE
     }
 
-    /// The one-line explanation: the trigger, that it was ignored, and why.
+    /// The one-line explanation: the trigger (as [`Self::label`]), that it
+    /// was ignored, and why.
     #[must_use]
     pub fn message(&self) -> String {
         let reason = reason(&self.cause);
+        let label = self.label();
         match &self.cause_path {
-            Some(path) if !reason.contains(&path.display().to_string()) => format!(
-                "ignoring invalid schema trigger {}: {reason} (in {})",
-                self.source,
-                path.display()
-            ),
-            _ => format!("ignoring invalid schema trigger {}: {reason}", self.source),
+            Some(path) if !reason.contains(&path.display().to_string()) => {
+                format!("ignoring invalid schema trigger {label}: {reason} (in {})", path.display())
+            }
+            _ => format!("ignoring invalid schema trigger {label}: {reason}"),
         }
     }
 }
@@ -177,6 +204,7 @@ impl PartialEq for InvalidTriggerFinding {
     fn eq(&self, other: &Self) -> bool {
         self.source == other.source
             && self.identity == other.identity
+            && self.name == other.name
             && self.cause_path == other.cause_path
             && self.position == other.position
             && self.cause.to_string() == other.cause.to_string()
@@ -203,7 +231,8 @@ fn reason(cause: &SchemaError) -> String {
 /// for a reference written in the trigger, the import whose types were
 /// searched. An unresolved template names the file defining its first slot
 /// written in a file, and a refused slot value its slot's file. Variants without a typed path name none: a missing reference
-/// (`NoMatch`, `Unresolved`) has no file to point at, and a chain or count
+/// (`NoMatch`, `Unresolved`) or a bundle-refused one (`BundleBoundary`,
+/// whose target was never read) has no file to point at, and a chain or count
 /// (`ReferenceCycle`, `ImportCycle`, `Aggregate`) is spelled out in the
 /// message instead.
 fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
@@ -259,6 +288,7 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         | SchemaError::Unresolved { .. }
         | SchemaError::NoMatch { .. }
         | SchemaError::RemoteUnsupported { .. }
+        | SchemaError::BundleBoundary { .. }
         | SchemaError::Baseline { .. }
         | SchemaError::BuildValidator { .. }
         | SchemaError::FrontmatterShape { .. }

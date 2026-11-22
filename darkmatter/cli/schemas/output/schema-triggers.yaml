@@ -30,6 +30,7 @@ types:
         message: string(required)
     trigger:
         source: string(required)
+        name: string -> the trigger's `name` label; null when it declares none
         matched: boolean(required)
         pending: boolean(required) -> the payload holds schema slots; it resolves only for a matching document
         conditions: condition[](required)

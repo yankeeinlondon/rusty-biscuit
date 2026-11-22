@@ -116,7 +116,7 @@ but a document they accept can still be rejected by the parser (see
 | [`document.yaml`](../../schemas/document.yaml) | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that both `claudine.yaml` and `inline-compose.yaml` import, so the two triggers declare them identically |
 | [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model` (exactly the documents identified as Claudine's); types `initialize`, `cancelled`, and `finalize` on those documents; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
-| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, `$state`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
+| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, `$state`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` or `kind: sequence`; requires `sequence` |
 
 Three of the eight are triggers; the other five are libraries. A library
 reaches a document only through a trigger's imports, so the eight files work
@@ -179,8 +179,9 @@ can reject it:
 | `prompt: "write it"` with `sequence: [a, b]` | applies | — | a sequence is not an inline document (`sequence.yaml` applies too) |
 | `prompt: "write it"` with `sequence: { a: 1 }` | applies | — | invalid: `sequence` is a list or a file reference (`sequence.yaml`) |
 
-`sequence.yaml` selects every document with a non-null `sequence`, so a
-sequence document with no other control is judged too:
+`sequence.yaml` selects every document with a non-null `sequence` or
+`kind: sequence`, so a sequence document with no other control is judged
+too, and it requires `sequence`:
 
 | Frontmatter | `sequence.yaml` | Verdict |
 |---|---|---|
@@ -189,6 +190,7 @@ sequence document with no other control is judged too:
 | `sequence: { tasks: [a] }` | applies | invalid: `sequence` is a list or a file reference |
 | `sequence: 42` or `sequence: true` | applies | valid to the schema, which coerces a top-level number or boolean to text; the sequence parser rejects it before anything runs |
 | `sequence: null`, or no `sequence` | — | no sequence trigger |
+| `kind: sequence` with no `sequence` | applies | invalid: `sequence` is required |
 | `fail_fast: true` beside `sequence:` | applies | invalid at `/fail_fast`: a sequence document has no `fail_fast` |
 | `fail_fast: null` beside `sequence:` | applies | valid to the schema; the sequence parser rejects any root `fail_fast`, null included, before anything runs |
 
@@ -1329,7 +1331,7 @@ CLI skips that one trigger, applies the valid ones as usual, and prints one
 warning for it before the provider starts:
 
 ```text
-warning: [schema_validation] ignoring invalid schema trigger /home/me/schemas/memory.yaml: invalid schema-trigger: found unknown keys: name, description
+warning: [schema_validation] ignoring invalid schema trigger /home/me/schemas/memory.yaml: invalid schema-trigger: found unknown keys: title, notes
 ```
 
 - **One warning per trigger per invocation.** Claudine loads a document's

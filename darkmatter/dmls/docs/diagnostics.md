@@ -357,7 +357,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
   the reason, and that it was ignored, the same text `md` prints:
 
   ```text
-  ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: schema-trigger envelope supports only `kind`, `match`, and `$schema`; found unknown keys: name, description
+  ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: schema-trigger envelope supports only `kind`, `name`, `description`, `match`, `$schema`, and `types`; found unknown keys: title, notes
   ```
 
   A closed envelope's warning sits at the start of the file, or at the start
