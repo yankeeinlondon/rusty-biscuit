@@ -3,9 +3,31 @@ kind: plan
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 1
+phase: 2
 agent: codex/gpt-6.2-sol
 yolo: true
+source_files_during_phase_1:
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/yaml_documents/semantic.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/object_composition.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/named_types.rs
+- darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+- darkmatter/lib/tests/l1/schemas_source_projection.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+- simplified-schema
+- darkmatter
+- darkmatter-lsp
 ---
 
 # Object composition implementation plan
