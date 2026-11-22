@@ -1,7 +1,7 @@
 ---
 kind: feature
 created: 2026-11-22
-status: human-in-the-loop
+status: finalized-spec
 area: simplified-schema
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -31,9 +31,7 @@ reviewed: true
 reviewed-by: "codex/gpt-6.2-sol"
 reviewed-on: "2026-11-22"
 review-iterations: 0
-needs-rulings: true
-required-rulings:
-    - Decide whether to allow a recursive cycle that includes both a composition reference and a child value.
+needs-rulings: false
 ---
 
 # Object composition with `...spread` and `$extends`
@@ -201,8 +199,26 @@ recursive named object can be a composition target if the composition
 reference stays outside the recursive cycle. For example, extending
 `node: "{ children: node[] }"` with `label: string` adds a label to the
 receiving object while its `children` still contain the original `node`
-type. See [Open Questions](#open-questions) for cycles that contain a
-composition reference as well as a child-value reference.
+type.
+
+A cycle that contains a composition reference **and** a child-value
+reference is allowed, under the same rule as ordinary recursion: every loop
+must descend into a child value at least once.
+
+```yaml
+types:
+    base:   "{ children: branch[] }"
+    branch: "{ ...base, label: string }"
+```
+
+Resolving `branch` needs only the member set of `base` (its property names
+and their declarations, with `children` kept as a reference to `branch`),
+not an expansion of the child type. Checking a document then reaches
+`branch` again only on a smaller value. So the resolver assembles an
+object's member set without expanding recursive child references, and
+keeps each winning member's origin, including across files. The same rule
+applies through aliases and cross-file composition. A loop made only of
+composition and alias hops is still the error in the table above.
 
 ### Output and callers
 
@@ -249,38 +265,6 @@ diagnostics and property completions through the existing dependency tracking.
   Host registration and its import restrictions are defined in
   `2026-11-22-host-registration-v2`.
 
-## Open Questions
-
-### Should a recursive cycle be allowed to pass through composition?
-
-```yaml
-types:
-    branch: "{ ...base, label: string }"
-    base: "{ children: branch[] }"
-```
-
-Computing the keys of `branch` only requires the keys of `base`. Checking a
-child then returns to `branch` on a smaller value. The current recursion
-rule relies on that descent. Supporting the example requires the resolver
-to assemble object shapes without expanding child references indefinitely.
-
-- **Allow the cycle if every loop descends into a child value.** This keeps
-  the existing recursion rule and lets a reusable base describe children
-  of the finished type. It requires resolving the object's member set
-  independently of recursive child definitions and preserving the winning
-  member's origin across files.
-- **Reject cycles containing any composition hop.** This keeps the first
-  implementation simpler and still lets an object copy members from an
-  independently recursive base. It adds a restriction specific to
-  composition and forces authors to repeat fields or change the model
-  when children need the finished type.
-
-**Recommendation:** Allow productive cycles under the existing child-value
-rule. The two parts can be resolved separately because copying an object's
-member set need only retain a reference to the child's definition. Cover
-both the productive example above and a direct composition loop that must
-fail. Apply the same rule to aliases and to composition across files.
-
 ## Documentation to update
 
 - Explain both forms, duplicate and override behavior, pattern keys, object
@@ -312,6 +296,10 @@ fail. Apply the same rule to aliases and to composition across files.
   members would be replaced.
 - Pattern replacement, overlap, catch-alls, and literal precedence. Check
   that receiver constraints apply to the final shape.
+- Recursion through composition: the `base`/`branch` cycle above resolves
+  and validates nested children, the same cycle split across two files
+  does too, and a loop of only composition and alias hops fails with the
+  reference chain.
 - Compare a composed schema with a handwritten equivalent through JSON
   Schema output, strict and soft validation, and subtype checks. Round-trip
   the authored YAML. Verify that composition leaves normal recursion and
