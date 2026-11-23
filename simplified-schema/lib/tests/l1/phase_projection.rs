@@ -42,3 +42,27 @@ fn an_object_document_projects_into_every_arm_of_an_effective_root_union() {
     assert_eq!(merged["$defs"]["topic"], json!({"type": "string"}), "the projected body replaces its counterpart");
     assert_eq!(merged["$defs"]["kept"], json!({"type": "number"}), "a layer-only definition is kept");
 }
+
+#[test]
+fn a_union_document_projects_into_the_cross_product_of_a_host_union() {
+    // Host arms major: effective arm `k` holds document arm `k % 2`.
+    let arm = |host: &str, document: &str| {
+        json!({
+            "type": "object",
+            "properties": {host: {"type": "string"}, document: {"type": "string"}},
+            "required": [host, document],
+        })
+    };
+    let effective = json!({"anyOf": [arm("prompt", "x"), arm("prompt", "y"), arm("sections", "x"), arm("sections", "y")]});
+    let projected_arm = |document: &str| json!({"type": "object", "properties": {document: {"type": "string"}}});
+    let projected = json!({"anyOf": [projected_arm("x"), projected_arm("y")]});
+
+    let merged = merge_with_effective(&effective, projected).unwrap();
+
+    let arms = merged["anyOf"].as_array().expect("the root union is kept");
+    assert_eq!(arms.len(), 4);
+    for (arm, (host, document)) in arms.iter().zip([("prompt", "x"), ("prompt", "y"), ("sections", "x"), ("sections", "y")]) {
+        assert_eq!(arm["required"], json!([host]), "the projection lifts only `{document}`'s presence");
+        assert!(arm["properties"].get(document).is_some() && arm["properties"].get(host).is_some());
+    }
+}

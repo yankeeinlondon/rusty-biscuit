@@ -2910,6 +2910,7 @@ impl<'a> Parser<'a> {
             ("required", false) => Constraint::Required,
             ("eager", false) => Constraint::Eager,
             ("not-empty", false) => Constraint::NotEmpty,
+            ("no-coerce", false) => Constraint::NoCoerce,
             ("integer", false) => Constraint::Integer,
             ("unique", false) => Constraint::Unique,
             ("generated", false) => Constraint::Generated,

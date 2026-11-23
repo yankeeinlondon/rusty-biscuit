@@ -651,7 +651,7 @@ flowchart TD
 | Conversion (validation and compose) | An arm accepts the value as written; otherwise exactly one arm is reachable, or the number-over-boolean or JSON-over-YAML tie-breaker settles it ([Choosing a Union Option](../conversion.md#choosing-a-union-option)). Arm order never matters. | The value is left as written; a tie no tie-breaker settles is an error naming each reading. |
 | Eager-`file` rewriting (compose) | Exactly one arm that contains an eager `file`, as the value itself or as a field of an object arm, accepts the value ([Files](types.md#files)). | The value is left unchanged. |
 | Cleanup (`md clean`) | Never inside a union, even when a tag would identify the arm. | Problems are reported and the value is left unchanged; no key is deleted. Values outside the union keep cleanup's usual repair rules. |
-| Editor completion and hover | Completion: a literal tag selects one arm. Hover: exactly one arm accepts the value. | Every applicable alternative is offered or listed. |
+| Editor completion and hover | Completion: a literal tag selects one arm. Hover: exactly one arm accepts the value. At the root, with no tag, an arm that types a key the document writes with a value as `null` alone drops out (`root_union_property_shape`). | Every applicable alternative is offered or listed. |
 
 The same rules apply to every item of a `U[]` list, judged on its own, so
 neighboring items can select different arms. Closest-arm scoring only ever

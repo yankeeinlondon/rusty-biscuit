@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 /// and [`make_passive`] together. A
 /// [`LayeredIdentity`](crate::validate::LayeredIdentity) folds it in;
 /// increment it with any change to what a projection produces.
-pub const PROJECTION_REVISION: u32 = 3;
+pub const PROJECTION_REVISION: u32 = 4;
 
 /// Runtime seam at which a resolved schema instance is validated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,13 +59,16 @@ pub fn merge_with_effective(
         effective.get("anyOf").and_then(Value::as_array),
         projected_document.get("anyOf").and_then(Value::as_array),
     ) {
+        // The document's union over object layers pairs arm for arm. Over a
+        // host's root union the effective arms are the cross product, host
+        // arms major, so effective arm `k` holds document arm `k % m`.
         (Some(effective_arms), Some(projected_arms))
-            if effective_arms.len() == projected_arms.len() =>
+            if !projected_arms.is_empty() && effective_arms.len() % projected_arms.len() == 0 =>
         {
             let mut root = projected_document.as_object().cloned().unwrap_or_default();
             let arms = effective_arms
                 .iter()
-                .zip(projected_arms)
+                .zip(projected_arms.iter().cycle())
                 .map(|(effective_arm, projected_arm)| merge_layer(effective_arm, projected_arm.clone()))
                 .collect::<Result<Vec<_>, _>>()?;
             root.insert("anyOf".into(), Value::Array(arms));

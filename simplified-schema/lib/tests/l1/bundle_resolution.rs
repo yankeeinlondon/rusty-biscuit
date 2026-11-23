@@ -379,9 +379,42 @@ fn a_template_types_returned_import_faces_both_the_gate_and_the_bundle() {
 
     let (unlisted, reads, admitted) = run("Owner@./other.yaml");
     match unlisted.expect_err("unlisted import refused") {
-        SlotResolutionError::Schema(error) => assert_eq!(refusal(&error), Some(BundleRefusal::Unlisted), "{error:?}"),
-        other => panic!("expected a schema failure, got {other:?}"),
+        SlotResolutionError::Refused(refused) => {
+            let [(slot, refusal)] = refused.as_slice() else { panic!("one refused slot: {refused:?}") };
+            assert_eq!(slot.expression, "t", "refused at the slot that returned the import");
+            assert!(refusal.message.contains("no listed member"), "{refusal:?}");
+        }
+        other => panic!("expected a refusal at the slot, got {other:?}"),
     }
     assert!(admitted.is_empty(), "a refused target is never offered to the gate: {admitted:?}");
     assert!(reads.served.is_empty());
+}
+
+/// A template met under a scope carries it: resolved later, outside any
+/// scope, its returned import still reads the table, not the disk, and the
+/// bundle's revision identifies the bytes it read.
+#[test]
+fn a_template_resolved_after_its_scope_closed_still_reads_the_bundle() {
+    let fixture = Fixture::new(&[("schemas/types.yaml", NUMBER_OWNER)], &[("schemas/other.yaml", STRING_OWNER)]);
+    write(&fixture.root(), "schemas/types.yaml", STRING_OWNER);
+    let sources = fixture.sources.clone().with_revision("rev-1");
+    let base = fixture.root().join("schemas");
+    let (met, _) = bundle::with(&sources, || resolve_yaml_schema(&yaml("owner: \"{{ t }}\"\n"), &base, &fixture.context(), HOST));
+    let Err(SchemaError::UnresolvedSlots(unresolved)) = met else { panic!("expected a template, got {met:?}") };
+    let pending = unresolved.pending.expect("pending schema");
+    let carried = pending.verified_bundle().expect("the scope is carried");
+    assert_eq!((carried.root(), carried.revision()), (fixture.root().as_path(), "rev-1"));
+
+    let resolve = |answer: &'static str| {
+        pending.resolve(&Host { answer, gate: Rc::default() }, &SlotRunRequest { context: fixture.context() })
+    };
+    assert_eq!(owner_type(&resolve("Owner@./types.yaml").expect("listed import resolves")), json!("number"));
+    assert!(matches!(resolve("Owner@./other.yaml"), Err(SlotResolutionError::Refused(_))), "unlisted is refused");
+    assert!(matches!(resolve("Owner@../../outside.yaml"), Err(SlotResolutionError::Refused(_))), "escaping is refused");
+
+    let outside = match resolve_yaml_schema(&yaml("owner: \"{{ t }}\"\n"), &base, &fixture.context(), HOST) {
+        Err(SchemaError::UnresolvedSlots(unresolved)) => unresolved.pending.expect("pending schema"),
+        other => panic!("expected a template, got {other:?}"),
+    };
+    assert!(outside.verified_bundle().is_none(), "a template met outside a scope carries none");
 }

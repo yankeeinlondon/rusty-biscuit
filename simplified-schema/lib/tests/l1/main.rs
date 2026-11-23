@@ -26,6 +26,7 @@ mod input_robustness;
 mod kind_envelopes;
 mod located_failures;
 mod located_schema_errors;
+mod no_coerce_strings;
 mod not_empty_values;
 mod object_composition;
 mod object_composition_export;

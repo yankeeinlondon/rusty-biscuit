@@ -102,6 +102,7 @@ pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
     frontmatter_expression_values_with_definitions, layered_property_shape, nested_property_shape,
     nested_property_shape_with_definitions, property_def_at_path, property_def_at_path_with_definitions,
+    root_union_property_shape,
 };
 pub use json_shape::shape_from_json_schema;
 pub use mapping_orders::MappingOrders;

@@ -2079,6 +2079,11 @@ fn string_fragment_with_base(
                 push_unique(&mut patterns, NOT_EMPTY_TEXT_PATTERN);
             }
             Constraint::Pattern(p) => push_unique(&mut patterns, p),
+            // `alphanumeric` already refuses native scalars, so the
+            // constraint is `string`'s alone.
+            Constraint::NoCoerce if type_label == "string" => {
+                m.insert(crate::format::DARKMATTER_NO_COERCE_ANNOTATION.into(), Value::Bool(true));
+            }
             other => return Err(invalid_constraint(name, type_label, other)),
         }
     }

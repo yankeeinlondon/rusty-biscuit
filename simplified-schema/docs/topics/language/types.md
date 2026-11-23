@@ -48,7 +48,7 @@ For a practical introduction with worked examples, see
 
 | Type         | Accepts                                                                                                | Notes                                                                                                                                                                           |
 |--------------|--------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `string`     | Any YAML string scalar.                                                                                | Constraints: `min`, `max`, `not-empty`, `pattern`, `suggest`, `default`, `required`.                                                                                              |
+| `string`     | Any YAML string scalar.                                                                                | Constraints: `min`, `max`, `not-empty`, `no-coerce`, `pattern`, `suggest`, `default`, `required`.                                                                                 |
 | `date`       | ISO-8601 date `YYYY-MM-DD`.                                                                            | JSON Schema `format: date`.                                                                                                                                                     |
 | `datetime`   | An ISO 8601 datetime `YYYY-MM-DDThh:mm[:ss[.ms]]` (a space may replace `T`) with an **optional** offset (`Z` or `±HH:MM`); a value with an offset must be RFC 3339, seconds included. | JSON Schema `format: darkmatter-datetime` (the built-in `date-time` requires an offset). See [Custom Vocabulary](../custom-vocabulary.md). |
 | `time`       | A time of day `hh:mm`, `hh:mm:ss`, or `hh:mm:ss.ms` with an **optional** offset (`Z` or `±HH:MM`); with an offset, seconds are required (`14:30` is valid, `14:30Z` is not). | JSON Schema `format: darkmatter-time` (the built-in `time` requires an offset). See [Custom Vocabulary](../custom-vocabulary.md). |
@@ -578,8 +578,17 @@ $schema:
 | `max(n)`       | Maximum length.                                                                                   | `maxLength`             |
 | `not-empty`    | Disallow empty / all-whitespace.                                                                  | `pattern: "\\S"`        |
 | `pattern(re)`  | ECMA-262 regex compiled with `jsonschema::PatternOptions::regex()` (ReDoS-safe, linear-time).     | `pattern`               |
+| `no-coerce`    | Accept only text as written: a native number or boolean is a type mismatch, never converted.      | `x-darkmatter-no-coerce: true` (annotation) |
 | `default(s)`   | Default string.                                                                                   | `default`               |
 | `required`     | Property is required.                                                                             | parent `required` entry |
+
+`no-coerce` is for a string whose meaning a converted number or boolean would
+fake, such as a file reference: with `source: string(no-coerce)`, `source: 42`
+and `source: true` are type errors, while `source: "42"` and `source: ./a.md`
+are accepted. Strict validation already refuses a non-string, so the
+constraint changes only [conversion](../conversion.md#conversion-rules). In a
+union, the other options keep their own conversions. It is valid only on
+`string`; `alphanumeric` never converts a number or boolean anyway.
 
 A value must satisfy every pattern. When an atom has more than one pattern-producing constraint (for example `not-empty` with a `pattern(...)`, or several `pattern(...)` constraints), each lowers to its own `allOf` entry instead of a single `pattern` keyword.
 

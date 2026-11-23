@@ -242,7 +242,23 @@ same rules.
 
 The scope is independent of a host's template read gate
 (`slots::TemplateReads`): a template type's returned import must be a listed
-member *and* be admitted by the gate. The scope also governs reads a host
+member *and* be admitted by the gate. A template met inside the scope keeps
+the bundle: `PendingSchema::verified_bundle()` returns it, and
+`PendingSchema::resolve` re-enters it for the schema built from the slot
+values, even when it is called after `with` returned. A reference a slot
+returned that the bundle refuses is reported at that slot
+(`SlotResolutionError::Refused`). A host that caches resolutions keys them
+on `BundleSources::revision()`, which is a digest of the member bytes unless
+the host set its own with `with_revision`:
+
+```rust
+let (met, _) = bundle::with(&sources.with_revision(revision), || resolve_template());
+// later, outside any scope: the returned `Owner@./types.yaml` still reads
+// the verified bytes, and `Owner@./unlisted.yaml` is refused at its slot
+let resolved = pending.resolve(&host, &request);
+```
+
+The scope also governs reads a host
 makes through `resolve::buffers::read`, so run a slot's own data-file reads
 outside it. `BundleSources` is plain `Send + Sync` data; the scope applies to
 the calling thread and is restored when `with` returns.

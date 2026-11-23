@@ -158,6 +158,21 @@ pub(crate) fn expanding<T>(slot: &Slot, expand: impl FnOnce() -> T) -> T {
     expand()
 }
 
+/// Records `refusal` as the running scope's refusal (unless one is already
+/// recorded) on behalf of the slot whose returned definition is expanding:
+/// a refusal decided outside the host's hooks, such as a verified bundle's
+/// boundary, is then the slot's like any refused read. Nothing happens
+/// outside an expansion with hooks installed.
+pub(crate) fn refuse_expanding(refusal: impl FnOnce() -> SlotAdmissionError) {
+    let Some(slot) = EXPANDING.with_borrow(Clone::clone) else { return };
+    if READS.with_borrow(Option::is_none) {
+        return;
+    }
+    REFUSAL.with_borrow_mut(|recorded| {
+        recorded.get_or_insert_with(|| (slot, refusal()));
+    });
+}
+
 /// The first refusal recorded in the running scope, left in place.
 pub(crate) fn recorded_refusal() -> Option<(Slot, SlotAdmissionError)> {
     REFUSAL.with_borrow(Clone::clone)

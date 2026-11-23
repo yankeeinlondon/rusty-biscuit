@@ -101,6 +101,10 @@ pub const DARKMATTER_TYPE_DEFINITION_KEYWORD: &str = "x-darkmatter-type-definiti
 /// reads it to keep native numbers and booleans from becoming text.
 pub const DARKMATTER_TYPE_ANNOTATION: &str = "x-darkmatter-type";
 
+/// Non-validating annotation for `string(no-coerce)`. Coercion reads it to
+/// keep native numbers and booleans from becoming text.
+pub const DARKMATTER_NO_COERCE_ANNOTATION: &str = "x-darkmatter-no-coerce";
+
 /// Keyword emitted for the `schema` semantic meta-type.
 pub const DARKMATTER_SCHEMA_KEYWORD: &str = "x-darkmatter-schema";
 

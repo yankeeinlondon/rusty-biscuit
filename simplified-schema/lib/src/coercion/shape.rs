@@ -216,8 +216,12 @@ pub struct TextShape {
     /// The allowed values (`enum(...)`); `None` allows any text.
     pub members: Option<Vec<String>>,
     /// Whether a native number or boolean converts into this target. `false`
-    /// only for a type whose own rule refuses them (`alphanumeric`).
+    /// only for a type whose own rule refuses them (`alphanumeric`,
+    /// `string(no-coerce)`).
     pub scalar_text: bool,
+    /// The target is `string(no-coerce)`: with `scalar_text: false` it is
+    /// named `string(no-coerce)` in messages rather than `alphanumeric`.
+    pub no_coerce: bool,
 }
 
 impl Default for TextShape {
@@ -228,6 +232,7 @@ impl Default for TextShape {
             pattern: None,
             members: None,
             scalar_text: true,
+            no_coerce: false,
         }
     }
 }
@@ -648,6 +653,10 @@ fn fmt_text(text: &TextShape, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.write_str(")")?;
         }
         None if text.scalar_text => f.write_str("string")?,
+        None if text.no_coerce => {
+            f.write_str("string")?;
+            constraints.insert(0, "no-coerce".to_string());
+        }
         None => f.write_str("alphanumeric")?,
     }
     fmt_constraints(&constraints, f)

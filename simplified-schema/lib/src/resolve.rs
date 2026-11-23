@@ -4708,6 +4708,7 @@ fn is_flag(constraint: &Constraint) -> bool {
     matches!(
         constraint,
         Constraint::NotEmpty
+            | Constraint::NoCoerce
             | Constraint::Integer
             | Constraint::Unique
             | Constraint::Eager

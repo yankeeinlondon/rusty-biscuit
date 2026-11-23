@@ -216,7 +216,17 @@ fn select(
                 }
                 Ok(SelectionOutcome::Found(path))
             }
-            Err(boundary) => Ok(SelectionOutcome::Failed(SelectionFailure::Bundle(boundary))),
+            Err(boundary) => {
+                // A reference a template type returned is refused at its
+                // slot, not as an error of the schema around it.
+                crate::slots::reads::refuse_expanding(|| crate::slots::SlotAdmissionError {
+                    code: None,
+                    message: SchemaError::BundleBoundary { reference: trimmed.to_string(), boundary: boundary.clone() }
+                        .to_string(),
+                    span: None,
+                });
+                Ok(SelectionOutcome::Failed(SelectionFailure::Bundle(boundary)))
+            }
         };
     }
     #[cfg(not(feature = "file"))]

@@ -1259,6 +1259,12 @@ pub enum Constraint {
     /// which have no "empty".
     NotEmpty,
 
+    /// `no-coerce` on `string`: only text as written is accepted; a native
+    /// number or boolean is a type mismatch instead of converting to its text.
+    /// Lowers to `x-darkmatter-no-coerce: true`, which only conversion reads;
+    /// strict validation already refuses a non-string.
+    NoCoerce,
+
     /// ECMA-262 regex the value must match.
     Pattern(String),
 
@@ -1541,6 +1547,7 @@ impl Constraint {
             Constraint::MinLen(_) => "min",
             Constraint::MaxLen(_) => "max",
             Constraint::NotEmpty => "not-empty",
+            Constraint::NoCoerce => "no-coerce",
             Constraint::Pattern(_) => "pattern",
             Constraint::Suggest(_) => "suggest",
             Constraint::Members(_) => "<members>",

@@ -15,6 +15,7 @@ use super::substitute::{SlotValues, with_values};
 use crate::errors::{SchemaError, UnresolvedSlots};
 use crate::resolve::{AuthoredSchemaValue, ResolvedSchema};
 use crate::resolve::buffers::{self, SourceBuffers};
+use crate::resolve::bundle::BundleSources;
 use crate::simplified::{DefinitionTable, SchemaRoot, Slot};
 
 /// An expanded template: the declaration after import expansion, slots in
@@ -76,6 +77,10 @@ pub struct PendingSchema {
     replay: Replay,
     /// Top-level properties [`Self::without_properties`] left out.
     omitted: Arc<[String]>,
+    /// The verified bundle in force when the template was met; the replay
+    /// re-enters it, so a returned definition's imports read only its
+    /// listed members, never the disk.
+    bundle: Option<BundleSources>,
 }
 
 impl PendingSchema {
@@ -100,6 +105,7 @@ impl PendingSchema {
             buffers,
             replay,
             omitted: Arc::default(),
+            bundle: crate::resolve::bundle::current(),
         }
     }
 
@@ -147,7 +153,17 @@ impl PendingSchema {
             buffers: self.buffers.clone(),
             replay: Arc::clone(&self.replay),
             omitted: omitted.into(),
+            bundle: self.bundle.clone(),
         }
+    }
+
+    /// The verified bundle ([`crate::resolve::bundle::with`]) the template
+    /// was met under, which every resolution of it reads schema sources
+    /// from; `None` when it was met outside one. A host caching resolutions
+    /// keys on its [`BundleSources::revision`]: the slot values alone do not
+    /// say which bytes a returned `Name@./file` import read.
+    pub fn verified_bundle(&self) -> Option<&BundleSources> {
+        self.bundle.as_ref()
     }
 
     /// The top-level properties [`Self::without_properties`] left out,
@@ -205,11 +221,17 @@ impl PendingSchema {
     /// template type's returned definition names) is read once, however many
     /// properties use it.
     fn replay_with(&self, values: &SlotValues) -> Result<ResolvedSchema, SchemaError> {
-        buffers::with(&self.buffers, || {
-            buffers::with_reads_retained(|| {
-                with_values(values, || super::omitting(&self.omitted, || (self.replay)()))
+        let replay = || {
+            buffers::with(&self.buffers, || {
+                buffers::with_reads_retained(|| {
+                    with_values(values, || super::omitting(&self.omitted, || (self.replay)()))
+                })
             })
-        })
+        };
+        match &self.bundle {
+            Some(bundle) => crate::resolve::bundle::reenter(bundle, replay),
+            None => replay(),
+        }
     }
 
     /// The slots the first pass met, in declaration order. A root union
@@ -263,7 +285,8 @@ impl PendingSchema {
     ///
     /// [`SlotResolutionError`]: refused slots (none is evaluated), a read a
     /// template type's returned definition needs that `host`'s
-    /// [`SlotHost::template_reads`] refused, failed evaluations (all
+    /// [`SlotHost::template_reads`] refused or the verified bundle the
+    /// template was met under refuses, failed evaluations (all
     /// attempted), a value that cannot fill its position
     /// ([`SchemaError::SlotResult`]), or cancellation.
     pub fn resolve(&self, host: &dyn SlotHost, request: &SlotRunRequest) -> Result<ResolvedSchema, SlotResolutionError> {
