@@ -14,7 +14,12 @@ A referenced `$schema` file is classified by `classify_yaml_schema_text` /
 top-level `$schema` (`types`-only is `NotASchemaDocument { TypesOnly }`, a map
 without `$schema` is `NoSchemaProperty`, a `kind: yaml-schema` is
 `SelectedByKind` even when malformed, and so is one named by `Name@file`;
-hosts reading a referenced file use `resolve::parse_referenced_schema_document`).
+a file whose `kind` names the trigger envelope is `TriggerEnvelope`; an
+import source that is a root union or whole-file reference is
+`RootUnionImport`/`ReferenceImport`; hosts reading a referenced file use
+`resolve::parse_referenced_schema_document`). A role refusal
+(`NotSchemaReason::is_role`) gets the naming declaration as its `site`
+through `SchemaError::refused_at` at the load boundaries.
 JSON must be an object whose
 `$schema` is exactly `DRAFT_2020_12_DIALECT` (else `JsonMissingDialect` or
 `UnsupportedJsonDialect`) and pass the offline meta-schema (else
@@ -123,7 +128,11 @@ into its `EffectiveSchema`/`ValidationReport` (`YamlContract`, `YamlValidation`,
   (`duplicates`, `duplicate_bundle_names`, `duplicate_name_finding`): every
   participant becomes an `InvalidTriggerFinding` located at its `name`
   (reusing `SchemaError::TriggerMatch`, so a library participant reads as a
-  trigger finding) and none is installed. Diagnostics show `name (path)`;
+  trigger finding) and none is installed. A refused file's label is read
+  leniently by `member_envelope::declared_name` (a valid `name` on a trigger
+  or `$schema`-free `kind: schema`, whatever else is wrong; never an invalid
+  one), the one rule discovery's skipped findings, Darkmatter's registration
+  warnings, and Claudine's build errors share. Diagnostics show `name (path)`;
   machine output keeps the path and span. Identity, shadowing, and lookups
   stay path-based. Trigger `types` are private to the trigger payload. Tests:
   `kind_envelopes.rs` (`files::a_duplicate_name_*`, `…two_roots…`,

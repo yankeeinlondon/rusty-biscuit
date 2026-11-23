@@ -173,6 +173,7 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
             return Err(crate::errors::SchemaError::NotASchemaDocument {
                 path: std::path::PathBuf::new(),
                 reason: crate::errors::NotSchemaReason::NamespaceCatalog,
+                site: None,
             }
             .into());
         }

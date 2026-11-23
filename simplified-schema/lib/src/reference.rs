@@ -66,6 +66,7 @@ pub fn classify_schema_reference(reference: &str) -> Result<SchemaReference, Sch
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         return Err(SchemaError::RemoteUnsupported {
             reference: trimmed.to_string(),
+            site: None,
         });
     }
     // A whitespace-only value is an empty reference, not a path made of
@@ -76,6 +77,7 @@ pub fn classify_schema_reference(reference: &str) -> Result<SchemaReference, Sch
             source: biscuit_file::FileReferenceError::InvalidSyntax(
                 "empty reference string".to_string(),
             ),
+            site: None,
         });
     }
     let kind = if is_bare_schema_name(trimmed) {
@@ -86,6 +88,7 @@ pub fn classify_schema_reference(reference: &str) -> Result<SchemaReference, Sch
     let file_reference = FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
         reference: trimmed.to_string(),
         source,
+        site: None,
     })?;
     Ok(SchemaReference { file_reference, kind })
 }

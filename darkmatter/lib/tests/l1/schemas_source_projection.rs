@@ -399,7 +399,7 @@ fn padded_schema_references_are_classified_and_resolved_as_one_trimmed_string() 
     // A whitespace-only value is an empty reference, not a path of spaces.
     for source in ["", " ", "   ", "\t", "\n", " \t\n "] {
         let error = classify_schema_reference(source).expect_err("empty reference must be rejected");
-        let SchemaError::Unresolved { reference, source: cause } = &error else {
+        let SchemaError::Unresolved { reference, source: cause, .. } = &error else {
             panic!("empty reference must report a structured resolution error: {error:?}");
         };
         assert_eq!(reference, "");

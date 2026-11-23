@@ -357,13 +357,14 @@ fn trigger_label(trigger: &TriggerTraceEntry) -> String {
     }
 }
 
-/// The conflict's sentence, both trigger files in code spans.
+/// The conflict's sentence, both triggers in code spans, each by its label
+/// beside its file when it declares a `name`.
 fn conflict_text(conflict: &HostTriggerConflict) -> String {
     let subject = conflict.subject.as_deref().map_or_else(|| "the root rules".to_string(), code_span);
     format!(
         "{} and {} conflict on {subject}: {}",
-        code_span(&conflict.first.display().to_string()),
-        code_span(&conflict.second.display().to_string()),
+        code_span(&conflict.first_label()),
+        code_span(&conflict.second_label()),
         conflict.reason
     )
 }

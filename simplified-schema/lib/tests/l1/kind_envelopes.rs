@@ -290,7 +290,8 @@ fn not_schema(error: &SchemaError) -> Option<NotSchemaReason> {
             ShippedSources::NONE,
         )
         .expect_err("a trigger's types are not importable");
-        assert_eq!(not_schema(&error), Some(NotSchemaReason::NoSchemaProperty), "{error:?}");
+        assert_eq!(not_schema(&error), Some(NotSchemaReason::TriggerEnvelope), "{error:?}");
+        assert_eq!(error.reference_site().map(|site| site.path.to_string()).as_deref(), Some("title"), "refused at the import");
     }
 
     #[test]

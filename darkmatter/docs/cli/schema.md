@@ -265,8 +265,13 @@ Registered host:
 - conflict [dm.host.trigger_conflict]: /Users/me/.acme/schemas/a.yaml and /Users/me/.acme/schemas/b.yaml conflict on agent: their types are incomparable
 ```
 
-In a data output, `registered.conflict` holds `first`, `second`, `subject` (the
-property, `null` for the root rules), and `reason`, and `diagnostics` holds the
+A trigger that declares a `name` is written `name (path)` in the conflict line
+(`` `team-agent (/Users/me/.acme/schemas/a.yaml)` ``).
+
+In a data output, `registered.conflict` holds `first`, `second`, their `name`
+labels `first_name` and `second_name` (`null` for a trigger without one),
+`subject` (the property, `null` for the root rules), and `reason`, and
+`diagnostics` holds the
 `dm.host.trigger_conflict` error; `outcome` is `failure`. A matched trigger whose
 payload is a template is left out of this check, since listing it reads nothing.
 

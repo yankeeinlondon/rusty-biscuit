@@ -104,16 +104,16 @@ impl SchemaFileSelection {
         let reference = self.reference;
         match self.outcome {
             SelectionOutcome::Found(path) => Ok(path),
-            SelectionOutcome::Missing { bare_name, .. } => Err(SchemaError::NoMatch { reference, bare_name }),
+            SelectionOutcome::Missing { bare_name, .. } => Err(SchemaError::NoMatch { reference, bare_name, site: None }),
             SelectionOutcome::SiblingOnly { suggestion, .. } => {
-                Err(SchemaError::BareNameSiblingExists { reference, suggestion })
+                Err(SchemaError::BareNameSiblingExists { reference, suggestion, site: None })
             }
-            SelectionOutcome::Failed(SelectionFailure::Remote) => Err(SchemaError::RemoteUnsupported { reference }),
+            SelectionOutcome::Failed(SelectionFailure::Remote) => Err(SchemaError::RemoteUnsupported { reference, site: None }),
             SelectionOutcome::Failed(SelectionFailure::Resolution(source)) => {
-                Err(SchemaError::Unresolved { reference, source })
+                Err(SchemaError::Unresolved { reference, source, site: None })
             }
             SelectionOutcome::Failed(SelectionFailure::Bundle(boundary)) => {
-                Err(SchemaError::BundleBoundary { reference, boundary })
+                Err(SchemaError::BundleBoundary { reference, boundary, site: None })
             }
         }
     }
@@ -221,7 +221,7 @@ fn select(
                 // slot, not as an error of the schema around it.
                 crate::slots::reads::refuse_expanding(|| crate::slots::SlotAdmissionError {
                     code: None,
-                    message: SchemaError::BundleBoundary { reference: trimmed.to_string(), boundary: boundary.clone() }
+                    message: SchemaError::BundleBoundary { reference: trimmed.to_string(), boundary: boundary.clone(), site: None }
                         .to_string(),
                     span: None,
                 });

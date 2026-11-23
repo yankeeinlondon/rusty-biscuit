@@ -285,6 +285,7 @@ impl Layer {
                 return Err(SchemaError::NotASchemaDocument {
                     path: named,
                     reason: crate::errors::NotSchemaReason::NamespaceCatalog,
+                    site: None,
                 }
                 .into());
             }
@@ -323,6 +324,7 @@ impl Layer {
         let json = serde_json::to_value(yaml).map_err(|_| SchemaError::NotASchemaDocument {
             path: named,
             reason: crate::errors::NotSchemaReason::NotAMapping,
+            site: None,
         })?;
         Ok(Self::json_schema(json, path, binding))
     }
@@ -393,6 +395,7 @@ fn resolve_authored(
             let unavailable = SchemaError::Unresolved {
                 reference: reference.clone(),
                 source: FileReferenceError::ResolutionUnavailable { reference },
+                site: None,
             };
             let typed = authored.schema().map(|root| Typed {
                 root: root.clone(),
@@ -443,6 +446,7 @@ fn resolve_authored(
             let mut stack = ReferenceStack::default();
             Some(resolve::resolve_reference_in_context(
                 reference.file_reference().raw(),
+                None,
                 base_dir,
                 &[],
                 context,
@@ -458,6 +462,7 @@ fn resolve_authored(
                 Site::Document { yaml, located } => resolve::resolve_root_union(
                     yaml.as_sequence().expect("a parsed root union is a sequence"),
                     InlineOwner::Document,
+                    None,
                     located.as_ref(),
                     base_dir,
                     &[],
@@ -540,7 +545,15 @@ fn resolve_authored(
         Ok(json) => {
             let mut json = Arc::unwrap_or_clone(json);
             provenance.examples =
-                resolve::resolve_document_examples(&mut json, base_dir, defining_file, &[], context, &mut searched)?;
+                resolve::resolve_document_examples(
+                    &mut json,
+                    base_dir,
+                    defining_file,
+                    &[],
+                    context,
+                    &mut searched,
+                    &expansion.example_sites,
+                )?;
             Ok(Arc::new(json))
         }
         Err(error) => Err(error),

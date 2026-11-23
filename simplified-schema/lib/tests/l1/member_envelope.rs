@@ -5,7 +5,7 @@
 //!
 //! Boundary: the crate's public API in-process; no files are read.
 
-use simplified_schema::member_envelope::{MemberKind, admit_member_text};
+use simplified_schema::member_envelope::{MemberKind, admit_member_text, declared_name};
 
 const TRIGGER: &str = "kind: schema-trigger\nmatch:\n    prompt: string(required)\n";
 const YAML_SCHEMA: &str = "kind: yaml-schema\n$schema:\n    kind: literal(thing; required)\n";
@@ -205,5 +205,25 @@ fn the_closed_key_sets_are_the_definitions_keys() {
         let mut keys: Vec<String> = kind.keys().iter().map(|key| (*key).to_string()).collect();
         keys.sort();
         assert_eq!(keys, declared_keys(definition, arm), "{kind:?}");
+    }
+}
+
+/// The lenient label a reader shows beside a refused member's path: a valid
+/// `name` of a trigger or types-only library, even when the rest of the
+/// envelope is refused; never an invalid name or another kind's.
+#[test]
+fn declared_name_reads_a_valid_label_leniently() {
+    let named = |base: &str, name: &str| format!("name: {name}\n{base}");
+    for (case, text, expected) in [
+        ("trigger with an unexpected key", with(&named(TRIGGER, "inline-compose-schema"), "review-typo: 1"), Some("inline-compose-schema")),
+        ("library", named(LIBRARY, "parts-list"), Some("parts-list")),
+        ("unnamed trigger", TRIGGER.to_string(), None),
+        ("invalid name", named(TRIGGER, "Not_Kebab"), None),
+        ("library exporting $schema", with(&named(LIBRARY, "parts-list"), "$schema:\n    a: string"), None),
+        ("namespace", named(NAMESPACE, "loop-schema"), None),
+        ("yaml kind", named(YAML_SCHEMA, "kind-schema"), None),
+        ("not YAML", "name: a\n  - [".to_string(), None),
+    ] {
+        assert_eq!(declared_name(&text).as_deref(), expected, "{case}");
     }
 }

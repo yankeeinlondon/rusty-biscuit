@@ -208,7 +208,7 @@ fn assert_bare_sidecar_rejected(err: MarkdownError, document: &std::path::Path, 
             assert!(problems.is_empty(), "got: {problems:?}");
             let source = source.expect("schema preparation error");
             match source.downcast_ref::<simplified_schema::SchemaError>() {
-                Some(simplified_schema::SchemaError::NotASchemaDocument { path, reason }) => {
+                Some(simplified_schema::SchemaError::NotASchemaDocument { path, reason, .. }) => {
                     assert_eq!(path, schema);
                     assert_eq!(*reason, simplified_schema::NotSchemaReason::NoSchemaProperty);
                 }

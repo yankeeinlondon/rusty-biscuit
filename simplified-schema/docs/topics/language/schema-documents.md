@@ -83,7 +83,9 @@ flowchart TD
     M -->|yes| OKJ[raw JSON Schema]
     X -->|no| K{kind: yaml-schema?}
     K -->|yes| SK[NotASchemaDocument: SelectedByKind]
-    K -->|no| Y{YAML envelope with $schema?}
+    K -->|no| T{kind: schema-trigger?}
+    T -->|yes| TE[NotASchemaDocument: TriggerEnvelope]
+    T -->|no| Y{YAML envelope with $schema?}
     Y -->|fails its definition| AD[SchemaDocument: does not satisfy its definition]
     Y -->|yes| OKY[SimplifiedSchema]
     Y -->|types only| TO[NotASchemaDocument: TypesOnly]
@@ -96,6 +98,7 @@ flowchart TD
 | YAML with `$schema` (informal, or `kind: schema`) that [satisfies its definition](#admission-checking-an-envelope-against-its-definition) | accepted |
 | `kind: yaml-schema`, well formed or not | `NotASchemaDocument` (`SelectedByKind`); [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced), never referenced |
 | `kind: schema` with only `types` | `NotASchemaDocument` (`TypesOnly`); its types still import as `Name@file.yaml` |
+| `kind: schema-trigger`, well formed or not | `NotASchemaDocument` (`TriggerEnvelope`); a trigger activates by placement and match, never by reference |
 | a recognized envelope its definition rejects (`types: [a, b]`, `description: ""`, a misspelled `typed:`) | `SchemaDocument` "the `kind: schema` envelope does not satisfy its definition ..." |
 | YAML mapping without `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) |
 | YAML that is not a mapping, or a JSON value that is not an object | `NotASchemaDocument` (`NotAMapping`) |
@@ -108,10 +111,15 @@ flowchart TD
 The meta-schema check runs offline; nothing is fetched. These rules apply only
 to a `$schema` target. A named-type import (`Name@file.yaml`) reads any
 `kind: schema` or informal envelope, a `types`-only one included, but never a
-`kind: yaml-schema` file. Other kinded YAML, such as ordinary data
-(`kind: roster`) or a [schema trigger](#who-owns-each-definition)
-(`kind: schema-trigger`), is never a target either: it fails with one of the
-rows above.
+`kind: yaml-schema`, `kind: namespace-schema`, or `kind: schema-trigger` file,
+and never a schema whose `$schema` is a root union or a whole-file reference
+(`RootUnionImport`, `ReferenceImport`: it has no named types of its own).
+Other kinded YAML, such as ordinary data (`kind: roster`), is never a target
+either: it fails with one of the rows above. A refusal of a valid file for the
+way it was named (`TypesOnly`, `SelectedByKind`, `NamespaceCatalog`,
+`TriggerEnvelope`, `RootUnionImport`, `ReferenceImport`, and
+`UnsupportedJsonDialect`) names the declaration that asked for it as its
+[site](../diagnostics.md#where-a-definition-failure-points).
 
 ### Migrating Raw JSON Schema Written in YAML
 
@@ -559,7 +567,8 @@ types:
   the span.
 - `description` is a string.
 - `types` is a mapping of named types, `{}` included. They are local to the
-  trigger: its inline `$schema` names them (here `headline`), and no other
+  trigger: its inline `$schema` names them (here `headline`), in every
+  inline arm of a registered host's root-union payload too, and no other
   file can import them, because a trigger file is never an import source.
   With a `types` table, the `$schema` entries are not named types themselves,
   as in a `kind: schema` document. Shared types belong in a `types`-only

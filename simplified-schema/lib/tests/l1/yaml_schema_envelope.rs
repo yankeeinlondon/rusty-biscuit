@@ -149,7 +149,7 @@ mod files {
         let error = result.expect_err("a yaml-schema is reached only through `kind`");
         let mut cause: &dyn std::error::Error = &error;
         loop {
-            if let Some(SchemaError::NotASchemaDocument { path: named, reason }) = cause.downcast_ref::<SchemaError>() {
+            if let Some(SchemaError::NotASchemaDocument { path: named, reason, .. }) = cause.downcast_ref::<SchemaError>() {
                 assert_eq!((named.as_path(), *reason), (path, NotSchemaReason::SelectedByKind), "{error}");
                 return;
             }
@@ -197,15 +197,11 @@ mod files {
         fixture.write("platforms.yaml", "kind: roster\nroster_version: 1\nplatforms: []\n");
         let error = fixture.resolve("./platforms.yaml").expect_err("kinded data is not a schema target");
         assert_eq!(not_schema(&error), Some(NotSchemaReason::NoSchemaProperty), "{error}");
-        // A trigger carrying a `$schema` payload is refused too: its `kind`
-        // and `match` are keys no schema envelope admits.
+        // A trigger carrying a `$schema` payload is refused too, for its
+        // kind: it activates by placement and match.
         fixture.write("trigger.yaml", "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema:\n  title: string\n");
-        match fixture.resolve("./trigger.yaml") {
-            Err(SchemaError::SchemaDocument { message, .. }) => {
-                assert!(message.contains("unsupported top-level key(s): kind, match"), "{message}");
-            }
-            other => panic!("a trigger must not be a `$schema` target: {other:?}"),
-        }
+        let error = fixture.resolve("./trigger.yaml").expect_err("a trigger must not be a `$schema` target");
+        assert_eq!(not_schema(&error), Some(NotSchemaReason::TriggerEnvelope), "{error}");
     }
     /// A definition on disk (or unsaved text for it) prepares like the
     /// embedded ones: its `Name@file` imports resolve from its own folder,

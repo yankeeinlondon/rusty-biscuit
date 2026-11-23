@@ -2,21 +2,26 @@
 //! column a registration warning reports, recovered from the typed error
 //! before it becomes the warning's message.
 //!
-//! The rule is the most specific location available. An error raised in a
-//! file another member imports is reported in that file, at the declaration
-//! that failed; a declaration inside a union arm at that arm, never another
-//! arm or a same-named declaration under the other of `$schema` and
-//! `types`; a grammar failure at the parser's rejected token; a missing
-//! field at the mapping that lacks it; a reference that cannot be followed
-//! at its spelling as an import or `example(...)` argument in the
-//! declaration that writes it, never in prose that repeats it (a comment, a
-//! top-level `description`, or any declaration's `-> description`). A
-//! position is never invented: when nothing more specific is known the
-//! nearest known declaration, or the file alone, is reported.
+//! The rule is the most specific location the error itself records. An
+//! error raised in a file another member imports is reported in that file,
+//! at the declaration that failed; a declaration inside a union arm at that
+//! arm, never another arm or a same-named declaration under the other of
+//! `$schema` and `types`; a grammar failure at the parser's rejected token;
+//! a missing field at the mapping that lacks it; a file reference that
+//! cannot be followed (an import, an `example(...)`, a `$schema` file) at
+//! the declaration that wrote it, in the file that wrote it, as the
+//! resolver recorded them ([`SchemaError::reference_site`]); so is a file
+//! that was found but refused for the role the declaration named it in (a
+//! types library, YAML kind, namespace, or trigger named as a document
+//! schema or import source, a file closing a reference cycle), also once
+//! that refusal is reported as a trigger payload cycle. A file that does
+//! not parse is reported at its own parse position. A position is never
+//! recovered by searching the text: a reference error that records no
+//! declaration is reported at the file alone (a refused file at that
+//! file).
 
 use std::path::{Path, PathBuf};
 
-use simplified_schema::simplified::grammar::without_descriptions;
 use simplified_schema::yaml_documents::{declaration_segments, load_yaml_document, locating_problem};
 use simplified_schema::{SchemaError, SchemaReferenceSite, SchemaSourceId, SchemaSourcePath};
 
@@ -74,9 +79,15 @@ fn located(error: &SchemaError, file: &Path, texts: &Texts<'_>, carriers: &[&str
         // The standalone parser reports a syntax error without a span; the
         // loader reports the parser's position in the same verified text.
         SchemaError::SchemaDocument { path, .. } => Site { file: path.clone(), at: texts(path).and_then(|text| parse_failure(text, path)) },
-        SchemaError::NotASchemaDocument { path, .. }
-        | SchemaError::UnsupportedJsonDialect { path, .. }
-        | SchemaError::InvalidJsonSchema { path, .. } => Site::unlocated(path),
+        // A file refused for the role a declaration named it in is reported
+        // at that declaration; one refused for its own content, at itself.
+        SchemaError::NotASchemaDocument { path, .. } | SchemaError::UnsupportedJsonDialect { path, .. } => {
+            match error.reference_site() {
+                Some(site) => reference_site(site, None, file, texts, carriers),
+                None => Site::unlocated(path),
+            }
+        }
+        SchemaError::InvalidJsonSchema { path, .. } => Site::unlocated(path),
         SchemaError::Aggregate { errors } => errors.first().map_or_else(|| here(None), |first| located(first, file, texts, carriers)),
         // The cause first; when it names no position, the operand or member
         // declaration it was reached through, which is on the failing path.
@@ -93,15 +104,19 @@ fn located(error: &SchemaError, file: &Path, texts: &Texts<'_>, carriers: &[&str
         | SchemaError::ConstraintConflict { site, name, .. }
         | SchemaError::UnionReference { site, name, .. }
         | SchemaError::InvalidCompositionTarget { site, name, .. } => reference_site(site, Some(name), file, texts, carriers),
-        SchemaError::BundleBoundary { reference, .. }
-        | SchemaError::NoMatch { reference, .. }
-        | SchemaError::Unresolved { reference, .. }
-        | SchemaError::RemoteUnsupported { reference }
-        | SchemaError::BareNameSiblingExists { reference, .. }
-        | SchemaError::InvalidExample { reference, .. }
-        | SchemaError::TriggerSchemaReferenced { reference, .. } => {
-            here(text.and_then(|text| file_reference(text, file, reference, carriers)))
-        }
+        SchemaError::BundleBoundary { .. }
+        | SchemaError::NoMatch { .. }
+        | SchemaError::Unresolved { .. }
+        | SchemaError::RemoteUnsupported { .. }
+        | SchemaError::BareNameSiblingExists { .. }
+        | SchemaError::InvalidExample { .. }
+        | SchemaError::TriggerSchemaReferenced { .. }
+        | SchemaError::TriggerPayloadCycle { .. }
+        | SchemaError::ReferenceCycle { .. }
+        | SchemaError::ReferenceDepthExceeded { .. } => match error.reference_site() {
+            Some(site) => reference_site(site, None, file, texts, carriers),
+            None => here(None),
+        },
         SchemaError::TriggerEnvelopeYaml { line: Some(line), column: Some(column), .. } => {
             here(text.and_then(|text| reported_position(text, *line, *column, false)))
         }
@@ -174,109 +189,6 @@ fn parse_failure(text: &str, file: &Path) -> Option<SourcePosition> {
     }
 }
 
-/// Where the file `reference` is spelled in `text` (read from `file`): in a
-/// declaration scalar under `carriers`, at a spelling the declaration
-/// grammar reads as a reference — the file of an import (`Name@file`, a
-/// `$extends` or `...` operand included) or an argument of `example(...)` —
-/// or, for a bare `$schema: file` payload, the carrier's own scalar; the
-/// earliest such scalar of the first carrier that has one. Only the
-/// declaration part of a scalar is searched, never its `-> description` (see
-/// [`without_descriptions`]), and prose outside the carriers (a top-level
-/// `description`, a comment) is never read, so neither a sibling's
-/// description nor the member's own prose stands in for the reference. When
-/// no declaration spells it so, the first carrier present is the nearest
-/// known declaration.
-///
-/// The resolver reports only the reference's spelling, not the declaration
-/// that wrote it, so two declarations importing the same file are told
-/// apart by authored order alone.
-fn file_reference(text: &str, file: &Path, reference: &str, carriers: &[&str]) -> Option<SourcePosition> {
-    let reference = reference.trim();
-    if reference.is_empty() {
-        return None;
-    }
-    let loaded = load_yaml_document(text, file).ok()?;
-    let spelled = carriers.iter().find_map(|carrier| {
-        let mut scalars = Vec::new();
-        string_scalars(loaded.json.get(*carrier)?, &mut vec![(*carrier).to_string()], &mut scalars);
-        scalars
-            .iter()
-            .filter_map(|segments| {
-                let range = loaded.byte_range(&locating_problem(segments))?;
-                let node = text.get(range.clone())?;
-                Some(range.start + reference_in(node, reference, segments.len() == 1)?)
-            })
-            .min()
-    });
-    // No declaration spells the reference as reported (the resolver may
-    // have normalized it): the nearest known declaration is the first
-    // carrier the error was reached through.
-    spelled
-        .or_else(|| {
-            carriers
-                .iter()
-                .find_map(|carrier| loaded.byte_range(&locating_problem(&[(*carrier).to_string()])).map(|range| range.start))
-        })
-        .map(|offset| line_column(text, offset))
-}
-
-/// The offset in `node`, one declaration scalar's authored text, of the
-/// first spelling of `reference` that its declaration part reads as a
-/// reference: after an import's `@`, or as an `example(...)` argument; when
-/// `whole` (the scalar is a carrier), also the scalar being the reference.
-fn reference_in(node: &str, reference: &str, whole: bool) -> Option<usize> {
-    const QUOTING: [char; 4] = [' ', '\t', '"', '\''];
-    let declared = without_descriptions(node);
-    if whole && declared.trim().trim_matches(QUOTING) == reference {
-        return declared.find(reference);
-    }
-    declared.match_indices(reference).map(|(at, _)| at).find(|&at| {
-        let ends = declared[at + reference.len()..]
-            .chars()
-            .next()
-            .is_none_or(|next| !(next.is_alphanumeric() || matches!(next, '.' | '/' | '\\' | '_' | '-' | '~')));
-        let before = declared[..at].trim_end_matches(QUOTING);
-        ends && (before.ends_with('@') || ((before.ends_with('(') || before.ends_with(',')) && in_example(before)))
-    })
-}
-
-/// Whether the innermost `(` left open in `before` opens an `example`
-/// argument list.
-fn in_example(before: &str) -> bool {
-    let mut closed = 0usize;
-    for (at, byte) in before.bytes().enumerate().rev() {
-        match byte {
-            b')' => closed += 1,
-            b'(' if closed == 0 => return before[..at].trim_end().ends_with("example"),
-            b'(' => closed -= 1,
-            _ => {}
-        }
-    }
-    false
-}
-
-/// The paths of every string under `value`, which is at `at`.
-fn string_scalars(value: &serde_json::Value, at: &mut Vec<String>, found: &mut Vec<Vec<String>>) {
-    match value {
-        serde_json::Value::String(_) => found.push(at.clone()),
-        serde_json::Value::Object(map) => {
-            for (key, child) in map {
-                at.push(key.clone());
-                string_scalars(child, at, found);
-                at.pop();
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for (index, item) in items.iter().enumerate() {
-                at.push(index.to_string());
-                string_scalars(item, at, found);
-                at.pop();
-            }
-        }
-        _ => {}
-    }
-}
-
 /// The value at `segments` of the YAML (or JSON) `text` read from `file`.
 pub(super) fn field(text: &str, file: &Path, segments: &[String]) -> Option<SourcePosition> {
     let loaded = load_yaml_document(text, file).ok()?;
@@ -305,43 +217,9 @@ pub(super) fn artifact(text: &str, file: &Path, site: Option<&ReasonSite>) -> Op
 mod tests {
     use super::*;
 
-    // The line and column of the locators under test.
-    fn file_reference(text: &str, file: &Path, reference: &str, carriers: &[&str]) -> Option<(usize, usize)> {
-        super::file_reference(text, file, reference, carriers).map(|at| (at.line, at.column))
-    }
-
+    // The line and column of the locator under test.
     fn artifact(text: &str, file: &Path, site: Option<&ReasonSite>) -> Option<(usize, usize)> {
         super::artifact(text, file, site).map(|at| (at.line, at.column))
-    }
-
-    #[test]
-    fn a_reference_is_found_in_its_declaration_and_never_in_prose_or_a_comment() {
-        let file = Path::new("x.yaml");
-        let text = "# uses ./x.yaml\nkind: schema-trigger\ndescription: see ./x.yaml\n$schema:\n    a: thing@./x.yaml\n";
-        assert_eq!(file_reference(text, file, "./x.yaml", PAYLOAD), Some((5, 14)));
-        let bare = "description: see ./x.yaml\n$schema: ./x.yaml\n";
-        assert_eq!(file_reference(bare, file, "./x.yaml", PAYLOAD), Some((2, 10)));
-        let example = "description: see ./x.yaml\ntypes:\n    a: string\n    b: string(example(./x.yaml))\n";
-        assert_eq!(file_reference(example, file, "./x.yaml", TYPES), Some((4, 23)));
-        assert_eq!(file_reference(text, file, "./absent.yaml", PAYLOAD), Some((5, 5)), "unspelled: the carrier");
-        assert_eq!(file_reference("description: ./x.yaml\n", file, "./x.yaml", PAYLOAD), None, "prose alone");
-        assert_eq!(file_reference(text, file, " ", PAYLOAD), None);
-    }
-
-    #[test]
-    fn a_reference_is_found_past_a_sibling_s_description_and_never_in_one() {
-        let file = Path::new("x.yaml");
-        let sibling = "types:\n    a: 'string -> Read ./x.yaml.'\n";
-        let at = |declaration: &str| file_reference(&format!("{sibling}{declaration}"), file, "./x.yaml", TYPES);
-        assert_eq!(at("    b: Options@./x.yaml\n"), Some((3, 16)), "an import");
-        assert_eq!(at("    b: string(example(./x.yaml))\n"), Some((3, 23)), "an example");
-        assert_eq!(at("    b: string(example(./y.yaml, ./x.yaml))\n"), Some((3, 33)), "a later example argument");
-        assert_eq!(at("    b: '{ c: string -> from ./x.yaml, d: D@./x.yaml }'\n"), Some((3, 44)), "an inline object's member");
-        assert_eq!(at("    b: \"string(example(./x.yaml)) -> Read ./x.yaml.\"\n"), Some((3, 24)), "an example ahead of its own prose");
-        assert_eq!(at("    b: Options@./x.yaml.bak\n"), Some((2, 5)), "a longer path: the carrier");
-        assert_eq!(at("    b: string\n"), Some((2, 5)), "prose alone: the carrier");
-        let extends = "$schema:\n    - a: 'string -> Read ./x.yaml.'\n      $extends: Options@./x.yaml\n";
-        assert_eq!(file_reference(extends, file, "./x.yaml", PAYLOAD), Some((3, 25)), "a `$extends` operand");
     }
 
     #[test]

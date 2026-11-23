@@ -80,7 +80,7 @@ impl Fixture {
 fn not_schema(error: &SchemaError) -> Option<(PathBuf, NotSchemaReason)> {
     let mut cause: &dyn std::error::Error = error;
     loop {
-        if let Some(SchemaError::NotASchemaDocument { path, reason }) = cause.downcast_ref::<SchemaError>() {
+        if let Some(SchemaError::NotASchemaDocument { path, reason, .. }) = cause.downcast_ref::<SchemaError>() {
             return Some((path.clone(), *reason));
         }
         cause = cause.source()?;
@@ -159,11 +159,25 @@ fn a_mapping_without_schema_is_not_a_schema_document() {
     for (name, text) in [
         ("plain.yaml", "title: string(required)\n"),
         ("raw-no-dialect.yaml", "type: object\nproperties:\n  x:\n    type: number\n"),
-        ("trigger.yaml", "kind: schema-trigger\nmatch: path(**/*.md)\n"),
         ("described.yaml", "description: Reviews\ntypes:\n  Id: string\n"),
     ] {
         let (path, result) = fixture.target(name, text);
         assert_not_schema(result, &path, NotSchemaReason::NoSchemaProperty);
+    }
+}
+
+/// A trigger file is refused for its kind, with or without a payload, and
+/// whether its envelope is well formed or not.
+#[test]
+fn a_trigger_file_is_not_a_schema_document() {
+    let fixture = Fixture::new();
+    for (name, text) in [
+        ("trigger.yaml", "kind: schema-trigger\nmatch: path(**/*.md)\n"),
+        ("payload.yaml", "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema:\n  title: string\n"),
+        ("malformed.yaml", "kind: schema-trigger\n$schema:\n  title: string\n"),
+    ] {
+        let (path, result) = fixture.target(name, text);
+        assert_not_schema(result, &path, NotSchemaReason::TriggerEnvelope);
     }
 }
 
@@ -515,7 +529,7 @@ fn json_dialect_and_root_shapes() {
         let text = SCHEMA_JSON.replace(DIALECT, dialect);
         let (path, result) = fixture.target(&format!("dialect-{label}.json"), &text);
         match result {
-            Err(SchemaError::UnsupportedJsonDialect { path: actual, declared }) => {
+            Err(SchemaError::UnsupportedJsonDialect { path: actual, declared, .. }) => {
                 assert_eq!(actual, path);
                 assert_eq!(declared, dialect);
             }
@@ -535,7 +549,7 @@ fn a_declared_schema_failing_the_meta_schema_is_invalid_json_schema() {
     let fixture = Fixture::new();
     let (path, result) = fixture.target("invalid.json", &SCHEMA_JSON.replace("\"type\": \"object\"", "\"type\": 5"));
     match result {
-        Err(SchemaError::InvalidJsonSchema { path: actual, message }) => {
+        Err(SchemaError::InvalidJsonSchema { path: actual, message, .. }) => {
             assert_eq!(actual, path);
             assert!(message.contains("/type"), "{message}");
         }

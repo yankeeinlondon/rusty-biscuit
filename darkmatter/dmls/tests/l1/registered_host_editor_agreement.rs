@@ -244,6 +244,38 @@ refused_install! {
             std::fs::write(root.join("home/.relay/schemas/options.yaml"), "kind: schema\ntypes:\n    Options: string\n").unwrap();
         }
         => "home/.relay/schemas/relay.yaml" at Some("review-entry: Options@");
+    an_example_beside_a_working_import_of_its_file_is_warned_at_its_declaration:
+        |root| Bundle::relay()
+            .with_file("schemas/lib.yaml", "kind: schema\ntypes:\n    span: string\n")
+            .with_member(
+                "schemas/relay.yaml",
+                &format!("{RELAY_TRIGGER}    span: span@./lib.yaml\n    review-entry: \"string(example(./lib.yaml))\"\n"),
+            )
+            .write_to(&root.join("home/.relay"))
+        => "home/.relay/schemas/relay.yaml" at Some("review-entry:");
+    an_inherited_example_is_warned_in_the_library_that_wrote_it:
+        |root| Bundle::relay()
+            .with_file("schemas/units.yaml", "kind: schema\ntypes:\n    Unit: string\n")
+            .with_file(
+                "schemas/lib.yaml",
+                "kind: schema\ntypes:\n    span:\n        unit: Unit@./units.yaml\n        last_updated: \"string(example(./units.yaml))\"\n",
+            )
+            .with_member("schemas/relay.yaml", &format!("{RELAY_TRIGGER}    span: span@./lib.yaml\n"))
+            .write_to(&root.join("home/.relay"))
+        => "home/.relay/schemas/lib.yaml" at Some("last_updated:");
+    a_payload_naming_its_own_trigger_is_warned_at_the_reference:
+        |root| {
+            let head = &RELAY_TRIGGER[..RELAY_TRIGGER.find("$schema:").unwrap()];
+            Bundle::relay().with_member("schemas/relay.yaml", &format!("{head}$schema: ./relay.yaml\n")).write_to(&root.join("home/.relay"))
+        }
+        => "home/.relay/schemas/relay.yaml" at Some("$schema: ./relay.yaml");
+    a_root_union_arm_naming_a_namespace_is_warned_at_the_arm:
+        |root| {
+            let head = &RELAY_TRIGGER[..RELAY_TRIGGER.find("$schema:").unwrap()];
+            let trigger = format!("{head}$schema:\n    - sequence: string\n    - ./seq.yaml\n");
+            Bundle::relay().with_member("schemas/relay.yaml", &trigger).write_to(&root.join("home/.relay"))
+        }
+        => "home/.relay/schemas/relay.yaml" at Some("- ./seq.yaml");
     a_manifest_naming_a_missing_member_refuses_the_host:
         |root| std::fs::remove_file(root.join("home/.relay/schemas/functions.facts.json")).unwrap()
         => "home/.relay/darkmatter-host.yaml" at Some("facts:");

@@ -24,7 +24,9 @@ types:
         conflict: conflict -> why the matched triggers' concrete payloads cannot be layered as one (dm.host.trigger_conflict, which fails the run); null when they can
     conflict:
         first: string(required) -> the trigger file representing the first declaration
+        first_name: string -> the first trigger's `name` label; null when it declares none
         second: string(required) -> the other trigger file
+        second_name: string -> the other trigger's `name` label; null when it declares none
         subject: string -> the property; null for the payloads' root rules
         reason: string(required)
     shadowed:

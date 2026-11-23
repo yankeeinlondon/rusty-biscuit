@@ -14,16 +14,18 @@ use crate::{SchemaError, SchemaReferenceSite, SchemaSourcePath, SchemaSourcePath
 
 use super::load::{LoadedYaml, locating_problem, pointer_string};
 
-/// The reference site `error` carries, and the type name the site spells,
-/// for the resolver failures that record one.
+/// The reference site `error` carries, for the resolver failures that
+/// record one, and the type name the site spells when the failure is about
+/// a named type (a file reference's spelling may have been normalized, so
+/// it names none).
 #[must_use]
-pub fn reference_site(error: &SchemaError) -> Option<(&SchemaReferenceSite, &str)> {
+pub fn reference_site(error: &SchemaError) -> Option<(&SchemaReferenceSite, Option<&str>)> {
     match error {
         SchemaError::UnknownNamedType { site, name, .. }
         | SchemaError::ConstraintConflict { site, name, .. }
         | SchemaError::UnionReference { site, name, .. }
-        | SchemaError::InvalidCompositionTarget { site, name, .. } => Some((site, name)),
-        _ => None,
+        | SchemaError::InvalidCompositionTarget { site, name, .. } => Some((site, Some(name))),
+        _ => error.reference_site().map(|site| (site, None)),
     }
 }
 
@@ -60,11 +62,15 @@ pub fn claim_segments(problem: &crate::ClaimProblem) -> Vec<String> {
 /// authored text outside any `-> description` contains `spelled` (the name
 /// the failing reference wrote), so a same-named declaration in the other
 /// carrier, or one whose prose mentions the name, never stands in for it;
-/// then any node that exists at the whole path, in carrier order. When the
-/// whole path exists in no carrier, the deepest node on it under the first
-/// carrier the document has is returned: the nearest enclosing declaration
-/// that is actually on the path, the carrier itself at worst. `None` when
-/// the document has none of `carriers`.
+/// then any node that exists at the whole path, in carrier order. A path
+/// that already starts with one of `carriers` the document has (the
+/// resolver writes a payload's private `types` as `types.<name>`) is
+/// followed from the document's root when no carrier holds it relatively.
+/// When the whole path exists in no carrier, the deepest node on it is
+/// returned, under the carrier it names or else the first carrier the
+/// document has: the nearest enclosing declaration that is actually on the
+/// path, the carrier itself at worst. `None` when the document has none of
+/// `carriers`.
 #[must_use]
 pub fn declaration_segments(
     loaded: &LoadedYaml,
@@ -88,8 +94,12 @@ pub fn declaration_segments(
     if let Some(found) = whole.iter().find(|segments| spells(segments)).or_else(|| whole.first()) {
         return Some(found.clone());
     }
-    let carrier = carriers.iter().find(|carrier| exists(&[(*carrier).to_string()]))?;
-    let full = under(carrier);
+    // A path that starts with its carrier (a payload's private `types`, or
+    // the `$schema` beside them) is already whole.
+    let full = match relative.first() {
+        Some(first) if carriers.contains(&first.as_str()) && exists(std::slice::from_ref(first)) => relative,
+        _ => under(carriers.iter().find(|carrier| exists(&[(*carrier).to_string()]))?),
+    };
     (1..=full.len()).rev().map(|depth| full[..depth].to_vec()).find(|segments| exists(segments))
 }
 
@@ -131,6 +141,14 @@ mod tests {
         let path = SchemaSourcePath::root().property("count");
         let found = declaration_segments(&loaded, text, &path, &["types", "$schema"], Some("Missing"));
         assert_eq!(found, owned(&["$schema", "count"]));
+    }
+
+    #[test]
+    fn a_path_that_names_its_carrier_is_followed_from_the_root() {
+        let path = SchemaSourcePath::root().property("types").property("count");
+        assert_eq!(segments(&path, &["$schema", "types"], None), owned(&["types", "count"]));
+        let deeper = SchemaSourcePath::root().property("$schema").property("count").union_arm(1).property("absent");
+        assert_eq!(segments(&deeper, &["$schema", "types"], None), owned(&["$schema", "count", "1"]), "the nearest node on it");
     }
 
     #[test]

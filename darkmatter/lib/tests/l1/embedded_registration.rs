@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::host_fixtures::*;
+use crate::host_registration_locations::declaration_of;
 use darkmatter::config::registration::bundle::{VerifiedSnapshot, load_snapshot};
 use darkmatter::config::registration::{HOST_REGISTRATION_CODE, load_embedded, md_owned_names};
 use simplified_schema::triggers::TriggerSource;
@@ -162,9 +163,9 @@ fn an_embedded_trigger_without_match_is_located_at_its_mapping() {
 
 /// An embedded member's unused declaration faces the bundle boundary as an
 /// installed one does: an unlisted import or example in a library's or a
-/// trigger's `types` refuses the whole bundle at the reference in the
-/// member's virtual file, even when the trigger's payload is served
-/// prepared.
+/// trigger's `types` refuses the whole bundle at the declaration that
+/// writes it, in the member's virtual file, even when the trigger's payload
+/// is served prepared.
 #[test]
 fn an_embedded_unused_unlisted_reference_refuses_the_bundle_at_the_reference() {
     let cases = [
@@ -182,9 +183,7 @@ fn an_embedded_unused_unlisted_reference_refuses_the_bundle_at_the_reference() {
         .expect_err("refused");
         assert_eq!(refusals.len(), 1, "{path}: {refusals:#?}");
         let refusal = &refusals[0];
-        let offset = text.find("./options.yaml").unwrap();
-        let line = text[..offset].matches('\n').count() + 1;
-        let column = offset - text[..offset].rfind('\n').map_or(0, |at| at + 1) + 1;
+        let (line, column) = declaration_of(text, "./options.yaml");
         assert_eq!(
             (refusal.file.as_path(), refusal.line, refusal.column),
             (Path::new("<acme>").join(path).as_path(), Some(line), Some(column)),
@@ -208,7 +207,7 @@ fn an_embedded_failure_inside_an_arm_or_a_shared_type_is_located_where_it_is_wri
     let cases = [
         ("trigger arm", "schemas/gadget.yaml", union_trigger.to_string(), "\"Missing("),
         ("library arm", "schemas/library.yaml", library_arm, "\"Missing[]"),
-        ("library import", "schemas/library.yaml", library_import, "./options.yaml"),
+        ("library import", "schemas/library.yaml", library_import, "Options@./options.yaml"),
     ];
     for (case, path, text, needle) in cases {
         let bundle = Bundle::acme().with_member(path, &text).with_member("schemas/options.yaml", "kind: schema\ntypes:\n    Options: string\n");
@@ -234,8 +233,8 @@ fn an_embedded_failure_inside_an_arm_or_a_shared_type_is_located_where_it_is_wri
 
 /// An embedded bundle locates an unlisted import or example that follows a
 /// sibling declaration whose description names the same file, as an
-/// installed one does: at the reference, in every member kind, used or not,
-/// and for a shared library's importers too.
+/// installed one does: at the declaration that writes it, in every member
+/// kind, used or not, and for a shared library's importers too.
 #[test]
 fn an_embedded_reference_after_a_sibling_description_is_located_at_the_reference() {
     const PROSE: &str = "    review-setting: 'string -> Read options from ./options.yaml.'\n";
@@ -262,9 +261,7 @@ fn an_embedded_reference_after_a_sibling_description_is_located_at_the_reference
                 bundle = bundle.with_member("schemas/globals.lifecycle.json", &lifecycle_artifact_for("acme", &[(path, &text)]));
             }
             let refusals = load_embedded(embedded(&bundle).expect("verifies"), md_owned_names(), &|_| None).expect_err("refused");
-            let offset = text.find(outer).unwrap() + outer.find("./options.yaml").unwrap();
-            let line = text[..offset].matches('\n').count() + 1;
-            let column = offset - text[..offset].rfind('\n').map_or(0, |at| at + 1) + 1;
+            let (line, column) = declaration_of(&text, outer);
             if !case.ends_with("library") {
                 assert_eq!(refusals.len(), 1, "{case}: {refusals:#?}");
             }
@@ -330,4 +327,62 @@ fn an_embedded_named_kind_claim_that_claims_nothing_is_located_at_its_declaratio
         (Path::new("<acme>/schemas/part.yaml"), Some(3), Some(11)),
         "{refusal:#?}"
     );
+}
+
+/// An embedded bundle locates an example beside a working import of its
+/// file, and one inherited from a shared library declaration, as an
+/// installed one does: at the declaration that writes the example, in the
+/// file that writes it, naming each importer of a library's.
+#[test]
+fn an_embedded_example_is_located_at_the_declaration_that_writes_it() {
+    use crate::host_registration_locations::{BAD_EXAMPLE, example_beside_an_import, last_position_of, republished, shared_example_bundle};
+    for (case, path, _, text) in example_beside_an_import() {
+        let refusals = load_embedded(embedded(&republished(path, &text)).expect("verifies"), md_owned_names(), &|_| None).expect_err("refused");
+        let [refusal] = refusals.as_slice() else { panic!("{case}: {refusals:#?}") };
+        let (line, column) = last_position_of(&text, BAD_EXAMPLE);
+        assert_eq!(
+            (refusal.file.as_path(), refusal.line, refusal.column),
+            (Path::new("<acme>").join(path).as_path(), Some(line), Some(column)),
+            "{case}: {refusal:#?}"
+        );
+    }
+
+    let (bundle, library) = shared_example_bundle();
+    let refusals = load_embedded(embedded(&bundle).expect("verifies"), md_owned_names(), &|_| None).expect_err("refused");
+    let (line, column) = last_position_of(&library, "\"string(example(./options.yaml))\"");
+    for refusal in &refusals {
+        assert_eq!(
+            (refusal.file.as_path(), refusal.line, refusal.column),
+            (Path::new("<acme>/schemas/library.yaml"), Some(line), Some(column)),
+            "{refusal:#?}"
+        );
+    }
+    for importer in ["imported by `files[0]`", "imported by `files[1]`"] {
+        assert!(refusals.iter().any(|refusal| refusal.message.contains(importer)), "{importer}: {refusals:#?}");
+    }
+}
+
+/// A payload naming another trigger, or a member of another role, as its
+/// document schema is refused at the same declaration by the embedded
+/// loader as by the installed one: the scalar or arm that names it.
+#[test]
+fn an_embedded_target_refused_for_its_role_is_located_at_the_declaration_that_names_it() {
+    use crate::host_registration_locations::republished;
+    let head = "kind: schema-trigger\nmatch:\n    gadget: string(required)\n";
+    for (target, reason) in [("./widget.yaml", "resolved to a schema-trigger envelope"), ("./library.yaml", "it declares only `types`")] {
+        for text in [format!("{head}$schema: {target}\n"), format!("{head}$schema:\n    - gadget: string\n    - {target}\n")] {
+            let bundle = republished("schemas/gadget.yaml", &text);
+            let refusals = load_embedded(embedded(&bundle).expect("verifies"), md_owned_names(), &|_| None).expect_err("refused");
+            let [refusal] = refusals.as_slice() else { panic!("{target}: {refusals:#?}") };
+            let offset = text.find(target).unwrap();
+            let line = text[..offset].matches('\n').count() + 1;
+            let column = offset - text[..offset].rfind('\n').map_or(0, |at| at + 1) + 1;
+            assert_eq!(
+                (refusal.file.as_path(), refusal.line, refusal.column),
+                (Path::new("<acme>/schemas/gadget.yaml"), Some(line), Some(column)),
+                "{target}: {refusal:#?}"
+            );
+            assert!(refusal.message.contains(reason), "{target}: {}", refusal.message);
+        }
+    }
 }

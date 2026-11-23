@@ -159,6 +159,7 @@ mod embedded_registration;
 mod host_registration;
 mod host_registration_snapshot;
 mod host_registration_locations;
+mod host_registration_labels;
 mod host_selection;
 mod foreign_document_compose;
 #[cfg(feature = "effects-instrumentation")]

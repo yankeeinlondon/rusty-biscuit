@@ -274,12 +274,12 @@ impl ImportEngine<'_> {
             // change what the schema depends on or probed.
             let dependencies = self.dependencies.clone();
             let searched = self.searched.clone();
-            let target = self.resolve_namespace(reference, namespace);
+            let target = self.resolve_namespace(reference, namespace, path);
             self.dependencies = dependencies;
             self.searched = searched;
             target
         } else {
-            self.resolve_namespace(reference, namespace)
+            self.resolve_namespace(reference, namespace, path)
         };
         let Ok(target) = target else {
             return;

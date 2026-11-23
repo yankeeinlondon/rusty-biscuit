@@ -226,12 +226,17 @@ fn prepare_one(
                 }
                 NamespaceDocumentError::NotOneObject => here(None),
             };
-            // An unresolved payload with nothing more specific is reported at
-            // its `$schema`.
+            // A payload that is not one object, or fails to resolve for a
+            // reason other than a reference, is reported at its `$schema`. A
+            // reference failure with no recorded declaration stays file-level:
+            // its writer is unknown, so no key is guessed.
             let site = match (&error, &site.at) {
-                (NamespaceDocumentError::Unresolved(_) | NamespaceDocumentError::NotOneObject, None) if site.file == location => {
+                (NamespaceDocumentError::Unresolved(inner), None)
+                    if site.file == location && !is_reference_failure(inner) =>
+                {
                     here(position("$schema"))
                 }
+                (NamespaceDocumentError::NotOneObject, None) if site.file == location => here(position("$schema")),
                 _ => site,
             };
             return Err((site, error.to_string()));
@@ -258,4 +263,18 @@ fn prepare_one(
     });
     let member = NamespaceMember { namespace: name.clone(), path: path.to_string(), location: location.to_path_buf(), at };
     Ok((member, GlobalDeclaration::new(name, definition, resolved.definitions)))
+}
+
+fn is_reference_failure(error: &simplified_schema::SchemaError) -> bool {
+    use simplified_schema::SchemaError;
+    matches!(
+        error,
+        SchemaError::Unresolved { .. }
+            | SchemaError::NoMatch { .. }
+            | SchemaError::RemoteUnsupported { .. }
+            | SchemaError::BundleBoundary { .. }
+            | SchemaError::InvalidExample { .. }
+            | SchemaError::BareNameSiblingExists { .. }
+            | SchemaError::TriggerSchemaReferenced { .. }
+    )
 }

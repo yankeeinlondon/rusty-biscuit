@@ -117,7 +117,7 @@ struct Finding {
     message: String,
     /// The resolver's reference site, when the failure records one and no
     /// span located it: [`Self::at_reference`] moves the finding there.
-    site: Option<(crate::SchemaReferenceSite, String)>,
+    site: Option<(crate::SchemaReferenceSite, Option<String>)>,
 }
 
 impl Finding {
@@ -126,7 +126,7 @@ impl Finding {
             SchemaError::SchemaDocument { span, .. } => span.clone(),
             _ => None,
         };
-        let site = super::declaration::reference_site(error).map(|(site, name)| (site.clone(), name.to_string()));
+        let site = super::declaration::reference_site(error).map(|(site, name)| (site.clone(), name.map(str::to_string)));
         Self { segments, span, message: error.to_string(), site }
     }
 
@@ -150,7 +150,7 @@ impl Finding {
             Some("types") => &["types", "$schema"],
             _ => &["$schema", "types"],
         };
-        if let Some(segments) = super::declaration::declaration_segments(loaded, text, &site.path, carriers, Some(&name)) {
+        if let Some(segments) = super::declaration::declaration_segments(loaded, text, &site.path, carriers, name.as_deref()) {
             self.segments = segments;
         }
         self

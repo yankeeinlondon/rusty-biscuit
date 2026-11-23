@@ -143,7 +143,7 @@ impl ImportEngine<'_> {
                 PropertyDef::Single(atom) => self.expand_atom(atom, &namespace, &path)?,
                 PropertyDef::Union(arms) => self.expand_union_arms(arms, &namespace, &path)?.into_expanded(),
             };
-            let body = self.rehome_definition(body, &namespace.key)?;
+            let body = self.rehome_definition(body, &namespace.key, &path)?;
             self.reached[&key].body = Some(body);
         }
         Ok(())

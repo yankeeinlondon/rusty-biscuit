@@ -117,7 +117,7 @@ fn a_bare_name_missing_from_every_root_links_into_the_first_root() {
         assert_eq!(selection.attempted, expected);
         assert!(matches!(
             selection.into_result(),
-            Err(SchemaError::NoMatch { reference, bare_name: true }) if reference == "absent.yaml"
+            Err(SchemaError::NoMatch { reference, bare_name: true, .. }) if reference == "absent.yaml"
         ));
     }
     // Nothing was created by planning the link.
@@ -135,7 +135,7 @@ fn a_bare_name_with_no_roots_resolves_like_any_file_reference() {
     assert_eq!(selection.attempted, [fixture.docs().join("absent.yaml"), fixture.repo().join("absent.yaml")]);
     assert!(matches!(
         selection.into_result(),
-        Err(SchemaError::NoMatch { reference, bare_name: false }) if reference == "absent.yaml"
+        Err(SchemaError::NoMatch { reference, bare_name: false, .. }) if reference == "absent.yaml"
     ));
     assert!(!fixture.docs().join("absent.yaml").exists());
 
@@ -170,7 +170,7 @@ fn a_bare_name_only_beside_the_document_suggests_the_relative_spelling() {
     assert_eq!(selection.attempted, [first.join("near.yaml")]);
     assert!(matches!(
         selection.into_result(),
-        Err(SchemaError::BareNameSiblingExists { reference, suggestion })
+        Err(SchemaError::BareNameSiblingExists { reference, suggestion, .. })
             if reference == "near.yaml" && suggestion == "./near.yaml"
     ));
 }
@@ -231,7 +231,7 @@ fn unresolvable_references_fail_without_a_path() {
     assert!(selection.attempted.is_empty());
     assert!(matches!(
         selection.into_result(),
-        Err(SchemaError::RemoteUnsupported { reference }) if reference == "https://example.com/schema.yaml"
+        Err(SchemaError::RemoteUnsupported { reference, .. }) if reference == "https://example.com/schema.yaml"
     ));
 }
 

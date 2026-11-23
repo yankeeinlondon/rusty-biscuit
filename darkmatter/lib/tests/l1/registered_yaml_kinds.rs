@@ -246,3 +246,30 @@ fn an_installed_definition_s_optional_types_table_keeps_the_envelope_s_rules() {
         }
     }
 }
+
+/// Two installations of one host with different content conflict for
+/// Markdown, but each one's YAML kinds stay indexed: a kind only one of them
+/// defines is judged by that definition, and the conflict warning says so
+/// rather than calling both unused.
+#[test]
+fn a_same_host_conflict_keeps_each_installation_s_own_yaml_kinds_and_says_so() {
+    let fixture = roster_fixture();
+    fixture.install_bundle("moved/acme", &Bundle::acme().with_file("schemas/roster.yaml", &ROSTER.replace("literal(roster;", "literal(other-roster;")));
+    let hosts = fixture.hosts(&[HOST, "../moved/acme/darkmatter-host.yaml"]);
+    let diagnostics = hosts.diagnostics();
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
+    for diagnostic in diagnostics {
+        assert!(!diagnostic.message.contains("neither is used"), "{}", diagnostic.message);
+        assert!(diagnostic.message.contains("Markdown") && diagnostic.message.contains("YAML kinds stay available"), "{}", diagnostic.message);
+    }
+
+    let validation = validated(validate(&fixture, &hosts, "team.yaml", "kind: roster\nplatforms: [linux]\n"));
+    assert!(validation.report.valid, "{:#?}", validation.report.problems);
+    let validation = validated(validate(&fixture, &hosts, "other.yaml", "kind: other-roster\n"));
+    assert!(!validation.report.valid, "the second installation's definition judges its own kind");
+    assert!(
+        validation.report.problems.iter().any(|problem| format!("{problem:?}").contains("platforms")),
+        "its required `platforms` is missing: {:#?}",
+        validation.report.problems
+    );
+}

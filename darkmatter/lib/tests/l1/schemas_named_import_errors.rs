@@ -67,11 +67,40 @@ fn valid_yaml_that_is_not_a_schema_is_not_a_schema_document_import() {
     let (types, result) = import_from(dir.path(), "title: notes\nname: string\n");
 
     match result {
-        Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::NoSchemaProperty }) => assert_eq!(
+        Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::NoSchemaProperty, .. }) => assert_eq!(
             biscuit_file::canonicalize_simplified(&path).unwrap_or(path),
             biscuit_file::canonicalize_simplified(&types).expect("imported file canonicalizes")
         ),
         other => panic!("expected NotASchemaDocument, got {:?}", other.map(|resolved| resolved.json_schema)),
+    }
+}
+
+/// A valid schema document that declares no named types of its own (a root
+/// union, a whole-file reference) is refused as an import source, for that
+/// role, at the import that named it.
+#[test]
+fn a_schema_document_without_named_types_is_refused_at_the_import_that_names_it() {
+    for (body, expected) in [
+        ("$schema:\n  - name: string\n  - other: string\n", NotSchemaReason::RootUnionImport),
+        ("$schema: ./elsewhere.yaml\n", NotSchemaReason::ReferenceImport),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (types, result) = import_from(dir.path(), body);
+
+        match result {
+            Err(error @ SchemaError::NotASchemaDocument { .. }) => {
+                assert!(error.to_string().contains("cannot supply named imports"), "{error}");
+                let SchemaError::NotASchemaDocument { path, reason, site } = error else { unreachable!() };
+                assert_eq!(reason, expected);
+                assert_eq!(
+                    biscuit_file::canonicalize_simplified(&path).unwrap_or(path),
+                    biscuit_file::canonicalize_simplified(&types).expect("imported file canonicalizes")
+                );
+                let site = site.expect("the import that named the file");
+                assert_eq!(site.path.to_string(), "value", "{expected:?}");
+            }
+            other => panic!("{expected:?}: expected NotASchemaDocument, got {:?}", other.map(|resolved| resolved.json_schema)),
+        }
     }
 }
 
@@ -95,16 +124,6 @@ fn an_import_target_that_cannot_supply_named_types_is_a_located_schema_document_
             "empty types",
             "kind: schema\ntypes: {}\n",
             "the `kind: schema` envelope does not satisfy its definition `simplified-schema/schemas/schema.yaml`: `/types`",
-        ),
-        (
-            "root union",
-            "$schema:\n  - name: string\n  - other: string\n",
-            "root-union schema documents cannot supply named imports",
-        ),
-        (
-            "whole-file reference",
-            "$schema: ./elsewhere.yaml\n",
-            "whole-file reference schema documents cannot supply named imports",
         ),
         ("duplicate key", "kind: schema\ntypes:\n  name: string\n  name: number\n", "not valid YAML"),
         ("trailing content", "kind: schema\ntypes:\n  name: string\n]\n", "not valid YAML"),

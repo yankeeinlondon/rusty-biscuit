@@ -152,15 +152,18 @@ pub fn validate_example_bytes(reference: &str, bytes: &[u8]) -> Result<Value, Sc
     let text = std::str::from_utf8(bytes).map_err(|_| SchemaError::InvalidExample {
         reference: reference.to_string(),
         message: "example file is not valid UTF-8".into(),
+        site: None,
     })?;
     let yaml: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(text).map_err(|source| SchemaError::InvalidExample {
             reference: reference.to_string(),
             message: format!("example file is not valid YAML: {source}"),
+            site: None,
         })?;
     let object = serde_json::to_value(&yaml).map_err(|source| SchemaError::InvalidExample {
         reference: reference.to_string(),
         message: format!("example file could not be normalized to JSON: {source}"),
+        site: None,
     })?;
 
     validate_example_object(reference, &object)?;
@@ -190,12 +193,14 @@ pub fn validate_example_object(reference: &str, object: &Value) -> Result<(), Sc
         SchemaError::InvalidExample {
             reference: reference.to_string(),
             message: format!("example envelope failed to build a validator: {source}"),
+            site: None,
         }
     })?;
     if let Some(message) = first_error(&validator, &coerced.value) {
         return Err(SchemaError::InvalidExample {
             reference: reference.to_string(),
             message: format!("does not match the example envelope: {message}"),
+            site: None,
         });
     }
 
@@ -207,6 +212,7 @@ pub fn validate_example_object(reference: &str, object: &Value) -> Result<(), Sc
             SchemaError::InvalidExample {
                 reference: reference.to_string(),
                 message: format!("parameters target failed to build a validator: {source}"),
+                site: None,
             }
         })?;
         if let Some(message) = first_error(&validator, parameters) {
@@ -215,6 +221,7 @@ pub fn validate_example_object(reference: &str, object: &Value) -> Result<(), Sc
                 message: format!(
                     "`parameters` must be an array of single-key maps: {message}"
                 ),
+                site: None,
             });
         }
     }
@@ -260,6 +267,7 @@ pub fn validate_returns_against_target(
         .map_err(|source| SchemaError::InvalidExample {
             reference: reference.to_string(),
             message: format!("annotated target schema failed to build a validator: {source}"),
+            site: None,
         })?;
     if let Some(message) = first_error(&validator, &coerced) {
         return Err(SchemaError::InvalidExample {
@@ -267,6 +275,7 @@ pub fn validate_returns_against_target(
             message: format!(
                 "example `returns` does not match the annotated target type: {message}"
             ),
+            site: None,
         });
     }
     Ok(())

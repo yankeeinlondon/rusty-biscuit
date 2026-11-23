@@ -66,3 +66,4 @@ mod validation_contract;
 mod yaml_kind_selection;
 mod yaml_schema_envelope;
 mod yaml_serializer_guard;
+mod reference_error_provenance;

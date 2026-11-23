@@ -49,16 +49,19 @@ pub struct WalkedMember {
 pub struct InventoryError {
     /// The relative path the problem is at (`""` for the root itself).
     pub path: String,
+    /// The refused member's valid display `name`, when it declares one
+    /// (`member_envelope::declared_name`); shown beside the path.
+    pub name: Option<String>,
     #[allow(missing_docs)]
     pub message: String,
 }
 
 impl std::fmt::Display for InventoryError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.path.is_empty() {
-            write!(formatter, "{}", self.message)
-        } else {
-            write!(formatter, "`{}`: {}", self.path, self.message)
+        match (&self.name, self.path.is_empty()) {
+            (_, true) => write!(formatter, "{}", self.message),
+            (Some(name), false) => write!(formatter, "`{name} ({})`: {}", self.path, self.message),
+            (None, false) => write!(formatter, "`{}`: {}", self.path, self.message),
         }
     }
 }
@@ -157,7 +160,10 @@ fn visit(
                     Ok((text, kind, label)) => {
                         members.push(WalkedMember { path: relative, file: path, text, kind, name: label });
                     }
-                    Err(message) => errors.push(error(&relative, message)),
+                    Err(message) => {
+                        let name = std::str::from_utf8(&bytes).ok().and_then(member_envelope::declared_name);
+                        errors.push(InventoryError { name, ..error(&relative, message) });
+                    }
                 },
                 Err(cause) => errors.push(error(&relative, format!("the file cannot be read: {cause}"))),
             }
@@ -166,7 +172,7 @@ fn visit(
 }
 
 fn error(path: &str, message: String) -> InventoryError {
-    InventoryError { path: path.to_string(), message }
+    InventoryError { path: path.to_string(), name: None, message }
 }
 
 /// Whether `metadata` (from `symlink_metadata`) is a symlink, or on Windows

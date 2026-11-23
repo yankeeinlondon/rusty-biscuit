@@ -424,6 +424,28 @@ fn a_closed_document_schema_refuses_an_undeclared_key_over_a_registered_root_uni
 /// column; each client receives that point counted in the encoding it
 /// negotiated (UTF-8 bytes or UTF-16 code units), on the unopened member and
 /// on the same member once it is open.
+/// A refused trigger that declares a valid `name` is published on its file
+/// with its label beside its manifest field.
+#[test]
+fn a_registration_warning_names_a_named_trigger_by_its_label() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".acme"]);
+    let trigger = format!("name: gadget-schema\n{}", crate::host_fixtures::GADGET_TRIGGER.replacen("string(required)", "string(requird)", 1));
+    Bundle::acme().with_member("schemas/gadget.yaml", &trigger).write_to(&root.join("home/.acme"));
+    let mut fixture = start(&workspace);
+    let (document, _) = open_text(&mut fixture, &workspace, "notes/notes.md", "---\ntitle: Notes\n---\n# Notes\n");
+    fixture.flush_server_with("textDocument/documentSymbol", json!({ "textDocument": { "uri": document.uri } }));
+    let published = fixture.take_latest_diagnostics_ending("home/.acme/schemas/gadget.yaml").expect("published on the member");
+    let refused = with_code(&published, REGISTRATION);
+    assert_eq!(refused.len(), 1, "{refused:#?}");
+    let message = refused[0]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("is not loaded at `files[1]` (`gadget-schema (schemas/gadget.yaml)`): "), "{refused:#?}");
+    assert_eq!(refused[0]["range"]["start"]["line"], json!(line_containing(&trigger, "string(requird)")), "the range is kept: {refused:#?}");
+    fixture.shutdown();
+}
+
 #[test]
 fn a_registration_warning_is_published_in_each_clients_position_encoding() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
@@ -431,7 +453,7 @@ fn a_registration_warning_is_published_in_each_clients_position_encoding() {
         let types = format!("types: {{label: 'string -> {prose}', review-entry: 'string(example(./options.yaml))'}}\n");
         let trigger = format!("{RELAY_TRIGGER}{types}");
         let line = line_containing(&trigger, "review-entry");
-        let prefix = &types[..types.find("./options.yaml").unwrap()];
+        let prefix = &types[..types.find("'string(example(").unwrap()];
         for (encoding, character) in [("utf-8", prefix.len()), ("utf-16", prefix.encode_utf16().count())] {
             let case = format!("{prose} / {encoding}");
             let workspace = LspWorkspace::new();

@@ -536,7 +536,7 @@ mod yaml_loader_matrix {
         assert!(
             matches!(
                 &types_only,
-                Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::TypesOnly }) if path.ends_with("types.yaml")
+                Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::TypesOnly, .. }) if path.ends_with("types.yaml")
             ),
             "got {types_only:?}"
         );

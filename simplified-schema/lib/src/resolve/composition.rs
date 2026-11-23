@@ -247,7 +247,7 @@ impl ImportEngine<'_> {
                     ),
                 }));
             }
-            let target = self.resolve_namespace(&reference, &from).map_err(lookup_failed)?;
+            let target = self.resolve_namespace(&reference, &from, &site.path).map_err(lookup_failed)?;
             let Some(def) = target.named_types.get(&name).cloned() else {
                 return Err(SchemaError::UnknownNamedType { name, namespace: target.key.source_id(), site });
             };

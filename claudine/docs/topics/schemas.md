@@ -1416,7 +1416,13 @@ required key, or a value of the wrong type (`name: null`, a library with no
 `types`). That envelope check is the one Darkmatter's registration runs on
 the published files, so the build accepts exactly what registration accepts;
 the full preparation of each file still happens when the shipped artifact is
-generated. The build's error lists every problem.
+generated. The build's error lists every problem, each at its file's path;
+a file that declares a valid `name` is shown by that name beside its path:
+
+```text
+`claudine/registration/` is not a valid registration inventory:
+  - `inline-compose-schema (inline-composition.yaml)`: `review-typo` is not a field of a `schema-trigger`; …
+```
 
 ```mermaid
 flowchart TD

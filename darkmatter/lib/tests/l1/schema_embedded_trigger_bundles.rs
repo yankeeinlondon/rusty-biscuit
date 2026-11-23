@@ -212,6 +212,13 @@ fn a_payload_naming_a_trigger_is_skipped_inside_the_bundle() {
             }
             other => panic!("{payload}: {other:?}"),
         }
+        // Each cycle is reported at the `$schema` value that named the
+        // trigger, in the embedded document that wrote it.
+        for (cause, name) in [(host_cause, "cycle/host.yaml"), (other_cause, "cycle/other.yaml")] {
+            let site = cause.reference_site().unwrap_or_else(|| panic!("{payload}: {cause:?}"));
+            assert_eq!(site.source, simplified_schema::SchemaSourceId::Embedded(name.into()), "{payload}");
+            assert_eq!(site.path, simplified_schema::SchemaSourcePath::root(), "{payload}");
+        }
         assert!(matches!(other_cause, SchemaError::TriggerPayloadCycle { .. }), "{payload}: {other_cause:?}");
     }
 }

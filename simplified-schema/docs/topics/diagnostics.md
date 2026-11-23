@@ -145,6 +145,9 @@ hint: use a named-type import (`Name@file.yaml`) to reuse its types
 | --- | --- | --- |
 | `kind: schema` with only `types` | `NotASchemaDocument` (`TypesOnly`) | use a named-type import (`Name@file.yaml`) to reuse its types |
 | `kind: yaml-schema`, well formed or not, named as a `$schema` target, a root-union file arm, a `Name@file` import source, or an embedded `$schema` target | `NotASchemaDocument` (`SelectedByKind`): "it is a `yaml-schema`; it is selected by `kind`, not referenced" | move shared types into a `kind: schema` file and import them from there |
+| `kind: namespace-schema`, named as a `$schema` target or a `Name@file` import source | `NotASchemaDocument` (`NamespaceCatalog`) | move shared types into a `kind: schema` file and import them from there |
+| `kind: schema-trigger`, well formed or not, named as a `$schema` target or a `Name@file` import source | `NotASchemaDocument` (`TriggerEnvelope`): "it is a `schema-trigger`; trigger schemas activate by placement and match, never by reference" | reference the trigger's payload file instead |
+| a root-union schema, or one whose `$schema` is a whole-file reference, named as a `Name@file` import source | `NotASchemaDocument` (`RootUnionImport`, `ReferenceImport`): "`x.yaml` cannot supply named imports: …" | import the type from the file that declares it |
 | a YAML mapping with no `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) | none |
 | YAML whose root is not a mapping | `NotASchemaDocument` (`NotAMapping`) | none |
 | `.json` whose root is not an object | `NotASchemaDocument` (`NotAMapping`) | declare `"$schema": "https://json-schema.org/draft/2020-12/schema"` |
@@ -176,6 +179,52 @@ structurally:
   `ConstraintConflict` also lists every participant with its
   `SchemaConstraintOrigin` (source, path, keyword, occurrence, and span), so
   a conflict reached through several imports points at each declaration.
+- **A reference that names a file and cannot be followed** (`Unresolved`,
+  `NoMatch`, `RemoteUnsupported`, `BundleBoundary`, `BareNameSiblingExists`,
+  `InvalidExample`, `TriggerSchemaReferenced`) carries an optional `site`,
+  read with `SchemaError::reference_site()`: the declaration that wrote the
+  reference (an import, an `example(...)` argument, a `$schema` file),
+  recorded where the resolver first read it. An imported library's
+  declaration keeps the library's file and path even after expansion copied
+  it into the importer, so a host reports the failure in the file that wrote
+  it. The site is `None` when no single declaration is known: two
+  declarations of one resolution wrote the same `example(...)` spelling, the
+  reference was not written in a schema (a selection called directly), or
+  the error is raised after resolution (`TriggerSchemaReferenced` from
+  `check_document_schema_not_trigger`, which sees only the paths read). A
+  host then reports the failure at the file, never by searching its text for
+  the reference.
+- **A file that was found but refused for the role a declaration named it
+  in** carries the same `site`, the declaration that named it:
+  `NotASchemaDocument` for a role reason (`NotSchemaReason::is_role()`:
+  `TypesOnly`, `SelectedByKind`, `NamespaceCatalog`, `TriggerEnvelope`,
+  `RootUnionImport`, `ReferenceImport`), `UnsupportedJsonDialect`, a
+  `ReferenceCycle` or `ReferenceDepthExceeded` at the `$schema` that closed
+  the loop or made the last hop, and `TriggerPayloadCycle` when a trigger
+  payload's refusal of a trigger file is reported as a cycle
+  (`triggers::assemble::refused_trigger_file` returns the site with the path,
+  and `trigger_schema_referenced(path, site)` keeps it for a document
+  `$schema`). Behind a delegating file (`$schema: ./alias.yaml` naming the
+  refused file), the site is the delegating file's `$schema`. A file refused
+  for its own content (`NoSchemaProperty`, `NotAMapping`,
+  `JsonMissingDialect`, `InvalidJsonSchema`, or a `SchemaDocument` parse
+  failure) has no site: the problem is in that file, and a host reports it
+  there.
+
+  ```rust
+  // A document `$schema: ./shared.yaml` naming a types-only library:
+  let SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. } = &error else { unreachable!() };
+  assert_eq!(error.reference_site().map(|site| &site.path), Some(&SchemaSourcePath::root()));
+  ```
+
+  ```rust
+  // `lib.yaml` declares `widget: { size: string(example(./absent.yaml)) }`
+  // and a document imports `widget@./lib.yaml`: the failure names lib.yaml.
+  if let Some(site) = error.reference_site() {
+      assert_eq!(site.source, SchemaSourceId::File(lib_yaml));
+      assert_eq!(site.path, SchemaSourcePath::root().property("widget").property("size"));
+  }
+  ```
 - **`NonDescendingCycle`** lists every `CycleReference` of each rejected
   cycle, with its site, its target, and the source that declares the target.
   A loop of `...name` / `$extends` and alias hops is reported this way too,
@@ -462,8 +511,8 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `Grammar`               | A type-and-constraint string could not be parsed. Carries property name, message, and byte span.          |
 | `Unresolved`            | `$schema` reference is malformed or `FileReference` rejected it; carries the typed resolver error.        |
 | `NoMatch`               | `$schema` reference matched no file (a path, or a bare name no schema root holds); a text with `*`, `?`, or `[` adds the literal-glob hint. |
-| `NotASchemaDocument`    | A file a `$schema` names is not a schema definition ([hints](#when-a-file-is-not-a-schema-target)). Carries the `path` and a `NotSchemaReason`: `TypesOnly` (a `kind: schema` file with `types` and no `$schema`; hint: use a named-type import `Name@file.yaml`), `NoSchemaProperty` (a YAML mapping without `$schema`), `NotAMapping` (the root is not a mapping or, for `.json`, an object), `JsonMissingDialect` (a JSON object without a string `$schema`), or `SelectedByKind` (a `kind: yaml-schema` file, which is applied by `kind` and is never a `$schema` target or `Name@file` import source; hint: move shared types into a `kind: schema` file and import them from there). JSON reasons carry the hint to declare `"$schema": "https://json-schema.org/draft/2020-12/schema"`. |
-| `UnsupportedJsonDialect` | A referenced `.json` file declares a `$schema` dialect other than exactly `https://json-schema.org/draft/2020-12/schema` (an empty string or a trailing `#` included). Carries the `path` and the `declared` text. |
+| `NotASchemaDocument`    | A file a `$schema` names is not a schema definition ([hints](#when-a-file-is-not-a-schema-target)). Carries the `path` and a `NotSchemaReason`: `TypesOnly` (a `kind: schema` file with `types` and no `$schema`; hint: use a named-type import `Name@file.yaml`), `NoSchemaProperty` (a YAML mapping without `$schema`), `NotAMapping` (the root is not a mapping or, for `.json`, an object), `JsonMissingDialect` (a JSON object without a string `$schema`), `SelectedByKind` (a `kind: yaml-schema` file, which is applied by `kind` and is never a `$schema` target or `Name@file` import source; hint: move shared types into a `kind: schema` file and import them from there), `NamespaceCatalog` (a `kind: namespace-schema` file), `TriggerEnvelope` (a `kind: schema-trigger` file), or, for a `Name@file` import source only, `RootUnionImport` / `ReferenceImport` (a schema with no named types of its own). JSON reasons carry the hint to declare `"$schema": "https://json-schema.org/draft/2020-12/schema"`. A role reason ([`is_role`](#where-a-definition-failure-points)) also carries the `site` of the declaration that named the file. |
+| `UnsupportedJsonDialect` | A referenced `.json` file declares a `$schema` dialect other than exactly `https://json-schema.org/draft/2020-12/schema` (an empty string or a trailing `#` included). Carries the `path`, the `declared` text, and the `site` of the declaration that named the file. |
 | `InvalidJsonSchema`     | A referenced `.json` file declares the Draft 2020-12 dialect but fails its meta-schema (checked offline). Distinct from a format rejection. Carries the `path` and the validator's message. |
 | `RemoteUnsupported`     | `http://` / `https://` `$schema` references are rejected in v1.                                           |
 | `BundleBoundary`        | A bundle scope refused a reference that is not a listed member reached by `./` or `../` (see [Selecting a schema file](./selecting-schema-files.md#resolving-inside-a-bundle)). |
@@ -486,8 +535,8 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `ComposedMember`        | Lowering failed inside a member copied in by composition. Carries the member's declaration site and the failure as `source`. |
 | `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintParticipant`: its `origin` (a `SchemaConstraintOrigin`) and the `constraint` value that took part. See [Merging use-site constraints](language/objects-and-named-types.md#merging-use-site-constraints). |
 | `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](language/unions.md#named-union-references). |
-| `ReferenceCycle`        | A `$schema` file-reference chain revisits a file it is already resolving; `chain` lists the files in visit order. |
-| `ReferenceDepthExceeded` | A chain of distinct `$schema` file references is deeper than `limit` (32) files. Not a cycle: no file repeats. |
+| `ReferenceCycle`        | A `$schema` file-reference chain revisits a file it is already resolving; `chain` lists the files in visit order, and `site` is the `$schema` declaration that closed the loop. |
+| `ReferenceDepthExceeded` | A chain of distinct `$schema` file references is deeper than `limit` (32) files. Not a cycle: no file repeats. `site` is the `$schema` declaration that made the last hop. |
 | `BareNameSiblingExists` | A bare schema name matched no schema root, but a file of that name sits beside the document; `suggestion` is the `./`-prefixed reference to use. See [Selecting a Schema File](./selecting-schema-files.md) for how a reference picks its file. |
 | `InvalidExample`        | An `example(...)` file is malformed or fails validation against the example envelope or inherited target shape. |
 | `BuildValidator`        | `jsonschema` could not build a validator from the produced schema.                                        |

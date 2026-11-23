@@ -166,6 +166,22 @@ fn ill_formed_member_envelopes_are_refused() {
     assert_refused_at(dir.path(), "nested/bad.yaml", "its `kind` is `document`");
 }
 
+/// A refused member that declares a valid `name` is named by its label
+/// beside its path, as the build failure prints it; an unnamed member, or
+/// one whose `name` is itself the problem, by its path alone.
+#[test]
+fn a_named_member_refusal_shows_its_label_beside_its_path() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "inline-composition.yaml", format!("{TRIGGER}review-typo: 1\n").as_bytes());
+    write(dir.path(), "library.yaml", format!("{LIBRARY}review-typo: 1\n").as_bytes());
+    write(dir.path(), "named-badly.yaml", b"kind: schema\nname: Not_Kebab\ntypes:\n    a: string\n");
+    let errors: Vec<String> = refusals(dir.path()).iter().map(ToString::to_string).collect();
+    assert_eq!(errors.len(), 3, "{errors:#?}");
+    assert!(errors[0].starts_with("`a-trigger (inline-composition.yaml)`: `review-typo` is not a field"), "{errors:#?}");
+    assert!(errors[1].starts_with("`library.yaml`: `review-typo` is not a field"), "{errors:#?}");
+    assert!(errors[2].starts_with("`named-badly.yaml`: its `name` `Not_Kebab`"), "{errors:#?}");
+}
+
 #[test]
 fn a_missing_or_empty_root_is_refused() {
     let dir = tempfile::tempdir().unwrap();

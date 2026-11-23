@@ -24,6 +24,7 @@ use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
 
 use crate::errors::SchemaError;
+use crate::simplified::{SchemaReferenceSite, SchemaSourceId, SchemaSourcePath};
 use crate::resolve::{ResolvedSchema, validate_simple_object_schema};
 
 use crate::roots::SchemaRoots;
@@ -367,7 +368,8 @@ fn resolve_file_payload(
     // definitions never share keys with the document's or another trigger's.
     // A trigger file is never a schema document, so the loader refuses a
     // payload that names one before any cycle check could see it; that
-    // refusal is reported as the cycle it is.
+    // refusal is reported as the cycle it is, at the declaration that
+    // named the trigger file.
     let resolved = match crate::resolve::resolve_trigger_payload_value(
         payload,
         types,
@@ -388,7 +390,7 @@ fn resolve_file_payload(
             return Ok(ResolvedPayload { dependencies, pending: Some(pending), ..ResolvedPayload::matcher_only() });
         }
         resolved => resolved.map_err(|error| match refused_trigger_file(&error) {
-            Some(path) => payload_cycle(source, &path).unwrap_or(error),
+            Some(refused) => payload_cycle(source, &refused.path, refused.site).unwrap_or(error),
             None => error,
         })?,
     };
@@ -966,6 +968,8 @@ pub(super) fn resolve_embedded_payload(
     };
     let resolved = bundle.with_documents(|documents| match payload {
         YamlValue::String(reference) => {
+            // The trigger's `$schema` value names the target.
+            let written = || SchemaReferenceSite { source: SchemaSourceId::Embedded(importer.clone()), path: SchemaSourcePath::root() };
             let target = crate::embedded::resolve_bundle_path(
                 bundle.name(),
                 &importer,
@@ -985,9 +989,11 @@ pub(super) fn resolve_embedded_payload(
                     trigger: importer_path.clone(),
                     payload_path: PathBuf::from(&target),
                     chain: format!("{importer} -> {target}{suffix}"),
+                    site: Some(Box::new(written())),
                 });
             }
             crate::resolve::prepare_embedded_schema_with_mode(&target, documents, bundle.name(), sources, mode)
+                .map_err(|error| error.refused_at(Path::new(&target), written))
         }
         YamlValue::Mapping(_) => {
             let types = types.map(crate::resolve::parse_trigger_types).transpose()?;
@@ -1146,8 +1152,10 @@ fn check_payload_cycles(
     trigger: &Path,
     resolved: &ResolvedSchema,
 ) -> Result<(), SchemaError> {
+    // A resolution keeps only the paths it read, not who named them, so a
+    // cycle found here is reported without a declaration.
     for ref_path in &resolved.referenced_files {
-        if let Some(cycle) = payload_cycle(trigger, ref_path) {
+        if let Some(cycle) = payload_cycle(trigger, ref_path, None) {
             return Err(cycle);
         }
     }
@@ -1155,8 +1163,9 @@ fn check_payload_cycles(
 }
 
 /// The cycle a payload forms by reaching `ref_path` (canonical): the trigger
-/// itself, or another file claiming the trigger envelope.
-fn payload_cycle(trigger: &Path, ref_path: &Path) -> Option<SchemaError> {
+/// itself, or another file claiming the trigger envelope. `site` is the
+/// declaration that named `ref_path`, when known.
+fn payload_cycle(trigger: &Path, ref_path: &Path, site: Option<SchemaReferenceSite>) -> Option<SchemaError> {
     let chain = if *ref_path == canonicalize(trigger) {
         format!("{} -> {} (self-reference)", trigger.display(), ref_path.display())
     } else if file_claims_trigger_envelope(ref_path) {
@@ -1168,21 +1177,45 @@ fn payload_cycle(trigger: &Path, ref_path: &Path) -> Option<SchemaError> {
         trigger: trigger.to_path_buf(),
         payload_path: ref_path.to_path_buf(),
         chain,
+        site: site.map(Box::new),
     })
 }
 
-/// The canonical path of the file the loader refused as a schema document,
-/// when that file claims the `kind: schema-trigger` envelope. A refusal
-/// wrapped by a delegating schema file is found through the source chain.
-pub fn refused_trigger_file(error: &SchemaError) -> Option<PathBuf> {
+/// A file the loader refused as a schema document or types library that
+/// claims the `kind: schema-trigger` envelope
+/// ([`refused_trigger_file`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusedTriggerFile {
+    /// The trigger file's canonical path.
+    pub path: PathBuf,
+    /// The declaration that named the trigger file (a `$schema` value or
+    /// arm, or a `Name@file` import, possibly in a library the resolution
+    /// imported), when the resolver recorded one.
+    pub site: Option<SchemaReferenceSite>,
+}
+
+/// The file the loader refused as a schema document, when that file claims
+/// the `kind: schema-trigger` envelope, with the declaration that named it.
+/// A trigger file that does not parse is not one: its own parse refusal,
+/// located in that file, is the error to report.
+/// A refusal wrapped by a delegating schema file, or by the library whose
+/// import named the file, is found through the source chain. A caller
+/// reporting it as a trigger-specific error
+/// ([`trigger_schema_referenced`], [`SchemaError::TriggerPayloadCycle`])
+/// keeps the site.
+pub fn refused_trigger_file(error: &SchemaError) -> Option<RefusedTriggerFile> {
     let mut cause: &dyn std::error::Error = error;
     loop {
-        if let Some(
-            SchemaError::NotASchemaDocument { path, .. } | SchemaError::SchemaDocument { path, .. },
-        ) = cause.downcast_ref::<SchemaError>()
-        {
+        // A wrapper's boxed source is reached as the `Box` itself, whose own
+        // `source()` skips to the boxed error's cause.
+        let found = cause.downcast_ref::<SchemaError>().or_else(|| cause.downcast_ref::<Box<SchemaError>>().map(|boxed| &**boxed));
+        // Only a role refusal of a readable file is the trigger itself; a
+        // trigger file that does not parse is refused for its own content
+        // and keeps that refusal and its parser position.
+        if let Some(refusal @ SchemaError::NotASchemaDocument { path, .. }) = found {
             let path = canonicalize(path);
-            return file_claims_trigger_envelope(&path).then_some(path);
+            return file_claims_trigger_envelope(&path)
+                .then(|| RefusedTriggerFile { path, site: refusal.reference_site().cloned() });
         }
         cause = cause.source()?;
     }
@@ -1207,24 +1240,29 @@ fn file_claims_trigger_envelope(path: &Path) -> bool {
 /// trigger schemas activate by placement and match, never by reference.
 ///
 /// `referenced_files` comes from the resolved document `$schema`;
-/// `suggestion` is the payload filename to reference instead.
+/// `suggestion` is the payload filename to reference instead. The
+/// resolution keeps only the paths it read, not who named them, so the
+/// error records no declaration; a trigger file the loader refused is
+/// reported with its declaration through [`refused_trigger_file`].
 pub fn check_document_schema_not_trigger(
     referenced_files: &[PathBuf],
 ) -> Result<(), SchemaError> {
     for ref_path in referenced_files {
         if file_claims_trigger_envelope(ref_path) {
-            return Err(trigger_schema_referenced(ref_path));
+            return Err(trigger_schema_referenced(ref_path, None));
         }
     }
     Ok(())
 }
 
 /// [`SchemaError::TriggerSchemaReferenced`] for a document `$schema` that
-/// reached the trigger file at `trigger_path`.
-pub fn trigger_schema_referenced(trigger_path: &Path) -> SchemaError {
+/// reached the trigger file at `trigger_path`, written by the declaration
+/// `site` when the caller knows it (a [`RefusedTriggerFile`]'s).
+pub fn trigger_schema_referenced(trigger_path: &Path, site: Option<SchemaReferenceSite>) -> SchemaError {
     SchemaError::TriggerSchemaReferenced {
         reference: trigger_path.to_string_lossy().into_owned(),
         suggestion: payload_suggestion(trigger_path),
+        site: site.map(Box::new),
     }
 }
 
@@ -1415,6 +1453,23 @@ mod tests {
         );
     }
 
+    /// A registered root-union payload names its trigger's private `types`
+    /// in every inline arm, as an object payload does.
+    #[test]
+    fn a_registered_root_union_payload_names_the_triggers_private_types() {
+        let repo = repo_fixture();
+        let source = repo.path().join("schemas/union.trigger.yaml");
+        let content = "kind: schema-trigger\nmatch:\n  prompt: string(required)\ntypes:\n  ModelIds: [string, number]\n\
+             $schema:\n  - prompt: string(required)\n    ids: ModelIds[]\n  - title: string(required)\n    ids: ModelIds[]\n";
+        write(&source, content);
+        let trigger = make_trigger(content, &source);
+        let payload = resolve_registered_trigger_payload(&trigger, &doc_context(repo.path()), crate::embedded::ShippedSources::NONE)
+            .expect("the private type resolves in each arm");
+        let arms = payload.union_arms.expect("a root union");
+        assert_eq!(arms.len(), 2);
+        assert!(arms.iter().all(|arm| arm.properties.contains_key("ids")), "{arms:#?}");
+    }
+
     #[test]
     fn a_trigger_with_no_schema_is_matcher_only() {
         let repo = repo_fixture();
@@ -1455,6 +1510,8 @@ mod tests {
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "self-referencing payload must be rejected: {err:?}"
         );
+        // Reported at the payload's `$schema` value, which named the file.
+        assert_eq!(err.reference_site().map(|site| site.path.clone()), Some(SchemaSourcePath::root()), "{err:?}");
     }
 
     #[test]
@@ -1484,6 +1541,8 @@ mod tests {
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "payload referencing another trigger must be rejected: {err:?}"
         );
+        // Reported at the payload's `$schema` value, which named the file.
+        assert_eq!(err.reference_site().map(|site| site.path.clone()), Some(SchemaSourcePath::root()), "{err:?}");
     }
 
     // ── Document-schema trigger check ───────────────────────────────────

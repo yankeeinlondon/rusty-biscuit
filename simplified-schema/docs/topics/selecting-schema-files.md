@@ -295,8 +295,21 @@ consumes it:
 | `Failed(Resolution(source))` | `SchemaError::Unresolved { reference, source }` |
 | `Failed(Bundle(boundary))` | `SchemaError::BundleBoundary { reference, boundary }` |
 
-Every error carries the trimmed reference. See
+Every error carries the trimmed reference, and a `site` the resolver fills
+with the declaration that wrote it (`None` from a direct selection; see
+[Where a definition failure points](./diagnostics.md#where-a-definition-failure-points)). See
 [Diagnostics](./diagnostics.md#error-model) for the variants.
+
+Selection can succeed and the file still be refused for the way the
+declaration uses it: a types-only library named as a `$schema` target, a
+`yaml-schema`, `namespace-schema`, or `schema-trigger` file named anywhere,
+or a root-union schema named in a `Name@file` import. That refusal
+(`NotASchemaDocument` with a role reason, `UnsupportedJsonDialect`, a
+reference cycle) carries the same `site`, the declaration that named the
+file, so a host points at the line to change rather than at a file that is
+fine on its own. For example, `w: title@./composition.trigger.yaml` is
+refused with reason `TriggerEnvelope` at `w`. A file that fails on its own
+content (it does not parse, or is no schema at all) has no site.
 
 ## Inspecting the selected file
 

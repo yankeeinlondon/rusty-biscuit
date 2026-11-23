@@ -1273,9 +1273,11 @@ fn byte_range(loaded: &LoadedYaml, segments: &[String]) -> Option<Range<usize>> 
     loaded.byte_range(&locating_problem(segments))
 }
 
-/// The position of byte `offset` in `text`: the convention of every
-/// published `line`/`column` (a `Diagnostic`'s `source`, a `path:line:col:`
-/// notice), whose column counts characters.
+/// The one-based position of byte `offset` in `text`, its column counted in
+/// characters (a leading BOM excluded). Registration, configuration, and the
+/// other authored records built from it publish this column; a frontmatter
+/// schema validation problem (`dm.schema.*`) does not, and keeps the
+/// validator's byte column.
 pub fn line_column(text: &str, offset: usize) -> SourcePosition {
     let offset = offset.min(text.len());
     let before = &text[..text.floor_char_boundary(offset)];

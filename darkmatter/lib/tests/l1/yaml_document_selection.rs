@@ -273,7 +273,11 @@ fn a_fallback_schema_naming_a_trigger_file_is_refused() {
     let folder = fixture.package().join("data");
     write(&folder.join("trigger.yaml"), "kind: schema-trigger\nmatch:\n    a: string(required)\n");
     let result = fixture.validate(&folder.join("doc.yaml"), "$schema: ./trigger.yaml\na: x\n");
-    assert!(matches!(result, Err(SchemaError::TriggerSchemaReferenced { .. })), "{result:?}");
+    let Err(error @ SchemaError::TriggerSchemaReferenced { .. }) = result else { panic!("{result:?}") };
+    assert!(error.to_string().contains("reference the payload"), "{error}");
+    // The refusal keeps the declaration that wrote the reference: the
+    // document's `$schema` value.
+    assert_eq!(error.reference_site().map(|site| site.path.clone()), Some(simplified_schema::SchemaSourcePath::root()), "{error:?}");
 }
 
 // ── Definition fields wired to the `not-empty` validator ───────────────────

@@ -616,7 +616,7 @@ impl FileReferenceDiagnostic {
     ) -> Result<Self, simplified_schema::SchemaError> {
         use simplified_schema::SchemaError;
         let (reference, kind, source) = match error {
-            SchemaError::Unresolved { reference, source } => (reference, FileRefFailure::classify(&source), Some(source)),
+            SchemaError::Unresolved { reference, source, .. } => (reference, FileRefFailure::classify(&source), Some(source)),
             SchemaError::NoMatch { reference, .. } => (reference, FileRefFailure::NotFound, None),
             SchemaError::Io { path, source } => (
                 path.to_string_lossy().into_owned(),

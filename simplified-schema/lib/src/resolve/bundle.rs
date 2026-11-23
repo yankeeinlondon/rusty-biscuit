@@ -431,5 +431,6 @@ pub(crate) fn check_example(reference: &str, path: &Path, bytes: &[u8]) -> Resul
     Err(SchemaError::BundleBoundary {
         reference: reference.to_string(),
         boundary: BundleBoundary { bundle, refusal: BundleRefusal::ExampleMember, target: Some(path.to_path_buf()) },
+        site: None,
     })
 }

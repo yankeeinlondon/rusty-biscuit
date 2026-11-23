@@ -41,6 +41,17 @@ fn position_of(text: &str, needle: &str) -> (usize, usize) {
     (before.matches('\n').count() + 1, before.len() - before.rfind('\n').map_or(0, |at| at + 1) + 1)
 }
 
+/// The 1-based line and column of the declaration that writes the first
+/// `reference` in `text`: the value of the mapping entry on its line, where
+/// a refusal of the reference points.
+pub(crate) fn declaration_of(text: &str, reference: &str) -> (usize, usize) {
+    let offset = text.find(reference).unwrap_or_else(|| panic!("`{reference}` is in the text"));
+    let line = text[..offset].rfind('\n').map_or(0, |at| at + 1);
+    let value = line + text[line..offset].rfind(": ").expect("the reference is a mapping entry's value") + 2;
+    let before = &text[..value];
+    (before.matches('\n').count() + 1, before.len() - line + 1)
+}
+
 // ── trigger members ─────────────────────────────────────────────────────────
 
 #[test]
@@ -112,7 +123,7 @@ fn an_unlisted_import_is_located_at_its_reference() {
     let text = GADGET_TRIGGER.replace("./library.yaml", "./extra.yaml");
     fixture.write_member("host", "schemas/gadget.yaml", &text);
     let diagnostic = refused(&fixture.load());
-    let expected = Some(position_of(&text, "./extra.yaml"));
+    let expected = Some(declaration_of(&text, "./extra.yaml"));
     assert_eq!(site(&diagnostic), (fixture.path("host/schemas/gadget.yaml").as_path(), Some("files[1]"), expected));
 }
 
@@ -530,7 +541,7 @@ fn with_unused(declaration: &str) -> [(&'static str, &'static str, &'static str,
 /// The `acme` bundle with `path` replaced by `text`, republished: a new YAML
 /// kind is listed, and an edited namespace gets the lifecycle artifact
 /// recorded against its new catalog hash, so the edit is the only change.
-fn republished(path: &str, text: &str) -> Bundle {
+pub(crate) fn republished(path: &str, text: &str) -> Bundle {
     let bundle = Bundle::acme().with_file("schemas/part.yaml", PART_KIND).with_file(path, text);
     if path != "schemas/run.yaml" {
         return bundle;
@@ -549,8 +560,8 @@ fn a_bundle_with_every_member_kind_loads_unedited() {
 }
 
 /// A declared type that no export uses still faces the bundle boundary: its
-/// unlisted import refuses the whole host, at the authored reference, in the
-/// one member that declares it. A namespace's refusal is the only one, never
+/// unlisted import refuses the whole host, at the declaration that writes
+/// it, in the one member that declares it. A namespace's refusal is the only one, never
 /// a lifecycle `catalog_hash` refusal.
 #[test]
 fn an_unused_unlisted_import_refuses_the_host_at_the_reference_in_every_member_kind() {
@@ -559,7 +570,7 @@ fn an_unused_unlisted_import_refuses_the_host_at_the_reference_in_every_member_k
         fixture.install_bundle("host", &republished(path, &text));
         fixture.write("host/schemas/options.yaml", OPTIONS);
         let diagnostic = refused(&fixture.load());
-        let expected = Some(position_of(&text, "./options.yaml"));
+        let expected = Some(declaration_of(&text, "./options.yaml"));
         assert_eq!(site(&diagnostic), (fixture.path(&format!("host/{path}")).as_path(), Some(field), expected), "{case}: {diagnostic:#?}");
         assert!(diagnostic.message.contains("options.yaml"), "{case}: {}", diagnostic.message);
     }
@@ -571,7 +582,7 @@ fn an_unused_remote_import_in_a_library_refuses_the_host_at_the_reference() {
     let fixture = Fixture::new();
     fixture.write_member("host", "schemas/library.yaml", &text);
     let diagnostic = refused(&fixture.load());
-    let expected = Some(position_of(&text, "https://"));
+    let expected = Some(declaration_of(&text, "https://"));
     assert_eq!(site(&diagnostic), (fixture.path("host/schemas/library.yaml").as_path(), Some("files[2]"), expected));
 }
 
@@ -582,7 +593,7 @@ fn an_unused_unlisted_example_refuses_the_host_at_the_reference() {
         fixture.write_member("host", path, &text);
         fixture.write("host/schemas/options.yaml", OPTIONS);
         let diagnostic = refused(&fixture.load());
-        let expected = Some(position_of(&text, "./options.yaml"));
+        let expected = Some(declaration_of(&text, "./options.yaml"));
         assert_eq!(site(&diagnostic), (fixture.path(&format!("host/{path}")).as_path(), Some(field), expected), "{case}: {diagnostic:#?}");
     }
 }
@@ -709,7 +720,9 @@ fn a_failure_inside_a_shared_type_is_located_in_the_library_for_every_importer()
 
         let all = refusals(&fixture.load());
 
-        let expected = Some(position_of(&text, needle));
+        // An arm is a sequence item, located at itself; a reference at the
+        // declaration that writes it.
+        let expected = Some(if needle.starts_with('"') { position_of(&text, needle) } else { declaration_of(&text, needle) });
         let named = needle.trim_start_matches('"').trim_end_matches("[]");
         for diagnostic in &all {
             assert_eq!(site(diagnostic), (library.as_path(), Some("files[2]"), expected), "{case}: {diagnostic:#?}");
@@ -760,8 +773,8 @@ fn position_within(text: &str, outer: &str, inner: &str) -> (usize, usize) {
     (line, column + outer.find(inner).unwrap_or_else(|| panic!("`{inner}` is in `{outer}`")))
 }
 
-/// An unused unlisted example or import is refused at the reference it
-/// declares in every member kind, even when the member's description
+/// An unused unlisted example or import is refused at the declaration that
+/// writes it in every member kind, even when the member's description
 /// mentions the same path first.
 #[test]
 fn an_unlisted_reference_repeated_in_prose_is_located_at_the_reference_in_every_member_kind() {
@@ -772,7 +785,7 @@ fn an_unlisted_reference_repeated_in_prose_is_located_at_the_reference_in_every_
             fixture.install_bundle("host", &republished(path, &text));
             fixture.write("host/schemas/options.yaml", OPTIONS);
             let diagnostic = refused(&fixture.load());
-            let expected = Some(position_within(&text, outer, "./options.yaml"));
+            let expected = Some(declaration_of(&text, outer));
             assert_eq!(
                 site(&diagnostic),
                 (fixture.path(&format!("host/{path}")).as_path(), Some(field), expected),
@@ -783,7 +796,7 @@ fn an_unlisted_reference_repeated_in_prose_is_located_at_the_reference_in_every_
 }
 
 /// A used shared-library type whose unlisted reference the library's prose
-/// repeats is located at the reference for the library and each importer,
+/// repeats is located at its declaration for the library and each importer,
 /// whose message still names it.
 #[test]
 fn a_shared_type_reference_repeated_in_prose_is_located_at_the_reference_for_every_importer() {
@@ -799,7 +812,7 @@ fn a_shared_type_reference_repeated_in_prose_is_located_at_the_reference_for_eve
 
         let all = refusals(&fixture.load());
 
-        let expected = Some(position_within(&text, outer, "./options.yaml"));
+        let expected = Some(declaration_of(&text, outer));
         for diagnostic in &all {
             assert_eq!(site(diagnostic), (library.as_path(), Some("files[2]"), expected), "{outer}: {diagnostic:#?}");
         }
@@ -861,8 +874,8 @@ fn sibling_cases() -> [(String, &'static str); 2] {
     [(format!("{SIBLING_PROSE}{SIBLING_IMPORT}"), "@./options.yaml"), (format!("{SIBLING_PROSE}{SIBLING_EXAMPLE}"), "example(./options.yaml")]
 }
 
-/// An unused unlisted import or example is refused at the reference in
-/// the declaration that writes it, in every member kind, even when an
+/// An unused unlisted import or example is refused at the declaration that
+/// writes it, in every member kind, even when an
 /// earlier sibling's description names the same path. A namespace's refusal
 /// stays the only one.
 #[test]
@@ -873,7 +886,7 @@ fn an_unused_reference_after_a_sibling_description_is_located_at_the_reference_i
             fixture.install_bundle("host", &republished(path, &text));
             fixture.write("host/schemas/options.yaml", OPTIONS);
             let diagnostic = refused(&fixture.load());
-            let expected = Some(position_within(&text, outer, "./options.yaml"));
+            let expected = Some(declaration_of(&text, outer));
             assert_eq!(
                 site(&diagnostic),
                 (fixture.path(&format!("host/{path}")).as_path(), Some(field), expected),
@@ -906,7 +919,7 @@ fn a_used_reference_after_a_sibling_description_is_located_at_the_reference_in_e
             fixture.install_bundle("host", &republished(path, &text));
             fixture.write("host/schemas/options.yaml", OPTIONS);
             let diagnostic = refused(&fixture.load());
-            let expected = Some(position_within(&text, outer, "./options.yaml"));
+            let expected = Some(declaration_of(&text, outer));
             assert_eq!(
                 site(&diagnostic),
                 (fixture.path(&format!("host/{path}")).as_path(), Some(field), expected),
@@ -917,7 +930,7 @@ fn a_used_reference_after_a_sibling_description_is_located_at_the_reference_in_e
 }
 
 /// A used shared-library declaration whose sibling's description names the
-/// same file is located at the reference for the library's own refusal and
+/// same file is located at that declaration for the library's own refusal and
 /// for each importer, whose message still names it: a `types` entry, and a
 /// property inside the `widget` object both triggers' shapes reach.
 #[test]
@@ -937,7 +950,7 @@ fn a_used_shared_reference_after_a_sibling_description_is_located_at_the_referen
 
             let all = refusals(&fixture.load());
 
-            let expected = Some(position_within(&text, outer, "./options.yaml"));
+            let expected = Some(declaration_of(&text, outer));
             for diagnostic in &all {
                 assert_eq!(site(diagnostic), (library.as_path(), Some("files[2]"), expected), "{case} {outer}: {diagnostic:#?}\n{text}");
             }
@@ -950,9 +963,9 @@ fn a_used_shared_reference_after_a_sibling_description_is_located_at_the_referen
 }
 
 /// A trigger arm's `$extends` operand importing the unlisted file is
-/// located at the operand's reference, after a sibling description that
+/// located at the `$extends` declaration, after a sibling description that
 /// names the same file; so are a missing listed-looking file and a remote
-/// import, which reach the locator with only their spelling too.
+/// import, at the declaration that writes each.
 #[test]
 fn a_composition_operand_and_other_reference_failures_after_a_sibling_description_are_located_at_the_reference() {
     let extends = "kind: schema-trigger\nmatch:\n    gadget: string(required)\n$schema:\n    - review-setting: 'string -> Read options from ./options.yaml.'\n      $extends: Options@./options.yaml\n      gadget: string\n    - gadget: string\n".to_string();
@@ -960,22 +973,18 @@ fn a_composition_operand_and_other_reference_failures_after_a_sibling_descriptio
         "{GADGET_TRIGGER}types:\n    review-setting: 'string -> Read options from https://example.com/options.yaml.'\n    review-entry: Options@https://example.com/options.yaml\n"
     );
     let missing = format!("{GADGET_TRIGGER}types:\n    review-setting: 'string -> Read options from ./absent.yaml.'\n    review-entry: Options@./absent.yaml\n");
-    for (case, text, outer, inner) in [
-        ("$extends operand", extends, "@./options.yaml", "./options.yaml"),
-        ("remote import", remote, "@https://", "https://"),
-        ("missing file", missing, "@./absent.yaml", "./absent.yaml"),
-    ] {
+    for (case, text, outer) in [("$extends operand", extends, "@./options.yaml"), ("remote import", remote, "@https://"), ("missing file", missing, "@./absent.yaml")] {
         let fixture = Fixture::new();
         fixture.write_member("host", "schemas/gadget.yaml", &text);
         fixture.write("host/schemas/options.yaml", OPTIONS);
         let diagnostic = refused(&fixture.load());
-        let expected = Some(position_within(&text, outer, inner));
+        let expected = Some(declaration_of(&text, outer));
         assert_eq!(site(&diagnostic), (fixture.path("host/schemas/gadget.yaml").as_path(), Some("files[1]"), expected), "{case}: {diagnostic:#?}\n{text}");
     }
 }
 
 /// The control: a declaration whose example precedes its own description
-/// naming the same file is located at the example.
+/// naming the same file is located at that declaration.
 #[test]
 fn an_example_ahead_of_its_own_description_is_located_at_the_example() {
     let text = format!("{GADGET_TRIGGER}types:\n    review-entry: 'string(example(./options.yaml)) -> Read options from ./options.yaml.'\n");
@@ -983,7 +992,7 @@ fn an_example_ahead_of_its_own_description_is_located_at_the_example() {
     fixture.write_member("host", "schemas/gadget.yaml", &text);
     fixture.write("host/schemas/options.yaml", OPTIONS);
     let diagnostic = refused(&fixture.load());
-    let expected = Some(position_within(&text, "example(./options.yaml", "./options.yaml"));
+    let expected = Some(declaration_of(&text, "example(./options.yaml"));
     assert_eq!(site(&diagnostic).2, expected, "{diagnostic:#?}");
 }
 
@@ -1015,7 +1024,7 @@ fn a_refusal_after_non_ascii_text_keeps_its_character_column_and_line_text() {
         fixture.write_member("host", "schemas/gadget.yaml", &text);
         let diagnostic = refused(&fixture.load());
         assert_eq!(diagnostic.file, fixture.path("host/schemas/gadget.yaml"), "{prose}: {diagnostic:#?}");
-        assert_eq!(located(&diagnostic), Some(character_position_of(&text, "./options.yaml")), "{prose}: {diagnostic:#?}");
+        assert_eq!(located(&diagnostic), Some(character_position_of(&text, "'string(example(./options.yaml")), "{prose}: {diagnostic:#?}");
     }
 }
 
@@ -1029,4 +1038,298 @@ fn a_json_artifact_syntax_error_after_non_ascii_text_is_a_character_column() {
     let diagnostic = refused(&fixture.load());
     assert_eq!(diagnostic.member.as_deref(), Some("lifecycle"), "{diagnostic:#?}");
     assert_eq!(located(&diagnostic), Some(character_position_of(artifact, "trailing")), "{diagnostic:#?}");
+}
+
+// ── an example whose file the member also imports ──────────────────────────
+
+/// A listed member that is no example artifact, named as an `example(...)`.
+pub(crate) const BAD_EXAMPLE: &str = "\"string(example(./library.yaml))\"";
+
+/// The bad example beside a working import of the same file, in every
+/// payload that can hold one, as (case, member path, member field, edited
+/// text): the import is written first, so a locator that searches the text
+/// for the file's spelling lands on the import.
+pub(crate) fn example_beside_an_import() -> [(&'static str, &'static str, &'static str, String); 4] {
+    [
+        (
+            "trigger object",
+            "schemas/gadget.yaml",
+            "files[1]",
+            format!("{GADGET_TRIGGER}    review-entry: {BAD_EXAMPLE}\n"),
+        ),
+        (
+            "trigger root-union arm after `$extends`",
+            "schemas/gadget.yaml",
+            "files[1]",
+            format!(
+                "kind: schema-trigger\nmatch:\n    gadget: string(required)\n$schema:\n    - $extends: widget@./library.yaml\n      gadget: string\n    - $extends: widget@./library.yaml\n      gadget: string\n      review-entry: {BAD_EXAMPLE}\n"
+            ),
+        ),
+        ("yaml kind", "schemas/part.yaml", "files[4]", format!("{PART_KIND}    gadget: gadget@./library.yaml\n    review-entry: {BAD_EXAMPLE}\n")),
+        ("namespace", "schemas/run.yaml", "files[3]", format!("{RUN_NAMESPACE}    label: gadget@./library.yaml\n    review-entry: {BAD_EXAMPLE}\n")),
+    ]
+}
+
+/// The 1-based position of the last `needle` in `text`: the declaration a
+/// case adds is written after the import it must not be confused with.
+pub(crate) fn last_position_of(text: &str, needle: &str) -> (usize, usize) {
+    let offset = text.rfind(needle).unwrap_or_else(|| panic!("`{needle}` is in the text"));
+    let before = &text[..offset];
+    (before.matches('\n').count() + 1, before.len() - before.rfind('\n').map_or(0, |at| at + 1) + 1)
+}
+
+/// An example naming a file the same payload imports successfully is
+/// refused at the declaration that writes the example, in its own arm,
+/// never at the working import; a namespace's refusal is the only one.
+#[test]
+fn an_example_beside_a_working_import_of_its_file_is_located_at_its_declaration() {
+    for (case, path, field, text) in example_beside_an_import() {
+        let fixture = Fixture::new();
+        fixture.install_bundle("host", &republished(path, &text));
+        let diagnostic = refused(&fixture.load());
+        let expected = Some(last_position_of(&text, BAD_EXAMPLE));
+        assert_eq!(
+            site(&diagnostic),
+            (fixture.path(&format!("host/{path}")).as_path(), Some(field), expected),
+            "{case}: {diagnostic:#?}\n{text}"
+        );
+        assert!(diagnostic.message.contains("invalid example artifact"), "{case}: {}", diagnostic.message);
+    }
+}
+
+/// `OPTIONS` as a listed library, the library's `widget` importing its
+/// `Options` and naming the same file as the example of `last_updated`,
+/// and the gadget trigger using `widget` too, so both triggers import the
+/// failing declaration.
+pub(crate) fn shared_example_bundle() -> (Bundle, String) {
+    let library = LIBRARY.replacen(
+        "        size: \"number -> The widget's size.\"\n",
+        "        size: \"number -> The widget's size.\"\n        settings: Options@./options.yaml\n        last_updated: \"string(example(./options.yaml))\"\n",
+        1,
+    );
+    let gadget = format!("{GADGET_TRIGGER}    widget: widget@./library.yaml\n");
+    let bundle = Bundle::acme()
+        .with_file("schemas/options.yaml", OPTIONS)
+        .with_member("schemas/library.yaml", &library)
+        .with_member("schemas/gadget.yaml", &gadget);
+    (bundle, library)
+}
+
+/// An example a used shared-library declaration writes is refused in the
+/// library, at that declaration, for each trigger that imports it, and each
+/// refusal names its importer; the importers' payloads are never blamed.
+#[test]
+fn an_inherited_example_is_located_in_the_library_that_wrote_it_for_every_importer() {
+    let (bundle, library) = shared_example_bundle();
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &bundle);
+    let all = refusals(&fixture.load());
+    let expected = Some(position_of(&library, "\"string(example(./options.yaml))\""));
+    let file = fixture.path("host/schemas/library.yaml");
+    for diagnostic in &all {
+        assert_eq!(site(diagnostic), (file.as_path(), Some("files[2]"), expected), "{diagnostic:#?}");
+        assert!(diagnostic.message.contains("invalid example artifact"), "{}", diagnostic.message);
+    }
+    for importer in ["imported by `files[0]` (`schemas/widget.yaml`)", "imported by `files[1]` (`schemas/gadget.yaml`)"] {
+        assert!(all.iter().any(|diagnostic| diagnostic.message.contains(importer)), "{importer}: {all:#?}");
+    }
+}
+
+/// The controls: a sole bad example, with no import of its file, is refused
+/// at its declaration; an unused example naming a listed file passes the
+/// bundle boundary without its contents being judged.
+#[test]
+fn a_sole_bad_example_is_located_at_its_declaration_and_an_unused_listed_example_loads() {
+    let text = format!("{RUN_NAMESPACE}    review-entry: {BAD_EXAMPLE}\n");
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &republished("schemas/run.yaml", &text));
+    let diagnostic = refused(&fixture.load());
+    assert_eq!(
+        site(&diagnostic),
+        (fixture.path("host/schemas/run.yaml").as_path(), Some("files[3]"), Some(position_of(&text, BAD_EXAMPLE))),
+        "{diagnostic:#?}"
+    );
+
+    let unused = format!("{LIBRARY}    review-note: \"string(example(./options.yaml))\"\n");
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &Bundle::acme().with_file("schemas/options.yaml", OPTIONS).with_member("schemas/library.yaml", &unused));
+    let loaded = fixture.load();
+    assert!(loaded.diagnostics.is_empty(), "{:#?}", loaded.diagnostics);
+    assert_eq!(loaded.profiles.len(), 1);
+}
+
+/// Two declarations of one namespace payload writing the same bad example
+/// leave the writer unknown, so the refusal names the namespace file without
+/// a position rather than guessing its `$schema` key or either declaration.
+#[test]
+fn an_example_written_by_two_namespace_declarations_is_refused_without_a_position() {
+    let text = format!("{RUN_NAMESPACE}    review-entry: {BAD_EXAMPLE}\n    review-other: {BAD_EXAMPLE}\n");
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &republished("schemas/run.yaml", &text));
+    let all = refusals(&fixture.load());
+    assert_eq!(all.len(), 1, "{all:#?}");
+    assert_eq!(site(&all[0]), (fixture.path("host/schemas/run.yaml").as_path(), Some("files[3]"), None), "{all:#?}");
+    assert!(all[0].message.contains("invalid example artifact"), "{}", all[0].message);
+}
+
+// ── a listed file refused for the role a declaration names it in ────────────
+
+/// `gadget.yaml` with its payload naming `target` as its whole `$schema`,
+/// and as a root union's second arm: (form, edited text).
+fn naming_as_document_schema(target: &str) -> [(&'static str, String); 2] {
+    let head = "kind: schema-trigger\nmatch:\n    gadget: string(required)\n";
+    [
+        ("scalar", format!("{head}$schema: {target}\n")),
+        ("second arm", format!("{head}$schema:\n    - gadget: string\n    - {target}\n")),
+    ]
+}
+
+/// A trigger payload naming a trigger file (itself or another) as its
+/// document schema is refused as a payload cycle, at the scalar or arm that
+/// names the trigger.
+#[test]
+fn a_payload_naming_a_trigger_is_refused_as_a_cycle_at_the_declaration_that_names_it() {
+    for target in ["./widget.yaml", "./gadget.yaml"] {
+        for (form, text) in naming_as_document_schema(target) {
+            let fixture = Fixture::new();
+            fixture.install_bundle("host", &republished("schemas/gadget.yaml", &text));
+            let diagnostic = refused(&fixture.load());
+            assert_eq!(
+                site(&diagnostic),
+                (fixture.path("host/schemas/gadget.yaml").as_path(), Some("files[1]"), Some(position_of(&text, target))),
+                "{target} {form}: {diagnostic:#?}"
+            );
+            assert!(diagnostic.message.contains("resolved to a schema-trigger envelope"), "{target} {form}: {}", diagnostic.message);
+        }
+    }
+}
+
+/// A valid member of another role (a types-only library, a YAML kind, a
+/// namespace) named as a document schema is refused at the scalar or arm
+/// that names it; the message names the target and its role.
+#[test]
+fn a_member_of_another_role_named_as_a_document_schema_is_refused_at_the_declaration() {
+    for (target, role) in [
+        ("./library.yaml", "it declares only `types`"),
+        ("./part.yaml", "it is a `yaml-schema`"),
+        ("./run.yaml", "it is a `namespace-schema`"),
+    ] {
+        for (form, text) in naming_as_document_schema(target) {
+            let fixture = Fixture::new();
+            fixture.install_bundle("host", &republished("schemas/gadget.yaml", &text));
+            let diagnostic = refused(&fixture.load());
+            assert_eq!(
+                site(&diagnostic),
+                (fixture.path("host/schemas/gadget.yaml").as_path(), Some("files[1]"), Some(position_of(&text, target))),
+                "{target} {form}: {diagnostic:#?}"
+            );
+            let name = target.trim_start_matches("./");
+            assert!(diagnostic.message.contains(name) && diagnostic.message.contains(role), "{target} {form}: {}", diagnostic.message);
+        }
+    }
+}
+
+/// A `Name@file` import naming a trigger file is refused at the import, in
+/// the YAML kind and the namespace that write it.
+#[test]
+fn an_import_naming_a_trigger_is_refused_at_the_import_in_a_kind_and_a_namespace() {
+    let kind = format!("{PART_KIND}    step: \"step[]@./widget.yaml\"\n");
+    let namespace = RUN_NAMESPACE.replace("count: \"number -> The pass.\"", "count: count@./widget.yaml");
+    for (case, path, field, text, reference) in [
+        ("yaml kind", "schemas/part.yaml", "files[4]", kind, "\"step[]@./widget.yaml\""),
+        ("namespace", "schemas/run.yaml", "files[3]", namespace, "count@./widget.yaml"),
+    ] {
+        let fixture = Fixture::new();
+        fixture.install_bundle("host", &republished(path, &text));
+        let all = refusals(&fixture.load());
+        let expected = Some(position_of(&text, reference));
+        for diagnostic in &all {
+            assert_eq!(site(diagnostic), (fixture.path(&format!("host/{path}")).as_path(), Some(field), expected), "{case}: {all:#?}");
+            assert!(diagnostic.message.contains("it is a `schema-trigger`"), "{case}: {}", diagnostic.message);
+        }
+    }
+}
+
+/// A shared library's import naming a trigger file is refused in the
+/// library, at that import: the library's own check, and each trigger
+/// importing the declaration, whose refusal is a payload cycle that names
+/// its importer.
+#[test]
+fn a_shared_import_naming_a_trigger_is_refused_in_the_library_for_every_importer() {
+    let library = LIBRARY.replacen(
+        "        size: \"number -> The widget's size.\"\n",
+        "        size: \"number -> The widget's size.\"\n        last_updated: stamp@./widget.yaml\n",
+        1,
+    );
+    let gadget = format!("{GADGET_TRIGGER}    widget: widget@./library.yaml\n");
+    let bundle = Bundle::acme().with_member("schemas/library.yaml", &library).with_member("schemas/gadget.yaml", &gadget);
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &bundle);
+    let all = refusals(&fixture.load());
+    let expected = Some(position_of(&library, "stamp@./widget.yaml"));
+    let file = fixture.path("host/schemas/library.yaml");
+    for diagnostic in &all {
+        assert_eq!(site(diagnostic), (file.as_path(), Some("files[2]"), expected), "{diagnostic:#?}");
+    }
+    for importer in ["imported by `files[0]` (`schemas/widget.yaml`)", "imported by `files[1]` (`schemas/gadget.yaml`)"] {
+        let diagnostic = all.iter().find(|diagnostic| diagnostic.message.contains(importer)).unwrap_or_else(|| panic!("{importer}: {all:#?}"));
+        assert!(diagnostic.message.contains("resolved to a schema-trigger envelope"), "{}", diagnostic.message);
+    }
+    assert!(all.iter().any(|diagnostic| !diagnostic.message.contains("imported by")), "the library's own check: {all:#?}");
+}
+
+/// The controls: a YAML kind's or a namespace's scalar `$schema` is refused
+/// by its envelope at the authored field before any target is read; a
+/// target that does not parse keeps its own parse position.
+#[test]
+fn neighboring_role_and_parse_refusals_keep_their_own_positions() {
+    let kind = PART_KIND.replace("$schema:\n    kind: literal(part; required)\n    name: string\n", "$schema: ./library.yaml\n");
+    let namespace = RUN_NAMESPACE.replace("$schema:\n    count: \"number -> The pass.\"\n", "$schema: ./library.yaml\n");
+    for (case, path, field, text) in [("yaml kind", "schemas/part.yaml", "files[4]", kind), ("namespace", "schemas/run.yaml", "files[3]", namespace)] {
+        let fixture = Fixture::new();
+        fixture.install_bundle("host", &republished(path, &text));
+        let all = refusals(&fixture.load());
+        let expected = Some(position_of(&text, "./library.yaml"));
+        assert!(
+            all.iter().all(|diagnostic| site(diagnostic) == (fixture.path(&format!("host/{path}")).as_path(), Some(field), expected)),
+            "{case}: {all:#?}"
+        );
+        assert!(all.iter().all(|diagnostic| !diagnostic.message.contains("is not a valid schema definition")), "{case}: {all:#?}");
+    }
+
+    let broken = "$schema:\n    title: [\n";
+    let text = "kind: schema-trigger\nmatch:\n    gadget: string(required)\n$schema: ./broken.yaml\n";
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &republished("schemas/gadget.yaml", text).with_file("schemas/broken.yaml", broken));
+    let all = refusals(&fixture.load());
+    let file = fixture.path("host/schemas/broken.yaml");
+    assert!(all.iter().all(|diagnostic| diagnostic.file == file && diagnostic.line == Some(3)), "{all:#?}");
+
+    // A target that claims the trigger envelope but does not parse is
+    // refused for its own content at its parse position, never turned into
+    // an unlocated payload cycle.
+    let broken = "kind: schema-trigger\nmatch:\n    gizmo: string(required)\n$schema:\n    title: [\n";
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &republished("schemas/gadget.yaml", text).with_file("schemas/broken.yaml", broken));
+    let all = refusals(&fixture.load());
+    let file = fixture.path("host/schemas/broken.yaml");
+    assert!(!all.is_empty());
+    assert!(all.iter().all(|diagnostic| diagnostic.file == file && diagnostic.line == Some(6)), "{all:#?}");
+    assert!(all.iter().all(|diagnostic| !diagnostic.message.contains("schema-trigger envelope")), "{all:#?}");
+}
+
+/// A payload's `$extends` operand naming a trigger is the same payload
+/// cycle, reported at the operand.
+#[test]
+fn an_extends_operand_naming_a_trigger_is_refused_at_the_operand() {
+    let text = "kind: schema-trigger\nmatch:\n    gadget: string(required)\n$schema:\n    $extends: widget@./widget.yaml\n    gadget: string\n";
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &republished("schemas/gadget.yaml", text));
+    let diagnostic = refused(&fixture.load());
+    assert_eq!(
+        site(&diagnostic),
+        (fixture.path("host/schemas/gadget.yaml").as_path(), Some("files[1]"), Some(position_of(text, "widget@./widget.yaml"))),
+        "{diagnostic:#?}"
+    );
+    assert!(diagnostic.message.contains("resolved to a schema-trigger envelope"), "{}", diagnostic.message);
 }

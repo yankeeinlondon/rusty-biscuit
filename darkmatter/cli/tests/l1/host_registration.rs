@@ -281,6 +281,26 @@ fn a_failing_grouped_match_condition_is_located_at_its_value() {
     assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(line), Some(column)), "{value:#}");
 }
 
+/// A refused trigger that declares a valid `name` is shown by its label
+/// beside its manifest field in a data record and in a formatted warning.
+#[test]
+fn a_named_refused_trigger_shows_its_label_in_both_output_families() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let trigger = format!("name: gadget-schema\n{}", crate::host_fixtures::GADGET_TRIGGER.replacen("string(required)", "string(requird)", 1));
+    let fixture = registered_bundle("host-labeled-refusal", &acme().with_member("schemas/gadget.yaml", &trigger), false);
+    let label = "is not loaded at `files[1]` (`gadget-schema (schemas/gadget.yaml)`): ";
+
+    let data = run(&fixture, &["schema", "validate", "notes.md", "--output", "json"]);
+    let value = data_value(&data, include_str!("../../schemas/output/schema-validate.yaml"));
+    let refusals = records(&value, REGISTRATION);
+    assert_eq!(refusals.len(), 1, "{value:#}");
+    assert!(refusals[0]["message"].as_str().is_some_and(|message| message.contains(label)), "{value:#}");
+
+    let formatted = run(&fixture, &["schema", "validate", "notes.md"]);
+    let stderr = stderr_of(&formatted);
+    assert!(stderr.contains(label), "{stderr}");
+}
+
 /// A registered trigger whose payload is a bare unlisted file reference,
 /// with the same path repeated in its description, is reported at the
 /// `$schema` carrier in a data output's record and before a formatted
@@ -315,8 +335,8 @@ fn an_unlisted_payload_reference_repeated_in_prose_is_located_at_its_carrier() {
 
 /// A registered trigger whose unused `types` import follows a sibling
 /// declaration whose description names the same file is reported at the
-/// import, in a data output's record and before a formatted warning's
-/// message, never at the sibling's description.
+/// declaration that writes the import, in a data output's record and before
+/// a formatted warning's message, never at the sibling's description.
 #[test]
 fn an_unlisted_import_after_a_sibling_description_is_located_at_the_import() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
@@ -327,7 +347,7 @@ fn an_unlisted_import_after_a_sibling_description_is_located_at_the_import() {
     let (line, column) = trigger
         .lines()
         .enumerate()
-        .find_map(|(index, text)| text.find("@./options.yaml").map(|at| (index as u64 + 1, at as u64 + 2)))
+        .find_map(|(index, text)| text.find("Options@./options.yaml").map(|at| (index as u64 + 1, at as u64 + 1)))
         .expect("the import is in the trigger");
     let bundle = acme().with_member("schemas/gadget.yaml", &trigger);
     let fixture = registered_bundle("host-located-sibling", &bundle, false);
@@ -626,6 +646,174 @@ fn schema_triggers_reports_conflicting_registered_matches_as_a_failed_preparatio
     assert!(stdout.contains("schemas/a.yaml") && stdout.contains("schemas/b.yaml"), "both files are named: {stdout}");
 }
 
+/// Two named triggers' conflict shows each label beside its file: in the
+/// data conflict, its record, and the formatted trace.
+#[test]
+fn schema_triggers_names_conflicting_named_triggers_by_their_labels() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let named = |name: &str, agent: &str| format!("name: {name}\n{}", team_trigger(agent));
+    let bundle = acme().with_file("schemas/a.yaml", &named("alpha-schema", "number")).with_file("schemas/b.yaml", &named("beta-schema", "boolean"));
+    let fixture = registered_bundle("host-triggers-labeled-conflict", &bundle, false);
+    fixture.write_file("cwd/team.md", "---\nteam: core\n---\n# Team\n");
+    if !fixture.initialize_repository_at(fixture.cwd()) {
+        return;
+    }
+
+    let data = run(&fixture, &["schema", "triggers", "team.md", "--output", "json"]);
+    let value = data_value(&data, include_str!("../../schemas/output/schema-triggers.yaml"));
+    let conflict = &value["registered"]["conflict"];
+    assert_eq!((conflict["first_name"].as_str(), conflict["second_name"].as_str()), (Some("alpha-schema"), Some("beta-schema")), "{value:#}");
+    let first = conflict["first"].as_str().expect("the first file");
+    let record = value["diagnostics"].as_array().expect("diagnostics").iter().find(|record| record["code"] == "dm.host.trigger_conflict");
+    let message = record.and_then(|record| record["message"].as_str()).unwrap_or_default();
+    assert!(message.contains(&format!("`alpha-schema ({first})`")), "{value:#}");
+
+    let formatted = run(&fixture, &["schema", "triggers", "team.md"]);
+    let stdout = String::from_utf8_lossy(&formatted.stdout).replace('\\', "/");
+    let line = stdout.lines().find(|line| line.contains("conflict on")).unwrap_or_default();
+    assert!(line.contains("alpha-schema (") && line.contains("beta-schema ("), "{stdout}");
+}
+
+/// A narrowing that moves a description or rule to another alternative of
+/// a key every arm of a root union shares is the same coded conflict on
+/// every route: validation, composition, and the trigger trace.
+#[test]
+fn a_narrowing_that_moves_rules_between_alternatives_conflicts_on_every_route() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let wide = |scalar: &str| {
+        format!("kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    review-model:\n        - \"{scalar} -> single model\"\n        - \"string[] -> model choices\"\n")
+    };
+    let union = |first: &str, second: &str| {
+        let key = format!("      review-model:\n          - \"{first}\"\n          - \"{second}\"\n");
+        format!(
+            "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    - prompt: string(required)\n      sections: null\n{key}    - sections: object(required)\n      prompt: null\n{key}"
+        )
+    };
+    for (name, scalar, narrowed) in [
+        ("host-arm-swap-descriptions", "string", union("enum(claude, codex) -> model choices", "string[] -> single model")),
+        ("host-arm-move-rule", "string(no-coerce)", union("enum(claude, codex) -> single model", "string(no-coerce)[] -> model choices")),
+    ] {
+        let bundle = acme().with_file("schemas/a.yaml", &wide(scalar)).with_file("schemas/b.yaml", &narrowed);
+        let fixture = registered_bundle(name, &bundle, false);
+        fixture.write_file("cwd/team.md", "---\nteam: core\nprompt: Say hello\n---\n# Team\n");
+        if !fixture.initialize_repository_at(fixture.cwd()) {
+            return;
+        }
+
+        let validate = run(&fixture, &["schema", "validate", "--output", "json", "team.md"]);
+        let value = data_value(&validate, include_str!("../../schemas/output/schema-validate.yaml"));
+        assert_eq!(value["files"][0]["code"], "dm.host.trigger_conflict", "{name}: {value:#}");
+        assert!(value["files"][0]["message"].as_str().is_some_and(|message| message.contains("`review-model`")), "{name}: {value:#}");
+        assert_ne!(validate.status.code(), Some(0), "{name}: {value:#}");
+
+        let compose = run(&fixture, &["compose", "team.md", "--output", "json"]);
+        let value: Value = serde_json::from_slice(&compose.stdout).expect("one JSON value");
+        let codes: Vec<&str> = value["diagnostics"].as_array().into_iter().flatten().filter_map(|record| record["code"].as_str()).collect();
+        assert!(codes.contains(&"dm.host.trigger_conflict"), "{name}: {value:#}");
+        assert!(!compose.status.success(), "{name}: {value:#}");
+
+        let triggers = run(&fixture, &["schema", "triggers", "team.md", "--output", "json"]);
+        let value = data_value(&triggers, include_str!("../../schemas/output/schema-triggers.yaml"));
+        assert_eq!(triggers.status.code(), Some(1), "{name}: {value:#}");
+        assert_eq!(value["registered"]["conflict"]["subject"], "review-model", "{name}: {value:#}");
+    }
+}
+
+/// A list narrowed by a key every arm of a root union shares (a string
+/// list under a list of strings or numbers) prepares on every route, and
+/// the narrowed layer still judges the document.
+#[test]
+fn a_list_narrowing_shared_by_a_root_union_prepares_on_every_route() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let wide = "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    review-model: \"(string | number)[]\"\n";
+    let key = "      review-model: \"string[]\"\n";
+    let union = format!(
+        "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    - prompt: string(required)\n      sections: null\n{key}    - sections: object(required)\n      prompt: null\n{key}"
+    );
+    let bundle = acme().with_file("schemas/a.yaml", wide).with_file("schemas/b.yaml", &union);
+    let fixture = registered_bundle("host-list-narrowing", &bundle, false);
+    fixture.write_file("cwd/team.md", "---\nteam: core\nprompt: Say hello\nreview-model: [claude]\n---\n# Team\n");
+    fixture.write_file("cwd/bad.md", "---\nteam: core\nprompt: Say hello\nreview-model: [{ name: claude }]\n---\n# Team\n");
+    if !fixture.initialize_repository_at(fixture.cwd()) {
+        return;
+    }
+    let codes = |value: &Value, key: &str| -> Vec<String> {
+        value[key].as_array().into_iter().flatten().filter_map(|record| record["code"].as_str().map(str::to_owned)).collect()
+    };
+
+    let validate = run(&fixture, &["schema", "validate", "--output", "json", "team.md"]);
+    let value = data_value(&validate, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert_eq!(validate.status.code(), Some(0), "{value:#}");
+    let bad = run(&fixture, &["schema", "validate", "--output", "json", "bad.md"]);
+    let value = data_value(&bad, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert_eq!(bad.status.code(), Some(1), "the narrowed list judges the item: {value:#}");
+    assert!(!codes(&value, "files").iter().any(|code| code == "dm.host.trigger_conflict"), "{value:#}");
+
+    let compose = run(&fixture, &["compose", "team.md", "--output", "json"]);
+    let value: Value = serde_json::from_slice(&compose.stdout).expect("one JSON value");
+    assert!(compose.status.success(), "{value:#}");
+    assert!(!codes(&value, "diagnostics").iter().any(|code| code == "dm.host.trigger_conflict"), "{value:#}");
+
+    let triggers = run(&fixture, &["schema", "triggers", "team.md", "--output", "json"]);
+    let value = data_value(&triggers, include_str!("../../schemas/output/schema-triggers.yaml"));
+    assert_eq!(triggers.status.code(), Some(0), "{value:#}");
+    assert_eq!(matched_registered(&value), ["a.yaml", "b.yaml"], "{value:#}");
+    assert!(value["registered"]["conflict"].is_null(), "{value:#}");
+}
+
+/// A described stored list narrowed by the same list written inline, and a
+/// stored list beside its exact inline body (in the reverse file order),
+/// prepare on every route, and the layer still judges the document.
+#[test]
+fn a_stored_list_compared_with_its_inline_spelling_prepares_on_every_route() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let head = "kind: schema-trigger\nmatch:\n    team: string(required)\n";
+    let stored = |use_site: &str| {
+        format!("{head}types:\n    Models: \"(string | {{ id: string }})[]\"\n$schema:\n    review-model: \"{use_site}\"\n    spare: Models\n")
+    };
+    let inline = |ty: &str| format!("{head}$schema:\n    review-model: \"{ty}\"\n");
+    let probes = [
+        ("host-described-alias", stored("Models -> Models reviewed"), inline("{ id: string }[] -> Models reviewed"), "[{ id: claude }]", "[claude]"),
+        ("host-equivalent-list", inline("(string | { id: string })[]"), stored("Models"), "[claude, { id: codex }]", "[{ id: [1] }]"),
+    ];
+    let codes = |value: &Value, key: &str| -> Vec<String> {
+        value[key].as_array().into_iter().flatten().filter_map(|record| record["code"].as_str().map(str::to_owned)).collect()
+    };
+    for (name, a, b, good, bad) in probes {
+        let bundle = acme().with_file("schemas/a.yaml", &a).with_file("schemas/b.yaml", &b);
+        let fixture = registered_bundle(name, &bundle, false);
+        fixture.write_file("cwd/team.md", &format!("---\nteam: core\nprompt: Say hello\nreview-model: {good}\n---\n# Team\n"));
+        fixture.write_file("cwd/bad.md", &format!("---\nteam: core\nprompt: Say hello\nreview-model: {bad}\n---\n# Team\n"));
+        if !fixture.initialize_repository_at(fixture.cwd()) {
+            return;
+        }
+
+        let validate = run(&fixture, &["schema", "validate", "--output", "json", "team.md"]);
+        let value = data_value(&validate, include_str!("../../schemas/output/schema-validate.yaml"));
+        assert_eq!(validate.status.code(), Some(0), "{name}: {value:#}");
+        let refused = run(&fixture, &["schema", "validate", "--output", "json", "bad.md"]);
+        let value = data_value(&refused, include_str!("../../schemas/output/schema-validate.yaml"));
+        assert_eq!(refused.status.code(), Some(1), "{name}: the layer judges the item: {value:#}");
+        assert!(!codes(&value, "files").iter().any(|code| code == "dm.host.trigger_conflict"), "{name}: {value:#}");
+
+        let compose = run(&fixture, &["compose", "team.md", "--output", "json"]);
+        let value: Value = serde_json::from_slice(&compose.stdout).expect("one JSON value");
+        assert!(compose.status.success(), "{name}: {value:#}");
+        assert!(!codes(&value, "diagnostics").iter().any(|code| code == "dm.host.trigger_conflict"), "{name}: {value:#}");
+
+        let triggers = run(&fixture, &["schema", "triggers", "team.md", "--output", "json"]);
+        let value = data_value(&triggers, include_str!("../../schemas/output/schema-triggers.yaml"));
+        assert_eq!(triggers.status.code(), Some(0), "{name}: {value:#}");
+        assert_eq!(matched_registered(&value), ["a.yaml", "b.yaml"], "{name}: {value:#}");
+        assert!(value["registered"]["conflict"].is_null(), "{name}: {value:#}");
+
+        let clean = run(&fixture, &["clean", "team.md", "--output", "json"]);
+        let value = data_value(&clean, include_str!("../../schemas/output/clean.yaml"));
+        assert_eq!(clean.status.code(), Some(0), "{name}: {value:#}");
+        assert!(!value.to_string().contains("dm.host.trigger_conflict"), "{name}: {value:#}");
+    }
+}
+
 #[test]
 fn schema_triggers_reports_compatible_registered_matches_as_success() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
@@ -665,5 +853,91 @@ fn schema_validate_keeps_document_root_rules_over_a_registered_root_union() {
     for (record, (name, _, valid)) in value["files"].as_array().expect("one record per file").iter().zip(&documents) {
         assert_eq!(record["valid"], *valid, "{name}: {value:#}");
         assert!(record.get("code").is_none_or(Value::is_null), "{name} prepares: {value:#}");
+    }
+}
+
+/// A registered trigger's example naming the file its payload also imports
+/// is reported at the example's declaration, not the working import; an
+/// example a shared library declaration writes is reported in the library,
+/// naming each importing trigger. Both output families carry the position.
+#[test]
+fn an_example_refusal_is_located_at_the_declaration_that_writes_it_in_both_output_families() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let example = "\"string(example(./library.yaml))\"";
+    let trigger = format!("{}    review-entry: {example}\n", crate::host_fixtures::GADGET_TRIGGER);
+    let library = crate::host_fixtures::LIBRARY.replacen(
+        "        size: \"number -> The widget's size.\"\n",
+        "        size: \"number -> The widget's size.\"\n        settings: Options@./options.yaml\n        last_updated: \"string(example(./options.yaml))\"\n",
+        1,
+    );
+    let shared = acme()
+        .with_file("schemas/options.yaml", "kind: schema\ntypes:\n    Options:\n        verbose: boolean\n")
+        .with_member("schemas/library.yaml", &library)
+        .with_member("schemas/gadget.yaml", &format!("{}    widget: widget@./library.yaml\n", crate::host_fixtures::GADGET_TRIGGER));
+    let position = |text: &str, needle: &str| {
+        text.lines()
+            .enumerate()
+            .find_map(|(index, line)| line.find(needle).map(|at| (index as u64 + 1, at as u64 + 1)))
+            .expect("the needle is in the text")
+    };
+    let cases = [
+        ("host-example-beside-import", acme().with_member("schemas/gadget.yaml", &trigger), "gadget.yaml", position(&trigger, example)),
+        ("host-example-inherited", shared, "library.yaml", position(&library, "\"string(example(./options.yaml))\"")),
+    ];
+    for (name, bundle, file, (line, column)) in cases {
+        let fixture = registered_bundle(name, &bundle, false);
+
+        let data = run(&fixture, &["schema", "validate", "notes.md", "--output", "json"]);
+        let formatted = run(&fixture, &["schema", "validate", "notes.md"]);
+
+        let value = data_value(&data, include_str!("../../schemas/output/schema-validate.yaml"));
+        let refusals = records(&value, REGISTRATION);
+        assert!(!refusals.is_empty(), "{name}: {value:#}");
+        for refusal in &refusals {
+            let source = &refusal["source"];
+            assert!(source["file"].as_str().is_some_and(|path| path.ends_with(file)), "{name}: {value:#}");
+            assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(line), Some(column)), "{name}: {value:#}");
+        }
+        let stderr = stderr_of(&formatted);
+        let located = format!(".acme/schemas/{file}:{line}:{column}: host registration");
+        assert!(stderr.contains(&located), "{name}: led by `{located}`: {stderr}");
+        if file == "library.yaml" {
+            assert!(stderr.contains("imported by `files[0]`") && stderr.contains("imported by `files[1]`"), "{name}: {stderr}");
+        }
+    }
+}
+
+/// A registered trigger whose payload names another trigger, directly or as
+/// a root union's second arm, is refused as a payload cycle at the scalar or
+/// arm that names it, and a payload naming a types-only library at that
+/// declaration too. Both output families carry the position.
+#[test]
+fn a_target_refused_for_its_role_is_located_at_the_declaration_that_names_it_in_both_output_families() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let head = "kind: schema-trigger\nmatch:\n    gadget: string(required)\n";
+    let scalar = format!("{head}$schema: ./widget.yaml\n");
+    let arm = format!("{head}$schema:\n    - gadget: string\n    - ./widget.yaml\n");
+    let library = format!("{head}$schema: ./library.yaml\n");
+    let cases = [
+        ("host-role-scalar", &scalar, (4, 10), "resolved to a schema-trigger envelope"),
+        ("host-role-arm", &arm, (6, 7), "resolved to a schema-trigger envelope"),
+        ("host-role-library", &library, (4, 10), "it declares only `types`"),
+    ];
+    for (name, trigger, (line, column), reason) in cases {
+        let fixture = registered_bundle(name, &acme().with_member("schemas/gadget.yaml", trigger), false);
+
+        let data = run(&fixture, &["schema", "validate", "notes.md", "--output", "json"]);
+        let formatted = run(&fixture, &["schema", "validate", "notes.md"]);
+
+        let value = data_value(&data, include_str!("../../schemas/output/schema-validate.yaml"));
+        let refusals = records(&value, REGISTRATION);
+        let [refusal] = refusals.as_slice() else { panic!("{name}: {value:#}") };
+        let source = &refusal["source"];
+        assert!(source["file"].as_str().is_some_and(|path| path.ends_with("gadget.yaml")), "{name}: {value:#}");
+        assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(line), Some(column)), "{name}: {value:#}");
+        assert!(refusal["message"].as_str().is_some_and(|message| message.contains(reason)), "{name}: {value:#}");
+        let stderr = stderr_of(&formatted);
+        let located = format!(".acme/schemas/gadget.yaml:{line}:{column}: host registration");
+        assert!(stderr.contains(&located), "{name}: led by `{located}`: {stderr}");
     }
 }

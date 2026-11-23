@@ -354,10 +354,10 @@ The rule covers every declaration in a file's `types` table, not only the
 ones the file's `$schema` uses. Each import, `$extends`, spread, and union
 arm a declaration names, and each file-backed `example(…)`, must stay inside
 the bundle even when nothing uses that declaration yet. One that does not
-refuses the whole registration, located at the reference:
+refuses the whole registration, located at the declaration that wrote it:
 
 ```yaml
-# ./schemas/library.yaml — refused at `./options.yaml` (not a listed member)
+# ./schemas/library.yaml — refused at the declaration naming `./options.yaml` (not a listed member)
 kind: schema
 types:
     widget: string
@@ -393,7 +393,9 @@ one refuses the registration at that member.
 
 **Display names are unique.** A trigger or library may declare a `name`
 (`name: widget-schema`); two files of one registration with the same name
-refuse it, with a warning at each file's `name`.
+refuse it, with a warning at each file's `name`. The name is only a label:
+diagnostics show it beside the file's path (see
+[Diagnostics](#diagnostics)).
 
 ### Namespace schemas
 
@@ -565,7 +567,22 @@ and is not loaded or reported again.
 equal collapse into the first (`HostClaim::Agreed`), so the same release
 installed twice is one host. Claims that differ are a `HostClaim::Conflict`,
 and `HostClaim::diagnostics()` gives one `dm.host.registration` warning per
-claim: neither is used, whatever their order.
+claim, whatever their order. The conflict has a different reach for each kind
+of document:
+
+- **Markdown:** neither installation's triggers apply. A document their
+  triggers match is `Ambiguous` and gets Darkmatter's own types.
+- **YAML:** both installations' `yaml-schema` definitions stay indexed. A
+  kind only one of them defines is judged by that definition; a kind both
+  define differently cannot be selected and is a kind-selection error naming
+  both files; a kind both define identically is one definition.
+
+For example, if a second copy of a host renames its `sequence` kind to
+`other-sequence`, a YAML file with `kind: sequence` is still checked by the
+first copy's definition and one with `kind: other-sequence` by the second's,
+while an inline Markdown prompt that either copy's triggers would match falls
+back to Darkmatter. The warning says the same: the triggers do not apply to
+Markdown, and each copy's YAML kinds stay available.
 
 ## Diagnostics
 
@@ -577,6 +594,28 @@ column of the problem when known: the configuration file, at the entry, when
 the manifest cannot be found, the manifest for its own shape or a member that
 is missing or does not match its digest, and the member file for a member
 that does not load.
+
+A member is shown by its display label when it has one. A trigger or
+types-only library that declares a valid `name` is written `name (path)`
+beside its manifest field, its path relative to the manifest, and so is an
+importer a library's refusal names. A member without a valid `name` is
+shown by its field alone, and an importer by its path alone:
+
+```text
+… is not loaded at `files[1]` (`gadget-schema (schemas/gadget.yaml)`): the trigger is invalid: …
+… is not loaded at `files[2]` (`parts-list (schemas/library.yaml)`): imported by `files[0]` (`widget-schema (schemas/widget.yaml)`): …
+… is not loaded at `files[2]` (`parts-list (schemas/library.yaml)`): imported by `files[1]` (`schemas/gadget.yaml`): …
+… is not loaded at `files[1]`: the trigger is invalid: …
+```
+
+The label is read with the same rules as an ordinary schema root's skipped
+trigger, so a file whose envelope is refused for another reason (an
+unexpected key, a `match` typo) is still named. An invalid `name` is never
+shown: it is the problem reported. A YAML kind or namespace member has no
+display name, and a problem found before the bundle's digests are verified
+(the manifest's shape, a missing or mismatched member) names the manifest
+entry alone. The embedded loader's refusal carries the same label in its
+`label` field, beside `member`.
 `markdown::compose::report_diagnostics::registration_diagnostic` turns one
 into the record `md` reports. DMLS reports them on the documents they affect;
 see [In the editor (DMLS)](#in-the-editor-dmls).
@@ -584,7 +623,18 @@ see [In the editor (DMLS)](#in-the-editor-dmls).
 ### Where a refusal points
 
 A refusal points at the most specific place its problem has. You can jump
-from the warning straight to the line to fix:
+from the warning straight to the line to fix. A refusal about a reference
+(an import, an `example(...)` file, a `$schema` file) points at the
+declaration that wrote it, in the file that wrote it, because the resolver
+records that declaration when it first reads the reference. That holds when
+the reference finds its file but the file cannot be used the way the
+declaration asks: a valid member of another kind is not the mistake, the
+declaration that named it is. A file that fails on its own content (it does
+not parse, or is no schema at all) is reported in that file instead.
+Darkmatter never searches the file's text for the reference, so the same
+path in a comment, a `description`, or another declaration's
+`-> description` is never reported. When the declaration is not known, the
+warning is about the whole file.
 
 | Problem | Reported at |
 | --- | --- |
@@ -593,7 +643,10 @@ from the warning straight to the line to fix:
 | a key written twice in a member | the second spelling of the key |
 | a declaration that does not resolve (an unknown type, a bad `$extends` target) | that declaration's value, in the section (`$schema` or `types`) that wrote it; inside a union (a root-union arm or a list of property arms) at the failing arm, never at another arm, its `$extends`, or a same-named declaration in the other section |
 | a declaration the type grammar rejects (`string(requird)`) | the rejected token (`requird`) inside the declaration, in its own arm |
-| a reference that names no listed member, or leaves the bundle (also a missing, remote, or unresolvable reference) | the reference as written, where the type grammar reads it as a reference: after the `@` of an import (`widget@./extra.yaml` at `./extra.yaml`, a `$extends: widget@./extra.yaml` operand alike) or as an `example(...)` argument (`string(example(./extra.yaml))` at `./extra.yaml`); a whole payload written as a reference (`$schema: ./extra.yaml`) at that value; a reference written inside an imported library, including an `example(...)` file, in that library. The same path repeated in prose is never reported: not in a comment, a top-level `description`, or the `-> description` of any declaration, its own or a sibling's (`a: 'string -> Read ./extra.yaml.'` above `b: Options@./extra.yaml` is reported at `b`). When two declarations reference the same file, the first written is reported; when none spells it as written, the `$schema` or `types` section it was reached through |
+| a reference that names no listed member, or leaves the bundle (also a missing, remote, or unresolvable reference, and an `example(...)` file that does not resolve) | the declaration that wrote the reference, in the file that wrote it, at the declaration's value: `size: widget@./extra.yaml` at `widget@…`, `note: string(example(./extra.yaml))` at `string(…`, a `$extends: widget@./extra.yaml` operand at its value, a property's union arm at that arm, and a whole payload written as a reference (`$schema: ./extra.yaml`) at that value. A reference written in an imported library, an `example(...)` file included, is reported in that library for every member that imports it. When no single declaration is known to have written it (two declarations of one payload write the same `example(...)` file), the warning names the file without a line and column, in every member kind |
+| a reference that finds a listed file which cannot serve the way the declaration uses it: a types-only library, a `yaml-schema`, a `namespace-schema`, or a trigger named as a payload's `$schema` (whole or as a root-union arm); a trigger, or a schema with no named types of its own (a root union, a whole-file reference), named in a `Name@file` import; a JSON Schema in another dialect | the declaration that named the file, at its value, as for a reference above; the message names the file and what it is (`it declares only `types``, `it is a `namespace-schema``). A trigger payload that reaches a trigger file this way is refused as a payload cycle (`resolved to a schema-trigger envelope`) at the same declaration, and a library import that names a trigger is reported in the library for every trigger importing it |
+| a `$schema` reference that closes a loop of files delegating to each other (`a.yaml` names `b.yaml`, which names `a.yaml`) | the `$schema` value that closes the loop, in the file that wrote it |
+| a referenced file that fails on its own content: not valid YAML, no schema at all, or a JSON Schema its dialect's meta-schema rejects | that file, at the parser's position when it does not parse, otherwise without a line and column |
 | a `kind: yaml-schema` definition whose `kind` claims no fixed set of kinds (`kind: kind-token(required)` where `kind-token` is a `string`) | the `kind` declaration's value in `$schema`, the position `md schema validate` reports for the definition |
 | a broken declaration in a file another member imports | the declaration, in the imported file; the message names the importer |
 | a file another member imports that does not load at all (not valid YAML, no or an unknown `kind`) | the imported file, at the parser's position when the YAML does not parse; the message names the importer |
@@ -633,6 +686,42 @@ $schema:
       gadget: "Missing(required)"           # line 8
 ```
 
+A reference is reported where it was written, not where it is used. In this
+library, `last_updated` names an example file the bundle does not list:
+
+```yaml
+# ./schemas/library.yaml (files[2])
+kind: schema
+types:
+    widget:
+        size: number
+        last_updated: "string(example(./notes.yaml))"   # line 6
+```
+
+Every trigger that imports `widget` gets a warning at line 6, column 23 of
+`schemas/library.yaml` (the start of the declaration's value), and its
+message begins `imported by` and names that trigger. The trigger's own
+`widget@./library.yaml` import is never reported for it, whatever else that
+trigger imports.
+
+A file the bundle lists can still be the wrong file for a declaration. In
+this trigger, the payload names the types-only library as its whole schema:
+
+```yaml
+# ./schemas/gadget.yaml (files[1])
+kind: schema-trigger
+match:
+    gadget: string(required)
+$schema: ./library.yaml          # line 4
+```
+
+The warning is reported at line 4, column 10 of `schemas/gadget.yaml` (the
+value `./library.yaml`), and its message says that `library.yaml` is not a
+valid schema definition because it declares only `types`. Written as a root
+union's second arm (`    - ./library.yaml`), it is reported at that arm. A
+payload naming a trigger file, its own or another, is reported the same way,
+as a payload cycle.
+
 A refused member never adds a second, misleading refusal elsewhere. When a
 `files` member is refused before its `kind` is known (it is not UTF-8, not
 valid YAML, or declares no or an unknown `kind`), or a namespace member is
@@ -657,7 +746,7 @@ also report the selection warnings of the documents they judge.
 | `dm.host.registration` | a manifest or member is missing, invalid, or remote; a member does not match its digest; a member has an unsupported `kind` or imports outside the bundle; a namespace is reserved or declared twice; two files share a `name`; a format 1 manifest is read; an artifact is refused; the host name differs from the lifecycle artifact's; or two manifests claim one host with different content (reported for each run, and again for a document such a host identifies) |
 | `dm.host.identify_too_broad` | a registered trigger could match on keys `md` owns alone |
 | `dm.host.ambiguous` | two or more hosts' triggers match the same document; it is analyzed as an `md` document |
-| `dm.host.trigger_conflict` | an error on the document: two of the host's triggers that match it declare a property, or the root rules, in ways that cannot be layered as one (see [When two triggers declare one property](#when-two-triggers-declare-one-property)); it names the host, the property or "the root rules", and both trigger files |
+| `dm.host.trigger_conflict` | an error on the document: two of the host's triggers that match it declare a property, or the root rules, in ways that cannot be layered as one (see [When two triggers declare one property](#when-two-triggers-declare-one-property)); it names the host, the property or "the root rules", and both trigger files, each with its display name when it declares one |
 | `dm.host.foreign_document` | `md compose` composes a document a registered host identifies; an `info` notice, once per run, naming the host's own command (see [below](#md-compose-of-a-hosts-document)) |
 | `dm.lifecycle.unknown_host` | DMLS only: a root key of a document no registered host identifies is a lifecycle event only a registered host has (see [below](#in-the-editor-dmls)) |
 
@@ -685,8 +774,9 @@ flowchart TD
 A document is judged in its own context: its frontmatter, and its own path
 for `$path` predicates, whose bare and `./` patterns read from the
 document's tree root. A conflict never wins: when two manifests claim one
-host with different content, neither is used, and a document their triggers
-match is `Ambiguous`.
+host with different content, neither's triggers are used, and a document
+their triggers match is `Ambiguous` (their YAML kinds stay available; see
+[Two manifests for one host](#two-manifests-for-one-host)).
 
 From Rust:
 
@@ -908,12 +998,92 @@ more matched triggers declare is compared pair by pair, after named types and
 | The two declarations | Result |
 | --- | --- |
 | the same type and the same rules | they coalesce; the first trigger in bundle-path order is the property's origin |
-| one type is strictly narrower (`enum(claude, codex)` inside `string`) and presence, null admission, defaults, descriptions, and constraints agree | the narrower one applies, with its own origin |
+| one type is strictly narrower (`enum(claude, codex)` inside `string`) and presence, null admission, defaults, descriptions, and constraints agree, alternative by alternative | the narrower one applies, with its own origin |
 | incomparable types (`number` and `boolean`), or a narrower type whose rules differ (`string(required)` and an optional `enum(...)`; `string` and `string \| null`; different descriptions, defaults, or constraints) | `dm.host.trigger_conflict` |
 
 Every pair counts: a third trigger narrower than both does not hide an
 incompatible pair. Only matched triggers are compared, so two triggers that
 never match the same document never conflict.
+
+When a property is a union, descriptions and rules stay with the
+alternative they were written on. Presence, null admission, and the
+property's default belong to the whole property; everything else is
+compared alternative by alternative. Each alternative of the narrower
+declaration is paired with an alternative of the wider one that covers it,
+and the two must have the same description, default, examples, and other
+rules. A list's element rules (`string(no-coerce)[]`) and its own rules
+(`string[](min(1))`) are compared separately, and an equivalent nested
+object must match field by field. The `generated` marker belongs to its
+alternative, whichever side of `[]` it is written on, so
+`string(generated)[]` and `string[](generated)` coalesce. An alternative the narrower declaration
+leaves out takes its rules with it.
+
+```yaml
+# a.yaml                                # b.yaml
+review-model:                           review-model:
+    - "string -> single model"              - "enum(claude, codex) -> single model"
+    - "string[] -> model choices"           - "string[] -> model choices"
+```
+
+These narrow: `b.yaml`'s enum keeps the description of the `string` it
+narrows. Were `b.yaml` to swap the two descriptions, or to move a
+`no-coerce` from the `string` alternative to the list's elements, the
+document would fail with `dm.host.trigger_conflict` on `review-model`, even
+though the same descriptions and rules appear somewhere in both. An
+alternative that no single alternative of the other declaration covers (it
+spans two of them) has nothing to be compared with, so it conflicts too.
+
+A list's items are alternatives as well. When a list narrows a list, the
+two lists' own description and list rules are compared once, and then each
+item alternative of the narrower list is paired with an item alternative of
+the wider one that covers it, and their element rules are compared there.
+A grouped union (`(string | number)[]`) and a list of a named union type
+(`ModelIds[]` with `ModelIds: [string, number]`) both have one item
+alternative per arm:
+
+```yaml
+# a.yaml
+review-model: "(string | number)[](min(1))"
+# b.yaml
+review-model: "string[](min(1))"
+```
+
+These narrow: a document gets `string[](min(1))`. Moving `min(1)` from the
+list to the items (`string(min(1))[]`), or keeping `no-coerce` on the
+string items in only one of the two lists, conflicts. A list whose items
+mix two types is not one of several lists of a single type, so
+`(string | number)[]` does not narrow a declaration that admits
+`string[]` or `number[]` separately: `[claude, 3]` fits the first and
+neither of the others, and the pair conflicts.
+
+A named type compares as the type it names, whether it was written inline
+or reached through a reference. This holds however the type is stored: a
+type used in two places is stored once and referenced, and that never
+changes the result. The description and rules written where the name is
+used count at the level they apply to. On a list type they are the
+list's own, so `Models(min(1)) -> reviewed` compares like the same list
+written out with `[](min(1)) -> reviewed`:
+
+```yaml
+# a.yaml                                    # b.yaml
+types:                                      $schema:
+    Models: "(string | { id: string })[]"       review-model: "{ id: string }[] -> reviewed"
+$schema:
+    review-model: "Models -> reviewed"
+    spare: Models
+```
+
+These narrow: a document gets `b.yaml`'s list of objects, and the
+description they share. Had `b.yaml` written `"(string | { id: string })[]
+-> reviewed"`, the two would coalesce. A named union (`Models: [string,
+"{ id: string }"]`) is the same as writing out its alternatives, and an
+object, dictionary value (`<string>: Models`) or tuple position that uses a
+named type matches the same one written out. In a
+root union, a key one arm writes inline and another arm writes through a
+named type is still the same key in every arm, not one that defines the
+union's alternatives. Two named types that refer to themselves are
+compared structure by structure, so the same recursive type under two names
+coalesces.
 
 ```yaml
 # ./schemas/a.yaml                     # ./schemas/b.yaml
@@ -927,7 +1097,10 @@ $schema:                                $schema:
 A document with `team: core` gets `agent: enum(claude, codex)`. Were `a.yaml`
 to declare `agent: string(required)`, the document would fail with
 `dm.host.trigger_conflict` naming `agent`, `a.yaml`, and `b.yaml`. The
-message gives the host, both trigger files, the property, and the reason;
+message gives the host, both trigger files, the property, and the reason; a
+trigger that declares a valid `name` is written `name (path)`
+(`` `team-agent (/home/me/.acme/registration/schemas/a.yaml)` ``), and
+`related` keeps the paths alone;
 `md schema validate --output json` reports it as the file's schema error
 with both trigger files in `related` (other keys omitted):
 
@@ -947,7 +1120,12 @@ with both trigger files in `related` (other keys omitted):
 
 The reason is one of: their types are incomparable; one is required and the
 other is not; one admits null and the other does not; their defaults,
-descriptions, or constraints differ. In the editor the same message is an
+descriptions, constraints, element constraints, or list constraints differ
+(with `at alternative N` when the narrower declaration has several);
+their equivalent types differ in a nested declaration; an alternative
+narrows no single alternative of the other declaration; an item
+alternative of a list narrows no single item alternative of the other
+list. In the editor the same message is an
 error on the document's frontmatter, with each trigger file attached as
 related information ("the first conflicting trigger", "the second
 conflicting trigger").

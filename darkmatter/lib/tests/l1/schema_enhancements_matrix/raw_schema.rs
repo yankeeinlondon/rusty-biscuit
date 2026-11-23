@@ -569,7 +569,7 @@ fn raw_yaml_schema_is_not_a_schema_target() {
         other => panic!("detected: expected an unsupported-key SchemaDocument error, got {other:?}"),
     }
     match validate_document(dir, "$schema: ./keywords.yaml\ncount: 1") {
-        Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::NoSchemaProperty }) => {
+        Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::NoSchemaProperty, .. }) => {
             assert_eq!(path.file_name().and_then(|name| name.to_str()), Some("keywords.yaml"));
         }
         other => panic!("keywords: expected NotASchemaDocument {{ NoSchemaProperty }}, got {other:?}"),

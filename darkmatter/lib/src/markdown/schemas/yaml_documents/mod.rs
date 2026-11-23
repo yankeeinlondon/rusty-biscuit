@@ -247,7 +247,7 @@ impl DarkmatterSchemas {
                         // Markdown document's `$schema` does.
                         .or_else(|error| self.resolve_template(error, &super::document_template_identity(&json, &base_dir)))
                         .map_err(|error| match assemble::refused_trigger_file(&error) {
-                            Some(path) => assemble::trigger_schema_referenced(&path),
+                            Some(refused) => assemble::trigger_schema_referenced(&refused.path, refused.site),
                             None => error,
                         })?;
                     assemble::check_document_schema_not_trigger(&resolved.referenced_files)?;

@@ -293,6 +293,9 @@ pub struct SnapshotRefusal {
     /// The manifest field of the failing entry (`files[1]`, `lifecycle`,
     /// `digests../schemas/a.yaml`); `None` when the manifest itself failed.
     pub member: Option<String>,
+    /// The failing member's display label, `name (bundle path)`, when it is
+    /// a trigger or types-only library declaring a valid `name`.
+    pub label: Option<String>,
     /// The manifest is format 1: the host must republish it, and nothing
     /// else about it was judged.
     pub legacy_format: bool,
@@ -318,6 +321,7 @@ impl SnapshotRefusal {
             column,
             line_prefix,
             member: refusal.member,
+            label: None,
             legacy_format,
             dependencies,
             candidates,

@@ -535,27 +535,14 @@ fn load_embedded_trigger(
 
 // ── Name labels ─────────────────────────────────────────────────────────────
 
-/// The `name` label `text` declares, read leniently: a string `name` on a
-/// `kind: schema-trigger` document or on a `kind: schema` document without
-/// a `$schema` export (a `types`-only library) that is a valid name
-/// ([`super::envelope::is_valid_name`]). `None` for every other document,
-/// including text that is not YAML; an invalid name is its envelope's
-/// failure, never a label.
+/// The `name` label `text` declares, by the lenient rules every reader
+/// naming a refused file shares ([`crate::member_envelope::declared_name`]).
 pub(crate) fn declared_name(text: &str) -> Option<String> {
     // Most schema files declare no label; skip their YAML parse.
     if !text.contains("name") {
         return None;
     }
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).ok()?;
-    let map = value.as_mapping()?;
-    let labeled = match map.get("kind").and_then(serde_yaml_ng::Value::as_str)? {
-        super::envelope::ENVELOPE_KIND => true,
-        "schema" => map.get("$schema").is_none_or(serde_yaml_ng::Value::is_null),
-        _ => false,
-    };
-    let name = map.get("name")?.as_str().filter(|name| super::envelope::is_valid_name(name))?;
-    labeled.then(|| name.to_string())
+    crate::member_envelope::declared_name(text)
 }
 
 /// [`declared_name`] of a bundle document's `'static` text, memoized for

@@ -61,6 +61,7 @@ impl DarkmatterSchemas {
                 (None, None) => Err(SchemaError::NotASchemaDocument {
                     path: path.to_path_buf(),
                     reason: NotSchemaReason::NoSchemaProperty,
+                    site: None,
                 }),
             }
         })
@@ -144,7 +145,7 @@ impl DarkmatterSchemas {
             );
         }
         let (Some(base), Some(file_name)) = (path.parent(), path.file_name()) else {
-            return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty });
+            return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty, site: None });
         };
         let reference = Value::String(format!("./{}", file_name.to_string_lossy()));
         super::resolve::resolve_authored_schema_with_roots(&reference, None, base, roots, &self.file_resolution_context)
@@ -172,7 +173,7 @@ impl DarkmatterSchemas {
 
 fn parse(path: &Path, text: &str) -> Result<StandaloneSchemaDocument, SchemaError> {
     simplified_schema::parse_standalone_schema_document(text, path)?
-        .ok_or_else(|| SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty })
+        .ok_or_else(|| SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty, site: None })
 }
 
 /// The named types of `document`: those beside its export, or the payload of

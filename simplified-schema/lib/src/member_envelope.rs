@@ -212,6 +212,26 @@ fn admit_kind(mapping: &serde_yaml_ng::Mapping, kind: MemberKind) -> Result<Admi
     Ok(AdmittedMember { kind, name })
 }
 
+/// The display `name` `text` declares, read leniently so a reader that
+/// refuses the file can still name it: a kebab-case string `name` on a
+/// `kind: schema-trigger` document, or on a `kind: schema` document without
+/// a `$schema` export (a types-only library). `None` for every other
+/// document, including text that is not YAML; an invalid `name` is the
+/// document's failure, never a label.
+#[must_use]
+pub fn declared_name(text: &str) -> Option<String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let value: Value = serde_yaml_ng::from_str(text).ok()?;
+    let map = value.as_mapping()?;
+    let labeled = match map.get("kind").and_then(Value::as_str)? {
+        "schema-trigger" => true,
+        "schema" => map.get("$schema").is_none_or(Value::is_null),
+        _ => false,
+    };
+    let name = map.get("name")?.as_str().filter(|name| is_kebab_case(name))?;
+    labeled.then(|| name.to_string())
+}
+
 /// How a kind's `types` is written.
 enum Types {
     /// May be omitted, never `null`; may be empty.

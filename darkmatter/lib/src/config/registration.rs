@@ -585,7 +585,10 @@ impl HostClaim {
     }
 
     /// One [`HOST_REGISTRATION_CODE`] warning per conflicting claim, at its
-    /// manifest's `host`, naming the others; none for an agreed claim.
+    /// manifest's `host`, naming the others; none for an agreed claim. The
+    /// text scopes the conflict as selection does: no claim's triggers
+    /// apply to Markdown, while [`RegisteredHosts`] still indexes every
+    /// claim's YAML kinds.
     #[must_use]
     pub fn diagnostics(&self) -> Vec<RegistrationDiagnostic> {
         let Self::Conflict { host, claims } = self else {
@@ -607,7 +610,7 @@ impl HostClaim {
                     at: claim.snapshot.host_position().cloned(),
                     member: None,
                     message: format!(
-                        "claims host `{host}`, which {} also claims with different content; neither is used",
+                        "claims host `{host}`, which {} also claims with different content; neither's triggers apply to Markdown documents, while each one's YAML kinds stay available and a kind both define differently cannot be selected",
                         others.join(", ")
                     ),
                 };
@@ -655,23 +658,41 @@ struct Refusal {
 
 impl Refusal {
     fn into_diagnostic(self, entry: &Registration) -> RegistrationDiagnostic {
-        let member = self.member.as_ref().map_or_else(String::new, |member| format!(" at `{member}`"));
+        Labeled { refusal: self, label: None }.into_diagnostic(entry)
+    }
+}
+
+/// A refusal and the display label of the member it is reported under
+/// ([`member_label`]), once [`related`] attributed it.
+struct Labeled {
+    refusal: Refusal,
+    label: Option<String>,
+}
+
+impl Labeled {
+    fn into_diagnostic(self, entry: &Registration) -> RegistrationDiagnostic {
+        let Self { refusal, label } = self;
+        let member = match (&refusal.member, &label) {
+            (Some(member), Some(label)) => format!(" at `{member}` (`{label}`)"),
+            (Some(member), None) => format!(" at `{member}`"),
+            (None, _) => String::new(),
+        };
         RegistrationDiagnostic {
-            code: self.code,
+            code: refusal.code,
             severity: Severity::Warning,
             message: format!(
                 "host registration `{}` (entry {} of `register` in `{}`) is not loaded{member}: {}",
                 entry.reference,
                 entry.index,
                 entry.declared_in.display(),
-                self.message
+                refusal.message
             ),
-            file: self.file,
-            line: self.at.as_ref().map(|at| at.line),
-            column: self.at.as_ref().map(|at| at.column),
-            line_prefix: self.at.map(|at| at.line_prefix),
+            file: refusal.file,
+            line: refusal.at.as_ref().map(|at| at.line),
+            column: refusal.at.as_ref().map(|at| at.column),
+            line_prefix: refusal.at.map(|at| at.line_prefix),
             entry: entry.clone(),
-            member: self.member,
+            member: refusal.member,
         }
     }
 }
@@ -775,13 +796,13 @@ fn resolve_local(reference: &str, context: &FileResolutionContext) -> Result<Pat
 /// Why a manifest published no profile: every refusal, and what a watcher
 /// observes to notice its repair.
 struct Refused {
-    refusals: Vec<Refusal>,
+    refusals: Vec<Labeled>,
     watches: Vec<PathBuf>,
 }
 
 impl Refused {
     fn one(refusal: Refusal, watches: Vec<PathBuf>) -> Self {
-        Self { refusals: vec![refusal], watches }
+        Self { refusals: vec![Labeled { refusal, label: None }], watches }
     }
 }
 
@@ -843,15 +864,19 @@ pub fn load_embedded(
     owned: &BTreeSet<String>,
     prepared: &dyn Fn(&str) -> Option<ResolvedPayload>,
 ) -> Result<RegisteredHostProfile, Vec<bundle::SnapshotRefusal>> {
-    let as_refusal = |refusal: Refusal| bundle::SnapshotRefusal::of(refusal, false, Vec::new(), Vec::new());
+    let as_refusal = |Labeled { refusal, label }: Labeled| bundle::SnapshotRefusal {
+        label,
+        ..bundle::SnapshotRefusal::of(refusal, false, Vec::new(), Vec::new())
+    };
     if snapshot.embedded_bundle().is_none() {
-        return Err(vec![as_refusal(Refusal {
+        let refusal = Refusal {
             code: HOST_REGISTRATION_CODE,
             file: snapshot.manifest().to_path_buf(),
             at: None,
             member: None,
             message: "the snapshot was read from disk; load it through its `register` entry".to_string(),
-        })]);
+        };
+        return Err(vec![as_refusal(Labeled { refusal, label: None })]);
     }
     let context = embedded_context(&snapshot);
     profile_with(snapshot, &context, owned, prepared)
@@ -916,7 +941,8 @@ fn profile_with(
     candidates.extend(members.missing.iter().cloned());
     let candidates = dedup(candidates);
     if !members.refusals.is_empty() {
-        return Err(Refused { refusals: members.refusals, watches: candidates });
+        let refusals = members.refusals.into_iter().map(|refusal| related(&snapshot, refusal)).collect();
+        return Err(Refused { refusals, watches: candidates });
     }
     let Members { triggers, kinds, libraries, catalog, lifecycle, functions, .. } = members;
     let (Some(catalog), Some((lifecycle_path, lifecycle))) = (catalog, lifecycle) else {
@@ -1134,7 +1160,6 @@ fn prepare_members(
             Err(refusal) => members.refusals.push(refusal),
         }
     }
-    members.refusals = members.refusals.into_iter().map(|refusal| related(snapshot, refusal)).collect();
     members
 }
 
@@ -1187,26 +1212,40 @@ fn verified_text<'a>(snapshot: &'a VerifiedSnapshot, location: &Path) -> Option<
 /// member (a library a trigger imports) is that member's refusal, and its
 /// message names the member that imported it. An unlocated problem in a
 /// member that is not text is reported at that member's manifest entry.
-fn related(snapshot: &VerifiedSnapshot, refusal: Refusal) -> Refusal {
+/// The member the refusal is reported under, and an importer it names,
+/// are shown by their display labels when they declare one
+/// ([`member_label`]).
+fn related(snapshot: &VerifiedSnapshot, refusal: Refusal) -> Labeled {
     let Some(importer) = refusal.member.as_deref().and_then(|field| listed(snapshot).find(|member| member.field == field)) else {
-        return refusal;
+        return Labeled { refusal, label: None };
     };
     let Some(failed) = listed(snapshot).find(|member| member.location == refusal.file) else {
-        return refusal;
+        return Labeled { refusal, label: member_label(snapshot, importer) };
     };
     let refusal = if importer.location == failed.location {
         refusal
     } else {
+        let named = member_label(snapshot, importer).unwrap_or_else(|| importer.path.clone());
         Refusal {
             member: Some(failed.field.clone()),
-            message: format!("imported by `{}` (`{}`): {}", importer.field, importer.path, refusal.message),
+            message: format!("imported by `{}` (`{named}`): {}", importer.field, refusal.message),
             ..refusal
         }
     };
+    let label = member_label(snapshot, failed);
     if refusal.at.is_none() && member_text(snapshot, failed).is_none() {
-        return Refusal { file: snapshot.manifest().to_path_buf(), at: failed.at.clone(), ..refusal };
+        return Labeled { refusal: Refusal { file: snapshot.manifest().to_path_buf(), at: failed.at.clone(), ..refusal }, label };
     }
-    refusal
+    Labeled { refusal, label }
+}
+
+/// `member` as a diagnostic names it beside its path, `name (bundle path)`,
+/// when its verified text is a trigger or types-only library declaring a
+/// valid `name` ([`simplified_schema::member_envelope::declared_name`]);
+/// `None` otherwise, and the path alone is shown.
+fn member_label(snapshot: &VerifiedSnapshot, member: &BundleMember) -> Option<String> {
+    let name = simplified_schema::member_envelope::declared_name(member_text(snapshot, member)?)?;
+    Some(format!("{name} ({})", member.path))
 }
 
 fn member_text<'a>(snapshot: &'a VerifiedSnapshot, member: &BundleMember) -> Option<&'a str> {

@@ -62,3 +62,116 @@ fn a_conflict_between_matched_triggers_is_one_error_related_to_both_files() {
     assert!(conflicts(&diagnostics).is_empty(), "{diagnostics:#?}");
     fixture.shutdown();
 }
+
+/// Two named triggers' conflict names each by its label beside its path;
+/// both files stay related.
+#[test]
+fn a_conflict_between_named_triggers_names_both_labels() {
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".acme"]);
+    let mut named = bundle("boolean");
+    for (path, name) in [("schemas/a.yaml", "alpha-schema"), ("schemas/b.yaml", "beta-schema")] {
+        let text = named.members[path].clone();
+        named = named.with_member(path, &format!("name: {name}\n{text}"));
+    }
+    named.write_to(&root.join("home/.acme"));
+    let mut fixture = start(&workspace);
+
+    let (_, diagnostics) = open_text(&mut fixture, &workspace, "notes/team.md", "---\nteam: core\nagent: 3\n---\n# Team\n");
+    let [conflict] = conflicts(&diagnostics)[..] else { panic!("one conflict: {diagnostics:#?}") };
+    let message = conflict["message"].as_str().unwrap_or_default().replace('\\', "/");
+    assert!(message.contains("`alpha-schema (") && message.contains("home/.acme/schemas/a.yaml)`"), "{conflict:#?}");
+    assert!(message.contains("`beta-schema (") && message.contains("home/.acme/schemas/b.yaml)`"), "{conflict:#?}");
+    assert_eq!(conflict["relatedInformation"].as_array().map(Vec::len), Some(2), "{conflict:#?}");
+    fixture.shutdown();
+}
+
+/// A narrowing whose alternatives carry each other's description, against
+/// the key every arm of a root union shares, is the same conflict, and the
+/// schema's own judgment of the value is withheld with it.
+#[test]
+fn a_narrowing_that_swaps_descriptions_between_alternatives_is_a_conflict() {
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".acme"]);
+    let wide = "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    review-model:\n        - \"string -> single model\"\n        - \"string[] -> model choices\"\n";
+    let key = "      review-model:\n          - \"enum(claude, codex) -> model choices\"\n          - \"string[] -> single model\"\n";
+    let union = format!(
+        "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    - prompt: string(required)\n      sections: null\n{key}    - sections: object(required)\n      prompt: null\n{key}"
+    );
+    let swapped = bundle("number").with_member("schemas/a.yaml", wide).with_member("schemas/b.yaml", &union);
+    swapped.write_to(&root.join("home/.acme"));
+    let mut fixture = start(&workspace);
+
+    let (_, diagnostics) =
+        open_text(&mut fixture, &workspace, "notes/team.md", "---\nteam: core\nprompt: Say hello\nreview-model: gemini\n---\n# Team\n");
+    let [conflict] = conflicts(&diagnostics)[..] else { panic!("one conflict: {diagnostics:#?}") };
+    assert!(conflict["message"].as_str().is_some_and(|message| message.contains("`review-model`")), "{conflict:#?}");
+    assert_eq!(diagnostics.len(), 1, "the conflict alone, no judgment of `review-model`: {diagnostics:#?}");
+    fixture.shutdown();
+}
+
+/// A list narrowed by a key every arm of a root union shares (a string
+/// list under a list of strings or numbers) is no conflict: a fitting
+/// document has no diagnostic, and the narrowed list still judges an item.
+#[test]
+fn a_list_narrowing_shared_by_a_root_union_publishes_no_conflict() {
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".acme"]);
+    let wide = "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    review-model: \"(string | number)[]\"\n";
+    let key = "      review-model: \"string[]\"\n";
+    let union = format!(
+        "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    - prompt: string(required)\n      sections: null\n{key}    - sections: object(required)\n      prompt: null\n{key}"
+    );
+    bundle("number").with_member("schemas/a.yaml", wide).with_member("schemas/b.yaml", &union).write_to(&root.join("home/.acme"));
+    let mut fixture = start(&workspace);
+
+    let (_, diagnostics) =
+        open_text(&mut fixture, &workspace, "notes/team.md", "---\nteam: core\nprompt: Say hello\nreview-model: [claude]\n---\n# Team\n");
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let (_, diagnostics) = open_text(
+        &mut fixture,
+        &workspace,
+        "notes/bad.md",
+        "---\nteam: core\nprompt: Say hello\nreview-model: [{ name: claude }]\n---\n# Team\n",
+    );
+    assert!(conflicts(&diagnostics).is_empty(), "{diagnostics:#?}");
+    assert!(!diagnostics.is_empty(), "the narrowed list judges the item: {diagnostics:#?}");
+    fixture.shutdown();
+}
+
+/// A described stored list narrowed by the same list written inline
+/// (`review-model`), and a stored list beside its exact inline body
+/// (`equivalent`), publish no conflict, and the layer still judges an item.
+#[test]
+fn a_stored_list_compared_with_its_inline_spelling_publishes_no_conflict() {
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".acme"]);
+    let head = "kind: schema-trigger\nmatch:\n    team: string(required)\n";
+    let stored = format!(
+        "{head}types:\n    Models: \"(string | {{ id: string }})[]\"\n$schema:\n    review-model: \"Models -> Models reviewed\"\n    equivalent: Models\n"
+    );
+    let inline = format!(
+        "{head}$schema:\n    review-model: \"{{ id: string }}[] -> Models reviewed\"\n    equivalent: \"(string | {{ id: string }})[]\"\n"
+    );
+    bundle("number").with_member("schemas/a.yaml", &stored).with_member("schemas/b.yaml", &inline).write_to(&root.join("home/.acme"));
+    let mut fixture = start(&workspace);
+
+    let (_, diagnostics) = open_text(
+        &mut fixture,
+        &workspace,
+        "notes/team.md",
+        "---\nteam: core\nprompt: Say hello\nreview-model: [{ id: claude }]\nequivalent: [claude]\n---\n# Team\n",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    for (file, bad) in [("notes/bad-model.md", "review-model: [claude]"), ("notes/bad-equivalent.md", "equivalent: [{ id: [1] }]")] {
+        let (_, diagnostics) =
+            open_text(&mut fixture, &workspace, file, &format!("---\nteam: core\nprompt: Say hello\n{bad}\n---\n# Team\n"));
+        assert!(conflicts(&diagnostics).is_empty(), "{bad}: {diagnostics:#?}");
+        assert!(!diagnostics.is_empty(), "the layer judges {bad}: {diagnostics:#?}");
+    }
+    fixture.shutdown();
+}

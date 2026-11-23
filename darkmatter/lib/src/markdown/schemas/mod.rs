@@ -660,7 +660,7 @@ impl DarkmatterSchemas {
             .map(|(index, _)| index)
             .collect();
         let conflict = profile.checked_layer(&concrete).err().and_then(|conflict| {
-            match conflict.into_error(profile.host(), document) {
+            match conflict.into_error(&profile, document) {
                 SchemaError::HostTriggerConflict(conflict) => Some(*conflict),
                 _ => None,
             }
@@ -1206,7 +1206,7 @@ impl DarkmatterSchemas {
                     )
                     .or_else(|error| self.resolve_template(error, &document_template_identity(value, &base_dir)))
                     .map_err(|error| match library_triggers::assemble::refused_trigger_file(&error) {
-                        Some(path) => library_triggers::assemble::trigger_schema_referenced(&path),
+                        Some(refused) => library_triggers::assemble::trigger_schema_referenced(&refused.path, refused.site),
                         None => error,
                     })?;
                     library_triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
@@ -1603,7 +1603,7 @@ impl DarkmatterSchemas {
         } else {
             profile.checked_layer(matched)
         }
-        .map_err(|conflict| conflict.into_error(profile.host(), document))?;
+        .map_err(|conflict| conflict.into_error(profile, document))?;
 
         let mut layers = Vec::with_capacity(checked.payloads.len());
         for part in &checked.payloads {
@@ -5472,6 +5472,13 @@ mod phase4_trigger_assembly {
             .unwrap();
 
         let err = unwrap_effective_err(api.effective_for(&md_from_file(&doc_path)));
+        // The refusal keeps the declaration that wrote the reference: the
+        // document's `$schema` value.
+        assert_eq!(
+            err.reference_site().map(|site| site.path.clone()),
+            Some(simplified_schema::SchemaSourcePath::root()),
+            "{err:?}"
+        );
         match err {
             SchemaError::TriggerSchemaReferenced { suggestion, .. } => {
                 assert!(
