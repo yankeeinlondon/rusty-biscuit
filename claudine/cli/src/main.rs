@@ -64,10 +64,19 @@ fn inject_caller_arguments(cli: &mut Cli, arguments: claudine::composition::Argu
 /// old-format that was backed up), run the initialization process so a
 /// config is available for the command about to run.
 async fn ensure_config_exists() -> Result<()> {
+    if !load_existing_config()? {
+        commands::init_wizard::run_initialization().await?;
+    }
+    Ok(())
+}
+
+/// Loads the user's Claudine configuration, reporting its load notices;
+/// `false` when there is none to use (missing, or a pre-2026 file the load
+/// backed up), so initialization must write one.
+pub(crate) fn load_existing_config() -> Result<bool> {
     // A legacy `config.json` counts: the load below converts it.
     if !claudine::dispatch::loader::user_config_exists() {
-        commands::init_wizard::run_initialization().await?;
-        return Ok(());
+        return Ok(false);
     }
 
     // The file exists, but it may be a legacy or pre-2026 file. The load
@@ -82,13 +91,10 @@ async fn ensure_config_exists() -> Result<()> {
                     _ => log::message(&text),
                 }
             }
-            Ok(())
+            Ok(true)
         }
-        Err(claudine::error::ClaudineError::ConfigNotFound(_)) => {
-            // Old-format was detected and backed up; re-run initialization.
-            commands::init_wizard::run_initialization().await?;
-            Ok(())
-        }
+        // Old-format was detected and backed up; initialization runs again.
+        Err(claudine::error::ClaudineError::ConfigNotFound(_)) => Ok(false),
         // Other errors (parse, validation) should propagate.
         Err(e) => Err(e.into()),
     }
@@ -592,11 +598,16 @@ async fn dispatch(
     // Commands that must work without config (handle is a hook callback,
     // completions is shell setup, __complete runs under a shell completion
     // pipeline, and steer must never change configuration or prompt a
-    // `--json` caller). Everything else requires config, and a missing one
-    // starts the interactive setup wizard.
+    // `--json` caller; setup loads or writes its own without prompting).
+    // Everything else requires config, and a missing one starts the
+    // interactive setup wizard.
     let needs_config = !matches!(
         command,
-        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_) | Commands::Steer(_)
+        Commands::Handle(_)
+            | Commands::Completions(_)
+            | Commands::Complete(_)
+            | Commands::Steer(_)
+            | Commands::Setup(_)
     );
 
     let perf_config_loading = if needs_config {
@@ -635,6 +646,7 @@ async fn dispatch(
         Commands::Providers(args) => commands::providers::run(args),
         Commands::Signals(args) => commands::signals::run(args),
         Commands::Logs(args) => commands::logs::run(args).await,
+        Commands::Setup(args) => commands::setup::run(args).await,
         Commands::Uninstall(args) => commands::uninstall::run(args),
         Commands::Mcp(args) => commands::mcp::run(args),
         Commands::Claude(_)

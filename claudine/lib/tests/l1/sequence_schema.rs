@@ -185,10 +185,11 @@ fn undeclared_step_keys_are_step_data() {
 }
 
 /// Every non-null `sequence` selects the trigger; a mapping then fails the
-/// payload. A native number or boolean is selected too, but Darkmatter coerces a
-/// top-level scalar to the file-reference string arm, so the schema accepts
-/// it and the sequence parser is what rejects it. A null or absent
-/// `sequence` selects nothing.
+/// payload. A native number or boolean is selected too and fails it as well:
+/// the reference arm is `string(no-coerce)`, so neither becomes reference
+/// text, and the sequence parser refuses both on its own. Written text, a
+/// quoted `"42"` included, is a reference. A null or absent `sequence`
+/// selects nothing.
 #[test]
 fn sequence_trigger_activation_follows_the_value_shape() {
     assert_sequence_rows(&[
@@ -197,8 +198,10 @@ fn sequence_trigger_activation_follows_the_value_shape() {
             include_str!("../fixtures/sequence-schema/sequence-mapping.md"),
             Invalid(&[("/sequence", "\"tasks\"")]),
         ),
-        ("sequence-number", include_str!("../fixtures/sequence-schema/sequence-number.md"), Valid),
-        ("sequence-boolean", "---\nsequence: true\n---\n", Valid),
+        ("sequence-number", include_str!("../fixtures/sequence-schema/sequence-number.md"), Invalid(&[("/sequence", "42 is not valid")])),
+        ("sequence-boolean", "---\nsequence: true\n---\n", Invalid(&[("/sequence", "true is not valid")])),
+        ("sequence-reference", "---\nsequence: ./steps.yaml\n---\n", Valid),
+        ("sequence-quoted-number", "---\nsequence: \"42\"\n---\n", Valid),
         // An empty list activates and is valid; a list is judged per item,
         // so one malformed item is reported at its own index.
         ("sequence-empty", "---\nsequence: []\n---\n", Valid),
@@ -231,6 +234,21 @@ fn sequence_trigger_activation_follows_the_value_shape() {
         assert!(!judged.properties.contains("sequence"), "{name}: no sequence declaration applies");
         assert!(judged.report.valid, "{name}: {:?}", problems(&judged.report));
     }
+}
+
+/// A task's `prompt`, `group`, and nested `sequence` references refuse a
+/// native number or boolean, as the task parser does; the written reference
+/// beside each is accepted.
+#[test]
+fn task_references_refuse_a_scalar_and_accept_reference_text() {
+    assert_sequence_rows(&[
+        ("task-prompt-reference", "---\nsequence:\n    - name: a\n      prompt: ./p.md\n---\n", Valid),
+        ("task-prompt-number", "---\nsequence:\n    - name: a\n      prompt: 42\n---\n", Invalid(&[("/sequence/0/prompt", "42")])),
+        ("task-group-reference", "---\nsequence:\n    - name: a\n      group: ./g.yaml\n---\n", Valid),
+        ("task-group-boolean", "---\nsequence:\n    - name: a\n      group: true\n---\n", Invalid(&[("/sequence/0/group", "true")])),
+        ("task-sequence-reference", "---\nsequence:\n    - name: a\n      sequence: ./s.yaml\n---\n", Valid),
+        ("task-sequence-number", "---\nsequence:\n    - name: a\n      sequence: 7\n---\n", Invalid(&[("/sequence/0/sequence", "7")])),
+    ]);
 }
 
 /// A document selecting both `composition.yaml` and `sequence-document.yaml` still

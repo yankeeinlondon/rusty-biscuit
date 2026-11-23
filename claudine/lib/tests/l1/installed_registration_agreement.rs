@@ -210,10 +210,25 @@ agreement! {
         "both.md", "---\nprompt: Fix the bug.\nsections:\n    Goal: Fix the bug.\n---\nBody\n", Launch::Inline, Some("/sections");
     installed_registration_agreement_sequence_of_the_wrong_type:
         "sequence.md", "---\nsequence: { steps: 3 }\n---\nBody\n", Launch::SequenceDocument, Some("/sequence");
+    installed_registration_agreement_sequence_of_a_number:
+        "number.md", "---\nsequence: 42\n---\nBody\n", Launch::SequenceDocument, Some("/sequence");
+    installed_registration_agreement_sequence_of_a_boolean:
+        "boolean.md", "---\nsequence: true\n---\nBody\n", Launch::SequenceDocument, Some("/sequence");
     installed_registration_agreement_composition_with_agent_and_model:
         "agent.md", "---\nagent: claude\nmodel: sonnet\nstart: [stop]\n---\nBody\n", Launch::Direct, None;
     installed_registration_agreement_formal_sequence_yaml:
         "run.yaml", "kind: sequence\ndescription: steps\nsequence:\n  - one\n", Launch::FormalSequence, None;
     installed_registration_agreement_formal_sequence_yaml_of_the_wrong_type:
         "bad.yaml", "kind: sequence\ndescription: [not, text]\nsequence:\n  - one\n", Launch::FormalSequence, Some("/description");
+}
+
+/// A formal `kind: sequence` file whose `sequence` is a number is refused at
+/// `/sequence` by the installed registration; in process the sequence parser
+/// refuses it first, with its own more precise error.
+#[test]
+fn installed_registration_refuses_a_formal_sequence_of_a_number() {
+    let fixture = Fixture::installed();
+    let text = "kind: sequence\nsequence: 42\n";
+    let path = fixture.write("number.yaml", text);
+    assert_eq!(fixture.passive(&path, text), verdict(["/sequence".to_string()]));
 }

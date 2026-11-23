@@ -136,7 +136,7 @@ impl RootContext {
     /// Build a context by inspecting the filesystem.
     ///
     /// Only `stat`s are performed — no config files are parsed. File
-    /// presence is sufficient to decide whether `init` should appear in
+    /// presence is sufficient to decide whether `setup` should appear in
     /// the root menu.
     pub(crate) fn discover() -> Self {
         let snapshot = crate::request::snapshot();

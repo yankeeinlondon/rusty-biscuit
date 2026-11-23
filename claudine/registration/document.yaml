@@ -5,7 +5,7 @@
 # Claudine trigger declares the same metadata.
 kind: schema
 types:
-    prompt: "string -> the prompt sent to the agent; inline-compose requires it once caller overlays are applied"
+    prompt: "string(no-coerce) -> the prompt sent to the agent; inline-compose requires it once caller overlays are applied; a number or boolean is not prompt text"
     sections: "object -> the prompt as sections: each key is a heading and its value that section's content"
     hash:
         - "string -> stored shorthand hash; managed by Darkmatter and Claudine's completion"

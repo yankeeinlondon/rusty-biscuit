@@ -333,7 +333,7 @@ fn a_matching_sequence_layer_cannot_weaken_the_inline_union() {
     let alone = profile.checked_layer(&[inline]).expect("the union checks alone");
     let together = profile.checked_layer(&[inline, sequence]).expect("a sequence layer is compatible with the union");
     let union = |layer: &darkmatter::config::registration::merge::CheckedLayer| {
-        let part = layer.payloads.iter().find(|part| part.union).expect("the root union").clone();
+        let part = layer.payloads.iter().find(|part| part.is_union()).expect("the root union").clone();
         assert_eq!(part.trigger, inline);
         part.json_schema
     };

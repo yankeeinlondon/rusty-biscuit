@@ -89,6 +89,9 @@ pub(crate) enum Commands {
     Signals(commands::signals::SignalsArgs),
     /// Query and sync Claudine JSONL logs through the reporting index.
     Logs(commands::logs::LogsArgs),
+    /// Set up Claudine with Darkmatter; safe to rerun, keeps settings
+    /// (publishes and registers its host registration, replacing an old one).
+    Setup(commands::setup::SetupArgs),
     /// Remove Claudine hooks from all agents.
     Uninstall(commands::uninstall::UninstallArgs),
     /// Manage MCP (Model Context Protocol) servers.

@@ -227,6 +227,16 @@ removed once the entry is written. The entry is written even when the
 `permissions` handshake below reports a conflict, and a repository's
 `.darkmatter.yaml` is never changed.
 
+Setup runs on the first `claudine` command that finds no configuration,
+and whenever you run [`claudine setup`](../cli/setup.md). The command is how
+an existing install moves from the old registration to the new one: it never
+asks a question, keeps every setting you wrote, and changes nothing when run
+again.
+
+```sh
+claudine setup
+```
+
 Setup runs these steps in this order, so a step that fails leaves what
 the earlier steps wrote in a usable state:
 
@@ -248,7 +258,9 @@ Publishing again later, without touching either configuration file, is
 [Hand edits, recovery, and overrides](schemas.md#hand-edits-recovery-and-overrides)
 for when you need it.
 
-First-run setup writes Claudine's own file, then Darkmatter's:
+Setup writes Claudine's own file, then Darkmatter's. On an existing
+configuration, `claudine setup` changes Claudine's file only where this
+table gives it a `permissions` block:
 
 | `~/.darkmatter.yaml` before setup | What setup does |
 |---|---|

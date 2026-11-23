@@ -19,7 +19,8 @@
 //! Every other value and comment in both files is kept, and running setup
 //! again changes nothing.
 //!
-//! [`setup_claudine`] is the whole of `claudine init`'s part: it publishes
+//! [`setup_claudine`] is the whole of Claudine's setup (the first-run wizard
+//! and `claudine setup`): it publishes
 //! Claudine's host registration first, then runs this handshake, then puts
 //! the published manifest in the user's `register` list in place of the
 //! retired `~/.claudine/darkmatter-host.yaml`, so Darkmatter (md and DMLS)

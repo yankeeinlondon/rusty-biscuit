@@ -125,8 +125,9 @@ are dropped, so an unchanged save starts no transaction. A user file spelling
 
 **Setup handshake** (`config/setup.rs::setup_with_darkmatter`): first-run
 initialization (`init_wizard::write_with_darkmatter_setup`, used by the
-headless and interactive wizard and the test-only `commands/init`) passes its
-own config write as a closure; the service refuses a missing home or
+headless and interactive wizard, `claudine setup`, and the test-only
+`commands/init`) passes its own config write as a closure (`claudine setup`
+on an existing config passes a no-op write); the service refuses a missing home or
 repository before calling it, records Claudine's pre-existing `permissions`,
 then moves an inline `~/.darkmatter.yaml` block into Claudine's file (only
 when Claudine had none or a semantically equal one, compared through
@@ -155,7 +156,10 @@ removed). `ClaudineSetup.{registration, cleanup}` carry both results; the
 CLI reports them in `init_wizard.rs::write_with_darkmatter_setup`. Tests:
 `lib/tests/l1/installed_registration.rs` (migration section). User docs:
 [Schemas → published host registration](topics/schemas.md#the-published-host-registration).
-The only other publisher is the hidden `claudine registrations [<filepath>|publish]`
+`claudine setup` (`cli/src/commands/setup.rs`, outside `needs_config`, never
+prompts) is the repeatable route to all of this for a configured home, and
+the command Darkmatter's format 1 warning names; tests
+`cli/tests/l1/setup_command.rs`. The only other publisher is the hidden `claudine registrations [<filepath>|publish]`
 (`cli/src/commands/registrations.rs`, dispatched before configuration
 loads): listing and detail read only `RegistrationInventory::claudine()`
 (XXH64 seed 0 as 16 hex digits), `publish` calls the same
@@ -843,8 +847,14 @@ container cells are `lib/tests/l1/container_schema_recursion.rs` over the
 `tests/fixtures/sequence-schema/containers-depth4-*.md` controls (see
 [Schemas](topics/schemas.md#sequence-containers)). A group is closed but a
 union with a file reference, so `execution`/`max_paralel` are reported at
-`/…/group` with the value in the message; a top-level `sequence: 42` is
-coerced to the string arm (schema valid; the parser rejects it).
+`/…/group` with the value in the message; a `sequence`, task `prompt`,
+or `group` reference is `string(no-coerce)`, so `sequence: 42` or
+`prompt: true` is a schema error, as the parser's refusal is. So are the
+top-level texts whose runtime reader refuses a non-string (`prompt`,
+`agent`/`model` and their list items, the four timeouts, `exit_expressions`
+`pattern`/`patterns`/`scope`); a text the runtime reads leniently (`title`,
+`description`, `argv`, a task `timeout`) stays a converting `string`
+([Schemas → Text that must be written as text](topics/schemas.md#text-that-must-be-written-as-text)).
 
 ## Per-task provider selection
 

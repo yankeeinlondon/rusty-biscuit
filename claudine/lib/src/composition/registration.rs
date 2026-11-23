@@ -36,10 +36,12 @@
 //! - **Members, then the manifest.** Under the lock, each member whose bytes
 //!   differ from the inventory's is replaced through a sibling temporary file
 //!   ([`atomic_write_registration`], with the Windows replacement retry);
-//!   entries the previous valid format 2 manifest listed and the inventory no
-//!   longer has are removed; regular files named with [`TEMP_PREFIX`] in a
-//!   publisher directory (leftovers of an interrupted replacement) are
-//!   removed. The manifest is replaced last, and only when its bytes differ.
+//!   entries the previous manifest listed and the inventory no longer has
+//!   are removed, only when Darkmatter's format 2 admission
+//!   (`bundle::admit_manifest`) accepts that manifest as Claudine's (any
+//!   refusal removes nothing; old member bytes need not match); regular
+//!   files named with [`TEMP_PREFIX`] in a publisher directory (leftovers
+//!   of an interrupted replacement) are removed. The manifest is replaced last, and only when its bytes differ.
 //! - **Unknown files are kept.** Anything else in the output root is not
 //!   the publisher's to remove; doctor reports it.
 //! - **No-op.** A publish of what is already installed writes nothing, so
@@ -54,14 +56,12 @@
 //! host with a located `dm.host.registration` warning; it never accepts a mix
 //! of two publishes. The next publish converges on the embedded bytes.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-
-use serde::Deserialize;
 
 use crate::config::atomic::{REGISTRATION_TEMP_PREFIX, atomic_write_registration};
 
@@ -652,10 +652,13 @@ impl Layout {
         if folder.is_empty() { output_root(&self.home) } else { self.destination(folder) }
     }
 
-    /// The published paths the installed manifest lists, when it is a valid
-    /// format 2 Claudine manifest; nothing otherwise. Only entries that name
-    /// a portable path inside the output root are returned, so a removal can
-    /// never leave it.
+    /// The published paths the installed manifest lists, when Darkmatter's
+    /// format 2 admission accepts it as a Claudine manifest and every member
+    /// is a path this publisher writes; nothing otherwise. An inadmissible
+    /// manifest authorizes no removal at all: its other entries are never
+    /// trusted on their own. Member bytes are not checked against the
+    /// digests, so a publish interrupted after replacing members still
+    /// retires what the standing manifest listed.
     fn previous_members(&self) -> Result<Vec<String>, PublishError> {
         let path = self.destination(MANIFEST_FILE);
         if self.route(&Self::output_names(MANIFEST_FILE))? != Entry::File {
@@ -666,60 +669,28 @@ impl Layout {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(io_error("read", &path)(error)),
         };
-        let Some(manifest) = PreviousManifest::parse(&bytes) else {
-            tracing::debug!(manifest = %path.display(), "the installed manifest is not a valid format 2 Claudine manifest; nothing is retired");
-            return Ok(Vec::new());
-        };
-        Ok(manifest
-            .references()
-            .filter_map(|reference| reference.strip_prefix("./"))
-            .filter(|relative| portable_path(relative).is_ok())
-            .map(str::to_string)
-            .collect())
+        Ok(previous_member_paths(&path, &bytes).unwrap_or_default())
     }
 }
 
-/// The installed manifest, read only to find retired members: the closed
-/// format 2 envelope with Claudine's host.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PreviousManifest {
-    kind: String,
-    format_version: u64,
-    host: String,
-    #[serde(rename = "version")]
-    _version: String,
-    files: Vec<String>,
-    lifecycle: String,
-    functions: Vec<PreviousFunctionPair>,
-    digests: BTreeMap<String, String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PreviousFunctionPair {
-    catalog: String,
-    facts: String,
-}
-
-impl PreviousManifest {
-    fn parse(bytes: &[u8]) -> Option<Self> {
-        let manifest: Self = serde_yaml_ng::from_slice(bytes).ok()?;
-        let valid = manifest.kind == "darkmatter-host"
-            && manifest.format_version == 2
-            && manifest.host == HOST_ID
-            && manifest.references().all(|reference| manifest.digests.contains_key(reference))
-            && manifest.digests.len() == manifest.references().count();
-        valid.then_some(manifest)
+/// The member paths of the installed manifest `bytes` at `path`, when it
+/// authorizes retirement: Darkmatter admits it, it registers [`HOST_ID`],
+/// and every member is a path this publisher writes (never the manifest
+/// itself).
+fn previous_member_paths(path: &Path, bytes: &[u8]) -> Option<Vec<String>> {
+    let admitted = match darkmatter::config::registration::bundle::admit_manifest(path, bytes) {
+        Ok(admitted) => admitted,
+        Err(refusal) => {
+            tracing::debug!(manifest = %path.display(), ?refusal, "the installed manifest is refused; nothing is retired");
+            return None;
+        }
+    };
+    let publishable = |member: &str| member != MANIFEST_FILE && portable_path(member).is_ok();
+    if admitted.host() != HOST_ID || !admitted.members().all(|member| publishable(&member.path)) {
+        tracing::debug!(manifest = %path.display(), host = admitted.host(), "the installed manifest is not one Claudine publishes; nothing is retired");
+        return None;
     }
-
-    fn references(&self) -> impl Iterator<Item = &str> {
-        self.files
-            .iter()
-            .map(String::as_str)
-            .chain([self.lifecycle.as_str()])
-            .chain(self.functions.iter().flat_map(|pair| [pair.catalog.as_str(), pair.facts.as_str()]))
-    }
+    Some(admitted.members().map(|member| member.path.clone()).collect())
 }
 
 mod legacy;
@@ -769,9 +740,11 @@ mod tests {
             let line = format!("    \"./{}\": \"{}\"\n", file.path(), blake3_hex(file.bytes()));
             assert!(manifest.contains(&line), "{line}");
         }
-        let parsed = PreviousManifest::parse(inventory.manifest().bytes()).expect("its own manifest is a valid previous one");
-        assert_eq!(parsed.files.len(), inventory::members().len());
-        assert_eq!(parsed.lifecycle, format!("./{}", inventory::LIFECYCLE_BUNDLE_PATH));
+        let previous: BTreeSet<String> = previous_member_paths(Path::new("/r/manifest.yaml"), inventory.manifest().bytes())
+            .expect("its own manifest authorizes retirement")
+            .into_iter()
+            .collect();
+        assert_eq!(previous, inventory.members().map(|file| file.path().to_string()).collect());
     }
 
     #[test]
@@ -787,21 +760,5 @@ mod tests {
         assert_ne!(base.manifest(), renamed.manifest());
         assert_ne!(base.manifest(), edited.manifest());
         assert_eq!(base.files().len(), edited.files().len());
-    }
-
-    #[test]
-    fn registration_previous_manifest_must_be_claudines_closed_format_2() {
-        let valid = "kind: darkmatter-host\nformat_version: 2\nhost: claudine\nversion: \"1\"\nfiles: [./schemas/a.yaml]\n\
-                     lifecycle: ./globals.lifecycle.json\nfunctions: []\ndigests:\n  ./schemas/a.yaml: x\n  ./globals.lifecycle.json: y\n";
-        assert!(PreviousManifest::parse(valid.as_bytes()).is_some());
-        for invalid in [
-            valid.replace("format_version: 2", "format_version: 1"),
-            valid.replace("host: claudine", "host: other"),
-            valid.replace("functions: []", "functions: []\nidentify: ./x.yaml"),
-            valid.replace("  ./schemas/a.yaml: x\n", ""),
-            "not: [a manifest".to_string(),
-        ] {
-            assert!(PreviousManifest::parse(invalid.as_bytes()).is_none(), "{invalid}");
-        }
     }
 }

@@ -230,7 +230,8 @@ too, and it requires `sequence`:
 | `sequence: [build, test]` | applies | valid |
 | `sequence: "@steps.yaml"` | applies | valid: a file reference |
 | `sequence: { tasks: [a] }` | applies | invalid: `sequence` is a list or a file reference |
-| `sequence: 42` or `sequence: true` | applies | valid to the schema, which coerces a top-level number or boolean to text; the sequence parser rejects it before anything runs |
+| `sequence: 42` or `sequence: true` | applies | invalid at `/sequence`: a number or boolean is never read as a file reference (the reference is `string(no-coerce)`), in `md schema validate`, `md compose`, and DMLS alike |
+| `sequence: "42"` | applies | valid: quoted text is a file reference |
 | `sequence: null`, or no `sequence` | — | no sequence trigger |
 | `kind: sequence` with no `sequence` | applies | invalid: `sequence` is required |
 | `fail_fast: true` beside `sequence:` | applies | invalid at `/fail_fast`: a sequence document has no `fail_fast` |
@@ -321,6 +322,8 @@ launch verdict:
 | `prompt` and `sections` both set | invalid: no arm admits both |
 | `kind: inline-compose` with neither | invalid: each arm requires its key |
 | `prompt: { text: "Fix the bug." }` | invalid: `prompt` is a string |
+| `prompt: 42` or `prompt: true` | invalid at `/prompt`: a number or boolean is not prompt text (see [Text that must be written as text](#text-that-must-be-written-as-text)) |
+| `prompt: "42"` | valid: quoted digits are text |
 | `sections: [Goal]` | invalid: `sections` is a mapping |
 | `sections: { Goal: "x" }` with `content_policy: []` | invalid at `/content_policy`: each arm checks every shared control |
 
@@ -1239,6 +1242,35 @@ a ternary is found the same way everywhere. A source guard,
 `claudine/lib/tests/l1/type_scope_ownership_guard.rs`, fails on a new
 hand-written walk.
 
+### Text that must be written as text
+
+Most of Claudine's text properties accept a number or boolean and read it as
+text, as any SimplifiedSchema `string` does: `title: 5` is the title `"5"`.
+The properties below are different. Claudine reads each one as text only when
+you wrote text, and refuses a number or boolean before it runs anything, so
+the schema types them `string(no-coerce)` and reports the same mistake in
+`md schema validate`, `md compose`, DMLS, and Claudine's launch verdict:
+
+| Property | Why a number is refused |
+|---|---|
+| `prompt` | it is the prompt itself; `claudine inline-compose` and `claudine sequence` refuse a non-string one |
+| `agent`, each `agent` list item | it names a provider |
+| `model`, each `model` list item | it names a model |
+| `timeout`, `step_timeout`, `timeout_warn`, `step_timeout_warn` | a duration needs its unit, such as `30s` or `5m` |
+| `exit_expressions` `pattern`, `patterns`, `scope` | the rule reader accepts only text |
+| a sequence's `sequence` reference, a task's `prompt` or `group` reference | a file reference is never a number |
+
+```yaml
+---
+prompt: 42        # invalid at /prompt
+model: "5"        # valid: quoted, so it is text
+timeout: 30       # invalid at /timeout: write 30s
+---
+```
+
+A setter is judged the same way: `claudine compose doc.md model=5` passes the
+number `5` and is refused; `--set '{"model":"5"}'` passes the text.
+
 ### Optional inputs and open metadata
 
 Every Claudine property is optional, and the schema reads an explicit `null`
@@ -1542,7 +1574,7 @@ from the author's declaration, as it is validated (see below). Two limits
 remain:
 
 - A document gets editor help only when Claudine's host registration is in
-  place (run Claudine's setup once), even though the CLI validates it
+  place (run `claudine setup` once), even though the CLI validates it
   without one.
 - An inline composition (a document `inline-composition.yaml` selects, such
   as one whose frontmatter is just `prompt: hi`) gets diagnostics but no
@@ -1603,7 +1635,12 @@ flowchart LR
   the old manifest and refuses the host with a warning rather than mixing
   two releases. The next publish finishes the job.
 - A file the previous manifest listed and the new one does not is removed.
-  Any other file in the folder is left alone.
+  Any other file in the folder is left alone. The previous manifest is
+  trusted for this only when Darkmatter would accept its shape and paths
+  (it does not matter whether the old files still match it, so the publish
+  after an interrupted one still cleans up). If it is malformed in any way,
+  for example an empty `version`, a bad digest, or one entry with a path
+  outside the folder, nothing is removed.
 - Publishing what is already installed writes nothing.
 - A symbolic link or a junction anywhere on the way stops the publish before
   anything is written; the link and its target are left alone.
@@ -1611,7 +1648,8 @@ flowchart LR
 #### When Claudine publishes and registers
 
 - **Setup.** Claudine's setup (the wizard a first run starts, interactive or
-  headless) does four things in order:
+  headless, and [`claudine setup`](../cli/setup.md), which you can run at any
+  time) does four things in order:
   1. publishes the registration; if that fails, setup stops with an error and
      writes nothing else;
   2. writes Claudine's configuration and completes the `permissions`
@@ -1683,7 +1721,8 @@ the manifest last:
 | a publish was interrupted (killed, or the disk filled) | `claudine registrations publish` |
 | you upgraded Claudine with `just install` | nothing: it publishes with the new binary |
 | you upgraded Claudine some other way | `claudine registrations publish` |
-| `~/.darkmatter.yaml` lost Claudine's `register` entry | add `~/.claudine/registrations/darkmatter/manifest.yaml` to its `register` list by hand; setup writes the entry only on a first run, and `registrations publish` never edits `~/.darkmatter.yaml` |
+| `md` or the editor warns that `~/.claudine/darkmatter-host.yaml` is a format 1 manifest (registered by an earlier release) | `claudine setup` |
+| `~/.darkmatter.yaml` lost Claudine's `register` entry | `claudine setup` (it keeps your settings), or add `~/.claudine/registrations/darkmatter/manifest.yaml` to its `register` list by hand; `registrations publish` never edits `~/.darkmatter.yaml` |
 | a publish reports a symbolic link or junction | remove or replace the link it names, then publish again |
 
 **To change what a Claudine property accepts, override it; do not edit the

@@ -15,8 +15,8 @@
 //! 4. Hooks / actions — `hooks`, `actions`.
 //! 5. Administration — `sync`, `uninstall`, `providers`, `logs`,
 //!    `completions`, `config`.
-//! 6. `init` — **only** when no configuration exists that the wizard
-//!    would overwrite. See [`should_offer_init`].
+//! 6. `setup` — **only** when no configuration exists yet. See
+//!    [`should_offer_setup`].
 //!
 //! The only flag emitted at the root slot is `--help`. Global flags
 //! (`--verbose`, `--debug`, `--plain`) are discoverable from
@@ -93,19 +93,18 @@ pub(crate) fn full_menu(ctx: &RootContext) -> Vec<String> {
         "steer",
     ]);
 
-    if should_offer_init(ctx) {
-        menu.push("init");
+    if should_offer_setup(ctx) {
+        menu.push("setup");
     }
 
     menu.into_iter().map(String::from).collect()
 }
 
-/// Decide whether `init` should appear in the menu.
+/// Decide whether `setup` should appear in the menu.
 ///
-/// The rule mirrors the spec literally: when in a repo, offer `init` only
-/// if neither user nor repo config exists. When outside a repo, offer
-/// `init` only if no user config exists.
-pub(crate) fn should_offer_init(ctx: &RootContext) -> bool {
+/// When in a repo, offer `setup` only if neither user nor repo config
+/// exists. When outside a repo, offer `setup` only if no user config exists.
+pub(crate) fn should_offer_setup(ctx: &RootContext) -> bool {
     if ctx.in_repo {
         !ctx.user_config_exists && !ctx.repo_config_exists
     } else {
@@ -125,36 +124,36 @@ mod tests {
         }
     }
 
-    // -- should_offer_init -----------------------------------------------
+    // -- should_offer_setup -----------------------------------------------
 
     #[test]
-    fn init_offered_when_no_config_outside_repo() {
-        assert!(should_offer_init(&ctx(false, false, false)));
+    fn setup_offered_when_no_config_outside_repo() {
+        assert!(should_offer_setup(&ctx(false, false, false)));
     }
 
     #[test]
-    fn init_hidden_when_user_config_exists_outside_repo() {
-        assert!(!should_offer_init(&ctx(true, false, false)));
+    fn setup_hidden_when_user_config_exists_outside_repo() {
+        assert!(!should_offer_setup(&ctx(true, false, false)));
     }
 
     #[test]
-    fn init_offered_inside_repo_with_no_configs() {
-        assert!(should_offer_init(&ctx(false, false, true)));
+    fn setup_offered_inside_repo_with_no_configs() {
+        assert!(should_offer_setup(&ctx(false, false, true)));
     }
 
     #[test]
-    fn init_hidden_inside_repo_when_user_config_present() {
-        assert!(!should_offer_init(&ctx(true, false, true)));
+    fn setup_hidden_inside_repo_when_user_config_present() {
+        assert!(!should_offer_setup(&ctx(true, false, true)));
     }
 
     #[test]
-    fn init_hidden_inside_repo_when_repo_config_present() {
-        assert!(!should_offer_init(&ctx(false, true, true)));
+    fn setup_hidden_inside_repo_when_repo_config_present() {
+        assert!(!should_offer_setup(&ctx(false, true, true)));
     }
 
     #[test]
-    fn init_hidden_inside_repo_when_both_configs_present() {
-        assert!(!should_offer_init(&ctx(true, true, true)));
+    fn setup_hidden_inside_repo_when_both_configs_present() {
+        assert!(!should_offer_setup(&ctx(true, true, true)));
     }
 
     // -- full_menu -------------------------------------------------------
@@ -217,27 +216,27 @@ mod tests {
     }
 
     #[test]
-    fn full_menu_includes_init_when_no_config_exists() {
+    fn full_menu_includes_setup_when_no_config_exists() {
         let menu = full_menu(&ctx(false, false, false));
-        assert_eq!(menu.last().map(String::as_str), Some("init"));
+        assert_eq!(menu.last().map(String::as_str), Some("setup"));
     }
 
     #[test]
-    fn full_menu_excludes_init_when_user_config_present_outside_repo() {
+    fn full_menu_excludes_setup_when_user_config_present_outside_repo() {
         let menu = full_menu(&ctx(true, false, false));
-        assert!(!menu.iter().any(|c| c == "init"));
+        assert!(!menu.iter().any(|c| c == "setup"));
     }
 
     #[test]
-    fn full_menu_excludes_init_when_repo_config_present() {
+    fn full_menu_excludes_setup_when_repo_config_present() {
         let menu = full_menu(&ctx(false, true, true));
-        assert!(!menu.iter().any(|c| c == "init"));
+        assert!(!menu.iter().any(|c| c == "setup"));
     }
 
     #[test]
-    fn full_menu_excludes_init_when_both_configs_present() {
+    fn full_menu_excludes_setup_when_both_configs_present() {
         let menu = full_menu(&ctx(true, true, true));
-        assert!(!menu.iter().any(|c| c == "init"));
+        assert!(!menu.iter().any(|c| c == "setup"));
     }
 
     // -- render ----------------------------------------------------------
@@ -318,18 +317,18 @@ mod tests {
     }
 
     #[test]
-    fn render_word_prefix_matches_init_when_offered() {
+    fn render_word_prefix_matches_setup_when_offered() {
         let got = render(
-            &RootPartial::Word("ini".to_string()),
+            &RootPartial::Word("set".to_string()),
             &ctx(false, false, false),
         );
-        assert_eq!(got, vec!["init"]);
+        assert_eq!(got, vec!["setup"]);
     }
 
     #[test]
-    fn render_word_prefix_excludes_init_when_gated_off() {
+    fn render_word_prefix_excludes_setup_when_gated_off() {
         let got = render(
-            &RootPartial::Word("ini".to_string()),
+            &RootPartial::Word("set".to_string()),
             &ctx(true, true, true),
         );
         assert!(got.is_empty());

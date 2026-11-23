@@ -516,3 +516,114 @@ mod obstructions {
         assert_obstructed(true, &manifest_path(&home.home()), &sentinel.file, &sentinel, &home);
     }
 }
+
+/// A home whose installed manifest is a release listing the extra library
+/// `schemas/retired.yaml`, with its text after `edit`. Returns the home and
+/// the retired file's path.
+fn home_with_previous_manifest(edit: impl FnOnce(String) -> String) -> (Home, PathBuf) {
+    let home = Home::new();
+    let previous = RegistrationInventory::claudine().clone().with_member(library("schemas/retired.yaml"));
+    publish(&home.home(), &previous).unwrap();
+    let text = String::from_utf8(home.manifest_bytes()).unwrap();
+    std::fs::write(manifest_path(&home.home()), edit(text)).unwrap();
+    let retired = home.output().join("schemas/retired.yaml");
+    (home, retired)
+}
+
+/// `text` with its one line starting `prefix` replaced by `line` (removed
+/// when `line` is empty).
+fn replace_line(text: &str, prefix: &str, line: &str) -> String {
+    assert_eq!(text.lines().filter(|l| l.starts_with(prefix)).count(), 1, "one `{prefix}` line in {text}");
+    text.lines()
+        .filter_map(|l| if l.starts_with(prefix) { (!line.is_empty()).then_some(line) } else { Some(l) })
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
+
+/// One edit of a manifest's text.
+type ManifestEdit<'a> = dyn Fn(String) -> String + 'a;
+
+const RETIRED_DIGEST_KEY: &str = "    \"./schemas/retired.yaml\":";
+
+#[test]
+fn host_publication_a_valid_previous_manifest_retires_even_when_old_member_bytes_no_longer_match() {
+    for corrupt in [false, true] {
+        let (home, retired) = home_with_previous_manifest(|text| text);
+        if corrupt {
+            // An interrupted publish: a member already differs from the
+            // manifest that still stands.
+            std::fs::write(home.output().join("schemas/shared.yaml"), "kind: schema\n").unwrap();
+        }
+        let stray = home.output().join("schemas/stray.yaml");
+        std::fs::write(&stray, "kept").unwrap();
+
+        let outcome = publish(&home.home(), RegistrationInventory::claudine()).unwrap();
+
+        assert_eq!(changes(&outcome).retired, ["schemas/retired.yaml"], "corrupt={corrupt}");
+        assert!(!retired.exists(), "corrupt={corrupt}");
+        assert_eq!(std::fs::read_to_string(&stray).unwrap(), "kept", "an unlisted file is a stray");
+        home.assert_loads(RegistrationInventory::claudine());
+    }
+}
+
+/// Every cell is one edit of a valid previous manifest that Darkmatter's
+/// format 2 admission refuses (or that names a file Claudine never
+/// publishes); none may authorize a removal.
+#[test]
+fn host_publication_a_previous_manifest_that_fails_admission_retires_nothing() {
+    let zeros = "0".repeat(64);
+    let temp = format!("./schemas/{TEMP_PREFIX}x.yaml");
+    let add_member = |text: String, member: &str| {
+        text.replace("files:\n", &format!("files:\n    - \"{member}\"\n"))
+            .replace("digests:\n", &format!("digests:\n    \"{member}\": \"{zeros}\"\n"))
+    };
+    let cells: Vec<(&str, Box<ManifestEdit<'_>>)> = vec![
+        ("version empty", Box::new(|t| replace_line(&t, "version:", "version: \"\""))),
+        ("version null", Box::new(|t| replace_line(&t, "version:", "version: null"))),
+        ("version numeric", Box::new(|t| replace_line(&t, "version:", "version: 7"))),
+        ("version omitted", Box::new(|t| replace_line(&t, "version:", ""))),
+        ("format_version wrong", Box::new(|t| replace_line(&t, "format_version:", "format_version: 3"))),
+        ("digests null", Box::new(|t| format!("{}digests: null\n", t.split("digests:\n").next().unwrap()))),
+        ("digest key absent", Box::new(|t| replace_line(&t, RETIRED_DIGEST_KEY, ""))),
+        ("digest value null", Box::new(|t| replace_line(&t, RETIRED_DIGEST_KEY, &format!("{RETIRED_DIGEST_KEY} null")))),
+        ("digest value numeric", Box::new(|t| replace_line(&t, RETIRED_DIGEST_KEY, &format!("{RETIRED_DIGEST_KEY} 7")))),
+        (
+            "digest value nonhex",
+            Box::new(|t| replace_line(&t, RETIRED_DIGEST_KEY, &format!("{RETIRED_DIGEST_KEY} \"{}\"", "z".repeat(64)))),
+        ),
+        (
+            "duplicate digest key",
+            Box::new(|t| {
+                let line = t.lines().find(|l| l.starts_with(RETIRED_DIGEST_KEY)).unwrap().to_string();
+                format!("{t}{line}\n")
+            }),
+        ),
+        ("trailing garbage", Box::new(|t| format!("{t}]\n"))),
+        ("second document", Box::new(|t| format!("{t}---\nkind: other\n"))),
+        ("escaping member", Box::new(move |t| add_member(t, "./../outside.yaml"))),
+        ("unprefixed member", Box::new(move |t| add_member(t, "schemas/unprefixed.yaml"))),
+        ("temporary-prefix member", Box::new(move |t| add_member(t, &temp))),
+        ("manifest as member", Box::new(move |t| add_member(t, "./manifest.yaml"))),
+        ("other host", Box::new(|t| replace_line(&t, "host:", "host: other"))),
+    ];
+    // One home serves every cell: after each publish only the manifest and
+    // the retired file are restored, so each cell is one edit of the same
+    // previous release.
+    let (home, retired) = home_with_previous_manifest(|text| text);
+    let previous = home.manifest_bytes();
+    let library_bytes = std::fs::read(&retired).unwrap();
+    let mut removed = Vec::new();
+    for (cell, edit) in &cells {
+        std::fs::write(manifest_path(&home.home()), edit(String::from_utf8(previous.clone()).unwrap())).unwrap();
+        std::fs::write(&retired, &library_bytes).unwrap();
+
+        let outcome = publish(&home.home(), RegistrationInventory::claudine()).unwrap();
+
+        if !changes(&outcome).retired.is_empty() || !retired.exists() {
+            removed.push(*cell);
+        }
+        assert_eq!(changes(&outcome).written, [MANIFEST_FILE], "{cell}");
+    }
+    assert!(removed.is_empty(), "an inadmissible previous manifest authorized a removal: {removed:?}");
+    home.assert_loads(RegistrationInventory::claudine());
+}

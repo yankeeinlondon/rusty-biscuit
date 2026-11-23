@@ -1127,14 +1127,15 @@ fn installed_and_embedded_registrations_own_the_same_properties() {
 /// Document metadata cases: the frontmatter and the one property a problem
 /// is reported under, or `None` when the document is valid. Absent and null
 /// metadata stay valid, both stored hash forms are accepted, and the
-/// longhand `value` takes any data. A scalar `prompt` or shorthand `hash` is
-/// convertible text, and `last_updated` must be a calendar date.
+/// longhand `value` takes any data. A scalar shorthand `hash` is convertible
+/// text, a number or boolean `prompt` is not prompt text (the inline runtime
+/// refuses it too), and `last_updated` must be a calendar date.
 const DOCUMENT_METADATA_CASES: &[(&str, Option<&str>)] = &[
     ("prompt: hi", None),
     ("prompt: hi\nhash: null\nlast_updated: null", None),
     ("start: [stop]\nprompt: null", None),
-    ("prompt: 5", None),
-    ("prompt: true", None),
+    ("prompt: 5", Some("prompt")),
+    ("prompt: true", Some("prompt")),
     ("prompt: hi\nhash: 0123456789abcdef", None),
     ("prompt: hi\nhash: 42", None),
     ("prompt: hi\nhash: { kind: detailed, value: [1, { a: b }], ignored: [title] }", None),

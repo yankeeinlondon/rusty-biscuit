@@ -101,6 +101,7 @@ fn groups() -> Vec<CommandGroup> {
             commands: vec![
                 cmd("config", "Manage Claudine configuration with a TUI"),
                 cmd("sync", "Re-sync hook registrations with detected agents"),
+                cmd("setup", "Set up Claudine with Darkmatter; safe to rerun, keeps settings"),
                 cmd("uninstall", "Remove Claudine hooks from all agents"),
                 cmd("providers", "Show provider capability matrix"),
                 cmd("logs", "Query and sync Claudine JSONL logs"),

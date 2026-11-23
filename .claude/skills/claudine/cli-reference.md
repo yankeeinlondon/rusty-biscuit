@@ -9,7 +9,7 @@ Complete command documentation with examples and options.
 ## Contents
 
 - [Global options](#global-options)
-- [`claudine init`](#claudine-init)
+- [`claudine setup`](#claudine-setup)
 - [`claudine hooks`](#claudine-hooks)
 - [`claudine actions`](#claudine-actions)
 - [Wrapped provider commands](#wrapped-provider-commands)
@@ -38,43 +38,29 @@ subcommand or flag.
 
 ---
 
-## `claudine init`
+## `claudine setup`
 
-Interactive setup wizard for initial configuration. Walks through 4 phases:
-
-1. **Agent Discovery** — detects installed agentic CLIs on the system
-2. **Provider Preferences** — rank your favorite installed CLIs for canonical ordering
-3. **Action Defaults** — global interview (logging `all/some/none`, then input-needed actions)
-4. **Write & Register** — saves `~/.claudine/config.yaml` and registers hooks with each provider
-
-Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings, from the in-memory bindings; the saved file lists only events that have actions, because the schema refuses an empty event list (`action[](not-empty)`; the test-only `commands/init/mod.rs::write_init_config` filters them the same way).
-
-```bash
-claudine init [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--quick` | Use defaults without prompting |
-| `--repo` | Create project-scoped configuration |
-
-**Quick Mode:**
+Reruns Claudine's setup with Darkmatter on the user's configuration, without
+prompting (`cli/src/commands/setup.rs` → `init_wizard::write_with_darkmatter_setup`
+→ `config/setup.rs::setup_claudine`). Order: publish the registration (failure
+stops, nothing written), the `permissions` handshake with `~/.darkmatter.yaml`
+(conflict is a warning), register `~/.claudine/registrations/darkmatter/manifest.yaml`
+in place of any spelling of `~/.claudine/darkmatter-host.yaml` (even when that
+file is gone), then remove the retired files. An existing Claudine file is
+handed a no-op write, so its settings and comments stay; with none (or a
+pre-2026 file the load backed up) it writes the headless first-run defaults.
+A repository's `.darkmatter.yaml` is never edited. A rerun changes nothing.
+It is the command Darkmatter's format 1 warning names. Tests:
+`cli/tests/l1/setup_command.rs`. User docs: `claudine/docs/cli/setup.md`.
 
 ```bash
-claudine init --quick
+claudine setup
 ```
 
-Creates configuration with sensible defaults:
-- All detected agents enabled
-- `session_start` → SoundEffect (power-up)
-- `turn_complete` → SoundEffect (success)
-- `tool_error` → SoundEffect (error)
-- `permission_request` → SoundEffect (notification)
-- `human_in_the_loop` → SoundEffect (notification)
-
-`--repo` creates `.claudine/config.yaml` in the repository root and can add `.claudine/` to `.gitignore`.
-
-After writing its own file, setup completes the handshake with Darkmatter's configuration of the same scope: an absent `.darkmatter.yaml` is created with `permissions: ~/.claudine/config.yaml`, an inline block there moves into Claudine's file first, a differing block in both files is a conflict that changes neither, and any existing reference is left alone. Outside a repository, `--repo` fails before writing. See `claudine/docs/topics/configuration.md`.
+There is no `claudine init`. A first command that finds no configuration
+runs `init_wizard::run_initialization`: the interactive wizard on a terminal,
+otherwise the headless defaults, both through the same setup. The
+`commands/init` module (with `--quick`/`--repo`) is compiled only for tests.
 
 ---
 

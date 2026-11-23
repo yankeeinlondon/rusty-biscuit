@@ -22,7 +22,7 @@ description: the step and container types of a sequence; nothing is exported thr
 types:
     steps:
         - "step[] -> an inline list of steps"
-        - "string -> a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`"
+        - "string(no-coerce) -> a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`; a number or boolean is not one"
     step:
         - "string -> shorthand for `{ name: <string> }`"
         - number
@@ -32,14 +32,14 @@ types:
         name: "string(not-empty) -> the step or leg name"
         when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
         with: "object -> a prompt task's frontmatter values for the document it runs"
-        prompt: "string -> the prompt file reference"
+        prompt: "string(no-coerce) -> the prompt file reference"
         shell: "unknown -> a shell command; the task parser checks its form"
         side_effect: "unknown -> a side effect; the task parser checks its arguments"
         task: "unknown -> a referenced task; the task parser checks its form"
         sequence: "steps -> a nested sequence"
         group:
             - group
-            - "string -> a group file reference"
+            - "string(no-coerce) -> a group file reference"
         operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command shell timeout, such as 45s"

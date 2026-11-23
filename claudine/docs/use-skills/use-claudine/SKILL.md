@@ -109,7 +109,9 @@ You are in {{ ctx.repo }} on branch {{ ctx.branch }}.
   Binaries built before 2026-11-08 left those three out of `claudine -h` and
   listed a nonexistent `budget` command.
 - **There is no `claudine init`.** Setup runs on the first command that needs
-  config. Change settings later with `claudine config`.
+  config; `claudine setup` reruns it without prompting and keeps your
+  settings (run it when `md` warns about a format 1 `darkmatter-host`
+  manifest). Change settings later with `claudine config`.
 - **On a terminal, `compose` always opens a provider picker** unless you
   pass `--provider`/`--claude`/…. Frontmatter `agent:` only sets its
   default. Without a terminal, `agent:` decides.

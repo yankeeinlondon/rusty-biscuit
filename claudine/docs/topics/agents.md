@@ -20,7 +20,7 @@ Agents differ from skills in several important ways that affect discovery, valid
 2. **Format heterogeneity.** While skills are universally Markdown with YAML frontmatter, agents span Markdown (Claude, Codex, Gemini, OpenCode, Qwen), YAML (Goose recipes, KimiCode agents) — each with a different schema.
 3. **Terminology divergence.** Goose calls them "recipes", KimiCode uses "agents" but with a YAML-only schema. The CLI normalizes all of these under the "agents" umbrella.
 4. **No `FileSystem` tree.** Since agents are single files, the Detail View shows file content (frontmatter and opening lines) rather than a directory tree.
-5. **Canonical provider must use Markdown.** Because cross-format conversion (Markdown ↔ YAML) is out of scope, only Markdown-based providers are eligible to be the canonical provider for agents. This excludes Goose (YAML recipes) and KimiCode (YAML with Markdown sidecar) from canonical selection. During `claudine init`, these providers must not appear as options for the agent canonical provider.
+5. **Canonical provider must use Markdown.** Because cross-format conversion (Markdown ↔ YAML) is out of scope, only Markdown-based providers are eligible to be the canonical provider for agents. This excludes Goose (YAML recipes) and KimiCode (YAML with Markdown sidecar) from canonical selection. Wherever the agent canonical provider is chosen, these providers must not appear as options.
 
 ## Provider Support Matrix
 
@@ -49,7 +49,7 @@ The reporting is broken down into the following sections:
 
    We then report on the **canonical** base providers:
 
-   - the _canonical_ base providers will be defined in the user and repo configuration files and are set when the user runs `claudine init` (via an interactive Q and A).
+   - the _canonical_ base providers will be defined in the user and repo configuration files and are set with `claudine config` (the Preferences tab).
        - obviously if the current working directory is **not** a git repo then we only report on the user scoped canonical provider
    - to provide symbolic links _to_ agents we need to isolate which provider will _provide_ the agent sources ... the "canonical provider" is the designated provider of agents.
    - **Only Markdown-based providers** are eligible as canonical for agents (see Key Differences #5). YAML-based providers (Goose, KimiCode) are excluded because cross-format conversion is not yet supported.
@@ -106,7 +106,7 @@ The reporting is broken down into the following sections:
 
 4. Auto-Init Behavior
 
-   - When `--apply` is used in a git repo and the repo canonical provider is not configured, claudine automatically runs `claudine init --repo` before proceeding with the fix operation.
+   - When `--apply` is used in a git repo and the repo canonical provider is not configured, claudine fixes nothing and asks you to set the repo provider with `claudine config` (the Preferences tab).
 
 5. Auto Fixes
 

@@ -42,6 +42,7 @@ Composition:
 Administration:
   config            Manage Claudine configuration with a TUI
   sync              Re-sync hook registrations with detected agents
+  setup             Set up Claudine with Darkmatter; safe to rerun, keeps settings
   uninstall         Remove Claudine hooks from all agents
   providers         Show provider capability matrix
   logs              Query and sync Claudine JSONL logs
@@ -50,6 +51,9 @@ Administration:
   context           Show Darkmatter runtime context, expression engine, and side effects
   errors            Show the diagnostic error-code contract (codes, dispositions, details)
 ```
+
+[`claudine setup`](./setup.md) sets Claudine up with Darkmatter again, for
+example after an upgrade.
 
 One maintenance command is hidden from this list:
 [`claudine registrations`](./registrations.md) lists, prints, and publishes

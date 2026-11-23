@@ -54,7 +54,7 @@ impl Fixture {
         FileResolutionContext::from_snapshot(self.root.join("work"), Some(self.home()), HashMap::new())
     }
 
-    /// Claudine's setup with its default configuration, as `claudine init --quick` writes it.
+    /// Claudine's setup with its default configuration, as a headless first run writes it.
     fn setup(&self) -> Result<claudine::config::setup::DarkmatterSetup, SetupError> {
         setup_with_darkmatter(&self.context(), ConfigScope::User, write_default)
     }

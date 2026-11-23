@@ -455,6 +455,128 @@ fn installed_registration_shared_events_alone_keep_the_md_contract() {
     }
 }
 
+/// A native number or boolean `sequence` selects Claudine and is refused at
+/// `/sequence` by the passive reader and by composition: the reference arm
+/// never converts a scalar to reference text. A list, written reference text,
+/// and a quoted number are accepted, a mapping is refused, and `null` alone
+/// leaves an md document.
+#[test]
+fn installed_registration_refuses_a_scalar_sequence_source() {
+    let fixture = Fixture::new();
+    fixture.setup().unwrap();
+    let hosts = fixture.hosts(&fixture.context());
+    for value in ["42", "true", "{}"] {
+        let text = format!("---\nsequence: {value}\n---\nBody\n");
+        let HostSelection::Registered(profile) = fixture.selection(&hosts, "work/doc.md", &text) else {
+            panic!("`sequence: {value}` identifies Claudine")
+        };
+        assert_eq!(profile.host(), "claudine");
+        assert_eq!(passive_problem_paths(&fixture, &hosts, &text), ["/sequence"], "passive reader, `{value}`");
+        let error = fixture.compose(&text, Some(Arc::clone(&hosts))).expect_err("composition refuses it");
+        assert_eq!(schema_problem_paths(&error), ["/sequence"], "composition, `{value}`");
+    }
+    for value in ["[]", "./steps.yaml", "\"42\""] {
+        let text = format!("---\nsequence: {value}\n---\nBody\n");
+        let passive = passive_problem_paths(&fixture, &hosts, &text);
+        assert!(passive.is_empty(), "passive reader, `{value}`: {passive:?}");
+        if let Err(error) = fixture.compose(&text, Some(Arc::clone(&hosts))) {
+            panic!("composition, `{value}`: {error:?}");
+        }
+    }
+    let text = "---\nsequence: null\n---\nBody\n";
+    assert!(matches!(fixture.selection(&hosts, "work/doc.md", text), HostSelection::Md), "`null` alone is md");
+}
+
+/// Every Claudine text property whose runtime reader refuses a non-string
+/// (`PromptPropertyWrongType`, `AgentHintWrongType`, `ModelHintWrongType`,
+/// the harness timeout parser, the `exit_expressions` reader) is refused at
+/// its own path by the passive reader and by composition, so a native number
+/// or boolean is never converted to text the runtime would not accept.
+#[test]
+fn installed_registration_a_closed_document_schema_holds_over_the_inline_union() {
+    let fixture = Fixture::new();
+    fixture.setup().unwrap();
+    let hosts = fixture.hosts(&fixture.context());
+    let text = |rest: &str| format!("---\n$schema:\n  $constraints: {{ closed: true }}\n  prompt: string\nprompt: hi\n{rest}---\nBody\n");
+
+    let refused = text("extra: hi\n");
+    let HostSelection::Registered(profile) = fixture.selection(&hosts, "work/doc.md", &refused) else {
+        panic!("`prompt` identifies Claudine")
+    };
+    assert_eq!(profile.host(), "claudine");
+    let path = fixture.work().join("doc.md");
+    fixture.write(&path, &refused);
+    let markdown = Markdown::try_from(path.as_path()).unwrap();
+    let report = darkmatter::markdown::schemas::DarkmatterSchemas::new(fixture.context().for_source(&path))
+        .with_registered_hosts(Arc::clone(&hosts))
+        .validate(&markdown)
+        .expect("the schema prepares");
+    let refused_keys: Vec<_> = report.problems.iter().map(|problem| problem.offending_property.as_deref()).collect();
+    assert_eq!(refused_keys, [Some("extra")], "passive reader: {:#?}", report.problems);
+    fixture.compose(&refused, Some(Arc::clone(&hosts))).expect_err("composition refuses `extra`");
+
+    let accepted = text("");
+    assert!(passive_problem_paths(&fixture, &hosts, &accepted).is_empty(), "the closed root admits what some layer declares");
+    if let Err(error) = fixture.compose(&accepted, Some(Arc::clone(&hosts))) {
+        panic!("composition: {error:?}");
+    }
+}
+
+#[test]
+fn installed_registration_refuses_a_scalar_where_claudine_reads_text() {
+    let fixture = Fixture::new();
+    fixture.setup().unwrap();
+    let hosts = fixture.hosts(&fixture.context());
+    let refused = [
+        ("prompt: 42", "/prompt"),
+        ("prompt: true", "/prompt"),
+        ("agent: 7", "/agent"),
+        ("agent: [claude, 7]", "/agent"),
+        ("model: 5", "/model"),
+        ("model: [true]", "/model"),
+        ("agent: claude\ntimeout: 30", "/timeout"),
+        ("agent: claude\nstep_timeout: 30", "/step_timeout"),
+        ("agent: claude\ntimeout_warn: 30", "/timeout_warn"),
+        ("agent: claude\nstep_timeout_warn: 30", "/step_timeout_warn"),
+        ("agent: claude\nexit_expressions: [{ pattern: 5 }]", "/exit_expressions"),
+    ];
+    for (frontmatter, pointer) in refused {
+        let text = format!("---\n{frontmatter}\n---\nBody\n");
+        let HostSelection::Registered(profile) = fixture.selection(&hosts, "work/doc.md", &text) else {
+            panic!("`{frontmatter}` identifies Claudine")
+        };
+        assert_eq!(profile.host(), "claudine");
+        let passive = passive_problem_paths(&fixture, &hosts, &text);
+        assert!(!passive.is_empty() && passive.iter().all(|path| path.starts_with(pointer)), "passive reader, `{frontmatter}`: {passive:?}");
+        let error = fixture.compose(&text, Some(Arc::clone(&hosts))).expect_err("composition refuses it");
+        let composed = schema_problem_paths(&error);
+        assert!(!composed.is_empty() && composed.iter().all(|path| path.starts_with(pointer)), "composition, `{frontmatter}`: {composed:?}");
+    }
+    let accepted = [
+        "prompt: hi",
+        "prompt: \"42\"",
+        "agent: claude\nmodel: \"5\"",
+        "agent: [claude, codex]",
+        "agent: claude\ntimeout: 30m",
+        "agent: claude\nexit_expressions: [{ pattern: \"5\" }]",
+    ];
+    for frontmatter in accepted {
+        let text = format!("---\n{frontmatter}\n---\nBody\n");
+        let passive = passive_problem_paths(&fixture, &hosts, &text);
+        assert!(passive.is_empty(), "passive reader, `{frontmatter}`: {passive:?}");
+        if let Err(error) = fixture.compose(&text, Some(Arc::clone(&hosts))) {
+            panic!("composition, `{frontmatter}`: {error:?}");
+        }
+    }
+    // The inline payload still requires exactly one of `prompt` and `sections`.
+    for frontmatter in ["prompt: hi\nsections: { intro: text }", "kind: inline-compose"] {
+        let text = format!("---\n{frontmatter}\n---\nBody\n");
+        assert!(!passive_problem_paths(&fixture, &hosts, &text).is_empty(), "passive reader, `{frontmatter}`");
+    }
+    let text = "---\nsections: { intro: text }\n---\nBody\n";
+    assert!(passive_problem_paths(&fixture, &hosts, text).is_empty(), "sections alone");
+}
+
 #[test]
 fn installed_registration_upgraded_binary_refresh_changes_the_facts() {
     let fixture = Fixture::new();
@@ -463,7 +585,7 @@ fn installed_registration_upgraded_binary_refresh_changes_the_facts() {
     let root = output_root(&fixture.home());
     let original_files: BTreeMap<_, _> = fixture.files().into_iter().filter(|(path, _)| path.starts_with(&root)).collect();
     let shared_yaml = RegistrationInventory::claudine().file("schemas/shared.yaml").unwrap().text().unwrap();
-    let declaration = "\"string -> the model to run\"";
+    let declaration = "\"string(no-coerce) -> the model to run\"";
     assert!(shared_yaml.contains(declaration), "the embedded schema declares the model as a string");
     let upgraded = RegistrationInventory::claudine().clone().with_version("99.0.0").with_member(PublishedFile::new(
         "schemas/shared.yaml",
@@ -733,11 +855,36 @@ fn installed_registration_user_setup_never_rewrites_a_repository_entry() {
     let repository = fixture.repo().join(".darkmatter.yaml");
     let text = format!("register:\n  - {LEGACY_MANIFEST_REFERENCE}\n");
     fixture.write(&repository, &text);
+    fixture.write(&legacy_manifest_path(&fixture.home()), "kind: darkmatter-host\nformat_version: 1\nhost: claudine\n");
+    fixture.git(&["add", "."]);
+    fixture.git(&["commit", "--quiet", "-m", "an old registration"]);
+    // What `md` reads in the repository, with its committed tree captured.
+    let diagnostics = || {
+        let snapshot = RequestSnapshot::new(fixture.repo()).with_home(Some(fixture.home()));
+        let request = ComposeRequest::prepare(ComposeOptions::new(), &snapshot).expect("a request");
+        RegisteredHosts::load(request.config_snapshot(), request.resolution_context()).diagnostics()
+    };
+    // Before setup, the passive reader refuses the format 1 manifest and
+    // names the command that replaces the user's entry.
+    let before = diagnostics();
+    assert!(
+        before.iter().any(|diagnostic| diagnostic.file == legacy_manifest_path(&fixture.home())
+            && diagnostic.message.contains("run `claudine setup`")),
+        "{before:#?}"
+    );
 
     setup_claudine(&context, ConfigScope::User, write_default).unwrap();
 
     assert_eq!(std::fs::read_to_string(&repository).unwrap(), text, "the repository file is not written");
     assert_eq!(register_list(&fixture), json!([MANIFEST_REFERENCE]));
+    // After setup, the repository's own entry is reported at the file its
+    // owners edit.
+    let after = diagnostics();
+    assert!(
+        after.iter().any(|diagnostic| canonicalize_simplified(&diagnostic.file).ok() == canonicalize_simplified(&repository).ok()
+            && diagnostic.message.contains("names no existing file")),
+        "{after:#?}"
+    );
 }
 
 #[cfg(unix)]

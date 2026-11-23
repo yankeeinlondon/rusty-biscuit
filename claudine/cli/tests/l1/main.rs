@@ -241,6 +241,7 @@ mod provider_tail_launch;
 mod provider_tail_notice;
 mod provider_tail_ownership;
 mod registrations_command;
+mod setup_command;
 mod run_harness_loop_call_sites;
 mod setter_after_switch;
 mod sequence_cli;

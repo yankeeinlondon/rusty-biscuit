@@ -3,11 +3,10 @@
 # Hand-maintained; see claudine/docs/topics/schemas.md.
 #
 # `sequence` is matched once per non-null YAML type, so a value of the wrong
-# type still selects this schema and the payload then rejects it (a native
-# number or boolean is the exception: Darkmatter coerces a top-level scalar to
-# the file-reference string arm, and the sequence parser rejects it). An
-# explicit `kind: sequence` also selects it, and the payload then requires
-# `sequence`.
+# type still selects this schema and the payload then rejects it. A native
+# number or boolean is rejected too: the reference arm is `string(no-coerce)`,
+# so it is never converted to reference text. An explicit `kind: sequence`
+# also selects it, and the payload then requires `sequence`.
 #
 # This payload declares only the sequence keys. `$state` and `template` are
 # declarations of the document's own inline list; the sequence parser refuses

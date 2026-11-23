@@ -81,7 +81,7 @@ subcommand list. The order is:
 4. **Hooks & actions** — `hooks`, `actions`.
 5. **Administration** — `sync`, `uninstall`, `providers`, `logs`,
    `completions`, `config`.
-6. **`init`** — conditional; see below.
+6. **`setup`** — conditional; see below.
 
 **Why this order.** Composition is the most-used subcommand surface in
 daily Claudine use, followed by the provider wrappers. Shared resources
@@ -89,18 +89,18 @@ and hook machinery come next because users reach for them repeatedly
 during setup. Administration is last because those commands are
 typically run once per project.
 
-### `init` visibility rule
+### `setup` visibility rule
 
-`init` is elided from the root menu when **either**:
+`setup` is elided from the root menu when **either**:
 
 - a user-scope Claudine config exists at `~/.claudine/config.yaml`
   (also accepted: a legacy `config.json`, which the next load converts), **or**
 - a repo-scope Claudine config exists at `<repo>/.claudine/config.yaml`
   (or a legacy `config.json`) when cwd is inside a detected git repo.
 
-**Why.** `init` is a one-time wizard. Surfacing it in the root menu
-after Claudine is already configured crowds the menu with a command the
-user will essentially never run again. Presence-only checks (`fs::metadata`)
+**Why.** A configured user rarely runs `setup` again (after an upgrade,
+when `md` names it), so offering it on every root `<TAB>` crowds the menu;
+`claudine setup` still runs, and `claudine --help` lists it. Presence-only checks (`fs::metadata`)
 keep the rule fast — the configs are never parsed.
 
 ### `--help` rule
@@ -1181,7 +1181,7 @@ completions    config
 
 ### Root menu when no configs exist
 
-Add `init` to the end of the list above.
+Add `setup` to the end of the list above.
 
 ### Partial `com` at the root
 
@@ -1349,7 +1349,7 @@ flowchart TD
 |---|---|
 | [`engine/mod.rs`](../../../cli/src/completion/engine/mod.rs) | Entry point; classifies the cursor slot and dispatches. |
 | [`engine/ownership.rs`](../../../cli/src/completion/engine/ownership.rs) | Asks type-aware ownership whether the word after the composition file is Claudine's, and, for a flag or a Claudine option's value at the cursor, whether the words before it read cleanly. |
-| [`root_menu.rs`](../../../cli/src/completion/root_menu.rs) | Curated subcommand menu + `init` visibility. |
+| [`root_menu.rs`](../../../cli/src/completion/root_menu.rs) | Curated subcommand menu + `setup` visibility. |
 | [`composition/mod.rs`](../../../cli/src/completion/composition/mod.rs) | Shared compose/inline-compose/sequence pipeline. |
 | [`setter_value.rs`](../../../cli/src/completion/setter_value.rs) | `@`-gated file completion inside `name=value` setters. |
 | [`scopes.rs`](../../../cli/src/completion/scopes.rs) | Monorepo-aware scope resolution (one `sniff` call per run). |

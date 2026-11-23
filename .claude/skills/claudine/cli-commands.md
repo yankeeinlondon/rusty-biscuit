@@ -43,7 +43,7 @@ Detail behind [SKILL.md](SKILL.md). Full flag reference: [cli-reference.md](cli-
 
 | Command | Description |
 |---------|-------------|
-| `claudine init [--quick] [--repo]` | Interactive setup wizard (4 phases) or quick defaults; also points Darkmatter's `.darkmatter.yaml` `permissions` at Claudine's file (setup handshake) |
+| `claudine setup` | Non-interactive, repeatable `config/setup.rs::setup_claudine` over the user's configuration (`commands/setup.rs`): publish, `permissions` handshake, register the manifest in place of the retired `~/.claudine/darkmatter-host.yaml`, remove the retired files; an existing config is passed a no-op write (settings kept), a missing one gets the headless first-run defaults. Dispatched outside `needs_config`, so it never starts the interactive wizard. The command Darkmatter's format 1 warning names. There is no `claudine init`: first-run setup is `init_wizard::run_initialization` (the test-only `commands/init` is not dispatched) |
 | `claudine config` | TUI for managing configuration, including messenger routes |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |

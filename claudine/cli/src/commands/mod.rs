@@ -22,6 +22,7 @@ pub mod providers;
 pub mod registrations;
 pub mod schema_interactive;
 pub mod sequence;
+pub mod setup;
 pub mod signals;
 pub mod skills;
 pub mod slash_commands;

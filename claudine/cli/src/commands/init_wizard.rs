@@ -27,16 +27,16 @@ pub struct InitArgs {
 pub async fn run_initialization() -> Result<()> {
     let _span = info_span!("init_wizard").entered();
     if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        return run_headless_initialization().await;
+        return run_headless_initialization().await.map(drop);
     }
 
     run_interactive_initialization().await
 }
 
-async fn run_headless_initialization() -> Result<()> {
+/// First-run setup without prompts; returns the configuration path written.
+pub(crate) async fn run_headless_initialization() -> Result<std::path::PathBuf> {
     let config = build_headless_config();
-    write_with_darkmatter_setup(ConfigScope::User, |path| write_initial_config(path, &config))?;
-    Ok(())
+    write_with_darkmatter_setup(ConfigScope::User, |path| write_initial_config(path, &config))
 }
 
 async fn run_interactive_initialization() -> Result<()> {

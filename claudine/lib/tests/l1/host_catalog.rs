@@ -259,6 +259,42 @@ mod lifecycle_artifact {
         assert!(check_lifecycle_artifact(&foreign).is_err());
     }
 
+    /// One edit to the published artifact, each a root no namespace of
+    /// Claudine's catalog declares, is refused as registration refuses it:
+    /// on a Darkmatter event, on a Claudine event, and as a host global
+    /// with no catalog attached. The unedited artifact's `err`/`timing`
+    /// bindings are the control above.
+    #[test]
+    fn the_lifecycle_check_refuses_a_binding_no_namespace_declares() {
+        fn edited(edit: impl FnOnce(&mut serde_json::Value)) -> String {
+            let mut artifact: serde_json::Value = serde_json::from_str(COMMITTED).expect("JSON");
+            edit(&mut artifact);
+            let mut text = serde_json::to_string_pretty(&artifact).expect("serializes");
+            text.push('\n');
+            text
+        }
+        fn rename_timing(artifact: &mut serde_json::Value, event: &str) {
+            let entry = artifact["events"].as_array_mut().unwrap().iter_mut().find(|entry| entry["name"] == event).unwrap();
+            let timing = entry["globals"]["declarations"].as_array_mut().unwrap().iter_mut().find(|entry| entry["root"] == "timing").unwrap();
+            timing["root"] = serde_json::json!("typo_root");
+        }
+        check_lifecycle_artifact(&edited(|_| {})).expect("a reserialized artifact is still current");
+        for (cell, text) in [
+            ("initialize", edited(|artifact| rename_timing(artifact, "initialize"))),
+            ("success", edited(|artifact| rename_timing(artifact, "success"))),
+            (
+                "host_globals",
+                edited(|artifact| {
+                    artifact["global_catalog"] = serde_json::json!(false);
+                    artifact["host_globals"][0] = serde_json::json!("typo_root");
+                }),
+            ),
+        ] {
+            let refusal = check_lifecycle_artifact(&text).expect_err(cell);
+            assert!(refusal.contains("binds `typo_root`"), "{cell}: {refusal}");
+        }
+    }
+
     /// The artifact rebuilds exactly the registry composition uses, rejects
     /// unknown verbs as composition does, and knows the same effect names.
     #[test]

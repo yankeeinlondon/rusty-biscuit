@@ -207,6 +207,12 @@ pub fn check_lifecycle_artifact(text: &str) -> Result<(), String> {
         std::path::Path::new(LIFECYCLE_ARTIFACT_PATH),
         FactsArtifact::Text(text),
     )?;
+    if let Some((segments, root)) = darkmatter::lifecycle::host_profile::undeclared_root(text, &catalog.catalog) {
+        return Err(format!(
+            "the lifecycle artifact binds `{root}` at `/{}`, which neither Darkmatter nor any namespace of Claudine's catalog declares",
+            segments.join("/")
+        ));
+    }
     let host = profile.registry().host();
     if host != crate::composition::registration::HOST_ID {
         return Err(format!("the lifecycle artifact records host `{host}`, not `{}`", crate::composition::registration::HOST_ID));
