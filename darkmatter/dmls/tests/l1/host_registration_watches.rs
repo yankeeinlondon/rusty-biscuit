@@ -27,7 +27,7 @@ pub(crate) const CHANGED: u32 = 2;
 pub(crate) const DELETED: u32 = 3;
 
 /// A client that watches files and roots watchers at folders.
-fn watching_params(root: &Path) -> Value {
+pub(crate) fn watching_params(root: &Path) -> Value {
     json!({
         "processId": null,
         "clientInfo": { "name": "Watched Client", "version": "1.0" },
@@ -57,11 +57,11 @@ pub(crate) fn report(fixture: &mut LspFixture<'_>, document: &Document, changes:
     settle(fixture, document);
 }
 
-fn settle(fixture: &mut LspFixture<'_>, document: &Document) {
+pub(crate) fn settle(fixture: &mut LspFixture<'_>, document: &Document) {
     fixture.flush_server_with("textDocument/documentSymbol", json!({ "textDocument": { "uri": document.uri } }));
 }
 
-fn offers_seq(fixture: &mut LspFixture<'_>, document: &Document) -> bool {
+pub(crate) fn offers_seq(fixture: &mut LspFixture<'_>, document: &Document) -> bool {
     completion_at(fixture, document, "{{ seq.na").contains(&"seq.name".to_string())
 }
 
@@ -75,7 +75,7 @@ pub(crate) fn registration_on(fixture: &mut LspFixture<'_>, suffix: &str) -> Opt
 
 /// The `(base URI, pattern)` of every relative watcher the server
 /// registered so far under `id`.
-fn watchers(fixture: &LspFixture<'_>, id: &str) -> Vec<(String, String)> {
+pub(crate) fn watchers(fixture: &LspFixture<'_>, id: &str) -> Vec<(String, String)> {
     fixture
         .buffered_server_requests()
         .iter()

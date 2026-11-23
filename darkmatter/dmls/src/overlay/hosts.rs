@@ -284,6 +284,7 @@ impl HostPreparation {
     /// everything they read. Does all of a preparation's I/O, and touches no
     /// shared state: it never migrates, writes, prompts, or fetches.
     pub fn run(self) -> PreparedHosts {
+        work_counters::record_host_load();
         let mut deps = HostDependencies::default();
         let mut notices = Vec::new();
         let loaded = darkmatter::markdown::schemas::slots::session::load_passively(&self.context);
@@ -851,7 +852,7 @@ mod tests {
         std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
         registrations.invalidate_all();
         let refused = fixture.version(&mut registrations);
-        assert_ne!(refused, first);
+        assert_eq!(refused, first, "a refusal that loads no profile changes only the published warnings");
         let diagnostics = registrations.diagnostics();
         assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
         assert_eq!(diagnostics[0].code, darkmatter::config::registration::HOST_REGISTRATION_CODE);

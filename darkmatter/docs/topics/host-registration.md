@@ -800,8 +800,9 @@ start:
   never answered from facts prepared for another.
 - **A broken replacement is not hidden.** When a manifest or a member
   changes so that the registration no longer loads, the host's view is
-  dropped at once: the document is analyzed as `md`, and the new
-  `dm.host.registration` warning appears on
+  dropped as soon as the reload completes (see
+  [below](#changes-are-followed-without-a-restart)): the document is
+  analyzed as `md`, and the new `dm.host.registration` warning appears on
   the file that is wrong. A file that is saved with the same bytes changes
   nothing.
 - **Ambiguity is `md`.** A document two registered hosts identify gets one
@@ -842,16 +843,33 @@ DMLS watches everything a registration is loaded from, wherever it lives:
   so a commit or a checkout can change what loads.
 
 A watched change reloads the registrations of every configuration that read
-the file and refreshes every open document they serve. A file the watch
-reports with the same bytes keeps everything as it was. The same handling
-covers every way an editor or a tool changes a file:
+the file, or searched the folder it is in, and refreshes every open document
+they serve. The reload waits until that configuration's files have been
+quiet for **300 ms**: one publish (`claudine setup`, for example) rewrites a
+dozen files, and an editor reports them in several batches, so every change
+restarts the wait and the whole burst gives one reload. Until the reload
+completes, open Markdown and YAML documents keep the view they had; nothing
+is published from a half-written install. The reload runs off the request
+thread and reads and compares the files there: a reload that finds the same
+registrations (a file saved with the same bytes) changes no document's
+analysis, and one whose warnings alone changed republishes only the
+warnings. A change reported during a reload makes that reload's result
+obsolete, and the next one, after quiet, is installed instead.
+
+Ordinary editing is never held: a document edit, a schema file a document
+names, a trigger file, or a `.dmls.toml` change is analyzed at once, under
+the registrations still installed. The same handling covers every way an
+editor or a tool changes a file:
 
 ```mermaid
 flowchart LR
-    A[file created, changed, deleted,<br/>or replaced by a rename] --> B{bytes differ from<br/>what the load read?}
-    B -- no --> C[nothing changes]
-    B -- yes --> D[reload the configuration's registrations]
-    D --> E[refresh every open document;<br/>publish or clear warnings on the files they name]
+    A[file created, changed, deleted,<br/>or replaced by a rename] --> B{read or searched by<br/>a configuration's load?}
+    B -- no --> C[nothing waits]
+    B -- yes --> W[wait until its files are<br/>quiet for 300 ms;<br/>every change restarts the wait]
+    W --> D[reload the configuration's registrations]
+    D --> F{same registrations?}
+    F -- yes --> C2[documents keep their analysis]
+    F -- no --> E[refresh every open document;<br/>publish or clear warnings on the files they name]
 ```
 
 For example, deleting `globals.lifecycle.json` of a registered host drops
@@ -861,7 +879,10 @@ Adding a `register` entry to `~/.darkmatter.yaml` registers the host for
 every open document of that configuration, and removing it unregisters it.
 
 An editor that cannot watch folders outside the workspace makes DMLS reload
-the registrations on every save instead.
+the registrations after every save instead, with the same 300 ms wait.
+Command-line reads (`md compose`, `md schema validate`) do not wait: the
+publisher replaces the manifest last, so a read sees either the earlier
+install or the new one.
 
 DMLS shows a missing `~/.darkmatter.yaml` once per session as a message
 naming `md init`; it never creates the file (see

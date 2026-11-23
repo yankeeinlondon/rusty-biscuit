@@ -15,12 +15,12 @@ use crate::registered_host_views::{repository, write};
 use crate::union_item_editor::open_text;
 
 /// A registered definition of `kind: roster`.
-const ROSTER: &str = "kind: yaml-schema\n$schema:\n    kind: literal(roster; required)\n    platforms: string[](required)\n";
+pub(crate) const ROSTER: &str = "kind: yaml-schema\n$schema:\n    kind: literal(roster; required)\n    platforms: string[](required)\n";
 
-const TEAM: &str = "kind: roster\nplatforms: 3\n";
+pub(crate) const TEAM: &str = "kind: roster\nplatforms: 3\n";
 
 /// `acme`, named `host`, with `roster` written as `definition`.
-fn bundle(host: &str, definition: &str) -> Bundle {
+pub(crate) fn bundle(host: &str, definition: &str) -> Bundle {
     let mut bundle = Bundle::acme_named(host).with_file("schemas/roster.yaml", definition);
     bundle.members.insert(
         "schemas/globals.lifecycle.json".into(),
@@ -29,7 +29,7 @@ fn bundle(host: &str, definition: &str) -> Bundle {
     bundle
 }
 
-fn errors(diagnostics: &[Value]) -> Vec<&Value> {
+pub(crate) fn errors(diagnostics: &[Value]) -> Vec<&Value> {
     diagnostics.iter().filter(|diagnostic| diagnostic["severity"] == 1).collect()
 }
 

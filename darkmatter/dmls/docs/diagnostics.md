@@ -95,9 +95,11 @@ The choice is kept with the document's schema and made again only when an
 input changes: the text, a schema file, the trigger registry, the
 context, or the configuration's registrations. A registration whose files
 change but whose content does not (a save with the same bytes) keeps every
-document's choice. A changed or broken registration replaces it at once: a
-document is never analyzed under the host a broken registration used to
-give, and the new failure is reported on the file that is wrong. Every file
+document's choice. A changed or broken registration replaces it once its
+files have been quiet for 300 ms and the reload completes (a publish's
+burst of changes gives one reload): after that, a document is never
+analyzed under the host a broken registration used to give, and the new
+failure is reported on the file that is wrong. Every file
 a registration reads is watched, so a deleted, recreated, or replaced file,
 and a commit or checkout in the repository, take effect without a restart;
 see [Host Registration](../../docs/topics/host-registration.md#changes-are-followed-without-a-restart).

@@ -587,10 +587,30 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   Markdown document with frontmatter whose configuration is stale, and
   `prepare_workspace_probe` prepares every workspace scope's (so a
   frontmatter-less document, which never waits, finds them). An install
-  whose profiles (manifest + revision), warnings, and load error equal the
-  previous one keeps its `version`; `generation()` advances with each new
-  version and the router refreshes every open document when it moves
-  (`publish_trigger_transitions`). Deps are BLAKE3 hashes (`content_hash`,
+  whose profiles (manifest + revision) and load error equal the previous
+  one keeps its `version` (`same_effect`; warnings alone differing replace
+  the `RegisteredHosts` under the same version); `generation()` advances
+  with each new version and the router refreshes every open document when
+  it moves (`publish_trigger_transitions`). Reloads are debounced per
+  `HostsKey`: `invalidate_paths(paths, now)` matches by path only
+  (`HostDependencies::touches`, no I/O on the router thread) and sets the
+  scope's `due = now + settle` and bumps its `generation`; `schedule_all`
+  does the same for the save fallback (`invalidate_unwatched_inputs`);
+  `invalidate_all` is immediate (`stale`). `expire(now)` turns a passed
+  deadline into `stale`; `needs_load` (cold or stale) gates `begin` and
+  `registry_need`, so a dirty scope serves its installed view and queues
+  nothing. `install(prepared, now)` drops a result whose generation (or
+  seq) is older than the scope's, and a warm result a concurrent change
+  touched re-arms the deadline instead. The router arms
+  `crossbeam_channel::after` on `next_host_reload()` and calls
+  `start_due_host_reloads` (`take_due_host_reloads`, then a workspace
+  pass and `refresh_all_diagnostics`) before every message, so a test's
+  `ManualClock` advance takes effect on its next round trip. The window is
+  `hosts::REGISTRATION_SETTLE` (300 ms, from the measured publish);
+  `HostRegistrations::default()`/`OverlayState` use zero, the server sets
+  `StartupHooks::registration_settle` or the constant, and `LspFixture`
+  defaults to zero except `start_with_registration_settle`.
+  `work_counters::host_loads()` counts loads. Deps are BLAKE3 hashes (`content_hash`,
   taken from `ConfigSnapshot::dependencies` except the `RepositoryHead`
   revision, read otherwise) of the config files present or absent, every
   `profile.dependencies()` path, a refused entry's probed manifest
@@ -622,7 +642,9 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `dm.config.migration` once per file) as `window/showMessage`
   (`Router::show_config_notices`). Tests:
   `tests/l1/registered_host_views.rs` (host fixtures by `#[path]`),
-  `tests/l1/host_registration_watches.rs`.
+  `tests/l1/host_registration_watches.rs`,
+  `tests/l1/registration_reload_scheduling.rs` (the settle window on a
+  `ManualClock`).
 - Lifecycle stacks: `overlay/event_views.rs::LifecycleHost::for_document`
   reads the selected view's lifecycle: the registered profile's
   (`lifecycle::host_profile::HostLifecycleProfile`), else `md_host`; no

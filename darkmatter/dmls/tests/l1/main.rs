@@ -69,6 +69,7 @@ mod registered_host_editor_agreement;
 mod registered_host_views;
 mod registered_trigger_conflict;
 mod registered_yaml_kinds;
+mod registration_reload_scheduling;
 mod registry_observability;
 mod registry_preparation;
 mod repository_contexts;
