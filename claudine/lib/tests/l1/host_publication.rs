@@ -133,7 +133,7 @@ fn host_publication_first_publish_loads_as_one_claudine_profile() {
     for dependency in profile.dependencies().iter().filter(|dependency| dependency.path != manifest) {
         assert!(dependency.path.starts_with(&revision_dir), "{} lies in the revision", dependency.path.display());
     }
-    assert!(profile.globals_path().starts_with(&revision_dir));
+    assert!(profile.namespaces().iter().all(|member| member.location.starts_with(&revision_dir)));
     assert!(profile.lifecycle_path().starts_with(&revision_dir));
 }
 

@@ -1,5 +1,5 @@
 {
-  "catalog_hash": "88ae2a0349cbd4dcf297eec7ac1db9714098c91c391afa2e0a98b83d61e0b7e4",
+  "catalog_hash": "a9c4368ee08aa8fd7e0467e506eab6bc9f03eaaa19716c6253dbafdb807649aa",
   "effects": [
     "air-reverse-burst",
     "air-woosh",
@@ -327,7 +327,7 @@
       "role": "iteration-gate"
     }
   ],
-  "format_version": 1,
+  "format_version": 2,
   "global_catalog": true,
   "host": "claudine",
   "host_globals": [

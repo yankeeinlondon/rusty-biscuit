@@ -373,10 +373,16 @@ mod lifecycle_artifact {
     const COMMITTED: &str = include_str!("../../../schemas/globals.lifecycle.json");
 
     fn profile() -> HostLifecycleProfile {
-        HostLifecycleProfile::from_artifact(
+        use darkmatter::config::registration::namespaces::{member_digest, namespace_catalog_hash};
+        // The transitional one-entry catalog map `lifecycle_artifact` hashes.
+        let digests = std::collections::BTreeMap::from([(
+            "globals.yaml".to_string(),
+            member_digest(HOST_CATALOG_TEXT.as_bytes()),
+        )]);
+        HostLifecycleProfile::from_artifact_at(
             claudine_globals(),
+            &namespace_catalog_hash(&digests),
             Path::new(HOST_CATALOG_PATH),
-            HOST_CATALOG_TEXT,
             FactsArtifact::Text(COMMITTED),
         )
         .expect("the committed artifact reads")

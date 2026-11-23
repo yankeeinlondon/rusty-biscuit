@@ -164,15 +164,23 @@ pub const LIFECYCLE_ARTIFACT_PATH: &str = "claudine/schemas/globals.lifecycle.js
 /// Claudine's host lifecycle artifact: its event registry, its parse options
 /// (unknown verbs rejected, the embedded Playa effect names), versioned
 /// against its host catalog
-/// ([`darkmatter::lifecycle::host_profile::lifecycle_artifact`]). DMLS reads
-/// the committed copy at [`LIFECYCLE_ARTIFACT_PATH`] to type Claudine
-/// lifecycle stacks as composition does; a test keeps it fresh, and
+/// ([`darkmatter::lifecycle::host_profile::lifecycle_artifact`]). The
+/// committed copy at [`LIFECYCLE_ARTIFACT_PATH`] is kept fresh by a test, and
 /// `just regen-lifecycle-artifact` in `claudine/` rewrites it.
+///
+/// Until the catalog moves to namespace files, the hash covers the one
+/// catalog file, keyed by its name, in the same digest-map form a format 2
+/// reader checks ([`darkmatter::config::registration::namespaces::namespace_catalog_hash`]).
 pub fn lifecycle_artifact() -> String {
+    use darkmatter::config::registration::namespaces::{member_digest, namespace_catalog_hash};
+    let digests = std::collections::BTreeMap::from([(
+        "globals.yaml".to_string(),
+        member_digest(crate::composition::schema::globals::HOST_CATALOG_TEXT.as_bytes()),
+    )]);
     darkmatter::lifecycle::host_profile::lifecycle_artifact(
         &claudine_parse_options(None, None),
         playa::SoundEffect::all_names(),
-        crate::composition::schema::globals::HOST_CATALOG_TEXT,
+        &namespace_catalog_hash(&digests),
     )
 }
 
