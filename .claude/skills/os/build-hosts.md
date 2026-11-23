@@ -196,6 +196,15 @@ as a `git diff --cached --binary <base>` built with a temporary
   `cross-check` sends `bash -lc 'bash "$0"' <script>` instead. Suspect this
   whenever a login-shell remote command reports a failure that the output
   contradicts.
+- **A `macos` leg builds its archive, then fails with `just: command not
+  found`.** On bolt, `just` is installed only at `/opt/homebrew/bin/just`, and
+  the bash login profile that `cross-check`'s `bash -lc` reads leaves
+  `/opt/homebrew/bin` off `PATH`; `~/.cargo/bin` is on it. The leg prints
+  `macos FAIL` without running a test. Every package fails the same way, so it
+  is the rig, not the change; check with `ssh bolt 'bash -lc "command -v
+  just"'`. The fix is on the rig: put `eval "$(/opt/homebrew/bin/brew
+  shellenv)"` in bolt's `~/.bash_profile`, or install `just` into
+  `~/.cargo/bin`. Seen 2026-11-23.
 - **`build-linux` can run out of memory linking Darkmatter's archive.** A
   `just cross-check darkmatter --os linux` compile builds every target together,
   `browser` included, and the kernel kills `ld` (`collect2: fatal error: ld
