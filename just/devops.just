@@ -2,6 +2,14 @@ import 'notify.just'
 import 'shell.just'
 mod util
 
+# `pcre2-sys` (sniff → hyperpolyglot → pcre2) links the host's libpcre2-8
+# dynamically whenever pkg-config finds one, so a locally installed CLI breaks
+# when that library is uninstalled (a Homebrew `pcre2` removal, say). Release
+# builds force the bundled static copy through `required_env` in
+# `.github/distribution/build-images.json`; every recipe here does the same.
+# Not a tracked `.cargo/config.toml`: hosts keep an untracked one at that path.
+export PCRE2_SYS_STATIC := env("PCRE2_SYS_STATIC", "1")
+
 bold := '\033[1m'
 dim := '\033[2m'
 reset := '\033[0m'

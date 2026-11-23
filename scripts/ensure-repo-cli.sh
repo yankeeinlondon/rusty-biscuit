@@ -7,8 +7,8 @@
 # An existing `<binary>` on PATH is kept when it is younger than
 # MAX_AGE_DAYS: a host may carry a build newer than this checkout, and every
 # rebuild costs minutes and gigabytes of target/. Any binary of that name
-# counts, whoever built it. An older binary, a missing one, or `--rebuild`
-# runs `just install` in `<area>`. Every decision is reported on stderr.
+# counts, whoever built it. An older binary, a missing one, one that cannot
+# start, or `--rebuild` runs `just install` in `<area>`. Every decision is reported on stderr.
 
 set -euo pipefail
 
@@ -53,6 +53,20 @@ fi
 
 if ! found="$(command -v "$binary" 2>/dev/null)" || [[ "$found" != */* ]]; then
     echo "$binary: not found on PATH; installing from $area/" >&2
+    install_area
+    exit 0
+fi
+
+# A recent binary can still be unable to start: one linked against a shared
+# library the host has since removed (a Homebrew `pcre2` uninstall, say) is
+# killed by the loader before it parses any argument. 127 is the Linux and
+# Git Bash loader failure, above 128 a signal (dyld aborts with SIGABRT); a
+# CLI that merely rejects `--version` exits with a usage code below either.
+# bash reports a signalled child ("Abort trap: 6") on the waiting shell's own
+# stderr, so the probe runs in a command substitution whose stderr is closed.
+status="$( { "$found" --version >/dev/null 2>&1; echo $?; } 2>/dev/null )"
+if (( status == 127 || status > 128 )); then
+    echo "$binary: $found does not start (exit $status); reinstalling from $area/" >&2
     install_area
     exit 0
 fi
