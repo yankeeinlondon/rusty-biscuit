@@ -8,6 +8,9 @@ implementation_4: "2026-11-23T13:59:41+00:00"
 implementation_5: "2026-11-23T17:06:02+00:00"
 implementation_6: "2026-11-23T18:36:40+00:00"
 implementation_7: "2026-11-23T19:47:53+00:00"
+implementation_8: "2026-11-23T20:25:40+00:00"
+implementation_9: "2026-11-23T21:00:10+00:00"
+implementation_10: "2026-11-23T22:25:05+00:00"
 ---
 
 # Host registration v2 — review repair log
@@ -1166,7 +1169,7 @@ these remaining cases. [Review 8](review-8.md#unblocked-findings).
 
 | ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
 | --- | --- | --- | --- |
-| R8-F1 | Storing a named type changes whether matching triggers can agree | fixed | every child .1–.9 verified; discovered siblings .10–.12 fixed, .13 clean; one resolved view (`resolved()`) shared by narrowing, equivalence, nested equality and root-union ownership in `merge.rs` |
+| R8-F1 | Storing a named type changes whether matching triggers can agree | fixed | every child .1–.9 verified; discovered siblings .10–.12 fixed, .13 clean; one resolved view (`resolved()`) shared by narrowing, equivalence, nested equality and root-union ownership in `merge.rs`; review 9 found a regression when a recursive reference is compared with its inline unfolding |
 | R8-F1.1 | Strict narrowing: described stored wide alias vs equally described inline narrow list (both orders), and described narrow alias vs inline wide list: narrows, keeps the common description | fixed | `a_described_stored_list_narrows_like_its_inline_body`: stored wide vs inline narrow and stored narrow vs inline wide, three payload forms, both orders; the description is kept and a differing description still conflicts; `cargo nextest run -p darkmatter --test l1 -E 'test(host_trigger_merge)'` (54 passed) |
 | R8-F1.2 | `Models(min(1))` vs narrow list with `min(1)` coalesces with the narrowing; minimum in the alias definition still succeeds; missing minimum on the narrow side conflicts; `[]` still refused | fixed | `a_list_rule_at_a_stored_list_use_is_the_lists_rule`: `Models(min(1))` narrows, the minimum in the definition still works, a missing minimum conflicts ("list constraints differ"), and the merged layer rejects `[]` |
 | R8-F1.3 | Stored `Models` vs its exact inline list (both orders) coalesces, first bundle path is origin; single-use and two-alias controls still succeed | fixed | `a_stored_list_coalesces_with_its_exact_inline_body`: coalesces in both orders with origin `a.yaml`; single-use and two-alias controls pass |
@@ -1176,10 +1179,10 @@ these remaining cases. [Review 8](review-8.md#unblocked-findings).
 | R8-F1.7 | Static cache, CLI (validate, compose, triggers, clean) and DMLS prepare one successful layer for the described-alias and equivalent-list probes | fixed | CLI `host_registration::a_stored_list_compared_with_its_inline_spelling_prepares_on_every_route`: validate, compose, triggers and `clean --output json` exit 0, and a bad item still fails. DMLS `registered_trigger_conflict::a_stored_list_compared_with_its_inline_spelling_publishes_no_conflict`. Scoped run over `-p darkmatter -p darkmatter-cli -p darkmatter-lsp`: 1285 passed |
 | R8-F1.8 | Deferred template supplying the described narrow list prepares once resolved; passive inspection stays passive (objects and both root-union placements) | fixed | `a_template_narrowing_a_described_stored_list_prepares_once_resolved`: object form and both root-union placements; the passive trace stays pending with no conflict |
 | R8-F1.9 | Controls: mixed list vs homogeneous lists stays refused; moved-rule, recursive equality and raw-declaration rules unchanged | clean | `a_stored_mixed_list_never_narrows_a_union_of_whole_lists` is still refused; all 45 earlier merge tests (moved-rule, recursive, raw) pass unchanged |
-| R8-F1.10 | Discovered: `rules_differ` read null admission and requiredness from a reference atom rather than its definition | fixed | resolution applies before those checks; covered by the .1–.6 tests |
+| R8-F1.10 | Discovered: `rules_differ` read null admission and requiredness from a reference atom rather than its definition | fixed | resolution applies before those checks; review 9 directly checked requiredness and nullable alias controls through a published bundle |
 | R8-F1.11 | Discovered: `string(required) \| number` and `string \| number(required)` lower alike but compared unequal | fixed | `Same` compares `required` for the whole property, like `generated`; covered by the scoped merge suite |
 | R8-F1.12 | Discovered: dictionary values (`<string>: Models`) and tuple elements (`tuple([Pair, string])`) compared stored and inline spellings as different | fixed | reproduced first (failed with "equivalent types differ in a nested declaration"); `Resolver` resolves pattern values, tuple elements and spreads, `Same` compares them structurally; `a_stored_type_in_a_dictionary_value_or_tuple_element_coalesces_with_its_inline_body` |
-| R8-F1.13 | Sweep: function types, slots, recursive references, raw declarations | clean | `function(...)` cannot type a document value (`convert.rs` refuses it); slots resolve before comparison (.8); a recursive reference stays a reference and compares coinductively; raw declarations unchanged |
+| R8-F1.13 | Sweep: function types, slots, recursive references, raw declarations | clean | `function(...)` cannot type a document value (`convert.rs` refuses it); slots resolve before comparison (.8); two references to equivalent recursive definitions still coalesce; a recursive reference against its inline unfolding fails, as reproduced in review 9; raw declarations unchanged |
 
 ### Work
 
@@ -1199,3 +1202,156 @@ these remaining cases. [Review 8](review-8.md#unblocked-findings).
         - the subagent noted that pattern keys and tuples were still compared as written. Both can hold a stored reference, so they belong to this defect class
         - R8-F1.12 (fixed): reproduced first. `{ <string>: Models }` against the same dictionary with the list inline, and `tuple([Pair, string])` against `tuple([{ id: string }, string])`, failed with "their equivalent types differ in a nested declaration". `Resolver` now resolves dictionary values, tuple elements and tuple spreads. `Same` compares pattern keys pairwise and tuples by position. Test: `a_stored_type_in_a_dictionary_value_or_tuple_element_coalesces_with_its_inline_body`
         - scoped runs: `-E 'test(host_trigger_merge)'` 54 passed; `-p darkmatter -p darkmatter-cli -p darkmatter-lsp -E 'test(trigger) | test(registration) | test(merge) | test(registered_) | test(host_)'` 1285 passed
+        - doc: the host-registration paragraph now names dictionary values and tuple positions
+- work completed for 'R8-F1 storing a named type changes whether matching triggers can agree' at 20:52:02
+- phase gates (orchestrator, no subagent running), load average 2.08 at start
+        - `darkmatter`: `just test` 17833 passed, 10 skipped, "none at or above 5.0s"; `just lint` exit 0 (zed-dmls wasm32 check included); `just check-tier-coverage darkmatter` 0 stranded
+        - `claudine` (consumer of the registered trigger layer through its embedded registration): `just test` 12725 passed, 15 skipped, "none at or above 5.0s"
+        - `simplified-schema`: no source changed this cycle, so its gates were not rerun
+        - cross-OS check not run: the repair only changes in-memory declaration comparison. No path handling, process code or `#[cfg]` code changed
+
+### Completion Report
+
+- **outcome: complete**; elapsed about 26 min (20:25:40 to 20:52:02 UTC)
+- parent findings: 1 total = 1 fixed + 0 already fixed + 0 blocked + 0 unresolved + 0 disputed
+- instance rows: R8-F1.1–.8 fixed, R8-F1.9 clean (controls); discovered siblings R8-F1.10–.12 fixed, R8-F1.13 controls clean; the additional recursive mixed-spelling case is R9-F1
+- verified repairs
+        - R8-F1: every declaration comparison in the checked merge now reads one resolved view. That covers strict narrowing, equivalence, nested equality across object properties, dictionary values and tuple elements, and root-union arm ownership. In this view, a non-recursive named type is expanded to its definition, and its use-site description and rules stay at the level they lower to. The winner's declaration and origin are still kept as written. A mixed list still never narrows separate homogeneous lists. A recursive reference and its inline unfolding can still be refused as different, because the expansion stops at a different depth on each side
+- decisions (none needs the author)
+        - the repair stays in `merge.rs` rather than adding a SimplifiedSchema helper, because the resolver's expansion works on authored references rather than stored definitions
+        - a described named union does not coalesce with the same alternatives written out, because the two lower to different schemas. Narrowing between them works
+- follow-up from review 9: R9-F1 covers the recursive named-versus-inline regression
+- changed files (this cycle)
+        - darkmatter lib: `src/config/registration/merge.rs`; tests `tests/l1/host_trigger_merge.rs` (R8-F1.1–.6, .8, .9, .12)
+        - darkmatter cli: `tests/l1/host_registration.rs` (R8-F1.7)
+        - dmls: `tests/l1/registered_trigger_conflict.rs` (R8-F1.7)
+        - docs: `darkmatter/docs/topics/host-registration.md` ("When two triggers declare one property")
+        - feature records: `log.md`, `review-8.md` (metadata)
+- final verification commands: `cargo nextest run -p darkmatter --test l1 -E 'test(host_trigger_merge)'` (54 passed); the scoped trigger/registration/merge run over darkmatter, darkmatter-cli and darkmatter-lsp (1285 passed); `just test`, `just lint` and `just check-tier-coverage` in `darkmatter/`, plus `just test` in `claudine/`. All passed, as recorded above
+
+### Review 9 record correction — 2026-11-23
+
+The recursive sweep marked the reference comparison clean based on two
+named references. In a temporary Claudine publication, either a named
+tree or its inline unfolding validated on its own. Together they failed
+validation, composition, cleanup, trigger inspection, and DMLS. The same
+failure appeared with both spellings in different arms of a root union.
+The named-reference control still passes. The ledger and completion
+report now state the scope of that control. The earlier cases cited
+for alias presence and null admission exercised list comparisons.
+Review 9 checked those two rules directly by publishing and validating
+the required-list and nullable-union cases.
+[Review 9](review-9.md#unblocked-findings).
+
+## Implementation of Review Findings #9
+
+> **started at:** 2026-11-23T21:00:10+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-host-registration-v2/review-9.md'
+- this is iteration 9 of the review-to-implement cycle 
+- the review's `implemented` flag was confirmed `false` before repairs started
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R9-F1 | Equivalent recursive declarations conflict when one is written inline | fixed | every child .1–.7 verified; `Same` in `merge.rs` compares the pair of operands being visited and unfolds a reference on demand (coinductive memo of in-progress pairs, rules compared on every first visit), shared by equivalence, narrowing and root-union ownership; discovered edge .8 clean |
+| R9-F1.1 | Named tree vs one inline unfolding, both file orders, both root-union placements, and an imported `Node@./sequence.yaml` vs inline outer object: coalesce, keep nested child checking, first bundle path is origin | fixed | `a_recursive_reference_coalesces_with_its_inline_unfolding`: local and imported `Node@./lib.yaml` vs inline, three payload forms × both orders, first-path origin, bad deep child refused at `/review-model/children`; failed before the fix with "equivalent types differ in a nested declaration"; `cargo nextest run -p darkmatter --test l1 -E 'test(host_trigger_merge)'` 61 passed |
+| R9-F1.2 | `Node \| string` vs inline tree alone narrows to the complete narrower tree; `Node \| string` vs inline tree `\| string` coalesces | fixed | `a_recursive_reference_and_its_inline_unfolding_narrow_and_pair_by_alternative`: `Node \| string` narrows to the whole inline tree (three forms, both orders, `claude` and a bad tree refused); `Node \| string` vs inline tree `\| string` coalesces |
+| R9-F1.3 | Root-union ownership: `Node` in one arm, inline tree in the other, other trigger `Node`; both orders: key stays shared, prompt/sections alternatives preserved | fixed | `a_root_union_shares_a_recursive_key_one_arm_names_and_another_writes_inline`: both orders; key shared, prompt and sections arms validate, neither is refused, bad child refused |
+| R9-F1.4 | Nested equality: same pair inside object property, dictionary value, tuple element, tuple spread and list item coalesces and keeps nested value checking | fixed | `a_recursive_reference_and_its_inline_unfolding_coalesce_at_every_nested_position`: object property, dictionary value, tuple element, tuple spread, list item; three forms × two orders with a bad deep child |
+| R9-F1.5 | Static matched-set cache and consumers: `md schema validate`, `md compose`, `md schema triggers`, `md clean --output json`, DMLS prepare the layer and keep value checking | fixed | CLI `host_registration::a_recursive_reference_and_its_inline_unfolding_prepare_on_every_route` (validate, compose, `schema triggers`, `clean --output json` exit 0; bad child fails validate with no conflict code); DMLS `registered_trigger_conflict::a_recursive_reference_and_its_inline_unfolding_publish_no_conflict`; cache `a_recursive_pairs_static_result_is_memoized_per_matched_set` (`Arc::ptr_eq`) |
+| R9-F1.6 | Deferred merge: imported tree vs a template returning the inline outer object, both orders, three payload forms; prepares after resolution, inspection stays passive | fixed | `a_template_returning_an_imported_trees_unfolding_prepares_once_resolved`: three forms × two orders; passive trace pending with no conflict; good/bad trees judged after resolution (session grants the one-time read of `schemas/lib.yaml` a template import requires) |
+| R9-F1.7 | Controls: two named recursive definitions and aliases of one import coalesce; differing child rule conflicts; mixed list, raw and function boundaries unchanged | clean | existing `recursive_definitions_compare_by_structure_not_storage`, mixed-list, raw and function boundaries unchanged and green; new `recursive_declarations_that_differ_only_past_an_unfolding_conflict` (a `string(min(1))` one level down, both orders, and two named recursive types differing only past their own reference) still conflicts; mutation `unfolded → true` failed only this control |
+| R9-F1.8 | Description inherited by a list of recursive nodes compared with an inline list | clean | `Node[]` inherits the definition's description on the list. The inline list with the same trailing description coalesces. The undescribed inline list conflicts. A nonrecursive rule-bearing type nested in the tree (`Name: string(min(1))` inside `Node[]`) also coalesced with its inline form in the repair probe. |
+
+### Work
+
+- starting the work on 'R9-F1 equivalent recursive declarations conflict when one is written inline' at 21:00:40
+        - defect class: a declaration comparison makes the depth at which each operand's named types were expanded part of the comparison, so a reference on one side and an equivalent inline unfolding on the other are refused as different
+        - delegated to one foreground rust-developer subagent; it reports log items back to the orchestrator
+- subagent (rust-developer) log items, reported back to the orchestrator; it finished at about 21:14
+        - reproduced first: the six new library equivalence, narrowing, ownership, nested, cache and template tests failed with `dm.host.trigger_conflict` ("their equivalent types differ in a nested declaration")
+        - repaired `config::registration::merge::Same`: `alternatives` pairs alternatives as written and, if that fails and either side holds a reference, `unfolded` expands each reference one level through `Resolver::atom` (so `expand` keeps use-site rules and descriptions) and pairs again; an in-progress pair is assumed equal (pushed before, popped after, so every first visit compares rules); `Same::types` gained reference-versus-other arms; union arms and tuple spreads use the same path
+        - this one change covers equivalence (`relation`), strict narrowing (`rules_differ` → `arm_differs` → `Same::types`) and root-union ownership (`View::declaration`)
+        - simplified-schema unchanged: `is_definition_subtype_with_definitions` already accepts the mixed pair both ways, which is why the refusal reached the equivalent branch
+        - mutation checks: `unfolded → false` failed the six library tests plus the CLI and DMLS tests; `unfolded → true` failed only the deep-rule control
+        - docs: `darkmatter/docs/topics/host-registration.md` ("When two triggers declare one property") gains a paragraph and example; `Same` doc comment rewritten, `resolved()` doc still accurate
+        - scoped runs: merge filter 61 passed; `-p darkmatter -p darkmatter-cli -p darkmatter-lsp -E 'test(trigger) | test(registration) | test(merge) | test(registered_) | test(host_)'` 1294 passed; `just lint` clean
+- orchestrator reconciliation at 21:14–21:17
+        - read the `merge.rs` diff: unfolding runs from a fresh `Resolver` (finite resolved trees), so the memo set is finite and the comparison terminates
+        - R9-F1.8 compared a list inheriting a description with an inline list. The conflict reflects the missing list description in the original probe. Adding the same trailing description to the inline list coalesces.
+- work completed for 'R9-F1 equivalent recursive declarations conflict when one is written inline' at 21:17:10
+- phase gates (orchestrator, no subagent running), load average 3.32 at start
+        - `darkmatter`: `just test` 17842 passed, 10 skipped, "none at or above 5.0s"; `just lint` exit 0 (zed-dmls wasm32 check included); `just check-tier-coverage darkmatter` 0 stranded
+        - `claudine` (consumer through its embedded registration): `just test` 12725 passed, 15 skipped, "none at or above 5.0s"
+        - `simplified-schema`: no source changed, gates not rerun
+        - cross-OS check not run: the repair only changes in-memory declaration comparison, with no path, process or `#[cfg]` code
+
+### Completion Report
+
+- **outcome: complete**; elapsed about 25 min (21:00:10 to about 21:25 UTC)
+- parent findings: 1 total = 1 fixed + 0 already fixed + 0 blocked + 0 unresolved + 0 disputed
+- instance rows: R9-F1.1–.6 fixed, R9-F1.7 clean (controls), discovered R9-F1.8 clean
+- verified repairs
+        - R9-F1: the checked merge now compares recursive declarations by the pair of operands being visited. It unfolds a reference against an inline type on demand, with use-site rules, and stops on a repeated pair only after every first visit has compared its rules. As a result, how far `resolved()` expanded either side no longer decides equivalence, narrowing, alternative pairing, root-union ownership, or nested collection positions. The winner's declaration and origin are kept as written
+- decisions (none needs the author): the repair stays in Darkmatter's `Same`, because SimplifiedSchema's subtype relation already accepted the pair
+- open findings: none
+- changed files (this cycle)
+        - darkmatter lib: `src/config/registration/merge.rs`; tests `tests/l1/host_trigger_merge.rs` (R9-F1.1–.4, .6, .7, cache)
+        - darkmatter cli: `tests/l1/host_registration.rs` (R9-F1.5)
+        - dmls: `tests/l1/registered_trigger_conflict.rs` (R9-F1.5)
+        - docs: `darkmatter/docs/topics/host-registration.md`
+        - feature records: `log.md`, `review-9.md` (metadata)
+- final verification commands: `cargo nextest run -p darkmatter --test l1 -E 'test(host_trigger_merge)'` (61 passed); the scoped trigger/registration/merge run (1294 passed); `just test`, `just lint` and `just check-tier-coverage darkmatter` in `darkmatter/`; `just test` in `claudine/`. All passed, as recorded above
+
+### Review 10 record correction — 2026-11-23
+
+The R9-F1.8 ledger and work notes located the inherited description on the
+item and said the equivalent list had no inline spelling. The description
+is on the list. With `Node: "{ name: string, children: Node[] } -> a node"`
+in a temporary Claudine publication, `md schema validate --output json`
+accepted `Node[]` alongside `{ name: string, children: Node[] }[] -> a node`.
+Removing only the inline description produced the expected description
+conflict. The undescribed recursive list and its undescribed inline
+counterpart also coalesced in both trigger orders.
+
+## Implementation of Review Findings #10
+
+Direction selection and rule pairing compared different representations of a
+list. The whole-property subtype check flattened list items into property
+alternatives and compared arrays by identity. The later rule check walked the
+items, but the earlier refusal prevented it from running.
+
+Both decisions now use the same coverage relation on resolved alternatives.
+One property alternative must be covered by one other property alternative.
+For lists, apply that rule again to the items of those two lists. Scalar
+coverage still uses SimplifiedSchema. The root-union ownership check continues
+to require equality between the declarations in its arms. The selected
+declaration and its origin are preserved.
+
+### Finding Ledger
+
+| Instance | Disposition | Evidence |
+| --- | --- | --- |
+| R10-F1.1 | fixed | Plain and grouped lists narrow by item type in both file orders and all three payload placements. Tests assert the retained schema, its origin, and accepted and rejected items. |
+| R10-F1.2 | fixed | The same checks pass for a named item union and for two stored list bodies. |
+| R10-F1.3 | fixed | The enum list fits a single homogeneous alternative. A union of homogeneous lists wins over a mixed list and rejects a mixed value. |
+| R10-F1.4 | fixed | Matching item and list rules allow narrowing. Changed item minima and a missing list minimum still conflict. |
+| R10-F1.5 | fixed | Root-union placements and the static cache use the winning list. CLI validation, composition, trigger inspection, and cleanup prepare it. DMLS and CLI validation reject a bad item after preparation. Existing tests cover union ownership and higher-layer precedence. |
+| R10-F1.6 | fixed | A template on either side narrows after resolution. Passive inspection still reports it as pending without a conflict. |
+| R10-F1.7 | clean | The merge suite still covers equivalent, scalar, recursive, item-removal, and incompatible mixed-list cases. The raw-schema equality branch was unchanged. |
+
+### Verification
+
+- Two new library tests reproduced the incomparable-type refusal before the repair.
+- The focused Darkmatter run passed all 66 merge, CLI, and DMLS tests. The full
+  Darkmatter Level 1 run passed 17,847 tests with 10 skipped and none at or above
+  five seconds. `just lint` passed, including the Zed WASM check.
+- Claudine's `just test installed_registration` passed all 47 selected tests,
+  including installed and embedded schema agreement.
+- Both edited prompts composed successfully in Claudine dry runs using this
+  spec. The reviewer now probes invariants and the repair prompt asks for a
+  shared rule and prior cases from the recurring defect class.
+
+One finding fixed. The repair is ready for independent review.

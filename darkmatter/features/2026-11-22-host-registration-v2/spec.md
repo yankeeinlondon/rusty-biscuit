@@ -5,7 +5,7 @@ status: finalized-spec
 reviewed: true
 reviewed-by: "codex/gpt-6.2-sol"
 reviewed-on: "2026-11-22"
-review-iterations: 8
+review-iterations: 11
 needs-rulings: false
 $schema:
     status: |-
@@ -38,6 +38,7 @@ depends-on:
 next-spec: 2026-11-22-claudine-doctor
 implemented: true
 implemented-by: "claude/opus"
+completed: true
 ---
 
 # Host registration v2

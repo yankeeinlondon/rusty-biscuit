@@ -1007,18 +1007,22 @@ line (see `decisions-for-review`).
 
 - **Checked trigger layer.** `darkmatter/lib/src/config/registration/merge.rs`
   (new) compares every pair of a host's matched payloads per top-level
-  property: subtype in both directions
-  (`is_definition_subtype_with_definitions` over a combined definition
-  table), then presence, null admission, defaults, descriptions, and the
-  remaining constraints separately. The original strict narrowing comparison
+  property. It resolves declarations over a combined definition table and
+  compares type coverage in both directions, then checks presence, null
+  admission, defaults, descriptions, and the remaining constraints separately.
+  The original strict narrowing comparison
   pooled descriptions and constraints across property alternatives. The
   iteration 6 repair keeps those rules on their alternatives. The
-  iteration 7 repair pairs list item alternatives for grouped lists and
-  plain uses of stored lists. A use-site description or constraint can
-  leave a stored list opaque to this comparison. Equivalent named and
-  inline declarations can also be refused when only the named form is
-  stored as a reference. A structural comparator that is coinductive
-  over named types coalesces the tested recursive aliases. The unique
+  iteration 7 repair pairs list item alternatives for grouped lists.
+  The iteration 8 repair also opens stored nonrecursive lists with
+  use-site descriptions or constraints and coalesces their equivalent
+  inline declarations. Two named recursive definitions with the same
+  structure still coalesce. The iteration 9 repair also coalesces a named
+  recursive tree and its equivalent inline unfolding. The iteration 10
+  repair uses the same coverage rule for direction and for pairing rules.
+  Each property alternative needs one covering alternative, and for two
+  lists the same rule compares their item alternatives. Scalar coverage
+  uses SimplifiedSchema's atom subtype helper. The unique
   narrowest class wins and every other payload's declaration is removed, so
   the winner keeps its origin. Root checks: at most one root union, no root
   rules when two or more payloads contribute, and no other payload may
@@ -1803,3 +1807,47 @@ validation, composition, trigger inspection and DMLS refuse a narrowing
 whose inline equivalent succeeds. The equivalent-declaration and
 union-arm checks can also distinguish a stored reference from its inline
 body. [Review 8](review-8.md#unblocked-findings) records the reproductions.
+
+### Review 9 record correction — 2026-11-23
+
+The Phase 3 account still described the described or constrained list
+aliases and nonrecursive inline equality as unresolved. The Level 1
+repair tests now pass for those cases, including root-union ownership,
+and the CLI and DMLS tests verify that bad items still fail after a
+successful merge. A temporary published bundle confirmed the remaining
+recursive limit. With either declaration alone the tree validated and a
+bad child value was rejected. Together the two equivalent declarations
+failed CLI schema preparation and produced the same conflict in DMLS.
+[Review 9](review-9.md#unblocked-findings).
+
+### Review 10 record correction — 2026-11-23
+
+The Phase 3 account still described the recursive tree and its inline
+unfolding as a conflicting pair. The installed Claudine bundle accepted
+the pair in `md schema validate --output json` after the two edited member
+digests were refreshed. The Darkmatter Level 1 run also passed the
+recursive equality, narrowing, root-union, nested declaration, deferred
+template, CLI, and DMLS tests. See [review 10](review-10.md#previous-finding-verification).
+
+### Departure from section 6 — list item coverage (2026-11-23)
+
+Section 6 names SimplifiedSchema's whole-property subtype helper. That
+helper distributes list item unions and compares arrays by identity,
+which can disagree with host registration's rule pairing. For R10-F1,
+host registration uses the same coverage test over resolved alternatives
+for both direction and rule pairing. Property alternatives and item
+alternatives remain separate. Scalar comparisons still use SimplifiedSchema's
+atom subtype helper, so callers of the public subtype helpers retain their
+existing behavior. The winner's declaration and source are preserved.
+
+### Review 11 record correction — 2026-11-23
+
+The Phase 3 summary still named SimplifiedSchema's whole-property subtype
+helper as the checked layer's current direction check. Both direction and
+rule pairing now use the list-aware coverage relation in
+`darkmatter/lib/src/config/registration/merge.rs`. I checked the call sites
+and ran the Level 1 merge suite. In a temporary Claudine publication,
+`md schema validate` accepted an enum list against a grouped string-or-number
+list, rejected a mixed value when the homogeneous alternatives won, and
+reported a conflict when the retained item minimum changed. See
+[review 11](review-11.md#previous-finding-verification).

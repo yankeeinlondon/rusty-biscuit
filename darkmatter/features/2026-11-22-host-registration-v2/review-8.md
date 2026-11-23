@@ -15,6 +15,7 @@ implemented: true
 description: "A **feature** review of `2026-11-22-host-registration-v2/spec.md`"
 feature: 2026-11-22-host-registration-v2/review-8.md
 previous: 2026-11-22-host-registration-v2/review-7.md
+next: 2026-11-22-host-registration-v2/review-9.md
 log: /home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-host-registration-v2/log.md
 implemented-by: claude/opus
 ---
