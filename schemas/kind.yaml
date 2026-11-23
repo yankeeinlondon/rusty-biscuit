@@ -5,6 +5,7 @@ $schema:
             schema,
             schema-trigger,
             yaml-schema,
+            namespace-schema,
             sequence,
             task,
             index,

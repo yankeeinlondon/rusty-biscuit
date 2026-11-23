@@ -1,6 +1,6 @@
 # Schema Resolution and Standalone Documents
 
-How a schema reference finds its file, how a standalone YAML file declares that it holds a SimplifiedSchema (or defines a YAML document kind), and how the library checks that file before reading it.
+How a schema reference finds its file, how a standalone YAML file declares that it holds a SimplifiedSchema (or defines a YAML document kind, or declares a host namespace), and how the library checks that file before reading it.
 
 ## Schema Resolution
 
@@ -257,8 +257,8 @@ types:
 - It is never a reference. `Name@file` imports and every lookup still name
   the file by its path. `StandaloneSchemaDocument::name` returns it.
 - Within one schema root it must be unique among the triggers and `types`-only
-  libraries that declare one (see [Trigger labels and local
-  types](#trigger-labels-and-local-types)).
+  libraries that declare one (see [A label is unique within its schema
+  root](#a-label-is-unique-within-its-schema-root)).
 
 A host's global catalog (such as Darkmatter's `darkmatter.yaml`) is an
 ordinary `kind: schema` envelope with `$schema` declarations. The host
@@ -463,6 +463,44 @@ against `namespace-schema.yaml` and returns a `NamespaceSchemaDocument`:
 resolves its imports from and reports against. It reads no file and resolves
 nothing; `Ok(None)` means the text claims another kind.
 
+#### Resolving a namespace's payload
+
+A host turns a namespace file into the declaration of its one global with
+`resolve::resolve_namespace_payload(text, path, &context, shipped)`. It
+resolves `$schema` as one object whose properties are the namespace's
+members, with the file's `types` as the names `$schema` can use. The
+namespace file is the origin of everything in it: its imports resolve from
+the file's folder, and an error points into the file.
+
+```yaml
+# registration/loop.yaml
+kind: namespace-schema
+namespace: loop
+$schema:
+    count: number(integer; min(1))
+    item: entry               # a private type, from `types` below
+    owner: person@./shared.yaml # an import, resolved beside this file
+types:
+    entry: "{ id: string, label: string }"
+```
+
+```rust
+use simplified_schema::resolve::resolve_namespace_payload;
+use simplified_schema::{SchemaRoot, parse_namespace_schema_document};
+
+let document = parse_namespace_schema_document(&text, &path)?.expect("a namespace schema");
+let resolved = resolve_namespace_payload(&text, &path, &context, shipped)?;
+let Some(SchemaRoot::Single(members)) = resolved.simplified else { unreachable!() };
+// `document.namespace` is "loop"; `members` holds `count`, `item`, and `owner`.
+```
+
+Envelope admission is the caller's step (`parse_namespace_schema_document`);
+`resolve_namespace_payload` reads only `$schema` and `types`, and refuses a
+`$schema` that is not a mapping. An empty `$schema: {}` resolves to an object
+with no members. A host that loads the namespace from a checked bundle runs
+this inside the bundle's scope, so its imports follow
+[path-based imports](#path-based-imports-inside-a-bundle).
+
 A namespace file is never a schema in its own right:
 
 - naming it as a `$schema` target or a root-union file arm, or importing
@@ -508,12 +546,86 @@ types:
 - None of the three may be written as `null`; omit the key instead. Any other
   key is refused.
 
-Discovery checks names per schema root and per embedded bundle, before
-filename shadowing: two files of one root (a trigger and a trigger, or a
-trigger and a `types`-only library) that declare the same `name` are both
-reported, each at its own `name`, and neither is installed as a trigger. The
-same name in two different roots is allowed. A shadowed file is read for its
-`name` only.
+#### A label is unique within its schema root
+
+A `name` only helps a reader if it points at one file, so discovery refuses a
+label that two files of one source share. The check runs per schema root and
+per embedded bundle, before filename shadowing: two files of one root (a
+trigger and a trigger, or a trigger and a `types`-only library) that declare
+the same `name` are both reported, each at its own `name`, and neither is
+installed as a trigger.
+
+```yaml
+# schemas/first.yaml
+kind: schema-trigger
+name: twin
+match:
+    alpha: string(required)
+```
+
+```yaml
+# schemas/library.yaml
+kind: schema
+name: twin
+types:
+    Id: string
+```
+
+Each file gets an invalid-trigger finding at its `name` value (line 2,
+column 7 here). Its message names the file as `twin (schemas/first.yaml)`
+and its cause names every other participant (paths shortened here):
+
+```text
+`name`: `twin` is also declared by `schemas/library.yaml` in the same schema source; every file declaring it is ignored
+```
+
+- The same name in two different roots is allowed; each root is judged on
+  its own.
+- A file shadowed by a same-named file in an earlier root still counts toward
+  its own root's names. It is read for its `name` only.
+- A `types`-only library that takes part in a duplicate is reported as an
+  invalid schema trigger too, and its types still import as `Name@file`,
+  because imports name files by path, never by label.
+
+### Path-based imports inside a bundle
+
+A host can load triggers, `types`-only libraries, and namespace files from a
+*bundle*: a folder whose member files the host has already read and checked,
+such as a published host registration. While the host resolves those files
+under the bundle's scope, a file reference reaches another file only by its
+path relative to the file that writes it, never by a label or a search:
+
+```yaml
+# schemas/composition.yaml, a member of the bundle
+kind: schema-trigger
+match:
+    prompt: string(required)
+$schema:
+    $extends: common-attributes@./shared.yaml # a listed member: served from its checked bytes
+    owner: person@../people/person.yaml       # people/person.yaml: fine when listed
+```
+
+| Written in a bundle member | Result |
+| --- | --- |
+| `Name@./shared.yaml`, `Name@../lib/base.yaml` landing on a listed member | resolved from that member's checked bytes |
+| a `./` or `../` path to a file in the folder that is not listed | refused without reading it |
+| a `../` path that leaves the bundle | refused |
+| a bare name (`Name@shared.yaml`), `~/`, an absolute path, or a schema-root lookup | refused |
+| a host's built-in name, such as `Name@darkmatter:lifecycle` | resolved as always |
+
+A refusal is a `SchemaError::BundleBoundary` that names the reference and the
+bundle:
+
+```text
+schema reference `shared.yaml` is refused: bundle `claudine`: a bundle file is referenced only as `./…` or `../…` from the file that names it
+```
+
+This keeps a bundle meaning the same thing wherever it is copied: no member
+can depend on a schema root, the home folder, or a file someone added after
+the check. The same rules cover `$schema` file targets, `$extends` and
+`...spread` operands, and `example(file)`. See
+[Resolving inside a bundle](../selecting-schema-files.md#resolving-inside-a-bundle)
+for the API and every refusal.
 
 ### Admission: Checking an Envelope Against Its Definition
 

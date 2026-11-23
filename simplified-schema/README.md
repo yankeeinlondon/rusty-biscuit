@@ -80,7 +80,7 @@ Most callers need one type, `SimplifiedSchema`: build it from text or a file, va
 
 Darkmatter keeps its own policy (its baseline, how matched triggers layer into a document's schema, and which values are still pending) and calls in here, handing the library its reserved `darkmatter:` namespace.
 
-The crate also owns the schema kinds built on the language: the definitions of `kind: schema`, `kind: yaml-schema`, and `kind: schema-trigger` documents (`schemas/`), schema-trigger discovery and matching, the schema roots they are found in, and the selection of a whole YAML document's schema by its `kind`; see [Schema documents](./docs/topics/language/schema-documents.md) and [Language core](./docs/topics/language-core.md).
+The crate also owns the schema kinds built on the language: the definitions of `kind: schema`, `kind: yaml-schema`, `kind: schema-trigger`, and `kind: namespace-schema` documents (`schemas/`), schema-trigger discovery and matching, the schema roots they are found in, and the selection of a whole YAML document's schema by its `kind`. A namespace schema declares one global a host's expressions read (such as `loop`), with types private to its file. A host that ships its schemas as a checked bundle (a host registration, for example) resolves them against that bundle alone, where files import each other only by `./` or `../` path. See [Schema documents](./docs/topics/language/schema-documents.md), [Selecting a schema file](./docs/topics/selecting-schema-files.md#resolving-inside-a-bundle), and [Language core](./docs/topics/language-core.md).
 
 ## Install
 

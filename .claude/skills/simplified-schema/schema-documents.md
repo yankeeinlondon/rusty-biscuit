@@ -21,10 +21,12 @@ JSON must be an object whose
 `InvalidJsonSchema`). There is no raw-YAML JSON Schema fallback; see
 [What a schema reference may target](../../../simplified-schema/docs/topics/language/schema-documents.md#what-a-schema-reference-may-target).
 
-Envelopes (`kind: schema`, `kind: yaml-schema`, informal) are **admitted**
-before their payload is read: `envelope.rs` soft-validates each against the
-compiled `simplified-schema/schemas/schema.yaml` / `yaml-schema.yaml`
-(`envelope::ENVELOPE_DEFINITIONS`, `admit_envelope_text`). Those files are the
+Envelopes (`kind: schema`, `kind: yaml-schema`, `kind: namespace-schema`,
+informal) are **admitted** before their payload is read: `envelope.rs`
+soft-validates each against the compiled
+`simplified-schema/schemas/schema.yaml` / `yaml-schema.yaml` /
+`namespace-schema.yaml` (`envelope::ENVELOPE_DEFINITIONS`,
+`admit_envelope_text`). Those files are the
 only authority for envelope structure (closed keys, `$schema` or `types`,
 `types` a mapping, `not-empty` metadata); never add a structural check to
 `standalone.rs` (`shipped_corpus.rs` guards it). Rust keeps only category
@@ -60,10 +62,10 @@ whole-YAML loading agree). `envelope_null_carriers.rs` runs every carrier cell
 through the parser, admission (normal and `PreparationMode::Uncached`), both
 factories, and whole-YAML loading, which must agree.
 
-Ownership boundary: this crate owns all three shipped definitions
-(`schemas/{schema,yaml-schema,schema-trigger}.yaml`, compiled into
-`envelope::ENVELOPE_DEFINITIONS`; only the first two admit envelopes, the
-trigger definition is a kind definition), envelope admission, trigger
+Ownership boundary: this crate owns all four shipped definitions
+(`schemas/{schema,yaml-schema,schema-trigger,namespace-schema}.yaml`, compiled
+into `envelope::ENVELOPE_DEFINITIONS`; all but the trigger definition admit
+envelopes, the trigger definition is a kind definition), envelope admission, trigger
 discovery and matching (`triggers/`), the schema roots (`roots.rs`), and whole
 YAML documents (`yaml_documents/`: `load.rs`, `select.rs`, `registry.rs`'s
 `KindRegistry`, `semantic.rs`'s kind checks). A host supplies only its inputs:
@@ -75,3 +77,47 @@ into its `EffectiveSchema`/`ValidationReport` (`YamlContract`, `YamlValidation`,
 `Route`). Its user docs: the "YAML documents" section of
 [definition.md](../../../darkmatter/docs/topics/schemas/definition.md) and
 [Schema Discovery](../../../darkmatter/docs/topics/schemas/schema-discovery.md).
+
+## Namespaces, labels, and bundles
+
+- **Namespace files** (`kind: namespace-schema`) are catalog inputs only.
+  `simplified/standalone.rs::parse_namespace_schema_document` admits the
+  envelope and refuses explicit `null` for `description`/`types` (the
+  definition cannot: an optional property admits `null`; whole-YAML loading
+  does not refuse it yet, and `CHECKED_KINDS` has no namespace entry).
+  `resolve.rs::resolve_namespace_payload` resolves `$schema` beside the
+  private `types` through the trigger-payload path (`InlineOwner::Trigger`),
+  so the file owns its inline types and no other file reaches them. Naming a
+  namespace file as a `$schema` target, root-union arm, or `Name@file` source,
+  or loading it through the `SimplifiedSchema` factories, is
+  `NotSchemaReason::NamespaceCatalog` (`resolve.rs`, `schema/layer.rs`,
+  `schema/export.rs`), even when malformed. Reserved names (Darkmatter
+  globals, expression roots, `null`) are the host's check
+  (`darkmatter/lib/src/config/registration/namespaces.rs`), not this crate's.
+  Tests: `kind_envelopes.rs` (`namespace_schema_*`,
+  `files::a_namespace_file_is_refused_*`).
+- **Labels.** A trigger's or `types`-only library's `name` is a kebab-case
+  display label (`schema-trigger.yaml`/`schema.yaml` pattern; the envelope
+  parsers refuse `null`). `triggers/discovery.rs` judges uniqueness per
+  physical root and per embedded bundle, before shadowing
+  (`duplicates`, `duplicate_bundle_names`, `duplicate_name_finding`): every
+  participant becomes an `InvalidTriggerFinding` located at its `name`
+  (reusing `SchemaError::TriggerMatch`, so a library participant reads as a
+  trigger finding) and none is installed. Diagnostics show `name (path)`;
+  machine output keeps the path and span. Identity, shadowing, and lookups
+  stay path-based. Trigger `types` are private to the trigger payload. Tests:
+  `kind_envelopes.rs` (`files::a_duplicate_name_*`, `…two_roots…`,
+  `…shadowed…`, `…trigger_payload_names_its_own_types…`).
+- **Bundles.** `resolve/bundle.rs` is a thread-local scope (like
+  `resolve::buffers`) consulted by `select.rs` and `buffers.rs` before any
+  probe or open: only explicit `./`/`../` references to listed members are
+  served, from the verified bytes; unlisted, escaping, bare, rooted, home,
+  magic, variable, absolute, and recursive references are refused
+  (`BundleRefusal`, `SchemaError::BundleBoundary`); built-in `ShippedSources`
+  names stay allowed. It is independent of `slots::TemplateReads` (a template's
+  returned import must pass both). Hosts: Darkmatter's registration loader
+  (`config/registration/{bundle,namespaces}.rs`) and Claudine's embedded
+  inventory. User docs:
+  [Path-based imports inside a bundle](../../../simplified-schema/docs/topics/language/schema-documents.md#path-based-imports-inside-a-bundle),
+  [Resolving inside a bundle](../../../simplified-schema/docs/topics/selecting-schema-files.md#resolving-inside-a-bundle).
+  Tests: `bundle_resolution.rs`.
