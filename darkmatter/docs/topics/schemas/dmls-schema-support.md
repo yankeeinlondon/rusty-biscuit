@@ -56,6 +56,7 @@ flowchart TD
     BASE["Darkmatter base baseline"] --> MERGE["combined baseline"]
     EXT["extension baselines<br/>from .dmls.toml [schema.extensions.*]<br/>(globs match the document)"] --> MERGE
     TRIG["trigger envelopes<br/>discovered in the five schema roots<br/>(SCHEMAS_DIR, package, area, tree root, ~/schemas)"] --> REGISTRY["trigger registry"]
+    HOST["registered host's matched triggers<br/>(one checked host layer, below the roots' triggers)"] --> ENGINE
     MERGE --> ENGINE["DarkmatterSchemas::effective_for"]
     REGISTRY --> ENGINE
     DOC["document frontmatter<br/>(including its own $schema)"] --> ENGINE
@@ -93,42 +94,57 @@ DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`
 
 ### Claudine documents
 
-Claudine's trigger bundle consists of eight ordinary disk files in
-`claudine/schemas/`:
+Claudine's schemas reach DMLS as a [host registration](../host-registration.md),
+not as files in a schema root. Claudine's setup publishes its registration
+bundle to `~/.claudine/registrations/darkmatter/` and adds
+`~/.claudine/registrations/darkmatter/manifest.yaml` to the `register` list
+of `~/.darkmatter.yaml`. DMLS then types a Claudine document in any folder,
+with no `$schema` in the document and no configuration. The bundle holds
+the file kinds a registration may carry:
 
-| File | Kind | Holds |
+| Kind | Claudine's files | What they do in the editor |
 |---|---|---|
-| `action.yaml` | library (`kind: schema`) | the lifecycle action types and the dictionary-bundle types |
-| `lifecycle.yaml` | library (`kind: schema`) | the recursive lifecycle stack families and the `loop:` block type |
-| `sequence-types.yaml` | library (`kind: schema`) | recursive sequence tasks and group containers |
-| `linking.yaml` | library (`kind: schema`) | the linking keys of a skill, command, or agent |
-| `document.yaml` | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that `claudine.yaml` and `inline-compose.yaml` import |
-| `claudine.yaml` | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, for a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
-| `inline-compose.yaml` | trigger (`kind: schema-trigger`) | inline-compose's document metadata, for a non-null `prompt` with no non-null `sequence` |
-| `sequence.yaml` | trigger (`kind: schema-trigger`) | sequence steps and root metadata, for a non-null `sequence` or `kind: sequence` |
+| `schema-trigger` | `composition.yaml`, `inline-composition.yaml`, `sequence-document.yaml` | select a Claudine document by their `match:` (a lifecycle event, `prompt`, `agent`, `model`, `sequence`, …) and type its frontmatter |
+| `yaml-schema` | `formal-sequence-file.yaml` | judges a whole YAML file with `kind: sequence` |
+| `namespace-schema` | `seq.yaml`, `loop.yaml`, `group.yaml` | declare the `seq`, `loop`, and `group` globals for completion, hover, and expression checks |
+| `schema` (types only) | `action.yaml`, `document.yaml`, `shared.yaml`, … | the types the files above import |
 
-DMLS needs no configuration for them. A document whose package area is
-`claudine/` finds them through the package-area root, so a misspelled verb, a
-malformed long form, or a `shell` action in `initialize` is a diagnostic with
-no `$schema` in the document. Anywhere else, put a complete bundle of regular
-files (all eight, so their relative imports resolve) in the repository root's
-`schemas/`, the folder an absolute `SCHEMAS_DIR` names, or `~/schemas`. A
-symlinked trigger file is ignored, and `$schema: claudine.yaml` fails, because
-a trigger activates by placement and match, never by reference. Claudine's
-expression globals and event analysis come only from its
-[registration](../host-registration.md); a `globals.yaml` and
-`globals.lifecycle.json` copied into a schema root supply nothing.
-
-DMLS reads these files **only from disk**: it has no Claudine dependency and
-registers no embedded bundle. The `claudine` binary carries its own embedded
-copy, so a document outside the Claudine area can pass or fail `claudine
-compose` while the editor, with no disk bundle in reach, says nothing about
-it. When the bundle is reachable, its triggers drive completion and hover as
-well as diagnostics, with no `$schema` in the document: `start:` items complete
-to the action verbs, `mode:` to `append`/`replace`, and hovering `max_turns`
+The bundle's `globals.lifecycle.json` supplies Claudine's events and verbs
+(see [Host Lifecycle Artifacts](../lifecycle/host-artifact.md)). With the
+registration installed, a misspelled verb, a malformed long form, or a
+`shell` action in `initialize` is a diagnostic; `start:` items complete to
+the action verbs, `mode:` to `append`/`replace`, and hovering `max_turns`
 describes it.
-[Claudine's Schemas](../../../../claudine/docs/topics/schemas.md) describes
-what the files check and how the CLI resolves them.
+
+A document is Claudine's only when one of these triggers matches it. A
+document with only keys `md` shares with every host (`initialize:` alone,
+say) stays an `md` document, and a document two registered hosts both match
+is analyzed as `md` with a `dm.host.ambiguous` warning.
+
+- **Nothing to copy.** A copy of a Claudine trigger in a schema root is an
+  ordinary trigger layered on top of the registered one, never a
+  replacement, and a `globals.yaml` or lifecycle artifact copied into a
+  schema root supplies nothing. Remove such copies left from older
+  instructions.
+- **An old install is reported.** A `register` entry naming an older
+  Claudine's `~/.claudine/darkmatter-host.yaml` (a format 1 manifest) gets
+  a `dm.host.registration` warning asking you to run `claudine setup`,
+  which publishes the current bundle and rewrites the entry.
+- **The view follows upgrades.** When the installed files change, DMLS
+  waits until they have been quiet for 300 ms, keeps serving the last
+  loaded view meanwhile, then reloads (see
+  [Changes are followed without a restart](../host-registration.md#changes-are-followed-without-a-restart)).
+- **No completion from `inline-composition.yaml`.** Its payload is a root
+  union (`prompt` or `sections`). A registered root union validates the
+  document but contributes no completion or hover, so those keys are
+  checked but not offered.
+
+DMLS has no Claudine dependency and runs nothing of Claudine's: it reads
+the published files through Darkmatter's library. The `claudine` binary
+loads the same files from its compiled-in copy, so once the registration is
+installed the editor and `claudine compose` judge a document's frontmatter
+with the same definitions. [Claudine's Schemas](../../../../claudine/docs/topics/schemas.md)
+describes what the files check.
 
 ### Templates (schemas with slots)
 
@@ -201,8 +217,8 @@ repository root DMLS captured for the document, are configuration files:
 |---|---|
 | `~/.darkmatter.yaml` | `user-config` in `darkmatter/schemas/darkmatter-config.yaml` |
 | `<repo-root>/.darkmatter.yaml` | `repository-config` in `darkmatter/schemas/darkmatter-config.yaml` |
-| `~/.claudine/config.yaml` | `user-config` in `claudine/schemas/claudine-config.yaml` |
-| `<repo-root>/.claudine/config.yaml` | `repository-config` in `claudine/schemas/claudine-config.yaml` |
+| `~/.claudine/config.yaml` | `user-config` in `claudine/registration/claudine-config.yaml` |
+| `<repo-root>/.claudine/config.yaml` | `repository-config` in `claudine/registration/claudine-config.yaml` |
 
 Both schemas are compiled into DMLS, so a Claudine configuration is checked
 even where Claudine is not installed or registered. The contract is the
@@ -369,6 +385,11 @@ are refreshed, when:
   reads it as if it were saved, and forgets it when it closes unsaved;
 - a server rescan, a configuration change, or a package-manifest change
   marks every registry stale.
+- the installed [host registrations](../host-registration.md#whole-yaml-documents)
+  of the document's configuration change: after their files have been quiet
+  for 300 ms and the reload completes, a contract a registered `yaml-schema`
+  supplied is prepared again. A reload that finds the same registrations
+  leaves every contract alone.
 
 The schema the document selects, its **contract**, is resolved and
 compiled on the same worker, once per declaration: editing only the

@@ -77,15 +77,16 @@ strict = false
 # fixed-width = 80           # 1..=1000, true (120), or false
 ```
 
-Claudine's schemas need no extension entry. They are trigger schemas, which
-`dmls` discovers in the document's schema roots: a document under `claudine/`
-reaches `claudine/schemas/` automatically, and a document elsewhere needs the
-complete eight-file trigger bundle in the repository root's `schemas/`, an absolute
-`SCHEMAS_DIR`, or `~/schemas`. Copy `globals.yaml` and its companion
-`globals.lifecycle.json` too for Claudine-specific globals and lifecycle
-analysis. `dmls` reads these files from disk only and uses the trigger bundle
-for diagnostics, completion, and hover. See
-[DMLS Schema Support](../../../docs/topics/schemas/dmls-schema-support.md#claudine-documents).
+Claudine's schemas need no extension entry and no copying. Claudine's setup
+publishes them as a host registration, at
+`~/.claudine/registrations/darkmatter/manifest.yaml`, and adds that manifest
+to the `register` list of `~/.darkmatter.yaml`. `dmls` reads the
+registration read-only and types every Claudine document, in any folder,
+for diagnostics, completion, and hover. A warning that the manifest is
+format 1 means an older Claudine install: run `claudine setup` to publish
+the current one. See
+[DMLS Schema Support](../../../docs/topics/schemas/dmls-schema-support.md#claudine-documents)
+and [Host Registration](../../../docs/topics/host-registration.md).
 
 The older `formatting.cleanup` (`compact` → `list-item-padding = "none"`,
 `loose` → `"one"`, `default` → no override) and `formatting.fixed_width` keys
@@ -155,6 +156,15 @@ Highlights that affect setup:
 - **File watching on Linux + Neovim.** Client-side watching is limited on Linux;
   `dmls` keeps a server-side rescan fallback so unopened-file changes still
   update the graph.
+- **Registration reloads.** `dmls` watches a registered host's manifest
+  and files wherever they live, outside the workspace included. When they
+  change (a `claudine setup` or upgrade, say), it waits until they have been
+  quiet for about 300 ms, keeping the last loaded view for open Markdown and
+  YAML documents meanwhile, then reloads and installs the latest completed
+  view; a warning the new files repair clears without a restart. A client
+  that cannot watch those folders gets the same reload after each save
+  instead. See
+  [Changes are followed without a restart](../../../docs/topics/host-registration.md#changes-are-followed-without-a-restart).
 - **File rename participation.** VS Code, Zed, and Helix support
   `workspace/willRenameFiles`; Neovim does not — link rewriting on file rename
   is unavailable there in v1.

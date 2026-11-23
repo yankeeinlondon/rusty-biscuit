@@ -39,8 +39,8 @@ The artifact is one member of a host's [registration bundle](../host-registratio
 the manifest's `lifecycle` field names it, and its digest is listed with
 every other member. A document gets the host's lifecycle only when a usable
 registered host's trigger matches it, wherever the document lives. Nothing in
-a schema root names a host: a `globals.yaml` with a `globals.lifecycle.json`
-beside it, left there by an older host install, is an ordinary pair of files.
+a schema root names a host: a `globals.lifecycle.json` found there (an older
+host install left one beside a `globals.yaml`) is an ordinary file.
 
 ```mermaid
 flowchart LR
@@ -72,37 +72,25 @@ stale, missing, or refused artifact refuses the **whole** registration with a
 are used). See
 [How a registration loads](../host-registration.md#how-a-registration-loads).
 
-Claudine publishes its registration itself on every launch, from the files
-compiled into its binary, so the files the manifest names always match the
-running release. Claudine still writes a format 1 manifest, which this reader
-refuses; publishing format 2, with Claudine's globals as namespace files, is
-**planned**. Its publication rules stay:
-
-- Every release's files go into an **immutable revision directory** named
-  after the host version and a BLAKE3 digest of the files' contents
-  (`~/.claudine/darkmatter-host/0.1.0-<digest>/schemas/`). The directory is
-  written under a staging name and renamed into place whole, and a directory
-  with a final name is never written to again.
-- The **stable manifest**, `~/.claudine/darkmatter-host.yaml`, names one
-  revision. It is replaced atomically and **last**, only after the revision's
-  files read back byte for byte, so a reader never pairs a new trigger with
-  an old catalog or artifact.
-- An existing revision whose files differ from the expected bytes is left
-  alone and the release is published under the next suffixed name
-  (`<version>-<digest>-2`). Old revisions are kept for readers still holding
-  an older manifest.
-- When the manifest already names a revision that verifies, nothing is
-  written.
+Claudine publishes its artifact with the rest of its registration, from the
+files compiled into its binary, to one tree at fixed paths:
+`~/.claudine/registrations/darkmatter/manifest.yaml` and, beside it,
+`globals.lifecycle.json` and `schemas/…`. It publishes during `claudine setup`
+and when `claudine registrations publish` runs (Claudine's `just install`
+calls it); no other `claudine` command touches the files. A publish replaces
+only the members whose bytes changed and writes the manifest last, so a
+reader that meets a publish in progress finds a member that does not match
+its digest and refuses the host for that read rather than pairing a new
+trigger with an old artifact. See
+[The published host registration](../../../../claudine/docs/topics/schemas.md#the-published-host-registration)
+in Claudine's documentation.
 
 ```mermaid
 flowchart TD
-    L[Claudine launch] --> C{manifest names a revision<br/>whose files match?}
+    P[claudine setup, or<br/>claudine registrations publish] --> C{every member already<br/>matches the inventory?}
     C -- yes --> N[write nothing]
-    C -- no --> S[write the revision into<br/>a staging directory]
-    S --> R[rename it into place,<br/>or reuse an identical one]
-    R --> V{every file reads back<br/>byte for byte?}
-    V -- no --> F[fail: the old manifest<br/>and revisions stay in force]
-    V -- yes --> M[replace the stable manifest<br/>atomically, last]
+    C -- no --> W[replace each changed member,<br/>remove members no longer listed]
+    W --> M[replace the manifest, last]
 ```
 
 ## What the artifact records
@@ -121,8 +109,9 @@ flowchart TD
 of a map from each namespace file, and each bundled file its preparation
 read, to the BLAKE3 digest of its bytes (`namespaces::member_digest`), keyed
 by bundle-relative path. Editing a namespace file, or a library one imports,
-makes the artifact stale. A format 1 artifact, which hashed a single
-`globals.yaml`, is refused.
+makes the artifact stale. An artifact whose `format_version` is `1` (the
+earlier format, which hashed a single catalog file) is refused; the host
+regenerates and republishes it.
 
 An availability is `"available"`, `"execution-dependent"`, or
 `{ "unavailable": { "code": "claudine.event-has-no-error", "parameters": {} } }`.

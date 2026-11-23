@@ -87,6 +87,12 @@ list-item-padding = "none"
   watching, or on the next save when the client has no watcher (Neovim on
   Linux). **Unsaved** edits to a trigger or `$schema` file reach Markdown
   documents only after you save.
+- **A host registration change takes about 300 ms to show.** After
+  `claudine setup` or an upgrade rewrites a registered host's files, DMLS
+  waits until they have been quiet for about 300 ms, keeping the previous
+  results meanwhile, then reloads without a restart. A client that can't
+  watch those folders reloads after the next save instead. See
+  [schemas.md](schemas.md#claudine).
 - **Missing required keys are not reported by default.** A value might be
   supplied at compose time. Set `[schema] strict = true` to see them.
 - **A missing `file(...)` target is not a diagnostic.** You may not have

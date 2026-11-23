@@ -128,17 +128,22 @@ Darkmatter's **SimplifiedSchema**:
 
 Host support is data-driven. A document selects its schemas through discovered
 triggers, its own `$schema`, or an explicit `[schema.extensions.*]` mapping.
-Each document is analyzed as one host: a host registered in its
-configuration that identifies it (its manifest supplies the schemas, global
-types, functions, and lifecycle), else `md`; see [Host Registration](../../docs/topics/host-registration.md)
+Each document is analyzed as one host: the registered host one of whose
+triggers matches it (its manifest supplies the schemas, global types,
+functions, and lifecycle), else `md`; a document two hosts match is `md`
+with a `dm.host.ambiguous` warning. See [Host Registration](../../docs/topics/host-registration.md)
 and [The document's host is selected once](./diagnostics.md#the-documents-host-is-selected-once).
 Every file a registration reads (both configuration files, manifests,
 members, JSON artifacts, and the repository's `HEAD`) is watched, so a change
-takes effect without a restart. A missing `~/.darkmatter.yaml` is one
+takes effect without a restart: after a burst of changes (a host's publish)
+DMLS waits until the files have been quiet for 300 ms, keeps the last loaded
+view for open Markdown and YAML documents meanwhile, then installs the
+reloaded view and clears any warning the change repaired. A client that
+cannot watch those folders reloads after each save instead. A missing `~/.darkmatter.yaml` is one
 message per session naming `md init`; DMLS never creates it.
 A host's namespace files supply global types, and its lifecycle artifact
-supplies event names and action rules. A `globals.yaml` or lifecycle artifact
-in a schema root supplies nothing: only a registration does. See
+supplies event names and action rules. A lifecycle artifact or catalog in a
+schema root supplies nothing: only a registration does. See
 [Editor Setup](./editors/README.md) for deployment. DMLS interprets these files
 through Darkmatter's library and does not execute Claudine or its actions.
 

@@ -92,7 +92,7 @@ behavior.
   regen-lifecycle-schema` (verb types in `schemas/partials/lifecycle.yaml`,
   plus the verb count in `lifecycle_schema_generation.rs`), the two verb
   pattern lists in `schemas/partials/md-lifecycle.yaml`, Claudine's mirrored
-  `expression` category in `claudine/schemas/{action,lifecycle}.yaml`, a row
+  `expression` category in `claudine/registration/{action,lifecycle-events}.yaml`, a row
   in `tests/l1/function_binding_registry.rs`, an alias row in
   `function_catalog_parity.rs`, the recursive-schema goldens
   (`DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`), DMLS's

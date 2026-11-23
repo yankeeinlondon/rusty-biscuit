@@ -41,7 +41,10 @@ then the repository's. A URL is refused; see
 
 Registration is **passive**. It supplies types, event names, and verb shapes
 only: it never writes a file, fetches a URL, prompts, runs a command, or
-installs a function handler, and it grants no permission. A repository may
+installs a function handler, and it grants no permission. The only input it
+reads is the bundle itself: the manifest and the files it lists, each
+prepared from the exact bytes that matched its digest. Applying the host's
+types to a document adds no I/O beyond that one verified read. A repository may
 register a host (a team's in-house tool) because it gains nothing a
 repository's own `schemas/` folder could not already do.
 
@@ -49,7 +52,15 @@ A host program usually adds its own entry during its setup, through
 `darkmatter::config::init::register_manifest`. That call keeps every
 existing entry, value, and comment. It adds nothing when an entry already
 names the same manifest file, however it is spelled (`~/…` or an absolute
-path). The manifest must already exist.
+path). The manifest must already exist, so a host publishes its bundle
+first and registers it last. Claudine's setup, for example, publishes its
+bundle and then adds this entry to `~/.darkmatter.yaml` (see
+[The published host registration](../../../claudine/docs/topics/schemas.md#the-published-host-registration)):
+
+```yaml
+register:
+    - ~/.claudine/registrations/darkmatter/manifest.yaml
+```
 
 A host whose manifest moved calls
 `darkmatter::config::init::replace_manifest_registration(context, scope, new, old_path)`
@@ -120,6 +131,27 @@ digest for no member, refuses the manifest at that entry. A digest is the
 BLAKE3 hash of the file's bytes as 64 lowercase hexadecimal digits
 (`biscuit_hash::blake3_hash_bytes`); `ABC…` or a short digest is refused.
 
+Claudine's published manifest has the same shape. It has no function
+catalogs, so it writes `functions: []`:
+
+```yaml
+# ~/.claudine/registrations/darkmatter/manifest.yaml (written by claudine; do not edit)
+kind: darkmatter-host
+format_version: 2
+host: claudine
+version: "0.1.0"
+files:
+    - "./schemas/composition.yaml"
+    - "./schemas/inline-composition.yaml"
+    - "./schemas/loop.yaml"
+    # … every other file of the bundle
+lifecycle: "./globals.lifecycle.json"
+functions: []
+digests:
+    "./schemas/composition.yaml": "<64 lowercase hex digits>"
+    # … one entry per member, the lifecycle artifact included
+```
+
 The schema of the envelope ships with Darkmatter
 (`darkmatter/schemas/darkmatter-host.yaml`) and is importable as
 `darkmatter-host@darkmatter:host`.
@@ -127,9 +159,21 @@ The schema of the envelope ships with Darkmatter
 **An older manifest is refused, not guessed at.** A format 1 manifest (one
 with `format_version: 1`, or with the removed `identify`, `triggers`, or
 `globals` fields) is refused with one `dm.host.registration` warning at its
-`format_version` that asks you to rerun the host's setup or update the host
-(for `acme`: run `acme setup`, or update `acme`). Nothing else about it is
-judged, and nothing of it is used. The same warning appears for an old entry
+`format_version` that asks you to rerun the host's setup or update the host.
+Nothing else about it is judged, and nothing of it is used, so documents the
+host would have typed are analyzed as `md` documents until it is repaired.
+For an older Claudine install the warning reads:
+
+```text
+this is a format 1 `darkmatter-host` manifest, which this Darkmatter no longer reads; format 2 lists every file of the host's bundle with its digest: run `claudine setup`, or update `claudine`, to publish a format 2 manifest
+```
+
+The repair is the host's, not Darkmatter's: running `claudine setup`
+publishes the format 2 bundle, replaces the old
+`~/.claudine/darkmatter-host.yaml` entry in `~/.darkmatter.yaml` with the
+new manifest, and then removes the old files. A manifest that names no `host`
+gets the same warning, ending "rerun the host program's setup, or update it,
+to publish a format 2 manifest". The same warning appears for an old entry
 in a repository's configuration, which its owners update.
 
 **Member paths** are written so that one manifest works on macOS, Linux, and
@@ -649,7 +693,31 @@ $schema:                                $schema:
 
 A document with `team: core` gets `agent: enum(claude, codex)`. Were `a.yaml`
 to declare `agent: string(required)`, the document would fail with
-`dm.host.trigger_conflict` naming `agent`, `a.yaml`, and `b.yaml`.
+`dm.host.trigger_conflict` naming `agent`, `a.yaml`, and `b.yaml`. The
+message gives the host, both trigger files, the property, and the reason;
+`md schema validate --output json` reports it as the file's schema error
+with both trigger files in `related` (other keys omitted):
+
+```json
+{
+  "file": "team.md",
+  "valid": false,
+  "error": "schema",
+  "code": "dm.host.trigger_conflict",
+  "message": "registered host `acme`'s triggers `/home/me/.acme/registration/schemas/a.yaml` and `/home/me/.acme/registration/schemas/b.yaml` conflict on `agent`: one is required and the other is not",
+  "related": [
+    "/home/me/.acme/registration/schemas/a.yaml",
+    "/home/me/.acme/registration/schemas/b.yaml"
+  ]
+}
+```
+
+The reason is one of: their types are incomparable; one is required and the
+other is not; one admits null and the other does not; their defaults,
+descriptions, or constraints differ. In the editor the same message is an
+error on the document's frontmatter, with each trigger file attached as
+related information ("the first conflicting trigger", "the second
+conflicting trigger").
 
 The root of the payloads is compared too:
 
@@ -855,6 +923,23 @@ registrations (a file saved with the same bytes) changes no document's
 analysis, and one whose warnings alone changed republishes only the
 warnings. A change reported during a reload makes that reload's result
 obsolete, and the next one, after quiet, is installed instead.
+
+```mermaid
+sequenceDiagram
+    participant P as claudine setup
+    participant E as editor
+    participant S as DMLS
+    participant W as background reload
+    P->>E: rewrites members, then the manifest
+    E->>S: change batch 1
+    Note over S: wait restarts (300 ms);<br/>documents keep the last loaded view
+    E->>S: change batch 2
+    Note over S: wait restarts again
+    Note over S: 300 ms with no change
+    S->>W: reload this configuration's registrations
+    W-->>S: completed view (or a refusal)
+    S->>S: install the latest completed view for<br/>open Markdown and YAML documents;<br/>publish or clear dm.host.* warnings
+```
 
 Ordinary editing is never held: a document edit, a schema file a document
 names, a trigger file, or a `.dmls.toml` change is analyzed at once, under

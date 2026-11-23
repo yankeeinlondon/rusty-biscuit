@@ -329,23 +329,46 @@ read them. Use a trigger with `$path` when `md` should apply the schema too.
 
 ## Claudine
 
-Claudine's schemas are ordinary trigger files in `claudine/schemas/`. DMLS
-needs no configuration for them.
+Claudine's schemas reach DMLS as a **host registration**, not as files in a
+schema root. Claudine's setup (`claudine setup`) publishes them to
+`~/.claudine/registrations/darkmatter/` and adds the manifest to
+`~/.darkmatter.yaml`:
 
-- **Under `claudine/`**, documents find them through the package-area root.
-- **Elsewhere**, put the complete set of eight files in the repository
-  root's `schemas/`, an absolute `SCHEMAS_DIR`, or `~/schemas`:
-  `action.yaml`, `lifecycle.yaml`, `sequence-types.yaml`, `linking.yaml`,
-  `document.yaml`, `claudine.yaml`, `inline-compose.yaml`, and
-  `sequence.yaml`. They import each other, so all eight are needed.
-- **Use regular files.** A symlinked trigger is ignored.
-- **Claudine's globals and lifecycle checks** come only from Claudine's
-  host registration (a `register` entry in `.darkmatter.yaml`); copying
-  `globals.yaml` and `globals.lifecycle.json` into a schema root supplies
-  nothing.
+```yaml
+# ~/.darkmatter.yaml
+register:
+    - ~/.claudine/registrations/darkmatter/manifest.yaml
+```
 
-DMLS reads these only from disk. An installed `claudine` binary doesn't make
-them available to the editor.
+With that entry, DMLS types Claudine documents in any folder, with no
+configuration and no `$schema`: frontmatter checks, completion, and hover,
+the `seq`, `loop`, and `group` globals, and Claudine's lifecycle events and
+verbs (`start:`, `success:`, `say`, …).
+
+- **A document is Claudine's when one of Claudine's triggers matches it**
+  (it has a lifecycle event of Claudine's, `prompt`, `agent`, `model`,
+  `sequence`, …). A document with only keys every host shares
+  (`initialize:` alone) stays a plain Darkmatter document. A document two
+  registered hosts both match is analyzed as plain Darkmatter with a
+  `dm.host.ambiguous` warning.
+- **A YAML file with `kind: sequence`** is judged by Claudine's registered
+  definition, unless a shipped or schema-root definition claims that kind.
+- **Don't copy Claudine's files into a schema root.** A copied trigger is an
+  ordinary trigger layered on top of Claudine's, not a replacement, and a
+  copied lifecycle artifact supplies nothing.
+- **`dm.host.registration` saying "format 1"** means an older Claudine
+  install (`~/.claudine/darkmatter-host.yaml`). Run `claudine setup`: it
+  publishes the current files and rewrites the `register` entry.
+- **After an upgrade or a new setup**, DMLS waits until the published files
+  have been quiet for about 300 ms, keeps showing the previous results
+  meanwhile, then reloads. No restart is needed, and a warning the new files
+  fix clears by itself.
+- **`prompt` and `sections` aren't completed.** Inline composition's rule
+  ("one of `prompt` or `sections`") is validated but offers no completion or
+  hover.
+- **`dm.host.trigger_conflict`** (an error on the document) means two of
+  Claudine's matching triggers disagree about one property. It's a defect
+  in the published files, not in your document; update Claudine.
 
 ## Schema templates
 
