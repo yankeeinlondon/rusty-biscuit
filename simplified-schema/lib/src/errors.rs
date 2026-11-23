@@ -232,6 +232,31 @@ impl fmt::Display for NotSchemaReason {
     }
 }
 
+/// Two matched triggers of one registered host declare a top-level
+/// property, or the payload's root rules, in ways that cannot be layered:
+/// their types are incomparable, or the narrower one disagrees on presence,
+/// null admission, a constraint, a default, or a description; or both write
+/// root rules, or one declares a key that defines another's root-union
+/// alternatives.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "registered host `{host}`'s triggers `{}` and `{}` conflict on {}: {reason}",
+    first.display(),
+    second.display(),
+    subject.as_ref().map_or_else(|| "the root rules".to_string(), |key| format!("`{key}`"))
+)]
+pub struct HostTriggerConflict {
+    /// The document whose matched triggers met.
+    pub document: Option<PathBuf>,
+    pub host: String,
+    /// The trigger file representing the first declaration.
+    pub first: PathBuf,
+    pub second: PathBuf,
+    /// The property name; `None` for the root rules.
+    pub subject: Option<String>,
+    pub reason: String,
+}
+
 /// The `{{ … }}` slots that keep a schema from being lowered.
 ///
 /// Each slot carries its authored span (in the type-expression string, or
@@ -1043,6 +1068,12 @@ pub enum SchemaError {
         property: String,
         declarations: Vec<String>,
     },
+
+    /// Two matched triggers of one registered host cannot be layered as one
+    /// host layer (`dm.host.trigger_conflict`). A schema preparation error:
+    /// validation and composition fail, and no higher layer clears it.
+    #[error("{0}")]
+    HostTriggerConflict(Box<HostTriggerConflict>),
 
     /// Default preparation would never end: a `$ref` chain returns to
     /// itself without describing a child value (`path` is `None`, and
@@ -1989,6 +2020,14 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     "Use the payload file (without the <cyan>.trigger</cyan> infix) as the \
                      document <cyan>$schema</cyan>. Trigger envelopes live in <cyan>schemas/</cyan> \
                      and activate automatically when their match conditions hold.",
+                ),
+
+            SchemaError::HostTriggerConflict(_) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "registered host triggers conflict"))
+                .body(vec![Prose::new(Prose::escape_text_outside_code_spans(&self.to_string()))])
+                .hint(
+                    "Declare the property once, in a types library both triggers extend, or make \
+                     the two declarations agree. The host's publisher owns these files.",
                 ),
 
             SchemaError::InvalidDefault { .. }

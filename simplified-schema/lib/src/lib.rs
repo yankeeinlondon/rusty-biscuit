@@ -96,7 +96,7 @@ pub use claims::{ClaimCause, ClaimProblem, claimed_values};
 pub use defaults::{AppliedDefault, DefaultPlan, DefaultPreparation};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::{
-    CompositionTargetKind, CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
+    CompositionTargetKind, CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, HostTriggerConflict, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
 };
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,

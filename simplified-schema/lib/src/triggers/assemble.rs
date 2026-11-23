@@ -219,6 +219,10 @@ pub struct ResolvedPayload {
     /// projections see the properties validation layers in. `None` for a raw
     /// JSON Schema payload, which has no SimplifiedSchema projection.
     pub shape: Option<std::sync::Arc<crate::SchemaShape>>,
+    /// The inline arms of a root-union payload, which only a registered
+    /// host's trigger may have ([`PayloadForm::ObjectOrUnion`]); `None` for
+    /// every object payload, whose projection is `shape`.
+    pub union_arms: Option<std::sync::Arc<[crate::SchemaShape]>>,
     /// The cyclic named types `shape` reaches through
     /// [`TypeExpr::Ref`](crate::simplified::TypeExpr::Ref);
     /// empty for a raw payload or one that does not recurse.
@@ -258,6 +262,7 @@ impl ResolvedPayload {
         Self {
             json_schema: std::sync::Arc::new(Value::Object(serde_json::Map::new())),
             shape: None,
+            union_arms: None,
             definitions: std::sync::Arc::default(),
             dependencies: Vec::new(),
             searched: Vec::new(),
@@ -341,6 +346,7 @@ pub(crate) fn reset_process_caches() {
 /// [`resolve_trigger_payload`] for a schema-root file, uncached. `types` is
 /// the trigger's local `types` table. `text` is the file's text as
 /// discovery read it: an inline payload's slots are positioned in it.
+#[allow(clippy::too_many_arguments)]
 fn resolve_file_payload(
     source: &Path,
     payload: &YamlValue,
@@ -349,6 +355,7 @@ fn resolve_file_payload(
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
     sources: ShippedSources,
+    form: PayloadForm,
 ) -> Result<ResolvedPayload, SchemaError> {
     let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
     let authored = text.map(|text| crate::resolve::AuthoredSchemaValue {
@@ -385,7 +392,52 @@ fn resolve_file_payload(
             None => error,
         })?,
     };
-    finish_file_payload(source, payload, resolved)
+    finish_file_payload_as(source, payload, resolved, form)
+}
+
+/// The root shapes a trigger payload may resolve to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadForm {
+    /// A merge-compatible object schema: every schema-root and embedded
+    /// trigger.
+    Object,
+    /// An object schema or a root union of object schemas: a registered
+    /// host's trigger, whose matched payloads are combined into one checked
+    /// host layer that owns at most one root union.
+    ObjectOrUnion,
+}
+
+/// [`resolve_trigger_payload`] for a registered host's file trigger, read
+/// in `context` with no schema roots and the payload admitted as
+/// [`PayloadForm::ObjectOrUnion`]. Uncached: a registration resolves each
+/// trigger once per load.
+///
+/// ## Errors
+///
+/// As [`resolve_trigger_payload`], except that a root union of object
+/// schemas is admitted.
+pub fn resolve_registered_trigger_payload(
+    trigger: &LoadedTrigger,
+    context: &biscuit_file::FileResolutionContext,
+    sources: ShippedSources,
+) -> Result<ResolvedPayload, SchemaError> {
+    let _resolve = crate::timings::stage(crate::ValidationStage::Resolve);
+    let TriggerSource::File(source) = &trigger.source else {
+        return resolve_trigger_payload(trigger, &[], context, sources);
+    };
+    let Some(payload) = trigger.envelope.payload.as_ref() else {
+        return Ok(ResolvedPayload::matcher_only());
+    };
+    resolve_file_payload(
+        source,
+        payload,
+        trigger.envelope.types.as_ref(),
+        trigger.text.as_ref(),
+        &[],
+        context,
+        sources,
+        PayloadForm::ObjectOrUnion,
+    )
 }
 
 /// The payload rules applied to `resolved`, the resolution of the trigger
@@ -396,6 +448,16 @@ pub fn finish_file_payload(
     source: &Path,
     payload: &YamlValue,
     resolved: crate::resolve::ResolvedSchema,
+) -> Result<ResolvedPayload, SchemaError> {
+    finish_file_payload_as(source, payload, resolved, PayloadForm::Object)
+}
+
+/// [`finish_file_payload`] admitting the root shapes `form` allows.
+pub fn finish_file_payload_as(
+    source: &Path,
+    payload: &YamlValue,
+    resolved: crate::resolve::ResolvedSchema,
+    form: PayloadForm,
 ) -> Result<ResolvedPayload, SchemaError> {
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(source, &resolved)?;
@@ -409,8 +471,30 @@ pub fn finish_file_payload(
         _ => None,
     };
 
-    // Merge-compatibility gate: must be a simple-object schema.
-    enforce_merge_compatible(source, payload, payload_path.as_deref(), &resolved.json_schema)?;
+    // Merge-compatibility gate: a simple-object schema, or (for a
+    // registered trigger) a root union of them.
+    let union_arms = match (form, &resolved.simplified) {
+        (PayloadForm::ObjectOrUnion, Some(crate::SchemaRoot::Union(arms))) => {
+            enforce_union_compatible(source, payload, payload_path.as_deref(), &resolved.json_schema)?;
+            let shapes: Option<Vec<crate::SchemaShape>> = arms
+                .iter()
+                .map(|arm| match arm {
+                    crate::simplified::SchemaArm::Inline(shape) => Some(shape.clone()),
+                    crate::simplified::SchemaArm::FileRef(_) => None,
+                })
+                .collect();
+            Some(shapes.ok_or_else(|| SchemaError::TriggerPayloadNotMergeable {
+                path: source.to_path_buf(),
+                payload: describe_payload(payload),
+                payload_path: payload_path.clone(),
+                reason: "a registered trigger's root-union arms must resolve to inline objects".into(),
+            })?)
+        }
+        _ => {
+            enforce_merge_compatible(source, payload, payload_path.as_deref(), &resolved.json_schema)?;
+            None
+        }
+    };
     let json_schema = std::sync::Arc::new(resolved.json_schema);
     enforce_compiles(source, payload, payload_path, &json_schema)?;
 
@@ -427,6 +511,7 @@ pub fn finish_file_payload(
 
     Ok(ResolvedPayload {
         shape: payload_shape(resolved.simplified),
+        union_arms: union_arms.map(std::sync::Arc::from),
         definitions: resolved.definitions,
         json_schema,
         dependencies: deps,
@@ -584,7 +669,7 @@ mod file_payload_memo {
         }
 
         tally::record_miss();
-        let resolved = resolve_file_payload(source, payload, types, text, schema_roots, original, sources)?;
+        let resolved = resolve_file_payload(source, payload, types, text, schema_roots, original, sources, super::PayloadForm::Object)?;
         let fingerprint = inputs_fingerprint(schema_roots, &resolved);
         let mut entries = ENTRIES.lock().expect("trigger payload memo poisoned");
         entries.retain(|entry| entry.key != key);
@@ -937,6 +1022,7 @@ pub(super) fn resolve_embedded_payload(
     enforce_compiles_in(cache, &importer_path, payload, None, &json_schema)?;
     let payload = ResolvedPayload {
         shape: payload_shape(resolved.simplified),
+        union_arms: None,
         definitions: resolved.definitions,
         json_schema,
         dependencies: Vec::new(),
@@ -1022,6 +1108,36 @@ fn enforce_merge_compatible(
             reason,
         }
     })
+}
+
+/// Rejects a root-union payload unless its root holds only the union (and
+/// its definitions or cosmetic keys) and every arm is a simple object
+/// schema ([`validate_simple_object_schema`]'s root contract).
+fn enforce_union_compatible(
+    trigger_source: &Path,
+    payload: &YamlValue,
+    payload_path: Option<&Path>,
+    json_schema: &Value,
+) -> Result<(), SchemaError> {
+    crate::note_work!(PayloadMergeCheck);
+    const ROOT_KEYS: &[&str] = &["anyOf", "$defs", "$schema", "description", "title"];
+    let refuse = |reason: String| SchemaError::TriggerPayloadNotMergeable {
+        path: trigger_source.to_path_buf(),
+        payload: describe_payload(payload),
+        payload_path: payload_path.map(Path::to_path_buf),
+        reason,
+    };
+    let root = json_schema.as_object().ok_or_else(|| refuse("payload did not resolve to a JSON object".into()))?;
+    if let Some(key) = root.keys().find(|key| !ROOT_KEYS.contains(&key.as_str())) {
+        return Err(refuse(format!("a root union payload's root may not declare `{key}`")));
+    }
+    let arms = root.get("anyOf").and_then(Value::as_array).ok_or_else(|| refuse("a root union payload must hold its arms".into()))?;
+    for (index, arm) in arms.iter().enumerate() {
+        let arm = arm.as_object().ok_or_else(|| refuse(format!("root-union arm {index} is not an object schema")))?;
+        crate::resolve::validate_simple_object_root(arm)
+            .map_err(|error| refuse(format!("root-union arm {index}: {error}")))?;
+    }
+    Ok(())
 }
 
 /// Checks whether any file the payload resolved to is a schema-trigger

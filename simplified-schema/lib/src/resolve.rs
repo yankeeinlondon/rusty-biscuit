@@ -380,6 +380,38 @@ pub(crate) fn resolve_trigger_payload_value(
     )
 }
 
+/// Resolves the `$schema` object of the `kind: namespace-schema` file at
+/// `path`, whose text is `text`, beside the file's private `types`: the one
+/// global the file declares, as a document schema whose properties are the
+/// namespace's members. The file is the import base and the owner of its
+/// inline named types, as a trigger file is of its payload's, so no other
+/// file reaches them. An empty `$schema: {}` resolves to an object with no
+/// members.
+///
+/// Envelope admission is the caller's
+/// ([`crate::parse_namespace_schema_document`]); this reads only `$schema`
+/// and `types`.
+///
+/// ## Errors
+///
+/// [`SchemaError::SchemaDocument`] when `text` is not one YAML mapping with a
+/// mapping `$schema`; otherwise every resolver error of the payload and its
+/// imports.
+pub fn resolve_namespace_payload(
+    text: &str,
+    path: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let refuse = |message: String| SchemaError::SchemaDocument { path: path.to_path_buf(), message, source: None, span: None };
+    let root: YamlValue = serde_yaml_ng::from_str(text).map_err(|error| refuse(error.to_string()))?;
+    let Some(payload) = root.get("$schema").filter(|value| value.is_mapping()) else {
+        return Err(refuse("a namespace's `$schema` must be one mapping".into()));
+    };
+    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    resolve_trigger_payload_value(payload, root.get("types"), path, None, base_dir, &[], request_context, shipped)
+}
+
 /// A trigger's `types` table as the named types its payload resolves with.
 pub(crate) fn parse_trigger_types(types: &YamlValue) -> Result<SchemaShape, SchemaError> {
     match crate::simplified::parse_schema_table(types)? {

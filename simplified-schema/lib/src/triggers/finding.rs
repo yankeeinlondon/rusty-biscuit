@@ -282,6 +282,9 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
             return host_file(&site.source, trigger).or_else(|| related_path(source, trigger));
         }
         SchemaError::TriggerLoad { source, .. } => return related_path(source, trigger),
+        // Never a discovery finding: it is raised when a document's matches
+        // meet, and names both triggers itself.
+        SchemaError::HostTriggerConflict(conflict) => &conflict.second,
         SchemaError::Aggregate { .. }
         | SchemaError::Grammar { .. }
         | SchemaError::Convert { .. }
