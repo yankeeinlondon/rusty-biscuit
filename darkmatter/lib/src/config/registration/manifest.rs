@@ -247,7 +247,9 @@ impl ReadManifestV2 {
     /// [`Self::members`] for an embedded bundle whose manifest has the
     /// virtual path `manifest`: each member's identity is its spelling with
     /// `.` and `..` applied, and its location the matching path under the
-    /// manifest's virtual directory. Probes nothing.
+    /// manifest's virtual directory. Probes nothing, so
+    /// [`admit_manifest`](super::bundle::admit_manifest) uses it for an
+    /// installed manifest's lexical admission too.
     pub fn embedded_members(&self, manifest: &Path) -> Result<MemberSpec, Refusal> {
         let root = manifest.parent().unwrap_or(manifest);
         self.members_with(manifest, &|authored| lexical_member(authored, root))

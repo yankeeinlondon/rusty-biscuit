@@ -298,6 +298,55 @@ fn removed_sequence_keys_are_reported_at_their_paths() {
     assert!(found[1].iter().any(|(path, _)| path == "/fail_fast"), "expected a diagnostic at /fail_fast: {:?}", found[1]);
 }
 
+/// A native number or boolean `sequence` is reported at `/sequence`, never
+/// read as a reference; a list and written reference text raise nothing.
+#[test]
+fn a_scalar_sequence_source_is_reported_at_sequence() {
+    let workspace = LspWorkspace::new();
+    let fixture = Fixture::new(workspace.path());
+    let texts = [
+        "---\nsequence: 42\n---\n\nBody\n",
+        "---\nsequence: true\n---\n\nBody\n",
+        "---\nsequence: []\n---\n\nBody\n",
+        "---\nsequence: ./steps.yaml\n---\n\nBody\n",
+    ];
+    let paths: Vec<PathBuf> = texts.iter().enumerate().map(|(index, text)| fixture.document(&format!("s{index}.md"), text)).collect();
+    let documents: Vec<(&Path, &str)> = paths.iter().map(PathBuf::as_path).zip(texts).collect();
+
+    let found = session_diagnostics(&workspace, &fixture, &documents);
+    for (index, value) in ["42", "true"].into_iter().enumerate() {
+        let paths: Vec<&str> = found[index].iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(paths, ["/sequence"], "`sequence: {value}`: {:?}", found[index]);
+    }
+    assert!(found[2].is_empty(), "list: {:?}", found[2]);
+    assert!(found[3].is_empty(), "reference: {:?}", found[3]);
+}
+
+/// A native number or boolean inline `prompt` is reported at `/prompt`, as
+/// Claudine's inline runtime refuses it; prompt text, quoted digits included,
+/// raises nothing.
+#[test]
+fn a_scalar_inline_prompt_is_reported_at_prompt() {
+    let workspace = LspWorkspace::new();
+    let fixture = Fixture::new(workspace.path());
+    let texts = [
+        "---\nprompt: 42\n---\n\nBody\n",
+        "---\nprompt: true\n---\n\nBody\n",
+        "---\nprompt: hi\n---\n\nBody\n",
+        "---\nprompt: \"42\"\n---\n\nBody\n",
+    ];
+    let paths: Vec<PathBuf> = texts.iter().enumerate().map(|(index, text)| fixture.document(&format!("p{index}.md"), text)).collect();
+    let documents: Vec<(&Path, &str)> = paths.iter().map(PathBuf::as_path).zip(texts).collect();
+
+    let found = session_diagnostics(&workspace, &fixture, &documents);
+    for (index, value) in ["42", "true"].into_iter().enumerate() {
+        let paths: Vec<&str> = found[index].iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(paths, ["/prompt"], "`prompt: {value}`: {:?}", found[index]);
+    }
+    assert!(found[2].is_empty(), "text: {:?}", found[2]);
+    assert!(found[3].is_empty(), "quoted digits: {:?}", found[3]);
+}
+
 /// A valid lifecycle stack and all eleven linking keys raise no schema
 /// diagnostic, and a wrongly typed linking key is rejected.
 #[test]
@@ -469,11 +518,11 @@ pub(crate) fn has(labels: &[String], label: &str) -> bool {
 #[test]
 fn trigger_payload_keys_complete_without_a_schema() {
     let found = editor_answers(&[
-        ("keys.md", "---\nagent: claude\nmod:\n---\n", "mod", Ask::Complete),
-        ("nested.md", "---\nagent: claude\nstart:\n  - say:\n      te: null\n---\n", "      te", Ask::Complete),
-        ("item.md", "---\nagent: claude\nstart:\n  - sa\n---\n", "  - sa", Ask::Complete),
-        ("loop.md", "---\nagent: claude\nloop:\n  ma: null\n---\n", "  ma", Ask::Complete),
-        ("outside/keys.md", "---\nagent: claude\nmod:\n---\n", "mod", Ask::Complete),
+        ("keys.md", "---\nprompt: hi\nmod:\n---\n", "mod", Ask::Complete),
+        ("nested.md", "---\nprompt: hi\nstart:\n  - say:\n      te: null\n---\n", "      te", Ask::Complete),
+        ("item.md", "---\nprompt: hi\nstart:\n  - sa\n---\n", "  - sa", Ask::Complete),
+        ("loop.md", "---\nprompt: hi\nloop:\n  ma: null\n---\n", "  ma", Ask::Complete),
+        ("outside/keys.md", "---\nprompt: hi\nmod:\n---\n", "mod", Ask::Complete),
     ]);
     let [top, nested, item, loop_keys, outside] = &found[..] else { panic!("{found:?}") };
 
@@ -493,9 +542,9 @@ fn trigger_payload_keys_complete_without_a_schema() {
 #[test]
 fn trigger_payload_items_and_values_complete_without_a_schema() {
     let found = editor_answers(&[
-        ("union.md", "---\nagent: claude\nstart:\n  - \n---\n", "  - ", Ask::Complete),
-        ("mode.md", "---\nagent: claude\nmode: \n---\n", "mode: ", Ask::Complete),
-        ("interactive.md", "---\nagent: claude\ninteractive: \n---\n", "interactive: ", Ask::Complete),
+        ("union.md", "---\nprompt: hi\nstart:\n  - \n---\n", "  - ", Ask::Complete),
+        ("mode.md", "---\nprompt: hi\nmode: \n---\n", "mode: ", Ask::Complete),
+        ("interactive.md", "---\nprompt: hi\ninteractive: \n---\n", "interactive: ", Ask::Complete),
     ]);
     let [union, mode, interactive] = &found[..] else { panic!("{found:?}") };
 
@@ -512,10 +561,10 @@ fn trigger_payload_items_and_values_complete_without_a_schema() {
 #[test]
 fn trigger_payload_properties_hover_without_a_schema() {
     let found = editor_answers(&[
-        ("mode.md", "---\nagent: claude\nmode: append\n---\n", "mode", Ask::Hover),
-        ("text.md", "---\nagent: claude\nstart:\n  - say:\n      text: hi\n---\n", "text", Ask::Hover),
-        ("max.md", "---\nagent: claude\nloop:\n  max: 3\n---\n", "max", Ask::Hover),
-        ("turns.md", "---\nagent: claude\nmax_turns: 3\n---\n", "max_turns", Ask::Hover),
+        ("mode.md", "---\nprompt: hi\nmode: append\n---\n", "mode", Ask::Hover),
+        ("text.md", "---\nprompt: hi\nstart:\n  - say:\n      text: hi\n---\n", "text", Ask::Hover),
+        ("max.md", "---\nprompt: hi\nloop:\n  max: 3\n---\n", "max", Ask::Hover),
+        ("turns.md", "---\nprompt: hi\nmax_turns: 3\n---\n", "max_turns", Ask::Hover),
     ]);
     let hovers: Vec<&str> = found.iter().map(|answer| answer[0].as_str()).collect();
     let [mode, text, max, turns] = hovers[..] else { panic!("{hovers:?}") };
@@ -542,10 +591,10 @@ fn trigger_payload_properties_hover_without_a_schema() {
 fn an_authored_redeclaration_wins_over_the_trigger_per_property() {
     let schema = "$schema:\n  mode: 'enum(fast, slow) -> the authored mode'\n";
     let found = editor_answers(&[
-        ("values.md", &format!("---\n{schema}agent: claude\nmode: \n---\n"), "\nmode: ", Ask::Complete),
-        ("hover.md", &format!("---\n{schema}agent: claude\nmode: fast\n---\n"), "mode: fast", Ask::Hover),
-        ("other.md", &format!("---\n{schema}agent: claude\ninteractive: \n---\n"), "interactive: ", Ask::Complete),
-        ("keys.md", &format!("---\n{schema}agent: claude\nmod:\n---\n"), "\nmod", Ask::Complete),
+        ("values.md", &format!("---\n{schema}prompt: hi\nmode: \n---\n"), "\nmode: ", Ask::Complete),
+        ("hover.md", &format!("---\n{schema}prompt: hi\nmode: fast\n---\n"), "mode: fast", Ask::Hover),
+        ("other.md", &format!("---\n{schema}prompt: hi\ninteractive: \n---\n"), "interactive: ", Ask::Complete),
+        ("keys.md", &format!("---\n{schema}prompt: hi\nmod:\n---\n"), "\nmod", Ask::Complete),
     ]);
     let [values, hover, other, keys] = &found[..] else { panic!("{found:?}") };
 
@@ -563,7 +612,7 @@ fn an_authored_redeclaration_wins_over_the_trigger_per_property() {
 fn a_trigger_declared_property_is_not_an_undeclared_expression_root() {
     let workspace = LspWorkspace::new();
     let fixture = Fixture::new(workspace.path());
-    let text = "---\nagent: claude\n---\n\n{{ max_turns }} and {{ nowhere_declared }}\n";
+    let text = "---\nprompt: hi\n---\n\n{{ max_turns }} and {{ nowhere_declared }}\n";
     let path = fixture.document("roots.md", text);
     let mut session = LspFixture::start_with_snapshot(&workspace, fixture.snapshot());
     session.initialize(initialize_params(&fixture.repo()));
@@ -650,10 +699,46 @@ fn baseline_stack_items_complete_md_verbs_only() {
 #[test]
 fn renamed_events_hover_with_the_claudine_name() {
     let found = editor_answers(&[
-        ("composed.md", "---\nagent: claude\ncomposed: [{info: hi}]\n---\n", "composed", Ask::Hover),
-        ("failed.md", "---\nagent: claude\nfailed: [{info: hi}]\n---\n", "failed", Ask::Hover),
+        ("composed.md", "---\nprompt: hi\ncomposed: [{info: hi}]\n---\n", "composed", Ask::Hover),
+        ("failed.md", "---\nprompt: hi\nfailed: [{info: hi}]\n---\n", "failed", Ask::Hover),
     ]);
     let [composed, failed] = &found[..] else { panic!("{found:?}") };
     assert!(composed[0].contains("`start`"), "{composed:?}");
     assert!(failed[0].contains("`blocked`"), "{failed:?}");
+}
+
+/// An inline document (Claudine's root-union payload, `inline-composition.yaml`)
+/// keeps the declarations the agent-only control (`composition.yaml`, an
+/// object payload) gets: a key every arm shares hovers with its declaration
+/// in either branch, both branch keys complete, and a written branch key
+/// leaves that branch's declarations, so its hover is never the other arm's
+/// `null`.
+#[test]
+fn a_registered_root_union_keeps_its_editor_declarations() {
+    let found = editor_answers(&[
+        ("control.md", "---\nagent: claude\n---\n", "agent", Ask::Hover),
+        ("prompt.md", "---\nprompt: hi\nagent: claude\n---\n", "agent", Ask::Hover),
+        ("sections.md", "---\nsections:\n  Intro: hi\nagent: claude\n---\n", "agent", Ask::Hover),
+        ("prompt-key.md", "---\nprompt: hi\nagent: claude\n---\n", "prompt", Ask::Hover),
+        ("sections-key.md", "---\nsections:\n  Intro: hi\n---\n", "sections", Ask::Hover),
+        ("branch-keys.md", "---\nprompt: hi\nsec:\npro:\n---\n", "sec", Ask::Complete),
+        ("other-branch.md", "---\nsections:\n  Intro: hi\npro:\n---\n", "pro", Ask::Complete),
+        ("shared-keys.md", "---\nsections:\n  Intro: hi\nage:\n---\n", "age", Ask::Complete),
+        ("shared-value.md", "---\nsections:\n  Intro: hi\nmode: \n---\n", "mode: ", Ask::Complete),
+    ]);
+    let [control, prompt, sections, prompt_key, sections_key, branch, other, shared, value] = &found[..] else {
+        panic!("{found:?}")
+    };
+
+    assert!(control[0].contains("the agent (provider) to run"), "agent-only control: {control:?}");
+    assert_eq!(prompt, control, "the shared declaration, as the object payload gives it");
+    assert_eq!(sections, control, "the shared declaration in the `sections` branch");
+    assert!(prompt_key[0].contains("the prompt sent to the agent"), "{prompt_key:?}");
+    assert!(!prompt_key[0].contains("has no `prompt`"), "the written branch, not the other arm's null: {prompt_key:?}");
+    assert!(sections_key[0].contains("each key is a heading"), "{sections_key:?}");
+    assert!(!sections_key[0].contains("has no `sections`"), "{sections_key:?}");
+    assert!(has(branch, "sections"), "{branch:?}");
+    assert!(has(other, "prompt"), "{other:?}");
+    assert!(has(shared, "agent"), "{shared:?}");
+    assert_eq!(value, &["append", "replace"]);
 }

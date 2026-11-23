@@ -53,6 +53,8 @@
 //! predicate compares names by their lowercase letters and digits alone, the
 //! rule Playa's lookup falls back to. With `global_catalog: true`, every
 //! `host_globals` name must be a namespace the catalog declares.
+//! Registration further requires every root the artifact binds to be
+//! declared, whatever `global_catalog` says ([`undeclared_root`]).
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -71,7 +73,7 @@ use crate::markdown::compose::expression::host::artifact::{
     array, describe, nullable, object, parse_strict, reject_unknown, required, required_in, sorted, string,
 };
 use crate::markdown::compose::expression::{Availability, BindingView, ScopeId, UnavailabilityReason};
-use crate::markdown::schemas::catalog::CatalogHandle;
+use crate::markdown::schemas::catalog::{CatalogHandle, GlobalCatalog};
 
 /// The artifact format this library writes and reads.
 pub const LIFECYCLE_ARTIFACT_FORMAT_VERSION: u64 = 2;
@@ -263,6 +265,36 @@ impl HostLifecycleProfile {
         let file = format!("the lifecycle artifact `{}`", artifact_path.display());
         read(catalog.into(), catalog_hash, artifact).map_err(|reason| format!("{file} {reason}"))
     }
+}
+
+/// The first root the lifecycle artifact `text` binds that neither
+/// Darkmatter's own catalog (`err`, `timing`) nor the host's namespace
+/// `catalog` declares, with the JSON pointer segments of the string naming
+/// it. Every event's declaration roots are checked, in `events` order, then
+/// `host_globals`, whatever `global_catalog` says. Shapes the reader refuses
+/// are skipped, so call it on text [`HostLifecycleProfile::from_artifact_at`]
+/// accepted; registration refuses an artifact for which it is `Some`.
+pub fn undeclared_root(text: &str, catalog: &GlobalCatalog) -> Option<(Vec<String>, String)> {
+    let Ok(Value::Object(root)) = serde_json::from_str::<Value>(text) else { return None };
+    let mut roots = Vec::new();
+    for (event, entry) in root.get("events").and_then(Value::as_array).into_iter().flatten().enumerate() {
+        let declarations = entry.pointer("/globals/declarations").and_then(Value::as_array);
+        for (index, declaration) in declarations.into_iter().flatten().enumerate() {
+            if let Some(name) = declaration.get("root").and_then(Value::as_str) {
+                let segments = ["events", &event.to_string(), "globals", "declarations", &index.to_string(), "root"];
+                roots.push((segments.map(str::to_string).to_vec(), name));
+            }
+        }
+    }
+    for (index, name) in root.get("host_globals").and_then(Value::as_array).into_iter().flatten().enumerate() {
+        if let Some(name) = name.as_str() {
+            roots.push((vec!["host_globals".to_string(), index.to_string()], name));
+        }
+    }
+    roots
+        .into_iter()
+        .find(|(_, name)| GlobalCatalog::darkmatter().global(name).is_none() && catalog.global(name).is_none())
+        .map(|(segments, name)| (segments, name.to_string()))
 }
 
 // ── reader ──────────────────────────────────────────────────────────────────

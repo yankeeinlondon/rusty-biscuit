@@ -47,7 +47,8 @@ pub struct BundleMember {
     pub line: Option<usize>,
     /// 1-based character column, when [`Self::line`] is known.
     pub column: Option<usize>,
-    /// The manifest's digest for it, which its bytes matched.
+    /// The manifest's digest for it, which its bytes matched in a
+    /// [`VerifiedSnapshot`] (an [`AdmittedManifest`] reads no bytes).
     pub digest: String,
 }
 
@@ -306,6 +307,66 @@ impl SnapshotRefusal {
         }
         .into_diagnostic(entry)
     }
+}
+
+/// A format 2 manifest admitted by the same envelope, digest-map, and member
+/// path checks [`load_snapshot`] applies, with no member read: its digests
+/// are what the manifest lists, not what the files hold.
+///
+/// This is what a publisher may trust about the manifest it is replacing
+/// (which members it published) when some members no longer match it, as
+/// after an interrupted publish.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmittedManifest {
+    host: String,
+    version: String,
+    files: Vec<BundleMember>,
+    lifecycle: BundleMember,
+    functions: Vec<BundleFunctionPair>,
+}
+
+#[allow(missing_docs)]
+impl AdmittedManifest {
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// Every member entry in authored order: each `files` item, `lifecycle`,
+    /// then each function's `catalog` and `facts`.
+    pub fn members(&self) -> impl Iterator<Item = &BundleMember> {
+        members(&self.files, &self.lifecycle, &self.functions)
+    }
+}
+
+/// Admits the format 2 manifest `bytes` read from `manifest` without reading
+/// or probing any member.
+///
+/// Member paths are judged lexically from the manifest's directory: the
+/// spelling, portable-name, duplicate, letter-case, and digest-map rules of
+/// [`load_snapshot`], with `.` and `..` applied to the spelling. A path that
+/// climbs out of the directory and back in is refused here even where the
+/// installed reader would accept it, so this admission never accepts a
+/// manifest that reader refuses.
+///
+/// ## Errors
+///
+/// The first reason the manifest is not a valid format 2 manifest, located
+/// as [`load_snapshot`] locates it; [`SnapshotRefusal::legacy_format`] for a
+/// format 1 manifest.
+pub fn admit_manifest(manifest: &Path, bytes: &[u8]) -> Result<AdmittedManifest, Box<SnapshotRefusal>> {
+    let refuse = |refusal: Refusal, legacy: bool| Reads::default().refuse(refusal, legacy);
+    let read = manifest::read_v2(manifest, bytes.to_vec()).map_err(|refusal| match refusal {
+        ManifestRefusal::Format1(refusal) => refuse(refusal, true),
+        ManifestRefusal::Invalid(refusal) => refuse(refusal, false),
+    })?;
+    let MemberSpec { files, lifecycle, functions } =
+        read.embedded_members(manifest).map_err(|refusal| refuse(refusal, false))?;
+    let ReadManifestV2 { manifest: accepted, .. } = read;
+    Ok(AdmittedManifest { host: accepted.host, version: accepted.version, files, lifecycle, functions })
 }
 
 /// The verified snapshot of the format 2 manifest at `manifest`, reading

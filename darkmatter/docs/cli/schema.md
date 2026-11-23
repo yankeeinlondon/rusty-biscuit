@@ -248,6 +248,28 @@ Registered host:
   - condition 1 — defeated: `gadget` is required but absent
 ```
 
+When two matched triggers of the host
+[cannot be layered as one](../topics/host-registration.md#when-two-triggers-declare-one-property),
+the section lists both matches and then the conflict, naming both trigger files,
+and the run fails with status 1: the same `dm.host.trigger_conflict` that
+`md schema validate` and `md compose` refuse the document with. Matching
+triggers whose declarations agree report success.
+
+```text
+Registered host:
+- acme 1.2.0 (manifest /Users/me/.acme/darkmatter-host.yaml, revision 5b1c…)
+- /Users/me/.acme/schemas/a.yaml — matched
+  - condition 1 — matched
+- /Users/me/.acme/schemas/b.yaml — matched
+  - condition 1 — matched
+- conflict [dm.host.trigger_conflict]: /Users/me/.acme/schemas/a.yaml and /Users/me/.acme/schemas/b.yaml conflict on agent: their types are incomparable
+```
+
+In a data output, `registered.conflict` holds `first`, `second`, `subject` (the
+property, `null` for the root rules), and `reason`, and `diagnostics` holds the
+`dm.host.trigger_conflict` error; `outcome` is `failure`. A matched trigger whose
+payload is a template is left out of this check, since listing it reads nothing.
+
 A trigger whose payload holds `{{ … }}` slots is listed with
 `(payload pending: holds schema slots)`, and its data record has `pending: true`:
 it is valid, nothing is read to list or match it, and its slots resolve only when
@@ -261,8 +283,8 @@ Triggers:
 
 A document outside every repository fails with status 1. A data output has `file`,
 `roots`, `shadowed`, `skipped`, `triggers`, `outcome`, and `diagnostics` on every
-run, and `registered` (`host`, `version`, `manifest`, `revision`, and the host's
-`triggers`), which is `null` when no single registered host identifies the
+run, and `registered` (`host`, `version`, `manifest`, `revision`, the host's
+`triggers`, and `conflict`), which is `null` when no single registered host identifies the
 document; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).
 
 ## `md schema about`

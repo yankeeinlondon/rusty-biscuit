@@ -16,7 +16,7 @@ use darkmatter::config::registration::merge::HOST_TRIGGER_CONFLICT_CODE;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::report_diagnostics::schema_error_diagnostics;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
-use simplified_schema::{SchemaError, SchemaOriginKind, SchemaSourceId};
+use simplified_schema::{SchemaError, SchemaOriginKind, SchemaPhase, SchemaSourceId};
 
 const HOST: &str = "../host/darkmatter-host.yaml";
 
@@ -66,6 +66,18 @@ impl Case {
         paths
     }
 
+    /// The problem paths of the document's frontmatter judged at `phase`.
+    fn phase_problems(&self, phase: SchemaPhase) -> Vec<String> {
+        let frontmatter = darkmatter::markdown::schemas::frontmatter_as_json(&self.markdown);
+        let report = self.effective().validate_for_phase(&frontmatter, phase).expect("the phase projection assembles");
+        report.problems.iter().map(|problem| problem.path.clone()).collect()
+    }
+
+    /// The undeclared keys a closed root refuses, and nothing else.
+    fn unknown_keys(&self) -> Vec<String> {
+        unknown_keys(&self.effective(), &self.markdown)
+    }
+
     /// The conflict `effective_for` refuses with: (subject, first, second).
     fn conflict(&self) -> (Option<String>, PathBuf, PathBuf, String) {
         match self.schemas.effective_for(&self.markdown) {
@@ -79,6 +91,20 @@ impl Case {
             Ok(_) => panic!("a trigger conflict, not a schema"),
         }
     }
+}
+
+/// The keys `effective` refuses as undeclared in `markdown`'s frontmatter;
+/// panics on any other problem.
+fn unknown_keys(effective: &EffectiveSchema, markdown: &Markdown) -> Vec<String> {
+    let report = effective.validate(&darkmatter::markdown::schemas::frontmatter_as_json(markdown));
+    report
+        .problems
+        .iter()
+        .map(|problem| {
+            assert_eq!(problem.code, simplified_schema::ValidationProblemCode::UnknownKey, "{problem:#?}");
+            problem.offending_property.clone().expect("the refused key")
+        })
+        .collect()
 }
 
 /// `team: core` plus `rest`, as a document.
@@ -293,6 +319,84 @@ fn a_root_trigger_refines_a_prepared_union_layer() {
     assert!(effective.json_schema["anyOf"].as_array().is_some_and(|arms| arms.len() == 2));
 }
 
+/// A closed document `$schema` declaring `team` and `prompt`, plus `rest`.
+fn closed_document(rest: &str) -> String {
+    document(&format!("$schema:\n  $constraints: {{ closed: true }}\n  team: string\n  prompt: string\n{rest}"))
+}
+
+#[test]
+fn a_closed_document_schema_closes_every_arm_of_a_host_union() {
+    let bundle = bundle(&[(A, &trigger(INLINE))]);
+    let case = Case::new(&bundle, &closed_document("prompt: hi\nextra: hi\n"));
+    assert_eq!(case.unknown_keys(), ["extra"], "the document's closed root refuses `extra` in the arm that holds `prompt`");
+    let valid = Case::new(&bundle, &closed_document("prompt: hi\n"));
+    assert!(valid.problems().is_empty(), "{:?}", valid.problems());
+    let sections = Case::new(&bundle, &closed_document("sections:\n  intro: hi\n"));
+    assert!(sections.problems().is_empty(), "the host arm's `sections` is declared: {:?}", sections.problems());
+    // A closed document that leaves `prompt` to the host keeps the host's
+    // exactly-one rule; one that redeclares `prompt` replaces it per key.
+    let only_team = |rest: &str| document(&format!("$schema:\n  $constraints: {{ closed: true }}\n  team: string\n{rest}"));
+    let both = Case::new(&bundle, &only_team("prompt: hi\nsections:\n  intro: hi\n"));
+    assert!(!both.problems().is_empty(), "the host's exactly-one rule still holds");
+    assert_eq!(Case::new(&bundle, &only_team("prompt: hi\nextra: hi\n")).unknown_keys(), ["extra"]);
+}
+
+#[test]
+fn a_closed_root_trigger_closes_every_arm_of_a_host_union() {
+    let fixture = Fixture::new();
+    fixture.install_bundle("host", &bundle(&[(A, &trigger(INLINE))]));
+    let hosts = fixture.hosts(&[HOST]);
+    fixture.write(
+        "work/schemas/closed.yaml",
+        "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    $constraints: { closed: true }\n    team: string\n",
+    );
+    let refused = |document: &str| {
+        let (markdown, context) = fixture.document(&fixture.repository(None), "work/doc.md", document);
+        let schemas = DarkmatterSchemas::new(context).with_registered_hosts(hosts.clone()).with_trigger_discovery().expect("discovery");
+        let effective = schemas.effective_for(&markdown).expect("assembles").expect("a schema");
+        unknown_keys(&effective, &markdown)
+    };
+    assert_eq!(refused(&document("prompt: hi\nextra: hi\n")), ["extra"], "the trigger's closed root holds over the union");
+    assert!(refused(&document("prompt: hi\n")).is_empty());
+}
+
+/// A document union: one arm requires `x`, the other a numeric `y`.
+const DOCUMENT_UNION: &str = "$schema:\n  - x: string(required)\n  - y: number(required)\n";
+
+#[test]
+fn a_document_union_over_a_host_union_requires_one_arm_of_each() {
+    let bundle = bundle(&[(A, &trigger(INLINE)), (B, &trigger("    agent: string\n"))]);
+    let valid = Case::new(&bundle, &document(&format!("{DOCUMENT_UNION}prompt: hi\nx: a\n")));
+    let effective = valid.effective();
+    assert_eq!(effective.json_schema["anyOf"].as_array().map(Vec::len), Some(4), "host arm × document arm");
+    assert!(valid.problems().is_empty(), "{:?}", valid.problems());
+    let other = Case::new(&bundle, &document(&format!("{DOCUMENT_UNION}sections:\n  intro: hi\ny: 3\nagent: me\n")));
+    assert!(other.problems().is_empty(), "{:?}", other.problems());
+
+    for (rest, why) in [
+        ("prompt: hi\n", "no document arm matches"),
+        ("prompt: hi\ny: three\n", "`y` is a number"),
+        ("x: a\n", "no host arm matches"),
+        ("prompt: hi\nsections:\n  intro: hi\nx: a\n", "the host's exactly-one rule"),
+        ("prompt: hi\nx: a\nagent: [1]\n", "the lower trigger's `agent` is a string in every arm"),
+    ] {
+        let case = Case::new(&bundle, &document(&format!("{DOCUMENT_UNION}{rest}")));
+        assert!(!case.problems().is_empty(), "{why}");
+        assert!(!case.phase_problems(SchemaPhase::Completion).is_empty(), "{why}, at completion");
+    }
+    assert!(valid.phase_problems(SchemaPhase::Launch).is_empty(), "{:?}", valid.phase_problems(SchemaPhase::Launch));
+}
+
+#[test]
+fn a_document_union_arm_redeclaring_a_host_key_wins_in_its_arms() {
+    let bundle = bundle(&[(A, &trigger(INLINE))]);
+    let union = "$schema:\n  - prompt: number(required)\n  - z: string(required)\n";
+    let case = Case::new(&bundle, &document(&format!("{union}prompt: 3\n")));
+    assert!(case.problems().is_empty(), "the document arm's `prompt: number` wins: {:?}", case.problems());
+    let case = Case::new(&bundle, &document(&format!("{union}prompt: hi\nz: a\n")));
+    assert!(case.problems().is_empty(), "the other document arm keeps the host's `prompt`: {:?}", case.problems());
+}
+
 #[test]
 fn a_registered_template_stays_passive_and_is_listed_whole() {
     let template = "    agent: enum({{ load_data(\"./agents.yaml\", \"string[]\") }})\n";
@@ -320,4 +424,36 @@ fn the_conflict_is_one_coded_error_on_the_document() {
     let [record] = records.as_slice() else { panic!("one record: {records:#?}") };
     assert_eq!(record.code, HOST_TRIGGER_CONFLICT_CODE);
     assert_eq!(record.source.as_ref().and_then(|source| source.file.clone()), Some(case.fixture.path("work/doc.md")));
+}
+
+// ── the passive trace (`md schema triggers`) ────────────────────────────────
+
+#[test]
+fn the_registered_trace_reports_the_conflict_effective_for_refuses_with() {
+    let conflicting = Case::new(&bundle(&[(A, &trigger("    agent: number\n")), (B, &trigger("    agent: boolean\n"))]), &document(""));
+    let compatible = Case::new(&bundle(&[(A, &trigger("    agent: number\n")), (B, &trigger("    agent: number\n"))]), &document(""));
+
+    let trace = conflicting.schemas.registered_trace(&conflicting.markdown).expect("the host identifies the document");
+    let Some(SchemaError::HostTriggerConflict(refused)) = conflicting.schemas.effective_for(&conflicting.markdown).err() else {
+        panic!("preparation refuses the document")
+    };
+    assert_eq!(trace.triggers.iter().filter(|entry| entry.matched).count(), 2, "both matches are listed: {trace:#?}");
+    assert_eq!(trace.conflict.as_ref(), Some(refused.as_ref()), "the trace reports the same checked merge");
+    assert_eq!(compatible.schemas.registered_trace(&compatible.markdown).expect("identified").conflict, None);
+}
+
+#[test]
+fn a_registered_template_stays_pending_in_the_trace_while_static_pairs_are_checked() {
+    let template = "    agent: enum({{ load_data(\"./agents.yaml\", \"string[]\") }})\n";
+    let with_template = Case::new(&bundle(&[(A, &trigger(template)), (B, &trigger("    agent: boolean\n"))]), &document(""));
+    let static_pair = Case::new(
+        &bundle(&[(A, &trigger(template)), (B, &trigger("    mode: number\n")), (C, &trigger("    mode: boolean\n"))]),
+        &document(""),
+    );
+
+    let trace = with_template.schemas.registered_trace(&with_template.markdown).expect("identified");
+    assert_eq!(trace.conflict, None, "a template is not evaluated by a passive trace: {trace:#?}");
+    assert!(trace.triggers.iter().any(|entry| entry.matched && entry.pending), "{trace:#?}");
+    let conflict = static_pair.schemas.registered_trace(&static_pair.markdown).expect("identified").conflict.expect("the static pair conflicts");
+    assert_eq!((conflict.first, conflict.second), (static_pair.path(B), static_pair.path(C)));
 }

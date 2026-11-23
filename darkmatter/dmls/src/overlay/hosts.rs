@@ -208,7 +208,10 @@ impl HostDependencies {
 
 /// One configuration's registrations.
 struct Scope {
-    installed: InstalledHosts,
+    /// `None` while the only result loaded was already superseded when it
+    /// completed: documents see no registration until the replacement load
+    /// installs, as before the first load.
+    installed: Option<InstalledHosts>,
     deps: HostDependencies,
     notices: Vec<ConfigNotice>,
     /// A reload is due now.
@@ -423,10 +426,10 @@ impl HostRegistrations {
     }
 
     /// The installed registrations of `context`'s configuration; `None`
-    /// before its first preparation. A lookup only: a dirty or stale scope
+    /// until a load completes that no change superseded. A lookup only: a dirty or stale scope
     /// serves its registrations until its reload installs.
     pub fn lookup(&self, context: &FileResolutionContext) -> Option<InstalledHosts> {
-        self.scopes.get(&HostsKey::of(context)).map(|scope| scope.installed.clone())
+        self.scopes.get(&HostsKey::of(context)).and_then(|scope| scope.installed.clone())
     }
 
     /// Whether `context`'s configuration is installed with no change
@@ -459,7 +462,9 @@ impl HostRegistrations {
     /// preparation never replaces a newer one, and one begun before a later
     /// change to the configuration is superseded by the reload that change
     /// scheduled. A change recorded while it ran that touches what it read
-    /// (where the installed view did not) schedules another reload. A result
+    /// (where the installed view did not) schedules another reload and
+    /// installs nothing; with no installed view yet, only the result's
+    /// dependencies are kept, to watch and schedule that reload from. A result
     /// with the same profiles and failure keeps its version, so no
     /// document's analysis changes; one whose warnings alone differ replaces
     /// them under the same version.
@@ -491,20 +496,31 @@ impl HostRegistrations {
         });
         let mut installed = InstalledHosts { hosts: Arc::new(hosts), version: 0, load_error };
         let previous = self.scopes.get(&key);
-        if touched && previous.is_some() {
-            // The result read something that changed while it ran; the
-            // installed view serves until a reload after quiet.
-            let scope = self.scopes.get_mut(&key).expect("checked above");
-            scope.stale = false;
-            scope.due = Some(now + self.settle);
+        let generation = previous.map_or(generation, |scope| scope.generation);
+        if touched {
+            let due = Some(now + self.settle);
+            match self.scopes.get_mut(&key) {
+                // The installed view serves until a reload after quiet.
+                Some(scope) if scope.installed.is_some() => {
+                    scope.stale = false;
+                    scope.due = due;
+                }
+                // Superseded before any view was installed: its profiles,
+                // warnings, and notices are withheld, but what it read is
+                // where the next change will show.
+                _ => {
+                    let scope = Scope { installed: None, deps, notices: Vec::new(), stale: false, due, generation, seq };
+                    self.scopes.insert(key, scope);
+                }
+            }
             return false;
         }
-        match previous {
-            Some(previous) if previous.installed.same_effect(&installed) => {
-                if previous.installed.same_diagnostics(&installed) {
-                    installed = previous.installed.clone();
+        match previous.and_then(|scope| scope.installed.as_ref()) {
+            Some(previous) if previous.same_effect(&installed) => {
+                if previous.same_diagnostics(&installed) {
+                    installed = previous.clone();
                 } else {
-                    installed.version = previous.installed.version;
+                    installed.version = previous.version;
                 }
             }
             _ => {
@@ -512,12 +528,8 @@ impl HostRegistrations {
                 installed.version = self.next_version;
             }
         }
-        let generation = previous.map_or(generation, |scope| scope.generation);
-        // A first load that a change touched is installed, so documents have
-        // a view, and reloads after quiet.
-        let due = touched.then(|| now + self.settle);
-        self.scopes.insert(key, Scope { installed, deps, notices, stale: false, due, generation, seq });
-        due.is_none()
+        self.scopes.insert(key, Scope { installed: Some(installed), deps, notices, stale: false, due: None, generation, seq });
+        true
     }
 
     /// Prepares `context`'s configuration on the calling thread, at `now`,
@@ -646,8 +658,8 @@ impl HostRegistrations {
     /// the documents the configuration serves.
     pub fn diagnostics(&self) -> Vec<RegistrationDiagnostic> {
         let mut all: Vec<RegistrationDiagnostic> = Vec::new();
-        for scope in self.scopes.values() {
-            for diagnostic in scope.installed.diagnostics() {
+        for installed in self.scopes.values().filter_map(|scope| scope.installed.as_ref()) {
+            for diagnostic in installed.diagnostics() {
                 if !all.contains(&diagnostic) {
                     all.push(diagnostic);
                 }
@@ -956,27 +968,51 @@ mod tests {
         assert_eq!(std::fs::read_to_string(fixture.config()).unwrap(), "{}\n");
     }
 
-    /// A first load that a change touched while it ran is installed (so
-    /// documents have a view) and reloads; an older result never replaces a
-    /// newer one.
+    /// A first load that a change touched while it ran installs nothing:
+    /// its refusal and notices are withheld, Markdown selection and the YAML
+    /// contract key see no registration (as before any load), and its reads
+    /// are kept so the replacement reload is scheduled and watched. An older
+    /// result never replaces a newer one.
     #[test]
-    fn a_change_during_a_first_preparation_reloads_it_and_an_older_one_never_wins() {
+    fn a_change_during_a_first_preparation_withholds_it_and_an_older_one_never_wins() {
         let fixture = Fixture::new();
-        let mut registrations = HostRegistrations::default();
+        let mut registrations = HostRegistrations::with_settle(REGISTRATION_SETTLE);
+        let origin = Instant::now();
         let older = registrations.begin(&fixture.context()).expect("cold").run();
 
-        std::fs::write(fixture.config(), "# edited\n").unwrap();
-        let during = registrations.begin(&fixture.context()).expect("still cold");
-        registrations.invalidate_paths(&[fixture.config()], Instant::now());
-        assert!(!registrations.install(during.run(), Instant::now()), "the change touched what it read");
-        assert!(registrations.lookup(&fixture.context()).is_some(), "installed meanwhile");
+        std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
+        let during = registrations.begin(&fixture.context()).expect("still cold").run();
+        std::fs::write(fixture.config(), "register: []\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 0));
+        assert!(!registrations.install(during, at(origin, 10)), "the change touched what it read");
+        assert!(registrations.lookup(&fixture.context()).is_none(), "the superseded result is withheld");
+        assert!(registrations.diagnostics().is_empty(), "its refusal is never published");
+        assert_eq!(registrations.generation(), 0, "no analysis version was issued for it");
+        assert!(registrations.dependencies().contains(&fixture.config()), "its reads are watched");
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 310)), "the replacement waits for quiet");
+        assert!(registrations.begin(&fixture.context()).is_none(), "and is not due yet");
 
-        registrations.expire(Instant::now());
+        let path = fixture.root.join("work/roster.yaml");
+        let selected = HostView::select(registrations.lookup(&fixture.context()).as_ref(), &Value::Null, &path, &fixture.context());
+        assert!(matches!(selected.selection(), HostSelection::Md), "Markdown selection is neutral meanwhile");
+        let mut contracts = super::super::yaml_contract::YamlContracts::default();
+        let mut key = |hosts: Option<&InstalledHosts>| {
+            contracts.key("kind: roster\n", &path, &fixture.context(), 1, None, hosts).expect("loads")
+        };
+        let neutral = key(None);
+        assert_eq!(key(registrations.lookup(&fixture.context()).as_ref()), neutral, "the YAML key names no revision");
+
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 100));
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 400)), "a later change resets the wait");
+        assert!(registrations.take_expired(at(origin, 400)));
         let newer = registrations.begin(&fixture.context()).expect("due").run();
-        assert!(registrations.install(newer, Instant::now()));
-        let installed = registrations.lookup(&fixture.context()).unwrap().version;
-        assert!(registrations.install(older, Instant::now()), "a dropped older result leaves the newer one fresh");
-        assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, installed);
+        assert!(registrations.install(newer, at(origin, 410)));
+        assert!(registrations.is_fresh(&fixture.context()));
+        let installed = registrations.lookup(&fixture.context()).expect("the current result installs");
+        assert!(registrations.diagnostics().is_empty(), "{:#?}", registrations.diagnostics());
+        assert_ne!(key(Some(&installed)), neutral, "the YAML key follows the current result");
+        assert!(registrations.install(older, at(origin, 420)), "a dropped older result leaves the newer one fresh");
+        assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, installed.version);
     }
 
     /// Two batches of events inside one settle window give one load, after
@@ -1035,6 +1071,33 @@ mod tests {
         registrations.prepare(&fixture.context(), at(origin, 620));
         assert!(registrations.is_fresh(&fixture.context()));
         assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, first, "the newer result is the same view");
+    }
+
+    /// A change, during a warm reload, at a path only that reload read (a
+    /// newly registered manifest) rearms the wait without installing: the
+    /// installed view and its warnings are kept.
+    #[test]
+    fn a_change_to_an_input_only_the_reload_read_rearms_it_without_installing() {
+        let fixture = Fixture::new();
+        let mut registrations = HostRegistrations::with_settle(REGISTRATION_SETTLE);
+        let origin = Instant::now();
+        std::fs::write(fixture.config(), "register: []\n").unwrap();
+        registrations.prepare(&fixture.context(), origin);
+        let first = registrations.lookup(&fixture.context()).unwrap().version;
+
+        std::fs::write(fixture.config(), "register:\n  - ./missing/darkmatter-host.yaml\n").unwrap();
+        registrations.invalidate_paths(&[fixture.config()], at(origin, 0));
+        assert!(registrations.take_expired(at(origin, 300)));
+        let in_flight = registrations.begin(&fixture.context()).expect("due").run();
+        let manifest = fixture.root.join("home/missing/darkmatter-host.yaml");
+        assert!(!registrations.dependencies().contains(&manifest), "not a recorded input yet");
+        registrations.invalidate_paths(std::slice::from_ref(&manifest), at(origin, 320));
+        assert!(registrations.needs_load(&fixture.context()), "the installed view never read it, so its deadline is not reset");
+
+        assert!(!registrations.install(in_flight, at(origin, 330)), "the reload read the changed path");
+        assert_eq!(registrations.lookup(&fixture.context()).unwrap().version, first, "the installed view is kept");
+        assert!(registrations.diagnostics().is_empty(), "the touched refusal is never published");
+        assert_eq!(registrations.next_deadline(), Some(at(origin, 630)), "the reload waits for quiet again");
     }
 
     /// An explicit reload is due at once, whatever the window; a change to

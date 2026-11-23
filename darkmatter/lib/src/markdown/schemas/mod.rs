@@ -459,8 +459,13 @@ struct TriggerLayer {
     json_schema: Arc<Value>,
     /// The canonical digest of `json_schema`.
     digest: SchemaDigest,
-    /// The payload's SimplifiedSchema object shape, when it has one.
+    /// The payload's SimplifiedSchema object shape, when it has one; for a
+    /// root union, the editor view of every arm
+    /// ([`simplified_schema::root_union_property_shape`]).
     shape: Option<Arc<SchemaShape>>,
+    /// A registered root union's inline arms, which the editor narrows to
+    /// the authored frontmatter; `None` for an object payload.
+    union_arms: Option<Arc<[SchemaShape]>>,
     /// The cyclic named types `shape` reaches.
     definitions: Arc<DefinitionTable>,
     /// Payload dependency edges (referenced files + imports + examples).
@@ -631,6 +636,13 @@ impl DarkmatterSchemas {
     /// origin, with [`RegisteredLayers::triggers`] naming the triggers that
     /// layer, and every trigger in bundle-path order. `None` when no single
     /// registered host identifies the document.
+    ///
+    /// The matched concrete payloads go through the same checked merge
+    /// ([`checked_layer`](crate::config::registration::RegisteredHostProfile::checked_layer))
+    /// validation and composition run, so a match whose payloads cannot be
+    /// layered carries [`RegisteredTrace::conflict`]. A template payload is
+    /// left out of that check: it stays pending in this passive trace and is
+    /// checked once a resolving consumer makes it concrete.
     #[must_use]
     pub fn registered_trace(&self, source: &Markdown) -> Option<RegisteredTrace> {
         let (profile, matched) = self.registered_identification(source)?;
@@ -642,6 +654,17 @@ impl DarkmatterSchemas {
             .into_iter()
             .map(|trigger| trigger.location.clone())
             .collect();
+        let concrete: Vec<usize> = registered_matches_indexed(&profile, &matched)
+            .into_iter()
+            .filter(|(_, registered)| registered.payload.pending.is_none())
+            .map(|(index, _)| index)
+            .collect();
+        let conflict = profile.checked_layer(&concrete).err().and_then(|conflict| {
+            match conflict.into_error(profile.host(), document) {
+                SchemaError::HostTriggerConflict(conflict) => Some(*conflict),
+                _ => None,
+            }
+        });
         let triggers = profile
             .triggers()
             .iter()
@@ -675,7 +698,7 @@ impl DarkmatterSchemas {
                 }
             })
             .collect();
-        Some(RegisteredTrace { origin, triggers })
+        Some(RegisteredTrace { origin, triggers, conflict })
     }
 
     /// Which registered host identifies `source`
@@ -1300,6 +1323,10 @@ impl DarkmatterSchemas {
                 .collect(),
             definitions,
             trigger_shapes: trigger_layers.iter().filter_map(|layer| layer.shape.clone()).collect(),
+            trigger_unions: trigger_layers
+                .iter()
+                .filter_map(|layer| Some((layer.shape.clone()?, layer.union_arms.clone()?)))
+                .collect(),
             trigger_definitions: trigger_layers
                 .iter()
                 .filter(|layer| !layer.definitions.is_empty())
@@ -1519,6 +1546,7 @@ impl DarkmatterSchemas {
                 json_schema: payload.json_schema.clone(),
                 digest,
                 shape: payload.shape.clone(),
+                union_arms: None,
                 definitions: Arc::clone(&payload.definitions),
                 dependencies: payload.dependencies.clone(),
                 advisories: payload.advisories.clone(),
@@ -1592,7 +1620,12 @@ impl DarkmatterSchemas {
                 source: registered.trigger.source.clone(),
                 json_schema: Arc::clone(&part.json_schema),
                 digest: registered_digest(digest, profile),
-                shape: part.shape.clone(),
+                shape: part.shape.clone().or_else(|| {
+                    part.union_arms
+                        .as_deref()
+                        .map(|arms| Arc::new(simplified_schema::root_union_property_shape(arms, &Value::Null)))
+                }),
+                union_arms: part.union_arms.clone(),
                 definitions: Arc::clone(&payload.definitions),
                 dependencies: payload.dependencies.clone(),
                 advisories: payload.advisories.clone(),
@@ -1867,6 +1900,10 @@ pub struct EffectiveSchema {
     /// SimplifiedSchema projection, in layering order (a later shape wins a
     /// shared top-level property, as it does in [`Self::json_schema`]).
     trigger_shapes: Vec<Arc<SchemaShape>>,
+    /// Each registered root-union layer: its every-arm view (the same `Arc`
+    /// in [`Self::trigger_shapes`] and `declared_trigger_shapes`) and its
+    /// arms, which the frontmatter-aware projections narrow it to.
+    trigger_unions: Vec<(Arc<SchemaShape>, Arc<[SchemaShape]>)>,
     /// The non-empty definition tables of the matching trigger payloads,
     /// searched by [`Self::definition`] after [`Self::definitions`].
     trigger_definitions: Vec<Arc<DefinitionTable>>,
@@ -2074,9 +2111,31 @@ impl EffectiveSchema {
 
     /// The object shapes of the matching trigger payloads, in layering order.
     /// A raw JSON Schema payload has no shape and is absent here, though it
-    /// still validates through [`Self::json_schema`].
+    /// still validates through [`Self::json_schema`]. A registered root union
+    /// is the view of every arm, merged
+    /// ([`simplified_schema::root_union_property_shape`]): a declaration all
+    /// arms share as written, and each branch key with its arms' atoms.
     pub fn trigger_shapes(&self) -> &[Arc<SchemaShape>] {
         &self.trigger_shapes
+    }
+
+    /// `shapes` with each root-union view narrowed to the arms `frontmatter`
+    /// admits; borrowed when no union layered.
+    fn narrowed_trigger_shapes<'a>(
+        &self,
+        shapes: &'a [Arc<SchemaShape>],
+        frontmatter: &Value,
+    ) -> std::borrow::Cow<'a, [Arc<SchemaShape>]> {
+        if self.trigger_unions.is_empty() || frontmatter.is_null() {
+            return std::borrow::Cow::Borrowed(shapes);
+        }
+        shapes
+            .iter()
+            .map(|shape| match self.trigger_unions.iter().find(|(view, _)| Arc::ptr_eq(view, shape)) {
+                Some((_, arms)) => Arc::new(simplified_schema::root_union_property_shape(arms, frontmatter)),
+                None => Arc::clone(shape),
+            })
+            .collect()
     }
 
     /// The top-level property shape an editor projects for this document: the
@@ -2087,7 +2146,8 @@ impl EffectiveSchema {
     /// top-level property — the per-property precedence validation applies
     /// when it merges the same layers into [`Self::json_schema`], so an
     /// authored redeclaration wins over a trigger's. Root unions and
-    /// `frontmatter` behave as in [`effective_property_shape`].
+    /// `frontmatter` behave as in [`effective_property_shape`], a registered
+    /// host's root-union payload included.
     ///
     /// The base is always the compiled baseline, whatever this schema was
     /// assembled with: this is the editor's projection. A request that selects its
@@ -2095,7 +2155,7 @@ impl EffectiveSchema {
     pub fn property_shape(&self, extension_shapes: &[SchemaShape], frontmatter: &Value) -> SchemaShape {
         frontmatter_shape::layered_property_shape(
             extension_shapes,
-            &self.trigger_shapes,
+            &self.narrowed_trigger_shapes(&self.trigger_shapes, frontmatter),
             self.simplified.as_ref(),
             frontmatter,
         )
@@ -2107,13 +2167,14 @@ impl EffectiveSchema {
     ///
     /// A layer with no SimplifiedSchema projection contributes what its JSON Schema
     /// proves, so it still replaces a lower layer's declaration of a shared key.
-    /// Root unions and `frontmatter` behave as in [`effective_property_shape`].
+    /// Root unions and `frontmatter` behave as in [`effective_property_shape`],
+    /// a registered host's root-union payload included.
     pub fn declared_property_shape(&self, frontmatter: &Value) -> SchemaShape {
         let base = self.baseline_declarations.as_ref().map_or_else(SchemaShape::default, BaselineDeclarations::shape);
         simplified_schema::layered_property_shape(
             base,
             &[],
-            &self.declared_trigger_shapes,
+            &self.narrowed_trigger_shapes(&self.declared_trigger_shapes, frontmatter),
             self.simplified.as_ref().or(self.raw_document.as_ref()),
             frontmatter,
         )
@@ -2277,6 +2338,7 @@ impl EffectiveSchema {
             baseline_declarations: None,
             declared_trigger_shapes: Vec::new(),
             trigger_shapes: Vec::new(),
+            trigger_unions: Vec::new(),
             trigger_definitions: Vec::new(),
             layers: SchemaLayers { document: true, ..SchemaLayers::default() },
             json_schema,
@@ -2507,6 +2569,7 @@ impl EffectiveSchema {
             declared_trigger_shapes: self.declared_trigger_shapes.clone(),
             definitions: Arc::clone(&self.definitions),
             trigger_shapes: self.trigger_shapes.clone(),
+            trigger_unions: self.trigger_unions.clone(),
             trigger_definitions: self.trigger_definitions.clone(),
             layers: self.layers.clone(),
             json_schema,
@@ -2895,6 +2958,9 @@ pub struct RegisteredTrace {
     pub origin: RegisteredLayers,
     /// Every one of the host's triggers, in manifest order.
     pub triggers: Vec<library_triggers::TriggerTraceEntry>,
+    /// The `dm.host.trigger_conflict` the matched concrete payloads meet,
+    /// which every preparing consumer refuses the document with.
+    pub conflict: Option<simplified_schema::HostTriggerConflict>,
 }
 
 /// Where a registered host's layers came from, for inspection output.
@@ -3281,17 +3347,16 @@ fn remember_merge(
 /// The merge of `baseline`, `layers`, and `doc` when `layers[union]` is a
 /// root union (only a registered host's checked layer has one, at its top).
 ///
-/// The property merge takes its lower side as a simple object, so it cannot
-/// put a layer over a union directly. The same result is built instead:
-/// everything below the union merges first, then everything above it over
-/// that, and the union, without the properties the layers above it
-/// redeclare (which win), merges over the result, so each arm gets its own
-/// declarations, then the higher layers', then the lower ones'.
+/// Precedence is the ordinary one, arm by arm: every arm is the lower
+/// layers, then the arm's own declarations, then the higher layers (the
+/// layers above the union and the document), so a higher declaration wins
+/// per key and a higher root rule (`closed`) holds in every arm. A higher
+/// root union (the document's) makes the cross product: one arm per host arm
+/// and higher arm, host arms major.
 ///
 /// ## Errors
 ///
-/// A merge error, or [`SchemaError::Baseline`] when the document's
-/// `$schema` is a root union too.
+/// A merge error.
 fn merge_around_union(
     baseline: Option<&Value>,
     layers: &[TriggerLayer],
@@ -3309,27 +3374,74 @@ fn merge_around_union(
         }
         Ok(acc)
     };
-    if doc.as_ref().is_some_and(|doc| doc.get("anyOf").is_some()) {
-        return Err(SchemaError::Baseline {
-            message: "the document's root-union `$schema` cannot layer over a registered host's root union".into(),
-            source: None,
-        });
-    }
     let lower = chain(baseline.cloned(), layers[..union].iter().map(|layer| layer.json_schema.as_ref().clone()).collect())?;
     let higher = chain(None, layers[union + 1..].iter().map(|layer| layer.json_schema.as_ref().clone()).chain(doc).collect())?;
-    let mut top = layers[union].json_schema.as_ref().clone();
-    if let Some(higher) = &higher {
-        let redeclared = declared_by_json(higher);
-        crate::config::registration::merge::remove_properties(&mut top, &redeclared);
-    }
-    let base = match (lower, higher) {
-        (Some(lower), Some(higher)) => Some(merge_baseline(&lower, higher)?),
-        (lower, higher) => lower.or(higher),
+    let top = layers[union].json_schema.as_ref().clone();
+    let with_lower = match lower {
+        Some(lower) => merge_baseline(&lower, top)?,
+        None => top,
     };
-    match base {
-        Some(base) => merge_baseline(&base, top),
-        None => Ok(top),
+    match higher {
+        Some(higher) => merge_over_union_arms(with_lower, &higher),
+        None => Ok(with_lower),
     }
+}
+
+/// `higher` merged over each arm of the root union `union`, as
+/// [`merge_baseline`](simplified_schema::resolve::merge_baseline) merges a
+/// document over a simple object: each arm, with the union's root `$defs`,
+/// is the lower side, so its definitions keep their meaning and `higher`'s
+/// keep their keys. A root-union `higher` yields one arm per pair, the
+/// union's arms major; its root annotations replace the union's.
+fn merge_over_union_arms(union: Value, higher: &Value) -> Result<Value, SchemaError> {
+    let Value::Object(mut root) = union else {
+        unreachable!("a lowered root union is an object");
+    };
+    let Some(Value::Array(arms)) = root.shift_remove("anyOf") else {
+        unreachable!("the caller passes a root union");
+    };
+    let defs = root.shift_remove("$defs");
+    let mut merged_arms = Vec::new();
+    let mut merged_defs = serde_json::Map::new();
+    for arm in arms {
+        let mut arm = arm;
+        if let (Some(defs), Some(object)) = (&defs, arm.as_object_mut()) {
+            object.insert("$defs".into(), defs.clone());
+        }
+        let Value::Object(mut merged) = simplified_schema::resolve::merge_baseline(&arm, higher.clone())? else {
+            unreachable!("a merge yields an object schema");
+        };
+        if let Some(Value::Object(arm_defs)) = merged.shift_remove("$defs") {
+            for (key, body) in arm_defs {
+                match merged_defs.get(&key) {
+                    Some(held) if *held != body => {
+                        return Err(SchemaError::Baseline {
+                            message: format!("two arms of the host's root union need different definitions under `$defs/{key}`"),
+                            source: None,
+                        });
+                    }
+                    Some(_) => {}
+                    None => {
+                        merged_defs.insert(key, body);
+                    }
+                }
+            }
+        }
+        match merged.shift_remove("anyOf") {
+            Some(Value::Array(pairs)) => {
+                for (key, value) in merged {
+                    root.insert(key, value);
+                }
+                merged_arms.extend(pairs);
+            }
+            _ => merged_arms.push(Value::Object(merged)),
+        }
+    }
+    root.insert("anyOf".into(), Value::Array(merged_arms));
+    if !merged_defs.is_empty() {
+        root.insert("$defs".into(), Value::Object(merged_defs));
+    }
+    Ok(Value::Object(root))
 }
 
 

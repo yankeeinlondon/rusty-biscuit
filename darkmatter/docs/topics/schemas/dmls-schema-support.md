@@ -134,10 +134,24 @@ is analyzed as `md` with a `dm.host.ambiguous` warning.
   waits until they have been quiet for 300 ms, keeps serving the last
   loaded view meanwhile, then reloads (see
   [Changes are followed without a restart](../host-registration.md#changes-are-followed-without-a-restart)).
-- **No completion from `inline-composition.yaml`.** Its payload is a root
-  union (`prompt` or `sections`). A registered root union validates the
-  document but contributes no completion or hover, so those keys are
-  checked but not offered.
+- **`inline-composition.yaml` completes and hovers like any trigger.** Its
+  payload is a root union (`prompt` or `sections`). The editor sees every
+  key either arm declares: a key both arms share (`agent`, `mode`, the
+  lifecycle events) has its one declaration, so it hovers and completes as
+  it does in an agent-only document, and both `prompt` and `sections` are
+  offered as keys. Once a branch key holds a value, the arms that refuse it
+  drop out of the view, so in a `prompt: hi` document `prompt` hovers with
+  the prompt's own description, never the other arm's `null`:
+
+  ```yaml
+  ---
+  prompt: hi
+  agent: claude    # hover: "the agent (provider) to run"
+  sec              # completes `sections`
+  ---
+  ```
+
+  Validation is unchanged: the document must still match exactly one arm.
 
 DMLS has no Claudine dependency and runs nothing of Claudine's: it reads
 the published files through Darkmatter's library. The `claudine` binary

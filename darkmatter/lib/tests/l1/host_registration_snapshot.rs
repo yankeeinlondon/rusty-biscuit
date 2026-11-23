@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::config::migration_receipt::content_hash;
 use darkmatter::config::registration::HOST_REGISTRATION_CODE;
-use darkmatter::config::registration::bundle::{SnapshotRefusal, VerifiedSnapshot, load_snapshot, load_snapshot_with};
+use darkmatter::config::registration::bundle::{
+    SnapshotRefusal, VerifiedSnapshot, admit_manifest, load_snapshot, load_snapshot_with,
+};
 
 const FILES: [&str; 2] = ["./schemas/a.yaml", "./schemas/b.yaml"];
 const LIFECYCLE: &str = "./globals.lifecycle.json";
@@ -659,4 +661,75 @@ fn a_retry_keeps_both_attempts_inputs() {
     for watched in ["schemas/b.yaml", "schemas/c.yaml"] {
         assert!(refusal.candidates.contains(&bundle.host().join(watched)), "{watched}: {:?}", refusal.candidates);
     }
+}
+
+// ── admission without member reads ──────────────────────────────────────────
+
+impl Bundle {
+    fn admit(&self) -> Result<darkmatter::config::registration::bundle::AdmittedManifest, Box<SnapshotRefusal>> {
+        admit_manifest(&self.manifest(), &std::fs::read(self.manifest()).unwrap())
+    }
+}
+
+#[test]
+fn admission_lists_the_members_without_reading_them() {
+    let bundle = Bundle::new();
+    bundle.write("schemas/a.yaml", "# changed after publication\n");
+    std::fs::remove_file(bundle.host().join("schemas/b.yaml")).unwrap();
+    bundle.load().expect_err("the verifying reader refuses the mismatch");
+
+    let admitted = bundle.admit().unwrap_or_else(|refusal| panic!("admitted: {refusal:#?}"));
+
+    assert_eq!((admitted.host(), admitted.version()), ("acme", "1.2.0"));
+    let paths: Vec<&str> = admitted.members().map(|member| member.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["schemas/a.yaml", "schemas/b.yaml", "globals.lifecycle.json", "functions/catalog.yaml", "functions/facts.json"]
+    );
+}
+
+/// One edit per shared validator (envelope, digest map, YAML document,
+/// member path): admission refuses exactly where the verifying reader does,
+/// located at the same place.
+#[test]
+fn admission_refuses_what_the_verifying_reader_refuses() {
+    let bundle = Bundle::new();
+    let valid = bundle.manifest_text(&Members::default());
+    let digest_line = valid.lines().find(|line| line.contains("'./schemas/a.yaml':")).unwrap().to_string();
+    let cases = [
+        ("version empty", valid.replace("version: \"1.2.0\"", "version: \"\"")),
+        ("version omitted", replace_field(&valid, "version", "")),
+        ("format 1", valid.replace("format_version: 2", "format_version: 1")),
+        ("digests null", replace_field(&valid, "digests", "digests: null\n")),
+        ("digest nonhex", valid.replace(&digest_line, &format!("    './schemas/a.yaml': \"{}\"", "z".repeat(64)))),
+        ("duplicate digest key", format!("{valid}{digest_line}\n")),
+        ("second document", format!("{valid}---\nkind: other\n")),
+        ("unprefixed member", bundle.manifest_text(&Members::with_files(&["./schemas/a.yaml", "schemas/b.yaml"]))),
+        ("escaping member", bundle.manifest_text(&Members::with_files(&["./schemas/a.yaml", "../x.yaml"]))),
+    ];
+    for (case, text) in cases {
+        bundle.write_manifest(&text);
+        let read = *bundle.load().expect_err(case);
+        let admitted = *bundle.admit().expect_err(case);
+        assert_eq!(
+            (admitted.message, admitted.line, admitted.column, admitted.member, admitted.legacy_format),
+            (read.message, read.line, read.column, read.member, read.legacy_format),
+            "{case}"
+        );
+    }
+}
+
+/// Admission applies `.` and `..` to the spelling, so a path that climbs
+/// out of the bundle folder and back in, which the installed reader
+/// resolves, is refused: admission is never the more permissive reader.
+#[test]
+fn admission_refuses_a_path_that_climbs_out_and_back_in() {
+    let bundle = Bundle::new();
+    bundle.publish(&Members::with_files(&["./schemas/a.yaml", "../host/schemas/b.yaml"]));
+    bundle.loaded();
+
+    let refusal = *bundle.admit().expect_err("lexically, `..` leaves the bundle");
+
+    assert_eq!(refusal.member.as_deref(), Some("files[1]"), "{refusal:#?}");
+    assert!(refusal.message.contains("leaves the bundle"), "{}", refusal.message);
 }

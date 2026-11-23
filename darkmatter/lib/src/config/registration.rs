@@ -59,7 +59,7 @@ use simplified_schema::yaml_documents::{RegisteredDefinition, RegisteredSource};
 use self::bundle::{BundleFunctionPair, BundleMember, VerifiedSnapshot};
 use self::namespaces::{NamespaceMember, PreparedCatalog};
 use super::load::{ConfigSnapshot, Registration, line_column};
-use crate::lifecycle::host_profile::HostLifecycleProfile;
+use crate::lifecycle::host_profile::{self, HostLifecycleProfile};
 use crate::markdown::compose::expression::host::FactsArtifact;
 use crate::markdown::compose::expression::{
     Availability, BindingView, HostFunctions, HostGlobals, RuntimeBinding, ScopeId, Severity, UnavailabilityReason,
@@ -886,7 +886,7 @@ pub fn prepare_embedded_payload(
     if !matches!(member_kind(text, &member.location)?, MemberKind::Trigger) {
         return Ok(None);
     }
-    let sources = BundleSources::embedded(name, snapshot.bytes().clone()).map_err(|error| error.to_string())?;
+    let sources = BundleSources::embedded(name, snapshot.bytes().clone()).map_err(|error| error.to_string())?.with_revision(snapshot.revision());
     let context = embedded_context(snapshot);
     let anchor = anchored_at(&context, &member.location);
     let (loaded, _) =
@@ -986,7 +986,7 @@ fn prepare_members(
         None => BundleSources::on_disk(snapshot.bundle_root(), snapshot.bytes().clone()),
     };
     let sources = match sources {
-        Ok(sources) => sources,
+        Ok(sources) => sources.with_revision(snapshot.revision()),
         Err(error) => {
             members.refusals.push(Refusal {
                 code: HOST_REGISTRATION_CODE,
@@ -1181,6 +1181,27 @@ fn load_lifecycle(snapshot: &VerifiedSnapshot, catalog: &PreparedCatalog) -> Res
     };
     let lifecycle = HostLifecycleProfile::from_artifact_at(Arc::clone(&catalog.catalog), &catalog.hash, &member.location, artifact)
         .map_err(refuse)?;
+    // The reader checks a root's syntax and reserved names, and `host_globals`
+    // only when `global_catalog` attaches the catalog; registration admits a
+    // root only when Darkmatter or one of the host's namespaces declares it.
+    if let Some(text) = member_text(snapshot, member)
+        && let Some((segments, root)) = host_profile::undeclared_root(text, &catalog.catalog)
+    {
+        let at = simplified_schema::yaml_documents::load_yaml_document(text, &member.location).ok().and_then(|loaded| {
+            loaded
+                .byte_range(&simplified_schema::yaml_documents::locating_problem(&segments))
+                .map(|range| line_column(text, range.start))
+        });
+        return Err(Refusal {
+            at,
+            message: format!(
+                "the lifecycle artifact `{}` binds `{root}` at `{}`, which neither Darkmatter nor any namespace of the host's catalog declares",
+                member.location.display(),
+                simplified_schema::yaml_documents::pointer_string(&segments)
+            ),
+            ..refuse(String::new())
+        });
+    }
     let recorded = lifecycle.registry().host();
     if recorded != snapshot.host() {
         return Err(Refusal {

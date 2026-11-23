@@ -185,6 +185,40 @@ fn a_registration_that_does_not_load_is_one_record_in_a_validate_data_output() {
 }
 
 #[test]
+fn a_lifecycle_binding_no_namespace_declares_refuses_the_host_at_the_binding_in_validate() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let mut bundle = acme();
+    let artifact = &bundle.members[&bundle.lifecycle];
+    let mut parsed: Value = serde_json::from_str(artifact).expect("the artifact is JSON");
+    let initialize = parsed["events"].as_array_mut().expect("events").iter_mut().find(|entry| entry["name"] == "initialize").expect("initialize");
+    let timing = initialize["globals"]["declarations"].as_array_mut().expect("declarations").iter_mut().find(|declaration| declaration["root"] == "timing").expect("timing");
+    timing["root"] = Value::from("typo_root");
+    let mut edited = serde_json::to_string_pretty(&parsed).expect("JSON serializes");
+    edited.push('\n');
+    let (line, column) = edited
+        .lines()
+        .enumerate()
+        .find_map(|(index, text)| text.find("\"typo_root\"").map(|at| (index as u64 + 1, at as u64 + 1)))
+        .expect("the edit is in the artifact");
+    let lifecycle = bundle.lifecycle.clone();
+    bundle.members.insert(lifecycle, edited);
+    let fixture = registered_bundle("host-undeclared-binding", &bundle, false);
+
+    let output = run(&fixture, &["schema", "validate", "widget.md", "--output", "json"]);
+
+    let value = data_value(&output, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert!(output.status.success(), "no host judges the widget: {value:#}");
+    assert!(records(&value, "dm.schema.type_mismatch").is_empty(), "no host schema applies: {value:#}");
+    let refusals = records(&value, REGISTRATION);
+    assert_eq!(refusals.len(), 1, "{value:#}");
+    let source = &refusals[0]["source"];
+    let file = source["file"].as_str().expect("the refusal names a file");
+    assert!(std::path::Path::new(file).ends_with(".acme/schemas/globals.lifecycle.json"), "in the artifact: {value:#}");
+    assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(line), Some(column)), "{value:#}");
+    assert!(refusals[0]["message"].as_str().is_some_and(|message| message.contains("binds `typo_root`")), "{value:#}");
+}
+
+#[test]
 fn selecting_a_host_never_migrates_a_repository_legacy_policy_file() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
     let fixture = registered("host-passive-repository", false);
@@ -369,4 +403,97 @@ fn two_matched_triggers_that_disagree_are_one_coded_conflict_naming_both() {
     let codes: Vec<&str> = value["diagnostics"].as_array().into_iter().flatten().filter_map(|record| record["code"].as_str()).collect();
     assert!(codes.contains(&"dm.host.trigger_conflict"), "{value:#}");
     assert!(!compose.status.success(), "{value:#}");
+}
+
+/// `md schema triggers` over `team.md` with `a` and `b` declaring `agent`,
+/// as data and formatted.
+fn team_triggers(name: &str, a: &str, b: &str) -> Option<(Output, Output)> {
+    let bundle = acme().with_file("schemas/a.yaml", &team_trigger(a)).with_file("schemas/b.yaml", &team_trigger(b));
+    let fixture = registered_bundle(name, &bundle, false);
+    fixture.write_file("cwd/team.md", "---\nteam: core\n---\n# Team\n");
+    if !fixture.initialize_repository_at(fixture.cwd()) {
+        return None;
+    }
+    Some((
+        run(&fixture, &["schema", "triggers", "team.md", "--output", "json"]),
+        run(&fixture, &["schema", "triggers", "team.md"]),
+    ))
+}
+
+/// The registered triggers `matched` in the data value, by file name.
+fn matched_registered(value: &Value) -> Vec<String> {
+    value["registered"]["triggers"]
+        .as_array()
+        .expect("registered triggers")
+        .iter()
+        .filter(|trigger| trigger["matched"] == true)
+        .filter_map(|trigger| trigger["source"].as_str())
+        .filter_map(|source| std::path::Path::new(source).file_name()?.to_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn schema_triggers_reports_conflicting_registered_matches_as_a_failed_preparation() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let Some((data, formatted)) = team_triggers("host-triggers-conflict", "number", "boolean") else { return };
+
+    let value = data_value(&data, include_str!("../../schemas/output/schema-triggers.yaml"));
+    assert_eq!(data.status.code(), Some(1), "{value:#}");
+    assert_eq!(value["outcome"], "failure", "{value:#}");
+    assert_eq!(matched_registered(&value), ["a.yaml", "b.yaml"], "both matches are still listed: {value:#}");
+    let conflict = &value["registered"]["conflict"];
+    let ends = |key: &str, tail: &str| conflict[key].as_str().is_some_and(|path| std::path::Path::new(path).ends_with(tail));
+    assert!(ends("first", "schemas/a.yaml") && ends("second", "schemas/b.yaml"), "{value:#}");
+    assert_eq!(conflict["subject"], "agent", "{value:#}");
+    let records: Vec<&Value> =
+        value["diagnostics"].as_array().expect("diagnostics").iter().filter(|record| record["code"] == "dm.host.trigger_conflict").collect();
+    assert_eq!(records.len(), 1, "{value:#}");
+    assert_eq!(records[0]["severity"], "error", "{value:#}");
+
+    let stdout = String::from_utf8_lossy(&formatted.stdout).replace('\\', "/");
+    assert_eq!(formatted.status.code(), Some(1), "{stdout}{}", stderr_of(&formatted));
+    assert!(stdout.contains("dm.host.trigger_conflict"), "{stdout}");
+    assert!(stdout.contains("schemas/a.yaml") && stdout.contains("schemas/b.yaml"), "both files are named: {stdout}");
+}
+
+#[test]
+fn schema_triggers_reports_compatible_registered_matches_as_success() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let Some((data, formatted)) = team_triggers("host-triggers-compatible", "number", "number") else { return };
+
+    let value = data_value(&data, include_str!("../../schemas/output/schema-triggers.yaml"));
+    assert_eq!(data.status.code(), Some(0), "{value:#}");
+    assert_eq!(matched_registered(&value), ["a.yaml", "b.yaml"], "{value:#}");
+    assert!(value["registered"]["conflict"].is_null(), "{value:#}");
+    let stdout = String::from_utf8_lossy(&formatted.stdout);
+    assert!(formatted.status.success(), "{stdout}{}", stderr_of(&formatted));
+    assert!(!stdout.contains("dm.host.trigger_conflict"), "{stdout}");
+}
+
+#[test]
+fn schema_validate_keeps_document_root_rules_over_a_registered_root_union() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let union = "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    - prompt: string(required)\n      sections: null\n    - sections: object(required)\n      prompt: null\n";
+    let fixture = registered_bundle("host-union-higher-rules", &acme().with_file("schemas/inline.yaml", union), false);
+    let closed = "$schema:\n  $constraints: { closed: true }\n  team: string\n  prompt: string\n";
+    let either = "$schema:\n  - x: string(required)\n  - y: number(required)\n";
+    let documents = [
+        ("closed-extra.md", format!("{closed}team: core\nprompt: hi\nextra: hi\n"), false),
+        ("closed.md", format!("{closed}team: core\nprompt: hi\n"), true),
+        ("union.md", format!("{either}team: core\nprompt: hi\nx: a\n"), true),
+        ("union-no-arm.md", format!("{either}team: core\nprompt: hi\n"), false),
+    ];
+    for (name, frontmatter, _) in &documents {
+        fixture.write_file(format!("cwd/{name}"), &format!("---\n{frontmatter}---\n# Doc\n"));
+    }
+
+    let mut args = vec!["schema", "validate", "--output", "json"];
+    args.extend(documents.iter().map(|(name, _, _)| *name));
+    let output = run(&fixture, &args);
+
+    let value = data_value(&output, include_str!("../../schemas/output/schema-validate.yaml"));
+    for (record, (name, _, valid)) in value["files"].as_array().expect("one record per file").iter().zip(&documents) {
+        assert_eq!(record["valid"], *valid, "{name}: {value:#}");
+        assert!(record.get("code").is_none_or(Value::is_null), "{name} prepares: {value:#}");
+    }
 }

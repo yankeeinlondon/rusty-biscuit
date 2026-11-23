@@ -216,3 +216,85 @@ fn an_artifact_of_another_host_is_refused_at_the_manifest_host() {
     assert_eq!(diagnostic.member.as_deref(), Some("host"));
     assert!(diagnostic.message.contains("records host `other`"), "{}", diagnostic.message);
 }
+
+// ── binding roots are namespace members ─────────────────────────────────────
+
+/// The relay bundle (shaped like Claudine's) with its lifecycle artifact
+/// edited by `edit` and the manifest's digest refreshed; the namespace files,
+/// and so the artifact's `catalog_hash`, are unchanged.
+fn relay_with_artifact(edit: impl FnOnce(&mut serde_json::Value)) -> Bundle {
+    let mut artifact: serde_json::Value =
+        serde_json::from_str(&relay_lifecycle_artifact()).expect("the relay artifact is JSON");
+    edit(&mut artifact);
+    let mut text = serde_json::to_string_pretty(&artifact).expect("JSON serializes");
+    text.push('\n');
+    Bundle::relay().with_member(LIFECYCLE, &text)
+}
+
+/// The `events` entry the host spells `name`.
+fn event<'a>(artifact: &'a mut serde_json::Value, name: &str) -> &'a mut serde_json::Value {
+    artifact["events"]
+        .as_array_mut()
+        .expect("`events` is an array")
+        .iter_mut()
+        .find(|entry| entry["name"] == name)
+        .expect("the event is listed")
+}
+
+/// Renames the declaration `from` of event `name` to `to`.
+fn rename_declaration(artifact: &mut serde_json::Value, name: &str, from: &str, to: &str) {
+    let declarations = event(artifact, name)["globals"]["declarations"].as_array_mut().expect("declarations");
+    let declaration = declarations.iter_mut().find(|declaration| declaration["root"] == from).expect("declared");
+    declaration["root"] = serde_json::Value::from(to);
+}
+
+/// The one refusal, in the lifecycle artifact at the line and column of the
+/// only `"typo_root"` string in it.
+fn refused_at_typo_root(bundle: &Bundle) {
+    let (fixture, loaded) = load(bundle);
+    let diagnostic = refused(&loaded);
+    assert_eq!(diagnostic.file, fixture.path(&format!("host/{LIFECYCLE}")), "{diagnostic:#?}");
+    assert_eq!(diagnostic.member.as_deref(), Some("lifecycle"), "{diagnostic:#?}");
+    assert!(diagnostic.message.contains("binds `typo_root`"), "{}", diagnostic.message);
+    let text = &bundle.members[LIFECYCLE];
+    let (line, column) = text
+        .lines()
+        .enumerate()
+        .find_map(|(index, line)| line.find("\"typo_root\"").map(|at| (index + 1, line[..at].chars().count() + 1)))
+        .expect("the edit is in the artifact");
+    assert_eq!((diagnostic.line, diagnostic.column), (Some(line), Some(column)), "{diagnostic:#?}");
+}
+
+#[test]
+fn an_undeclared_root_on_a_darkmatter_event_is_refused_at_the_binding() {
+    refused_at_typo_root(&relay_with_artifact(|artifact| rename_declaration(artifact, "initialize", "timing", "typo_root")));
+}
+
+#[test]
+fn an_undeclared_root_on_a_host_event_is_refused_at_the_binding() {
+    refused_at_typo_root(&relay_with_artifact(|artifact| rename_declaration(artifact, "success", "timing", "typo_root")));
+}
+
+#[test]
+fn an_undeclared_host_global_is_refused_even_without_an_attached_catalog() {
+    let detached = |artifact: &mut serde_json::Value| artifact["global_catalog"] = serde_json::Value::Bool(false);
+    let (_fixture, control) = load(&relay_with_artifact(detached));
+    assert!(control.diagnostics.is_empty(), "{:#?}", control.diagnostics);
+    assert_eq!(control.profiles.len(), 1);
+
+    refused_at_typo_root(&relay_with_artifact(|artifact| {
+        detached(artifact);
+        artifact["host_globals"] = serde_json::json!(["typo_root"]);
+    }));
+}
+
+#[test]
+fn darkmatter_err_and_timing_bindings_load_unedited() {
+    let (_fixture, loaded) = load(&relay_with_artifact(|_| {}));
+    assert!(loaded.diagnostics.is_empty(), "{:#?}", loaded.diagnostics);
+    let [profile] = loaded.profiles.as_slice() else { panic!("one profile") };
+    let registry = profile.lifecycle().registry();
+    let id = registry.id("success").expect("the relay registers `success`");
+    let roots: Vec<&str> = registry.globals(id).globals().map(|global| global.root()).collect();
+    assert_eq!(roots, ["err", "timing"]);
+}

@@ -535,7 +535,7 @@ Error: /home/me/.darkmatter.yaml:2:1 at `/not-a-setting`: `not-a-setting` is not
 Claudine reads the same file once at startup, before any hook, agent,
 provider, or composition is dispatched. A file that does not load stops the
 run with that located error. A missing file is one warning naming
-`claudine init`, except for a provider hook callback (`claudine handle`) and
+`md init`, except for a provider hook callback (`claudine handle`) and
 `claudine steer`, which answer a program on their streams; completion reads no
 configuration. Each request Claudine composes receives the invocation's
 snapshot, projected for the repository the request's document lives in.

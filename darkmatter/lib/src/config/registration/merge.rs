@@ -52,8 +52,17 @@ pub struct CheckedPayload {
     /// Its object shape, with the same declarations removed; `None` for a
     /// root union or a raw JSON Schema payload.
     pub shape: Option<Arc<SchemaShape>>,
+    /// The inline arms of the host layer's root union, with the same
+    /// declarations removed from every arm; `None` for an object payload.
+    pub union_arms: Option<Arc<[SchemaShape]>>,
+}
+
+impl CheckedPayload {
     /// Whether the payload is the host layer's root union.
-    pub union: bool,
+    #[must_use]
+    pub fn is_union(&self) -> bool {
+        self.union_arms.is_some()
+    }
 }
 
 /// A host's matched payloads, checked: the object payloads in bundle-path
@@ -110,7 +119,7 @@ pub fn check(matched: &[MatchedPayload<'_>]) -> Result<CheckedLayer, TriggerConf
         trigger: entry.trigger,
         json_schema: Arc::clone(&entry.payload.json_schema),
         shape: entry.payload.shape.clone(),
-        union: entry.payload.union_arms.is_some(),
+        union_arms: entry.payload.union_arms.clone(),
     };
     if matched.len() < 2 {
         return Ok(CheckedLayer { payloads: matched.iter().map(unchanged).collect() });
@@ -170,17 +179,19 @@ pub fn check(matched: &[MatchedPayload<'_>]) -> Result<CheckedLayer, TriggerConf
             }
             let mut json = entry.payload.json_schema.as_ref().clone();
             remove_properties(&mut json, lost);
-            let shape = entry.payload.shape.as_ref().map(|shape| {
-                let mut shape = shape.as_ref().clone();
+            let pruned = |shape: &SchemaShape| {
+                let mut shape = shape.clone();
                 shape.properties.retain(|name, _| !lost.contains(name));
-                Arc::new(shape)
-            });
-            CheckedPayload { trigger: entry.trigger, json_schema: Arc::new(json), shape, union: entry.payload.union_arms.is_some() }
+                shape
+            };
+            let shape = entry.payload.shape.as_deref().map(|shape| Arc::new(pruned(shape)));
+            let union_arms = entry.payload.union_arms.as_deref().map(|arms| arms.iter().map(pruned).collect());
+            CheckedPayload { trigger: entry.trigger, json_schema: Arc::new(json), shape, union_arms }
         })
         .collect();
     // The union is the top of the host layer, where the others merge into
     // each of its arms.
-    payloads.sort_by_key(|payload| payload.union);
+    payloads.sort_by_key(CheckedPayload::is_union);
     Ok(CheckedLayer { payloads })
 }
 

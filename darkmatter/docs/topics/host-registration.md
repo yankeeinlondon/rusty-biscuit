@@ -171,10 +171,14 @@ this is a format 1 `darkmatter-host` manifest, which this Darkmatter no longer r
 The repair is the host's, not Darkmatter's: running `claudine setup`
 publishes the format 2 bundle, replaces the old
 `~/.claudine/darkmatter-host.yaml` entry in `~/.darkmatter.yaml` with the
-new manifest, and then removes the old files. A manifest that names no `host`
+new manifest, and then removes the old files. It asks nothing, keeps every
+other setting, and changes nothing when run again (see
+[`claudine setup`](../../../claudine/docs/cli/setup.md)). A manifest that names no `host`
 gets the same warning, ending "rerun the host program's setup, or update it,
 to publish a format 2 manifest". The same warning appears for an old entry
-in a repository's configuration, which its owners update.
+in a repository's configuration, which setup never edits: once setup has
+removed the old manifest, that entry is reported at the repository's
+`.darkmatter.yaml` as naming no existing file, for its owners to remove.
 
 **Member paths** are written so that one manifest works on macOS, Linux, and
 Windows alike:
@@ -264,6 +268,36 @@ What a snapshot records:
   the reader retried. A refusal carries the same two lists, so a caller can
   watch for a missing member to appear.
 
+### Admitting a manifest without reading its members
+
+A publisher replacing its own bundle needs to know which files the manifest
+it is replacing listed, even when some of those files no longer match it
+(a publish was interrupted after replacing members). For that,
+`config::registration::bundle::admit_manifest(manifest, bytes)` judges the
+manifest's bytes by the same rules as `load_snapshot` (the closed envelope,
+the digest map, a single YAML document, and every member path) and returns
+an `AdmittedManifest` with `host()`, `version()`, and `members()`, or the
+same located `SnapshotRefusal`. It reads and probes no member, so the
+digests it lists are what the manifest claims, not what the files hold.
+
+Member paths are judged from their spelling alone: `.` and `..` are applied
+to the text, so `../host/schemas/b.yaml`, which `load_snapshot` follows out
+of the bundle folder and back in, is refused here. Admission is therefore
+never more permissive than the verifying reader.
+
+```rust
+use std::path::Path;
+use darkmatter::config::registration::bundle::admit_manifest;
+
+fn previously_published(manifest: &Path) -> Vec<String> {
+    let Ok(bytes) = std::fs::read(manifest) else { return Vec::new() };
+    // Trust nothing from a manifest that fails admission.
+    admit_manifest(manifest, &bytes)
+        .map(|admitted| admitted.members().map(|member| member.path.clone()).collect())
+        .unwrap_or_default()
+}
+```
+
 ## The files of a bundle
 
 Each `files` member is classified by its own `kind`:
@@ -285,6 +319,27 @@ listed member. An unlisted file, a path that leaves the bundle, a bare name
 that would search schema roots, and a URL are refused, so a bundle copied
 to another machine behaves the same. Darkmatter's built-in schemas
 (`Name@darkmatter:lifecycle`) stay available.
+
+The same rule holds for a trigger whose payload is a `{{ … }}` template.
+When the template is resolved for a document, its slots still need the
+normal read grants, but a type a slot returns is read from the bundle the
+registration verified, never from the disk:
+
+```yaml
+# ./schemas/widget.yaml (a listed member)
+kind: schema-trigger
+match:
+    widget: object(required)
+$schema:
+    widget: "{{ 'widget@./library.yaml' }}"   # listed: served from the verified bytes
+    # "{{ 'widget@./stray.yaml' }}"           # unlisted: refused at this slot
+    # "{{ 'widget@../../outside.yaml' }}"     # leaves the bundle: refused at this slot
+```
+
+A resolution is reused only for the registration revision it read, so a
+republished member is never judged by an earlier copy. A YAML kind or
+namespace schema must be complete when the registration loads; a slot in
+one refuses the registration at that member.
 
 **Display names are unique.** A trigger or library may declare a `name`
 (`name: widget-schema`); two files of one registration with the same name
@@ -426,7 +481,8 @@ The rules a load follows:
 - **Strict artifacts.** The lifecycle artifact must record the hash of the
   namespace catalog it was generated for, and each facts artifact the hash
   of its function catalog. A stale artifact, a missing one, a format 1
-  lifecycle artifact, an artifact that binds a host global no namespace
+  lifecycle artifact, an artifact that binds a root (an event's
+  declaration or a host global) that neither Darkmatter nor a namespace
   declares, or a function whose facts are incomplete refuses the
   registration.
 - **One host name.** The manifest's `host` must equal the host the lifecycle
@@ -665,6 +721,64 @@ gadget: name      # rejected by the root trigger's `gadget: number`
   manifest's identity and content revision, so a changed host install never
   reuses a validator compiled for another.
 
+### Higher layers over a host's root union
+
+A host layer can be a root union: a document must match one of its arms (for
+example, Claudine's inline composition has one arm that requires `prompt` and
+one that requires `sections`). The layers above it keep their ordinary
+precedence inside every arm. Each arm is built from the lower layers, then
+the arm's own declarations, then the root triggers and the document's
+`$schema`:
+
+- **A higher declaration wins in every arm.** A document that redeclares
+  `prompt` replaces the host's `prompt` in both arms, including the arm that
+  admitted only `null` for it.
+- **A higher root rule holds in every arm.** A `closed` document `$schema`
+  (or a closed root trigger, when no document `$schema` sits above it)
+  refuses any key that no layer declares, whichever arm the document matches:
+
+  ```yaml
+  ---
+  $schema:
+      $constraints: { closed: true }
+      prompt: string
+  prompt: hi
+  extra: hi       # refused: dm.schema.unknown_key
+  ---
+  ```
+
+  The host arm's own keys (`sections` here) count as declared.
+- **A document union makes one arm per pair.** When the document's `$schema`
+  is itself a root union, the effective schema has one arm for each host arm
+  and document arm, host arms first. A document must therefore match one arm
+  of each:
+
+  ```yaml
+  ---
+  $schema:
+      - x: string(required)
+      - y: number(required)
+  prompt: hi      # the host's `prompt` arm
+  x: a            # the document's first arm
+  ---
+  ```
+
+  Leaving out both `x` and `y`, or both `prompt` and `sections`, matches no
+  arm. Where a document arm redeclares a host key, that arm's declaration
+  wins in its pairs only.
+
+Only one root union is allowed among the host's matched triggers (see the
+next section); a root trigger above the host is always an object.
+
+In the editor, a host's root union contributes the keys of every arm: a
+declaration all arms share is offered and hovered exactly as written, and a
+key whose arms declare it differently shows each arm's alternative. An arm
+that types a key the document writes with a value as `null` alone drops out
+of that view, so writing `prompt: hi` leaves the `prompt` arm's
+declarations (see [In the editor (DMLS)](#in-the-editor-dmls)). A document
+`$schema` root union follows the same rule after its `literal(...)`
+discriminant, when it has one.
+
 ### When two triggers declare one property
 
 A document can match several of one host's triggers. Together they form one
@@ -736,7 +850,12 @@ only once it is resolved.
 
 `--disable schema-triggers` turns off the registered layer together with the
 schema roots' triggers. `md schema triggers` reports the registered host and
-each of its triggers; see [`md schema triggers`](../cli/schema.md#md-schema-triggers).
+each of its triggers and runs the same check over the matched triggers whose
+payloads are not templates: a conflict is listed with both trigger files and
+the run fails with status 1, so inspecting a document never reports success
+for one that validation and composition refuse. A template payload stays
+pending there and is not evaluated; see
+[`md schema triggers`](../cli/schema.md#md-schema-triggers).
 
 ## `md compose` of a host's document
 
@@ -922,7 +1041,12 @@ thread and reads and compares the files there: a reload that finds the same
 registrations (a file saved with the same bytes) changes no document's
 analysis, and one whose warnings alone changed republishes only the
 warnings. A change reported during a reload makes that reload's result
-obsolete, and the next one, after quiet, is installed instead.
+obsolete, and the next one, after quiet, is installed instead. This holds
+for the first load too: when a change arrives while the server is still
+loading a configuration for the first time, no registered host, refusal, or
+configuration notice from that obsolete load is shown. Its documents are
+analyzed as if nothing were registered (the `md` host, and no host kinds for
+YAML documents) until the next load completes.
 
 ```mermaid
 sequenceDiagram

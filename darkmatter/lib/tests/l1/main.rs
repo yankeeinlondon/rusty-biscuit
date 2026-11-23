@@ -94,6 +94,7 @@ mod plain_corpus;
 mod fm_namespace_contract;
 mod hashing_guard;
 mod host_globals_compose;
+mod host_template_bundle_scope;
 mod host_trigger_merge;
 mod registered_yaml_kinds;
 mod shell_child_environment;

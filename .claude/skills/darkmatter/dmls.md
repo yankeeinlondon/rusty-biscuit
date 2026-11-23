@@ -601,7 +601,10 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `registry_need`, so a dirty scope serves its installed view and queues
   nothing. `install(prepared, now)` drops a result whose generation (or
   seq) is older than the scope's, and a warm result a concurrent change
-  touched re-arms the deadline instead. The router arms
+  touched re-arms the deadline instead; a touched cold result installs
+  nothing (`Scope::installed` is `None`, so `lookup` is `None`: `md`
+  selection and a hosts-version-0 YAML contract key) and keeps only its
+  deps to watch and re-arm from. The router arms
   `crossbeam_channel::after` on `next_host_reload()` and calls
   `start_due_host_reloads` (`take_due_host_reloads`, then a workspace
   pass and `refresh_all_diagnostics`) before every message, so a test's

@@ -21,6 +21,12 @@ types:
         manifest: string(required) -> the host manifest file
         revision: string(required) -> the host's content revision
         triggers: trigger[](required) -> in manifest order; they layer below the schema roots' triggers
+        conflict: conflict -> why the matched triggers' concrete payloads cannot be layered as one (dm.host.trigger_conflict, which fails the run); null when they can
+    conflict:
+        first: string(required) -> the trigger file representing the first declaration
+        second: string(required) -> the other trigger file
+        subject: string -> the property; null for the payloads' root rules
+        reason: string(required)
     shadowed:
         path: string(required)
         winner: string(required)

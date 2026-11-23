@@ -100,7 +100,7 @@ flowchart TD
 | `events` | Darkmatter's five events (each with the host's spelling as `name`), then the host's own in registration order, with `position` and `role`, the admitted action types, and the event's globals view (`scope` and each declaration's `root`, `description`, and `availability`) |
 | `outcome_pair` | The host's success and failure alternatives and the explicit-error downgrades, or `null` |
 | `host_globals` | The late globals the host adds after `err` and `timing` (Claudine's `loop` and `group`) |
-| `global_catalog` | Whether the host types those globals with its namespace catalog; when `true`, every `host_globals` name must be a namespace the bundle declares |
+| `global_catalog` | Whether the host types those globals with its namespace catalog. Registration requires every `host_globals` name to be a namespace the bundle declares either way (see [Reading it](#reading-it)) |
 | `unknown_verbs` | `"reject"`, `"ignore"`, or `{ "ignore_unprovided": [verbs] }` |
 | `effects` | The effect names the host accepts in a literal `effect` operand |
 | `catalog_hash`, `format_version` | The hash of the namespace catalog the artifact was generated for, and the format (`2`) |
@@ -175,6 +175,27 @@ reason naming the file:
   namespace;
 - the registration is refused, such as an outcome alternative naming an event
   the artifact does not list.
+
+Registration adds one rule on top of the reader: every root the artifact
+binds must be declared. That covers each event's declaration `root` and
+every `host_globals` name, whatever `global_catalog` says. A root is
+declared when it is one of Darkmatter's own globals (`err`, `timing`) or a
+namespace one of the bundle's `namespace-schema` files declares. Anything
+else, such as a typo, refuses the registration with a `dm.host.registration`
+warning located at that string in the artifact:
+
+```json
+{ "availability": "available", "description": "Observed durations.", "root": "typo_root" }
+```
+
+gives "the lifecycle artifact `…/globals.lifecycle.json` binds `typo_root` at
+`/events/0/globals/declarations/1/root`, which neither Darkmatter nor any
+namespace of the host's catalog declares", at the line and column of
+`"typo_root"`. `md`, `md schema validate`, and DMLS all see the same refusal
+because they read the same loaded registrations. A host can run the same
+check on an artifact before it publishes it with
+`darkmatter::lifecycle::host_profile::undeclared_root(text, &catalog)`;
+Claudine's generator does this.
 
 ## What the editor does without a usable artifact
 

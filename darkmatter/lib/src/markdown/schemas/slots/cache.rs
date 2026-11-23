@@ -97,6 +97,11 @@ pub(crate) fn resolution_key(
         "template": template,
         "sources": sources,
         "slots": slots,
+        // A returned definition's imports read the verified bundle the
+        // template was met under, which no read source records.
+        "bundle": pending.verified_bundle().map(|bundle| {
+            serde_json::json!([biscuit_file::to_portable_string(bundle.root()), bundle.revision()])
+        }),
         "context": crate::markdown::compose::file_resolution_context_identity(context),
         "repository": repository.map(biscuit_file::to_portable_string),
         "home": context.home_dir().is_some(),

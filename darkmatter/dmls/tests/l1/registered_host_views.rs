@@ -312,6 +312,40 @@ fn an_invalid_replacement_clears_the_host_view_and_reports_the_failure() {
     fixture.shutdown();
 }
 
+/// A relay whose lifecycle artifact binds `typo_root`, a root no namespace
+/// declares, on its own `success` event (the manifest re-addressed) is
+/// refused at that binding before any view is derived: the document is an
+/// `md` document, and the refusal is published on the artifact.
+#[test]
+fn a_lifecycle_binding_no_namespace_declares_refuses_the_host_at_the_binding() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".relay"]);
+    let mut artifact: Value = serde_json::from_str(&relay_lifecycle_artifact()).unwrap();
+    let success = artifact["events"].as_array_mut().unwrap().iter_mut().find(|entry| entry["name"] == "success").unwrap();
+    let timing = success["globals"]["declarations"].as_array_mut().unwrap().iter_mut().find(|entry| entry["root"] == "timing").unwrap();
+    timing["root"] = json!("typo_root");
+    let mut edited = serde_json::to_string_pretty(&artifact).unwrap();
+    edited.push('\n');
+    let line = line_containing(&edited, "\"typo_root\"");
+    let character = edited.lines().nth(line as usize).unwrap().find("\"typo_root\"").unwrap() as u64;
+    let bundle = Bundle::relay().with_member("schemas/globals.lifecycle.json", &edited);
+    bundle.write_to(&root.join("home/.relay"));
+    let mut fixture = start(&workspace);
+    let (document, diagnostics) = open_text(&mut fixture, &workspace, "notes/relay.md", MOTIVATING);
+
+    assert!(with_code(&diagnostics, UNAVAILABLE).is_empty(), "no relay stacks: {diagnostics:#?}");
+    assert!(!completion_at(&mut fixture, &document, "{{ seq.na").contains(&"seq.name".to_string()));
+    fixture.flush_server_with("textDocument/documentSymbol", json!({ "textDocument": { "uri": document.uri } }));
+    let refused = fixture.take_latest_diagnostics_ending("home/.relay/schemas/globals.lifecycle.json").expect("published on the artifact");
+    let refused = with_code(&refused, REGISTRATION);
+    assert_eq!(refused.len(), 1, "{refused:#?}");
+    assert_eq!(refused[0]["range"]["start"], json!({ "line": line, "character": character }), "{refused:#?}");
+    assert!(refused[0]["message"].as_str().unwrap().contains("binds `typo_root`"), "{refused:#?}");
+    fixture.shutdown();
+}
+
 /// In-process: the document's analysis snapshot and schema are keyed on the
 /// registration's revision. An invalidation of an unchanged file keeps both;
 /// a changed member installs a new revision and replaces both.
@@ -361,4 +395,26 @@ fn the_analysis_snapshot_follows_the_registration_revision() {
     assert!(!Arc::ptr_eq(&first.analysis, &changed.analysis), "a new revision is a new snapshot");
     let bundle = |overlay: &DocumentOverlay| overlay.bundle().map(|bundle| bundle as *const _);
     assert_ne!(bundle(&first), bundle(&changed), "and a reassembled schema");
+}
+
+/// A closed document `$schema` holds over a registered host's root union:
+/// the undeclared key is reported where it is written, and the declared
+/// ones (the document's and the host arm's) are not.
+#[test]
+fn a_closed_document_schema_refuses_an_undeclared_key_over_a_registered_root_union() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".acme"]);
+    let union = "kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    - prompt: string(required)\n      sections: null\n    - sections: object(required)\n      prompt: null\n";
+    Bundle::acme().with_file("schemas/inline.yaml", union).write_to(&root.join("home/.acme"));
+    let mut fixture = start(&workspace);
+    let text = "---\n$schema:\n  $constraints: { closed: true }\n  team: string\n  prompt: string\nteam: core\nprompt: hi\nextra: hi\n---\nBody\n";
+    let (_, diagnostics) = open_text(&mut fixture, &workspace, "notes/inline.md", text);
+
+    let unknown = with_code(&diagnostics, "dm.schema.unknown_key");
+    let [diagnostic] = unknown.as_slice() else { panic!("one unknown key: {diagnostics:#?}") };
+    assert_eq!(diagnostic["range"]["start"]["line"], json!(line_containing(text, "extra: hi")), "{diagnostic:#?}");
+    assert!(with_code(&diagnostics, REGISTRATION).is_empty(), "{diagnostics:#?}");
+    fixture.shutdown();
 }
