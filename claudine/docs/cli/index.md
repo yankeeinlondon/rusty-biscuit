@@ -51,6 +51,10 @@ Administration:
   errors            Show the diagnostic error-code contract (codes, dispositions, details)
 ```
 
+One maintenance command is hidden from this list:
+[`claudine registrations`](./registrations.md) lists, prints, and publishes
+the schema files Claudine registers with Darkmatter.
+
 ## CLI Switch Overview
 
 - all _switches_ start with a `--{name}` signature although in some cases you may find a _short form_ alias that takes the `-{alias}` format

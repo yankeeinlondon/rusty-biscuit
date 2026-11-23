@@ -1,5 +1,9 @@
+# Claudine's `group` global: the settled legs and variables of a group that
+# its events read. Hand-maintained; see claudine/docs/topics/schemas.md.
+# Which events may read it is Claudine's binding catalog, not this file.
 kind: namespace-schema
 namespace: group
+description: "The current group: how each leg settled and the group's own variables."
 $schema:
     legs:
         "<string>":

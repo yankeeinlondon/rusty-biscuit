@@ -1624,8 +1624,9 @@ its `ctx`; `err` and `timing` members equal the runtime
 document `$schema` naming one is an ordinary tagged schema whose globals
 become optional document properties (no catalog-specific refusal).
 Hosts declare their own globals in a catalog of the same format
-(`claudine/schemas/globals.yaml`, loaded with `GlobalCatalog::from_documents`
-and the host's requirements). DMLS hovers and completes host globals from the
+(Claudine: one `kind: namespace-schema` file per global in
+`claudine/registration/`, prepared with `namespaces::prepare_catalog` over the
+embedded inventory and checked against the host's requirements). DMLS hovers and completes host globals from the
 selected registered host's namespace catalog (`RegisteredHostProfile::globals`),
 treating each as `ExecutionDependent` (DMLS cannot know loop/group
 membership); schema roots are never searched for a host catalog. Inside an

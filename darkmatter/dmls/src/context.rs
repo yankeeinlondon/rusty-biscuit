@@ -474,7 +474,7 @@ pub(crate) mod test_support {
     }
 
     /// Writes Claudine's schema `bundle` (`(file name, text)` pairs including
-    /// `claudine.yaml`) into `dir`, plus the `claudine.yaml` trigger's payload
+    /// `composition.yaml`) into `dir`, plus the `composition.yaml` trigger's payload
     /// as the plain `$schema` document `claudine-payload.yaml`, and returns
     /// that document's path.
     ///
@@ -488,8 +488,8 @@ pub(crate) mod test_support {
         }
         let (_, trigger) = bundle
             .iter()
-            .find(|(name, _)| *name == "claudine.yaml")
-            .expect("the bundle holds claudine.yaml");
+            .find(|(name, _)| *name == "composition.yaml")
+            .expect("the bundle holds composition.yaml");
         let start = trigger.find("\n$schema:").expect("the trigger has a `$schema` payload") + 1;
         let path = dir.join("claudine-payload.yaml");
         std::fs::write(&path, &trigger[start..]).expect("write payload");

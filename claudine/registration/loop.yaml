@@ -1,5 +1,9 @@
+# Claudine's `loop` global: the values a loop's passes read. Hand-maintained;
+# see claudine/docs/topics/schemas.md. Which events may read it is Claudine's
+# binding catalog, not this file.
 kind: namespace-schema
 namespace: loop
+description: "The nearest enclosing loop's current pass and the previous pass's result."
 $schema:
     count: "number(integer; min(1)) -> The one-based iteration."
     is_first: "boolean -> Whether this is the first iteration."

@@ -24,6 +24,7 @@ pub mod frontmatter_excerpt;
 mod guardrails;
 pub mod hints;
 pub mod inline_prompt;
+pub mod inventory;
 #[cfg(test)]
 pub(crate) mod interpolation_conformance;
 pub(crate) mod json_util;

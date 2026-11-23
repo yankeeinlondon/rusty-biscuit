@@ -152,8 +152,9 @@ let text = darkmatter::lifecycle::host_profile::lifecycle_artifact(
 `namespaces::prepare_catalog` returns the same map and hash after preparing
 the namespace files, so a host can generate both from one preparation.
 Commit the result in the bundle, and add a test that compares it with the
-committed file. `just regen-lifecycle-artifact` in `claudine/` rewrites
-Claudine's. Regenerate it whenever a namespace file, a library it imports,
+committed file. The root `just shipped-schemas` rewrites Claudine's, after
+loading the candidate against the namespace files' current hash. Regenerate
+it whenever a namespace file, a library it imports,
 the registration, or the effect catalog changes.
 
 ## Reading it

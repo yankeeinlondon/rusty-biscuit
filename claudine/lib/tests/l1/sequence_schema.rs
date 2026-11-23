@@ -1,5 +1,5 @@
-//! The sequence document schema: `claudine/schemas/sequence.yaml` (a trigger)
-//! and its type library `sequence-types.yaml`, judged through the same
+//! The sequence document schema: `claudine/registration/sequence-document.yaml` (a trigger)
+//! and its type library `sequence.yaml`, judged through the same
 //! trigger discovery, effective schema, and validation DMLS and
 //! `md schema validate` use.
 //!
@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 
 use claudine::composition::{CompositionError, resolve_composition_source_in_context, resolve_sequence_plan};
 
-use crate::claudine_schemas::{Discovered, SchemaRepo, embedded_bundle, problems, shipped_bundle};
+use crate::claudine_schemas::{Discovered, SchemaRepo, problems, shipped_bundle};
 
 /// What the schema must decide for one fixture.
 enum Expect {
@@ -40,14 +40,14 @@ fn assert_sequence_rows(rows: &[(&str, &str, Expect)]) {
 fn assert_row(repo: &SchemaRepo, discovered: &Discovered, name: &str, text: &str, expect: &Expect) {
     let path = repo.write_document(&format!("{name}.md"), text);
     assert!(
-        discovered.selects(&path, include_str!("../../../schemas/sequence.yaml")),
-        "{name}: selects sequence.yaml"
+        discovered.selects(&path, include_str!("../../../registration/sequence-document.yaml")),
+        "{name}: selects sequence-document.yaml"
     );
     let report = discovered
         .judge(
             &path,
-            include_str!("../../../schemas/claudine.yaml"),
-            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../registration/composition.yaml"),
+            include_str!("../../../registration/inline-composition.yaml"),
         )
         .expect("judged")
         .report;
@@ -220,12 +220,12 @@ fn sequence_trigger_activation_follows_the_value_shape() {
         ("sequence-absent", include_str!("../fixtures/sequence-schema/sequence-absent.md")),
     ] {
         let path = repo.write_document(&format!("{name}.md"), text);
-        assert!(!discovered.selects(&path, include_str!("../../../schemas/sequence.yaml")), "{name}: not selected");
+        assert!(!discovered.selects(&path, include_str!("../../../registration/sequence-document.yaml")), "{name}: not selected");
         let judged = discovered
             .judge(
                 &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
+                include_str!("../../../registration/composition.yaml"),
+                include_str!("../../../registration/inline-composition.yaml"),
             )
             .expect("judged");
         assert!(!judged.properties.contains("sequence"), "{name}: no sequence declaration applies");
@@ -233,7 +233,7 @@ fn sequence_trigger_activation_follows_the_value_shape() {
     }
 }
 
-/// A document selecting both `claudine.yaml` and `sequence.yaml` still
+/// A document selecting both `composition.yaml` and `sequence-document.yaml` still
 /// rejects a malformed task `with`: no payload weakens the task type.
 #[test]
 fn malformed_task_with_fails_when_both_claudine_triggers_apply() {
@@ -243,15 +243,15 @@ fn malformed_task_with_fails_when_both_claudine_triggers_apply() {
         "both-triggers-malformed-with.md",
         include_str!("../fixtures/sequence-schema/both-triggers-malformed-with.md"),
     );
-    assert!(discovered.selects(&path, include_str!("../../../schemas/sequence.yaml")));
+    assert!(discovered.selects(&path, include_str!("../../../registration/sequence-document.yaml")));
     let judged = discovered
         .judge(
             &path,
-            include_str!("../../../schemas/claudine.yaml"),
-            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../registration/composition.yaml"),
+            include_str!("../../../registration/inline-composition.yaml"),
         )
         .expect("judged");
-    assert!(judged.claudine, "claudine.yaml applies too");
+    assert!(judged.claudine, "composition.yaml applies too");
     assert_eq!(
         problems(&judged.report).into_iter().map(|(path, _)| path).collect::<BTreeSet<_>>(),
         BTreeSet::from(["/sequence/0/with".to_string()])
@@ -311,8 +311,8 @@ fn sequence_rejection(repo: &SchemaRepo, path: &std::path::Path) -> Option<Compo
 
 /// The declarations a sequence document and an inline container own:
 /// `$state` and an inline task's `$schema` are typed with the shared
-/// `schema` meta-type, `template` with `object`. The disk bundle and the
-/// copy embedded in the binary give every row the same verdict.
+/// `schema` meta-type, `template` with `object`. The installed registration
+/// and the copy compiled into the binary give every row the same verdict.
 #[test]
 fn sequence_declarations_are_typed_alike_on_disk_and_embedded() {
     const VALID: &str = "---\n$schema:\n    spec: string\n$state:\n    color: string(required)\ntemplate:\n    desc: \"{{ color }}\"\nsequence:\n    - name: outer\n      $schema:\n          spec: string\n      $state: ./state.schema.yaml\n      template:\n          rank: 3\n      sequence:\n          - name: inner\n            shell: just inner\n---\nBody.\n";
@@ -326,7 +326,7 @@ fn sequence_declarations_are_typed_alike_on_disk_and_embedded() {
 
     let shipped = shipped_bundle!();
     let disk = SchemaRepo::new(&shipped);
-    let embedded = SchemaRepo::new(&[]);
+    let embedded = SchemaRepo::new(&shipped);
     let verdicts = |repo: &SchemaRepo, discovered: &Discovered| -> Vec<(bool, Vec<(String, String)>)> {
         repo.write_document("state.schema.yaml", "kind: schema\n$schema:\n    rank: number\n");
         rows.iter()
@@ -335,8 +335,8 @@ fn sequence_declarations_are_typed_alike_on_disk_and_embedded() {
                 let report = discovered
                     .judge(
                         &path,
-                        include_str!("../../../schemas/claudine.yaml"),
-                        include_str!("../../../schemas/inline-compose.yaml"),
+                        include_str!("../../../registration/composition.yaml"),
+                        include_str!("../../../registration/inline-composition.yaml"),
                     )
                     .expect("judged")
                     .report;
@@ -357,10 +357,7 @@ fn sequence_declarations_are_typed_alike_on_disk_and_embedded() {
             })
             .collect()
     };
-    let on_disk = verdicts(&disk, &disk.discover().expect("the shipped bundle loads"));
-    let in_binary = verdicts(
-        &embedded,
-        &embedded.discover_embedded(embedded_bundle(&shipped)).expect("the embedded bundle loads"),
-    );
-    assert_eq!(on_disk, in_binary, "disk and embedded verdicts agree");
+    let on_disk = verdicts(&disk, &disk.discover_installed().expect("the installed bundle loads"));
+    let in_binary = verdicts(&embedded, &embedded.discover().expect("the compiled bundle loads"));
+    assert_eq!(on_disk, in_binary, "installed and compiled verdicts agree");
 }

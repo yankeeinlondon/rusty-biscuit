@@ -1,5 +1,10 @@
+# Claudine's `seq` global: the sequence position and outputs that lifecycle
+# and sequence expressions read. Hand-maintained; see
+# claudine/docs/topics/schemas.md. Which events may read it is Claudine's
+# binding catalog, not this file.
 kind: namespace-schema
 namespace: seq
+description: "The current sequence step: its position among its siblings, its neighbors, the run's token, and the results so far; a sequence's own events read it with no current step."
 $schema:
     name: "string -> The current step's name; null in a sequence's own events."
     id: "string -> The step's unique id: its dasherized name, suffixed -2, -3, … on repeats."

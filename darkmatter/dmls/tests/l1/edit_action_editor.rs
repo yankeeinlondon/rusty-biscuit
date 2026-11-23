@@ -1,7 +1,6 @@
 //! DMLS over the lifecycle `edit` action, in an `md` document (Darkmatter's
-//! baseline) and in a Claudine document (Claudine's schemas found by trigger
-//! discovery, analyzed under the lifecycle of an explicitly registered
-//! Claudine-shaped host, [`crate::claudine_host`]):
+//! baseline) and in a Claudine document (typed and analyzed under Claudine's
+//! registration, which the [`Fixture`] repository registers):
 //! completion offers `edit`, hover shows its schema description, and a
 //! malformed operand is diagnosed where it is written, in a branch the run
 //! would not take as well as one it would.
@@ -53,17 +52,21 @@ enum Host {
     /// A repository with no registered host: Darkmatter's baseline types
     /// the document.
     Md,
-    /// Claudine's schema bundle, and the registered Claudine-shaped host
-    /// whose trigger the document's marker matches.
+    /// Claudine's registration, whose `composition.yaml` trigger the
+    /// document's selector matches.
     Claudine,
 }
 
-/// `text` as `host` opens it: a Claudine document carries the registered
-/// host's marker.
+/// `text` as `host` opens it: a Claudine document carries `agent`, which
+/// selects `composition.yaml` (the shared `initialize` event alone selects no
+/// Claudine trigger).
 fn host_text(host: Host, text: &str) -> String {
     match host {
         Host::Md => text.to_string(),
-        Host::Claudine => crate::claudine_host::marked(text),
+        Host::Claudine => {
+            let body = text.strip_prefix("---\n").expect("the document opens with frontmatter");
+            format!("---\nagent: claude\n{body}")
+        }
     }
 }
 
@@ -128,7 +131,6 @@ fn answers(host: Host, text: &str, asks: &[Ask]) -> Vec<Value> {
     let (repo, document, snapshot) = match host {
         Host::Claudine => {
             let fixture = Fixture::new(workspace.path());
-            crate::claudine_host::register(&workspace.path().join("home"), &crate::claudine_host::bundle());
             (fixture.repo(), fixture.document("doc.md", text), fixture.snapshot().with_env(env))
         }
         Host::Md => {

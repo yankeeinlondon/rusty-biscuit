@@ -20,9 +20,11 @@
 //! again changes nothing.
 //!
 //! [`setup_claudine`] is the whole of `claudine init`'s part: it publishes
-//! Claudine's host revision first, then runs this handshake, then adds the
-//! published manifest to the user's `register` list, so Darkmatter (md and
-//! DMLS) recognizes Claudine documents outside `claudine/`.
+//! Claudine's host registration first, then runs this handshake, then puts
+//! the published manifest in the user's `register` list in place of the
+//! retired `~/.claudine/darkmatter-host.yaml`, so Darkmatter (md and DMLS)
+//! recognizes Claudine documents outside `claudine/`, and last removes the
+//! retired manifest and its revision tree.
 //!
 //! User-facing guide: `claudine/docs/topics/configuration.md` ("Darkmatter's
 //! permissions").
@@ -41,7 +43,9 @@ use simplified_schema::yaml_documents::load_yaml_document;
 
 use super::persist::{PropertyPath, SaveOutcome, YamlEdit, validate_config_text};
 use super::schema::{CONFIG_DIR, CONFIG_FILE_NAME, ConfigScope};
-use crate::composition::registration::{self, HostRevision, PublishError, PublishOutcome};
+use crate::composition::registration::{
+    self, CleanupError, LegacyCleanup, PublishError, PublishOutcome, RegistrationInventory,
+};
 use crate::error::ClaudineError;
 
 /// What happened to Darkmatter's `permissions`.
@@ -119,29 +123,39 @@ pub enum SetupError {
 /// What [`setup_claudine`] did, step by step.
 #[derive(Debug)]
 pub struct ClaudineSetup {
-    /// The published (or already current) host revision.
+    /// The published (or already current) host registration.
     pub publication: PublishOutcome,
     /// Claudine's configuration write and the `permissions` handshake. Only
     /// a failure of Claudine's own write stops setup; every other failure
     /// is reported here and leaves Darkmatter's file as it was.
     pub darkmatter: Result<DarkmatterSetup, SetupError>,
-    /// The `register` entry for Claudine's manifest in `~/.darkmatter.yaml`.
+    /// The `register` entry for Claudine's manifest in `~/.darkmatter.yaml`;
+    /// [`RegisterReport::replaced`] lists the retired entries it replaced.
     pub registration: Result<RegisterReport, InitError>,
+    /// The removal of the retired registration
+    /// ([`registration::remove_legacy_registration`]); `None` when the
+    /// `register` entry could not be written, so nothing was removed.
+    pub cleanup: Option<Result<LegacyCleanup, CleanupError>>,
 }
 
 /// The whole of Claudine's setup with Darkmatter, in order: publish
-/// Claudine's host revision ([`registration::publish`]), write Claudine's
+/// Claudine's host registration ([`registration::publish`]), write Claudine's
 /// configuration of `scope` and complete the `permissions` handshake
 /// ([`setup_with_darkmatter`]), then register the published manifest in
-/// the user's `~/.darkmatter.yaml` (an entry naming the same manifest, in
-/// any spelling, is kept as the one entry). Registration is always the
-/// user's: the manifest lives under the home, whichever scope was set up.
+/// the user's `~/.darkmatter.yaml`
+/// ([`replace_manifest_registration`](dm_init::replace_manifest_registration):
+/// entries naming the retired manifest or the new one, in any spelling,
+/// become the one entry), and once that succeeds remove the retired
+/// registration under `~/.claudine`. A handshake that failed (a
+/// `permissions` conflict, say) still registers the manifest. Registration
+/// is always the user's: the manifest lives under the home, whichever scope
+/// was set up, and a repository's `register` list is never changed.
 ///
 /// ## Errors
 ///
 /// - [`SetupError::NoHome`] or [`SetupError::NotARepository`] before
 ///   anything is written;
-/// - [`SetupError::Publish`] when the revision cannot be published; nothing
+/// - [`SetupError::Publish`] when the registration cannot be published; nothing
 ///   else is written;
 /// - [`SetupError::Claudine`] when Claudine's own write fails.
 pub fn setup_claudine(
@@ -151,13 +165,19 @@ pub fn setup_claudine(
 ) -> Result<ClaudineSetup, SetupError> {
     let home = context.home_dir().ok_or(SetupError::NoHome)?.to_path_buf();
     claudine_config_path(context, scope)?;
-    let publication = registration::publish(&home, HostRevision::claudine()).map_err(SetupError::Publish)?;
+    let publication = registration::publish(&home, RegistrationInventory::claudine()).map_err(SetupError::Publish)?;
     let darkmatter = match setup_with_darkmatter(context, scope, write_claudine) {
         Err(SetupError::Claudine(error)) => return Err(SetupError::Claudine(error)),
         other => other,
     };
-    let registration = dm_init::register_manifest(context, DarkmatterScope::User, registration::MANIFEST_REFERENCE);
-    Ok(ClaudineSetup { publication, darkmatter, registration })
+    let registration = dm_init::replace_manifest_registration(
+        context,
+        DarkmatterScope::User,
+        registration::MANIFEST_REFERENCE,
+        &registration::legacy_manifest_path(&home),
+    );
+    let cleanup = registration.is_ok().then(|| registration::remove_legacy_registration(&home));
+    Ok(ClaudineSetup { publication, darkmatter, registration, cleanup })
 }
 
 /// Claudine's configuration file of `scope` that `context` names.

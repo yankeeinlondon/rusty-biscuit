@@ -1,6 +1,6 @@
 //! Every shipped document Claudine runs, judged by both of its gates: the
 //! schema verdict (trigger discovery, effective schema, and validation over
-//! the shipped `claudine/schemas/` bundle, the path DMLS and
+//! the shipped `claudine/registration/` bundle, the path DMLS and
 //! `md schema validate` take) and Claudine's lifecycle parser
 //! (`2026-10-30-claudine-recursive-schemas`, Phase 5).
 //!
@@ -121,16 +121,16 @@ fn assert_shipped(shipped: &Shipped) {
     let judged = discovered
         .judge(
             &path,
-            include_str!("../../../schemas/claudine.yaml"),
-            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../registration/composition.yaml"),
+            include_str!("../../../registration/inline-composition.yaml"),
         )
         .expect("judged");
-    let sequence = discovered.selects(&path, include_str!("../../../schemas/sequence.yaml"));
+    let sequence = discovered.selects(&path, include_str!("../../../registration/sequence-document.yaml"));
 
     assert_eq!(
         (judged.claudine, judged.inline, sequence),
         (selects.claudine, selects.inline, selects.sequence),
-        "{label}: (claudine.yaml, inline-compose.yaml, sequence.yaml) selection"
+        "{label}: (composition.yaml, inline-composition.yaml, sequence-document.yaml) selection"
     );
     // The selected payloads are what judged the document, so a valid verdict
     // is not vacuous. A list `$schema` lowers to an `anyOf` root whose

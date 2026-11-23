@@ -192,7 +192,7 @@ pub struct Prepared {
     validators: CompiledValidators,
     conversion: Arc<ConversionPlan>,
     /// The schema's defaults, compiled once.
-    defaults: DefaultPlan,
+    defaults: Arc<DefaultPlan>,
     /// The directory a relative file value resolves from; `context`'s `cwd`
     /// when `None`.
     base_dir: Option<PathBuf>,
@@ -225,7 +225,13 @@ impl Prepared {
         base_dir: Option<PathBuf>,
         context: biscuit_file::FileResolutionContext,
     ) -> Result<Self, SchemaError> {
-        Self::compiled_through(json_schema, base_dir, context, &SHARED_VALIDATOR_CACHE)
+        let cache = &SHARED_VALIDATOR_CACHE;
+        // The shared cache's plans are per canonical schema for the process,
+        // so a schema prepared once per document or file (a host's kind
+        // definition, say) compiles its defaults once, not per call.
+        Self::assemble(json_schema, base_dir, context, cache, |schema| {
+            DefaultPlan::for_identity(cache.canonical_digest_shared(schema).identity, schema, cache)
+        })
     }
 
     /// [`Self::new`], compiling through `cache` instead of the process-wide
@@ -238,9 +244,21 @@ impl Prepared {
         context: biscuit_file::FileResolutionContext,
         cache: &ValidatorCache,
     ) -> Result<Self, SchemaError> {
+        Self::assemble(json_schema, base_dir, context, cache, |schema| {
+            DefaultPlan::compile(Arc::clone(schema), cache).map(Arc::new)
+        })
+    }
+
+    fn assemble(
+        json_schema: Arc<Value>,
+        base_dir: Option<PathBuf>,
+        context: biscuit_file::FileResolutionContext,
+        cache: &ValidatorCache,
+        defaults: impl FnOnce(&Arc<Value>) -> Result<Arc<DefaultPlan>, SchemaError>,
+    ) -> Result<Self, SchemaError> {
         let validators = CompiledValidators::build(&json_schema, cache, base_dir.as_deref(), &context)?;
         let conversion = ConversionPlan::for_hashed(cache.shared_schema_hash(&json_schema));
-        let defaults = DefaultPlan::compile(Arc::clone(&json_schema), cache)?;
+        let defaults = defaults(&json_schema)?;
         Ok(Self {
             json_schema,
             validators,

@@ -1,5 +1,5 @@
 # The eleven optional linking keys a linked skill, command, or agent may carry.
-# Hand-maintained; see README.md. The types keep every form the linking reader
+# Hand-maintained; see claudine/docs/topics/schemas.md. The types keep every form the linking reader
 # and the providers accept, rather than one provider's preferred output.
 kind: schema
 types:

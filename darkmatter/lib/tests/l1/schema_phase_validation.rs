@@ -558,6 +558,7 @@ fn shipped_schema_and_trigger_corpus_parses_passively() {
     let root = repo_root();
     let schema_dirs = [
         root.join("darkmatter/docs/schemas"),
+        root.join("claudine/registration"),
         root.join("claudine/schemas"),
         root.join("claudine/docs/schemas"),
         root.join("schemas"),

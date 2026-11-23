@@ -76,10 +76,96 @@ pub struct VerifiedSnapshot {
     bytes: BTreeMap<String, Arc<[u8]>>,
     dependencies: Vec<HostDependency>,
     candidates: Vec<PathBuf>,
+    /// The bundle name of a snapshot verified from memory
+    /// ([`Self::from_embedded`]); `None` for an installed one.
+    embedded: Option<String>,
 }
 
 #[allow(missing_docs)]
 impl VerifiedSnapshot {
+    /// The snapshot of a bundle compiled into a host program: the format 2
+    /// manifest `manifest` (file name `manifest_name`) and every member's
+    /// bytes in `members`, keyed by bundle-relative path, each checked
+    /// against the manifest's digest exactly as [`load_snapshot`] checks an
+    /// installed one. Nothing is read from, or probed on, the disk.
+    ///
+    /// The bundle is rooted at the virtual directory `<name>`, the root of
+    /// [`BundleSources::embedded`](simplified_schema::resolve::bundle::BundleSources::embedded):
+    /// the manifest and every [`BundleMember::location`] lie under it and
+    /// name no host file. [`Self::dependencies`] and [`Self::candidates`]
+    /// are empty, since nothing on disk can change the snapshot.
+    ///
+    /// ## Errors
+    ///
+    /// The first reason the bundle cannot be used, as for an installed
+    /// bundle: an invalid or format 1 manifest, a member the manifest lists
+    /// that `members` lacks, or one whose bytes do not match its digest. A
+    /// `name` that is not one plain path segment is refused too.
+    pub fn from_embedded(
+        name: &str,
+        manifest_name: &str,
+        manifest: &[u8],
+        members: &BTreeMap<String, Arc<[u8]>>,
+    ) -> Result<Self, Box<SnapshotRefusal>> {
+        let root = PathBuf::from(format!("<{name}>"));
+        let path = root.join(manifest_name);
+        let refuse = |refusal: Refusal, legacy: bool| Reads::default().refuse(refusal, legacy);
+        if !simplified_schema::embedded::is_plain_segment(name) || name.contains(['<', '>']) {
+            let message = format!("the embedded bundle name `{name}` is not one plain path segment");
+            return Err(refuse(Refusal { code: HOST_REGISTRATION_CODE, file: path, at: None, member: None, message }, false));
+        }
+        let read = manifest::read_v2(&path, manifest.to_vec()).map_err(|refusal| match refusal {
+            ManifestRefusal::Format1(refusal) => refuse(refusal, true),
+            ManifestRefusal::Invalid(refusal) => refuse(refusal, false),
+        })?;
+        let MemberSpec { files, lifecycle, functions } = read.embedded_members(&path).map_err(|refusal| refuse(refusal, false))?;
+        let mut table: BTreeMap<String, Arc<[u8]>> = BTreeMap::new();
+        for member in self::members(&files, &lifecycle, &functions) {
+            let at = member.line.zip(member.column);
+            let refuse_member = |message: String| {
+                refuse(
+                    Refusal { code: HOST_REGISTRATION_CODE, file: path.clone(), at, member: Some(member.field.clone()), message },
+                    false,
+                )
+            };
+            let bytes = members
+                .get(&member.path)
+                .ok_or_else(|| refuse_member(format!("`{}` is missing from the embedded bundle", member.reference)))?;
+            let actual = content_hash(bytes);
+            if actual != member.digest {
+                return Err(refuse_member(format!(
+                    "`{}` does not match its digest (the manifest lists `{}`, the embedded bytes hash to `{actual}`)",
+                    member.reference, member.digest
+                )));
+            }
+            table.insert(member.path.clone(), Arc::clone(bytes));
+        }
+        let revision = revision(&read, &files, &lifecycle, &functions);
+        let ReadManifestV2 { manifest: accepted, .. } = read;
+        Ok(Self {
+            host: accepted.host,
+            version: accepted.version,
+            manifest: path,
+            manifest_hash: content_hash(manifest),
+            revision,
+            bundle_root: root,
+            files,
+            lifecycle,
+            functions,
+            bytes: table,
+            dependencies: Vec::new(),
+            candidates: Vec::new(),
+            embedded: Some(name.to_string()),
+        })
+    }
+
+    /// The bundle name of a snapshot built by [`Self::from_embedded`];
+    /// `None` for an installed bundle.
+    #[must_use]
+    pub fn embedded_bundle(&self) -> Option<&str> {
+        self.embedded.as_deref()
+    }
+
     #[must_use]
     pub fn host(&self) -> &str {
         &self.host
@@ -115,7 +201,8 @@ impl VerifiedSnapshot {
         &self.revision
     }
 
-    /// The manifest's directory, which every member path is relative to.
+    /// The manifest's directory, which every member path is relative to:
+    /// the virtual `<name>` of an embedded bundle.
     #[must_use]
     pub fn bundle_root(&self) -> &Path {
         &self.bundle_root
@@ -393,6 +480,7 @@ fn attempt(
         bytes: table,
         dependencies: Vec::new(),
         candidates: Vec::new(),
+        embedded: None,
     })
 }
 

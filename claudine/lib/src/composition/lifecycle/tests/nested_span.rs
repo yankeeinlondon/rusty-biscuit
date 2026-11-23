@@ -323,10 +323,10 @@ fn single_pass_inventory_matches_the_authored_claudine_schema() {
     let load = |text: &str| -> serde_json::Value {
         biscuit_file::serde_yaml_ng::from_str(text).expect("schema is YAML")
     };
-    let claudine = load(include_str!("../../../../../schemas/claudine.yaml"));
-    let lifecycle = load(include_str!("../../../../../schemas/lifecycle.yaml"));
+    let shared = load(include_str!("../../../../../registration/shared.yaml"));
+    let lifecycle = load(include_str!("../../../../../registration/lifecycle-events.yaml"));
 
-    let schema_events: BTreeSet<&str> = claudine["$schema"]
+    let schema_events: BTreeSet<&str> = shared["types"]["common-attributes"]
         .as_object()
         .unwrap()
         .iter()

@@ -152,20 +152,33 @@ pub struct RegisteredTrigger {
     /// Its bundle-relative path (`schemas/composition.yaml`): its identity
     /// wherever the bundle is installed.
     pub bundle_path: String,
+    /// Where its text came from: the installed file, or for an embedded
+    /// bundle ([`load_embedded`]) the virtual `<name>/schemas/…` path, which
+    /// names no host file. Diagnostics and inspection name it.
+    pub location: PathBuf,
     /// Its conditions as admitted against the names `md` owns: every
     /// matching alternative requires a key no `md` document has.
     pub identifying: IdentifyingTrigger,
 }
 
 impl RegisteredTrigger {
-    /// The trigger file.
+    /// The installed trigger file.
     ///
     /// ## Panics
     ///
-    /// Never: a registered trigger is always a file trigger.
+    /// For a trigger of an embedded bundle ([`load_embedded`]), whose source
+    /// is [`TriggerSource::Embedded`](simplified_schema::triggers::TriggerSource::Embedded)
+    /// and names no host file. Code that may meet one reads
+    /// [`Self::location`] or the trigger's source instead.
     #[must_use]
     pub fn path(&self) -> &Path {
-        self.trigger.source.path().expect("a registered trigger is a file")
+        self.trigger.source.path().expect("an installed registered trigger is a file")
+    }
+
+    /// Whether this trigger came from an embedded bundle.
+    #[must_use]
+    pub const fn is_embedded(&self) -> bool {
+        matches!(self.trigger.source, simplified_schema::triggers::TriggerSource::Embedded { .. })
     }
 }
 
@@ -227,7 +240,7 @@ impl RegisteredHostProfile {
             .iter()
             .filter_map(|&index| Some((index, self.triggers.get(index)?)))
             .filter(|(_, trigger)| trigger.trigger.envelope.payload.is_some())
-            .map(|(index, trigger)| merge::MatchedPayload { trigger: index, file: trigger.path(), payload: &trigger.payload })
+            .map(|(index, trigger)| merge::MatchedPayload { trigger: index, file: &trigger.location, payload: &trigger.payload })
             .collect();
         let result = merge::check(&payloads).map(Arc::new);
         self.checked.lock().expect("checked layers poisoned").push((key, result.clone()));
@@ -694,6 +707,49 @@ pub fn manifest_identity(
     Ok(PathIdentity::new(&canonical))
 }
 
+/// [`manifest_identity`] for an entry whose manifest may be missing: the
+/// identity of the file the entry would open, from the first location its
+/// resolution probes in the context captured for `declared_in`. `None` for a
+/// malformed or remote reference, or one that names no location.
+pub(crate) fn manifest_location_identity(
+    reference: &str,
+    declared_in: &Path,
+    context: &FileResolutionContext,
+) -> Option<PathIdentity> {
+    let parsed = FileReference::new(reference).ok()?;
+    if parsed.class().kind == FileReferenceKind::Url {
+        return None;
+    }
+    let detailed = parsed.resolve_detailed(&anchored_at(context, declared_in));
+    let location = match detailed.matched_path() {
+        Some(path) => path.to_path_buf(),
+        None => detailed.probed_paths().next()?,
+    };
+    Some(location_identity(&location))
+}
+
+/// The identity of `path` whether or not it exists: its nearest existing
+/// ancestor canonicalized, with the missing rest appended, so a missing file
+/// under a linked folder compares equal to its other spellings. Equals
+/// [`manifest_identity`]'s for an existing file.
+pub(crate) fn location_identity(path: &Path) -> PathIdentity {
+    let mut missing = Vec::new();
+    let mut existing = path;
+    loop {
+        if let Ok(canonical) = canonicalize_simplified(existing) {
+            let full = missing.iter().rev().fold(canonical, |path: PathBuf, name| path.join(name));
+            return PathIdentity::new(&full);
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                missing.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return PathIdentity::new(path),
+        }
+    }
+}
+
 /// The existing local file `reference` names in `context`.
 fn resolve_local(reference: &str, context: &FileResolutionContext) -> Result<PathBuf, String> {
     let parsed = FileReference::new(reference).map_err(|error| format!("`{reference}` is not a file reference: {error}"))?;
@@ -751,9 +807,108 @@ fn load_manifest(path: &Path, context: &FileResolutionContext, owned: &BTreeSet<
         };
         Refused::one(refusal, dedup(watches))
     })?;
+    profile_of(snapshot, context, owned)
+}
+
+/// The profile of the embedded bundle `snapshot`
+/// ([`VerifiedSnapshot::from_embedded`]): every member classified and
+/// prepared from its verified bytes inside its virtual root, exactly as an
+/// installed bundle's members are, with no disk read. Each trigger's source
+/// is [`TriggerSource::Embedded`](simplified_schema::triggers::TriggerSource::Embedded)
+/// named by its bundle path (`embedded:claudine/schemas/composition.yaml`),
+/// so origins and traces never name a host file. A host compiles its own
+/// bundle in this way to judge documents in process without an installed
+/// registration.
+///
+/// `prepared` serves payloads the host prepared ahead of time, by trigger
+/// bundle path; a trigger it serves is not resolved again. The host
+/// vouches that each served payload was prepared from that trigger's
+/// verified bytes, with every check registration runs ([`prepare_embedded_payload`]).
+///
+/// ## Errors
+///
+/// Every refusal, as for an installed manifest; a snapshot that is not
+/// embedded is refused.
+pub fn load_embedded(
+    snapshot: VerifiedSnapshot,
+    owned: &BTreeSet<String>,
+    prepared: &dyn Fn(&str) -> Option<ResolvedPayload>,
+) -> Result<RegisteredHostProfile, Vec<bundle::SnapshotRefusal>> {
+    let as_refusal = |refusal: Refusal| bundle::SnapshotRefusal {
+        code: refusal.code,
+        message: refusal.message,
+        file: refusal.file,
+        line: refusal.at.map(|(line, _)| line),
+        column: refusal.at.map(|(_, column)| column),
+        member: refusal.member,
+        legacy_format: false,
+        dependencies: Vec::new(),
+        candidates: Vec::new(),
+    };
+    if snapshot.embedded_bundle().is_none() {
+        return Err(vec![as_refusal(Refusal {
+            code: HOST_REGISTRATION_CODE,
+            file: snapshot.manifest().to_path_buf(),
+            at: None,
+            member: None,
+            message: "the snapshot was read from disk; load it through its `register` entry".to_string(),
+        })]);
+    }
+    let context = embedded_context(&snapshot);
+    profile_with(snapshot, &context, owned, prepared)
+        .map_err(|refused| refused.refusals.into_iter().map(as_refusal).collect())
+}
+
+/// The context an embedded bundle prepares in: detached at its virtual
+/// root, with no home and no environment, so nothing outside the bundle's
+/// verified bytes can be reached through it.
+fn embedded_context(snapshot: &VerifiedSnapshot) -> FileResolutionContext {
+    FileResolutionContext::from_snapshot(snapshot.bundle_root(), None, std::collections::HashMap::new())
+}
+
+/// The embedded trigger at bundle path `path` of `snapshot`
+/// ([`VerifiedSnapshot::from_embedded`]), its payload resolved and checked
+/// as [`load_embedded`] resolves it: what a host records ahead of time and
+/// later serves through `load_embedded`'s `prepared`. `Ok(None)` when the
+/// member is not a schema trigger.
+///
+/// ## Errors
+///
+/// Why the member does not load as a registered trigger.
+pub fn prepare_embedded_payload(
+    snapshot: &VerifiedSnapshot,
+    path: &str,
+    owned: &BTreeSet<String>,
+) -> Result<Option<ResolvedPayload>, String> {
+    let name = snapshot.embedded_bundle().ok_or_else(|| "the snapshot is not embedded".to_string())?;
+    let member = snapshot.files().iter().find(|member| member.path == path).ok_or_else(|| format!("`{path}` is not a member"))?;
+    let text = member_text(snapshot, member).ok_or_else(|| format!("`{path}` is not UTF-8 text"))?;
+    if !matches!(member_kind(text, &member.location)?, MemberKind::Trigger) {
+        return Ok(None);
+    }
+    let sources = BundleSources::embedded(name, snapshot.bytes().clone()).map_err(|error| error.to_string())?;
+    let context = embedded_context(snapshot);
+    let anchor = anchored_at(&context, &member.location);
+    let (loaded, _) =
+        resolve_bundle::with(&sources, || load_trigger(member, text, &anchor, &context, owned, Some(name), &|_| None));
+    loaded.map(|trigger| Some(trigger.payload)).map_err(|refusal| refusal.message)
+}
+
+/// The profile of `snapshot`, prepared in `context`.
+fn profile_of(snapshot: VerifiedSnapshot, context: &FileResolutionContext, owned: &BTreeSet<String>) -> Result<RegisteredHostProfile, Refused> {
+    profile_with(snapshot, context, owned, &|_| None)
+}
+
+fn profile_with(
+    snapshot: VerifiedSnapshot,
+    context: &FileResolutionContext,
+    owned: &BTreeSet<String>,
+    prepared: &dyn Fn(&str) -> Option<ResolvedPayload>,
+) -> Result<RegisteredHostProfile, Refused> {
     let manifest_hash = snapshot.manifest_hash().to_string();
+    let path = snapshot.manifest().to_path_buf();
     let snapshot = Arc::new(snapshot);
-    let members = prepare_members(&snapshot, context, owned);
+    let members = prepare_members(&snapshot, context, owned, prepared);
     let mut candidates: Vec<PathBuf> = snapshot.candidates().to_vec();
     candidates.extend(members.missing.iter().cloned());
     let candidates = dedup(candidates);
@@ -767,7 +922,7 @@ fn load_manifest(path: &Path, context: &FileResolutionContext, owned: &BTreeSet<
     Ok(RegisteredHostProfile {
         host: snapshot.host().to_string(),
         version: snapshot.version().to_string(),
-        manifest: ManifestIdentity { path: path.to_path_buf(), content_hash: manifest_hash },
+        manifest: ManifestIdentity { path, content_hash: manifest_hash },
         entries: Vec::new(),
         triggers,
         kinds,
@@ -818,9 +973,19 @@ struct Label {
 
 /// Classifies and prepares every member of `snapshot` from its verified
 /// bytes alone.
-fn prepare_members(snapshot: &VerifiedSnapshot, context: &FileResolutionContext, owned: &BTreeSet<String>) -> Members {
+fn prepare_members(
+    snapshot: &VerifiedSnapshot,
+    context: &FileResolutionContext,
+    owned: &BTreeSet<String>,
+    prepared: &dyn Fn(&str) -> Option<ResolvedPayload>,
+) -> Members {
     let mut members = Members::default();
-    let sources = match BundleSources::on_disk(snapshot.bundle_root(), snapshot.bytes().clone()) {
+    let embedded = snapshot.embedded_bundle();
+    let sources = match embedded {
+        Some(name) => BundleSources::embedded(name, snapshot.bytes().clone()),
+        None => BundleSources::on_disk(snapshot.bundle_root(), snapshot.bytes().clone()),
+    };
+    let sources = match sources {
         Ok(sources) => sources,
         Err(error) => {
             members.refusals.push(Refusal {
@@ -852,7 +1017,8 @@ fn prepare_members(snapshot: &VerifiedSnapshot, context: &FileResolutionContext,
         let anchor = anchored_at(context, &member.location);
         match member_kind(text, &member.location) {
             Ok(MemberKind::Trigger) => {
-                let (loaded, reads) = resolve_bundle::with(&sources, || load_trigger(member, text, &anchor, context, owned));
+                let (loaded, reads) =
+                    resolve_bundle::with(&sources, || load_trigger(member, text, &anchor, context, owned, embedded, prepared));
                 members.missing.extend(reads.missing);
                 match loaded {
                     Ok(trigger) => {
@@ -1065,6 +1231,8 @@ fn load_trigger(
     anchor: &FileResolutionContext,
     context: &FileResolutionContext,
     owned: &BTreeSet<String>,
+    embedded: Option<&str>,
+    prepared: &dyn Fn(&str) -> Option<ResolvedPayload>,
 ) -> Result<RegisteredTrigger, Refusal> {
     let path = &member.location;
     let refuse = |code: &'static str, at: Option<(usize, usize)>, message: String| Refusal {
@@ -1092,13 +1260,25 @@ fn load_trigger(
             format!("the trigger could match a document `md` owns, so it cannot identify the host: {refusal}"),
         )
     })?;
-    let trigger = LoadedTrigger::from_file(path.clone(), Arc::clone(&text), envelope, context.base_dir().to_path_buf());
+    let mut trigger = LoadedTrigger::from_file(path.clone(), Arc::clone(&text), envelope, context.base_dir().to_path_buf());
     // A registered trigger is its own source: its payload resolves from its
     // file, never through the document's schema roots. It may be a root
     // union, which the host's checked layer owns.
-    let payload = resolve_registered_trigger_payload(&trigger, anchor, crate::markdown::schemas::embedded::SHIPPED_SOURCES)
-        .map_err(|error| refuse(HOST_REGISTRATION_CODE, None, format!("the trigger's payload does not load: {error}")))?;
-    Ok(RegisteredTrigger { trigger, payload, bundle_path: member.path.clone(), identifying })
+    let mut payload = match prepared(&member.path) {
+        Some(payload) => payload,
+        None => resolve_registered_trigger_payload(&trigger, anchor, crate::markdown::schemas::embedded::SHIPPED_SOURCES)
+            .map_err(|error| refuse(HOST_REGISTRATION_CODE, None, format!("the trigger's payload does not load: {error}")))?,
+    };
+    // An embedded trigger resolved from its virtual path; from here on it is
+    // known by its bundle identity, never as a file.
+    // Its payload's dependency and probe paths are virtual too: nothing on
+    // disk can change an embedded payload, so none is kept.
+    if let Some(bundle) = embedded {
+        trigger.source = simplified_schema::triggers::TriggerSource::Embedded { bundle: bundle.to_string(), name: member.path.clone() };
+        payload.dependencies.clear();
+        payload.searched.clear();
+    }
+    Ok(RegisteredTrigger { trigger, payload, bundle_path: member.path.clone(), location: path.clone(), identifying })
 }
 
 #[cfg(test)]

@@ -102,7 +102,6 @@ mod handle_repo_config;
 mod handoff_owners;
 mod home_lookup_round_trip;
 mod hooks_cli;
-mod host_registration_refresh;
 // Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
 // binaries, which only `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -241,6 +240,7 @@ mod provider_error_finalize;
 mod provider_tail_launch;
 mod provider_tail_notice;
 mod provider_tail_ownership;
+mod registrations_command;
 mod run_harness_loop_call_sites;
 mod setter_after_switch;
 mod sequence_cli;

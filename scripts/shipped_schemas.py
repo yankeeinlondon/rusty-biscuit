@@ -15,11 +15,15 @@ section), and only then prints it on stdout; a refusal exits 1 and prints
 nothing. This script runs the three in dependency order and passes each one
 the candidates already emitted below it as `--lower <owner>=<path>`, so a
 generator also refuses when the lower artifact it validated against is not
-the one that will be published beside it. Only when all three are accepted
-are they written to sibling temporary files and renamed over the checked-in
-files; any refusal leaves all three files as they were and no temporary file
-behind. Nothing is checked after publication: the crates' freshness tests
-are the standing check that the published files match generation.
+the one that will be published beside it. Claudine's generator is also
+passed `--lifecycle-output <path>`: it checks its lifecycle artifact as a
+registration reader loads it and writes the candidate there, and the script
+stages it with the shipped artifacts. Only when every output is accepted are
+they written to sibling temporary files and renamed over the checked-in
+files; any refusal leaves every file as it was and no temporary file
+behind. Generation never reads a checked-in file, so it runs over stale or
+malformed ones. Nothing is checked after publication: the crates' freshness
+tests are the standing check that the published files match generation.
 
 Usage (from anywhere in the repository; `just shipped-schemas` runs it):
 
@@ -29,7 +33,7 @@ Usage (from anywhere in the repository; `just shipped-schemas` runs it):
 names the tree the artifact paths are relative to, and `--generator` replaces
 `cargo run --quiet -p <package> --example shipped_schemas --` with another
 program (a `.py` file runs under this interpreter), called as
-`<program> <package> [--lower <owner>=<path>]...`.
+`<program> <package> [--lower <owner>=<path>]... [--lifecycle-output <path>]`.
 """
 
 from __future__ import annotations
@@ -50,6 +54,12 @@ ARTIFACTS = (
     ("claudine", "claudine", "claudine/lib/generated/shipped.json"),
 )
 
+# Lifecycle artifacts a package's generator emits beside its shipped
+# artifact: package -> repository-relative path.
+LIFECYCLE_ARTIFACTS = {
+    "claudine": "claudine/lib/generated/globals.lifecycle.json",
+}
+
 
 class Refused(Exception):
     """A step failed; nothing has been replaced."""
@@ -63,10 +73,16 @@ def generator_command(generator: str | None, package: str, *extra: str) -> list[
     return [generator, package, *extra]
 
 
-def generate(root: Path, generator: str | None, package: str, lowers: list[tuple[str, Path]]) -> bytes:
+def generate(
+    root: Path, generator: str | None, package: str, lowers: list[tuple[str, Path]], lifecycle: Path | None = None
+) -> bytes:
     """Runs `package`'s generator over the lower candidates `lowers`, which it
-    must accept its own candidate over."""
-    command = generator_command(generator, package, *(arg for owner, path in lowers for arg in ("--lower", f"{owner}={path}")))
+    must accept its own candidate over; with `lifecycle`, the generator also
+    writes its lifecycle candidate there."""
+    extra = [arg for owner, path in lowers for arg in ("--lower", f"{owner}={path}")]
+    if lifecycle is not None:
+        extra += ["--lifecycle-output", str(lifecycle)]
+    command = generator_command(generator, package, *extra)
     completed = subprocess.run(command, cwd=root, stdin=subprocess.DEVNULL, capture_output=True)
     if completed.returncode != 0:
         detail = completed.stderr.decode("utf-8", "replace").strip()
@@ -93,6 +109,22 @@ def check_output(owner: str, path: str, data: bytes, lower_owners: list[str]) ->
     named = [dependency.get("owner") for dependency in dependencies or [] if isinstance(dependency, dict)]
     if not isinstance(dependencies, list) or sorted(named) != sorted(lower_owners):
         raise Refused(f"`{path}`: the header's dependencies are {named!r}, expected {lower_owners!r}")
+
+
+def check_lifecycle(path: str, candidate: Path) -> bytes:
+    """Refuses a lifecycle candidate that is missing or cannot be one."""
+    if not candidate.exists():
+        raise Refused(f"`{path}`: the generator wrote no lifecycle candidate")
+    data = candidate.read_bytes()
+    if not data:
+        raise Refused(f"`{path}`: the lifecycle candidate is empty")
+    try:
+        document = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise Refused(f"`{path}`: the lifecycle candidate is not JSON: {error}") from error
+    if not isinstance(document, dict) or not isinstance(document.get("catalog_hash"), str):
+        raise Refused(f"`{path}`: the lifecycle candidate has no `catalog_hash`")
+    return data
 
 
 def replace_all(root: Path, outputs: list[tuple[str, bytes]]) -> list[str]:
@@ -133,12 +165,16 @@ def main(argv: list[str]) -> int:
         with tempfile.TemporaryDirectory(prefix="shipped-schemas-") as scratch:
             candidates: list[tuple[str, Path]] = []
             for package, owner, path in ARTIFACTS:
-                data = generate(root, arguments.generator, package, candidates)
+                lifecycle_path = LIFECYCLE_ARTIFACTS.get(package)
+                lifecycle = Path(scratch) / f"{owner}.lifecycle.json" if lifecycle_path else None
+                data = generate(root, arguments.generator, package, candidates, lifecycle)
                 check_output(owner, path, data, [lower for lower, _ in candidates])
                 candidate = Path(scratch) / f"{owner}.json"
                 candidate.write_bytes(data)
                 candidates.append((owner, candidate))
                 outputs.append((path, data))
+                if lifecycle_path and lifecycle is not None:
+                    outputs.append((lifecycle_path, check_lifecycle(lifecycle_path, lifecycle)))
         changed = replace_all(root, outputs)
     except Refused as refusal:
         print(f"error: {refusal}", file=sys.stderr)

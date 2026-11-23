@@ -1,8 +1,8 @@
 //! CLI-boundary coverage for Claudine's trigger schemas in the launch verdict.
 //!
-//! A document with no `$schema` is judged by Claudine's embedded
-//! `claudine.yaml` payload (`inline-compose.yaml` for an inline prompt, and
-//! `sequence.yaml` for a sequence document):
+//! A document with no `$schema` is judged by Claudine's compiled
+//! registration: the `composition.yaml` payload (`inline-composition.yaml` for an inline prompt,
+//! with `sequence-document.yaml` beside it for a sequence document):
 //! an invalid value of a Claudine control blocks `compose` and
 //! `inline-compose` before any provider launches and is never dropped, while an
 //! unrelated authored optional value keeps the drop-and-warn cleanup. The same
@@ -560,7 +560,7 @@ fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() 
 }
 
 // A sequence document whose only control is `sequence` is judged by the
-// embedded `sequence.yaml` payload, imports included, with no schema on
+// registered `sequence-document.yaml` payload, imports included, with no schema on
 // disk: a malformed task field fails the run before any step launches. The
 // unedited sequence launches its one step.
 launch_verdict_cases! {
@@ -694,38 +694,38 @@ fn write_git_skeleton(dir: &Path) {
     fs::write(git.join("config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n").unwrap();
 }
 
-/// A malformed disk `claudine.yaml` is skipped with one warning naming it and
-/// its grammar failure, and the prompt launches. The skipped file still
-/// shadows the embedded copy, so the embedded payload's `start` rule never
-/// judges the launch.
+/// A malformed disk `composition.yaml` is skipped with one warning naming it and
+/// its grammar failure. A schema-root file is an ordinary trigger, never a
+/// replacement of the registered copy, so the registered payload still
+/// judges the launch and refuses its `failure` operand.
 #[test]
-fn a_malformed_disk_trigger_is_skipped_with_a_warning_and_shadows_the_embedded_copy() {
+fn a_malformed_disk_trigger_is_skipped_with_a_warning_beside_the_registered_copy() {
     let (fixture, marker) = marker_fixture("launch-trigger-schemas-broken-disk");
     write_git_skeleton(fixture.cwd());
     let schemas = fixture.cwd().join("schemas");
     fs::create_dir_all(&schemas).unwrap();
-    fs::write(schemas.join("claudine.yaml"), "kind: schema-trigger\nmatch: 42\n$schema: {}\n").unwrap();
-    // Only the embedded payload rejects this operand (the parser does not
-    // type-check it), and the `failure` stack never fires on a passing run.
+    fs::write(schemas.join("composition.yaml"), "kind: schema-trigger\nmatch: 42\n$schema: {}\n").unwrap();
+    // Only the registered payload rejects this operand (the parser does not
+    // type-check it).
     let doc = write_doc(&fixture, "prompt.md", "---\nfailure:\n  - pr_list: three\n---\nBody\n");
 
     let result = run(&fixture, "compose", &doc, &[]);
 
-    assert_eq!(result.code, Some(0), "the prompt launches:\n{}", result.stderr);
-    assert_eq!(provider_launches(&marker), 1, "{}", result.stderr);
+    assert_schema_rejection(&result, &["/failure/0", "three"], "the registered payload");
+    assert_eq!(provider_launches(&marker), 0, "{}", result.stderr);
     assert_eq!(
         result.stderr.matches("ignoring invalid schema trigger").count(),
         1,
         "the skipped trigger is reported once:\n{}",
         result.stderr
     );
-    assert!(result.stderr.contains("claudine.yaml"), "the skipped source is visible:\n{}", result.stderr);
+    assert!(result.stderr.contains("composition.yaml"), "the skipped source is visible:\n{}", result.stderr);
     assert!(result.stderr.contains("match"), "the trigger grammar failure is visible:\n{}", result.stderr);
     assert!(!result.stderr.contains("schema load failed"), "never a schema-load error:\n{}", result.stderr);
 }
 
-/// A disk `claudine.yaml` that replaces the embedded one and loosens
-/// `description` to any value.
+/// A disk `inline-composition.yaml`, an ordinary trigger layered above the
+/// registered one, that loosens `description` to any value.
 #[cfg(unix)]
 const LOOSENED_CLAUDINE_SCHEMA: &str = "kind: schema-trigger\nmatch:\n    group:\n        - prompt: string(required)\n$schema:\n    description: \"unknown -> loosened\"\n";
 
@@ -743,7 +743,7 @@ fn an_agent_written_disk_schema_takes_effect_on_the_next_run() {
     let prelude = format!(
         "printf '%s' {} > {}\n",
         sh_quote(LOOSENED_CLAUDINE_SCHEMA),
-        sh_quote(&schemas.join("claudine.yaml").display().to_string())
+        sh_quote(&schemas.join("inline-composition.yaml").display().to_string())
     );
     InlineAgentStub::new(&doc)
         .prelude(&prelude)
@@ -753,7 +753,7 @@ fn an_agent_written_disk_schema_takes_effect_on_the_next_run() {
     let first = run(&fixture, "inline-compose", &doc, &[]);
     assert_eq!(first.code, Some(1), "the launch schema still rejects the mapping:\n{}", first.stderr);
     assert_completion_names(&first.stderr, "description");
-    assert!(schemas.join("claudine.yaml").exists(), "the agent wrote the schema");
+    assert!(schemas.join("inline-composition.yaml").exists(), "the agent wrote the schema");
 
     fs::write(&doc, "---\nprompt: Write the body\ndescription: {x: 1}\n---\nBody\n").unwrap();
     InlineAgentStub::new(&doc).body("Second body\n").install(fixture.bin_dir(), "goose");

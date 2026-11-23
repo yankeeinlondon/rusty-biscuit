@@ -51,6 +51,26 @@ existing entry, value, and comment. It adds nothing when an entry already
 names the same manifest file, however it is spelled (`~/…` or an absolute
 path). The manifest must already exist.
 
+A host whose manifest moved calls
+`darkmatter::config::init::replace_manifest_registration(context, scope, new, old_path)`
+instead. Every entry naming `old_path` or the new manifest, in any spelling
+(`~/…`, an absolute path, or a path relative to the configuration file) and
+even when the old file no longer exists, is replaced: the first becomes the
+new reference as written, the rest are removed, and with none the new
+reference is appended. Other entries and comments are kept, and a file that
+already lists the new reference once writes nothing:
+
+```yaml
+# before: replace_manifest_registration(…, "~/.acme/registration/manifest.yaml", ~/.acme/host.yaml)
+register:
+    - ~/tools/mine.yaml
+    - /home/me/.acme/host.yaml       # Acme
+# after
+register:
+    - ~/tools/mine.yaml
+    - ~/.acme/registration/manifest.yaml       # Acme
+```
+
 ## The manifest
 
 The host writes the manifest and every file it lists; you never edit them by
@@ -517,6 +537,45 @@ Markdown frontmatter. `RegisteredHosts::yaml_kinds()` is the index, and
 `YamlContract::registered()` names the host, bundle path, and file of the
 definition that judged a document.
 
+### A registration compiled into its host
+
+A host program can judge its own documents with the bundle it publishes
+without reading the published copy, for example before its setup has ever
+run. It hands Darkmatter the manifest and member bytes it carries in memory,
+and they load through the same checks as an installed bundle:
+
+```rust,ignore
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use darkmatter::config::registration::bundle::VerifiedSnapshot;
+use darkmatter::config::registration::{load_embedded, md_owned_names};
+
+// `manifest` and each member's bytes are compiled into the host binary.
+let members: BTreeMap<String, Arc<[u8]>> = BTreeMap::from([
+    ("schemas/widget.yaml".to_string(), Arc::from(&WIDGET[..])),
+    // …every member the manifest lists
+]);
+let snapshot = VerifiedSnapshot::from_embedded("acme", "manifest.yaml", MANIFEST, &members)?;
+// `prepared` may serve a payload the host prepared ahead of time, by bundle
+// path; `None` resolves it from the member's text.
+let profile = load_embedded(snapshot, md_owned_names(), &|_path| None)?;
+```
+
+- **Nothing is read from disk.** `from_embedded` checks every listed member
+  against its manifest digest from the supplied bytes, under a virtual root
+  `<acme>`. A missing member or a digest mismatch refuses it, as for an
+  installed bundle. The profile's `dependencies()` and `candidates()` are
+  empty.
+- **Embedded identity.** Each trigger's origin is
+  `TriggerSource::Embedded { bundle: "acme", name: "schemas/widget.yaml" }`
+  (shown as `embedded:acme/schemas/widget.yaml`) and its `location` is the
+  virtual `<acme>/schemas/widget.yaml`. `RegisteredTrigger::path()` names an
+  installed file and panics for an embedded trigger; check `is_embedded()`
+  first, or read `location`.
+- **The same layer.** The profile is used through `RegisteredHosts` like any
+  other: its matched triggers are checked as one host layer, root unions
+  allowed, below every schema-root trigger.
+
 ## Layering
 
 For a document a registered host identifies, the schema layers are, from
@@ -548,7 +607,11 @@ gadget: name      # rejected by the root trigger's `gadget: number`
   Shadowing by file name stays among the schema roots.
 - **Each trigger once.** When the host's trigger file is also visible in a
   schema root (the same file, with the same content), it applies once, as the
-  host's. An unrelated file with the same name is a different trigger.
+  host's. An unrelated file with the same name is a different trigger. A
+  root trigger never duplicates an
+  [embedded registration](#a-registration-compiled-into-its-host)'s trigger,
+  whose identity is its bundle path, not a file: a copy of it in a schema
+  root applies as an ordinary trigger on top.
 - **Ordinary matching.** A host trigger applies only when its `match:` matches
   the document, exactly as a root trigger does; the same match that selects
   the host decides which of its triggers apply.

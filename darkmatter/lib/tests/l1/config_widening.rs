@@ -418,7 +418,7 @@ fn a_default_schema_the_trusted_code_cannot_read_is_potential_widening() {
 
 #[test]
 fn claudines_shipped_schema_default_is_compared_through_its_import() {
-    let shipped = include_str!("../../../../claudine/schemas/claudine-config.yaml");
+    let shipped = include_str!("../../../../claudine/registration/claudine-config.yaml");
     let from = "\"&**/*.toml\"], \"shell-commands\": []";
     assert!(shipped.contains(from), "Claudine's schema still spells its repository default");
     let wider = shipped.replace(from, "\"&**/*.toml\"], \"shell-commands\": [\"prefix git\"]");
@@ -454,7 +454,7 @@ fn the_repository_inputs_file_parses_and_names_the_shipped_inputs() {
     let policy_paths: Vec<&str> = inputs.policy_files.iter().map(|file| file.path.as_str()).collect();
     assert_eq!(policy_paths, [".darkmatter.yaml", ".claudine/config.yaml"]);
     let schema_paths: Vec<&str> = inputs.default_schemas.iter().map(|schema| schema.path.as_str()).collect();
-    assert_eq!(schema_paths, ["darkmatter/schemas/darkmatter-config.yaml", "claudine/schemas/claudine-config.yaml"]);
+    assert_eq!(schema_paths, ["darkmatter/schemas/darkmatter-config.yaml", "claudine/registration/claudine-config.yaml"]);
     for required in [
         ".github/ci/permission-inputs.json",
         ".github/workflows/ci.yml",

@@ -50,12 +50,33 @@ build *args="":
     @just _build claudine-cli "Claudine CLI" {{ args }}
     @just _build claudine-gen "Claudine Catalog Generator" {{ args }}
 
-# Install the CLI
+# Install the CLI, then publish its Darkmatter host registration
 install *args="":
     @just _build biscuit-terminal "biscuit-terminal Library" --release {{ args }}
     @just _build darkmatter "Darkmatter Library" --release {{ args }}
     @just build --release
     @just _install "./cli" "Claudine" "" {{ args }}
+    @just publish-registrations
+
+# Publish the registration compiled into this worktree's release build to
+# ~/.claudine/registrations/darkmatter/ (`claudine registrations publish`)
+publish-registrations:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The release binary `just build --release` produced, never one found on
+    # PATH or under an install root: either may be an older build whose
+    # registration differs from this worktree's.
+    target_dir="$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)"
+    if command -v cygpath > /dev/null; then
+        target_dir="$(cygpath -u "${target_dir}")"
+    fi
+    claudine="${target_dir}/release/claudine{{ if os_family() == "windows" { ".exe" } else { "" } }}"
+    if [[ ! -x "${claudine}" ]]; then
+        echo -e "{{ RED }}ERROR:{{ RESET }} no release build at ${claudine}; run {{ BOLD }}just build --release{{ RESET }} first" >&2
+        exit 1
+    fi
+    files="$("${claudine}" registrations publish | jq length)"
+    echo -e "✅ Published {{ BOLD }}${files}{{ RESET }} Darkmatter host registration files to ~/.claudine/registrations/darkmatter/"
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
@@ -467,19 +488,20 @@ generate-models:
     echo
     cd -
 
-# Regenerate this area's shipped artifact, `lib/generated/shipped.json` (the
-# prepared trigger bundle and host catalog); run after editing `schemas/` or
-# the code that prepares them. `--check` instead fails when it is stale. Both
+# Regenerate this area's generated files, `lib/generated/shipped.json` (the
+# prepared trigger bundle, host catalog, and YAML kinds) and
+# `lib/generated/globals.lifecycle.json`; run after editing `registration/` or
+# the code that prepares them. `--check` instead fails when either is stale. Both
 # first require Simplified Schema's and Darkmatter's artifacts to be current
 # and otherwise name the root `just shipped-schemas`, which regenerates every
 # artifact in order.
 shipped-schemas *args="--write":
     cargo run --quiet -p claudine --example shipped_schemas -- {{ args }}
 
-# rewrite schemas/globals.lifecycle.json, the host lifecycle artifact DMLS reads
+# rewrite lib/generated/globals.lifecycle.json, the host lifecycle artifact DMLS
+# reads; it is generated with every shipped artifact by the root recipe
 regen-lifecycle-artifact:
-    @cargo run -q -p claudine --example lifecycle_artifact -- --write
-    @echo "Lifecycle artifact regenerated in schemas/globals.lifecycle.json"
+    @just --justfile ../justfile shipped-schemas
 
 git-conflict:
     #!/usr/bin/env bash

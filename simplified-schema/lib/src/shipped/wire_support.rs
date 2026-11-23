@@ -49,7 +49,11 @@ pub(crate) mod no_host_path {
     }
 }
 
-/// The portable variants of [`DefNamespace`].
+/// The portable variants of [`DefNamespace`]. The `Bundle*` variants are
+/// the file-backed namespaces of a file inside an embedded bundle's virtual
+/// root (`<claudine>/schemas/shared.yaml`, see
+/// [`BundleSources::embedded`](crate::resolve::bundle::BundleSources::embedded)),
+/// which names no host file.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum WireNamespace {
@@ -57,18 +61,45 @@ enum WireNamespace {
     RootUnionArm(usize),
     Embedded(String),
     Shipped(String),
+    BundleFile(String),
+    BundleFileRootUnionArm(String, usize),
+    BundleTriggerPayload(String),
+    BundleTriggerPayloadUnionArm(String, usize),
+}
+
+/// `path` written portably when it lies under an embedded bundle's virtual
+/// root `<name>`; `None` for a host path.
+fn bundle_path(path: &std::path::Path) -> Option<String> {
+    let mut components = path.components();
+    let std::path::Component::Normal(root) = components.next()? else { return None };
+    let root = root.to_str()?;
+    let name = root.strip_prefix('<')?.strip_suffix('>')?;
+    if !crate::embedded::is_plain_segment(name) {
+        return None;
+    }
+    let mut portable = root.to_string();
+    for component in components {
+        let std::path::Component::Normal(segment) = component else { return None };
+        portable.push('/');
+        portable.push_str(segment.to_str()?);
+    }
+    Some(portable)
 }
 
 impl Serialize for DefNamespace {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let bundled = |path: &std::path::Path| {
+            bundle_path(path).ok_or_else(|| S::Error::custom("a file-backed namespace cannot be shipped"))
+        };
         let wire = match self {
             Self::InlineRoot => WireNamespace::InlineRoot,
             Self::RootUnionArm(index) => WireNamespace::RootUnionArm(*index),
             Self::Embedded(path) => WireNamespace::Embedded(path.clone()),
             Self::Shipped(path) => WireNamespace::Shipped(path.clone()),
-            Self::File(_) | Self::FileRootUnionArm(..) | Self::TriggerPayload(_) | Self::TriggerPayloadUnionArm(..) => {
-                return Err(S::Error::custom("a file-backed namespace cannot be shipped"));
-            }
+            Self::File(path) => WireNamespace::BundleFile(bundled(path)?),
+            Self::FileRootUnionArm(path, index) => WireNamespace::BundleFileRootUnionArm(bundled(path)?, *index),
+            Self::TriggerPayload(path) => WireNamespace::BundleTriggerPayload(bundled(path)?),
+            Self::TriggerPayloadUnionArm(path, index) => WireNamespace::BundleTriggerPayloadUnionArm(bundled(path)?, *index),
         };
         wire.serialize(serializer)
     }
@@ -76,21 +107,28 @@ impl Serialize for DefNamespace {
 
 impl<'de> Deserialize<'de> for DefNamespace {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let local = bundle_local::<D>;
         Ok(match WireNamespace::deserialize(deserializer)? {
             WireNamespace::InlineRoot => Self::InlineRoot,
             WireNamespace::RootUnionArm(index) => Self::RootUnionArm(index),
             WireNamespace::Embedded(path) => Self::Embedded(path),
             WireNamespace::Shipped(path) => Self::Shipped(path),
+            WireNamespace::BundleFile(path) => Self::File(local(path)?),
+            WireNamespace::BundleFileRootUnionArm(path, index) => Self::FileRootUnionArm(local(path)?, index),
+            WireNamespace::BundleTriggerPayload(path) => Self::TriggerPayload(local(path)?),
+            WireNamespace::BundleTriggerPayloadUnionArm(path, index) => Self::TriggerPayloadUnionArm(local(path)?, index),
         })
     }
 }
 
-/// The portable variants of [`SchemaSourceId`].
+/// The portable variants of [`SchemaSourceId`]; `BundleFile` as for
+/// [`WireNamespace`].
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum WireSourceId {
     InlineDocument,
     Embedded(String),
+    BundleFile(String),
 }
 
 impl Serialize for SchemaSourceId {
@@ -98,7 +136,10 @@ impl Serialize for SchemaSourceId {
         match self {
             Self::InlineDocument => WireSourceId::InlineDocument.serialize(serializer),
             Self::Embedded(path) => WireSourceId::Embedded(path.clone()).serialize(serializer),
-            Self::File(path) => Err(S::Error::custom(format!("a host file (`{}`) cannot be shipped", path.display()))),
+            Self::File(path) => match bundle_path(path) {
+                Some(portable) => WireSourceId::BundleFile(portable).serialize(serializer),
+                None => Err(S::Error::custom(format!("a host file (`{}`) cannot be shipped", path.display()))),
+            },
         }
     }
 }
@@ -108,8 +149,18 @@ impl<'de> Deserialize<'de> for SchemaSourceId {
         Ok(match WireSourceId::deserialize(deserializer)? {
             WireSourceId::InlineDocument => Self::InlineDocument,
             WireSourceId::Embedded(path) => Self::Embedded(path),
+            WireSourceId::BundleFile(portable) => Self::File(bundle_local::<D>(portable)?),
         })
     }
+}
+
+/// The local path of the bundle path `portable`, which must round-trip.
+fn bundle_local<'de, D: Deserializer<'de>>(portable: String) -> Result<std::path::PathBuf, D::Error> {
+    let path: std::path::PathBuf = portable.split('/').collect();
+    bundle_path(&path)
+        .filter(|round_trip| *round_trip == portable)
+        .map(|_| path)
+        .ok_or_else(|| D::Error::custom(format!("`{portable}` is not a path inside an embedded bundle")))
 }
 
 /// A [`DefinitionTable`] on the wire: its entries as ordered

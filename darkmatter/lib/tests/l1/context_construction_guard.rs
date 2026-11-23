@@ -38,6 +38,13 @@ const ALLOWLIST: &[Allowance] = &[
     ),
     allow(
         Gate::Construction,
+        "config/registration.rs",
+        "FileResolutionContext::from_snapshot",
+        1,
+        "`embedded_context`, behind `load_embedded` and `prepare_embedded_payload`: a host's compiled-in registration prepares at the bundle's virtual root with no home and no environment, and every read is served from the verified embedded bytes; it names no file on disk",
+    ),
+    allow(
+        Gate::Construction,
         "config/widening.rs",
         "FileResolutionContext::from_snapshot",
         1,

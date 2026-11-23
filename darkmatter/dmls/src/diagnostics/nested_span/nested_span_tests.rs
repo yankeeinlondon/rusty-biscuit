@@ -1,6 +1,6 @@
 //! `dm.expression.nested_span_in_literal` end to end through the frontmatter
 //! producer and the `Rewrite with + concatenation` quick fix, with Claudine's
-//! catalog (from `claudine/schemas/`) active as a schema extension.
+//! catalog (from `claudine/registration/`) active as a schema extension.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -37,9 +37,11 @@ fn with_ctx<R>(text: &str, version: i32, f: impl FnOnce(&DocumentContext) -> R) 
             path: crate::context::test_support::claudine_payload_extension(
                 schemas.path(),
                 &[
-                    ("claudine.yaml", CLAUDINE_TRIGGER),
+                    ("composition.yaml", CLAUDINE_TRIGGER),
+                    ("shared.yaml", CLAUDINE_SHARED),
+                    ("content-policy.yaml", CLAUDINE_CONTENT_POLICY),
                     ("document.yaml", CLAUDINE_DOCUMENT),
-                    ("lifecycle.yaml", CLAUDINE_LIFECYCLE),
+                    ("lifecycle-events.yaml", CLAUDINE_LIFECYCLE),
                     ("action.yaml", CLAUDINE_ACTION),
                     ("linking.yaml", CLAUDINE_LINKING),
                 ],
@@ -335,11 +337,13 @@ fn ranges_are_inner_for_exact_styles_and_whole_for_folded_and_tagged() {
 
 // Claudine's authoritative schemas; DMLS has no Claudine dependency, so the
 // static inventory is held against the YAML itself.
-const CLAUDINE_TRIGGER: &str = include_str!("../../../../../claudine/schemas/claudine.yaml");
-const CLAUDINE_DOCUMENT: &str = include_str!("../../../../../claudine/schemas/document.yaml");
-const CLAUDINE_LIFECYCLE: &str = include_str!("../../../../../claudine/schemas/lifecycle.yaml");
-const CLAUDINE_ACTION: &str = include_str!("../../../../../claudine/schemas/action.yaml");
-const CLAUDINE_LINKING: &str = include_str!("../../../../../claudine/schemas/linking.yaml");
+const CLAUDINE_TRIGGER: &str = include_str!("../../../../../claudine/registration/composition.yaml");
+const CLAUDINE_SHARED: &str = include_str!("../../../../../claudine/registration/shared.yaml");
+const CLAUDINE_CONTENT_POLICY: &str = include_str!("../../../../../claudine/registration/content-policy.yaml");
+const CLAUDINE_DOCUMENT: &str = include_str!("../../../../../claudine/registration/document.yaml");
+const CLAUDINE_LIFECYCLE: &str = include_str!("../../../../../claudine/registration/lifecycle-events.yaml");
+const CLAUDINE_ACTION: &str = include_str!("../../../../../claudine/registration/action.yaml");
+const CLAUDINE_LINKING: &str = include_str!("../../../../../claudine/registration/linking.yaml");
 
 /// The mapping under `section` (`$schema` of a trigger, `types` of a library).
 fn schema_section(text: &str, section: &str) -> serde_yaml_ng::Mapping {
@@ -359,7 +363,8 @@ fn keys_of(mapping: &serde_yaml_ng::Mapping) -> BTreeSet<String> {
 
 #[test]
 fn lifecycle_inventory_matches_the_authored_claudine_schema() {
-    let payload = schema_section(CLAUDINE_TRIGGER, "$schema");
+    let shared = schema_section(CLAUDINE_SHARED, "types");
+    let payload = shared.get("common-attributes").and_then(|value| value.as_mapping()).expect("common-attributes");
     let events: BTreeSet<String> = payload
         .iter()
         .filter(|(_, value)| {

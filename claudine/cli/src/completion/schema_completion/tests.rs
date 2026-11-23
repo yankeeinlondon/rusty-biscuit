@@ -1127,13 +1127,13 @@ fn shipped_container_schema_resolves_for_authored_parameter_completion() {
     let tmp = TempDir::new().unwrap();
     seed_repo(tmp.path());
     for (name, text) in [
-        ("action.yaml", include_str!("../../../../schemas/action.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../schemas/lifecycle.yaml")),
-        ("sequence-types.yaml", include_str!("../../../../schemas/sequence-types.yaml")),
+        ("action.yaml", include_str!("../../../../registration/action.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../registration/lifecycle-events.yaml")),
+        ("sequence.yaml", include_str!("../../../../registration/sequence.yaml")),
     ] {
         write(&tmp.path().join(name), text);
     }
-    write(&tmp.path().join("nested.md"), "---\n$schema:\n  nested: task@./sequence-types.yaml\n---\n");
+    write(&tmp.path().join("nested.md"), "---\n$schema:\n  nested: task@./sequence.yaml\n---\n");
     fs::create_dir_all(tmp.path().join("home")).unwrap();
     let mut ctx = ScopeContext::discover_from(tmp.path());
     ctx.home = Some(tmp.path().join("home"));

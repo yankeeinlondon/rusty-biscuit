@@ -483,8 +483,9 @@ type MatchedTrigger<'a> = (
 fn registered_layers(layers: &[TriggerLayer]) -> Option<RegisteredLayers> {
     let mut registered: Option<RegisteredLayers> = None;
     for layer in layers {
-        let (Some(host), Some(path)) = (&layer.registered, layer.source.path()) else { continue };
-        registered.get_or_insert_with(|| RegisteredLayers::of(host)).triggers.push(path.to_path_buf());
+        let Some(host) = &layer.registered else { continue };
+        let Some(trigger) = host.triggers().iter().find(|trigger| trigger.trigger.source == layer.source) else { continue };
+        registered.get_or_insert_with(|| RegisteredLayers::of(host)).triggers.push(trigger.location.clone());
     }
     registered
 }
@@ -521,26 +522,40 @@ fn registered_matches_indexed<'p>(
 
 /// Whether the root trigger `root` (with its pre-resolved payload, when the
 /// registry has one) is the registered trigger `registered` seen again
-/// through a schema root: the same file, with the same envelope and payload.
-/// A same-named unrelated file is a distinct trigger.
+/// through a schema root or an embedded bundle: the same envelope and
+/// payload from the same source. A file is the same when its disk identity
+/// is; an embedded document when its bundle, name, and payload digest are.
+/// A same-named unrelated file, or a disk copy of an embedded member, is a
+/// distinct trigger.
 fn same_registered_trigger(
     registered: &crate::config::registration::RegisteredTrigger,
     root: &library_triggers::LoadedTrigger,
     root_payload: Option<&library_triggers::assemble::ResolvedPayload>,
 ) -> bool {
-    let (TriggerSource::File(root_path), TriggerSource::File(registered_path)) = (&root.source, &registered.trigger.source) else {
-        return false;
-    };
-    if root_path.file_name() != registered_path.file_name() || root.envelope != registered.trigger.envelope {
+    if root.envelope != registered.trigger.envelope {
         return false;
     }
-    if root_payload.is_some_and(|payload| *payload.json_schema != *registered.payload.json_schema) {
-        return false;
+    match (&root.source, &registered.trigger.source) {
+        (TriggerSource::File(root_path), TriggerSource::File(registered_path)) => {
+            if root_path.file_name() != registered_path.file_name() {
+                return false;
+            }
+            if root_payload.is_some_and(|payload| *payload.json_schema != *registered.payload.json_schema) {
+                return false;
+            }
+            let identity = |path: &Path| {
+                biscuit_file::PathIdentity::new(&biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf()))
+            };
+            identity(root_path) == identity(registered_path)
+        }
+        (embedded @ TriggerSource::Embedded { .. }, registered_source @ TriggerSource::Embedded { .. }) => {
+            let digest = |payload: &library_triggers::assemble::ResolvedPayload| {
+                payload.digest.unwrap_or_else(|| simplified_schema::validate::SchemaDigest::canonical(&payload.json_schema))
+            };
+            embedded == registered_source && root_payload.is_some_and(|payload| digest(payload) == digest(&registered.payload))
+        }
+        _ => false,
     }
-    let identity = |path: &Path| {
-        biscuit_file::PathIdentity::new(&biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf()))
-    };
-    identity(root_path) == identity(registered_path)
 }
 
 /// The cache identity of a registered trigger layer: its payload's digest
@@ -625,7 +640,7 @@ impl DarkmatterSchemas {
         let mut origin = RegisteredLayers::of(&profile);
         origin.triggers = registered_matches(&profile, &matched)
             .into_iter()
-            .map(|trigger| trigger.path().to_path_buf())
+            .map(|trigger| trigger.location.clone())
             .collect();
         let triggers = profile
             .triggers()
@@ -1554,7 +1569,7 @@ impl DarkmatterSchemas {
             let inputs: Vec<merge::MatchedPayload<'_>> = contributing
                 .iter()
                 .zip(&resolved)
-                .map(|((index, registered), payload)| merge::MatchedPayload { trigger: *index, file: registered.path(), payload })
+                .map(|((index, registered), payload)| merge::MatchedPayload { trigger: *index, file: &registered.location, payload })
                 .collect();
             merge::check(&inputs).map(Arc::new)
         } else {

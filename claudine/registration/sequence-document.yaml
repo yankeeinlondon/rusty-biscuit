@@ -1,5 +1,6 @@
-# The sequence document's catalog, applied to any document that sets
-# `sequence` to a non-null value. Hand-maintained; see README.md.
+# The sequence document's catalog, applied to any Markdown document that sets
+# `sequence` to a non-null value or declares `kind: sequence`.
+# Hand-maintained; see claudine/docs/topics/schemas.md.
 #
 # `sequence` is matched once per non-null YAML type, so a value of the wrong
 # type still selects this schema and the payload then rejects it (a native
@@ -11,12 +12,15 @@
 # This payload declares only the sequence keys. `$state` and `template` are
 # declarations of the document's own inline list; the sequence parser refuses
 # them beside a reference or dynamic source, which this open schema cannot say.
-# A non-null `sequence` also selects claudine.yaml, which types the document's
-# lifecycle events, `loop`, and the rest of Claudine's controls; declaring them
-# here as well would compile every event stack twice. The payload requires
-# only `sequence` and leaves the document open, so a body step's frontmatter
-# data is kept.
+# A sequence document also selects composition.yaml, which types the
+# document's lifecycle events, `loop`, and the rest of Claudine's controls;
+# declaring them here as well would compile every event stack twice. It never
+# selects inline-composition.yaml, so it declares neither `prompt` nor
+# `sections`. The payload requires only `sequence` and leaves the document
+# open, so a body step's frontmatter data is kept.
 kind: schema-trigger
+name: sequence-document
+description: the sequence keys of a Markdown sequence document
 match:
     group:
         - kind: literal(sequence; required)
@@ -26,7 +30,7 @@ match:
         - sequence: object(required)
         - sequence: "unknown[](required)"
 $schema:
-    sequence: "steps(required)@./sequence-types.yaml -> the sequence's steps: an inline list, or a reference to one"
+    sequence: "steps(required)@./sequence.yaml -> the sequence's steps: an inline list, or a reference to one"
     template: |-
         object -> key/values which are _composed_ with each step's state; these key/values are then merged with the existing key/values from the step. This allows for expressions like: `slug: {{ dasherize(name) }}`, etc.
     $state: "schema -> the schema each step's normalized state in this document's inline `sequence:` list must satisfy; root `$schema` describes the document itself"

@@ -20,6 +20,13 @@ const fn ambient(path: &'static str, identifier: &'static str, count: usize, rea
 const HOME_CONFIG: &str = "locates a provider's or Claudine's own configuration under the user's home";
 
 const ALLOWLIST: &[Allowance] = &[
+    Allowance {
+        gate: Gate::Construction,
+        path: "composition/inventory.rs",
+        identifier: "FileResolutionContext::from_snapshot",
+        count: 1,
+        reason: "`bundle_context`: a detached context at the embedded inventory's virtual root, for preparations that read only the compiled-in bundle; it names no file and captures no process state",
+    },
     ambient(
         "child_environment.rs",
         "std::env::current_dir",

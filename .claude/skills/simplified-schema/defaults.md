@@ -47,7 +47,11 @@ Tests: `tests/l1/required_presence.rs` (presence, no defaults) and
   non-null is no choice, since a described value exists). `$ref`, `allOf`,
   selectors and array items keep the arm.
   `DefaultPlan::for_identity` memoizes per `SchemaIdentity` (capacity 64,
-  cleared by `reset_process_caches`).
+  cleared by `reset_process_caches`). `Prepared::new` takes its plan from
+  it (keyed by the shared cache's canonical digest), so a large schema
+  prepared once per file compiles its defaults once per process;
+  `Prepared::compiled_through` (private caches, the envelopes) compiles
+  its own.
 - Key selection follows JSON Schema, and every schema selecting one key is
   that key's one property definition (`Entry`: child location + one
   `Declared`): its `properties` entries, every matching `patternProperties`

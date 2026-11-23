@@ -1000,9 +1000,10 @@ impl OverlayState {
     /// re-read and compared with its recorded xxHash first, so an unchanged
     /// file invalidates nothing.
     pub fn invalidate_trigger_inputs(&self, paths: &[PathBuf]) {
+        let now = self.slots.clock().now();
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.invalidate_paths(paths);
-        cache.hosts.invalidate_paths(paths);
+        cache.hosts.invalidate_paths(paths, now);
         let OverlayCache { triggers, contracts, .. } = &mut *cache;
         contracts.invalidate_paths(paths, triggers.source_buffers());
     }
@@ -1025,14 +1026,52 @@ impl OverlayState {
         folders
     }
 
-    /// Marks stale every host registration a change at one of `paths` can
-    /// affect: a configuration file, a manifest, or a file a manifest names
-    /// or imports. Each recorded file is re-read and compared with its
-    /// recorded BLAKE3 hash, so an unchanged file keeps the installed
-    /// registrations (and every document's selected host). Also done by
+    /// Schedules a reload, after the settle window
+    /// ([`set_registration_settle`](Self::set_registration_settle)), of every
+    /// host registration a change at one of `paths` can affect: a
+    /// configuration file, a manifest, a file a manifest names or imports,
+    /// or a folder above one. Judged by path; the reload re-reads, and an
+    /// unchanged result keeps the installed registrations (and every
+    /// document's selected host). Also done by
     /// [`invalidate_trigger_inputs`](Self::invalidate_trigger_inputs).
     pub fn invalidate_host_inputs(&self, paths: &[PathBuf]) {
-        self.inner.lock().expect("overlay lock poisoned").hosts.invalidate_paths(paths);
+        let now = self.slots.clock().now();
+        self.inner.lock().expect("overlay lock poisoned").hosts.invalidate_paths(paths, now);
+    }
+
+    /// Marks every trigger registry and YAML contract stale and schedules
+    /// every host registration's reload after the settle window: a save on
+    /// a client whose watches cannot report schema or registration inputs.
+    pub fn invalidate_unwatched_inputs(&self) {
+        let now = self.slots.clock().now();
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.invalidate_all();
+        cache.hosts.schedule_all(now);
+        cache.contracts.invalidate_all();
+    }
+
+    /// How long changed registration inputs must be quiet before they
+    /// reload; zero (reload on the next preparation) unless the server sets
+    /// [`hosts::REGISTRATION_SETTLE`].
+    pub fn set_registration_settle(&self, settle: std::time::Duration) {
+        self.inner.lock().expect("overlay lock poisoned").hosts.set_settle(settle);
+    }
+
+    /// The earliest instant a changed host registration's settle window
+    /// ends, on the server's clock.
+    pub fn next_host_reload(&self) -> Option<std::time::Instant> {
+        self.inner.lock().expect("overlay lock poisoned").hosts.next_deadline()
+    }
+
+    /// Marks due every host registration whose settle window has ended.
+    ///
+    /// ## Returns
+    ///
+    /// Whether any became due since the last call (here or in a
+    /// preparation), so the server queues the reloads.
+    pub fn take_due_host_reloads(&self) -> bool {
+        let now = self.slots.clock().now();
+        self.inner.lock().expect("overlay lock poisoned").hosts.take_expired(now)
     }
 
     /// Marks every host registration stale. Also done by
@@ -1114,22 +1153,29 @@ impl OverlayState {
         Some(view)
     }
 
-    /// Loads the registered hosts of `context`'s configuration unless they
-    /// are fresh. Passive: never migrates, writes, prompts, or fetches. The
+    /// Loads the registered hosts of `context`'s configuration when they
+    /// need a load: never loaded, or due (a settle window that has ended
+    /// first becomes due). One still waiting for quiet keeps its installed
+    /// view. Passive: never migrates, writes, prompts, or fetches. The
     /// overlay lock is held only to begin and to install, never across the
     /// load.
     ///
     /// ## Returns
     ///
     /// Whether the registrations are fresh afterwards; `false` when a change
-    /// arrived during the load and touched what it read.
+    /// arrived during the load, or one is still waiting for quiet.
     pub fn prepare_hosts(&self, context: &FileResolutionContext) -> bool {
-        let preparation = self.inner.lock().expect("overlay lock poisoned").hosts.begin(context);
+        let clock = self.slots.clock();
+        let preparation = {
+            let mut cache = self.inner.lock().expect("overlay lock poisoned");
+            cache.hosts.expire(clock.now());
+            cache.hosts.begin(context)
+        };
         let Some(preparation) = preparation else {
             return true;
         };
         let prepared = preparation.run();
-        self.inner.lock().expect("overlay lock poisoned").hosts.install(prepared)
+        self.inner.lock().expect("overlay lock poisoned").hosts.install(prepared, clock.now())
     }
 
     /// The probe documents of the workspace scopes (see [`workspace_probes`]),
@@ -1259,11 +1305,14 @@ impl OverlayState {
         }
         let context = resolution.context().ok()?;
         let bounded = schema::trigger_boundary(path, workspace_roots).is_some();
+        let now = self.slots.clock().now();
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         // Every Markdown document with frontmatter and a context selects its
         // host, inside a workspace folder or not; a YAML document's kind may
-        // be a registered host's.
-        let hosts_stale = !cache.hosts.is_fresh(context);
+        // be a registered host's. A configuration waiting for quiet serves
+        // its installed view and queues nothing.
+        cache.hosts.expire(now);
+        let hosts_stale = cache.hosts.needs_load(context);
         if !bounded && !yaml && !hosts_stale {
             return None;
         }

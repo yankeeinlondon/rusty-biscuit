@@ -1,541 +1,807 @@
 //! Publishing Claudine's `darkmatter-host` registration.
 //!
 //! Darkmatter (`md` and DMLS) learns Claudine's schemas, globals, and
-//! lifecycle from a `darkmatter-host` manifest that a `register` entry of
-//! `.darkmatter.yaml` names ([`MANIFEST_REFERENCE`]). This module writes that
-//! manifest and the files it names from the copies compiled into this
-//! binary ([`HostRevision::claudine`]); nothing is ever copied by hand.
+//! lifecycle from a format 2 `darkmatter-host` manifest that a `register`
+//! entry of `.darkmatter.yaml` names ([`MANIFEST_REFERENCE`]). This module
+//! writes that manifest and every file it lists from the copies compiled into
+//! this binary ([`RegistrationInventory::claudine`]); nothing is ever copied
+//! by hand.
 //!
 //! ## Layout
 //!
 //! ```text
-//! ~/.claudine/
-//! ├── darkmatter-host.yaml                  the stable manifest
-//! └── darkmatter-host/
-//!     ├── 0.1.0-<digest>/schemas/…           one immutable revision
-//!     └── 0.1.0-<digest>-2/schemas/…         a republished revision
+//! ~/.claudine/registrations/
+//! ├── .darkmatter.lock           the publisher lock (retained)
+//! └── darkmatter/                the output root
+//!     ├── manifest.yaml          every member and its BLAKE3 digest
+//!     ├── globals.lifecycle.json
+//!     └── schemas/…              the files of `claudine/registration/`
 //! ```
 //!
-//! A revision directory is named `<version>-<digest>`: the host version and
-//! the first [`DIGEST_LENGTH`] hex characters of the BLAKE3 content digest
-//! ([`HostRevision::digest`]) over the ordered roles and every file's exact
-//! text. Its `schemas/` folder holds every file of the revision: the trigger
-//! bundle and its libraries, `globals.yaml`, `globals.lifecycle.json`, the
-//! identifying trigger `claudine-document.yaml`, and `claudine-config.yaml`.
-//! The configuration schema is there only so the installed revision can be
-//! inspected; the manifest never names it. The manifest's member paths are
-//! relative to the manifest and name one revision directory
-//! (`./darkmatter-host/0.1.0-<digest>/schemas/claudine-document.yaml`).
+//! There is one member tree at fixed paths: no release or version folders.
+//! Every published path is the inventory's ([`PublishedFile::path`]), so
+//! imports between members resolve as they do in the embedded bundle.
 //!
 //! ## Contract
 //!
-//! - A directory with a final (non-staging) name is never written to after it
-//!   appears. A revision is written into a uniquely named staging directory
-//!   beside it and renamed into place whole, so a reader sees either no
-//!   revision or a complete one.
-//! - The stable manifest is replaced atomically and last, only after its
-//!   revision directory verified byte for byte. It therefore never names a
-//!   partial revision, so a reader can never pair a new trigger with an old
-//!   catalog.
-//! - An existing revision is reused only when every expected file holds
-//!   exactly the expected bytes. One that differs (or misses a file) is left
-//!   untouched and the revision is published under the next free suffixed
-//!   name (`<version>-<digest>-2`, `-3`, …). The digest is shortened for that
-//!   reason: identity is always settled by comparing bytes, never by name.
-//! - Old revisions are retained for readers still holding an older manifest;
-//!   nothing here removes one.
+//! - **Preflight.** Before anything is created or written, every directory
+//!   from `~/.claudine` down to each destination, every destination, the
+//!   lock file, and every authorized removal is examined without following
+//!   links. A symbolic link, a junction, or another reparse point is an
+//!   obstruction ([`PublishError::Obstructed`]): the publish stops, and the
+//!   link and its target are left alone. The examination is repeated under
+//!   the lock.
+//! - **Serialized.** Cooperating publishers (threads or processes) take one
+//!   OS file lock, [`lock_path`], waiting at most [`LOCK_DEADLINE`].
+//! - **Members, then the manifest.** Under the lock, each member whose bytes
+//!   differ from the inventory's is replaced through a sibling temporary file
+//!   ([`atomic_write_registration`], with the Windows replacement retry);
+//!   entries the previous valid format 2 manifest listed and the inventory no
+//!   longer has are removed; regular files named with [`TEMP_PREFIX`] in a
+//!   publisher directory (leftovers of an interrupted replacement) are
+//!   removed. The manifest is replaced last, and only when its bytes differ.
+//! - **Unknown files are kept.** Anything else in the output root is not
+//!   the publisher's to remove; doctor reports it.
+//! - **No-op.** A publish of what is already installed writes nothing, so
+//!   every file keeps its modification time ([`PublishOutcome::Current`]).
 //!
-//! ## The no-op rule
+//! ## Readers and interruption
 //!
-//! [`publish`] runs on every launch, so when the stable manifest already
-//! equals the expected text and the revision it names verifies, it writes
-//! nothing and returns [`PublishOutcome::Current`]. That check costs one read
-//! of the manifest and one of each revision file; disk content is compared,
-//! never hashed.
-//!
-//! ## Failures
-//!
-//! Every failure is a [`PublishError`] and leaves the previous stable
-//! manifest and every previous revision as they were. A failed manifest
-//! replacement can leave the new revision directory behind; it is complete,
-//! and the next publish reuses it.
+//! Darkmatter verifies every member against the manifest's digests
+//! (`darkmatter::config::registration::bundle::load_snapshot`). While a
+//! publish is in progress, or after one stopped partway, the old manifest
+//! still stands and some members no longer match it, so a reader refuses the
+//! host with a located `dm.host.registration` warning; it never accepts a mix
+//! of two publishes. The next publish converges on the embedded bytes.
 
-use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::fs;
-use std::io::{self, Write};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde::Deserialize;
 
-use crate::composition::schema::bundle::{CLAUDINE_SCHEMA_FILES, CLAUDINE_TRIGGER_FILES};
-use crate::composition::schema::globals::HOST_CATALOG_TEXT;
-use crate::config::atomic::atomic_write;
-
-/// The `register` entry that names Claudine's stable manifest.
-pub const MANIFEST_REFERENCE: &str = "~/.claudine/darkmatter-host.yaml";
+use crate::config::atomic::{REGISTRATION_TEMP_PREFIX, atomic_write_registration};
 
 /// The host identifier the manifest and the lifecycle artifact record.
 pub const HOST_ID: &str = "claudine";
 
-/// Hex characters of the content digest kept in a revision directory's name.
-pub const DIGEST_LENGTH: usize = 16;
+/// The `register` entry that names Claudine's manifest.
+pub const MANIFEST_REFERENCE: &str = "~/.claudine/registrations/darkmatter/manifest.yaml";
 
-/// Claudine's identifying trigger, named by the manifest's `identify`.
-pub const IDENTIFY_FILE: &str = "claudine-document.yaml";
-/// The host global catalog, named by the manifest's `globals`.
-pub const GLOBALS_FILE: &str = "globals.yaml";
-/// The lifecycle artifact for [`GLOBALS_FILE`], named by `lifecycle`.
-pub const LIFECYCLE_FILE: &str = "globals.lifecycle.json";
-/// The configuration schema: published for inspection only, never named by
-/// the manifest.
-pub const CONFIG_SCHEMA_FILE: &str = "claudine-config.yaml";
+/// The `register` entry of the retired format 1 publisher, which setup
+/// replaces with [`MANIFEST_REFERENCE`].
+pub const LEGACY_MANIFEST_REFERENCE: &str = "~/.claudine/darkmatter-host.yaml";
 
-const IDENTIFY_TEXT: &str = include_str!("../../../schemas/claudine-document.yaml");
+/// The manifest's path inside the output root.
+pub const MANIFEST_FILE: &str = "manifest.yaml";
+
+/// The prefix of a publisher temporary file; see
+/// [`REGISTRATION_TEMP_PREFIX`].
+pub const TEMP_PREFIX: &str = REGISTRATION_TEMP_PREFIX;
+
+/// How long a publisher waits for another to release [`lock_path`] before
+/// failing with [`PublishError::LockTimeout`].
+pub const LOCK_DEADLINE: Duration = Duration::from_secs(10);
+
+/// The pause between attempts to take a lock another publisher holds.
+pub const LOCK_BACKOFF: Duration = Duration::from_millis(20);
+
+/// FILE_ATTRIBUTE_REPARSE_POINT, as Win32 defines it.
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 
 const CLAUDINE_DIR: &str = ".claudine";
-const MANIFEST_FILE: &str = "darkmatter-host.yaml";
-const REVISIONS_DIR: &str = "darkmatter-host";
-const SCHEMAS_DIR: &str = "schemas";
-const STAGING_PREFIX: &str = ".staging-";
-/// Suffixed names tried before giving up; each skipped name is a revision
-/// whose bytes differ, which only damage or tampering produces.
-const MAX_REVISION_NAMES: usize = 64;
+const REGISTRATIONS_DIR: &str = "registrations";
+const OUTPUT_DIR: &str = "darkmatter";
+const LOCK_FILE: &str = ".darkmatter.lock";
+const LEGACY_MANIFEST_FILE: &str = "darkmatter-host.yaml";
+const LEGACY_REVISIONS_DIR: &str = "darkmatter-host";
 
-/// The stable manifest under `home`: `~/.claudine/darkmatter-host.yaml`.
+/// `~/.claudine/registrations`: the lock file and the output root.
+#[must_use]
+pub fn registrations_dir(home: &Path) -> PathBuf {
+    home.join(CLAUDINE_DIR).join(REGISTRATIONS_DIR)
+}
+
+/// The output root, `~/.claudine/registrations/darkmatter`.
+#[must_use]
+pub fn output_root(home: &Path) -> PathBuf {
+    registrations_dir(home).join(OUTPUT_DIR)
+}
+
+/// The manifest, `~/.claudine/registrations/darkmatter/manifest.yaml`.
 #[must_use]
 pub fn manifest_path(home: &Path) -> PathBuf {
-    home.join(CLAUDINE_DIR).join(MANIFEST_FILE)
+    output_root(home).join(MANIFEST_FILE)
 }
 
-/// The folder holding every published revision: `~/.claudine/darkmatter-host`.
+/// The publisher lock, `~/.claudine/registrations/.darkmatter.lock`.
 #[must_use]
-pub fn revisions_dir(home: &Path) -> PathBuf {
-    home.join(CLAUDINE_DIR).join(REVISIONS_DIR)
+pub fn lock_path(home: &Path) -> PathBuf {
+    registrations_dir(home).join(LOCK_FILE)
 }
 
-/// One publishable host revision: a version, every file by portable
-/// filename with its exact text, and Claudine's fixed roles over them.
-///
-/// The roles are fixed: `identify` is [`IDENTIFY_FILE`], the triggers are
-/// `claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml` in that order,
-/// `globals` is [`GLOBALS_FILE`], `lifecycle` is [`LIFECYCLE_FILE`], and
-/// `functions` is empty (Claudine ships no function catalog).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HostRevision {
-    version: String,
-    files: BTreeMap<String, Cow<'static, str>>,
-    digest: String,
+/// The retired format 1 manifest, `~/.claudine/darkmatter-host.yaml`.
+#[must_use]
+pub fn legacy_manifest_path(home: &Path) -> PathBuf {
+    home.join(CLAUDINE_DIR).join(LEGACY_MANIFEST_FILE)
 }
 
-impl HostRevision {
-    /// The revision compiled into this binary, built once per process.
-    #[must_use]
-    pub fn claudine() -> &'static Self {
-        static REVISION: OnceLock<HostRevision> = OnceLock::new();
-        REVISION.get_or_init(|| {
-            let mut files: BTreeMap<String, Cow<'static, str>> = CLAUDINE_SCHEMA_FILES
-                .iter()
-                .map(|(name, text)| ((*name).to_string(), Cow::Borrowed(*text)))
-                .collect();
-            files.insert(GLOBALS_FILE.to_string(), Cow::Borrowed(HOST_CATALOG_TEXT));
-            files.insert(
-                LIFECYCLE_FILE.to_string(),
-                Cow::Owned(crate::composition::lifecycle::lifecycle_artifact()),
-            );
-            files.insert(IDENTIFY_FILE.to_string(), Cow::Borrowed(IDENTIFY_TEXT));
-            files.insert(
-                CONFIG_SCHEMA_FILE.to_string(),
-                Cow::Borrowed(crate::config::schema::CONFIG_SCHEMA_SOURCE),
-            );
-            Self::from_parts(env!("CARGO_PKG_VERSION").to_string(), files)
-        })
-    }
-
-    fn from_parts(version: String, files: BTreeMap<String, Cow<'static, str>>) -> Self {
-        let digest = content_digest(&files);
-        Self { version, files, digest }
-    }
-
-    /// This revision under another host version; the content is unchanged.
-    #[must_use]
-    pub fn with_version(self, version: impl Into<String>) -> Self {
-        Self::from_parts(version.into(), self.files)
-    }
-
-    /// This revision with `name` holding `text`, replacing the file of that
-    /// name or adding one. Roles are unchanged.
-    #[must_use]
-    pub fn with_file(mut self, name: impl Into<String>, text: impl Into<String>) -> Self {
-        self.files.insert(name.into(), Cow::Owned(text.into()));
-        Self::from_parts(self.version, self.files)
-    }
-
-    /// The host release the manifest records as `version`.
-    #[must_use]
-    pub fn version(&self) -> &str {
-        &self.version
-    }
-
-    /// Every file, by filename, in filename order.
-    pub fn files(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.files.iter().map(|(name, text)| (name.as_str(), text.as_ref()))
-    }
-
-    /// The full BLAKE3 hex content digest over the ordered roles and the
-    /// filename → text map, by `biscuit_hash::blake3_hash_json`. The version
-    /// is not part of it.
-    #[must_use]
-    pub fn digest(&self) -> &str {
-        &self.digest
-    }
-
-    /// The first candidate revision directory name, `<version>-<digest>`.
-    #[must_use]
-    pub fn directory_name(&self) -> String {
-        format!("{}-{}", self.version, &self.digest[..DIGEST_LENGTH])
-    }
-
-    /// The candidate directory name at `attempt` (1-based): attempt 1 is
-    /// [`Self::directory_name`], later ones carry `-<attempt>`.
-    fn candidate_name(&self, attempt: usize) -> String {
-        match attempt {
-            1 => self.directory_name(),
-            n => format!("{}-{n}", self.directory_name()),
-        }
-    }
-
-    /// The stable manifest's text when it names the revision directory
-    /// `directory`: exactly the v1 fields.
-    #[must_use]
-    pub fn manifest_text(&self, directory: &str) -> String {
-        let member = |file: &str| quoted(&format!("./{REVISIONS_DIR}/{directory}/{SCHEMAS_DIR}/{file}"));
-        let triggers: String = CLAUDINE_TRIGGER_FILES
-            .iter()
-            .map(|file| format!("    - {}\n", member(file)))
-            .collect();
-        format!(
-            "# Written by Claudine from its built-in schemas and rewritten when they change; do not edit.\n\
-             kind: darkmatter-host\n\
-             format_version: 1\n\
-             host: {HOST_ID}\n\
-             version: {version}\n\
-             identify: {identify}\n\
-             triggers:\n{triggers}\
-             globals: {globals}\n\
-             lifecycle: {lifecycle}\n\
-             functions: []\n",
-            version = quoted(&self.version),
-            identify = member(IDENTIFY_FILE),
-            globals = member(GLOBALS_FILE),
-            lifecycle = member(LIFECYCLE_FILE),
-        )
-    }
-
-    /// The first name (the version or a filename) that is not one portable
-    /// path segment.
-    fn unportable_name(&self) -> Option<&str> {
-        std::iter::once(self.version.as_str())
-            .chain(self.files.keys().map(String::as_str))
-            .find(|name| !is_portable_segment(name))
-    }
+/// The retired format 1 revision tree, `~/.claudine/darkmatter-host/`.
+#[must_use]
+pub fn legacy_revisions_dir(home: &Path) -> PathBuf {
+    home.join(CLAUDINE_DIR).join(LEGACY_REVISIONS_DIR)
 }
 
-/// A JSON double-quoted scalar, which YAML reads as the same string.
-fn quoted(text: &str) -> String {
-    Value::String(text.to_string()).to_string()
-}
+mod published;
 
-fn content_digest(files: &BTreeMap<String, Cow<'static, str>>) -> String {
-    // Arrays keep the role order: canonical JSON sorts object keys.
-    let roles = json!([
-        ["identify", IDENTIFY_FILE],
-        ["triggers", CLAUDINE_TRIGGER_FILES],
-        ["globals", GLOBALS_FILE],
-        ["lifecycle", LIFECYCLE_FILE],
-        ["functions", []],
-    ]);
-    let texts: serde_json::Map<String, Value> = files
-        .iter()
-        .map(|(name, text)| (name.clone(), Value::String(text.to_string())))
-        .collect();
-    biscuit_hash::blake3_hash_json(&json!({ "roles": roles, "files": texts }))
-}
+pub use published::{FileKind, PublishedFile, RegistrationInventory};
+use published::portable_path;
 
-/// Whether `name` can be one file or directory name on every supported OS.
-fn is_portable_segment(name: &str) -> bool {
-    const RESERVED: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
-    !name.is_empty()
-        && name != "."
-        && name != ".."
-        && !name.ends_with(['.', ' '])
-        && !name.chars().any(|c| c.is_control() || RESERVED.contains(&c))
-}
+// ── outcome and errors ──────────────────────────────────────────────────────
 
 /// What [`publish`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublishOutcome {
-    /// The stable manifest was replaced to name `revision_dir`, which was
-    /// written or reused.
-    Published {
-        #[allow(missing_docs)]
-        manifest: PathBuf,
-        #[allow(missing_docs)]
-        revision_dir: PathBuf,
-    },
-    /// The stable manifest already named a verified `revision_dir`; nothing
-    /// was written.
+    /// Everything installed already held the inventory's bytes; nothing was
+    /// written or removed.
     Current {
-        #[allow(missing_docs)]
+        /// The manifest path.
+        manifest: PathBuf,
+    },
+    /// At least one file was written or removed; the manifest now lists the
+    /// inventory.
+    Published {
+        /// The manifest path.
         manifest: PathBuf,
         #[allow(missing_docs)]
-        revision_dir: PathBuf,
+        changes: PublishChanges,
     },
 }
 
-#[allow(missing_docs)]
 impl PublishOutcome {
+    /// The manifest path.
     #[must_use]
     pub fn manifest(&self) -> &Path {
         match self {
-            Self::Published { manifest, .. } | Self::Current { manifest, .. } => manifest,
+            Self::Current { manifest } | Self::Published { manifest, .. } => manifest,
         }
     }
 
+    /// What changed; `None` when the installation was current.
     #[must_use]
-    pub fn revision_dir(&self) -> &Path {
+    pub const fn changes(&self) -> Option<&PublishChanges> {
         match self {
-            Self::Published { revision_dir, .. } | Self::Current { revision_dir, .. } => revision_dir,
+            Self::Current { .. } => None,
+            Self::Published { changes, .. } => Some(changes),
         }
     }
 }
 
-/// Why [`publish`] stopped. In every case the previous stable manifest and
-/// every previous revision are unchanged.
+/// The files a [`PublishOutcome::Published`] changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PublishChanges {
+    /// Published paths created or replaced, in the order written; the
+    /// manifest, when written, is last.
+    pub written: Vec<String>,
+    /// Paths the previous manifest listed, no longer in the inventory, that
+    /// were removed.
+    pub retired: Vec<String>,
+    /// Leftover temporary files removed.
+    pub removed_temps: Vec<PathBuf>,
+}
+
+impl PublishChanges {
+    /// Whether the manifest was replaced.
+    #[must_use]
+    pub fn manifest_written(&self) -> bool {
+        self.written.iter().any(|path| path == MANIFEST_FILE)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.written.is_empty() && self.retired.is_empty() && self.removed_temps.is_empty()
+    }
+}
+
+/// A link the publisher refuses to traverse or replace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Obstruction {
+    /// A symbolic link.
+    SymbolicLink,
+    /// A junction or another reparse point (Windows).
+    ReparsePoint,
+}
+
+impl std::fmt::Display for Obstruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::SymbolicLink => "a symbolic link",
+            Self::ReparsePoint => "a junction or other reparse point",
+        })
+    }
+}
+
+/// Why [`publish`] stopped. Members may have been replaced before the
+/// failure, but the manifest was not: the previous manifest is intact, and
+/// the next publish converges.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PublishError {
-    /// The version or a filename cannot be one path segment on every OS.
-    #[error("`{name}` cannot name a file or directory on every platform, so no revision was published")]
-    UnportableName {
+    /// An inventory path cannot be published as given.
+    #[error("the registration path `{path}` {reason}, so nothing was published")]
+    InvalidPath {
         #[allow(missing_docs)]
-        name: String,
+        path: String,
+        #[allow(missing_docs)]
+        reason: String,
     },
-    /// The folder holding the revisions could not be created or read.
-    #[error("could not prepare the revision folder `{}`: {source}", .path.display())]
-    RevisionsDir {
+    /// A link stands where the publisher would traverse, write, or remove.
+    #[error("`{}` is {obstruction}; the publisher never follows or replaces one, so nothing was published. Remove it and publish again", .path.display())]
+    Obstructed {
+        #[allow(missing_docs)]
+        path: PathBuf,
+        #[allow(missing_docs)]
+        obstruction: Obstruction,
+    },
+    /// Something other than a directory stands where a directory belongs.
+    #[error("`{}` is not a directory, so nothing was published", .path.display())]
+    NotADirectory {
+        #[allow(missing_docs)]
+        path: PathBuf,
+    },
+    /// Something other than a regular file stands where a file is written.
+    #[error("`{}` is not a regular file, so nothing was published", .path.display())]
+    NotAFile {
+        #[allow(missing_docs)]
+        path: PathBuf,
+    },
+    /// Another publisher held the lock for the whole deadline.
+    #[error("another publisher held `{}` for {waited:?}; nothing was published", .lock.display())]
+    LockTimeout {
+        #[allow(missing_docs)]
+        lock: PathBuf,
+        #[allow(missing_docs)]
+        waited: Duration,
+    },
+    /// A file-system operation failed.
+    #[error("could not {action} `{}`: {source}", .path.display())]
+    Io {
+        /// What was being done (`read`, `write`, `remove`, …).
+        action: &'static str,
         #[allow(missing_docs)]
         path: PathBuf,
         #[allow(missing_docs)]
         source: io::Error,
     },
-    /// The staging directory could not be created or written.
-    #[error("could not stage a revision in `{}`: {source}", .path.display())]
-    Staging {
+    /// A test observer stopped the publish ([`publish_with`]).
+    #[doc(hidden)]
+    #[error("the publish was stopped after {step}")]
+    Interrupted {
         #[allow(missing_docs)]
-        path: PathBuf,
-        #[allow(missing_docs)]
-        source: io::Error,
-    },
-    /// The staged revision could not be renamed into place.
-    #[error("could not move the staged revision to `{}`: {source}", .path.display())]
-    Rename {
-        /// The final revision directory.
-        path: PathBuf,
-        #[allow(missing_docs)]
-        source: io::Error,
-    },
-    /// Every candidate name was taken by a revision whose files differ.
-    #[error(
-        "the first {MAX_REVISION_NAMES} revision names for `{name}` in `{}` all hold different files; remove the damaged ones and run again",
-        .dir.display()
-    )]
-    NoFreeRevisionName {
-        /// The revisions folder.
-        dir: PathBuf,
-        /// The unsuffixed revision name.
-        name: String,
-    },
-    /// The stable manifest could not be replaced.
-    #[error("could not replace the manifest `{}`: {source}", .path.display())]
-    Manifest {
-        #[allow(missing_docs)]
-        path: PathBuf,
-        #[allow(missing_docs)]
-        source: io::Error,
+        step: String,
     },
 }
 
-/// Publishes `revision` under `home` and points the stable manifest at it,
-/// or does nothing when the manifest already names a verified copy of it.
+fn io_error(action: &'static str, path: &Path) -> impl FnOnce(io::Error) -> PublishError + use<> {
+    let path = path.to_path_buf();
+    move |source| PublishError::Io { action, path, source }
+}
+
+// ── test seams ──────────────────────────────────────────────────────────────
+
+/// A point in a publish an observer of [`publish_with`] sees.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PublishStep {
+    /// The lock is held and the second preflight passed; nothing written yet.
+    Locked,
+    /// The member at this path was replaced.
+    MemberWritten(String),
+    /// The retired entry at this path was removed.
+    Retired(String),
+    /// Every member is in place; the manifest is next.
+    BeforeManifest,
+}
+
+/// Options for [`publish_with`].
+#[doc(hidden)]
+pub struct PublishHooks<'a> {
+    /// Replaces [`LOCK_DEADLINE`].
+    pub lock_deadline: Duration,
+    /// Sees each [`PublishStep`]; `Break` stops the publish there with
+    /// [`PublishError::Interrupted`], as a crash at that point would.
+    pub observer: &'a mut dyn FnMut(&PublishStep) -> ControlFlow<()>,
+}
+
+// ── publishing ──────────────────────────────────────────────────────────────
+
+/// Publishes `inventory` under `home`, or does nothing when the installation
+/// already holds it. See the module docs for the layout and the contract.
 ///
 /// `home` is the user's home as the caller captured it; neither the process
-/// environment nor the working directory is read. See the module docs for
-/// the layout and the no-op rule.
+/// environment nor the working directory is read.
 ///
 /// ## Errors
 ///
-/// Returns a [`PublishError`] when a name is not portable, when the
-/// revisions folder, the staging directory, or the rename fails, when no
-/// free revision name remains, or when the stable manifest cannot be
-/// replaced. None of these changes the previous manifest or revisions.
-pub fn publish(home: &Path, revision: &HostRevision) -> Result<PublishOutcome, PublishError> {
-    if let Some(name) = revision.unportable_name() {
-        return Err(PublishError::UnportableName { name: name.to_string() });
-    }
-    let manifest = manifest_path(home);
-    let revisions = revisions_dir(home);
-
-    if let Some(revision_dir) = current_revision(&manifest, &revisions, revision) {
-        tracing::debug!(revision = %revision_dir.display(), "the host registration is current");
-        return Ok(PublishOutcome::Current { manifest, revision_dir });
-    }
-
-    let directory = place_revision(&revisions, revision)?;
-    atomic_write(&manifest, revision.manifest_text(&directory).as_bytes())
-        .map_err(|source| PublishError::Manifest { path: manifest.clone(), source })?;
-    let revision_dir = revisions.join(directory);
-    tracing::debug!(revision = %revision_dir.display(), "published the host registration");
-    Ok(PublishOutcome::Published { manifest, revision_dir })
+/// A [`PublishError`]: an inventory path that cannot be published, an
+/// obstruction or misplaced entry found by the preflight (before anything
+/// is written), a lock held past [`LOCK_DEADLINE`], or a failed file-system
+/// operation. The previous manifest stays in place in every case.
+pub fn publish(home: &Path, inventory: &RegistrationInventory) -> Result<PublishOutcome, PublishError> {
+    let mut observer = |_: &PublishStep| ControlFlow::Continue(());
+    publish_with(home, inventory, PublishHooks { lock_deadline: LOCK_DEADLINE, observer: &mut observer })
 }
 
-/// The revision directory the stable manifest names, when the manifest is
-/// exactly the expected text for one of the candidate names and that
-/// directory verifies.
-fn current_revision(manifest: &Path, revisions: &Path, revision: &HostRevision) -> Option<PathBuf> {
-    let text = fs::read_to_string(manifest).ok()?;
-    for attempt in 1..=MAX_REVISION_NAMES {
-        let name = revision.candidate_name(attempt);
-        let dir = revisions.join(&name);
-        if text == revision.manifest_text(&name) {
-            return (revision_state(&dir, revision) == RevisionState::Verified).then_some(dir);
+/// [`publish`] with a lock deadline and an observer, for tests that hold
+/// the lock or stop a publish partway.
+///
+/// ## Errors
+///
+/// As [`publish`], plus [`PublishError::Interrupted`] when the observer
+/// breaks.
+#[doc(hidden)]
+pub fn publish_with(
+    home: &Path,
+    inventory: &RegistrationInventory,
+    hooks: PublishHooks<'_>,
+) -> Result<PublishOutcome, PublishError> {
+    if let Some((path, reason)) = inventory.invalid_path() {
+        return Err(PublishError::InvalidPath { path: path.to_string(), reason });
+    }
+    let layout = Layout::new(home);
+    // Before anything is created, the lock file and its folder included.
+    layout.preflight(inventory)?;
+    fs::create_dir_all(layout.registrations()).map_err(io_error("create", &layout.registrations()))?;
+    let _lock = acquire_lock(&lock_path(home), hooks.lock_deadline)?;
+    // Another publisher may have changed the tree while this one waited.
+    let plan = layout.preflight(inventory)?;
+    let observer = hooks.observer;
+    let stop = |step: PublishStep, observer: &mut dyn FnMut(&PublishStep) -> ControlFlow<()>| match observer(&step) {
+        ControlFlow::Continue(()) => Ok(()),
+        ControlFlow::Break(()) => Err(PublishError::Interrupted { step: format!("{step:?}") }),
+    };
+    stop(PublishStep::Locked, observer)?;
+
+    let mut changes = PublishChanges::default();
+    for directory in &plan.directories {
+        changes.removed_temps.extend(remove_temps(directory)?);
+    }
+    for file in inventory.members() {
+        let destination = layout.destination(file.path());
+        if holds(&destination, file.bytes())? {
+            continue;
         }
-        // Names are taken in order, so the first absent one ends the search.
-        if fs::symlink_metadata(&dir).is_err() {
-            return None;
+        atomic_write_registration(&destination, file.bytes()).map_err(io_error("write", &destination))?;
+        changes.written.push(file.path().to_string());
+        stop(PublishStep::MemberWritten(file.path().to_string()), observer)?;
+    }
+    for path in &plan.retired {
+        let destination = layout.destination(path);
+        match fs::remove_file(&destination) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(io_error("remove", &destination)(error)),
         }
+        remove_empty_parents(&layout, path, inventory);
+        changes.retired.push(path.clone());
+        stop(PublishStep::Retired(path.clone()), observer)?;
     }
-    None
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RevisionState {
-    /// Nothing exists at the name.
-    Absent,
-    /// Every expected file holds exactly the expected bytes.
-    Verified,
-    /// Something exists at the name but is not this revision.
-    Differs,
-}
-
-fn revision_state(dir: &Path, revision: &HostRevision) -> RevisionState {
-    match fs::symlink_metadata(dir) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return RevisionState::Absent,
-        Ok(metadata) if metadata.is_dir() => {}
-        _ => return RevisionState::Differs,
+    stop(PublishStep::BeforeManifest, observer)?;
+    let manifest = layout.destination(MANIFEST_FILE);
+    if !holds(&manifest, inventory.manifest().bytes())? {
+        atomic_write_registration(&manifest, inventory.manifest().bytes()).map_err(io_error("write", &manifest))?;
+        changes.written.push(MANIFEST_FILE.to_string());
     }
-    let schemas = dir.join(SCHEMAS_DIR);
-    let verified = revision
-        .files()
-        .all(|(name, text)| fs::read(schemas.join(name)).is_ok_and(|bytes| bytes == text.as_bytes()));
-    if verified {
-        RevisionState::Verified
+
+    if changes.is_empty() {
+        tracing::debug!(manifest = %manifest.display(), "the host registration is current");
+        Ok(PublishOutcome::Current { manifest })
     } else {
-        RevisionState::Differs
+        tracing::debug!(manifest = %manifest.display(), ?changes, "published the host registration");
+        Ok(PublishOutcome::Published { manifest, changes })
     }
 }
 
-/// The name of a verified directory holding `revision`, reusing one or
-/// staging and renaming a new one.
-fn place_revision(revisions: &Path, revision: &HostRevision) -> Result<String, PublishError> {
-    fs::create_dir_all(revisions)
-        .map_err(|source| PublishError::RevisionsDir { path: revisions.to_path_buf(), source })?;
-    for attempt in 1..=MAX_REVISION_NAMES {
-        let name = revision.candidate_name(attempt);
-        let dir = revisions.join(&name);
-        match revision_state(&dir, revision) {
-            RevisionState::Verified => return Ok(name),
-            RevisionState::Differs => {
-                tracing::warn!(revision = %dir.display(), "a published host revision differs from its name; leaving it untouched");
+/// Whether the regular file `path` holds exactly `bytes`. The preflight
+/// already refused anything at `path` but a regular file or nothing.
+fn holds(path: &Path, bytes: &[u8]) -> Result<bool, PublishError> {
+    match fs::read(path) {
+        Ok(found) => Ok(found == bytes),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io_error("read", path)(error)),
+    }
+}
+
+/// Removes every regular file named with [`TEMP_PREFIX`] directly in
+/// `directory`, when it exists.
+fn remove_temps(directory: &Path) -> Result<Vec<PathBuf>, PublishError> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(io_error("list", directory)(error)),
+    };
+    let mut removed = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(io_error("list", directory))?;
+        if !entry.file_name().to_string_lossy().starts_with(TEMP_PREFIX) {
+            continue;
+        }
+        let path = entry.path();
+        if entry_at(&path)? != Entry::File {
+            continue;
+        }
+        match fs::remove_file(&path) {
+            Ok(()) => removed.push(path),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error("remove", &path)(error)),
+        }
+    }
+    Ok(removed)
+}
+
+/// Removes the folders of the retired `path` that no member needs and that
+/// are now empty; a folder that still holds anything stays.
+fn remove_empty_parents(layout: &Layout, path: &str, inventory: &RegistrationInventory) {
+    let mut folder = path;
+    while let Some((parent, _)) = folder.rsplit_once('/') {
+        let prefix = format!("{parent}/");
+        if inventory.files().iter().any(|file| file.path().starts_with(&prefix)) {
+            return;
+        }
+        if fs::remove_dir(layout.destination(parent)).is_err() {
+            return;
+        }
+        folder = parent;
+    }
+}
+
+/// A held publisher lock, released when dropped. The lock file stays.
+struct PublisherLock {
+    _file: File,
+}
+
+fn acquire_lock(lock: &Path, deadline: Duration) -> Result<PublisherLock, PublishError> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock)
+        .map_err(io_error("open the lock", lock))?;
+    let started = Instant::now();
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(PublisherLock { _file: file }),
+            Err(TryLockError::WouldBlock) => {
+                let waited = started.elapsed();
+                if waited >= deadline {
+                    return Err(PublishError::LockTimeout { lock: lock.to_path_buf(), waited });
+                }
+                std::thread::sleep(LOCK_BACKOFF.min(deadline - waited));
             }
-            RevisionState::Absent => {
-                if stage_and_rename(revisions, &dir, revision)? {
-                    return Ok(name);
-                }
-                // Another publisher created `dir` first; reuse it if it holds
-                // this revision.
-                if revision_state(&dir, revision) == RevisionState::Verified {
-                    return Ok(name);
-                }
+            Err(TryLockError::Error(source)) => {
+                return Err(PublishError::Io { action: "lock", path: lock.to_path_buf(), source });
             }
         }
     }
-    Err(PublishError::NoFreeRevisionName { dir: revisions.to_path_buf(), name: revision.directory_name() })
 }
 
-/// Writes `revision` into a fresh staging directory and renames it to
-/// `final_dir`. `Ok(false)` when the rename lost to another publisher that
-/// created `final_dir` meanwhile; the staging directory is removed either way.
-fn stage_and_rename(revisions: &Path, final_dir: &Path, revision: &HostRevision) -> Result<bool, PublishError> {
-    let staging = tempfile::Builder::new()
-        .prefix(STAGING_PREFIX)
-        .tempdir_in(revisions)
-        .map_err(|source| PublishError::Staging { path: revisions.to_path_buf(), source })?;
-    write_files(staging.path(), revision)
-        .map_err(|source| PublishError::Staging { path: staging.path().to_path_buf(), source })?;
-    match fs::rename(staging.path(), final_dir) {
-        Ok(()) => {
-            // The directory now lives at `final_dir`; there is nothing left
-            // for the guard to remove.
-            let _ = staging.keep();
-            Ok(true)
+// ── preflight ───────────────────────────────────────────────────────────────
+
+/// What a path holds, read without following links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entry {
+    Absent,
+    File,
+    Directory,
+    Obstruction(Obstruction),
+    /// A socket, device, or anything else.
+    Other,
+}
+
+/// Classifies an entry from its no-follow file type and its Windows file
+/// attributes (`0` elsewhere). A symbolic link wins over the reparse bit it
+/// also carries on Windows; a junction carries only the bit.
+fn obstruction_of(is_symlink: bool, attributes: u32) -> Option<Obstruction> {
+    if is_symlink {
+        Some(Obstruction::SymbolicLink)
+    } else if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        Some(Obstruction::ReparsePoint)
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn attributes(metadata: &fs::Metadata) -> u32 {
+    std::os::windows::fs::MetadataExt::file_attributes(metadata)
+}
+
+#[cfg(not(windows))]
+const fn attributes(_: &fs::Metadata) -> u32 {
+    0
+}
+
+fn entry_at(path: &Path) -> Result<Entry, PublishError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Entry::Absent),
+        Err(error) => return Err(io_error("inspect", path)(error)),
+    };
+    Ok(match obstruction_of(metadata.file_type().is_symlink(), attributes(&metadata)) {
+        Some(obstruction) => Entry::Obstruction(obstruction),
+        None if metadata.is_dir() => Entry::Directory,
+        None if metadata.is_file() => Entry::File,
+        None => Entry::Other,
+    })
+}
+
+/// The publisher's paths under one home.
+struct Layout {
+    home: PathBuf,
+}
+
+/// What the preflight found.
+struct Plan {
+    /// Every existing publisher directory: the output root and each folder
+    /// holding a member or a retired entry.
+    directories: Vec<PathBuf>,
+    /// Retired regular files to remove, by published path.
+    retired: Vec<String>,
+}
+
+impl Layout {
+    fn new(home: &Path) -> Self {
+        Self { home: home.to_path_buf() }
+    }
+
+    fn registrations(&self) -> PathBuf {
+        registrations_dir(&self.home)
+    }
+
+    fn destination(&self, path: &str) -> PathBuf {
+        let mut destination = output_root(&self.home);
+        destination.extend(path.split('/'));
+        destination
+    }
+
+    /// The entry at the end of `names` below the home, after checking that
+    /// every folder on the way is a real directory. An absent folder ends
+    /// the walk: nothing below it exists.
+    fn route(&self, names: &[&str]) -> Result<Entry, PublishError> {
+        let mut path = self.home.clone();
+        let Some((last, folders)) = names.split_last() else {
+            return Ok(Entry::Directory);
+        };
+        for folder in folders {
+            path.push(folder);
+            match entry_at(&path)? {
+                Entry::Directory => {}
+                Entry::Absent => return Ok(Entry::Absent),
+                Entry::Obstruction(obstruction) => return Err(PublishError::Obstructed { path, obstruction }),
+                Entry::File | Entry::Other => return Err(PublishError::NotADirectory { path }),
+            }
         }
-        Err(_) if fs::symlink_metadata(final_dir).is_ok() => Ok(false),
-        Err(source) => Err(PublishError::Rename { path: final_dir.to_path_buf(), source }),
+        path.push(last);
+        match entry_at(&path)? {
+            Entry::Obstruction(obstruction) => Err(PublishError::Obstructed { path, obstruction }),
+            entry => Ok(entry),
+        }
+    }
+
+    fn output_names(path: &str) -> Vec<&str> {
+        [CLAUDINE_DIR, REGISTRATIONS_DIR, OUTPUT_DIR].into_iter().chain(path.split('/')).collect()
+    }
+
+    /// A file the publisher writes: absent, or a regular file.
+    fn writable(&self, names: &[&str]) -> Result<(), PublishError> {
+        match self.route(names)? {
+            Entry::Absent | Entry::File => Ok(()),
+            _ => Err(PublishError::NotAFile { path: names.iter().fold(self.home.clone(), |path, name| path.join(name)) }),
+        }
+    }
+
+    fn preflight(&self, inventory: &RegistrationInventory) -> Result<Plan, PublishError> {
+        self.writable(&[CLAUDINE_DIR, REGISTRATIONS_DIR, LOCK_FILE])?;
+        match self.route(&[CLAUDINE_DIR, REGISTRATIONS_DIR, OUTPUT_DIR])? {
+            Entry::Absent | Entry::Directory => {}
+            _ => return Err(PublishError::NotADirectory { path: output_root(&self.home) }),
+        }
+        for file in inventory.files() {
+            self.writable(&Self::output_names(file.path()))?;
+        }
+
+        let known: BTreeSet<&str> = inventory.files().iter().map(PublishedFile::path).collect();
+        let mut retired = Vec::new();
+        for path in self.previous_members()? {
+            if known.contains(path.as_str()) {
+                continue;
+            }
+            // A folder or anything else that is not a regular file is not
+            // the publisher's: it is left for doctor to report.
+            if self.route(&Self::output_names(&path))? == Entry::File {
+                retired.push(path);
+            }
+        }
+
+        let mut folders: BTreeSet<String> = BTreeSet::from([String::new()]);
+        for path in inventory.files().iter().map(PublishedFile::path).chain(retired.iter().map(String::as_str)) {
+            let mut folder = path;
+            while let Some((parent, _)) = folder.rsplit_once('/') {
+                folders.insert(parent.to_string());
+                folder = parent;
+            }
+        }
+        let mut directories = Vec::new();
+        for folder in folders {
+            let names: Vec<&str> = [CLAUDINE_DIR, REGISTRATIONS_DIR, OUTPUT_DIR]
+                .into_iter()
+                .chain(folder.split('/').filter(|name| !name.is_empty()))
+                .collect();
+            if self.route(&names)? == Entry::Directory {
+                directories.push(self.destination_folder(&folder));
+            }
+        }
+        Ok(Plan { directories, retired })
+    }
+
+    fn destination_folder(&self, folder: &str) -> PathBuf {
+        if folder.is_empty() { output_root(&self.home) } else { self.destination(folder) }
+    }
+
+    /// The published paths the installed manifest lists, when it is a valid
+    /// format 2 Claudine manifest; nothing otherwise. Only entries that name
+    /// a portable path inside the output root are returned, so a removal can
+    /// never leave it.
+    fn previous_members(&self) -> Result<Vec<String>, PublishError> {
+        let path = self.destination(MANIFEST_FILE);
+        if self.route(&Self::output_names(MANIFEST_FILE))? != Entry::File {
+            return Ok(Vec::new());
+        }
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(io_error("read", &path)(error)),
+        };
+        let Some(manifest) = PreviousManifest::parse(&bytes) else {
+            tracing::debug!(manifest = %path.display(), "the installed manifest is not a valid format 2 Claudine manifest; nothing is retired");
+            return Ok(Vec::new());
+        };
+        Ok(manifest
+            .references()
+            .filter_map(|reference| reference.strip_prefix("./"))
+            .filter(|relative| portable_path(relative).is_ok())
+            .map(str::to_string)
+            .collect())
     }
 }
 
-fn write_files(staging: &Path, revision: &HostRevision) -> io::Result<()> {
-    let schemas = staging.join(SCHEMAS_DIR);
-    fs::create_dir(&schemas)?;
-    for (name, text) in revision.files() {
-        let mut file = fs::File::create(schemas.join(name))?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-    }
-    Ok(())
+/// The installed manifest, read only to find retired members: the closed
+/// format 2 envelope with Claudine's host.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreviousManifest {
+    kind: String,
+    format_version: u64,
+    host: String,
+    #[serde(rename = "version")]
+    _version: String,
+    files: Vec<String>,
+    lifecycle: String,
+    functions: Vec<PreviousFunctionPair>,
+    digests: BTreeMap<String, String>,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreviousFunctionPair {
+    catalog: String,
+    facts: String,
+}
+
+impl PreviousManifest {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let manifest: Self = serde_yaml_ng::from_slice(bytes).ok()?;
+        let valid = manifest.kind == "darkmatter-host"
+            && manifest.format_version == 2
+            && manifest.host == HOST_ID
+            && manifest.references().all(|reference| manifest.digests.contains_key(reference))
+            && manifest.digests.len() == manifest.references().count();
+        valid.then_some(manifest)
+    }
+
+    fn references(&self) -> impl Iterator<Item = &str> {
+        self.files
+            .iter()
+            .map(String::as_str)
+            .chain([self.lifecycle.as_str()])
+            .chain(self.functions.iter().flat_map(|pair| [pair.catalog.as_str(), pair.facts.as_str()]))
+    }
+}
+
+mod legacy;
+
+pub use legacy::{CleanupError, LegacyCleanup, remove_legacy_registration};
 
 #[cfg(test)]
 mod tests {
+    use super::published::blake3_hex;
     use super::*;
+    use crate::composition::inventory;
 
     #[test]
-    fn registration_names_are_portable_segments() {
-        for name in ["0.1.0", "0.1.0-alpha.1+build", "claudine.yaml"] {
-            assert!(is_portable_segment(name), "{name}");
+    fn registration_reparse_classification_reads_the_attribute_bits() {
+        const READONLY: u32 = 0x1;
+        const DIRECTORY: u32 = 0x10;
+        assert_eq!(obstruction_of(false, 0), None);
+        assert_eq!(obstruction_of(false, DIRECTORY | READONLY), None);
+        assert_eq!(obstruction_of(false, DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT), Some(Obstruction::ReparsePoint));
+        assert_eq!(obstruction_of(false, FILE_ATTRIBUTE_REPARSE_POINT), Some(Obstruction::ReparsePoint));
+        assert_eq!(obstruction_of(true, FILE_ATTRIBUTE_REPARSE_POINT), Some(Obstruction::SymbolicLink));
+        assert_eq!(obstruction_of(true, 0), Some(Obstruction::SymbolicLink));
+    }
+
+    #[test]
+    fn registration_paths_must_be_portable_and_unreserved() {
+        for path in ["manifest.yaml", "schemas/seq.yaml", "schemas/nested/a_b-2.yaml", "globals.lifecycle.json"] {
+            assert_eq!(portable_path(path), Ok(()), "{path}");
         }
-        for name in ["", ".", "..", "a/b", "a\\b", "a:b", "a*", "trailing.", "trailing ", "tab\t"] {
-            assert!(!is_portable_segment(name), "{name:?}");
+        let reserved = format!("schemas/{TEMP_PREFIX}x");
+        for path in ["", "/abs.yaml", "a//b", "./a", "../a", "a\\b", "a:b", "a b", "trailing.", "schemas/con.yaml", &reserved] {
+            assert!(portable_path(path).is_err(), "{path:?}");
         }
     }
 
     #[test]
-    fn registration_digest_depends_on_content_not_version() {
-        let base = HostRevision::claudine().clone();
+    fn registration_inventory_lists_every_embedded_member_and_derives_its_manifest() {
+        let inventory = RegistrationInventory::claudine();
+        let paths: Vec<&str> = inventory.files().iter().map(PublishedFile::path).collect();
+        let mut sorted = paths.clone();
+        sorted.sort_unstable();
+        assert_eq!(paths, sorted, "path order");
+        assert_eq!(inventory.members().count(), inventory::members().len() + 1, "every member and the lifecycle artifact");
+        assert_eq!(inventory.invalid_path(), None);
+        let manifest = inventory.manifest().text().unwrap();
+        for file in inventory.members() {
+            let line = format!("    \"./{}\": \"{}\"\n", file.path(), blake3_hex(file.bytes()));
+            assert!(manifest.contains(&line), "{line}");
+        }
+        let parsed = PreviousManifest::parse(inventory.manifest().bytes()).expect("its own manifest is a valid previous one");
+        assert_eq!(parsed.files.len(), inventory::members().len());
+        assert_eq!(parsed.lifecycle, format!("./{}", inventory::LIFECYCLE_BUNDLE_PATH));
+    }
+
+    #[test]
+    fn registration_manifest_changes_with_any_member_byte_and_the_version() {
+        let base = RegistrationInventory::claudine().clone();
         let renamed = base.clone().with_version("9.9.9");
-        let edited = base.clone().with_file(GLOBALS_FILE, "kind: schema\n");
-        assert_eq!(base.digest(), renamed.digest());
-        assert_ne!(base.directory_name(), renamed.directory_name());
-        assert_ne!(base.digest(), edited.digest());
+        let edited = base.clone().with_member(PublishedFile::new(
+            "schemas/shared.yaml",
+            FileKind::Library,
+            None::<&'static str>,
+            b"kind: schema\ntypes:\n    x: string\n".to_vec(),
+        ));
+        assert_ne!(base.manifest(), renamed.manifest());
+        assert_ne!(base.manifest(), edited.manifest());
+        assert_eq!(base.files().len(), edited.files().len());
     }
 
     #[test]
-    fn registration_manifest_never_names_the_config_schema() {
-        let revision = HostRevision::claudine();
-        let text = revision.manifest_text(&revision.directory_name());
-        assert!(!text.contains(CONFIG_SCHEMA_FILE), "{text}");
-        assert!(revision.files().any(|(name, _)| name == CONFIG_SCHEMA_FILE));
+    fn registration_previous_manifest_must_be_claudines_closed_format_2() {
+        let valid = "kind: darkmatter-host\nformat_version: 2\nhost: claudine\nversion: \"1\"\nfiles: [./schemas/a.yaml]\n\
+                     lifecycle: ./globals.lifecycle.json\nfunctions: []\ndigests:\n  ./schemas/a.yaml: x\n  ./globals.lifecycle.json: y\n";
+        assert!(PreviousManifest::parse(valid.as_bytes()).is_some());
+        for invalid in [
+            valid.replace("format_version: 2", "format_version: 1"),
+            valid.replace("host: claudine", "host: other"),
+            valid.replace("functions: []", "functions: []\nidentify: ./x.yaml"),
+            valid.replace("  ./schemas/a.yaml: x\n", ""),
+            "not: [a manifest".to_string(),
+        ] {
+            assert!(PreviousManifest::parse(invalid.as_bytes()).is_none(), "{invalid}");
+        }
     }
 }

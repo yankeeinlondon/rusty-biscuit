@@ -488,10 +488,14 @@ mod tests {
     /// the repo / frontmatter layer regardless of the host's real
     /// `~/.claudine/config.yaml`. Caller must hold the guard for the test's
     /// lifetime and be `#[serial]`.
-    fn isolate_empty_home() -> (tempfile::TempDir, test_toolkit::EnvGuard) {
+    fn isolate_empty_home() -> (tempfile::TempDir, Vec<test_toolkit::EnvGuard>) {
         let home = tempfile::tempdir().unwrap();
-        let guard = test_toolkit::EnvGuard::set_safe("HOME", home.path().to_str().unwrap());
-        (home, guard)
+        // Windows reads the home from `USERPROFILE`, not `HOME`.
+        let guards = ["HOME", "USERPROFILE"]
+            .into_iter()
+            .map(|key| test_toolkit::EnvGuard::set_safe(key, home.path().to_str().unwrap()))
+            .collect();
+        (home, guards)
     }
 
     #[test]

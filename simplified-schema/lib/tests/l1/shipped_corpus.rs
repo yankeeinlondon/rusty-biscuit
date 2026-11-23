@@ -173,20 +173,28 @@ fn darkmatter_catalog_and_partials_resolve_from_supplied_sources() {
 fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
     const BUNDLE: &str = "claudine";
     const DOCUMENTS: &[EmbeddedDocument<'static>] = &[
-        EmbeddedDocument { path: "claudine/action.yaml", text: include_str!("../../../../claudine/schemas/action.yaml") },
-        EmbeddedDocument { path: "claudine/claudine.yaml", text: include_str!("../../../../claudine/schemas/claudine.yaml") },
-        EmbeddedDocument { path: "claudine/document.yaml", text: include_str!("../../../../claudine/schemas/document.yaml") },
+        EmbeddedDocument { path: "claudine/action.yaml", text: include_str!("../../../../claudine/registration/action.yaml") },
+        EmbeddedDocument { path: "claudine/composition.yaml", text: include_str!("../../../../claudine/registration/composition.yaml") },
         EmbeddedDocument {
-            path: "claudine/inline-compose.yaml",
-            text: include_str!("../../../../claudine/schemas/inline-compose.yaml"),
+            path: "claudine/content-policy.yaml",
+            text: include_str!("../../../../claudine/registration/content-policy.yaml"),
         },
-        EmbeddedDocument { path: "claudine/lifecycle.yaml", text: include_str!("../../../../claudine/schemas/lifecycle.yaml") },
-        EmbeddedDocument { path: "claudine/linking.yaml", text: include_str!("../../../../claudine/schemas/linking.yaml") },
+        EmbeddedDocument { path: "claudine/document.yaml", text: include_str!("../../../../claudine/registration/document.yaml") },
         EmbeddedDocument {
-            path: "claudine/sequence-types.yaml",
-            text: include_str!("../../../../claudine/schemas/sequence-types.yaml"),
+            path: "claudine/inline-composition.yaml",
+            text: include_str!("../../../../claudine/registration/inline-composition.yaml"),
         },
-        EmbeddedDocument { path: "claudine/sequence.yaml", text: include_str!("../../../../claudine/schemas/sequence.yaml") },
+        EmbeddedDocument {
+            path: "claudine/lifecycle-events.yaml",
+            text: include_str!("../../../../claudine/registration/lifecycle-events.yaml"),
+        },
+        EmbeddedDocument { path: "claudine/linking.yaml", text: include_str!("../../../../claudine/registration/linking.yaml") },
+        EmbeddedDocument { path: "claudine/sequence.yaml", text: include_str!("../../../../claudine/registration/sequence.yaml") },
+        EmbeddedDocument {
+            path: "claudine/sequence-document.yaml",
+            text: include_str!("../../../../claudine/registration/sequence-document.yaml"),
+        },
+        EmbeddedDocument { path: "claudine/shared.yaml", text: include_str!("../../../../claudine/registration/shared.yaml") },
     ];
     // Claudine's documents name Darkmatter's shipped partials through the
     // reserved namespace, so the host's shipped sources come too.
@@ -227,6 +235,16 @@ fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
                     prepare_embedded_schema_in(&target, DOCUMENTS, BUNDLE, SHIPPED)
                         .unwrap_or_else(|error| panic!("{} payload {target}: {error}", document.path));
                 }
+                // A root union (a registered trigger's payload form): an
+                // embedded inline schema cannot be one, so each arm resolves
+                // on its own.
+                YamlValue::Sequence(arms) => {
+                    assert!(arms.len() > 1, "{}: a root union has several arms", document.path);
+                    for arm in arms {
+                        prepare_embedded_inline_schema(arm, document.path, DOCUMENTS, BUNDLE, SHIPPED)
+                            .unwrap_or_else(|error| panic!("{} payload arm {arm:?}: {error}", document.path));
+                    }
+                }
                 payload => {
                     prepare_embedded_inline_schema(payload, document.path, DOCUMENTS, BUNDLE, SHIPPED)
                         .unwrap_or_else(|error| panic!("{} payload: {error}", document.path));
@@ -246,7 +264,7 @@ fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
                 .unwrap_or_else(|error| panic!("the types of {}: {error}", document.path));
         }
     }
-    assert_eq!(triggers, 3, "claudine.yaml, inline-compose.yaml, and sequence.yaml are triggers");
+    assert_eq!(triggers, 3, "composition.yaml, inline-composition.yaml, and sequence-document.yaml are triggers");
 }
 
 #[test]

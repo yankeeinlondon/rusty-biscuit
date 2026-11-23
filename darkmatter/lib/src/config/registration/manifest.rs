@@ -241,6 +241,19 @@ impl ReadManifestV2 {
     pub fn members(&self, manifest: &Path, context: &FileResolutionContext) -> Result<MemberSpec, Refusal> {
         let anchor = super::anchored_at(context, manifest);
         let root = PathIdentity::new(manifest.parent().unwrap_or(manifest));
+        self.members_with(manifest, &|authored| normalize_member(authored, &anchor, &root))
+    }
+
+    /// [`Self::members`] for an embedded bundle whose manifest has the
+    /// virtual path `manifest`: each member's identity is its spelling with
+    /// `.` and `..` applied, and its location the matching path under the
+    /// manifest's virtual directory. Probes nothing.
+    pub fn embedded_members(&self, manifest: &Path) -> Result<MemberSpec, Refusal> {
+        let root = manifest.parent().unwrap_or(manifest);
+        self.members_with(manifest, &|authored| lexical_member(authored, root))
+    }
+
+    fn members_with(&self, manifest: &Path, normalize: &NormalizeMember<'_>) -> Result<MemberSpec, Refusal> {
         let mut entries: Vec<(Vec<String>, &str)> = Vec::new();
         for (index, file) in self.manifest.files.iter().enumerate() {
             entries.push((vec!["files".to_string(), index.to_string()], file));
@@ -264,7 +277,7 @@ impl ReadManifestV2 {
                 member: Some(field.clone()),
                 message,
             };
-            let (path, location) = normalize_member(authored, &anchor, &root).map_err(&refuse)?;
+            let (path, location) = normalize(authored).map_err(&refuse)?;
             if let Some(earlier) = members.iter().find(|member| member.path == path) {
                 return Err(refuse(format!(
                     "`{authored}` names `{path}`, which `{}` (`{}`) already names; each bundle file is listed once",
@@ -334,6 +347,52 @@ fn normalize_member(
     anchor: &FileResolutionContext,
     root: &PathIdentity,
 ) -> Result<(String, PathBuf), String> {
+    let reference = check_member_spelling(authored)?;
+    let resolution = reference.resolve_detailed(anchor);
+    let Some(location) = resolution.probed_paths().last() else {
+        let why = resolution.error().map_or_else(|| "nothing was probed".to_string(), ToString::to_string);
+        return Err(format!("`{authored}` cannot be resolved: {why}"));
+    };
+    let route = PathIdentity::new(&location).relative_from(root).filter(|route| route.parent_hops() == 0);
+    let Some(route) = route.filter(|route| !route.forward().is_empty()) else {
+        return Err(leaves_bundle(authored));
+    };
+    let path = route.forward().iter().map(|name| name.to_string_lossy()).collect::<Vec<_>>().join("/");
+    Ok((path, location))
+}
+
+/// Turns an authored member reference into its bundle path and its file
+/// (an installed file, or its place under an embedded bundle's virtual root).
+type NormalizeMember<'a> = dyn Fn(&str) -> Result<(String, PathBuf), String> + 'a;
+
+/// [`normalize_member`] for an embedded bundle rooted at the virtual
+/// directory `root`: `.` and `..` are applied to the spelling itself.
+fn lexical_member(authored: &str, root: &Path) -> Result<(String, PathBuf), String> {
+    check_member_spelling(authored)?;
+    let mut names: Vec<&str> = Vec::new();
+    for name in authored.split('/') {
+        match name {
+            "." => {}
+            ".." => {
+                names.pop().ok_or_else(|| leaves_bundle(authored))?;
+            }
+            name => names.push(name),
+        }
+    }
+    if names.is_empty() {
+        return Err(leaves_bundle(authored));
+    }
+    let location = names.iter().fold(root.to_path_buf(), |path, name| path.join(name));
+    Ok((names.join("/"), location))
+}
+
+fn leaves_bundle(authored: &str) -> String {
+    format!("`{authored}` leaves the bundle: members sit in the manifest's directory or below it")
+}
+
+/// The member spelling `authored` as a reference, once it is local, written
+/// `./…` or `../…` with forward slashes, and made of portable names.
+fn check_member_spelling(authored: &str) -> Result<FileReference, String> {
     let reference =
         FileReference::new(authored).map_err(|error| format!("`{authored}` is not a file reference: {error}"))?;
     if reference.class().kind == FileReferenceKind::Url {
@@ -356,17 +415,7 @@ fn normalize_member(
             name => portable_name(name).map_err(|why| format!("`{authored}`: `{name}` {why}"))?,
         }
     }
-    let resolution = reference.resolve_detailed(anchor);
-    let Some(location) = resolution.probed_paths().last() else {
-        let why = resolution.error().map_or_else(|| "nothing was probed".to_string(), ToString::to_string);
-        return Err(format!("`{authored}` cannot be resolved: {why}"));
-    };
-    let route = PathIdentity::new(&location).relative_from(root).filter(|route| route.parent_hops() == 0);
-    let Some(route) = route.filter(|route| !route.forward().is_empty()) else {
-        return Err(format!("`{authored}` leaves the bundle: members sit in the manifest's directory or below it"));
-    };
-    let path = route.forward().iter().map(|name| name.to_string_lossy()).collect::<Vec<_>>().join("/");
-    Ok((path, location))
+    Ok(reference)
 }
 
 /// Whether `name` is a file or directory name every supported file system

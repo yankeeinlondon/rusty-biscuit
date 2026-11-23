@@ -128,6 +128,10 @@ pub(crate) enum Commands {
     Context(commands::context::ContextArgs),
     /// Show the diagnostic error-code contract (codes, dispositions, details).
     Errors(commands::errors::ErrorsArgs),
+    /// List, print, or publish Claudine's Darkmatter host registration
+    /// (maintainers).
+    #[command(hide = true)]
+    Registrations(commands::registrations::RegistrationsArgs),
 }
 
 /// Exit status of a refused invocation: a usage error, with nothing run.

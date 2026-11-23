@@ -11,6 +11,7 @@ fn shipped_lifecycle_artifacts_use_mapping_only_set() {
     let (mapping_witnesses, defects) = mapping_only_set_findings(&[
         root.join("claudine/cli/tests/fixtures"),
         root.join("claudine/gen/tests/fixtures"),
+        root.join("claudine/registration"),
         root.join("claudine/schemas"),
         root.join("claudine/docs/schemas"),
         root.join("darkmatter/dmls/tests/fixtures/sequence_descent"),

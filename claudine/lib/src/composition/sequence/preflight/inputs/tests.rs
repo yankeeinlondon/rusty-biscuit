@@ -300,7 +300,10 @@ fn a_referenced_template_never_selects_a_prompt_from_its_referrers_values() {
     let leaked = write(dir.path(), "elsewhere/leaked.md", "---\ntitle: l\n---\nLeaked.\n");
     let fallback = write(dir.path(), "fallback.md", "---\ntitle: f\n---\nFallback.\n");
     let own = write(dir.path(), "own.md", "---\ntitle: o\n---\nOwn.\n");
-    let template = format!("template:\n  prompt: \"{{{{ prompt_path || '{}' }}}}\"\nsequence:\n  - name: one\n", fallback.display());
+    // `/` separators: a Windows `\` inside the double-quoted scalar would be
+    // read as a YAML escape.
+    let fallback = fallback.display().to_string().replace('\\', "/");
+    let template = format!("template:\n  prompt: \"{{{{ prompt_path || '{fallback}' }}}}\"\nsequence:\n  - name: one\n");
     write(dir.path(), "roster.yaml", &format!("kind: sequence\n{template}"));
     write(dir.path(), "own.yaml", &format!("kind: sequence\nprompt_path: {}\n{template}", own.display()));
     let prompts = |root: &Path, setters: Value| -> Vec<std::ffi::OsString> {

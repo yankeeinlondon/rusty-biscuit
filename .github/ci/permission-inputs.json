@@ -5,7 +5,7 @@
   ],
   "default-schemas": [
     { "path": "darkmatter/schemas/darkmatter-config.yaml", "format": "darkmatter-config" },
-    { "path": "claudine/schemas/claudine-config.yaml", "format": "host-config" }
+    { "path": "claudine/registration/claudine-config.yaml", "format": "host-config" }
   ],
   "checker-inputs": [
     ".github/ci/permission-inputs.json",

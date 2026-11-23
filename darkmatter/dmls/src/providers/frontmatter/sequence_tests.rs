@@ -1,5 +1,5 @@
 //! Sequence descent (spec D6) through the frontmatter provider: typed schema
-//! paths, Claudine's predicate typing (from `claudine/schemas/`), shape sharing through the
+//! paths, Claudine's predicate typing (from `claudine/registration/`), shape sharing through the
 //! snapshot's analysis, and
 //! the hover/completion/navigation boundary at real list items versus
 //! synthetic item positions.
@@ -22,13 +22,15 @@ use crate::source_map::{PositionEncoding, SourceMap};
 
 use FmPathSegment::{Index, Key};
 
-/// The Claudine schema files the `claudine.yaml` catalog's payload reads.
-const CLAUDINE_BUNDLE: [(&str, &str); 5] = [
-    ("claudine.yaml", include_str!("../../../../../claudine/schemas/claudine.yaml")),
-    ("document.yaml", include_str!("../../../../../claudine/schemas/document.yaml")),
-    ("lifecycle.yaml", include_str!("../../../../../claudine/schemas/lifecycle.yaml")),
-    ("action.yaml", include_str!("../../../../../claudine/schemas/action.yaml")),
-    ("linking.yaml", include_str!("../../../../../claudine/schemas/linking.yaml")),
+/// The Claudine schema files the `composition.yaml` catalog's payload reads.
+const CLAUDINE_BUNDLE: [(&str, &str); 7] = [
+    ("composition.yaml", include_str!("../../../../../claudine/registration/composition.yaml")),
+    ("shared.yaml", include_str!("../../../../../claudine/registration/shared.yaml")),
+    ("content-policy.yaml", include_str!("../../../../../claudine/registration/content-policy.yaml")),
+    ("document.yaml", include_str!("../../../../../claudine/registration/document.yaml")),
+    ("lifecycle-events.yaml", include_str!("../../../../../claudine/registration/lifecycle-events.yaml")),
+    ("action.yaml", include_str!("../../../../../claudine/registration/action.yaml")),
+    ("linking.yaml", include_str!("../../../../../claudine/registration/linking.yaml")),
 ];
 
 /// A temporary folder holding Claudine's catalog payload as a plain `$schema`

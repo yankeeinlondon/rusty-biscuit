@@ -195,19 +195,11 @@ catalog, and `export` pushes the catalog into a provider's config.
 
 ## Making Claudine's schemas visible to `md` and DMLS
 
-The `claudine` binary has its trigger schemas built in. `md` and DMLS read
-them **from disk only**.
-
-- **Under `claudine/`** in the repo, documents find them automatically.
-- **Elsewhere**, copy the bundle as regular files (symlinks are ignored)
-  into `~/schemas/`, an absolute `$SCHEMAS_DIR`, or `<repo>/schemas/`:
-
-```bash
-cd claudine/schemas
-cp action.yaml lifecycle.yaml sequence-types.yaml linking.yaml document.yaml \
-   claudine.yaml inline-compose.yaml sequence.yaml \
-   globals.yaml globals.lifecycle.json ~/schemas/
-```
-
-The first eight files are the trigger bundle; they import each other. The
-last two give the editor Claudine's globals and lifecycle checks.
+The `claudine` binary has its schemas built in: the files of
+`claudine/registration/` (the trigger files, the libraries they import, the
+`kind: sequence` YAML definition, and the namespace files of the globals
+`seq`, `loop`, and `group`). `md` and DMLS read them from Claudine's host
+registration, which Claudine's setup publishes and registers in
+`~/.darkmatter.yaml`, so a Claudine document is typed in any folder. The
+editor's lifecycle checks come from the generated lifecycle artifact the
+registration carries.

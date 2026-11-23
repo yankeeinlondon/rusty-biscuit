@@ -7,7 +7,7 @@
 //! reserved `darkmatter:` namespace and closed to unknown verbs.
 //!
 //! Documents are judged as Claudine's launch verdict judges them: through the
-//! bundle embedded in the binary. The expected names and action types come
+//! registration compiled into the binary, as a registered host. The expected names and action types come
 //! from the registries, never from a list kept here.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,7 +20,7 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
 use serde_json::Value;
 
-use crate::claudine_schemas::{Discovered, SchemaRepo, embedded_bundle, problems, shipped_bundle};
+use crate::claudine_schemas::{Discovered, SchemaRepo, problems, shipped_bundle};
 
 /// Every action type, each with one well-formed action of that type that
 /// both hosts provide.
@@ -47,8 +47,8 @@ struct Bundle {
 impl Bundle {
     fn embedded() -> Self {
         let shipped = shipped_bundle!();
-        let repo = SchemaRepo::new(&[]);
-        let discovered = repo.discover_embedded(embedded_bundle(&shipped)).expect("the embedded bundle loads");
+        let repo = SchemaRepo::new(&shipped);
+        let discovered = repo.discover().expect("the compiled bundle loads");
         Self { repo, discovered }
     }
 
@@ -58,8 +58,8 @@ impl Bundle {
             .discovered
             .judge(
                 &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
+                include_str!("../../../registration/composition.yaml"),
+                include_str!("../../../registration/inline-composition.yaml"),
             )
             .expect("judged");
         assert!(judged.claudine, "the probe selects Claudine's trigger: {frontmatter}");
@@ -206,10 +206,10 @@ fn lowered(repo: &SchemaRepo, references: &[(&str, String)]) -> BTreeMap<String,
 
 #[test]
 fn claudine_action_types_are_darkmatters_neutral_definitions() {
-    let repo = SchemaRepo::new(&[("action.yaml", include_str!("../../../schemas/action.yaml").to_string())]);
+    let repo = SchemaRepo::new(&[("action.yaml", include_str!("../../../registration/action.yaml").to_string())]);
     let exports = ["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"];
     let claudine: Vec<(&str, String)> =
-        exports.iter().map(|export| (*export, format!("{export}@../schemas/action.yaml"))).collect();
+        exports.iter().map(|export| (*export, format!("{export}@../registration/action.yaml"))).collect();
     let darkmatter: Vec<(&str, String)> =
         exports.iter().map(|export| (*export, format!("{export}@darkmatter:lifecycle"))).collect();
     let claudine = lowered(&repo, &claudine);

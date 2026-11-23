@@ -143,10 +143,17 @@ feature). A first claudine run in a fixture with no Claudine config therefore
 rewrites `~/.darkmatter.yaml` to the reference; read saved rules from
 `~/.claudine/config.yaml` there. The full setup order is
 `config/setup.rs::setup_claudine`: `composition::registration::publish` the
-immutable host revision (failure aborts setup), then this handshake, then
-`darkmatter::config::init::register_manifest` adds
-`~/.claudine/darkmatter-host.yaml` to the user `~/.darkmatter.yaml` (failure
-is a warning). User docs:
+fixed format 2 tree (failure aborts setup, nothing written), then this
+handshake, then `darkmatter::config::init::replace_manifest_registration`
+puts `registration::MANIFEST_REFERENCE` in the user `~/.darkmatter.yaml`
+in place of any spelling of the retired `~/.claudine/darkmatter-host.yaml`
+(even after a handshake `Conflict`; failure is a warning), then, only after
+that succeeded, `registration::remove_legacy_registration` deletes exactly
+the retired manifest and `~/.claudine/darkmatter-host/` after a no-follow
+preflight of the whole tree (a link is `CleanupError::Obstructed`, nothing
+removed). `ClaudineSetup.{registration, cleanup}` carry both results; the
+CLI reports them in `init_wizard.rs::write_with_darkmatter_setup`. Tests:
+`lib/tests/l1/installed_registration.rs` (migration section). User docs:
 [Schemas → published host registration](topics/schemas.md#the-published-host-registration).
 
 **`tts` in `~/.claudine/config.yaml`** (`config/tts.rs::TtsValue`) is `true`,
@@ -195,9 +202,11 @@ twins of `LifecycleError`. Event names come from the host registry:
 Darkmatter's `composed`/`failed` to `start`/`blocked` (the Darkmatter spelling
 is `LifecycleRenamedEvent`) and registers `success`/`failure` and `loop`;
 derive event keys from `authored_event_keys()`, never a hand list. The host
-globals `seq`, `loop`, and `group` are declared once in the host catalog
-`claudine/schemas/globals.yaml` (embedded by `composition/schema/globals.rs`,
-`claudine_globals()`/`host_global()`; never a trigger or document schema), and
+globals `seq`, `loop`, and `group` are declared once, by the namespace files
+`claudine/registration/{group,loop,seq}.yaml`, prepared into the host catalog
+by `composition/schema/globals.rs` (`prepare_namespace_catalog` over the
+embedded inventory, `claudine_globals()`/`host_global()`; never a trigger or
+document schema), and
 `bindings.rs` and the registry take their names from it; Darkmatter's own
 globals (`fm`, `ctx`, `current`, `env`, `err`, `timing`) are declared in
 `darkmatter/schemas/darkmatter.yaml`, whose resolved `fm` is the built-in
@@ -743,24 +752,36 @@ Atomic failed groups withhold all leg mutations; tolerant groups merge failed
 leg mutations in declaration order. Body-only steps mask source lifecycle keys
 through data overrides so canonical rereads do not fire container events again. Internal legacy task-stage tests
 construct preflight models directly; they do not authorize old YAML syntax.
-The canonical shipped trigger schema lives in `claudine/schemas/`, not
-Darkmatter's docs tree. A malformed disk `claudine.yaml` is skipped with a
-warning and still shadows the embedded copy; there is no fallback to it
-(`claudine_schemas_embedded.rs`, `launch_trigger_schemas.rs`). The embedded
-bundle's triggers and the host catalog are served prepared from the checked-in
+The canonical shipped trigger schemas live in `claudine/registration/`, not
+Darkmatter's docs tree. In process they are Claudine's registered host:
+`composition/schema/bundle.rs::claudine_hosts()` (one `OnceLock` per process)
+verifies the compiled inventory with Darkmatter's
+`VerifiedSnapshot::from_embedded` and loads it with
+`registration::load_embedded`, and `discover_schema_owner` passes it through
+`with_claudine_registration` before root trigger discovery, so registered
+payloads (root unions included, `inline-composition.yaml`) form the lowest
+trigger layer and every schema-root trigger, a same-name disk copy included,
+layers above it. A malformed disk `composition.yaml` is skipped with a
+warning and hides nothing registered (`claudine_schemas_embedded.rs`,
+`launch_trigger_schemas.rs`). Registered origins are
+`TriggerSource::Embedded { bundle: "claudine", name: "schemas/<file>" }`
+(never call the disk-only `RegisteredTrigger::path()`), and
+`is_claudine_owned` means the winning origin is a trigger of the registered
+`claudine` host layer, compiled in or installed. The registered payloads, the
+host catalog, and the YAML kinds are served prepared from the checked-in
 `claudine/lib/generated/shipped.json` (`composition/schema/shipped.rs`,
 prepared over Simplified Schema's and Darkmatter's artifacts;
-`claudine_schema_bundle()` attaches `shipped::BUNDLE`, `claudine_globals()` is
+`shipped::registered_payload` feeds `profile_of_with`, `claudine_globals()` is
 a registry view). A refused artifact or section falls back to preparing the
-text; disk shadowing happens before the prepared lookup and is unchanged.
-After editing `claudine/schemas/` (or a lower artifact changes), run the
-root `just shipped-schemas`; `shipped_artifacts::shipped_artifact_is_fresh`
-fails with that command, and a code-only change to preparation bumps
-`shipped::PREPARATION_REVISION`. Do not shadow `claudine.yaml` with a
-reduced schema (such as a copy of `inline-compose.yaml`) to speed a test up:
-preparation is precompiled, and shadowing only stops the test checking the
-shipped schemas. Shadow only when shadowing or a custom definition is the
-subject. Action shapes are Darkmatter's: `action.yaml`'s
+text; an edited inventory (`bundle::profile_of`, tests) is always prepared
+from its own text. After editing `claudine/registration/` (or a lower artifact
+changes), run the root `just shipped-schemas`;
+`shipped_artifacts::shipped_artifact_is_fresh` fails with that command, and a
+code-only change to preparation bumps `shipped::PREPARATION_REVISION`. Do not
+replace a shipped trigger with a reduced schema in a test to speed it up:
+preparation is precompiled, and a reduced registration only stops the test
+checking the shipped schemas. Edit the inventory only when a custom
+definition is the subject. Action shapes are Darkmatter's: `action.yaml`'s
 categories and bundles, the `cancelled-*` types, and `loop`'s loose verbs are
 mappings whose values reference per-verb types `@darkmatter:lifecycle` (a
 reserved reference that resolves from Darkmatter's embedded partials, so the
@@ -777,10 +798,9 @@ contract. The
 shared Darkmatter events `initialize`, `cancelled`, and `finalize` never
 select `claudine.yaml` alone (it still types them once selected), so a probe
 of their Claudine types adds a Claudine key (`claudine_schemas.rs::CLAUDINE_SELECTOR`,
-`agent: claude`). `schemas/claudine-document.yaml` is the identifying trigger
-(the nine keys `sequence`/`start`/`blocked`/`success`/`failure`/`loop`/`prompt`/`agent`/`model`,
-empty payload) named only by the published `darkmatter-host` manifest; it is
-not in `CLAUDINE_SCHEMA_FILES`, so Claudine's runtime never applies it
+`agent: claude`). There is no identify-only trigger: every inventory trigger
+identifies, and together they identify the nine keys
+`sequence`/`start`/`blocked`/`success`/`failure`/`loop`/`prompt`/`agent`/`model`
 (`lib/tests/l1/claudine_identification.rs`). The
 container types live in `schemas/sequence-types.yaml`, not `lifecycle.yaml`.
 The lifecycle families (`stack`/`item`/`conditional`, `initialize-*`,
@@ -968,13 +988,30 @@ fails (see `darkmatter/docs/topics/host-functions.md`; user docs:
 [Schemas → What Claudine adds to expression checking](topics/schemas.md#what-claudine-adds-to-expression-checking)).
 DMLS types Claudine lifecycle stacks (its events, renames, per-event `err`,
 and verbs such as `say`/`retry`/`proxy`) from the generated
-`claudine/schemas/globals.lifecycle.json` beside `globals.yaml`
-(`composition::lifecycle::lifecycle_artifact()`, Darkmatter's
-`lifecycle::host_profile`): after changing `claudine_registry()`,
-`claudine_parse_options`, `globals.yaml`, or the Playa effect catalog, run
-`just regen-lifecycle-artifact` in `claudine/`;
+`claudine/lib/generated/globals.lifecycle.json`
+(`composition::lifecycle::lifecycle_artifact()`, versioned by the namespace
+files' `catalog_hash`; `inventory::LIFECYCLE_ARTIFACT` embeds it for
+publication): after changing `claudine_registry()`, `claudine_parse_options`,
+a namespace file, or the Playa effect catalog, run the root
+`just shipped-schemas` (the generator's `--lifecycle-output` stages it and
+`check_lifecycle_artifact` loads it before anything is replaced);
 `host_catalog.rs::lifecycle_artifact` fails while it is stale and proves the
 rebuilt registry equals `claudine_registry()`.
+**Registration inventory** (`composition/inventory.rs`, `lib/build.rs`):
+`claudine/registration/` is compiled in by `build.rs`, which walks it with
+`inventory/walk.rs` (std + `serde_yaml_ng` only, `#[path]`-included by the
+build script) and fails the build listing every nonportable name, non-`.yaml`
+file, symlink/junction, case collision, non-UTF-8 text, or bad `kind`
+envelope. `inventory::members()` is the sorted table (`InventoryMember {path,
+text, kind, name}`; `bundle_path()` is `schemas/<path>`), `bundle_sources()`
+the embedded `<claudine>` bundle and `bundle_context()` its one detached
+context. `bundle.rs`'s lists, `shipped.rs::sources()`, the namespace catalog
+(`globals.rs`), the YAML kinds (`shipped::formal_sequence_kind()`), and the
+format 1 publisher all derive from it; `tests/l1/registration_inventory.rs`
+proves the table equals a fresh walk. A YAML file declaring `kind: sequence`
+with an inline list is judged against `formal_sequence_kind()` in
+`sequence/mod.rs::resolve_sequence_plan_with`, after the formal parser
+accepts it (its errors are more precise), as `SchemaValidation`.
 A new host site adds an entry with its reason. Runtime `is_null` checks are not
 restricted. The guard/site conformance matrix is
 `composition/lifecycle/executor/tests/scope_site_conformance.rs` plus its
@@ -1154,7 +1191,7 @@ of a topic doc.
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
 - [Configuration](topics/configuration.md) — the YAML `~/.claudine/config.yaml` and `{repo-root}/.claudine/config.yaml`, validated against `claudine/schemas/claudine-config.yaml`, and the automatic conversion of a legacy JSON5 `config.json`
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
-- [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
+- [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, the registered layer below disk triggers, and DMLS's registration-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
 - [Lifecycle](topics/flow-control/lifecycle.md) — Claudine as a host of Darkmatter's lifecycle (renames, registrations, how failures route, the `finalize` exceptions), the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors. The host-neutral model (Darkmatter's five events, host registration, the `md` host, recovery modes) is `darkmatter/docs/topics/lifecycle/index.md` and `error-handling.md`
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
 - [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards

@@ -276,7 +276,9 @@ pub(crate) fn write_with_darkmatter_setup(
         Ok(setup) => {
             // Publishing and registering Claudine is setup's documented
             // default, as quiet as Claudine's own first write (a headless
-            // first run prints nothing); only a failure is reported.
+            // first run prints nothing); only a failure, or a change to what
+            // the user had (a replaced entry, a removed retired file), is
+            // reported.
             let claudine_config = match setup.darkmatter {
                 Ok(handshake) => {
                     let darkmatter = biscuit_file::to_portable_string(&handshake.darkmatter_config);
@@ -302,8 +304,37 @@ pub(crate) fn write_with_darkmatter_setup(
                     claudine::config::setup::claudine_config_path(&context, scope)?
                 }
             };
-            if let Err(error) = setup.registration {
-                log::warn(&format!("  Claudine was not registered with Darkmatter: {error}"));
+            match &setup.publication {
+                claudine::composition::registration::PublishOutcome::Published { manifest, .. } => log::info(&format!(
+                    "  Published Claudine's host registration at `{}`",
+                    biscuit_file::to_portable_string(manifest)
+                )),
+                outcome => log::info(&format!(
+                    "  Claudine's host registration at `{}` is current",
+                    biscuit_file::to_portable_string(outcome.manifest())
+                )),
+            }
+            match setup.registration {
+                Ok(report) if !report.replaced.is_empty() => log::message(&format!(
+                    "  Darkmatter registration: `{}` now lists `{}` in place of {}",
+                    biscuit_file::to_portable_string(&report.path),
+                    claudine::composition::registration::MANIFEST_REFERENCE,
+                    report.replaced.iter().map(|entry| format!("`{entry}`")).collect::<Vec<_>>().join(", ")
+                )),
+                Ok(_) => {}
+                Err(error) => log::warn(&format!("  Claudine was not registered with Darkmatter: {error}")),
+            }
+            match setup.cleanup {
+                Some(Ok(cleanup)) => {
+                    for path in cleanup.removed {
+                        log::message(&format!(
+                            "  Removed the retired host registration `{}`",
+                            biscuit_file::to_portable_string(&path)
+                        ));
+                    }
+                }
+                Some(Err(error)) => log::warn(&format!("  The retired host registration was not removed: {error}")),
+                None => {}
             }
             Ok(claudine_config)
         }

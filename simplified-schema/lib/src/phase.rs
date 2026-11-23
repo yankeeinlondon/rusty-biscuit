@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 /// and [`make_passive`] together. A
 /// [`LayeredIdentity`](crate::validate::LayeredIdentity) folds it in;
 /// increment it with any change to what a projection produces.
-pub const PROJECTION_REVISION: u32 = 2;
+pub const PROJECTION_REVISION: u32 = 3;
 
 /// Runtime seam at which a resolved schema instance is validated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +69,29 @@ pub fn merge_with_effective(
                 .map(|(effective_arm, projected_arm)| merge_layer(effective_arm, projected_arm.clone()))
                 .collect::<Result<Vec<_>, _>>()?;
             root.insert("anyOf".into(), Value::Array(arms));
+            Value::Object(root)
+        }
+        // A root union below an object document (a registered host's union
+        // layer): every arm already holds the document's declarations, so
+        // the projected document replaces them arm by arm. Its definitions
+        // join the root, where the arms' references resolve.
+        (Some(effective_arms), None) => {
+            let mut projected_document = projected_document;
+            let projected_defs = projected_document.as_object_mut().and_then(|document| document.shift_remove("$defs"));
+            let mut root = effective.as_object().cloned().unwrap_or_default();
+            let arms = effective_arms
+                .iter()
+                .map(|effective_arm| merge_layer(effective_arm, projected_document.clone()))
+                .collect::<Result<Vec<_>, _>>()?;
+            root.insert("anyOf".into(), Value::Array(arms));
+            if let Some(Value::Object(projected_defs)) = projected_defs {
+                let Value::Object(defs) = root.entry("$defs").or_insert_with(|| Value::Object(Map::new())) else {
+                    unreachable!("an effective schema's `$defs` is an object");
+                };
+                for (key, body) in projected_defs {
+                    defs.insert(key, body);
+                }
+            }
             Value::Object(root)
         }
         (None, None) => merge_layer(effective, projected_document)?,

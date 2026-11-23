@@ -1,9 +1,9 @@
 //! Schema-aware composition preparation.
 //!
-//! The launch verdict judges a document by its effective schema: the
-//! matching trigger schemas of its five schema locations, with Claudine's
-//! embedded bundle ([`bundle`]) as the last-resort location, under its
-//! authored `$schema` (see [`load_effective_schema`]). Darkmatter's compose
+//! The launch verdict judges a document by its effective schema: Claudine's
+//! compiled registration as the registered host layer ([`bundle`]), the
+//! matching trigger schemas of its five schema locations above it, and its
+//! authored `$schema` on top (see [`load_effective_schema`]). Darkmatter's compose
 //! pipeline also runs effective-schema validation between frontmatter
 //! interpolation and shell expansion (see
 //! `darkmatter::markdown::compose::schema_validation`). When the
@@ -565,9 +565,9 @@ pub fn authored_schema_parameters(
 }
 
 /// Resolve the effective schema a launch verdict judges the document by: the
-/// matching trigger schemas of the document's five schema locations, with
-/// Claudine's embedded bundle as the last-resort location (see [`bundle`]),
-/// merged under the authored `$schema`.
+/// matched triggers of Claudine's compiled registration (see [`bundle`]),
+/// the matching trigger schemas of the document's five schema locations
+/// above them, merged under the authored `$schema`.
 ///
 /// Triggers match `snapshot`, the values the verdict is about to judge, so a
 /// caller overlay or a composed value selects them as it would in the editor;
@@ -623,9 +623,8 @@ fn discover_schema_owner(
     trigger_findings: &TriggerFindings,
 ) -> Result<DarkmatterSchemas, CompositionError> {
     let document_context = file_resolution_context.for_source(&source.resolved_path);
-    let mut schemas = DarkmatterSchemas::new(document_context)
-        .with_embedded_trigger_bundle(bundle::claudine_schema_bundle())
-        .and_then(DarkmatterSchemas::with_trigger_discovery)
+    let mut schemas = bundle::with_claudine_registration(DarkmatterSchemas::new(document_context))
+        .with_trigger_discovery()
         .map_err(|err| schema_load_error(source, &err))?;
     // Recorded before any effective schema resolves, so a later authored
     // `$schema` failure is delivered with the triggers skipped before it.

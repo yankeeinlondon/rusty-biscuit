@@ -1,27 +1,36 @@
+# The sequence document's step and container types, applied by
+# sequence-document.yaml to a document's `sequence:` list and by
+# formal-sequence-file.yaml to a `kind: sequence` YAML file's. Hand-maintained;
+# see claudine/docs/topics/schemas.md.
+#
+# `task` and `group` are recursive: a task's inline `sequence:` items and a
+# group's `tasks:` legs reference them again, so containers are typed at every
+# depth and the resolver stores each once as a definition. Every container
+# event is typed with the same family as the document's event of that name:
+# `initialize` with `initialize-stack`, `cancelled` with `cancelled-stack`, and
+# the others with `stack`. The task parser accepts unlimited nesting, and the
+# schema adds no container-depth limit; each event stack starts its own
+# conditional-depth count, which the lifecycle parser checks.
+#
+# A task object is open: an undeclared key is authored step data, read as
+# `seq.<key>`. `$schema`, `$state`, and `template` are an inline sequence's own
+# declarations; the task parser refuses them on any other task. A group object is closed, so `execution` (removed) and a
+# misspelled key such as `max_paralel` are schema errors.
 kind: schema
 name: sequence-schema
-description: |-
-    Defines the shape of a sequence; both _inline_ sequences and normal sequences. Nothing is exported via `$schema` so this file is simply
-    to provide reuse to other schemas.
+description: the step and container types of a sequence; nothing is exported through `$schema`
 types:
-    sequence:
-        - seq_file_ref(required)
-        - step[](required)
+    steps:
+        - "step[] -> an inline list of steps"
+        - "string -> a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`"
     step:
-        - sequence_shorthand(required)
-        - task(required)
-    sequence_shorthand: string -> a string which is shorthand for the `name` property of state for a sequence.
-    seq_file_ref: |-
-        string(pattern(*.yaml)) ->
-        a _file reference_ to a sequence file, where the file is:
-
-        - a formal YAML sequence file (`kind: "sequence"`)
-        - a YAML or JSON/JSON5 file reference to an array of scalar values or key/value objects (which MUST have a `name` key)
-        - a YAML or JSON/JSON5 file reference _and_ a `::{offset}` that dereferences the base data to a nested section that meets the criteria of being an array of scalar values or key/value objects (which MUST have a `name` key)
-
+        - "string -> shorthand for `{ name: <string> }`"
+        - number
+        - boolean
+        - task
     task:
-        name: "string(not-empty;required) -> the step or leg name"
-        when: "expression(not-empty) -> you may optionally add the `when` property to make the given task _conditional_."
+        name: "string(not-empty) -> the step or leg name"
+        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
         with: "object -> a prompt task's frontmatter values for the document it runs"
         prompt: "string -> the prompt file reference"
         shell: "unknown -> a shell command; the task parser checks its form"
@@ -31,20 +40,20 @@ types:
         group:
             - group
             - "string -> a group file reference"
-        operation: "string(suggest(plan,implement,review,commit)) -> a form of metadata that can classify the _type_ of operation this task is performing"
+        operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command shell timeout, such as 45s"
-        loop: "loop@./lifecycle.yaml -> an inline sequence's loop, beside `sequence:`"
+        loop: "loop@./lifecycle-events.yaml -> an inline sequence's loop, beside `sequence:`"
         $schema: "schema -> an inline sequence's check of the values it sees at its turn, judged before its `initialize`; beside `sequence:`"
         $state: "schema -> the schema each of this inline sequence's own steps' normalized state must satisfy; beside `sequence:`"
         template: "object -> defaults merged into every item of this inline sequence's own list; beside `sequence:`"
-        initialize: "initialize-stack@./lifecycle.yaml -> actions run before the container starts; shell-free"
-        start: "stack@./lifecycle.yaml -> actions run when the container starts"
-        blocked: "stack@./lifecycle.yaml -> actions run when the container is blocked"
-        success: "stack@./lifecycle.yaml -> actions run after the container succeeds"
-        failure: "stack@./lifecycle.yaml -> actions run after the container fails"
-        cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
-        finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
+        initialize: "initialize-stack@./lifecycle-events.yaml -> actions run before the container starts; shell-free"
+        start: "stack@./lifecycle-events.yaml -> actions run when the container starts"
+        blocked: "stack@./lifecycle-events.yaml -> actions run when the container is blocked"
+        success: "stack@./lifecycle-events.yaml -> actions run after the container succeeds"
+        failure: "stack@./lifecycle-events.yaml -> actions run after the container fails"
+        cancelled: "cancelled-stack@./lifecycle-events.yaml -> opt into cancellation; actions run when cancelled"
+        finalize: "stack@./lifecycle-events.yaml -> actions run last, whatever the outcome"
         "<string>": "unknown -> authored step data, read as `seq.<key>`; the task parser rejects reserved keys"
     group:
         name: "string(not-empty) -> the container name"
@@ -55,11 +64,11 @@ types:
         flow: "string -> default flow for prompt legs"
         fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
         max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
-        loop: "loop@./lifecycle.yaml -> the group's loop, beside `tasks:`"
-        initialize: "initialize-stack@./lifecycle.yaml -> actions run before the group starts; shell-free"
-        start: "stack@./lifecycle.yaml -> actions run when the group starts"
-        blocked: "stack@./lifecycle.yaml -> actions run when the group is blocked"
-        success: "stack@./lifecycle.yaml -> actions run after the group succeeds"
-        failure: "stack@./lifecycle.yaml -> actions run after the group fails"
-        cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
-        finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
+        loop: "loop@./lifecycle-events.yaml -> the group's loop, beside `tasks:`"
+        initialize: "initialize-stack@./lifecycle-events.yaml -> actions run before the group starts; shell-free"
+        start: "stack@./lifecycle-events.yaml -> actions run when the group starts"
+        blocked: "stack@./lifecycle-events.yaml -> actions run when the group is blocked"
+        success: "stack@./lifecycle-events.yaml -> actions run after the group succeeds"
+        failure: "stack@./lifecycle-events.yaml -> actions run after the group fails"
+        cancelled: "cancelled-stack@./lifecycle-events.yaml -> opt into cancellation; actions run when cancelled"
+        finalize: "stack@./lifecycle-events.yaml -> actions run last, whatever the outcome"

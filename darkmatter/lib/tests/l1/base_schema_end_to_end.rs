@@ -1,10 +1,9 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use darkmatter::markdown::{
-    Markdown, compose::{RequestSnapshot, build_resolution_context},
+    Markdown,
     schemas::{DarkmatterSchemas, darkmatter_base_json_schema, darkmatter_base_schema, resolve::resolve_yaml_schema},
 };
-use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::{PropertyDef, SchemaShape, TypeExpr, parse_yaml_schema, to_json_schema};
 use biscuit_test_harness::manifest_dir;
 use serde_yaml_ng::Value as YamlValue;
@@ -15,40 +14,51 @@ fn base_api() -> DarkmatterSchemas {
         .expect("base schema must be baseline-compatible")
 }
 
-/// Claudine's complete schema bundle, as Claudine embeds it.
-const CLAUDINE_BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new(
-    "claudine",
-    &[
-        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
-        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
-        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
-        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
-        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
-        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
-    ],
-);
-
-/// The Darkmatter baseline with trigger discovery and Claudine's bundle
-/// registered, the way Claudine's launch verdict applies it to a document with
-/// no `$schema`. Discovery runs in an empty folder with an empty home, so the
-/// embedded bundle is the only trigger source; the folder lives as long as the
-/// returned guard.
-fn claudine_api() -> (tempfile::TempDir, DarkmatterSchemas) {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
-    std::fs::create_dir_all(root.join("home")).expect("home dir");
-    let snapshot = RequestSnapshot::new(&root)
-        .with_home(Some(root.join("home")))
-        .with_env(HashMap::new());
-    let context = build_resolution_context(&snapshot).expect("fixture context");
-    let api = DarkmatterSchemas::new(context)
+/// The Darkmatter baseline with trigger discovery and Claudine's
+/// registration (its trigger, library, and namespace files and its lifecycle
+/// artifact, without the sequence trigger and types) installed as the
+/// registered `claudine` host, the way Claudine's setup publishes it. The
+/// fixture's work folder and home are empty, so the registered host is the
+/// only trigger source; the fixture lives as long as the returned guard.
+fn claudine_api() -> (crate::host_fixtures::Fixture, DarkmatterSchemas) {
+    use crate::host_fixtures::{Bundle, Fixture, MANIFEST_NAME};
+    let files = [
+        ("action.yaml", include_str!("../../../../claudine/registration/action.yaml")),
+        ("composition.yaml", include_str!("../../../../claudine/registration/composition.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/registration/document.yaml")),
+        ("inline-composition.yaml", include_str!("../../../../claudine/registration/inline-composition.yaml")),
+        ("lifecycle-events.yaml", include_str!("../../../../claudine/registration/lifecycle-events.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/registration/linking.yaml")),
+        ("shared.yaml", include_str!("../../../../claudine/registration/shared.yaml")),
+        ("content-policy.yaml", include_str!("../../../../claudine/registration/content-policy.yaml")),
+        ("group.yaml", include_str!("../../../../claudine/registration/group.yaml")),
+        ("loop.yaml", include_str!("../../../../claudine/registration/loop.yaml")),
+        ("seq.yaml", include_str!("../../../../claudine/registration/seq.yaml")),
+    ];
+    let mut bundle = Bundle {
+        host: "claudine".to_string(),
+        version: "0.0.1".to_string(),
+        files: Vec::new(),
+        lifecycle: "schemas/globals.lifecycle.json".to_string(),
+        functions: Vec::new(),
+        members: Default::default(),
+    };
+    for (name, text) in files {
+        bundle = bundle.with_file(&format!("schemas/{name}"), text);
+    }
+    bundle = bundle
+        .with_member("schemas/globals.lifecycle.json", include_str!("../../../../claudine/lib/generated/globals.lifecycle.json"));
+    let fixture = Fixture::new();
+    fixture.install_bundle("claudine", &bundle);
+    let hosts = fixture.hosts(&[&format!("../claudine/{MANIFEST_NAME}")]);
+    assert!(hosts.claims().len() == 1, "Claudine's registration loads: {:?}", hosts.claims());
+    let api = DarkmatterSchemas::new(fixture.context())
         .with_baseline(darkmatter_base_schema())
         .expect("base schema must be baseline-compatible")
+        .with_registered_hosts(hosts)
         .with_trigger_discovery()
-        .expect("an empty folder has no disk triggers")
-        .with_embedded_trigger_bundle(CLAUDINE_BUNDLE)
-        .expect("Claudine's bundle must load");
-    (dir, api)
+        .expect("an empty folder has no disk triggers");
+    (fixture, api)
 }
 
 thread_local! {
@@ -218,12 +228,14 @@ fn claudine_catalog_resolves_from_its_bundle() {
         .expect("Claudine's catalog must resolve its imports")
         .expect("a document with a prompt selects Claudine's catalog");
 
-    let raw = include_str!("../../../../claudine/schemas/claudine.yaml");
+    // Both Claudine payloads extend the shared attributes.
+    let raw = include_str!("../../../../claudine/registration/shared.yaml");
     let yaml: YamlValue = serde_yaml_ng::from_str(raw).expect("schema YAML must parse");
     let properties = yaml
-        .get("$schema")
+        .get("types")
+        .and_then(|types| types.get("common-attributes"))
         .and_then(YamlValue::as_mapping)
-        .expect("schema must declare a property mapping");
+        .expect("the library must declare the common attributes");
     assert!(properties.contains_key("max_turns"));
     assert!(!properties.contains_key("maxTurns"));
     assert!(!properties.contains_key("output"));

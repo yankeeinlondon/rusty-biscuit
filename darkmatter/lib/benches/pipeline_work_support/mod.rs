@@ -166,7 +166,7 @@ const CLAUDINE_SCHEMAS: [(&str, &str); 9] = [
 /// The A3 document: the repository's largest lifecycle prompt, frozen.
 pub const A3_DOCUMENT: &str = include_str!("../fixtures/pipeline-work/implement-plan.md");
 
-/// The host lifecycle artifact `claudine/schemas/globals.lifecycle.json`,
+/// The host lifecycle artifact `claudine/lib/generated/globals.lifecycle.json`,
 /// frozen beside the A3 document in its format 1 form, keyed by the hash of
 /// the frozen `globals.yaml`. [`claudine_profile`] re-keys it for the
 /// registered bundle it builds.

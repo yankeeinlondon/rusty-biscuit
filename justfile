@@ -84,8 +84,9 @@ test *args="":
 # Regenerate every shipped schema artifact (`*/lib/generated/shipped.json`) in
 # dependency order: Simplified Schema's, Darkmatter's over it, then
 # Claudine's over both. Run after editing a shipped schema YAML file or the
-# code that prepares one. Every output is generated and checked before any
-# file is replaced, so a failure leaves all three as they were.
+# code that prepares one. Claudine's generator also emits its lifecycle
+# artifact. Every output is generated and checked before any file is
+# replaced, so a failure leaves all of them as they were.
 shipped-schemas:
     @python3 scripts/shipped_schemas.py
 

@@ -1,5 +1,5 @@
 # Claudine's lifecycle action types: one closed type per action category, and
-# event-specific dictionary-bundle types. Hand-maintained; see README.md.
+# event-specific dictionary-bundle types. Hand-maintained; see claudine/docs/topics/schemas.md.
 #
 # Darkmatter owns the shape of every lifecycle verb
 # (darkmatter/schemas/partials/lifecycle.yaml); this file selects the verbs

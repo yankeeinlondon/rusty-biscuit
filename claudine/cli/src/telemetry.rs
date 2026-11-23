@@ -165,6 +165,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Dashboard(_) => "dashboard",
         Commands::Context(_) => "context",
         Commands::Errors(_) => "errors",
+        Commands::Registrations(_) => "registrations",
     }
 }
 

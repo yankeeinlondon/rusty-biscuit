@@ -154,6 +154,7 @@ mod expression_strict_equality;
 mod expression_type_scope;
 mod host_functions;
 mod host_namespaces;
+mod embedded_registration;
 mod host_registration;
 mod host_registration_snapshot;
 mod host_selection;

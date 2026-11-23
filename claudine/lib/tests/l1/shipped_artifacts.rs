@@ -1,5 +1,6 @@
 //! Claudine's shipped artifact (`claudine::composition::schema::shipped`):
-//! the checked-in prepared form of its trigger bundle and host catalog.
+//! the checked-in prepared form of its registered trigger payloads, host
+//! catalog, and YAML kinds.
 //!
 //! The reader under test is Claudine's payload loader ([`Registry::load_over`]
 //! over the shared `simplified_schema::shipped` decoder, whose document and
@@ -19,14 +20,17 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
-use claudine::composition::schema::bundle::CLAUDINE_SCHEMA_BUNDLE_NAME;
+use std::sync::Arc;
+
+use claudine::composition::registration::{FileKind, PublishedFile, RegistrationInventory};
+use claudine::composition::schema::bundle::{self, CLAUDINE_TRIGGER_FILES};
 use claudine::composition::schema::shipped::{self, ClaudinePayload, FreshClaudine, Registry};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
 use darkmatter::markdown::schemas::shipped::FreshDarkmatter;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
-use simplified_schema::embedded::EmbeddedSchemaBundle;
+use darkmatter::config::registration::RegisteredHosts;
 use serde_json::{Value, json};
 use simplified_schema::embedded::EmbeddedDocument;
 use simplified_schema::shipped::{self as mechanism, DependencyFingerprint, FallbackReason, FreshLower, LowerArtifact};
@@ -37,6 +41,9 @@ mod generator;
 
 /// The checked-in artifact, as the library embeds it.
 const CHECKED_IN: &[u8] = include_bytes!("../../generated/shipped.json");
+
+/// The checked-in lifecycle artifact the generator checks beside it.
+const CHECKED_IN_LIFECYCLE: &[u8] = include_bytes!("../../generated/globals.lifecycle.json");
 
 /// One fresh, uncached generation of all three artifacts per test process.
 fn fresh() -> &'static (FreshLower, FreshDarkmatter, FreshClaudine) {
@@ -107,12 +114,12 @@ impl Bare {
     }
 
     /// The effective schema of an in-memory document holding `frontmatter`,
-    /// with `bundle` as the only trigger source.
-    fn effective(&self, bundle: EmbeddedSchemaBundle, frontmatter: &str) -> EffectiveSchema {
+    /// with `hosts` as the only trigger source.
+    fn effective(&self, hosts: Arc<RegisteredHosts>, frontmatter: &str) -> EffectiveSchema {
         let schemas = DarkmatterSchemas::new(self.context.clone())
-            .with_embedded_trigger_bundle(bundle)
-            .and_then(DarkmatterSchemas::with_trigger_discovery)
-            .expect("the bundle loads");
+            .with_registered_hosts(hosts)
+            .with_trigger_discovery()
+            .expect("no schema root exists");
         let markdown = Markdown::from(format!("---\n{frontmatter}\n---\nbody\n").as_str());
         schemas.effective_for(&markdown).expect("resolves").expect("a trigger applies")
     }
@@ -156,6 +163,10 @@ fn shipped_artifact_is_fresh() {
     // this test.
     let _ = include_str!("../../../../biscuit-hash/lib/src/json.rs");
     let _ = include_str!("../../../../biscuit-hash/lib/src/xx.rs");
+    let _ = include_str!("../../../../darkmatter/lib/src/config/registration.rs");
+    let _ = include_str!("../../../../darkmatter/lib/src/config/registration/bundle.rs");
+    let _ = include_str!("../../../../darkmatter/lib/src/config/registration/manifest.rs");
+    let _ = include_str!("../../../../darkmatter/lib/src/config/registration/namespaces.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/catalog.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/embedded.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/resolve.rs");
@@ -167,6 +178,7 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../simplified-schema/lib/src/numeric.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/numeric/ingress.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/resolve.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/resolve/bundle.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/resolve/graph.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/resolve/recursive.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/shipped/mod.rs");
@@ -211,17 +223,17 @@ fn the_checked_in_artifact_round_trips_to_uncached_preparation_in_order() {
     let registry = Registry::load(Some(CHECKED_IN));
     assert_eq!(registry.check_all(), Ok(()));
     let globals: Vec<&str> = registry.globals().globals().map(|global| global.name()).collect();
-    assert_eq!(globals, ["seq", "loop", "group"]);
+    assert_eq!(globals, ["group", "loop", "seq"]);
     assert_eq!(
         registry.globals(),
         &GlobalCatalog::from_record(uncached.globals.clone(), claudine::composition::schema::globals::CLAUDINE_GLOBALS)
             .unwrap()
     );
-    assert_eq!(registry.bundle().map(|bundle| bundle.bundle()), Some(CLAUDINE_SCHEMA_BUNDLE_NAME));
-    let names: Vec<&str> = uncached.bundle.documents.iter().map(|document| document.name.as_str()).collect();
-    let mut sorted = names.clone();
-    sorted.sort_unstable();
-    assert_eq!(names, sorted, "documents keep the bundle's sorted file order");
+    let served = registry.registered().expect("the registered section is accepted");
+    assert_eq!(served.len(), CLAUDINE_TRIGGER_FILES.len());
+    let paths: Vec<&str> = uncached.registered.iter().map(|record| record.path.as_str()).collect();
+    let expected: Vec<String> = CLAUDINE_TRIGGER_FILES.iter().map(|file| format!("schemas/{file}")).collect();
+    assert_eq!(paths, expected, "records keep the inventory's trigger order");
 }
 
 #[test]
@@ -234,20 +246,23 @@ fn fresh_generation_is_deterministic() {
 
 // ── Accepted lookups ────────────────────────────────────────────────────────
 
-/// A cold process discovers Claudine's bundle and reads its host catalog
-/// from the accepted artifact: nothing is prepared from text, and no payload
-/// merge or compile check runs.
+/// A cold process loads Claudine's compiled registration with the accepted
+/// artifact's payloads and reads its host catalog from it: nothing is
+/// prepared from text, and no payload merge or compile check runs.
 #[cfg(feature = "work-counters")]
 #[test]
 fn cold_accepted_lookups_prepare_nothing() {
-    use claudine::composition::schema::bundle::claudine_schema_bundle;
     use claudine::composition::schema::globals::claudine_globals;
     use darkmatter::work_counters::{Work, snapshot};
     let bare = Bare::new();
     let before = snapshot();
     assert!(shipped::registry().refusal().is_none(), "{:?}", shipped::registry().refusal());
-    let effective = bare.effective(claudine_schema_bundle(), "start: []\nprompt: hello");
-    assert!(effective.json_schema["properties"].get("start").is_some(), "claudine.yaml applied");
+    let effective = bare.effective(Arc::clone(bundle::claudine_hosts()), "start: []\nprompt: hello");
+    // The inline payload is a root union, so the effective schema's
+    // properties live in its arms; the origins name every declared key.
+    for property in ["start", "prompt"] {
+        assert!(bundle::is_claudine_owned(&effective, property), "the registered layer declares `{property}`");
+    }
     assert_eq!(claudine_globals().globals().count(), 3);
     let work = snapshot().since(&before);
     assert_eq!(work.get(Work::ShippedRuntimePreparation), 0, "{:?}", work.nonzero());
@@ -256,43 +271,50 @@ fn cold_accepted_lookups_prepare_nothing() {
     assert_eq!(work.get(Work::ArtifactAccept), 3, "the library's, Darkmatter's, and Claudine's: {:?}", work.nonzero());
 }
 
-/// A bundle named `claudine` with other files is not the bundle the artifact
-/// was prepared from: discovery prepares it from its own text.
+/// An edited inventory is not the one the artifact was prepared from: its
+/// profile prepares every payload from its own text.
 #[test]
-fn a_custom_same_name_bundle_is_prepared_not_served() {
-    const FILES: &[(&str, &str)] = &[(
-        "claudine.yaml",
-        "kind: schema-trigger\nmatch:\n    - prompt: string(required)\n$schema:\n    custom_marker: number\n",
-    )];
-    assert!(shipped::registry().bundle().is_some(), "the process artifact is accepted");
+fn a_custom_inventory_is_prepared_not_served() {
+    const COMPOSITION: &str =
+        "kind: schema-trigger\nname: composition\nmatch:\n    - custom_select: string(required)\n$schema:\n    custom_marker: number\n";
+    assert!(shipped::registry().registered().is_some(), "the process artifact is accepted");
     let bare = Bare::new();
     #[cfg(feature = "work-counters")]
     let before = darkmatter::work_counters::snapshot();
-    let custom = EmbeddedSchemaBundle::new(CLAUDINE_SCHEMA_BUNDLE_NAME, FILES).with_prepared(&shipped::BUNDLE);
-    let effective = bare.effective(custom, "prompt: hello");
+    let inventory = RegistrationInventory::claudine().clone().with_member(PublishedFile::new(
+        "schemas/composition.yaml",
+        FileKind::Trigger,
+        bundle::trigger_member("schemas/composition.yaml").and_then(|member| member.name),
+        COMPOSITION.as_bytes(),
+    ));
+    let profile = bundle::profile_of(&inventory).expect("the edited inventory registers");
+    let effective = bare.effective(bundle::hosts_of(profile), "custom_select: hello");
     let properties = &effective.json_schema["properties"];
     assert!(properties.get("custom_marker").is_some(), "the custom text applied: {properties}");
-    assert!(properties.get("start").is_none(), "the shipped claudine.yaml was not served");
+    assert!(properties.get("start").is_none(), "the shipped composition.yaml was not served");
     #[cfg(feature = "work-counters")]
     {
         use darkmatter::work_counters::Work;
         let work = darkmatter::work_counters::snapshot().since(&before);
-        assert_eq!(work.get(Work::ShippedRuntimePreparation), 1, "{:?}", work.nonzero());
         assert!(work.get(Work::PayloadCompileCheck) >= 1, "{:?}", work.nonzero());
     }
 }
 
-/// Generation prepares every owner from text: no artifact is decoded or
-/// accepted, so neither lower registry nor Claudine's is consulted.
+/// Generation prepares every owner from text. The trigger bundle consults no
+/// artifact; the namespace catalog and the YAML kinds are prepared inside the
+/// inventory's bundle scope, whose resolver has no uncached mode, so each
+/// consults one lower registry (the library's and Darkmatter's). A registry
+/// serves only an artifact whose recorded sources match the compiled text,
+/// and Claudine's own artifact is never consulted.
 #[cfg(feature = "work-counters")]
 #[test]
-fn generation_consults_no_artifact() {
+fn generation_consults_no_artifact_but_the_lower_registries_for_namespaces_and_kinds() {
     use darkmatter::work_counters::{Work, snapshot};
     let before = snapshot();
     let _ = fresh();
     let work = snapshot().since(&before);
-    assert_eq!(work.get(Work::ArtifactDecode), 0, "{:?}", work.nonzero());
-    assert_eq!(work.get(Work::ArtifactAccept), 0, "{:?}", work.nonzero());
+    assert!(work.get(Work::ArtifactDecode) <= 2, "{:?}", work.nonzero());
+    assert_eq!(work.get(Work::ArtifactDecode), work.get(Work::ArtifactAccept), "{:?}", work.nonzero());
     assert_eq!(work.get(Work::ArtifactGeneration), 3, "{:?}", work.nonzero());
 }
 
@@ -308,7 +330,7 @@ fn assert_falls_back(bytes: Option<&[u8]>, lower: [LowerArtifact; 2], reason: Fa
     assert_eq!(refusal.reason, reason, "{refusal}");
     assert!(refusal.pointer.as_deref().unwrap_or("").starts_with(pointer), "pointer is not under `{pointer}`: {refusal}");
     if refused.refusal().is_some() {
-        assert!(refused.bundle().is_none(), "no entry of a refused artifact is served");
+        assert!(refused.registered().is_none(), "no entry of a refused artifact is served");
     }
     let accepted = Registry::load(Some(CHECKED_IN));
     assert_eq!(refused.globals(), accepted.globals());
@@ -326,12 +348,12 @@ fn malformed_json_falls_back() {
 
 #[test]
 fn a_source_mismatch_falls_back() {
-    // The artifact describes an edited `globals.yaml`, not the compiled one.
+    // The artifact describes an edited namespace member, not the compiled one.
     let mutated: Vec<EmbeddedDocument<'static>> = shipped::sources()
         .iter()
         .map(|document| EmbeddedDocument {
             path: document.path,
-            text: if document.path == "claudine/schemas/globals.yaml" {
+            text: if document.path == "claudine/registration/seq.yaml" {
                 Box::leak(format!("{}\n# edited\n", document.text).into_boxed_str())
             } else {
                 document.text
@@ -354,7 +376,7 @@ fn a_malformed_record_falls_back() {
     let bytes = edited(|value| value["payload"]["globals"]["globals"][0]["name"] = json!(5));
     assert_falls_back(Some(&bytes), current_lowers(), FallbackReason::MalformedArtifact, "/payload/globals/globals/0/name");
     let registry = Registry::load(Some(&bytes));
-    assert!(registry.refusal().is_none() && registry.bundle().is_some(), "only the globals section is refused");
+    assert!(registry.refusal().is_none() && registry.registered().is_some(), "only the globals section is refused");
 }
 
 #[test]
@@ -392,25 +414,27 @@ fn the_re_encoded_checked_in_artifact_is_the_accepted_control() {
 }
 
 #[test]
-fn a_record_for_another_bundle_is_refused() {
-    let bytes = edited(|value| value["payload"]["bundle"]["bundle"] = json!("other"));
-    assert_record_refused(bytes, FallbackReason::UnusableRecord, "/payload/bundle/bundle");
+fn a_record_for_another_trigger_is_refused() {
+    let bytes = edited(|value| value["payload"]["registered"][0]["path"] = json!("schemas/missing.yaml"));
+    assert_record_refused(bytes, FallbackReason::UnusableRecord, "/payload/registered/0/path");
 }
 
 #[test]
-fn a_bundle_document_outside_the_sources_is_refused() {
-    let bytes = edited(|value| value["payload"]["bundle"]["documents"][0]["name"] = json!("missing.yaml"));
-    assert_record_refused(bytes, FallbackReason::UnusableRecord, "/payload/bundle/documents/0/name");
+fn a_missing_trigger_record_is_refused() {
+    let bytes = edited(|value| {
+        value["payload"]["registered"].as_array_mut().unwrap().pop();
+    });
+    assert_record_refused(bytes, FallbackReason::UnusableRecord, "/payload/registered");
 }
 
-/// The index of the first bundle document holding a payload record.
+/// The index of the first registered trigger holding a payload record.
 fn first_payload_index(value: &Value) -> usize {
-    value["payload"]["bundle"]["documents"]
+    value["payload"]["registered"]
         .as_array()
         .unwrap()
         .iter()
-        .position(|document| document["outcome"].get("Payload").is_some())
-        .expect("the bundle prepares a payload")
+        .position(|record| !record["payload"].is_null())
+        .expect("the registration prepares a payload")
 }
 
 #[test]
@@ -418,23 +442,38 @@ fn a_payload_digest_of_another_revision_is_refused() {
     let mut index = 0;
     let bytes = edited(|value| {
         index = first_payload_index(value);
-        value["payload"]["bundle"]["documents"][index]["outcome"]["Payload"]["digest"]["revision"] = json!(99);
+        value["payload"]["registered"][index]["payload"]["digest"]["revision"] = json!(99);
     });
-    assert_record_refused(bytes, FallbackReason::UnusableRecord, &format!("/payload/bundle/documents/{index}/outcome/Payload/digest/revision"));
+    assert_record_refused(bytes, FallbackReason::UnusableRecord, &format!("/payload/registered/{index}/payload/digest/revision"));
+}
+
+#[test]
+fn a_payload_with_both_a_shape_and_union_arms_is_refused() {
+    let mut index = 0;
+    let bytes = edited(|value| {
+        index = first_payload_index(value);
+        let payload = &mut value["payload"]["registered"][index]["payload"];
+        if payload["shape"].is_null() {
+            payload["shape"] = payload["union_arms"][0].clone();
+        } else {
+            payload["union_arms"] = json!([payload["shape"].clone()]);
+        }
+    });
+    assert_record_refused(bytes, FallbackReason::UnusableRecord, &format!("/payload/registered/{index}/payload"));
 }
 
 #[test]
 fn an_absent_payload_digest_is_malformed() {
     let bytes = edited(|value| {
         let index = first_payload_index(value);
-        value["payload"]["bundle"]["documents"][index]["outcome"]["Payload"].as_object_mut().unwrap().shift_remove("digest");
+        value["payload"]["registered"][index]["payload"].as_object_mut().unwrap().shift_remove("digest");
     });
-    assert_record_refused(bytes, FallbackReason::MalformedArtifact, "/payload/bundle");
+    assert_record_refused(bytes, FallbackReason::MalformedArtifact, "/payload/registered");
 }
 
 #[test]
 fn a_host_catalog_at_another_path_is_refused() {
-    let bytes = edited(|value| value["payload"]["globals"]["identity"] = json!("claudine/schemas/other.yaml"));
+    let bytes = edited(|value| value["payload"]["globals"]["identity"] = json!("claudine/other"));
     assert_record_refused(bytes, FallbackReason::UnusableRecord, "/payload/globals/identity");
 }
 
@@ -481,6 +520,7 @@ fn generated() -> Result<generator::Generated, String> {
         lower: lower.artifact().to_vec(),
         darkmatter: darkmatter.artifact().to_vec(),
         artifact: claudine.artifact().to_vec(),
+        lifecycle: CHECKED_IN_LIFECYCLE.to_vec(),
     })
 }
 
@@ -488,14 +528,21 @@ fn generated() -> Result<generator::Generated, String> {
 fn the_generator_checks_emits_and_writes() {
     let directory = tempfile::tempdir().unwrap();
     let artifact = directory.path().join("shipped.json");
+    let lifecycle = directory.path().join("globals.lifecycle.json");
     std::fs::write(&artifact, CHECKED_IN).unwrap();
+    std::fs::write(&lifecycle, CHECKED_IN_LIFECYCLE).unwrap();
     assert_eq!(run_generator(&["--check"], &artifact, compiled_lowers(), generated), (0, Vec::new(), String::new()));
+    std::fs::write(&lifecycle, b"{}").unwrap();
+    let (code, _, stderr) = run_generator(&["--check"], &artifact, compiled_lowers(), generated);
+    assert_eq!(code, 1, "a stale lifecycle artifact fails the check");
+    assert!(stderr.contains("globals.lifecycle.json` is stale") && stderr.contains("just shipped-schemas"), "{stderr}");
     let stale = generator::CompiledLowers { lower: b"stale lower", darkmatter: b"stale darkmatter" };
     let (code, stdout, _) = run_generator(&[], &artifact, stale, generated);
     assert_eq!((code, stdout.as_slice()), (0, fresh().2.artifact()), "emitting checks no lower artifact");
     std::fs::write(&artifact, b"stale").unwrap();
     assert_eq!(run_generator(&["--write"], &artifact, compiled_lowers(), generated).0, 0);
     assert_eq!(std::fs::read(&artifact).unwrap(), fresh().2.artifact());
+    assert_eq!(std::fs::read(&lifecycle).unwrap(), CHECKED_IN_LIFECYCLE, "writing replaces the lifecycle artifact too");
     assert_eq!(run_generator(&["--check", "--write"], &artifact, compiled_lowers(), generated).0, 2);
 }
 
@@ -555,6 +602,7 @@ fn a_failed_generation_leaves_the_artifact_in_place() {
             lower: lowers.lower.to_vec(),
             darkmatter: lowers.darkmatter.to_vec(),
             artifact: b"{\"not\": \"an artifact\"}\n".to_vec(),
+            lifecycle: CHECKED_IN_LIFECYCLE.to_vec(),
         })
     };
     assert_eq!(run_generator(&["--write"], &artifact, lowers, refused).0, 1);
@@ -596,6 +644,7 @@ fn emitting_refuses_a_candidate_acceptance_rejects() {
         lower: lower.to_vec(),
         darkmatter: darkmatter.to_vec(),
         artifact,
+        lifecycle: CHECKED_IN_LIFECYCLE.to_vec(),
     };
     let cases = [
         (
@@ -620,6 +669,33 @@ fn emitting_refuses_a_candidate_acceptance_rejects() {
         assert!(stdout.is_empty(), "{case}: a refused candidate prints nothing");
         assert!(stderr.contains("claudine/lib/generated/shipped.json` is refused") && stderr.contains(pointer), "{case}: {stderr}");
     }
+}
+
+#[test]
+fn staged_generation_refuses_a_stale_lifecycle_member_and_writes_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let candidate = directory.path().join("lifecycle.candidate.json");
+    let output = candidate.to_str().unwrap();
+    let artifact = directory.path().join("shipped.json");
+    let mut stale: Value = serde_json::from_slice(CHECKED_IN_LIFECYCLE).unwrap();
+    stale["catalog_hash"] = json!("0000000000000000");
+    let stale = serde_json::to_vec_pretty(&stale).unwrap();
+    for (case, lifecycle) in [("stale catalog hash", stale), ("not JSON", b"not json".to_vec())] {
+        let generation = || {
+            let mut generation = generated()?;
+            generation.lifecycle = lifecycle.clone();
+            Ok(generation)
+        };
+        let (code, stdout, stderr) = run_generator(&["--lifecycle-output", output], &artifact, compiled_lowers(), generation);
+        assert_eq!(code, 1, "{case}: {stderr}");
+        assert!(stdout.is_empty(), "{case}: a refused generation prints no candidate");
+        assert!(!candidate.exists(), "{case}: no lifecycle candidate is written");
+    }
+    let (code, stdout, stderr) = run_generator(&["--lifecycle-output", output], &artifact, compiled_lowers(), generated);
+    assert_eq!((code, stdout.as_slice(), stderr.as_str()), (0, fresh().2.artifact(), ""));
+    assert_eq!(std::fs::read(&candidate).unwrap(), CHECKED_IN_LIFECYCLE);
+    let (code, _, stderr) = run_generator(&["--check", "--lifecycle-output", output], &artifact, compiled_lowers(), generated);
+    assert_eq!(code, 2, "{stderr}");
 }
 
 #[test]

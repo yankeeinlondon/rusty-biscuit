@@ -82,8 +82,7 @@ rest of the
 
 - **In the editor.** DMLS reports a misspelled verb, a malformed long form, or
   a `shell` action in `initialize` as you type, with no `$schema` in the
-  document. This works under `claudine/` out of the box, and elsewhere once a
-  disk copy of the schemas is reachable (see
+  document, once Claudine's setup has registered its schemas (see
   [How a Document Reaches the Schemas](#how-a-document-reaches-the-schemas)).
 - **At launch.** `claudine compose`, `claudine inline-compose`, and
   `claudine sequence` judge these schemas before `start` and provider launch.
@@ -144,19 +143,14 @@ So `prompt`, `hash` (shorthand string or longhand mapping), and
 The library is not a trigger: the two triggers still match, apply, and are
 shadowed independently.
 
-`claudine/schemas/` also holds `claudine-document.yaml`, Claudine's
-**identifying trigger**. It is not part of the bundle: the `claudine` binary
-only publishes it and never applies it. It decides whether a document is a Claudine document
-at all, and the `darkmatter-host` manifest Claudine publishes names it (see
-[The published host registration](#the-published-host-registration)). It
-matches a non-null `sequence`, `start`, `blocked`, `success`, `failure`,
-`loop`, `prompt`, `agent`, or `model`, and its payload is empty, so when
-Darkmatter discovers it as an ordinary trigger for a document under
-`claudine/`, it adds no types.
+There is no separate identifying trigger: every trigger in
+`claudine/registration/` identifies a Claudine document by its own `match:`,
+so a document that selects none of them is not Claudine's (see
+[The published host registration](#the-published-host-registration)).
 
-Copy all eight files together (see [On disk](#on-disk)). For editor analysis of
-Claudine's host globals and lifecycle events, also copy `globals.yaml` and
-`globals.lifecycle.json`; these describe the host rather than adding document
+Copy the bundle files together (see [On disk](#on-disk)). Claudine's host
+globals are declared by the namespace files `group.yaml`, `loop.yaml`, and
+`seq.yaml` beside them; these describe the host rather than adding document
 properties. The bundle does not need Darkmatter's schema files beside it (see
 [Verb shapes are Darkmatter's](#verb-shapes-are-darkmatters)).
 
@@ -684,6 +678,25 @@ shell source. A group object is closed, so the schema reports them there
 too. See [Sequences → Sequence documents](flow-control/sequences.md#sequence-documents-schema-state-and-template)
 for what each declaration does and when it is checked.
 
+A YAML file that declares `kind: sequence` and an inline `sequence:` list is
+also judged, as written, by the formal sequence kind
+([`formal-sequence-file.yaml`](../../registration/formal-sequence-file.yaml))
+that `md schema validate` and DMLS use. `claudine sequence` checks it with
+the copy compiled into the binary, after the sequence parser has accepted the
+list and before any step runs; a value of the wrong type is a schema
+validation error naming the file and the property:
+
+```yaml
+kind: sequence
+description: [not, text]    # refused: `/description` is not a string
+sequence:
+    - review
+```
+
+A Markdown sequence document, and a YAML file whose `sequence` is a file
+reference, expression, or `$( … )` source, are judged by the sequence parser
+alone.
+
 ### Keeping recursive schemas small and quick to validate
 
 For schema maintainers, recursive references serve two purposes: they keep
@@ -1053,8 +1066,11 @@ shell is started.
 
 Claudine is a host of Darkmatter's expression language. It extends the
 language in one way only: it declares the globals `seq`, `loop`, and `group`
-in its host catalog, [`globals.yaml`](../../schemas/globals.yaml). That file
-is a catalog, never a document schema or a trigger. Darkmatter types every
+in its host catalog, one `kind: namespace-schema` file per global:
+[`group.yaml`](../../registration/group.yaml),
+[`loop.yaml`](../../registration/loop.yaml), and
+[`seq.yaml`](../../registration/seq.yaml). They form a catalog, never a
+document schema or a trigger. Darkmatter types every
 read of those roots from it, so a call such as `min(loop.count, 5)` is
 checked like a call on a schema-declared property, both before launch and in
 DMLS:
@@ -1089,8 +1105,8 @@ Claudine's lifecycle differs from the `md` host's: `composed` is `start`,
 and verbs such as `say`, `retry`, and `proxy` run. So DMLS can check
 lifecycle expressions as a launch does, Claudine writes its event
 registration and parse options to
-[`globals.lifecycle.json`](../../schemas/globals.lifecycle.json), beside
-`globals.yaml`. With it, a guard narrows the calls it selects in every
+[`globals.lifecycle.json`](../../lib/generated/globals.lifecycle.json), whose
+`catalog_hash` is Darkmatter's hash of the three namespace files. With it, a guard narrows the calls it selects in every
 Claudine event and verb, and a `set` ends the fact, in the editor exactly as
 before launch:
 
@@ -1109,9 +1125,12 @@ success:
 ---
 ```
 
-The file is generated: run `just regen-lifecycle-artifact` in `claudine/`
-after changing `globals.yaml`, the event registry, or the sound-effect
-catalog. `host_catalog.rs` fails while it is stale, and DMLS reports a stale
+The file is generated with the shipped artifact: run `just shipped-schemas`
+from the repository root after changing a namespace file, the event
+registry, or the sound-effect catalog. The generator writes the new artifact
+only after loading it as a reader would, against the namespace files'
+current hash, so a candidate built over other namespace bytes replaces
+nothing. `host_catalog.rs` fails while it is stale, and DMLS reports a stale
 or missing one as `dm.lifecycle.incomplete_analysis`, analyzing the document
 as the `md` host's until it is regenerated. The format and the editor's
 behavior are described in Darkmatter's
@@ -1152,20 +1171,23 @@ can describe them:
 
 ## How a Document Reaches the Schemas
 
-The editor and the `claudine` CLI find the same files, with one difference:
-the CLI carries a built-in copy.
+Claudine's schemas reach a document through one route everywhere: its
+**registration**, the files of `claudine/registration/` loaded as a
+registered host. The `claudine` CLI loads the copy compiled into its binary;
+`md` and DMLS load the copy Claudine's setup installs and registers. Schema
+files you place in the five schema locations are ordinary triggers that
+apply **on top of** the registration, never instead of it.
 
 ```mermaid
 flowchart TD
-    D["document frontmatter"] --> R["disk discovery: the five schema locations<br/>SCHEMAS_DIR, package, package area,<br/>repository root, ~/schemas"]
+    D["document frontmatter"] --> G["registered layer: Claudine's registration<br/>(compiled into claudine; installed for md and DMLS)"]
+    D --> R["disk discovery: the five schema locations<br/>SCHEMAS_DIR, package, package area,<br/>repository root, ~/schemas"]
     R --> S{"same file name in<br/>several locations?"}
     S -- yes --> N["the first file in that order wins;<br/>later ones are never read"]
-    S -- no --> M
-    N --> M{"claudine CLI: is a trigger name<br/>missing from every location?"}
-    M -- yes --> E["add the embedded copy of that trigger"]
-    M -- no --> I
-    E --> I["skip each invalid trigger with one warning;<br/>it still shadows later files of its name"]
-    I --> P["merge the payloads of the valid triggers that match"]
+    S -- no --> I
+    N --> I["skip each invalid disk trigger with one warning"]
+    G --> P["merge the matching registered payloads,<br/>then layer the matching disk payloads above them"]
+    I --> P
     P --> A["apply the authored $schema last;<br/>a redeclared property replaces the trigger's"]
     A --> V{"phase verdict<br/>(launch, or completion)"}
     V -- valid --> L["launch permitted"]
@@ -1177,47 +1199,52 @@ flowchart TD
 Darkmatter searches five locations: the folder `SCHEMAS_DIR` names first,
 then the package, package-area, and repository-root `schemas/` folders, then
 `~/schemas`. The first file of a name **shadows** every later file of that
-name, so a bundle in `SCHEMAS_DIR` replaces the one in `claudine/schemas/`. A document whose package area
-is `claudine/` therefore reaches `claudine/schemas/` with no setup. `md schema
-triggers <file>` lists the locations, the shadowed files, and which triggers
-matched.
+name in those locations. `md schema triggers <file>` lists the locations, the
+shadowed files, and which triggers matched.
 
-Anywhere else, nothing needs to be copied. Claudine's
-setup publishes them with a `darkmatter-host.yaml` manifest and registers
-that manifest in `~/.darkmatter.yaml`, so `md` and DMLS type a Claudine
-document in any folder (see
+Nothing needs to be copied for Claudine's own schemas. Claudine's setup
+publishes them with a `darkmatter-host` manifest and registers that manifest
+in `~/.darkmatter.yaml`, so `md` and DMLS type a Claudine document in any
+folder (see
 [The published host registration](#the-published-host-registration) and
 [Host registration](../../../darkmatter/docs/topics/host-registration.md)).
-The five locations remain the place for your own schemas, `~/schemas`
-included.
+The five locations are the place for your own schemas, `~/schemas` included.
 
-A trigger file in one of the locations still applies on top of the
-registered ones, so a modified Claudine trigger placed there overrides the
-properties it declares. It must come with what it imports. A bundle is **complete**
-when all eight files sit side by side, so the relative imports
-(`@./document.yaml`, `@./lifecycle.yaml`, …) resolve:
+A trigger file in one of the locations applies on top of the registered
+triggers, whatever its name. A disk file named `composition.yaml` does not
+replace Claudine's `composition.yaml`: both apply when both match, and the
+disk file's declaration of a property replaces the registered one for that
+property only. For example, with this repository-root file
 
-- the triggers `claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml`;
-- the libraries `action.yaml`, `document.yaml`, `lifecycle.yaml`,
-  `linking.yaml`, and `sequence-types.yaml`.
+```yaml
+# schemas/composition.yaml
+kind: schema-trigger
+match:
+    start: "unknown[](required)"
+$schema:
+    model: number
+```
 
-Darkmatter's own schema files are never needed: the
-`@darkmatter:lifecycle` references resolve from the copy built into `md`, DMLS,
-and `claudine`.
+a document with a `start` stack has a numeric `model`, while Claudine's types
+for `start` and every other control still apply. A property a disk trigger
+takes over this way is no longer a Claudine control: its invalid value is
+cleaned like an authored optional instead of failing the launch.
 
-A disk trigger imports only from disk, never from the `claudine` binary's
-embedded files. This matters most when you place one trigger on disk to
-replace the embedded one: copy the libraries it imports (see the table under
-[The eight files](#the-eight-files)) into the same folder. A lone
-`inline-compose.yaml` without `document.yaml` cannot resolve its imports, so
-it is skipped with a warning and, because a skipped file still shadows, the
-embedded `inline-compose.yaml` does not apply either.
+A disk trigger must come with what it imports, and imports only from disk,
+never from the registration's files. A lone trigger whose `@./document.yaml`
+import has no disk copy beside it is skipped with a warning; the registered
+triggers still apply.
+
+A disk trigger's payload must be one object schema. Only a registered
+trigger may be a root union, such as `inline-composition.yaml`'s
+`prompt` / `sections` arms, so a copy of that file in a schema location is
+skipped with a warning.
 
 These routes do **not** work:
 
 - **Symlinking individual files.** Discovery reads regular files only; a
-  symlinked `claudine.yaml` is ignored.
-- **Pointing `$schema` at a trigger.** `$schema: claudine.yaml` fails with
+  symlinked `composition.yaml` is ignored.
+- **Pointing `$schema` at a trigger.** `$schema: composition.yaml` fails with
   "schema-trigger file referenced as document schema": triggers activate by
   placement and match, never by reference.
 - **A `.dmls.toml` extension.** Extension settings configure only the editor,
@@ -1226,60 +1253,60 @@ These routes do **not** work:
 
 ### In the `claudine` CLI
 
-The `claudine` binary embeds the eight files (`include_str!` in
-[`schema/bundle.rs`](../../lib/src/composition/schema/bundle.rs)), so an
-installed binary validates Claudine controls with no checkout and no disk
-bundle. The embedded copy is the **last** location:
+The `claudine` binary compiles in the files of `claudine/registration/` and
+loads them, from memory, the way Darkmatter loads an installed registration:
+the manifest's digests are checked against the compiled bytes, each member is
+classified by its `kind`, and the matching trigger payloads are merged into
+one checked layer. So an installed binary validates Claudine controls with
+no checkout, no published registration, and no disk bundle.
 
-- An embedded trigger is added only for a name no disk location holds. A disk
-  `claudine.yaml` always wins, even one that does not match the document.
-- A malformed disk trigger is skipped with a warning (see
-  [When a trigger is invalid](#when-a-trigger-is-invalid)); the embedded copy
-  never stands in for it.
-- Each winning file resolves its imports from its own origin: a disk trigger
-  imports from disk, never from the embedded files.
-- Embedded triggers come after disk files in the merge, and a later layer's
-  declaration of a property replaces an earlier one's. So a disk copy of
-  `inline-compose.yaml` types `prompt`, `hash`, and `last_updated` only where
-  it applies alone: when the embedded `claudine.yaml` matches too, its
-  declarations of those three properties win.
-
-`md` and DMLS have no embedded bundle. They see Claudine's schemas through
-the [published host registration](#the-published-host-registration), or
-from a bundle in one of the five locations.
+- The registered triggers always apply where they match; no disk file hides
+  them, a malformed one included.
+- Their origins name the bundle path, such as
+  `embedded:claudine/schemas/composition.yaml`; no host file is named.
+- A property is a **Claudine control** when its winning declaration comes
+  from a registered Claudine trigger. A disk trigger or an authored
+  `$schema` that redeclares it takes it over.
+- The compiled registration is built once per process.
 
 ### How the built-in copy is prepared
 
 Turning a trigger file into something a document can be checked against
 takes work: each payload's imports are resolved, the result is converted
-to JSON Schema, and it is checked to merge and compile. The host catalog
-`globals.yaml` is resolved the same way. Instead of repeating that work in
-every `claudine` process, the result is checked into the repository as
+to JSON Schema, and it is checked to merge and compile. The host catalog (the
+namespace files) and the `kind: sequence` YAML definition are prepared the
+same way. Instead of repeating that work in every `claudine` process, the
+result is checked into the repository as
 `claudine/lib/generated/shipped.json` (the **shipped artifact**) and compiled
-into the binary next to the eight files and `globals.yaml`.
+into the binary next to the files of `claudine/registration/`.
+
+The build compiles that folder in whole, sorted by path, and refuses a
+folder that is not a valid registration inventory: a file that is not
+`.yaml`, a name that is not portable (ASCII letters, digits, `.`, `_`, and
+`-`, not a Windows device name), a symlink or junction, two paths that differ
+only in letter case, text that is not UTF-8, or a file whose `kind` envelope
+is ill-formed. The build's error lists every problem.
 
 ```mermaid
 flowchart TD
-    B["claudine starts: bundle files, globals.yaml,<br/>and shipped.json are compiled in"] --> H{"does shipped.json describe exactly<br/>these texts, the current Simplified Schema<br/>and Darkmatter artifacts, and this code?"}
-    H -- yes --> U["use the prepared bundle and host catalog"]
-    H -- no --> T["prepare from the compiled-in text,<br/>as before (same result, slower)"]
-    U --> D["trigger discovery picks files by name as always"]
+    B["claudine starts: the registration inventory<br/>and shipped.json are compiled in"] --> H{"does shipped.json describe exactly<br/>these texts, the current Simplified Schema<br/>and Darkmatter artifacts, and this code?"}
+    H -- yes --> U["serve each registered trigger's prepared payload"]
+    H -- no --> T["prepare each payload from the compiled-in text<br/>(same result, slower)"]
+    U --> D["load the registration and merge the matching payloads"]
     T --> D
-    D --> W{"which file won the name?"}
-    W -- "embedded file" --> P["prepared entry (or text, if refused)"]
-    W -- "disk file" --> R["the disk file is prepared at run time"]
 ```
 
-**What you do.** After editing any file in `claudine/schemas/` (the bundle
-or `globals.yaml`), or code that changes how they are prepared, run from the
-repository root:
+**What you do.** After editing any file in `claudine/registration/`, or code
+that changes how they are prepared, run from the repository root:
 
 ```sh
 just shipped-schemas
 ```
 
 It regenerates Simplified Schema's, Darkmatter's, and Claudine's artifacts in
-that order, because Claudine's is built over the other two. Inside `claudine/`,
+that order, because Claudine's is built over the other two, and Claudine's
+lifecycle artifact `claudine/lib/generated/globals.lifecycle.json` with them.
+Every candidate is checked before any file is replaced. Inside `claudine/`,
 `just shipped-schemas` rewrites only Claudine's artifact and `just
 shipped-schemas --check` only reports whether it is current; both stop and
 name the root command when either lower artifact is out of date. If you
@@ -1294,30 +1321,21 @@ when its header proves it was generated from exactly the compiled-in texts,
 over the current lower artifacts, at the current preparation revision. When
 any of that is not true (an edited YAML file, a stale lower artifact, a
 damaged record), the artifact is refused and Claudine prepares from the text
-as it did before, with the same result; no warning is printed. The bundle and
-the host catalog are separate sections, so a damaged catalog record leaves the
-prepared bundle in use, and the other way around.
+as it did before, with the same result; no warning is printed. The registered
+payloads, the host catalog, and the YAML kinds are separate sections, so a
+damaged catalog record leaves the prepared payloads in use, and the other way
+around.
 
-**The selection rules above do not change.** The prepared form is consulted
-only after discovery has chosen a file for each name:
+**The prepared form changes nothing a document sees.** A served payload is
+the one the compiled text prepares to, and:
 
-- A same-name file in a disk schema location still wins. It is prepared from
-  disk at run time, with every check, while the embedded files it did not
-  replace still come from the artifact. For example, a
-  `schemas/claudine.yaml` at a repository's root replaces the built-in
-  `claudine.yaml` trigger for documents in that repository, while the
-  built-in `inline-compose.yaml` and `sequence.yaml` triggers are still
-  served prepared.
-- Shadowing changes which schema a document is checked against; it is not a
-  way to make a command or a test faster. The built-in triggers are already
-  prepared, so a test that replaces `claudine.yaml` with a smaller schema
-  only stops checking what users get. Shadow a trigger only when the
-  shadowing itself, or a custom definition, is what the test is about.
-- A bundle that is not exactly Claudine's (another name, or any file whose
-  text differs) is prepared from its own text.
-- `md` and DMLS do not read Claudine's artifact. DMLS still reads the host
-  catalog `globals.yaml` and `globals.lifecycle.json` from disk, as described
-  in [What Claudine adds to expression checking](#what-claudine-adds-to-expression-checking).
+- Disk triggers are always prepared from disk at run time, with every check,
+  while the registered payloads still come from the artifact.
+- A registration that is not exactly the compiled one (a test's edited
+  inventory, for example) is prepared from its own text.
+- `md` and DMLS do not read Claudine's artifact. They read the host catalog
+  and the lifecycle artifact from the
+  [published host registration](#the-published-host-registration).
 
 How artifacts are encoded, checked, and loaded is described in
 [Shipped Artifacts](../../../simplified-schema/docs/topics/shipped-artifacts.md).
@@ -1346,9 +1364,9 @@ warning: [schema_validation] ignoring invalid schema trigger /home/me/schemas/me
 - **Each invocation reports again.** A new `claudine` run, and a `prep`
   target (which runs as an invocation of its own), print the warning again
   while the file stays broken. `--silent` hides it.
-- **A skipped file still shadows.** An invalid disk `claudine.yaml` still
-  hides the embedded `claudine.yaml`, so Claudine's control schema is absent
-  until the file is fixed or removed; nothing falls back to the embedded copy.
+- **A skipped file hides nothing registered.** An invalid disk
+  `composition.yaml` is skipped, and Claudine's registered `composition.yaml`
+  still judges the document.
 - **A reference is still an error.** A `$schema` that names a trigger file
   fails whether or not the trigger is valid, and so does an
   authored `$schema` that cannot load.
@@ -1395,11 +1413,11 @@ optional; a property declared only by a trigger is never cleaned away.)
 
 ### In the editor
 
-DMLS has no Claudine dependency and reads the schemas only from disk: the
-host manifest registered in `~/.darkmatter.yaml`, and the same five
-locations. When either reaches the bundle, a Claudine prompt with no
-`$schema` gets diagnostics, completion, and hover from the matching
-triggers:
+DMLS has no Claudine dependency and reads Claudine's schemas only through
+the host manifest registered in `~/.darkmatter.yaml` (disk triggers in the
+five locations apply above them, as in the CLI). Once Claudine's setup has
+published and registered it, a Claudine prompt with no `$schema` gets
+diagnostics, completion, and hover from the matching triggers:
 
 - top-level keys (`mod` completes to `mode` and `model`) and their values
   (`mode:` offers `append` and `replace`, `interactive:` offers `true` and
@@ -1427,78 +1445,88 @@ document whose only Claudine-looking keys are shared events (`initialize`,
 
 A property the document's own `$schema` redeclares is completed and hovered
 from the author's declaration, as it is validated (see below). One limit
-remains: a document outside the Claudine area gets editor help only when
-Claudine's host registration is in place (run Claudine's setup once), even
-though the CLI validates it without one.
+remains: a document gets editor help only when Claudine's host registration
+is in place (run Claudine's setup once), even though the CLI validates it
+without one.
 
 See [DMLS Schema Support](../../../darkmatter/docs/topics/schemas/dmls-schema-support.md).
 
 ### The published host registration
 
 Darkmatter can also learn Claudine's schemas without a checkout: a
-`register` entry in `~/.darkmatter.yaml` naming `~/.claudine/darkmatter-host.yaml`
-points `md` and DMLS at a `darkmatter-host` manifest that Claudine writes
-from its embedded copies (see
+`register` entry in `~/.darkmatter.yaml` naming
+`~/.claudine/registrations/darkmatter/manifest.yaml` points `md` and DMLS at
+a format 2 `darkmatter-host` manifest that Claudine writes from its
+compiled-in copies (see
 [Host registration](../../../darkmatter/docs/topics/host-registration.md)).
 Claudine publishes it like this:
 
 ```text
-~/.claudine/
-├── darkmatter-host.yaml                  the manifest a `register` entry names
-└── darkmatter-host/
-    ├── 0.1.0-3f9a0c1d2e4b5a69/schemas/    one revision: every file below
-    └── 0.1.0-3f9a0c1d2e4b5a69-2/schemas/  the same revision, republished
+~/.claudine/registrations/
+├── .darkmatter.lock           held while a publish runs
+└── darkmatter/
+    ├── manifest.yaml          every file below and its BLAKE3 digest
+    ├── globals.lifecycle.json
+    └── schemas/…              the files of `claudine/registration/`
 ```
 
-- A revision folder is named `<version>-<digest>`: Claudine's version and the
-  first 16 hex characters of a BLAKE3 digest over the files' exact texts and
-  their roles. It holds the eight bundle files, `globals.yaml`,
-  `globals.lifecycle.json`, the identifying trigger `claudine-document.yaml`,
-  and `claudine-config.yaml`.
-- The manifest names `claudine-document.yaml` as `identify`, the triggers
-  `claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml` in that order,
-  `globals.yaml`, `globals.lifecycle.json`, and `functions: []`. Its paths
-  are relative to the manifest and point into one revision folder:
-
-  ```yaml
-  identify: "./darkmatter-host/0.1.0-3f9a0c1d2e4b5a69/schemas/claudine-document.yaml"
-  ```
-
-- `claudine-config.yaml` is there only so you can inspect what is installed.
-  The manifest never names it, and it selects no document.
-- A revision folder is never changed once it exists. A new revision is
-  written into a staging folder beside it and renamed into place whole, and
-  the manifest is replaced atomically only after that, so a reader never
-  sees half a revision. Every older revision stays, so a reader that already
-  read the old manifest keeps working; nothing removes old revisions yet.
-- When the manifest already names a revision whose files match, publishing
-  writes nothing. A revision folder whose files were damaged is left as it is
-  and the revision is published again under the next free name (`-2`,
-  `-3`, …).
-- If publishing fails, the previous manifest and every revision stay as they
-  were.
+- There is one tree at fixed paths, with no version folders. Every file is
+  replaced only when its bytes differ, and the manifest is written last, so
+  a reader that meets a publish in progress sees files that do not match
+  the old manifest and refuses the host with a warning rather than mixing
+  two releases. The next publish finishes the job.
+- A file the previous manifest listed and the new one does not is removed.
+  Any other file in the folder is left alone.
+- Publishing what is already installed writes nothing.
+- A symbolic link or a junction anywhere on the way stops the publish before
+  anything is written; the link and its target are left alone.
 
 #### When Claudine publishes and registers
 
 - **Setup.** Claudine's setup (the wizard a first run starts, interactive or
-  headless) does three things in order:
-  1. publishes the revision; if that fails, setup stops with an error and
+  headless) does four things in order:
+  1. publishes the registration; if that fails, setup stops with an error and
      writes nothing else;
   2. writes Claudine's configuration and completes the `permissions`
      handshake with `.darkmatter.yaml` of the same scope;
-  3. adds `~/.claudine/darkmatter-host.yaml` to the `register` list of the
-     **user's** `~/.darkmatter.yaml`, whichever scope was set up.
+  3. puts `~/.claudine/registrations/darkmatter/manifest.yaml` in the
+     `register` list of the **user's** `~/.darkmatter.yaml`, whichever scope
+     was set up, even when step 2 reported a `permissions` conflict;
+  4. removes the files earlier releases published, `~/.claudine/darkmatter-host.yaml`
+     and the `~/.claudine/darkmatter-host/` folder, once step 3 succeeded.
 
-  Step 3 keeps every existing entry and comment. If an entry already names
-  the same manifest file, even spelled differently (an absolute path instead
-  of `~/…`), nothing is added. A failure there is a warning; Claudine's own
-  configuration is already saved.
-- **Every launch.** Each `claudine` command except a provider hook
-  (`handle`), `steer`, shell completion, and `uninstall` publishes the
-  revision again when the manifest is missing or stale. An upgraded binary
-  therefore updates its registration on its next run. This refresh rewrites
-  only Claudine's own manifest and revisions, never `~/.darkmatter.yaml`. A
-  failure is a warning, and the last complete revision stays in use.
+  Step 3 keeps every other entry and comment. An entry naming the old
+  `~/.claudine/darkmatter-host.yaml` (in any spelling, and even when that
+  file is already gone) or the new manifest is rewritten in place to the
+  new spelling; any further such entry is removed, and with none the new
+  entry is appended:
+
+  ```yaml
+  # ~/.darkmatter.yaml before setup
+  register:
+      - ~/hosts/mine.yaml
+      - ~/.claudine/darkmatter-host.yaml   # Claudine
+  # after setup
+  register:
+      - ~/hosts/mine.yaml
+      - ~/.claudine/registrations/darkmatter/manifest.yaml   # Claudine
+  ```
+
+  A repository's `.darkmatter.yaml` is never changed. A failure in step 3 is
+  a warning (Claudine's own configuration is already saved) and step 4 is
+  skipped, so the next setup finishes both. Step 4 removes nothing else
+  under `~/.claudine`: if a symbolic link or junction stands anywhere in the
+  old files, it removes nothing, follows nothing, and warns; delete them
+  yourself.
+- **`claudine registrations publish`.** The hidden
+  [`registrations`](../cli/registrations.md) command publishes on request,
+  and Claudine's `just install` runs it with the binary it just built, so an
+  upgrade installed that way updates the registration. It writes only
+  Claudine's own registration files, never `~/.darkmatter.yaml`, and a
+  failure exits nonzero with the cause on stderr.
+- **Never otherwise.** No other `claudine` command reads, publishes, or
+  repairs the installed files, so a missing or edited file stays that way
+  until the next publish.
 
 Registration is for `md` and DMLS only. A `claudine` run always uses the
 schemas and event registry compiled into the binary, even when a repository
@@ -1541,10 +1569,12 @@ parser still enforces the execution rules.
         - [Error Schema (`err` namespace)](^darkmatter/schemas/partials/error.yaml)
         - [Timing Schema (`timing` namespace)](^darkmatter/schemas/partials/timing.yaml)
     - Claudine ([overview of the bundle](../../schemas/README.md))
-        - [Frontmatter catalog trigger](../../schemas/claudine.yaml)
-        - [Inline-compose trigger](../../schemas/inline-compose.yaml)
-        - [Host globals catalog (`seq`, `loop`, `group`)](../../schemas/globals.yaml)
-        - [Action types](../../schemas/action.yaml)
-        - [Lifecycle stacks and `loop:`](../../schemas/lifecycle.yaml)
-        - [Linking keys](../../schemas/linking.yaml)
-        - [Document metadata (`prompt`, `hash`, `last_updated`)](../../schemas/document.yaml)
+        - [Composition trigger](../../registration/composition.yaml)
+        - [Inline-compose trigger](../../registration/inline-composition.yaml)
+        - [Sequence-document trigger](../../registration/sequence-document.yaml)
+        - [Formal `kind: sequence` YAML file](../../registration/formal-sequence-file.yaml)
+        - Host globals: [`group`](../../registration/group.yaml), [`loop`](../../registration/loop.yaml), [`seq`](../../registration/seq.yaml)
+        - [Action types](../../registration/action.yaml)
+        - [Lifecycle stacks and `loop:`](../../registration/lifecycle-events.yaml)
+        - [Linking keys](../../registration/linking.yaml)
+        - [Document metadata (`prompt`, `hash`, `last_updated`)](../../registration/document.yaml)

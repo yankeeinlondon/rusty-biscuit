@@ -1,7 +1,7 @@
 //! The shipped configuration schema: the one authority for the shape and
 //! defaults of `~/.claudine/config.yaml` and `{repo-root}/.claudine/config.yaml`.
 //!
-//! The text is `claudine/schemas/claudine-config.yaml`, compiled in with
+//! The text is `claudine/registration/claudine-config.yaml`, compiled in with
 //! `include_str!`. Its `permissions` property imports Darkmatter's type
 //! (`permissions@darkmatter:config`), so the contracts are prepared with
 //! Darkmatter's shipped sources. [`super::load`] validates a file against
@@ -16,10 +16,10 @@ use simplified_schema::{Prepared, SchemaError};
 
 /// The virtual path the schema is prepared under, and the name its problems
 /// cite.
-pub const CONFIG_SCHEMA_PATH: &str = "claudine/schemas/claudine-config.yaml";
+pub const CONFIG_SCHEMA_PATH: &str = "claudine/registration/claudine-config.yaml";
 
 /// The configuration schema's text, as shipped.
-pub const CONFIG_SCHEMA_SOURCE: &str = include_str!("../../../schemas/claudine-config.yaml");
+pub const CONFIG_SCHEMA_SOURCE: &str = include_str!("../../../registration/claudine-config.yaml");
 
 /// The directory both configuration files live in, under the home directory
 /// or the repository root.

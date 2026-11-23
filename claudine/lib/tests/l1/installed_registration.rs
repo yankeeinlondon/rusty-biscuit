@@ -1,5 +1,5 @@
 //! Claudine's installed Darkmatter integration, end to end over a temporary
-//! home: `setup_claudine` publishes the host revision, writes Claudine's
+//! home: `setup_claudine` publishes the host registration, writes Claudine's
 //! configuration, hands off `permissions`, and registers the manifest in the
 //! user's `~/.darkmatter.yaml`; Darkmatter's own loader and selection (the
 //! library path `md` and DMLS share: `RegisteredHosts::load`, `select`,
@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use claudine::composition::registration::{
-    HostRevision, MANIFEST_REFERENCE, PublishOutcome, manifest_path, publish, revisions_dir,
+    CleanupError, FileKind, LEGACY_MANIFEST_REFERENCE, MANIFEST_REFERENCE, Obstruction, PublishOutcome, PublishedFile,
+    RegistrationInventory, legacy_manifest_path, legacy_revisions_dir, manifest_path, output_root, publish,
 };
 use claudine::composition::{TriggerFindings, pre_validate_schema, resolve_composition_source_in_context};
 use claudine::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
@@ -155,16 +156,6 @@ impl Fixture {
         }
         files
     }
-
-    /// The non-staging revision directory names.
-    fn revision_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = std::fs::read_dir(revisions_dir(&self.home()))
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .collect();
-        names.sort();
-        names
-    }
 }
 
 fn write_default(path: &Path) -> claudine::error::Result<SaveOutcome> {
@@ -197,8 +188,8 @@ fn installed_registration_setup_publishes_configures_and_registers() {
 
     let manifest = manifest_path(&fixture.home());
     assert_eq!(setup.publication.manifest(), manifest);
-    assert!(manifest.is_file(), "the stable manifest exists");
-    assert!(setup.publication.revision_dir().join("schemas").is_dir(), "the revision exists");
+    assert!(manifest.is_file(), "the manifest exists");
+    assert!(output_root(&fixture.home()).join("schemas").is_dir(), "the members exist");
     let darkmatter = setup.darkmatter.as_ref().unwrap();
     assert_eq!(darkmatter.permissions, PermissionsHandoff::Referenced);
     assert!(document(&fixture.claudine())["permissions"].is_object(), "Claudine holds the block");
@@ -256,7 +247,7 @@ fn installed_registration_keeps_existing_entries_and_comments() {
 }
 
 #[test]
-fn installed_registration_same_manifest_spelled_absolutely_is_not_duplicated() {
+fn installed_registration_same_manifest_spelled_absolutely_becomes_the_one_canonical_entry() {
     let fixture = Fixture::new();
     let absolute = manifest_path(&fixture.home());
     let quoted = serde_json::to_string(absolute.to_str().unwrap()).unwrap();
@@ -264,8 +255,10 @@ fn installed_registration_same_manifest_spelled_absolutely_is_not_duplicated() {
 
     let setup = fixture.setup().unwrap();
 
-    assert_eq!(setup.registration.unwrap().action, InitAction::Unchanged);
-    assert_eq!(document(&fixture.darkmatter())["register"], json!([absolute.to_str().unwrap()]));
+    let registration = setup.registration.unwrap();
+    assert_eq!(registration.action, InitAction::Updated);
+    assert_eq!(registration.replaced, vec![absolute.to_str().unwrap().to_string()]);
+    assert_eq!(document(&fixture.darkmatter())["register"], json!([MANIFEST_REFERENCE]));
     assert_one_claudine_profile(&fixture.hosts(&fixture.context()));
 }
 
@@ -293,16 +286,16 @@ fn installed_registration_repository_scope_registers_in_the_user_file_only() {
 #[test]
 fn installed_registration_failed_publication_writes_no_configuration() {
     let fixture = Fixture::new();
-    fixture.write(&revisions_dir(&fixture.home()), "an obstruction");
+    fixture.write(&output_root(&fixture.home()), "an obstruction");
 
     let error = fixture.setup().unwrap_err();
 
     assert!(matches!(error, SetupError::Publish(_)), "{error}");
     assert!(!fixture.claudine().exists(), "Claudine's configuration is not written");
     assert!(!fixture.darkmatter().exists(), "Darkmatter's configuration is not written");
-    assert!(!manifest_path(&fixture.home()).exists(), "no manifest names a missing revision");
+    assert!(!manifest_path(&fixture.home()).exists(), "no manifest is published");
 
-    std::fs::remove_file(revisions_dir(&fixture.home())).unwrap();
+    std::fs::remove_file(output_root(&fixture.home())).unwrap();
     let setup = fixture.setup().unwrap();
     assert!(setup.darkmatter.is_ok() && setup.registration.is_ok(), "{setup:?}");
     assert_one_claudine_profile(&fixture.hosts(&fixture.context()));
@@ -466,54 +459,58 @@ fn installed_registration_shared_events_alone_keep_the_md_contract() {
 fn installed_registration_upgraded_binary_refresh_changes_the_facts() {
     let fixture = Fixture::new();
     fixture.setup().unwrap();
-    fixture.compose(MAPPING_MODEL, Some(fixture.hosts(&fixture.context()))).expect_err("the installed revision rejects it");
-    let original = fixture.revision_names();
-    let original_dir = revisions_dir(&fixture.home()).join(&original[0]);
-    let original_files: BTreeMap<_, _> =
-        fixture.files().into_iter().filter(|(path, _)| path.starts_with(&original_dir)).collect();
-    let (_, claudine_yaml) = HostRevision::claudine().files().find(|(name, _)| *name == "claudine.yaml").unwrap();
+    fixture.compose(MAPPING_MODEL, Some(fixture.hosts(&fixture.context()))).expect_err("the installed registration rejects it");
+    let root = output_root(&fixture.home());
+    let original_files: BTreeMap<_, _> = fixture.files().into_iter().filter(|(path, _)| path.starts_with(&root)).collect();
+    let shared_yaml = RegistrationInventory::claudine().file("schemas/shared.yaml").unwrap().text().unwrap();
     let declaration = "\"string -> the model to run\"";
-    assert!(claudine_yaml.contains(declaration), "the embedded schema declares the model as a string");
-    let upgraded = HostRevision::claudine()
-        .clone()
-        .with_version("99.0.0")
-        .with_file("claudine.yaml", claudine_yaml.replace(declaration, "\"object -> the model to run\""));
+    assert!(shared_yaml.contains(declaration), "the embedded schema declares the model as a string");
+    let upgraded = RegistrationInventory::claudine().clone().with_version("99.0.0").with_member(PublishedFile::new(
+        "schemas/shared.yaml",
+        FileKind::Library,
+        None::<&'static str>,
+        shared_yaml.replace(declaration, "\"object -> the model to run\"").into_bytes(),
+    ));
 
-    publish(&fixture.home(), &upgraded).unwrap();
+    let outcome = publish(&fixture.home(), &upgraded).unwrap();
 
     let hosts = fixture.hosts(&fixture.context());
     assert_one_claudine_profile(&hosts);
     assert_eq!(hosts.loaded().profiles[0].version(), "99.0.0");
     if let Err(error) = fixture.compose(MAPPING_MODEL, Some(hosts)) {
-        panic!("the upgraded revision accepts a mapping model: {error:?}");
+        panic!("the upgraded registration accepts a mapping model: {error:?}");
     }
-    assert_eq!(fixture.revision_names().len(), 2, "{:?}", fixture.revision_names());
-    let retained: BTreeMap<_, _> =
-        fixture.files().into_iter().filter(|(path, _)| path.starts_with(&original_dir)).collect();
-    assert_eq!(retained, original_files, "the old revision is retained byte for byte");
+    assert_eq!(outcome.changes().unwrap().written, ["schemas/shared.yaml", "manifest.yaml"]);
+    let after: BTreeMap<_, _> = fixture.files().into_iter().filter(|(path, _)| path.starts_with(&root)).collect();
+    assert_eq!(after.keys().collect::<Vec<_>>(), original_files.keys().collect::<Vec<_>>(), "the same fixed paths");
+    for (path, bytes) in &original_files {
+        if !path.ends_with("shared.yaml") && !path.ends_with("manifest.yaml") {
+            assert_eq!(&after[path], bytes, "{} is unchanged", path.display());
+        }
+    }
     assert!(!fixture.home().join("schemas").exists(), "nothing is copied into ~/schemas");
 }
 
-/// A repository registration of a hand-written `claudine` host whose only
-/// trigger rejects a string `model`, which Claudine's own schema accepts.
+/// A repository registration of a hand-written `claudine` host: Claudine's
+/// published set with its triggers replaced by one that rejects a string
+/// `model`, which Claudine's own schema accepts.
 fn install_hostile_claudine(fixture: &Fixture) {
-    let schemas = fixture.repo().join(".hostile/schemas");
-    for (name, text) in HostRevision::claudine().files() {
-        if ["claudine-document.yaml", "globals.yaml", "globals.lifecycle.json"].contains(&name) {
-            fixture.write(&schemas.join(name), text);
-        }
+    let hostile = RegistrationInventory::claudine()
+        .clone()
+        .with_version("6.6.6")
+        .without_member("schemas/composition.yaml")
+        .without_member("schemas/inline-composition.yaml")
+        .without_member("schemas/sequence-document.yaml")
+        .with_member(PublishedFile::new(
+            "schemas/hostile.yaml",
+            FileKind::Trigger,
+            None::<&'static str>,
+            b"kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    model: \"number -> a hostile model type\"\n".to_vec(),
+        ));
+    for file in hostile.files() {
+        fixture.write(&fixture.repo().join(".hostile").join(file.path()), file.text().unwrap());
     }
-    fixture.write(
-        &schemas.join("hostile.yaml"),
-        "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    model: \"number -> a hostile model type\"\n",
-    );
-    fixture.write(
-        &fixture.repo().join(".hostile/darkmatter-host.yaml"),
-        "kind: darkmatter-host\nformat_version: 1\nhost: claudine\nversion: 6.6.6\n\
-         identify: ./schemas/claudine-document.yaml\ntriggers:\n    - ./schemas/hostile.yaml\n\
-         globals: ./schemas/globals.yaml\nlifecycle: ./schemas/globals.lifecycle.json\nfunctions: []\n",
-    );
-    fixture.write(&fixture.repo().join(".darkmatter.yaml"), "register:\n  - ./.hostile/darkmatter-host.yaml\n");
+    fixture.write(&fixture.repo().join(".darkmatter.yaml"), "register:\n  - ./.hostile/manifest.yaml\n");
 }
 
 #[test]
@@ -563,4 +560,206 @@ fn installed_registration_claudine_runtime_ignores_a_hostile_repository_registra
     std::fs::write(&path, MAPPING_MODEL).unwrap();
     let error = verdict().expect_err("Claudine's own schema still rejects a mapping model");
     assert!(error.contains("/model"), "{error}");
+}
+
+// ── migration from the retired format 1 registration ────────────────────────
+
+/// A home as the format 1 publisher left it: the retired manifest, a
+/// revision tree two folders deep, and `~/.darkmatter.yaml` listing the
+/// retired manifest between two entries of its own. Returns the
+/// configuration text.
+fn with_legacy_registration(fixture: &Fixture) -> String {
+    let home = fixture.home();
+    fixture.write(&legacy_manifest_path(&home), "kind: darkmatter-host\nformat_version: 1\n");
+    let revisions = legacy_revisions_dir(&home);
+    fixture.write(&revisions.join("0123abcd/schemas/claudine.yaml"), "kind: schema-trigger\n");
+    fixture.write(&revisions.join("0123abcd/globals.yaml"), "kind: schema\n");
+    fixture.write(&home.join("hosts/mine.yaml"), "kind: darkmatter-host\n");
+    let text = format!(
+        "# mine\nregister:\n  - ~/hosts/mine.yaml   # kept\n  - {LEGACY_MANIFEST_REFERENCE}   # Claudine's\n  # an unknown one\n  - ~/hosts/gone.yaml\n"
+    );
+    fixture.write(&fixture.darkmatter(), &text);
+    text
+}
+
+/// `text` with the retired entry spelled as the new one.
+fn migrated(text: &str) -> String {
+    text.replace(LEGACY_MANIFEST_REFERENCE, MANIFEST_REFERENCE)
+}
+
+/// The `register` list of `~/.darkmatter.yaml`, as written.
+fn register_list(fixture: &Fixture) -> Value {
+    document(&fixture.darkmatter())["register"].clone()
+}
+
+#[test]
+fn installed_registration_setup_migrates_a_legacy_home_and_removes_the_retired_files() {
+    let fixture = Fixture::new();
+    let original = with_legacy_registration(&fixture);
+    let unrelated = fixture.home().join(".claudine/mcp/catalog.json");
+    fixture.write(&unrelated, "{}\n");
+
+    let setup = fixture.setup().unwrap();
+
+    let registration = setup.registration.unwrap();
+    assert_eq!(registration.action, InitAction::Updated);
+    assert_eq!(registration.replaced, vec![LEGACY_MANIFEST_REFERENCE.to_string()]);
+    let text = std::fs::read_to_string(fixture.darkmatter()).unwrap();
+    assert!(text.starts_with(&migrated(&original)), "the entry is replaced in place, every other byte kept:\n{text}");
+    assert_eq!(register_list(&fixture), json!(["~/hosts/mine.yaml", MANIFEST_REFERENCE, "~/hosts/gone.yaml"]));
+    let cleanup = setup.cleanup.expect("cleanup ran").unwrap();
+    assert_eq!(cleanup.removed, vec![legacy_revisions_dir(&fixture.home()), legacy_manifest_path(&fixture.home())]);
+    assert!(!legacy_manifest_path(&fixture.home()).exists());
+    assert!(!legacy_revisions_dir(&fixture.home()).exists());
+    assert_eq!(std::fs::read_to_string(&unrelated).unwrap(), "{}\n", "nothing else under ~/.claudine is touched");
+
+    let again = fixture.setup().unwrap();
+    assert_eq!(again.registration.unwrap().action, InitAction::Unchanged);
+    assert_eq!(again.cleanup.unwrap().unwrap().removed, Vec::<PathBuf>::new());
+}
+
+#[test]
+fn installed_registration_setup_replaces_a_legacy_entry_whose_manifest_is_gone() {
+    let fixture = Fixture::new();
+    let absolute = biscuit_file::to_portable_string(&legacy_manifest_path(&fixture.home()));
+    fixture.write(&fixture.darkmatter(), &format!("register:\n  - {absolute}\n  - {LEGACY_MANIFEST_REFERENCE}\n"));
+
+    let setup = fixture.setup().unwrap();
+
+    assert_eq!(setup.registration.unwrap().replaced.len(), 2);
+    assert_eq!(register_list(&fixture), json!([MANIFEST_REFERENCE]));
+    assert_eq!(setup.cleanup.unwrap().unwrap().removed, Vec::<PathBuf>::new(), "nothing was left to remove");
+    assert_one_claudine_profile(&fixture.hosts(&fixture.context()));
+}
+
+/// An interrupted `~/.darkmatter.yaml` write leaves the new manifest
+/// published, the retired entry listed, and the retired files in place;
+/// the next setup finishes the migration.
+#[test]
+fn installed_registration_setup_converges_after_an_interrupted_registration_write() {
+    let fixture = Fixture::new();
+    setup_with_darkmatter(&fixture.context(), ConfigScope::User, write_default).unwrap();
+    let configured = std::fs::read_to_string(fixture.darkmatter()).unwrap();
+    let legacy = configured.replace("register: []", &format!("register:\n    - {LEGACY_MANIFEST_REFERENCE}"));
+    assert_ne!(legacy, configured, "the handshake wrote an empty list: {configured}");
+    fixture.write(&fixture.darkmatter(), &legacy);
+    fixture.write(&legacy_manifest_path(&fixture.home()), "kind: darkmatter-host\n");
+
+    let interrupted = {
+        let _hook = darkmatter::config::write::test_hooks::fail_next_replacement();
+        fixture.setup().unwrap()
+    };
+
+    assert!(matches!(interrupted.registration, Err(InitError::Write(_))), "{:?}", interrupted.registration);
+    assert!(interrupted.cleanup.is_none(), "nothing is removed before the entry is replaced");
+    assert!(manifest_path(&fixture.home()).is_file(), "the new manifest is published");
+    assert_eq!(std::fs::read_to_string(fixture.darkmatter()).unwrap(), legacy);
+    assert!(legacy_manifest_path(&fixture.home()).is_file());
+
+    let rerun = fixture.setup().unwrap();
+
+    assert!(matches!(rerun.publication, PublishOutcome::Current { .. }));
+    assert_eq!(rerun.registration.unwrap().action, InitAction::Updated);
+    assert_eq!(register_list(&fixture), json!([MANIFEST_REFERENCE]));
+    assert!(!legacy_manifest_path(&fixture.home()).exists());
+    assert_one_claudine_profile(&fixture.hosts(&fixture.context()));
+}
+
+#[test]
+fn installed_registration_permissions_conflict_keeps_both_blocks_and_still_registers() {
+    let fixture = Fixture::new();
+    let inline = "permissions:\n  network: allow\nregister: []\n";
+    fixture.write(&fixture.darkmatter(), inline);
+    fixture.write(&fixture.claudine(), "permissions:\n  network: deny\n");
+
+    let setup = fixture.setup().unwrap();
+
+    assert!(matches!(setup.darkmatter, Err(SetupError::Conflict { .. })), "{:?}", setup.darkmatter);
+    assert_eq!(document(&fixture.darkmatter())["permissions"], json!({ "network": "allow" }), "the inline block stays");
+    assert_eq!(document(&fixture.claudine())["permissions"], json!({ "network": "deny" }));
+    assert_eq!(register_list(&fixture), json!([MANIFEST_REFERENCE]));
+}
+
+#[test]
+fn installed_registration_third_party_permissions_reference_is_kept_and_the_manifest_registered() {
+    let fixture = Fixture::new();
+    fixture.write(&fixture.home().join(".other/config.yaml"), "permissions:\n  network: deny\n");
+    fixture.write(&fixture.darkmatter(), "permissions: ~/.other/config.yaml\nregister: []\n");
+
+    let setup = fixture.setup().unwrap();
+
+    let handoff = setup.darkmatter.unwrap().permissions;
+    assert_eq!(handoff, PermissionsHandoff::ThirdParty { reference: "~/.other/config.yaml".to_string() });
+    assert_eq!(document(&fixture.darkmatter())["permissions"], "~/.other/config.yaml");
+    assert_eq!(register_list(&fixture), json!([MANIFEST_REFERENCE]));
+}
+
+#[test]
+fn installed_registration_inline_block_moves_to_an_absent_or_matching_destination_and_registers() {
+    for claudine_before in [None, Some("permissions:\n  network: allow\n")] {
+        let fixture = Fixture::new();
+        fixture.write(&fixture.darkmatter(), "permissions:\n  network: allow\nregister: []\n");
+        if let Some(text) = claudine_before {
+            fixture.write(&fixture.claudine(), text);
+        }
+
+        let setup = fixture.setup().unwrap();
+
+        assert_eq!(setup.darkmatter.unwrap().permissions, PermissionsHandoff::Transferred, "{claudine_before:?}");
+        assert_eq!(document(&fixture.claudine())["permissions"]["network"], "allow");
+        assert_eq!(document(&fixture.darkmatter())["permissions"], "~/.claudine/config.yaml");
+        assert_eq!(register_list(&fixture), json!([MANIFEST_REFERENCE]), "{claudine_before:?}");
+    }
+}
+
+#[test]
+fn installed_registration_failed_publication_leaves_a_legacy_home_untouched() {
+    let fixture = Fixture::new();
+    with_legacy_registration(&fixture);
+    fixture.write(&fixture.claudine(), "permissions:\n  network: deny\n");
+    fixture.write(&output_root(&fixture.home()), "an obstruction");
+    let before = fixture.files();
+
+    let error = fixture.setup().unwrap_err();
+
+    assert!(matches!(error, SetupError::Publish(_)), "{error}");
+    assert_eq!(fixture.files(), before, "byte for byte");
+}
+
+#[test]
+fn installed_registration_user_setup_never_rewrites_a_repository_entry() {
+    let fixture = Fixture::new();
+    let context = fixture.repository();
+    let repository = fixture.repo().join(".darkmatter.yaml");
+    let text = format!("register:\n  - {LEGACY_MANIFEST_REFERENCE}\n");
+    fixture.write(&repository, &text);
+
+    setup_claudine(&context, ConfigScope::User, write_default).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&repository).unwrap(), text, "the repository file is not written");
+    assert_eq!(register_list(&fixture), json!([MANIFEST_REFERENCE]));
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_registration_cleanup_refuses_a_link_in_the_retired_tree_and_leaves_its_target() {
+    let fixture = Fixture::new();
+    with_legacy_registration(&fixture);
+    let sentinel = fixture.root.join("outside/keep.yaml");
+    fixture.write(&sentinel, "kept\n");
+    let link = legacy_revisions_dir(&fixture.home()).join("0123abcd/linked");
+    std::os::unix::fs::symlink(sentinel.parent().unwrap(), &link).unwrap();
+
+    let setup = fixture.setup().unwrap();
+
+    assert_eq!(register_list(&fixture), json!(["~/hosts/mine.yaml", MANIFEST_REFERENCE, "~/hosts/gone.yaml"]));
+    let error = setup.cleanup.expect("cleanup ran").unwrap_err();
+    assert!(
+        matches!(&error, CleanupError::Obstructed { path, obstruction: Obstruction::SymbolicLink } if *path == link),
+        "{error}"
+    );
+    assert_eq!(std::fs::read_to_string(&sentinel).unwrap(), "kept\n", "the link's target is untouched");
+    assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the link stays");
+    assert!(legacy_manifest_path(&fixture.home()).is_file(), "nothing was removed");
+    assert!(legacy_revisions_dir(&fixture.home()).join("0123abcd/globals.yaml").is_file());
 }

@@ -464,6 +464,9 @@ pub struct RegisterReport {
     pub path: PathBuf,
     /// [`InitAction::Unchanged`] when an entry already named the manifest.
     pub action: InitAction,
+    /// The entries [`replace_manifest_registration`] rewrote or removed, as
+    /// they were written; always empty for [`register_manifest`].
+    pub replaced: Vec<String>,
 }
 
 /// Adds `reference` (a manifest reference, as it should be written) to the
@@ -522,7 +525,7 @@ pub fn register_manifest(
                             .is_ok_and(|identity| identity == wanted)
                     });
                     if registered {
-                        return Ok(RegisterReport { path: observation.path, action: InitAction::Unchanged });
+                        return Ok(RegisterReport { path: observation.path, action: InitAction::Unchanged, replaced: Vec::new() });
                     }
                     YamlEdit::Set { path: register_path(Some(entries.len()))?, value: Value::from(reference) }
                 }
@@ -544,7 +547,135 @@ pub fn register_manifest(
     let mut transaction = ConfigTransaction::new();
     transaction.add(change).map_err(InitError::Write)?;
     commit_checked(transaction, context, &|_| None)?;
-    Ok(RegisterReport { path: observation.path, action })
+    Ok(RegisterReport { path: observation.path, action, replaced: Vec::new() })
+}
+
+/// [`register_manifest`] for a host whose manifest moved: `reference` takes
+/// the place of every `register` entry that names `old_path` (the host's
+/// previous default manifest, which may no longer exist) or the same
+/// manifest as `reference`, however each is spelled. The first such entry is
+/// rewritten to `reference` as given and the others are removed; with none,
+/// `reference` is appended. Every other entry, value, and comment is kept,
+/// and a file that already lists `reference` once and `old_path` nowhere is
+/// not written.
+///
+/// Entries are compared by the file they name, resolved from the
+/// configuration file's folder: [`manifest_identity`](super::registration::manifest_identity)
+/// for an existing file, and the location the reference would open for a
+/// missing one, so `~/.acme/old.yaml`, its absolute path, and `.acme/old.yaml`
+/// in `~/.darkmatter.yaml` all match a missing `~/.acme/old.yaml`.
+///
+/// ## Errors
+///
+/// As [`register_manifest`]; nothing was changed.
+pub fn replace_manifest_registration(
+    context: &FileResolutionContext,
+    scope: ConfigScope,
+    reference: &str,
+    old_path: &Path,
+) -> Result<RegisterReport, InitError> {
+    let observation = observe(context, scope)?;
+    let (change, report) = replace_manifest_change(&observation, context, reference, old_path)?;
+    if let Some(change) = change {
+        let mut transaction = ConfigTransaction::new();
+        transaction.add(change).map_err(InitError::Write)?;
+        commit_checked(transaction, context, &|_| None)?;
+    }
+    Ok(report)
+}
+
+/// The change [`replace_manifest_registration`] makes to `observation`'s
+/// file (`None` when nothing would change) and the report it returns once
+/// that change is committed. An existing file is edited in place and must
+/// still hold the bytes observed.
+///
+/// ## Errors
+///
+/// As [`register_manifest`].
+pub fn replace_manifest_change(
+    observation: &ConfigObservation,
+    context: &FileResolutionContext,
+    reference: &str,
+    old_path: &Path,
+) -> Result<(Option<TargetChange>, RegisterReport), InitError> {
+    if let BlockState::Invalid(error) = &observation.permissions {
+        return Err(InitError::Invalid(error.clone()));
+    }
+    let revision = match observation.scope {
+        ConfigScope::User => ConfigRevision::User,
+        ConfigScope::Repository => ConfigRevision::RepositoryWorktree,
+    };
+    let invalid = |message: String| {
+        InitError::Invalid(ConfigError::unlocated(
+            super::load::ConfigErrorKind::InvalidSetting,
+            &observation.path,
+            revision,
+            message,
+        ))
+    };
+    let wanted = super::registration::manifest_identity(reference, &observation.path, context)
+        .map_err(|why| invalid(format!("cannot register `{reference}`: {why}")))?;
+    let old = super::registration::location_identity(old_path);
+    let register_path = |index: Option<usize>| {
+        let mut segments = vec![String::from("register")];
+        segments.extend(index.map(|index| index.to_string()));
+        PropertyPath::from_segments(segments).map_err(|error| invalid(error.to_string()))
+    };
+    let report = |action: InitAction, replaced: Vec<String>| RegisterReport {
+        path: observation.path.clone(),
+        action,
+        replaced,
+    };
+
+    let (Some(bytes), Some(authored)) = (&observation.bytes, &observation.authored) else {
+        let mut edits = Vec::new();
+        for (key, default) in top_level_defaults(observation.scope) {
+            let value = if key == "register" { Value::Array(vec![Value::from(reference)]) } else { default };
+            let path = PropertyPath::from_segments([key]).map_err(|error| invalid(error.to_string()))?;
+            edits.push(YamlEdit::Set { path, value });
+        }
+        let change = TargetChange::create(&observation.path, String::new(), edits);
+        return Ok((Some(change), report(InitAction::Created, Vec::new())));
+    };
+    let entries = match authored.get("register") {
+        None | Some(Value::Null) => {
+            let edit = YamlEdit::Set { path: register_path(None)?, value: Value::Array(vec![Value::from(reference)]) };
+            let change = TargetChange::edit(&observation.path, SourceExpectation::Bytes(bytes.clone()), vec![edit]);
+            return Ok((Some(change), report(InitAction::Updated, Vec::new())));
+        }
+        Some(Value::Array(entries)) => entries,
+        Some(_) => return Err(invalid(String::from("`register` is not a list, so no host can be registered"))),
+    };
+    let affected: Vec<(usize, &str)> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| Some((index, entry.as_str()?)))
+        .filter(|(_, entry)| {
+            super::registration::manifest_location_identity(entry, &observation.path, context)
+                .is_some_and(|identity| identity == wanted || identity == old)
+        })
+        .collect();
+
+    let mut edits = Vec::new();
+    let mut replaced = Vec::new();
+    match affected.split_first() {
+        None => edits.push(YamlEdit::Set { path: register_path(Some(entries.len()))?, value: Value::from(reference) }),
+        Some((&(first, written), rest)) => {
+            if written != reference {
+                edits.push(YamlEdit::Set { path: register_path(Some(first))?, value: Value::from(reference) });
+                replaced.push(written.to_string());
+            }
+            for &(index, written) in rest.iter().rev() {
+                edits.push(YamlEdit::Remove { path: register_path(Some(index))? });
+                replaced.push(written.to_string());
+            }
+        }
+    }
+    if edits.is_empty() {
+        return Ok((None, report(InitAction::Unchanged, Vec::new())));
+    }
+    let change = TargetChange::edit(&observation.path, SourceExpectation::Bytes(bytes.clone()), edits);
+    Ok((Some(change), report(InitAction::Updated, replaced)))
 }
 
 /// Every top-level setting of `scope` with its schema default, in schema

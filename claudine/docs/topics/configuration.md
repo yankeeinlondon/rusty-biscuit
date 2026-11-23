@@ -212,13 +212,20 @@ permission in one place:
 # ~/.darkmatter.yaml
 permissions: ~/.claudine/config.yaml
 register:
-    - ~/.claudine/darkmatter-host.yaml
+    - ~/.claudine/registrations/darkmatter/manifest.yaml
 ```
 
 The `register` entry is Claudine's host registration: setup publishes it
-before writing either file and adds the entry last, so `md` and DMLS
+before writing either file and writes the entry last, so `md` and DMLS
 recognize Claudine documents anywhere (see
 [The published host registration](schemas.md#the-published-host-registration)).
+An entry naming the manifest earlier releases published,
+`~/.claudine/darkmatter-host.yaml`, is rewritten in place to the new path
+(even when that file no longer exists), other entries and comments are kept,
+and the old manifest and its `~/.claudine/darkmatter-host/` folder are
+removed once the entry is written. The entry is written even when the
+`permissions` handshake below reports a conflict, and a repository's
+`.darkmatter.yaml` is never changed.
 
 First-run setup writes Claudine's own file, then Darkmatter's:
 
@@ -242,7 +249,10 @@ not set up.
 
 The same steps are available to Rust callers as
 `claudine::config::setup::setup_with_darkmatter(context, scope, write)`,
-where `write` is the caller's own write of Claudine's file. To undo the move,
+where `write` is the caller's own write of Claudine's file;
+`claudine::config::setup::setup_claudine(context, scope, write)` runs the
+whole setup, publication, registration, and removal of the old files
+included, and reports each step. To undo the move,
 `md init --inline` writes the block back into `~/.darkmatter.yaml`; see
 [`md init`](../../../darkmatter/docs/cli/init.md).
 

@@ -1,6 +1,7 @@
 //! `md init` through the real binary: the formatted report, a repository
-//! request outside a repository, and the temporary legacy-file migration any
-//! `md` command performs. The setup rules themselves are proven in-process
+//! request outside a repository, an existing file's `permissions` reference
+//! and `register` list, and the temporary legacy-file migration any `md`
+//! command performs. The setup rules themselves are proven in-process
 //! (`darkmatter/lib/tests/l1/config_init.rs`).
 
 use crate::common;
@@ -78,4 +79,18 @@ fn a_legacy_shell_whitelist_is_migrated_by_any_md_command() {
     assert!(!legacy.exists(), "the legacy file is removed once migrated");
     let text = std::fs::read_to_string(fixture.home().join(".darkmatter.yaml")).expect("the user file");
     assert!(text.contains("prefix ls"), "{text}");
+}
+
+#[test]
+fn init_on_an_existing_file_keeps_a_claudine_permissions_reference_and_the_register_list() {
+    let fixture = CliProcessFixture::named("init-keeps-reference").without_user_config();
+    fixture.write_file("home/.claudine/config.yaml", "permissions:\n    network: deny\n");
+    let original = "permissions: ~/.claudine/config.yaml # Claudine's\nregister:\n    - ~/.claudine/registrations/darkmatter/manifest.yaml\n    # mine\n    - ~/hosts/mine.yaml\n";
+    let path = fixture.write_file("home/.darkmatter.yaml", original);
+
+    let output = run(&fixture, &["init"]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
+    let text = std::fs::read_to_string(&path).expect("the user file");
+    assert!(text.starts_with(original), "the reference, entries, and comments stay:\n{text}");
 }

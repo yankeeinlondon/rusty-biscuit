@@ -6,7 +6,7 @@ use std::thread;
 #[cfg(windows)]
 use std::time::Duration;
 
-use tempfile::NamedTempFile;
+use tempfile::{Builder, NamedTempFile};
 #[cfg(windows)]
 use tempfile::PersistError;
 #[cfg(unix)]
@@ -17,6 +17,15 @@ use windows::Win32::Foundation::{
     ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_SHARING_VIOLATION,
 };
 
+/// The temporary-name prefix of [`atomic_write`]: `tempfile`'s default.
+const DEFAULT_TEMP_PREFIX: &str = ".tmp";
+
+/// The temporary-name prefix of [`atomic_write_registration`], reserved for
+/// the registration publisher: a regular file whose name starts with it in
+/// a publisher directory is a leftover of an interrupted replacement, which
+/// the next publish removes. No registration member may be named with it.
+pub const REGISTRATION_TEMP_PREFIX: &str = ".claudine-registration-";
+
 #[cfg(windows)]
 const PERSIST_ATTEMPTS: usize = 11;
 #[cfg(windows)]
@@ -25,7 +34,8 @@ const INITIAL_PERSIST_RETRY_DELAY: Duration = Duration::from_millis(1);
 /// Write content to a file atomically using a sibling temporary file.
 ///
 /// Creates a uniquely named temp file inside the target's parent directory
-/// via [`tempfile::NamedTempFile::new_in`], writes and syncs the content, then
+/// (named `.tmp…`, as [`tempfile::NamedTempFile::new_in`] names it), writes
+/// and syncs the content, then
 /// atomically persists it on the same filesystem. On Unix the parent directory
 /// is also synced so the replacement's metadata change survives a power loss.
 ///
@@ -50,17 +60,36 @@ const INITIAL_PERSIST_RETRY_DELAY: Duration = Duration::from_millis(1);
 /// returning [`crate::error::Result`] convert for free via `?` and
 /// `ClaudineError`'s `#[from] std::io::Error`.
 pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
-    atomic_write_with(path, content, persist_temp_file)
+    atomic_write_with(path, content, DEFAULT_TEMP_PREFIX, persist_temp_file)
 }
 
-fn atomic_write_with<P>(path: &Path, content: &[u8], persist: P) -> std::io::Result<()>
+/// [`atomic_write`] for the registration publisher
+/// ([`crate::composition::registration`]): the same sibling temporary file,
+/// sync, and (on Windows) replacement retry, with a temporary name starting
+/// with [`REGISTRATION_TEMP_PREFIX`].
+///
+/// ## Errors
+///
+/// As [`atomic_write`].
+pub fn atomic_write_registration(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    registration_write_with(path, content, persist_temp_file)
+}
+
+fn registration_write_with<P>(path: &Path, content: &[u8], persist: P) -> std::io::Result<()>
+where
+    P: FnOnce(NamedTempFile, &Path) -> std::io::Result<()>,
+{
+    atomic_write_with(path, content, REGISTRATION_TEMP_PREFIX, persist)
+}
+
+fn atomic_write_with<P>(path: &Path, content: &[u8], prefix: &str, persist: P) -> std::io::Result<()>
 where
     P: FnOnce(NamedTempFile, &Path) -> std::io::Result<()>,
 {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
 
-    let mut tmp = NamedTempFile::new_in(parent)?;
+    let mut tmp = Builder::new().prefix(prefix).tempfile_in(parent)?;
     tmp.as_file_mut().write_all(content)?;
     tmp.as_file_mut().sync_all()?;
 
@@ -220,7 +249,7 @@ mod tests {
                     let barrier = Arc::clone(&barrier);
                     let target = Arc::clone(&target);
                     thread::spawn(move || {
-                        atomic_write_with(&target, &payload, |tmp, path| {
+                        atomic_write_with(&target, &payload, DEFAULT_TEMP_PREFIX, |tmp, path| {
                             barrier.wait();
                             persist_temp_file(tmp, path)
                         })
@@ -356,7 +385,7 @@ mod tests {
         let mut temp_paths = Vec::new();
         let mut delays = Vec::new();
 
-        atomic_write_with(&target, payload, |tmp, destination| {
+        atomic_write_with(&target, payload, DEFAULT_TEMP_PREFIX, |tmp, destination| {
             persist_with_retry(
                 tmp,
                 destination,
@@ -384,5 +413,61 @@ mod tests {
         assert_eq!(delays, [1, 2].map(Duration::from_millis));
         assert!(temp_paths.windows(2).all(|pair| pair[0] == pair[1]));
         assert_eq!(fs::read(target).unwrap(), payload);
+    }
+
+    #[test]
+    fn registration_writes_use_the_reserved_temp_prefix_and_leave_no_sibling() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("member.yaml");
+        let mut temp_name = None;
+
+        registration_write_with(&target, b"kind: schema\n", |tmp, destination| {
+            temp_name = tmp.path().file_name().map(|name| name.to_string_lossy().into_owned());
+            persist_temp_file(tmp, destination)
+        })
+        .unwrap();
+
+        let temp_name = temp_name.expect("a temporary file was persisted");
+        assert!(temp_name.starts_with(REGISTRATION_TEMP_PREFIX), "{temp_name}");
+        assert_eq!(fs::read(&target).unwrap(), b"kind: schema\n");
+        let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        assert_eq!(entries, [OsString::from("member.yaml")]);
+    }
+
+    /// The registration writer reaches the same bounded Windows retry as
+    /// [`atomic_write`], reusing its one written temporary file.
+    #[cfg(windows)]
+    #[test]
+    fn registration_writes_reuse_the_windows_persist_retry() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("member.yaml");
+        let mut attempts = 0;
+        let mut temp_paths = Vec::new();
+        let mut delays = Vec::new();
+
+        registration_write_with(&target, b"published", |tmp, destination| {
+            persist_with_retry(
+                tmp,
+                destination,
+                |file, path| {
+                    attempts += 1;
+                    temp_paths.push(file.path().to_owned());
+                    if attempts == 1 {
+                        Err(PersistError { error: windows_error(ERROR_SHARING_VIOLATION), file })
+                    } else {
+                        file.persist(path).map(|_| ())
+                    }
+                },
+                |delay| delays.push(delay),
+            )
+        })
+        .unwrap();
+
+        assert_eq!(attempts, 2);
+        assert_eq!(delays, [Duration::from_millis(1)]);
+        assert!(temp_paths.windows(2).all(|pair| pair[0] == pair[1]));
+        let name = temp_paths[0].file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(REGISTRATION_TEMP_PREFIX), "{name}");
+        assert_eq!(fs::read(target).unwrap(), b"published");
     }
 }

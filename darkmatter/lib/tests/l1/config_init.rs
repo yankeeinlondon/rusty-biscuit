@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::config::init::{
     InitAction, InitError, InitOptions, default_permissions, init, init_repository, init_user, register_manifest,
+    replace_manifest_registration,
 };
 use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot, PermissionsSetting};
 use darkmatter::config::schema::{CONFIG_FILE_NAME, ConfigScope};
@@ -396,4 +397,152 @@ fn register_manifest_without_a_home_writes_nothing() {
     let context = FileResolutionContext::from_snapshot(fixture.root.join("work"), None, HashMap::new());
     let error = register_manifest(&context, ConfigScope::User, MANIFEST_REFERENCE).unwrap_err();
     assert!(matches!(error, InitError::NoHome), "{error}");
+}
+
+// ── replace_manifest_registration ───────────────────────────────────────────
+
+const NEW_REFERENCE: &str = "~/.acme/registration/manifest.yaml";
+
+/// The retired manifest's path; the file itself is never created, as after
+/// a host removed it.
+fn old_manifest(fixture: &Fixture) -> PathBuf {
+    fixture.home().join(".acme/darkmatter-host.yaml")
+}
+
+fn with_new_manifest(fixture: &Fixture) -> PathBuf {
+    fixture.write("home/.acme/registration/manifest.yaml", "kind: darkmatter-host\n")
+}
+
+fn replace(fixture: &Fixture) -> Result<darkmatter::config::init::RegisterReport, InitError> {
+    replace_manifest_registration(&fixture.context(), ConfigScope::User, NEW_REFERENCE, &old_manifest(fixture))
+}
+
+#[test]
+fn replace_manifest_registration_creates_a_missing_user_file_with_the_entry() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    let report = replace(&fixture).unwrap();
+    assert_eq!(report.action, InitAction::Created);
+    assert_eq!(document(&fixture.user_file())["register"], json!([NEW_REFERENCE]));
+    assert!(report.replaced.is_empty());
+}
+
+#[test]
+fn replace_manifest_registration_adds_a_list_to_a_file_without_one() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    fixture.write("home/.darkmatter.yaml", "# mine\npermissions:\n    network: deny\n");
+    assert_eq!(replace(&fixture).unwrap().action, InitAction::Updated);
+    let text = std::fs::read_to_string(fixture.user_file()).unwrap();
+    assert!(text.starts_with("# mine\npermissions:\n    network: deny\n"), "{text}");
+    assert_eq!(registered(&fixture), vec![NEW_REFERENCE.to_string()]);
+}
+
+#[test]
+fn replace_manifest_registration_appends_to_an_empty_list() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    fixture.write("home/.darkmatter.yaml", "register: []\n");
+    replace(&fixture).unwrap();
+    assert_eq!(registered(&fixture), vec![NEW_REFERENCE.to_string()]);
+}
+
+#[test]
+fn replace_manifest_registration_replaces_the_old_entry_in_place_keeping_every_other_byte() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    fixture.write("home/.other/darkmatter-host.yaml", "kind: darkmatter-host\n");
+    fixture.write("home/.third/manifest.yaml", "kind: darkmatter-host\n");
+    let original = "# mine\nregister:\n    # in-house first\n    - ~/.other/darkmatter-host.yaml # kept\n    - ~/.acme/darkmatter-host.yaml\n    # the third\n    - ~/.third/manifest.yaml\npermissions:\n    network: deny\n";
+    fixture.write("home/.darkmatter.yaml", original);
+
+    let report = replace(&fixture).unwrap();
+
+    assert_eq!(report.action, InitAction::Updated);
+    assert_eq!(report.replaced, vec!["~/.acme/darkmatter-host.yaml".to_string()]);
+    let expected = original.replace("~/.acme/darkmatter-host.yaml", NEW_REFERENCE);
+    assert_eq!(std::fs::read_to_string(fixture.user_file()).unwrap(), expected);
+}
+
+#[test]
+fn replace_manifest_registration_matches_a_missing_old_manifest_in_every_spelling() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    let absolute = biscuit_file::to_portable_string(&old_manifest(&fixture));
+    for spelling in [absolute.as_str(), "~/.acme/darkmatter-host.yaml", "./.acme/darkmatter-host.yaml"] {
+        fixture.write("home/.darkmatter.yaml", &format!("register:\n    - {spelling}\n"));
+        let report = replace(&fixture).unwrap();
+        assert_eq!(report.replaced, vec![spelling.to_string()], "{spelling}");
+        assert_eq!(registered(&fixture), vec![NEW_REFERENCE.to_string()], "{spelling}");
+    }
+}
+
+#[test]
+fn replace_manifest_registration_leaves_one_canonical_entry_at_the_first_affected_index() {
+    let fixture = Fixture::new();
+    let new = with_new_manifest(&fixture);
+    fixture.write("home/.other/darkmatter-host.yaml", "kind: darkmatter-host\n");
+    let new_absolute = biscuit_file::to_portable_string(&new);
+    let original = format!(
+        "register:\n    - ~/.other/darkmatter-host.yaml\n    - {new_absolute}\n    - ~/.acme/darkmatter-host.yaml\n    - {NEW_REFERENCE}\n    - ~/.acme/darkmatter-host.yaml\n"
+    );
+    fixture.write("home/.darkmatter.yaml", &original);
+
+    let report = replace(&fixture).unwrap();
+
+    assert_eq!(
+        registered(&fixture),
+        vec!["~/.other/darkmatter-host.yaml".to_string(), NEW_REFERENCE.to_string()]
+    );
+    assert_eq!(report.replaced.len(), 4, "{:?}", report.replaced);
+    // Running it again finds nothing to do.
+    let before = fixture.files();
+    assert_eq!(replace(&fixture).unwrap().action, InitAction::Unchanged);
+    assert_eq!(fixture.files(), before);
+}
+
+#[test]
+fn replace_manifest_registration_writes_nothing_when_the_new_entry_is_listed() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    fixture.write("home/.darkmatter.yaml", &format!("register:\n    - {NEW_REFERENCE}\n"));
+    let before = fixture.files();
+    let report = replace(&fixture).unwrap();
+    assert_eq!(report.action, InitAction::Unchanged);
+    assert_eq!(fixture.files(), before);
+}
+
+#[test]
+fn replace_manifest_registration_refuses_a_malformed_file_with_its_location_and_writes_nothing() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    let original = "register:\n    - ~/.acme/darkmatter-host.yaml\npermissions: [unclosed\n";
+    fixture.write("home/.darkmatter.yaml", original);
+    let error = replace(&fixture).unwrap_err();
+    assert!(matches!(error, InitError::Invalid(_)), "{error}");
+    let message = error.to_string();
+    assert!(message.contains(":3:") || message.contains("line 3"), "the error names its line: {message}");
+    assert_eq!(std::fs::read_to_string(fixture.user_file()).unwrap(), original);
+}
+
+#[test]
+fn replace_manifest_registration_refuses_a_file_changed_since_it_was_read() {
+    use darkmatter::config::init::{commit_checked, observe, replace_manifest_change};
+    use darkmatter::config::write::{ConfigTransaction, ConfigWriteError};
+
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    fixture.write("home/.darkmatter.yaml", "register:\n    - ~/.acme/darkmatter-host.yaml\n");
+    let context = fixture.context();
+    let observation = observe(&context, ConfigScope::User).unwrap();
+    let (change, _) = replace_manifest_change(&observation, &context, NEW_REFERENCE, &old_manifest(&fixture)).unwrap();
+    let concurrent = "register:\n    - ~/.acme/darkmatter-host.yaml\n# edited meanwhile\n";
+    fixture.write("home/.darkmatter.yaml", concurrent);
+
+    let mut transaction = ConfigTransaction::new();
+    transaction.add(change.expect("the old entry is replaced")).unwrap();
+    let error = commit_checked(transaction, &context, &|_| None).unwrap_err();
+
+    assert!(matches!(error, InitError::Write(ConfigWriteError::Changed { .. })), "{error}");
+    assert_eq!(std::fs::read_to_string(fixture.user_file()).unwrap(), concurrent);
 }

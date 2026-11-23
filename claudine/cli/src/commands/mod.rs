@@ -19,6 +19,7 @@ pub mod logs;
 pub mod mcp;
 pub(crate) mod prep_target;
 pub mod providers;
+pub mod registrations;
 pub mod schema_interactive;
 pub mod sequence;
 pub mod signals;

@@ -69,8 +69,9 @@ enum Class {
     /// A `kind: schema-trigger` envelope: never a standalone schema, and its
     /// `$schema` payload parses and resolves inline from its own directory.
     Trigger,
-    /// A global catalog (`kind: schema` with `$schema` declarations), which
-    /// a host registers through its own loader. Its envelope parses as an
+    /// A global catalog (`kind: schema` with `$schema` declarations) or a
+    /// host namespace (`kind: namespace-schema`), which a host registers
+    /// through its own loader. Its envelope parses as an
     /// ordinary tagged schema document, and its declarations parse and
     /// resolve inline from its own directory.
     GlobalCatalog,
@@ -183,36 +184,48 @@ const EXCEPTIONS: &[Exception] = &[
         Class::NotASchema,
         "a `kind: example` artifact embedded by the expression-function catalog",
     ),
-    // claudine/schemas
+    // claudine/registration
     exception(
-        "claudine/schemas",
-        "globals.yaml",
-        Class::GlobalCatalog,
-        "Claudine's host catalog of `seq`, `loop`, and `group`, registered explicitly",
-    ),
-    exception(
-        "claudine/schemas",
-        "claudine.yaml",
+        "claudine/registration",
+        "composition.yaml",
         Class::Trigger,
         "Claudine's frontmatter catalog, applied by trigger",
     ),
     exception(
-        "claudine/schemas",
-        "inline-compose.yaml",
+        "claudine/registration",
+        "inline-composition.yaml",
         Class::Trigger,
         "inline-compose's document metadata, applied by trigger",
     ),
     exception(
-        "claudine/schemas",
-        "sequence.yaml",
+        "claudine/registration",
+        "sequence-document.yaml",
         Class::Trigger,
         "the sequence document's catalog, applied by trigger",
     ),
     exception(
-        "claudine/schemas",
-        "claudine-document.yaml",
-        Class::Trigger,
-        "Claudine's identifying trigger, named by its `darkmatter-host` manifest; its payload is empty",
+        "claudine/registration",
+        "group.yaml",
+        Class::GlobalCatalog,
+        "Claudine's `group` host namespace, read only by its registered catalog",
+    ),
+    exception(
+        "claudine/registration",
+        "loop.yaml",
+        Class::GlobalCatalog,
+        "Claudine's `loop` host namespace, read only by its registered catalog",
+    ),
+    exception(
+        "claudine/registration",
+        "seq.yaml",
+        Class::GlobalCatalog,
+        "Claudine's `seq` host namespace, read only by its registered catalog",
+    ),
+    exception(
+        "claudine/registration",
+        "formal-sequence-file.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of a `kind: sequence` YAML file, applied by `kind`",
     ),
     // claudine/docs/schemas: design drafts, not loaded by any reader.
     exception(
@@ -291,18 +304,22 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
     // The md profile's open keys and loose bodies.
     ("darkmatter/schemas/partials/md-lifecycle.yaml", &["unknown"]),
     // `cancelled-stop`'s short forms; the rest is referenced from Darkmatter.
-    ("claudine/schemas/action.yaml", &["null", "unknown"]),
+    ("claudine/registration/action.yaml", &["null", "unknown"]),
     // Loose bodies and loop-action values.
-    ("claudine/schemas/lifecycle.yaml", &["unknown"]),
+    ("claudine/registration/lifecycle-events.yaml", &["unknown"]),
     // The `null`-typed Darkmatter event names.
-    ("claudine/schemas/claudine.yaml", &["null"]),
+    ("claudine/registration/shared.yaml", &["null"]),
+    // Each inline arm types the other arm's key as `null`.
+    ("claudine/registration/inline-composition.yaml", &["null"]),
     // The hash payload, which both metadata triggers import.
-    ("claudine/schemas/document.yaml", &["unknown"]),
+    ("claudine/registration/document.yaml", &["unknown"]),
     // Step outputs, loop results, and leg payloads are any value.
-    ("claudine/schemas/globals.yaml", &["unknown"]),
+    ("claudine/registration/group.yaml", &["unknown"]),
+    ("claudine/registration/loop.yaml", &["unknown"]),
+    ("claudine/registration/seq.yaml", &["unknown"]),
     // Removed root `fail_fast`, and the parser-checked task and step fields.
-    ("claudine/schemas/sequence.yaml", &["null"]),
-    ("claudine/schemas/sequence-types.yaml", &["unknown"]),
+    ("claudine/registration/sequence-document.yaml", &["null"]),
+    ("claudine/registration/sequence.yaml", &["unknown"]),
     // `set_frontmatter.value` has a native null arm; the undefined actions are
     // `unknown` placeholders.
     (
@@ -673,6 +690,7 @@ fn shipped_schema_artifacts_parse_passively() {
             root.join("content-policy/schemas"),
         ),
         ("schemas", root.join("schemas")),
+        ("claudine/registration", root.join("claudine/registration")),
         ("claudine/schemas", root.join("claudine/schemas")),
         (".claudine/schemas", root.join(".claudine/schemas")),
         (
@@ -873,6 +891,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
             root.join("content-policy/schemas"),
         ),
         ("schemas", root.join("schemas")),
+        ("claudine/registration", root.join("claudine/registration")),
         ("claudine/schemas", root.join("claudine/schemas")),
         (".claudine/schemas", root.join(".claudine/schemas")),
         (
@@ -1387,7 +1406,7 @@ fn inline_shape<'a>(definition: &'a PropertyDef, label: &str) -> &'a SchemaShape
 fn migrated_shipped_definitions_declare_their_presence() {
     let root = repo_root();
     let side_effect_path = root.join("claudine/docs/schemas/partials/side-effect.yaml");
-    let claudine_path = root.join("claudine/schemas/claudine.yaml");
+    let claudine_path = root.join("claudine/registration/shared.yaml");
     let before = fingerprint([side_effect_path.as_path(), claudine_path.as_path()]);
     let counters = effect_counters();
 
@@ -1431,7 +1450,8 @@ fn migrated_shipped_definitions_declare_their_presence() {
     let claudine: YamlValue =
         serde_yaml_ng::from_str(&fs::read_to_string(&claudine_path).expect("readable"))
             .expect("Claudine's catalog is YAML");
-    let schema = yaml_key(&claudine, "$schema").expect("the trigger has a `$schema` payload");
+    let schema = yaml_key(yaml_key(&claudine, "types").expect("the library has `types`"), "common-attributes")
+        .expect("the catalog's common attributes");
     let property = |key: &str| {
         parse_property_definition(key, yaml_key(schema, key).unwrap_or_else(|| panic!("no `{key}`")))
             .unwrap_or_else(|error| panic!("`{key}`: {error}"))
@@ -1666,6 +1686,7 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
         ("darkmatter/example-docs/schemas", root.join("darkmatter/example-docs/schemas")),
         ("simplified-schema/schemas", root.join("simplified-schema/schemas")),
         ("content-policy/schemas", root.join("content-policy/schemas")),
+        ("claudine/registration", root.join("claudine/registration")),
         ("claudine/schemas", root.join("claudine/schemas")),
         ("claudine/docs/schemas", root.join("claudine/docs/schemas")),
         ("claudine/docs/research", root.join("claudine/docs/research")),

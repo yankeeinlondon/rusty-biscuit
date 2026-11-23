@@ -119,6 +119,7 @@ fn no_active_file_spells_a_renamed_trigger_form() {
         manifest_dir!().join("../../simplified-schema/lib/src"),
         manifest_dir!().join("../../simplified-schema/lib/tests"),
         manifest_dir!().join("../../simplified-schema/docs"),
+        manifest_dir!().join("../../claudine/registration"),
         manifest_dir!().join("../../claudine/schemas"),
         manifest_dir!().join("../../claudine/docs/topics"),
         manifest_dir!().join("../../claudine/lib/src"),
