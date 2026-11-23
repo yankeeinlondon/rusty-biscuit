@@ -3,7 +3,7 @@ kind: plan
 total-phases: 6
 created: 2026-11-22
 status: planned
-phase: 5
+phase: 6
 agent: codex/gpt-6.2-sol
 yolo: true
 packages:
@@ -332,6 +332,23 @@ skills_files_updated_during_phase_4:
 - .claude/skills/darkmatter/schema.md
 - .claude/skills/simplified-schema/defaults.md
 - claudine/docs/use-skills/use-claudine/config.md
+source_files_during_phase_5:
+- darkmatter/dmls/src/overlay/hosts.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/work_counters.rs
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/dmls/tests/common/mod.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/registration_reload_scheduling.rs
+- darkmatter/dmls/tests/l1/host_registration_watches.rs
+- darkmatter/dmls/tests/l1/registered_yaml_kinds.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/dmls.md
 ---
 
 # Host registration v2 implementation plan
@@ -473,11 +490,11 @@ At the final checkpoint audit new parse paths for load-bearing `#[serde(default)
   - Run one Linux sample with the Phase 4 binary in a temporary home. Seed a valid publication of the same inventory with edited member bytes and a corresponding valid earlier manifest, then time the real changed publish with a monotonic clock, from immediately before the first member write through successful manifest replacement. Use five warmed changed publishes with the home reseeded outside the timed interval for each. Verify changed publication and full v2 load on every trial. Save sample values and the resulting window in the implementation log.
   - Let the measured duration be the slowest valid sample in milliseconds. At or below 150 ms use 300 ms. Above 150 ms set the window to the next multiple of 50 ms at or above twice the measured duration. An incomplete or invalid sample retains the initial 300 ms and records the actual failure; the implementation continues through deterministic verification. Run the sample once, with no cross-OS benchmark or later timing recheck.
 
-- [ ] **Queue host reloads**
+- [x] **Queue host reloads**
   - Implement Rule 16 using the measured constant and existing configuration keys. Coalesce changed, created, and deleted registration inputs across batches; reset the specific key's deadline on each relevant event, including directory and missing-target events. Keep the old installed view while dirty, and publish diagnostics on the latest completed view. Preserve independent indexing/overlay updates and the save fallback. Queue from the watch index on the router thread. Read and hash files on the worker.
   - Invalidate only views and open documents tied to the changed configuration, and update both YAML and Markdown requests. Preserve explicit configuration/schema reload behavior for non-registration changes. When validation fails, drop the refused host and republish the located diagnostic. Recovery clears that diagnostic, refreshes watches, and restores analysis without reopening the document.
 
-- [ ] **Reload checkpoint**
+- [x] **Reload checkpoint**
   - Use a controlled clock and worker completion queue in `overlay/hosts.rs` and the L1 registration-watch fixtures. Assert two batches yield one load after quiet, a newer event supersedes an in-flight result, an unchanged view changes no analysis generation, watch coverage follows a moved or missing target, and repair clears stale diagnostics. Include Markdown and YAML fixtures open across the same lifecycle, an unrelated config and a normal edit that remain immediate, and a client using save fallback. Run the DMLS L1 watch, YAML, and registered-host suites.
 
 ## Phase 6 — Documentation and end-to-end proof

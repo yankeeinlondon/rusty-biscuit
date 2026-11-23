@@ -263,8 +263,18 @@ decisions-for-review:
         Setup rewrites an existing entry for the new manifest that is spelled differently (an absolute path) to the canonical `~/…` spelling, per the plan's 'canonical spelling at the first affected index' rule; an existing test was renamed to assert this. For an entry whose file is missing, only the first location its resolution would probe is compared. Legacy cleanup removes nothing at all if any link or unexpected entry is found in the old tree. Obsolete repository `register` entries are not reported, because setup had no existing place for such a report. Alternatives: leave other spellings alone; remove the old manifest even when the revision tree is obstructed; add a report. Redo cost: small each.
     - |-
         `claudine registrations` is dispatched after request initialization (home capture) and before Darkmatter configuration loads, and `just install` calls a public `publish-registrations` recipe that prints a file count rather than the whole JSON. Startup-passivity tests use `claudine errors` as the representative ordinary command. Alternatives: dispatch earlier with separate home capture; a private recipe. Redo cost: small.
+    - |-
+        Reload relevance is now decided by path alone on the editor's message thread, and the reload itself (on the background worker) re-reads and hashes the files. Before this phase, the message thread re-hashed a reported file and ignored the event when its bytes were unchanged; the plan asks that files be read and hashed only on the worker. Consequence: a file saved with identical bytes now costs one background reload after the 300 ms window, which finds the same registrations and changes no document's analysis. Alternative: have the worker compare the recorded hashes first and skip the full load when nothing changed. Redo cost: small (one check at the start of the reload).
+    - |-
+        A reload whose registrations (manifest paths, revisions, load failure) are unchanged but whose configuration-level warnings differ keeps the analysis version: the new warnings are published on the files they name, but open documents are not reanalyzed. Before, any warning change bumped the version and reanalyzed every open document. The plan asks for the effective revision and the diagnostics to be compared separately. Alternative: keep bumping the version on any warning change (simpler, more reanalysis). Redo cost: small; one existing unit assertion was flipped to match (a refusal that loads no profile keeps the version).
+    - |-
+        The settle window is zero everywhere except the running server: `HostRegistrations::default()` and `OverlayState` (used by in-process callers and many tests) reload on the next preparation, and the server sets 300 ms (`StartupHooks::registration_settle` can override it). The shared L1 server fixture also defaults to zero so the existing registration-watch tests keep their immediate behavior; the 300 ms window is exercised by the new `registration_reload_scheduling` tests on a manual clock and by the `hosts.rs` unit tests. Alternative: make the production window the default everywhere and have test flushes wait for pending reloads, which adds about 300 ms of real time per reported change in every host test. Redo cost: moderate (fixture default and test timing).
+    - |-
+        Only the watch-limited save fallback (a client that cannot root watchers at folders, or rejected them) schedules the debounced registration reload on save. A client with no watcher at all (`ServerRescan`), a `.dmls.toml` or client settings change, a package manifest or `.git` change, and other explicit full invalidations still reload registrations immediately, as the plan's 'preserve explicit configuration reload behavior' asks. Alternative: debounce the `ServerRescan` save too. Redo cost: one call site.
+    - |-
+        When a configuration's first load (nothing installed yet) is touched by a change while it runs, its result is installed anyway, so documents get a view, and another reload is scheduled after the window. A warm configuration's touched or superseded result is dropped and the installed view kept. Alternative: drop the first result too and leave documents on `md` until the second load. Redo cost: small.
 message-to-agent: |-
-    Phase 4 landed Claudine's v2 bundle. Source is `claudine/registration/` (walked by `claudine/lib/build.rs`, exposed as `claudine::composition::inventory`); `RegistrationInventory::claudine()` + `publish(home, inventory)` in `claudine::composition::registration` write `~/.claudine/registrations/darkmatter/` (manifest last, OS lock `~/.claudine/registrations/.darkmatter.lock`); hidden `claudine registrations [<path>|publish]`; `setup_claudine` publishes, runs the permissions handoff, calls Darkmatter's new `config::init::replace_manifest_registration`, then removes the legacy `~/.claudine/darkmatter-host*`. In process, Claudine selects through the same registered path (`schema::bundle::claudine_hosts()`, `VerifiedSnapshot::from_embedded`, `registration::load_embedded`); its shipped artifact carries the prepared registered payloads. For Phase 5 (DMLS reload scheduling): DMLS fixtures that need Claudine now install the real bundle and register it; a registered root-union layer has no editor shape (`registered_trigger_layers` sets `shape: None`), so six DMLS editor tests start from `agent: claude`. For Phase 6 docs: stale text remains in `claudine/docs/topics/schemas.md` (an "eight files" table with old names such as `claudine.yaml`, `inline-compose.yaml`), `claudine/schemas/README.md`, `.claude/skills/claudine/cli-commands.md`, `darkmatter/dmls/docs` mentions of `globals.yaml`, and `darkmatter/docs/topics/schemas/dmls-schema-support.md`; caller skills were not republished (`just publish-skills` not run in Phase 4). Windows cross-checks of `claudine`, `claudine-cli`, and `darkmatter` pass (see the log); the shipped record now stores portable `/` paths, so keep any new path field in Claudine's artifact portable too.
+    Phase 5 landed debounced DMLS registration reloads (`darkmatter/dmls/src/overlay/hosts.rs`): per-configuration `due`/`generation`, `REGISTRATION_SETTLE` = 300 ms (measured publish 0.306 ms), router timer + `start_due_host_reloads` before every message, path-only matching on the router thread, `invalidate_unwatched_inputs` for the save fallback. The docs already describe the 300 ms wait in `darkmatter/docs/topics/host-registration.md` ("Changes are followed without a restart") and `dmls/docs/diagnostics.md`; Phase 6 still needs `dmls/docs/editors/README.md` and the `use-dmls` caller skill to mention it, plus the stale Claudine/DMLS doc text listed by Phase 4 (`claudine/docs/topics/schemas.md` "eight files" table, `claudine/schemas/README.md`, `.claude/skills/claudine/cli-commands.md`, `darkmatter/dmls/docs` mentions of `globals.yaml`, `darkmatter/docs/topics/schemas/dmls-schema-support.md`). Caller skills have not been republished in Phases 4 or 5 (`just publish-skills` not run). L1 tests of the window use `LspFixture::start_with_registration_settle` with a `ManualClock`; every other `LspFixture` uses a zero window.
 source_files_during_phase_4:
     - claudine/registration/action.yaml
     - claudine/registration/claudine-config.yaml
@@ -412,6 +422,23 @@ skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/simplified-schema/defaults.md
     - claudine/docs/use-skills/use-claudine/config.md
+source_files_during_phase_5:
+    - darkmatter/dmls/src/overlay/hosts.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/registration_reload_scheduling.rs
+    - darkmatter/dmls/tests/l1/host_registration_watches.rs
+    - darkmatter/dmls/tests/l1/registered_yaml_kinds.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/host-registration.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Implementation Log for 2026-11-22-host-registration-v2 (6 phases)
@@ -1150,3 +1177,89 @@ line (see `decisions-for-review`).
 - One warm-up (0.327 ms), then five samples: 0.289, 0.288, 0.306, 0.267,
   0.298 ms. Slowest valid sample 0.306 ms, at or below 150 ms, so the
   settle window is **300 ms** (`REGISTRATION_SETTLE`).
+
+### Reload scheduling (Rule 16)
+
+- `dmls/src/overlay/hosts.rs`: each configuration scope (`HostsKey`) now
+  has `due: Option<Instant>` and `generation`. A registration-input event
+  (`invalidate_paths(paths, now)`) is matched by path only
+  (`HostDependencies::touches`, which now also covers a directory at or
+  above a searched folder, so a missing folder's creation or a moved
+  install counts) and sets `due = now + settle`, resetting any deadline
+  already set and bumping the generation. `expire(now)` turns a passed
+  deadline into `stale`; `needs_load` (never loaded, or stale) gates
+  `begin`, so a scope waiting for quiet keeps serving its installed view
+  and queues nothing. `install(prepared, now)` drops a result whose
+  generation or sequence is older than the scope's (a newer event
+  supersedes an in-flight reload); a warm result a concurrent change
+  touched re-arms the deadline instead of installing. `same_result` was
+  split into `same_effect` (manifest paths, revisions, load error: the
+  analysis version) and `same_diagnostics` (configuration-level warnings,
+  replaced under the same version). `schedule_all(now)` is the save
+  fallback's debounced form; `invalidate_all` stays immediate.
+  `REGISTRATION_SETTLE` = 300 ms. The old router-side content hashing in
+  `affected_by` is gone: the reload on the worker reads and hashes.
+- `overlay/mod.rs`: the overlay passes the server clock (the slot
+  store's, which the router sets) to every call; `registry_need` uses
+  `needs_load` after `expire`; new `invalidate_unwatched_inputs`,
+  `set_registration_settle`, `next_host_reload`, `take_due_host_reloads`.
+- `router.rs`: `StartupHooks::registration_settle` (default the constant),
+  a `crossbeam_channel::after` arm on the next deadline, and
+  `start_due_host_reloads` (a workspace pass plus `refresh_all_diagnostics`)
+  before every message, so a manual-clock advance takes effect on the next
+  round trip, ahead of its reply. The watch-limited save fallback calls
+  `invalidate_unwatched_inputs` instead of the immediate full
+  invalidation. Ordinary edits, trigger files, `$schema` files,
+  `.dmls.toml`, context inputs, and `ServerRescan` rescans are unchanged.
+- YAML: `YamlContractStore::key` already folds in the installed hosts'
+  version and `prepare_yaml_contract` passes the same looked-up view to the
+  worker (Phase 3); nothing changed there. The version now changes only
+  with effective registrations, so a warnings-only reload leaves YAML
+  contracts alone.
+- `work_counters::host_loads()` counts registration loads for tests.
+- `tests/common/mod.rs`: `LspFixture` defaults to a zero window (the
+  previous immediate behavior) and `start_with_registration_settle` gives
+  the production window on a caller's `ManualClock`.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+| --- | --- |
+| Two batches inside the window yield one load after quiet; deadline reset per batch | `overlay::hosts::tests::two_batches_within_the_window_give_one_load_after_quiet` (unit, controlled instants); `registration_reload_scheduling::a_burst_across_batches_reloads_once_after_quiet_and_a_repair_clears_the_warning` (L1 server, `ManualClock`, `host_loads()` delta 0 at 299 ms, 1 at 300 ms) |
+| Old view kept while dirty, for Markdown and YAML open together | same L1 test (seq completion still offered, YAML error count unchanged, no warning before the reload) |
+| A newer event supersedes an in-flight result | `overlay::hosts::tests::a_newer_event_supersedes_an_in_flight_reload` (explicit begin/run/install completion order); `a_change_during_a_first_preparation_reloads_it_and_an_older_one_never_wins` |
+| An unchanged view changes no analysis generation | `overlay::hosts::tests::an_unchanged_reload_keeps_the_version_and_a_changed_configuration_replaces_it` (`generation()` unchanged); `registration_reload_scheduling::an_unchanged_reload_changes_no_analysis` (one load, zero root assemblies and YAML preparations after the report) |
+| Watch coverage follows a moved or missing target; directory and missing-target events | `registration_reload_scheduling::watch_coverage_follows_a_moved_install` (watcher on `home` for `moved`, then the folder's creation event alone reloads); `overlay::hosts::tests::a_missing_manifest_is_watched_where_it_would_appear` (folder event); `a_repair_clears_the_published_refusal` (watches follow a moved entry) |
+| Broken view published on the latest completed view; repair clears it without reopening | L1 burst test (warning on the relay manifest after the reload; cleared after restoring the member, documents never reopened); `overlay::hosts::tests::a_repair_clears_the_published_refusal` |
+| Unrelated config and a normal edit remain immediate | `registration_reload_scheduling::a_normal_edit_and_an_unrelated_schema_change_are_not_held` (a `$schema` file change and a `didChange` analyzed with no clock advance and no load) |
+| Explicit reload immediate; unrelated path schedules nothing; save fallback waits | `overlay::hosts::tests::an_explicit_reload_is_immediate_and_an_unrelated_path_schedules_nothing`; `registration_reload_scheduling::a_save_fallback_client_reloads_after_the_window` (client without `relativePatternSupport`) |
+| Existing behavior preserved | the existing `host_registration_watches`, `registered_host_views`, `registered_yaml_kinds`, `claudine_*`, `config_contracts`, and startup/registry suites (zero window) |
+
+Not tested at the server level: holding a reload in flight with the
+registry gate while a newer event arrives. The registry gate holds every
+document and workspace job, which makes the open/flush sequence of these
+fixtures deadlock-prone; the supersede rule is decided entirely inside
+`HostRegistrations::install`, which the unit tests drive with an explicit
+completion order.
+
+Robustness matrix: not applicable. This phase adds no file-format or
+configuration reader; the window is a constant, not configuration.
+
+### Verification
+
+- Targeted: `cargo nextest run -p darkmatter-lsp --lib -E 'test(overlay::hosts::) | test(host_registrations_watch_missing)'`
+  (11 passed); `--test l1 -E 'test(registration_reload_scheduling::)'`
+  (5 passed); the DMLS lib plus the L1 host, YAML, registration, Claudine,
+  watch, schema-scope, config-contract, invalid-trigger, and startup tests
+  (1299 passed).
+- Gates, darkmatter area: `just lint` clean (after removing an unused
+  test field); `just test` 17653 passed, 10 skipped, `none at or above
+  5.0s` (load average about 11 during the run on this host). Only this
+  log changed after that run. `just check-tier-coverage darkmatter`:
+  nothing stranded.
+- Dependents: no workspace package depends on `darkmatter-lsp`.
+- Windows (`just cross-check darkmatter-lsp --os windows`, build-win):
+  2124 passed, 9 skipped. No `os-failing`.
+- The affected-scope calculator was not used to skip gates; both gates ran.
+- Unrelated uncommitted files from earlier work remain in the tree and
+  were not touched by this phase.
