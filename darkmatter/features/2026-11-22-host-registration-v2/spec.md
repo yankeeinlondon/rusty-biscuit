@@ -5,7 +5,7 @@ status: finalized-spec
 reviewed: true
 reviewed-by: "codex/gpt-6.2-sol"
 reviewed-on: "2026-11-22"
-review-iterations: 1
+review-iterations: 5
 needs-rulings: false
 $schema:
     status: |-

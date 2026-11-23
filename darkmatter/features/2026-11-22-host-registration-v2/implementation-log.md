@@ -1674,7 +1674,7 @@ The live sources (lib, cli, dmls, build scripts, benches, scripts, test-toolkit)
 
 ### Acceptance checklist
 
-- A complete bundle works outside the checkout: the end-to-end table above (CLI and DMLS, temporary home, no schema roots). Refusals with locations (missing or unlisted imports, path escapes, duplicates, stale artifacts, invalid trigger matches) and order independence of `files` were covered in Phases 1–3. The tampered member above was refused with its location.
+- A complete bundle works outside the checkout: the end-to-end table above (CLI and DMLS, temporary home, no schema roots). Phases 1–3 exercised refusals for references reached during preparation, path escapes, duplicates, stale artifacts and invalid matches, plus order independence of `files`. The tampered member above was refused with its location. The unused-declaration and trigger-position limits are recorded in the review 2 correction below.
 - Shared events only → Darkmatter, a wrong literal kind, Claudine validation of malformed values, ambiguity, and registered YAML kind precedence and collisions: Phase 2 and 3 tests. Plain, `both.md`, and YAML were confirmed above.
 - Merge checks (equivalent, narrowing, constraint and presence conflicts, three-way, never-together) and the exactly-one-of-`prompt`/`sections` rule: Phase 3. `both.md` was confirmed above.
 - Interrupted or overlapping publication, retry convergence, identical-publish timestamps: Phase 4. The timestamps and tamper repair were confirmed above. DMLS reload and repair without restart: Phase 5.
@@ -1707,3 +1707,17 @@ This is the final phase. `message-to-agent` was removed, and `completed-phase: 6
   upgrade. The worktree binary returned exit 2 and an unrecognized-command
   error in a configured temporary home. The explicit publish command
   succeeded and did not migrate the configuration.
+
+### Review 2 record correction (2026-11-23)
+
+The acceptance checklist implied that import refusal and trigger locations
+were covered for the entire bundle. Review 2 reproduced the limits with
+`claudine setup` in a temporary home and `md schema validate --output json`.
+After updating the digests, an unlisted import in an unused library,
+trigger, YAML-kind or namespace type left the Claudine inline trigger
+active. The namespace control also updated the lifecycle catalog hash.
+The same reference in a used type refused the host. A grouped match typo
+in the installed inline trigger refused the host but its warning pointed
+to line 44, the payload, instead of the edited condition on line 25. The
+original tests cover reached references and the trigger cases they exercised.
+See [review 2](review-2.md#unblocked-findings) for the remaining cases.
