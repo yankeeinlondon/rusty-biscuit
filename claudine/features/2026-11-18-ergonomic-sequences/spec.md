@@ -1,32 +1,90 @@
 # Ergonomic Sequences
 
-We have improved sequences but today we use the `prompt` directive to perform a "compose" or "inline-compose" operation
-on a Markdown or YAML file and that might be ok but being more explicit would be better. In addition, today, a sequence
-can't call another sequence!
+We have improved sequences but today we use the `prompt` directive to perform a "compose" or "inline-compose" (and it was supposed to also allow child sequences) operation on a Markdown or YAML file and that might be ok but being more explicit would be better. In addition, today, a sequence can't call another child sequence!
 
-In this specification we will add the following operations:
+In this specification we will add the following explicit operations:
 
 - `compose` - composes the referenced document and uses as a prompt to an agent; produces an error if the referenced document has a "prompt" or "sections"
   frontmatter property (indicating that it is intended to be executed with `inline-compose`)
 - `inline-compose` - same as compose but with the intention of executing an inline-compose operation; error if the neither the `prompt` or `sections`
   frontmatter properties are set
-- `sequence`
+- `sequence` - an explicit execution of a child sequence
 
-All three operations will have the format of:
+It will **keep** the `prompt` operation but this operation will be a generic call for executing a compose, inline-compose, or a sequence operation.
 
-- short form: `{operation}: <file-reference>`
-- long form:
+The simplified schema for tasks will be changed to a union type that allows the following properties (as a union):
 
-    ```yaml
-    $schema:
-        compose: fn
-        inline-compose: fn
-        sequence:
-    ```
+- compose (explicit composition)
+- inline-compose (explicit composition)
+- sequence (explicit child composition)
+- prompt (generic composition; pre-existing)
+- shell-command: (execute shell command; pre-existing)
 
-All three operation will accept the `with` parameter in the long form which allows for explicit setting of properties
-of Frontmatter state prior to implementing. Note, however, that _by default_ the sequence's state is passed into each
-child operation.
+In **Simplified Schema** it would look something like:
+
+```yaml
+$schema:
+    # use `compose`, `inline-compose`, `sequence`, `prompt`, or `shell-command` but
+    # only ONE of them
+    - compose: compose
+      $extends: common-task-props
+    - inline-compose: inline-compose
+      $extends: common-task-props
+    - sequence: sequence
+      $extends: common-task-props
+    - prompt: prompt
+      $extends: common-task-props
+    - shell-command: shell-command
+      $extends: common-task-props
+types:
+    common-task-props: 
+        name: "string(required) -> the name of the task and made available as `seq.name` during execution"
+        timeout: "number -> the wall clock time that this operation/task is allowed to take before it will be _timed out_."
+        # ...
+    compose:
+        - compose-short-form
+        - compose-long-form
+    compose-short-form: 
+        - file(required;match(**/*.md)) -> a file reference to a Markdown document that will be composed before being passed to the agent
+        - string(required) -> an inline prompt which will be _composed_ before being passed to the agent.
+    compose-long-form:
+        file: file(required;match(**/*.md)) -> a file reference to a Markdown document that will be composed before being passed to the agent
+        with: object -> an _optional_ key/value object of properties which will be set as the initial state of the composed document
+        default-values: object -> an _optional_ key/value object of properties which will have a specified _default value_ for the state of the composed document
+        # ...
+```
+
+## An Unspoken Linguistic Complication
+
+We need to clear up one complication that may have gotten lost in the shuffle:
+
+- Markdown files with no `sequence` property are a single document that will be executed _either_ via a "compose" or "inline-compose" operation. This is determined by whether the document's frontmatter has either a `prompt` or `sections` property. 
+    - if it _does_ then it will be executed as an inline-compose operation
+    - if it _does not_ then it will be executed with the document's body/prose as the prompt during a compose operation.
+- So what about a Markdown file WITH a `sequence` property? 
+    - this is the area of confusion which at least currently we don't have a great linguistic solution for
+    - the answer is .. it is a **sequence** operation but there are two variants of a sequence:
+        - inline sequences
+            - if the document has a `prompt` or `sections` property then it is a _inline sequence_
+            - this means that each step in the sequence is intended to operate on the prose/body of this document as it's primary mutation
+        - compose sequences
+            - if the document _does not_ have a `prompt` or `sections` property then it is considered a _compose sequence_
+            - which means that the prompt for each step in the sequence will use the document's prose/body as the prompt 
+
+In most ways a sequence defined by a YAML document is the clearest variant of a sequence:
+
+- a YAML defined sequence is neither a _inline sequence_ or a _compose sequence_ it is just a pure sequence that makes no assumptions about where the "prompt" that will be composed is coming from. It is instead just an ordered set of steps/tasks.
+- Each step in the YAML sequence chooses an operation specifically (`compose`, `inline-compose`, `sequence`, `shell-command`) or more generally (`prompt`).
+    - When using the `compose` or `inline-compose` operation, if you point to Markdown file with the `sequence` property then that is an ERROR
+    - When using the `sequence` operation, you can point to either a YAML or Markdown file:
+        - if it's a Markdown file then it must have a `sequence` property or it will result in an ERROR
+        - if it's a YAML file then it must be one of the following:
+            - an **explicit** sequence (e.g., `kind: sequence`)
+            - an **informal** sequence (e.g., an array of string or an array of objects which must have the `name` property defined)
+        - Note: the informal syntax does allow _offsetting_ so if the base property of the YAML is not what you want to use as the sequence you can offset it with a `{filename}::{offset}` syntax that might look like `./foobar.yaml::data`
+
+This linguistic complication is useful context for this spec but we must also make sure that it is fully documentation (e.g., documentation under Claudine's "docs" folder). 
+
 
 ## Defined and default values
 
