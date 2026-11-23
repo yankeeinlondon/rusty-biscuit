@@ -3,7 +3,7 @@ kind: plan
 total-phases: 6
 created: 2026-11-22
 status: planned
-phase: 4
+phase: 5
 agent: codex/gpt-6.2-sol
 yolo: true
 packages:
@@ -13,6 +13,7 @@ packages:
 - darkmatter-lsp
 - claudine
 - claudine-cli
+- test-toolkit
 source_files_during_phase_1:
 - simplified-schema/schemas/namespace-schema.yaml
 - simplified-schema/schemas/schema-trigger.yaml
@@ -184,6 +185,153 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/SKILL.md
 - darkmatter/docs/use-skills/use-dmls/schemas.md
+source_files_during_phase_4:
+- claudine/registration/action.yaml
+- claudine/registration/claudine-config.yaml
+- claudine/registration/composition.yaml
+- claudine/registration/content-policy.yaml
+- claudine/registration/document.yaml
+- claudine/registration/formal-sequence-file.yaml
+- claudine/registration/group.yaml
+- claudine/registration/inline-composition.yaml
+- claudine/registration/lifecycle-events.yaml
+- claudine/registration/linking.yaml
+- claudine/registration/loop.yaml
+- claudine/registration/seq.yaml
+- claudine/registration/sequence-document.yaml
+- claudine/registration/sequence.yaml
+- claudine/registration/shared.yaml
+- claudine/schemas/action.yaml
+- claudine/schemas/claudine-config.yaml
+- claudine/schemas/claudine-document.yaml
+- claudine/schemas/claudine.yaml
+- claudine/schemas/document.yaml
+- claudine/schemas/globals.lifecycle.json
+- claudine/schemas/globals.yaml
+- claudine/schemas/inline-compose.yaml
+- claudine/schemas/lifecycle.yaml
+- claudine/schemas/linking.yaml
+- claudine/schemas/sequence-types.yaml
+- claudine/schemas/sequence.yaml
+- claudine/lib/build.rs
+- claudine/lib/Cargo.toml
+- claudine/lib/generated/globals.lifecycle.json
+- claudine/lib/generated/shipped.json
+- claudine/lib/examples/lifecycle_artifact.rs
+- claudine/lib/examples/shipped_schemas.rs
+- claudine/lib/benches/pipeline_work.rs
+- claudine/lib/benches/pipeline_work_alloc.rs
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/inventory.rs
+- claudine/lib/src/composition/inventory/walk.rs
+- claudine/lib/src/composition/inventory/tests.rs
+- claudine/lib/src/composition/lifecycle/mod.rs
+- claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+- claudine/lib/src/composition/registration.rs
+- claudine/lib/src/composition/registration/legacy.rs
+- claudine/lib/src/composition/registration/published.rs
+- claudine/lib/src/composition/schema/bundle.rs
+- claudine/lib/src/composition/schema/globals.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/src/composition/schema/shipped.rs
+- claudine/lib/src/composition/sequence/mod.rs
+- claudine/lib/src/composition/sequence/declarations/tests.rs
+- claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+- claudine/lib/src/config/atomic.rs
+- claudine/lib/src/config/schema.rs
+- claudine/lib/src/config/setup.rs
+- claudine/lib/tests/l1/claudine_identification.rs
+- claudine/lib/tests/l1/claudine_schema_parity.rs
+- claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/claudine_schemas_matrix.rs
+- claudine/lib/tests/l1/claudine_trigger_selection_parity.rs
+- claudine/lib/tests/l1/container_schema_recursion.rs
+- claudine/lib/tests/l1/context_construction_guard.rs
+- claudine/lib/tests/l1/embedded_inventory_preflight.rs
+- claudine/lib/tests/l1/host_catalog.rs
+- claudine/lib/tests/l1/host_publication.rs
+- claudine/lib/tests/l1/installed_registration.rs
+- claudine/lib/tests/l1/installed_registration_agreement.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/registration_inventory.rs
+- claudine/lib/tests/l1/sequence_schema.rs
+- claudine/lib/tests/l1/shipped_artifacts.rs
+- claudine/cli/src/args.rs
+- claudine/cli/src/main.rs
+- claudine/cli/src/telemetry.rs
+- claudine/cli/src/commands/mod.rs
+- claudine/cli/src/commands/registrations.rs
+- claudine/cli/src/commands/init_wizard.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- claudine/cli/tests/l1/host_registration_refresh.rs
+- claudine/cli/tests/l1/launch_trigger_schemas.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/registrations_command.rs
+- claudine/cli/tests/l1/shipped_prompts.rs
+- claudine/cli/src/commands/wrap/runaway_guard.rs
+- claudine/cli/tests/l1/implement_plan_commit_message.rs
+- claudine/cli/tests/l1/lifecycle_refusal_reports.rs
+- claudine/cli/tests/l1/lifecycle_edit_action.rs
+- claudine/justfile
+- darkmatter/lib/src/config/init.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/registration/bundle.rs
+- darkmatter/lib/src/config/registration/manifest.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/benches/pipeline_work_support/mod.rs
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+- darkmatter/lib/tests/l1/config_init.rs
+- darkmatter/lib/tests/l1/config_widening.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/embedded_registration.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/schema_phase_validation.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+- darkmatter/cli/tests/l1/init_command.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/dmls/src/config_contracts.rs
+- darkmatter/dmls/src/context.rs
+- darkmatter/dmls/src/diagnostics/nested_span.rs
+- darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+- darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+- darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+- darkmatter/dmls/tests/l1/config_contracts.rs
+- darkmatter/dmls/tests/l1/edit_action_editor.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/shipped/wire_support.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+- simplified-schema/lib/src/phase.rs
+- simplified-schema/lib/tests/l1/phase_projection.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_identities.rs
+- tools/test-toolkit/tests/shipped_schemas_coordinator_contracts.rs
+- scripts/shipped_schemas.py
+- justfile
+- Cargo.lock
+- .github/ci/permission-inputs.json
+docs_updated_during_phase_4:
+- claudine/schemas/README.md
+- claudine/docs/cli/index.md
+- claudine/docs/dependencies.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/schemas.md
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/docs/topics/lifecycle/host-artifact.md
+docs_created_during_phase_4:
+- claudine/docs/cli/registrations.md
+skills_files_updated_during_phase_4:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/module-map.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/simplified-schema/defaults.md
+- claudine/docs/use-skills/use-claudine/config.md
 ---
 
 # Host registration v2 implementation plan
@@ -300,28 +448,28 @@ At the final checkpoint audit new parse paths for load-bearing `#[serde(default)
 
 ## Phase 4 — Claudine bundle and publication
 
-- [ ] **Source migration**
+- [x] **Source migration**
   - Apply Rules 10–11. Preserve authoritative lifecycle, provider, linking, and sequence types. Check exact content-policy copy and require every resulting import to resolve from the inventory or supported built-ins. Update live references in root and package schema sources, including `simplified-schema/lib/tests/l1/shipped_corpus.rs`, `darkmatter/lib/tests/l1/{shipped_schema_corpus,base_schema_end_to_end}.rs`, `darkmatter/cli/tests/l1/{claudine_schema_bundle,schema_validate}.rs`, `darkmatter/dmls/tests/l1/claudine_schema_discovery.rs`, `dmls/src/providers/frontmatter/sequence_tests.rs`, Claudine’s `config/schema.rs::CONFIG_SCHEMA_SOURCE` and `composition/lifecycle/mod.rs::lifecycle_artifact`, and Claudine’s `sequence_schema`, `claudine_identification`, `host_catalog`, `shipped_artifacts`, and `cli/src/completion/schema_completion/tests.rs` fixtures. Frozen historical inputs retain their original paths and bytes.
   - Add real inventory tests for plain shared events, prompt, sections, allowed null counterparts, both values, an explicit inline kind with neither value, formal YAML, sequence presence, wrong sequence types, and literal mismatch. Assert a matching sequence layer cannot weaken the inline union. Assert setup/config still consumes the canonical config definition.
-- [ ] **Embedded inventory**
+- [x] **Embedded inventory**
   - Implement Rule 12. Seed the moved lifecycle artifact at its new generated path with the previous bytes so the first build can compile the generator. Generate replacement bytes only from fresh inputs. Keep build-time regeneration independent of installed configuration. Verify that rebuild input tracking covers additions, deletions, moves, edits, and nested files and that staged artifact generation refuses a stale derived member before replacing any output.
   - Run root `just shipped-schemas`, then verify the generated outputs with the existing artifact checks. Repoint or retire `claudine/lib/examples/lifecycle_artifact.rs` and the old recipe by making them delegate to the shared generator and root recipe. Check inline, direct, and sequence preflight against the embedded inventory with an empty fake home and working directory outside the repository.
 
-- [ ] **Fixed publication**
+- [x] **Fixed publication**
   - Own `composition/registration.rs`, `config/atomic.rs`, and `host_publication.rs`. Apply Rule 13. Export the manifest path, inventory members, published byte views, and publisher outcome for the CLI and future repair. Verify interruption with barriers at a member replacement and before manifest commit, two cooperating publishers, reader outcomes, cleanup, the Windows persist retry, and a timestamp-identical no-op. Test symlinks to out-of-tree sentinels and native Windows reparse classification without requiring privileged symlink creation for the Windows unit test.
 ### Wave 4
 
-- [ ] **Registration command**
+- [x] **Registration command**
   - Own the Claudine CLI routes and install recipe. Use Rule 14 and the library API specified in Rule 13. Keep machine output free of warnings/log lines on stdout. Replace `host_registration_refresh.rs` with hermetic listing, detail, publish, and startup-passivity tests. Prove no bundle access during ordinary commands using a valid Claudine config plus an obstructed installation path and observable read/write instrumentation, alongside checks for missing and stale member bytes. Exercise the install command with an isolated Cargo root and home.
-- [ ] **Config migration**
+- [x] **Config migration**
   - Own Darkmatter `config/init.rs`, Claudine `config/setup.rs`, and setup CLI reporting. Use Rule 15 and the shared publisher. Cover setup on empty and preexisting homes, equivalent legacy paths with a missing old file, duplicates, conflicts, interrupted config writes, malformed settings, preserved comments and unrelated references, obsolete repository entries, and refused legacy cleanup. Keep one CLI test for `md init` preserving a permissions reference and the registration list.
 
-- [ ] **Publisher checkpoint**
+- [x] **Publisher checkpoint**
   - Run Claudine and Darkmatter nextest filters for the embedded corpus, shipped artifacts, registration publication, setup, and installed CLI agreement. Check the JSON inventory against the exact published bytes, including the manifest and generated lifecycle artifact. Compare passive Darkmatter/DMLS results from the installed bundle with in-process Claudine validation on representative documents, using temp roots and existing command fixtures. Record the intentional sections validation/runtime boundary and the fixture migrations in the implementation log.
 
 ## Phase 5 — DMLS reload scheduling
 
-- [ ] **Measure publication**
+- [x] **Measure publication**
   - Run one Linux sample with the Phase 4 binary in a temporary home. Seed a valid publication of the same inventory with edited member bytes and a corresponding valid earlier manifest, then time the real changed publish with a monotonic clock, from immediately before the first member write through successful manifest replacement. Use five warmed changed publishes with the home reseeded outside the timed interval for each. Verify changed publication and full v2 load on every trial. Save sample values and the resulting window in the implementation log.
   - Let the measured duration be the slowest valid sample in milliseconds. At or below 150 ms use 300 ms. Above 150 ms set the window to the next multiple of 50 ms at or above twice the measured duration. An incomplete or invalid sample retains the initial 300 ms and records the actual failure; the implementation continues through deterministic verification. Run the sample once, with no cross-OS benchmark or later timing recheck.
 

@@ -10,6 +10,7 @@ packages:
     - darkmatter-lsp
     - claudine
     - claudine-cli
+    - test-toolkit
 source_files_during_phase_1:
     - simplified-schema/schemas/namespace-schema.yaml
     - simplified-schema/schemas/schema-trigger.yaml
@@ -238,8 +239,179 @@ decisions-for-review:
         `md schema validate --output json` gives a conflict's `schema` record `code: dm.host.trigger_conflict` and a new `related` array (the two trigger files); the output schema gained `related`. DMLS relates each trigger file at a zero range (the top of the file), because the property's span in the trigger is not carried through the checked layer. Locating the declarations needs the payload's source map in `merge::check`. Redo cost: moderate.
     - |-
         A whole YAML document now waits for its configuration's host registrations in DMLS (`registry_demand`, `prepare_need`), and the contract key folds in the installed registrations' version. Their install republishes the document's current version, so an editor can see one extra publication of the same version; `lsp_session::meta_schema_phase6_shipped_schema_activation_and_current_error` now waits for the version 2 publication instead of the next one. Alternative: suppress a republish whose diagnostics are unchanged. Redo cost: small.
+    - |-
+        Claudine's formal `kind: sequence` YAML is judged by the shipped `formal-sequence-file.yaml` kind after the sequence parser accepts the list, not before normalizing as the plan says. Checking first replaced the parser's more precise errors and would refuse a `sequence` that is a file reference, an expression, or a `$( … )` source, which work today. Alternative: check first and rewrite about eight tests, at the cost of weaker errors. Redo cost: small.
+    - |-
+        Claudine's build-time inventory check (`claudine/lib/build.rs`) is structural only: portable names, no links, case collisions, UTF-8, and an allowed `kind`. Full preparation of the bundle runs in the generator and the tests. Alternative: make SimplifiedSchema a build dependency for earlier, fuller errors, at the cost of slower builds of every Claudine consumer. Redo cost: moderate.
+    - |-
+        `claudine-config.yaml` is an embedded bundle member (a types-only library), so it is published with the registration and listed by `claudine registrations`. The plan moves it into `claudine/registration/` because the old publisher shipped it. Alternative: keep it in the folder but exclude it from the bundle, which needs an exclusion rule in the inventory walk. Redo cost: small.
+    - |-
+        A same-name copy of a Claudine registration file in a schema root is now an ordinary trigger layered above the registered layer; it no longer replaces the compiled-in file. A malformed or non-matching copy therefore no longer hides Claudine's triggers, and a property counts as a Claudine control only when its winning declaration is in the registered Claudine layer. Alternative: keep the old replace-by-name rule for in-process use, which would make in-process and installed results differ. Redo cost: moderate (embedded shadow tests rewritten).
+    - |-
+        One broken member refuses Claudine's whole registered profile, in process as well as installed, so the trigger matrix's per-origin `trigger_kind` cells are all errors and the old `unclaimed_trigger` case is gone. Alternative: let the in-process path skip a broken trigger, which would differ from the installed reader. Redo cost: small to moderate.
+    - |-
+        The prepared registered payloads are stored in Claudine's shipped artifact (`PREPARATION_REVISION` 7), which grew from 3.1 MB to 5.7 MB, so an in-process launch does not prepare the profile from text (about 0.2 s first load now, versus roughly 0.5 s from text in debug). Alternative: prepare from text at first use and keep the artifact small. Redo cost: moderate.
+    - |-
+        A registered root-union layer has no editor shape (`registered_trigger_layers` sets `shape: None`), so DMLS completion, hover, and declared expression names see nothing from `inline-composition.yaml`; validation is unaffected. Six DMLS editor tests now start their document with `agent: claude` instead of `prompt: hi`, assertions unchanged. This was already true of installed registrations after Phase 3. Alternative: give union arms an editor shape now (merge arm properties for completion). Redo cost: moderate; the six test inputs should be reverted when that lands.
+    - |-
+        SimplifiedSchema's `Prepared::new` now reuses a cached default plan (`DefaultPlan::for_identity`) library-wide instead of compiling one per call. It fixed a 10 s test caused by compiling the 590 KB sequence kind's defaults on every inline sequence plan. Alternative: cache only in Claudine's sequence check. Redo cost: small.
+    - |-
+        `registration.rs` in Claudine was split into `registration/published.rs` and `registration/legacy.rs` (re-exported at the same paths) to stay under the repository's 800-line production-file guard. Redo cost: none functionally.
+    - |-
+        The publisher's lock waits up to 10 s (the config writer waits 2 s), because a publish holds it across about 17 synced writes. Validity of the previous manifest (for retiring members) is read with Claudine's own closed serde check, because Darkmatter's `read_v2` is private and `load_snapshot` refuses exactly the interrupted state that still needs retirement. The test seam `publish_with` is always compiled (`#[doc(hidden)]`). Alternatives: export a Darkmatter envelope check; gate the seam behind `test-fixtures`. Redo cost: small each.
+    - |-
+        Setup rewrites an existing entry for the new manifest that is spelled differently (an absolute path) to the canonical `~/…` spelling, per the plan's 'canonical spelling at the first affected index' rule; an existing test was renamed to assert this. For an entry whose file is missing, only the first location its resolution would probe is compared. Legacy cleanup removes nothing at all if any link or unexpected entry is found in the old tree. Obsolete repository `register` entries are not reported, because setup had no existing place for such a report. Alternatives: leave other spellings alone; remove the old manifest even when the revision tree is obstructed; add a report. Redo cost: small each.
+    - |-
+        `claudine registrations` is dispatched after request initialization (home capture) and before Darkmatter configuration loads, and `just install` calls a public `publish-registrations` recipe that prints a file count rather than the whole JSON. Startup-passivity tests use `claudine errors` as the representative ordinary command. Alternatives: dispatch earlier with separate home capture; a private recipe. Redo cost: small.
 message-to-agent: |-
-    Phase 3 landed Rule 8 and Rule 9. `config::registration::merge::check` turns a host's matched payloads into one `CheckedLayer` (or a `TriggerConflict`, boxed as `SchemaError::HostTriggerConflict`, code `dm.host.trigger_conflict`); `RegisteredHostProfile::checked_layer(&matched)` memoizes static results, and `markdown/schemas/mod.rs::registered_trigger_layers` uses it (template payloads resolve whole, unmemoized). Registered payloads are loaded by `simplified_schema::triggers::assemble::resolve_registered_trigger_payload` with `PayloadForm::ObjectOrUnion`, so one root union is allowed and merged by `merged_trigger_schema`'s `merge_around_union`; embedded and root triggers still refuse unions. For Phase 4: Claudine's inline-composition union payload must ship as a registered trigger (inline arms only, no `Name@file` arm) and must not share alternative-defining keys (`prompt`, `sections`, ...) with Claudine's other triggers. Registered `yaml-schema` kinds are the lowest tier of `prepare_yaml_contract` in the CLI and DMLS (`YamlContract::registered()`). Claudine's format 1 round-trip tests (`host_publication`, `installed_registration`, `host_registration_refresh`) still fail with the format 1 upgrade warning until Phase 4 publishes format 2. Tests: `darkmatter/lib/tests/l1/host_trigger_merge.rs`, `registered_yaml_kinds.rs`, DMLS `registered_trigger_conflict.rs` and `registered_yaml_kinds.rs`, and two CLI tests at the end of `darkmatter/cli/tests/l1/host_registration.rs`.
+    Phase 4 landed Claudine's v2 bundle. Source is `claudine/registration/` (walked by `claudine/lib/build.rs`, exposed as `claudine::composition::inventory`); `RegistrationInventory::claudine()` + `publish(home, inventory)` in `claudine::composition::registration` write `~/.claudine/registrations/darkmatter/` (manifest last, OS lock `~/.claudine/registrations/.darkmatter.lock`); hidden `claudine registrations [<path>|publish]`; `setup_claudine` publishes, runs the permissions handoff, calls Darkmatter's new `config::init::replace_manifest_registration`, then removes the legacy `~/.claudine/darkmatter-host*`. In process, Claudine selects through the same registered path (`schema::bundle::claudine_hosts()`, `VerifiedSnapshot::from_embedded`, `registration::load_embedded`); its shipped artifact carries the prepared registered payloads. For Phase 5 (DMLS reload scheduling): DMLS fixtures that need Claudine now install the real bundle and register it; a registered root-union layer has no editor shape (`registered_trigger_layers` sets `shape: None`), so six DMLS editor tests start from `agent: claude`. For Phase 6 docs: stale text remains in `claudine/docs/topics/schemas.md` (an "eight files" table with old names such as `claudine.yaml`, `inline-compose.yaml`), `claudine/schemas/README.md`, `.claude/skills/claudine/cli-commands.md`, `darkmatter/dmls/docs` mentions of `globals.yaml`, and `darkmatter/docs/topics/schemas/dmls-schema-support.md`; caller skills were not republished (`just publish-skills` not run in Phase 4). Windows cross-checks of `claudine`, `claudine-cli`, and `darkmatter` pass (see the log); the shipped record now stores portable `/` paths, so keep any new path field in Claudine's artifact portable too.
+source_files_during_phase_4:
+    - claudine/registration/action.yaml
+    - claudine/registration/claudine-config.yaml
+    - claudine/registration/composition.yaml
+    - claudine/registration/content-policy.yaml
+    - claudine/registration/document.yaml
+    - claudine/registration/formal-sequence-file.yaml
+    - claudine/registration/group.yaml
+    - claudine/registration/inline-composition.yaml
+    - claudine/registration/lifecycle-events.yaml
+    - claudine/registration/linking.yaml
+    - claudine/registration/loop.yaml
+    - claudine/registration/seq.yaml
+    - claudine/registration/sequence-document.yaml
+    - claudine/registration/sequence.yaml
+    - claudine/registration/shared.yaml
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine-config.yaml
+    - claudine/schemas/claudine-document.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/document.yaml
+    - claudine/schemas/globals.lifecycle.json
+    - claudine/schemas/globals.yaml
+    - claudine/schemas/inline-compose.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/schemas/linking.yaml
+    - claudine/schemas/sequence-types.yaml
+    - claudine/schemas/sequence.yaml
+    - claudine/lib/build.rs
+    - claudine/lib/Cargo.toml
+    - claudine/lib/generated/globals.lifecycle.json
+    - claudine/lib/generated/shipped.json
+    - claudine/lib/examples/lifecycle_artifact.rs
+    - claudine/lib/examples/shipped_schemas.rs
+    - claudine/lib/benches/pipeline_work.rs
+    - claudine/lib/benches/pipeline_work_alloc.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/inventory.rs
+    - claudine/lib/src/composition/inventory/walk.rs
+    - claudine/lib/src/composition/inventory/tests.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/registration.rs
+    - claudine/lib/src/composition/registration/legacy.rs
+    - claudine/lib/src/composition/registration/published.rs
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/src/composition/schema/globals.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/shipped.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/declarations/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/inputs/tests.rs
+    - claudine/lib/src/config/atomic.rs
+    - claudine/lib/src/config/schema.rs
+    - claudine/lib/src/config/setup.rs
+    - claudine/lib/tests/l1/claudine_identification.rs
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/l1/claudine_trigger_selection_parity.rs
+    - claudine/lib/tests/l1/container_schema_recursion.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+    - claudine/lib/tests/l1/embedded_inventory_preflight.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - claudine/lib/tests/l1/host_publication.rs
+    - claudine/lib/tests/l1/installed_registration.rs
+    - claudine/lib/tests/l1/installed_registration_agreement.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/registration_inventory.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - claudine/lib/tests/l1/shipped_artifacts.rs
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/registrations.rs
+    - claudine/cli/src/commands/init_wizard.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/host_registration_refresh.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/registrations_command.rs
+    - claudine/cli/tests/l1/shipped_prompts.rs
+    - claudine/cli/src/commands/wrap/runaway_guard.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/lifecycle_refusal_reports.rs
+    - claudine/cli/tests/l1/lifecycle_edit_action.rs
+    - claudine/justfile
+    - darkmatter/lib/src/config/init.rs
+    - darkmatter/lib/src/config/registration.rs
+    - darkmatter/lib/src/config/registration/bundle.rs
+    - darkmatter/lib/src/config/registration/manifest.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/benches/pipeline_work_support/mod.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/config_init.rs
+    - darkmatter/lib/tests/l1/config_widening.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+    - darkmatter/lib/tests/l1/embedded_registration.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/init_command.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/config_contracts.rs
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/config_contracts.rs
+    - darkmatter/dmls/tests/l1/edit_action_editor.rs
+    - simplified-schema/lib/src/prepared.rs
+    - simplified-schema/lib/src/shipped/wire_support.rs
+    - simplified-schema/lib/tests/l1/shipped_corpus.rs
+    - simplified-schema/lib/src/phase.rs
+    - simplified-schema/lib/tests/l1/phase_projection.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/schema_identities.rs
+    - tools/test-toolkit/tests/shipped_schemas_coordinator_contracts.rs
+    - scripts/shipped_schemas.py
+    - justfile
+    - Cargo.lock
+    - .github/ci/permission-inputs.json
+docs_updated_during_phase_4:
+    - claudine/schemas/README.md
+    - claudine/docs/cli/index.md
+    - claudine/docs/dependencies.md
+    - claudine/docs/topics/configuration.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/host-registration.md
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+docs_created_during_phase_4:
+    - claudine/docs/cli/registrations.md
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/module-map.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/simplified-schema/defaults.md
+    - claudine/docs/use-skills/use-claudine/config.md
 ---
 
 # Implementation Log for 2026-11-22-host-registration-v2 (6 phases)
@@ -596,3 +768,385 @@ line (see `decisions-for-review`).
 - `just publish-skills` in `darkmatter/`: published.
 - Windows (`just cross-check darkmatter --os windows`): 12769 passed, 66
   skipped, after the path-comparison fix above. No `os-failing` needed.
+
+## Phase 4
+
+- Started 2026-11-23. Tasks: Source migration (Rules 10–11), Embedded
+  inventory (Rule 12), Fixed publication (Rule 13), then Wave 4:
+  Registration command (Rule 14) and Config migration (Rule 15) in parallel,
+  then the Publisher checkpoint. Each task ran as one foreground subagent
+  that verified only its own slice; the orchestrator ran the gates.
+
+### Source migration (Rules 10–11)
+
+- `claudine/registration/` is the only source of Claudine's bundle.
+  `action.yaml`, `document.yaml`, `linking.yaml`, and `claudine-config.yaml`
+  moved in from `claudine/schemas/`; `content-policy.yaml` is a byte copy of
+  `content-policy/schemas/content-policy.yaml`; the old `schemas/sequence.yaml`
+  trigger became `registration/sequence-document.yaml` and its named types
+  `registration/sequence.yaml`; `lifecycle-events.yaml` is now the
+  authoritative types-only lifecycle library. `claudine.yaml`,
+  `inline-compose.yaml`, `lifecycle.yaml`, `sequence.yaml`, and
+  `sequence-types.yaml` under `claudine/schemas/` are deleted.
+- `shared.yaml::common-attributes` carries the common controls;
+  `composition.yaml` and both arms of `inline-composition.yaml` extend it.
+  Exactly one of `composition` and `inline-composition` applies to a
+  document now, which changed the recorded trigger-selection parity table
+  (prompt rows select only `inline-composition.yaml`), two matrix operand
+  paths, and the embedded shadow tests.
+- Claudine config validation and DMLS's configuration contract read
+  `claudine/registration/claudine-config.yaml`; `.github/ci/permission-inputs.json`
+  names the new path.
+- Interim: embedded bundles still refuse a root union, so the in-process
+  inline trigger was a single-object runtime copy
+  (`composition/schema/runtime-inline-composition.yaml`) until the embedded
+  inventory task routed in-process selection through the registered profile.
+- New tests: `claudine/lib/tests/l1/registration_inventory.rs` (7 tests:
+  whole install and exact content-policy copy; shared events alone and a
+  misspelled kind select nothing; prompt/sections arms with null
+  counterparts, both values, and `kind: inline-compose` with neither;
+  sequence presence, wrong types, literal mismatch; a sequence layer cannot
+  weaken the union; formal sequence YAML requires an inline `step[]`; setup
+  and config consume the canonical config definition).
+- Scoped runs: `claudine` 1115/1115 of the touched filters, `claudine-cli`
+  121/121, Darkmatter/SimplifiedSchema corpus filters 76/76, `darkmatter-cli`
+  + DMLS filters 310/310. Format 1 round-trip tests (`host_publication`,
+  `installed_registration`, `host_registration_refresh`) still fail with the
+  upgrade warning, as expected until publication.
+
+### Embedded inventory (Rule 12), first pass
+
+- `claudine/lib/build.rs` walks `claudine/registration/` with the shared
+  pure module `composition/inventory/walk.rs` (compiled by the build script
+  through `#[path]` and by the library), emits a sorted include table, and
+  a `rerun-if-changed` for the folder and every file. The build check is
+  structural (portable names, no symlinks/junctions, case collisions,
+  UTF-8, allowed member kinds); full preparation runs in the generator and
+  tests. `serde_yaml_ng` became a build dependency.
+- `claudine::composition::inventory` exposes `members()`, `member(path)`,
+  `members_of(kind)`, `bundle_bytes()`, `bundle_sources()`,
+  `bundle_context()`, `LIFECYCLE_ARTIFACT`, and the bundle constants.
+- `globals.yaml` and `claudine-document.yaml` are deleted; Claudine's
+  globals are prepared from the three namespace files
+  (`schema::globals::prepare_namespace_catalog`), and the lifecycle
+  artifact's `catalog_hash` is the hash of those files. The shipped record
+  gained YAML kind records (`PreparedKind`, `formal_sequence_kind`);
+  `PREPARATION_REVISION` 5 → 6.
+- The lifecycle artifact (`claudine/lib/generated/globals.lifecycle.json`)
+  is a candidate emitted by Claudine's generator (`--lifecycle-output`) and
+  staged by `scripts/shipped_schemas.py` with the other artifacts;
+  `examples/lifecycle_artifact.rs` is deleted and the old
+  `regen-lifecycle-artifact` recipe delegates to the root
+  `just shipped-schemas`.
+- Formal `kind: sequence` YAML is judged by the prepared embedded kind in
+  `sequence/mod.rs`, after the sequence parser accepts the list (see
+  `decisions-for-review`).
+- Generation now decodes the two lower registries once each (the bundle
+  scope has no uncached mode); the generation test is renamed
+  `generation_consults_no_artifact_but_the_lower_registries_for_namespaces_and_kinds`.
+- Tests: 9 walk unit tests (`composition::inventory::tests`),
+  `registration_inventory::the_embedded_inventory_is_a_fresh_walk_of_the_registration_folder`,
+  `shipped_artifacts::staged_generation_refuses_a_stale_lifecycle_member_and_writes_nothing`,
+  `embedded_inventory_preflight::inline_direct_and_sequence_preflight_use_the_embedded_inventory`
+  (empty home, cwd outside any repository),
+  `declarations::tests::a_formal_yaml_sequence_is_judged_by_the_prepared_kind`,
+  and a coordinator test in `tools/test-toolkit`.
+- Deferred by this pass and done by a follow-up task (below): in-process
+  selection through the checked embedded registered profile and removal of
+  the single-object runtime inline stand-in.
+
+### Embedded inventory (Rule 12), registered profile
+
+- In-process selection now goes through Darkmatter's registration path.
+  `schema::bundle::claudine_hosts()` (`OnceLock`) verifies the compiled
+  manifest and members from memory (`VerifiedSnapshot::from_embedded`,
+  virtual root `<claudine>`), loads them with `registration::load_embedded`,
+  and wraps the profile as the only `RegisteredHosts`. `discover_schema_owner`
+  and the benches use `with_claudine_registration(..)`. Embedded triggers
+  carry `TriggerSource::Embedded { bundle: "claudine", name: "schemas/<file>" }`,
+  `location` `<claudine>/schemas/<file>`, and no host file; a registered
+  trigger's duplicate check uses its disk identity, or its embedded identity
+  plus payload digest.
+- `composition/schema/runtime-inline-composition.yaml` and
+  `RUNTIME_INLINE_COMPOSITION` are deleted; the inline union
+  (`inline-composition.yaml`, `PayloadForm::ObjectOrUnion`) applies in
+  process.
+- Shipped artifact: `PREPARATION_REVISION` 6 → 7; the record holds the
+  prepared registered payloads (`payload.registered`, one record per trigger
+  with its bundle path and payload digest), served by
+  `shipped::registered_payload`. `claudine/lib/generated/shipped.json`
+  regenerated with `just shipped-schemas` (3.1 MB → 5.7 MB).
+- Darkmatter: `manifest::embedded_members`, `bundle::from_embedded`,
+  `registration::{load_embedded, RegisteredTrigger::{location, is_embedded}}`;
+  SimplifiedSchema wire namespaces gained `Bundle*` variants so prepared
+  payloads of a virtual-root bundle serialize.
+- Departures from the plan:
+  - A disk copy of a Claudine registration file in a schema root is an
+    ordinary trigger layered above the registered layer, never a
+    replacement: it no longer hides the registered triggers, and
+    `is_claudine_owned` is true only when the winning origin is a trigger of
+    the registered Claudine layer. The embedded shadow tests were rewritten
+    for this (`claudine_schemas_embedded.rs`), including a malformed or
+    non-matching disk copy, which now leaves the registered triggers in
+    force.
+  - Registration refuses the whole profile on one broken member, so the
+    matrix `trigger_kind` cells are `Error` for every origin and
+    `unclaimed_trigger` is gone; "each trigger alone" metadata cases are
+    passive only (built with `profile_of(without_member)`).
+  - DMLS's Claudine fixtures install the real bundle in the repository and
+    register it; the "outside the area" halves use documents outside the
+    repository. `darkmatter-cli`'s `schema_validate` Claudine bundle drops
+    the inline file.
+  - Six DMLS editor tests write `agent: claude` instead of `prompt: hi`: a
+    registered root-union layer has no editor shape
+    (`registered_trigger_layers` sets `shape: None`), so completion, hover,
+    and declared expression names see nothing from `inline-composition.yaml`.
+    That was already true for an installed registration; see leftovers.
+  - `Prepared::new` (SimplifiedSchema) now takes its `DefaultPlan` from
+    `DefaultPlan::for_identity`. The formal `kind: sequence` check of the
+    first pass compiled the 590 KB kind's defaults on every inline sequence
+    plan (about 120 ms each in debug), which made
+    `template_owner_values_tests::every_inline_template_reads_its_owners_prepared_values`
+    take 10.1 s alone; it now takes 1.4 s.
+- Guards that went red when whole packages ran, fixed here:
+  `claudine/lib/src/composition/registration.rs` was over the 800-line
+  production limit (`test_placement`), so its inventory and retired-cleanup
+  sections moved to `registration/{published,legacy}.rs`, re-exported at
+  the same paths; the error-guard allowlist gained `prepare_registered` and
+  lost a stale `prepare_payload` entry; Darkmatter's context guard allows
+  `embedded_context`; `shipped_schema_corpus` dropped the deleted
+  `claudine/schemas/{globals,claudine-document}.yaml` entries.
+- Tests added: `embedded_inventory_preflight::the_in_process_inline_launch_enforces_the_prompt_or_sections_union`,
+  `claudine_schemas_embedded::a_schema_root_trigger_overrides_a_registered_property`,
+  five `shipped_artifacts` record refusals (another trigger's record, a
+  missing record, another revision's payload digest, a payload with both a
+  shape and union arms, an absent digest), and
+  `darkmatter/lib/tests/l1/embedded_registration.rs` (8 tests:
+  verification from memory, digest mismatch, missing member, bundle names,
+  members outside the bundle, `load_embedded` refusing a disk snapshot,
+  embedded trigger provenance, a prepared payload served).
+- Timing: `inline_direct_and_sequence_preflight_use_the_embedded_inventory`
+  0.86 s before, 1.05–1.16 s after (the first in-process profile load, about
+  0.2 s, is in it); the new union test 0.57 s.
+
+### Fixed publication (Rule 13)
+
+- `claudine/lib/src/composition/registration.rs` is rewritten:
+  `RegistrationInventory::claudine()` holds every published file (manifest,
+  lifecycle artifact, `schemas/…` members) with its kind, optional name, and
+  exact bytes; `publish(home, inventory)` writes the fixed tree under
+  `~/.claudine/registrations/darkmatter/` behind the OS file lock
+  `~/.claudine/registrations/.darkmatter.lock` (deadline 10 s, backoff
+  20 ms). Preflight (no-follow metadata plus a pure reparse-point
+  classifier) runs before the lock file is created and again under the
+  lock. Only changed members are written; retired entries come from the
+  previous valid format 2 manifest; regular temps with the reserved prefix
+  `.claudine-registration-` are removed; unknown files are kept; the
+  manifest is written last and only when its bytes differ.
+  `PublishOutcome::{Current, Published{changes}}`.
+- `config/atomic.rs::atomic_write_registration` reuses the sibling-temp
+  writer and its Windows persist retry with the reserved prefix.
+- Legacy paths for setup migration: `LEGACY_MANIFEST_REFERENCE`,
+  `legacy_manifest_path`, `legacy_revisions_dir`.
+- Test seam: `publish_with(home, inventory, PublishHooks { lock_deadline,
+  observer })`, whose observer can stop at `MemberWritten`, `Retired`, or
+  `BeforeManifest`.
+- Tests: 12 in `host_publication.rs` (fresh format 2 load, identical
+  no-op with unchanged mtimes, single changed member, interruption at a
+  member and before the manifest then convergence, readers at every step,
+  two cooperating publishers, lock timeout, temp cleanup with unknown files
+  kept, retirement, an invalid/escaping previous manifest removes nothing,
+  misplaced entries stop before any write), 6 `obstructions::*` symlink
+  tests (Unix), 5 `registration::tests` unit tests including the
+  reparse-bit classifier, and 2 `atomic::tests` (reserved prefix; Windows
+  retry, `#[cfg(windows)]`). `installed_registration.rs` moved to the new
+  layout. Scoped run: 73/73; `claudine-cli host_registration_refresh` 5/5.
+
+### Config migration (Rule 15)
+
+- `darkmatter::config::init::replace_manifest_registration(context, scope,
+  reference, old_path)` beside the unchanged `register_manifest`, with
+  `replace_manifest_change(observation, …)` as its planning half (the
+  `setup_change` pattern) so a test can change the file between read and
+  commit. Entries match by `registration::manifest_location_identity`: the
+  matched path, or for a missing file the first probed candidate in the
+  context anchored at the config file, keyed by
+  `registration::location_identity` (nearest existing ancestor
+  canonicalized, rest appended). The first affected entry is rewritten to
+  the given spelling, the rest removed in descending order, one
+  `ConfigTransaction` with the observed bytes. `RegisterReport` gained
+  `replaced`.
+- Departure: an entry naming the new manifest in another spelling (an
+  absolute path) is now rewritten to `~/…` instead of left as written;
+  `installed_registration_same_manifest_spelled_absolutely_*` changed to
+  assert the canonical entry.
+- `setup_claudine`: publish → handshake (only a Claudine write failure
+  stops) → `replace_manifest_registration(User, MANIFEST_REFERENCE,
+  legacy_manifest_path)` → on success
+  `composition::registration::remove_legacy_registration(home)`
+  (`ClaudineSetup.cleanup`). Cleanup preflights `~/.claudine`, the old
+  manifest, and every entry of `~/.claudine/darkmatter-host/` with the
+  publisher's no-follow classifier and removes nothing on a link
+  (`CleanupError::Obstructed`) or an unexpected entry. Repository
+  configuration is never read for migration; obsolete repository entries
+  are not reported (no existing place for it).
+- CLI (`init_wizard.rs::write_with_darkmatter_setup`): publication at
+  `info`, a replaced entry and each removed retired path as messages, a
+  cleanup error as a warning; a fresh headless setup still prints nothing.
+
+### Registration command (Rule 14)
+
+- Hidden `claudine registrations [<filepath>|publish]`
+  (`claudine/cli/src/commands/registrations.rs`), dispatched after request
+  initialization and before Darkmatter configuration loads. List and detail
+  read only the embedded inventory; `publish` writes stdout only after a
+  successful publish. Hash is `format!("{:016x}", xx_hash_bytes(..))`.
+- `refresh_host_registration` and its startup branch are removed from
+  `claudine/cli/src/main.rs`; `host_registration_refresh.rs` is replaced by
+  `claudine/cli/tests/l1/registrations_command.rs` (8 tests: sorted listing
+  with hashes and names; exact detail contents; refused unlisted spelling
+  and `publish` not a member; publish installs the listing and a second
+  publish is identical with unchanged mtimes; publish failure on stderr;
+  `claudine errors` with a valid config leaves an obstructed registration
+  path untouched, never follows a registration symlink, and repairs neither
+  missing nor stale members), plus 2 unit tests. Slowest 0.09 s.
+- `claudine/justfile`: `install` runs the new `publish-registrations`
+  recipe, which resolves the release binary from `cargo metadata`'s target
+  directory and the native suffix. Verified with `just -n install --root …`
+  and by running `publish-registrations` with a temp `HOME`, a temp target
+  directory, and a failing `claudine` first on `PATH` (17 files published,
+  the `PATH` binary never ran; an obstructed home failed with the cause on
+  stderr). No real `cargo install` ran.
+- Docs: `claudine/docs/cli/registrations.md` (new, maintainers),
+  `claudine/docs/cli/index.md`, `claudine/docs/topics/schemas.md`.
+
+### Publisher checkpoint
+
+- Inventory against published bytes: `claudine-cli`
+  `registrations_command::registrations_publish_installs_the_listing_and_a_second_publish_changes_nothing`
+  compares the JSON listing (path, kind, seed-0 XXH64, name) with the
+  inventory and every installed file, manifest and lifecycle artifact
+  included, byte for byte.
+- Installed versus in-process agreement: new
+  `claudine/lib/tests/l1/installed_registration_agreement.rs` (8 tests, one
+  per document via `macro_rules!`): the bundle is published into a temp
+  home and registered in its `~/.darkmatter.yaml`; each document is judged
+  passively (`DarkmatterSchemas::validate`/`validate_yaml_document` with the
+  loaded `RegisteredHosts`, the path `md schema validate` and DMLS take)
+  and in process (inline, direct, Markdown sequence, or formal sequence
+  launch). Documents: shared events only, `prompt` only, `sections` only,
+  both (refused at `/sections`), a wrong-typed `sequence` (refused at
+  `/sequence`), a composition with `agent`/`model`, a valid and an invalid
+  formal `kind: sequence` file (refused at `/description`). All agree;
+  0.65–1.3 s each. DMLS itself is not spawned: it uses the same
+  `DarkmatterSchemas` entry points, and its registered-host editor
+  agreement is covered by DMLS's own `registered_host_editor_agreement`.
+- Sections boundary (intentional): `sections` is schema-validated by
+  `inline-composition.yaml` (one of `prompt` or `sections`, the other
+  null-only), but running a `sections` document is a later runtime feature;
+  the inline launch reports `PromptPropertyMissing` after the schema passes,
+  and `error/render/sequence_loop.rs` reports sections execution as
+  upcoming. The agreement test counts that as an accepted schema verdict.
+- Fixture migrations this phase: Claudine's schema tests read
+  `claudine/registration/…` instead of `claudine/schemas/…`; the trigger
+  selection parity table and matrix operand paths follow the
+  composition/inline split; embedded shadow tests expect a disk copy to
+  layer above the registered triggers; provenance expectations moved to
+  `embedded:claudine/schemas/<file>`; DMLS and `darkmatter-cli` Claudine
+  fixtures install and register the real bundle; `installed_registration`
+  uses the fixed-path layout and a format 2 hostile repository bundle;
+  `host_registration_refresh.rs` is replaced by `registrations_command.rs`;
+  six DMLS editor tests start from `agent: claude` instead of `prompt: hi`
+  (no editor shape for a registered root union yet). Frozen bench inputs
+  keep their original paths and bytes.
+
+### Gate fix: phase projection over a registered root union
+
+- The first full `claudine` run failed two `claudine-cli` tests
+  (`launch_trigger_schemas::inline_compose_deferral_does_not_suspend_the_payload`,
+  `…::inline_completion_lists_a_payload_problem_beside_the_authored_table`);
+  both failed alone too, so not load. Cause:
+  `simplified_schema::phase::merge_with_effective` returned only the
+  projected document when the effective schema's root was a union (the
+  registered inline layer) and the document's `$schema` an object, so at
+  `SchemaPhase::Launch`/`Completion` every baseline and trigger rule was
+  lost and an invalid `model` passed the verdict. Fix: the projected
+  document is merged into every arm (`merge_layer` per arm; its `$defs`
+  join the root). `PROJECTION_REVISION` 2 → 3; the pinned projection
+  identity in `schema_identities.rs` updated.
+- Tests: `simplified-schema` `phase_projection::an_object_document_projects_into_every_arm_of_an_effective_root_union`
+  (new); Claudine `embedded_inventory_preflight::a_document_schema_over_the_inline_union_keeps_the_union_at_launch`
+  (new; an in-process probe showed the invalid document accepted before
+  the fix); the two CLI tests above pass after it.
+
+### Gates
+
+- `darkmatter`: `just test` 17644 passed, 10 skipped, none ≥ 5 s (run
+  before and after the projection fix); `just lint` passed.
+- `claudine`: `just test` 12701 passed, 15 skipped, none ≥ 5 s (after the
+  fix; the first run had the 2 failures above); `just lint` passed after
+  two `clippy::result_large_err` allowances in test helpers.
+- `simplified-schema`: `just test` 2526 passed (and 2126 in the
+  no-default-features leg); `just lint` passed.
+- `just check-tier-coverage` for `darkmatter`, `claudine`,
+  `simplified-schema`: nothing stranded. `just slow-tests fresh`: fresh.
+- Dependents: `cargo check --tests` of `claudine-gen`, `biscuit-icon-cli`,
+  `biscuit-terminal-cli`, `sniff-detection-cli`, `biscuit-speaks-cli`,
+  `messenger`, `messenger-cli`, `playa-cli`, `research`, `content-policy`,
+  `test-toolkit`: clean. `test-toolkit`'s coordinator tests were run by the
+  embedded inventory task (7 passed).
+
+### Cross-OS check (Windows, build-win)
+
+- `claudine`, attempt 1: 6938 passed, 4 failed. Three `shipped_artifacts`
+  tests: the prepared registered payload's `DefaultFileRecord.file` was
+  the platform path (`<claudine>\schemas\action.yaml` on Windows), so the
+  artifact was not byte-identical across platforms. Fixed in
+  `composition/schema/shipped.rs`: the record stores `/` separators
+  (`portable_path`) and decodes to the native path (`native_path`); the
+  Linux bytes are unchanged, so no regeneration or revision bump.
+  One pre-existing test,
+  `sequence::preflight::inputs::tests::a_referenced_template_never_selects_a_prompt_from_its_referrers_values`,
+  wrote a Windows path inside a double-quoted YAML scalar (read as `\U`
+  escapes); it now spells the path with `/`. Attempt 2: 6942 passed.
+- `claudine-cli`, attempt 1: 4229 passed, 13 failed, none in code this
+  phase changed: seven `implement_plan_commit_message` tests recorded
+  `gix`'s Windows installation-config probe (`git config -lz
+  --show-origin …`) through the fake `git` (now filtered beside the
+  `--exec-path` probe the test already ignored); four
+  `wrap::runaway_guard` unit tests read the rig's real
+  `%USERPROFILE%\.claudine\config.yaml` because `isolate_empty_home` set
+  only `HOME` (now also `USERPROFILE`);
+  `lifecycle_refusal_reports::a_foreign_referenced_group_initialize_refusal_is_reported_by_its_step`
+  expected a mixed-separator path (now joined per component); and
+  `lifecycle_edit_action::a_sequence_container_runs_edit_in_its_start_and_finalize_around_its_children`
+  ran POSIX `test` under `cmd` (now a `cmd` equivalent on Windows).
+  Attempt 2: 4242 passed.
+- `darkmatter`: 12786 passed, 66 skipped.
+- After these fixes, Linux `claudine` `just test` 12701 passed again and
+  `just lint` passed. No `os-failing` needed.
+- Unrelated uncommitted files present in the tree and not part of this
+  phase: `claudine/features/2026-11-18-ergonomic-sequences/spec.md`
+  (modified) and `claudine/features/2026-11-22-current-pid/spec.md` (new).
+
+## Phase 5
+
+### Publication timing sample (Linux)
+
+- Host: this Linux build host, load average 1.71 at the start. A
+  temporary example (`claudine/lib/examples/publish_timing.rs`, deleted
+  after the run, release build) used the Phase 4 publisher in-process.
+  For each trial a fresh temporary home was seeded outside the timed
+  interval with a valid publication of the same inventory whose every
+  member had edited bytes (a trailing `# seed` comment on YAML members, a
+  trailing newline on JSON members) and the manifest derived for those
+  bytes. The changed publish of `RegistrationInventory::claudine()` was
+  then timed with `Instant` from the publisher's `Locked` step (taken
+  immediately before the first member write) until `publish_with`
+  returned after replacing the manifest. Every trial asserted the
+  manifest and all 17 files were written and that
+  `darkmatter::config::registration::bundle::load_snapshot` loaded the
+  result.
+- One warm-up (0.327 ms), then five samples: 0.289, 0.288, 0.306, 0.267,
+  0.298 ms. Slowest valid sample 0.306 ms, at or below 150 ms, so the
+  settle window is **300 ms** (`REGISTRATION_SETTLE`).
