@@ -64,6 +64,12 @@ const ALLOWLIST: &[Allowance] = &[
         "`PLAYA_DRY_RUN` disables TTS pre-warm before its worker starts, as it does playback",
     ),
     ambient(
+        "composition/registration/access_log.rs",
+        "std::env::var",
+        1,
+        "`test-fixtures` hook that records the registration module's file-system calls for CLI tests",
+    ),
+    ambient(
         "composition/sequence/task/group/branch.rs",
         "std::env::var",
         1,

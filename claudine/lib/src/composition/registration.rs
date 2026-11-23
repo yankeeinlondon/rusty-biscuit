@@ -354,6 +354,7 @@ pub fn publish_with(
     let layout = Layout::new(home);
     // Before anything is created, the lock file and its folder included.
     layout.preflight(inventory)?;
+    access_log::note("create", &layout.registrations());
     fs::create_dir_all(layout.registrations()).map_err(io_error("create", &layout.registrations()))?;
     let _lock = acquire_lock(&lock_path(home), hooks.lock_deadline)?;
     // Another publisher may have changed the tree while this one waited.
@@ -374,12 +375,14 @@ pub fn publish_with(
         if holds(&destination, file.bytes())? {
             continue;
         }
+        access_log::note("write", &destination);
         atomic_write_registration(&destination, file.bytes()).map_err(io_error("write", &destination))?;
         changes.written.push(file.path().to_string());
         stop(PublishStep::MemberWritten(file.path().to_string()), observer)?;
     }
     for path in &plan.retired {
         let destination = layout.destination(path);
+        access_log::note("remove", &destination);
         match fs::remove_file(&destination) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
@@ -392,6 +395,7 @@ pub fn publish_with(
     stop(PublishStep::BeforeManifest, observer)?;
     let manifest = layout.destination(MANIFEST_FILE);
     if !holds(&manifest, inventory.manifest().bytes())? {
+        access_log::note("write", &manifest);
         atomic_write_registration(&manifest, inventory.manifest().bytes()).map_err(io_error("write", &manifest))?;
         changes.written.push(MANIFEST_FILE.to_string());
     }
@@ -408,6 +412,7 @@ pub fn publish_with(
 /// Whether the regular file `path` holds exactly `bytes`. The preflight
 /// already refused anything at `path` but a regular file or nothing.
 fn holds(path: &Path, bytes: &[u8]) -> Result<bool, PublishError> {
+    access_log::note("read", path);
     match fs::read(path) {
         Ok(found) => Ok(found == bytes),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -418,6 +423,7 @@ fn holds(path: &Path, bytes: &[u8]) -> Result<bool, PublishError> {
 /// Removes every regular file named with [`TEMP_PREFIX`] directly in
 /// `directory`, when it exists.
 fn remove_temps(directory: &Path) -> Result<Vec<PathBuf>, PublishError> {
+    access_log::note("list", directory);
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -433,6 +439,7 @@ fn remove_temps(directory: &Path) -> Result<Vec<PathBuf>, PublishError> {
         if entry_at(&path)? != Entry::File {
             continue;
         }
+        access_log::note("remove", &path);
         match fs::remove_file(&path) {
             Ok(()) => removed.push(path),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -451,7 +458,9 @@ fn remove_empty_parents(layout: &Layout, path: &str, inventory: &RegistrationInv
         if inventory.files().iter().any(|file| file.path().starts_with(&prefix)) {
             return;
         }
-        if fs::remove_dir(layout.destination(parent)).is_err() {
+        let destination = layout.destination(parent);
+        access_log::note("remove", &destination);
+        if fs::remove_dir(&destination).is_err() {
             return;
         }
         folder = parent;
@@ -464,6 +473,7 @@ struct PublisherLock {
 }
 
 fn acquire_lock(lock: &Path, deadline: Duration) -> Result<PublisherLock, PublishError> {
+    access_log::note("lock", lock);
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -526,6 +536,7 @@ const fn attributes(_: &fs::Metadata) -> u32 {
 }
 
 fn entry_at(path: &Path) -> Result<Entry, PublishError> {
+    access_log::note("inspect", path);
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Entry::Absent),
@@ -664,6 +675,7 @@ impl Layout {
         if self.route(&Self::output_names(MANIFEST_FILE))? != Entry::File {
             return Ok(Vec::new());
         }
+        access_log::note("read", &path);
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -693,6 +705,7 @@ fn previous_member_paths(path: &Path, bytes: &[u8]) -> Option<Vec<String>> {
     Some(admitted.members().map(|member| member.path.clone()).collect())
 }
 
+mod access_log;
 mod legacy;
 
 pub use legacy::{CleanupError, LegacyCleanup, remove_legacy_registration};

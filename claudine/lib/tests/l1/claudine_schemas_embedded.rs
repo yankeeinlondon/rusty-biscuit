@@ -1168,7 +1168,20 @@ const NEVER_MATCHING_TRIGGER: &str =
 /// through `schemas`, each written after `prefix`, and, when `launch`, the
 /// launch verdict (which always judges with the compiled registration).
 fn assert_document_metadata_cases(locations: &Locations, schemas: &DarkmatterSchemas, label: &str, prefix: &str, launch: bool) {
-    for (frontmatter, rejected_at) in DOCUMENT_METADATA_CASES {
+    assert_metadata_cases_where(locations, schemas, label, prefix, launch, |_| true);
+}
+
+/// [`assert_document_metadata_cases`] over the cases `select` keeps, given
+/// each case's rejected property.
+fn assert_metadata_cases_where(
+    locations: &Locations,
+    schemas: &DarkmatterSchemas,
+    label: &str,
+    prefix: &str,
+    launch: bool,
+    select: impl Fn(Option<&str>) -> bool,
+) {
+    for (frontmatter, rejected_at) in DOCUMENT_METADATA_CASES.iter().filter(|(_, rejected_at)| select(*rejected_at)) {
         let frontmatter = &format!("{prefix}{frontmatter}");
         let what = format!("{label}: `{frontmatter}`");
         let expected: BTreeSet<String> = rejected_at.iter().map(|property| property.to_string()).collect();
@@ -1183,22 +1196,35 @@ fn assert_document_metadata_cases(locations: &Locations, schemas: &DarkmatterSch
     }
 }
 
-/// Passive validation and the launch verdict agree on every metadata case,
-/// with the compiled registration alone and with the shipped bundle copied
-/// into a schema root above it, where the disk triggers import
-/// `document.yaml` from disk.
+/// Passive validation and the launch verdict agree on every metadata case
+/// with the compiled registration alone.
 #[test]
 fn document_metadata_verdicts_agree_between_passive_validation_and_launch() {
     let embedded = Locations::new();
-    let on_disk = Locations::new();
-    on_disk.write_bundle(Root::Tree, &shipped_bundle!());
-    for (label, locations) in [("embedded", &embedded), ("disk", &on_disk)] {
-        assert_document_metadata_cases(locations, &locations.schemas(), label, "", true);
-    }
+    assert_document_metadata_cases(&embedded, &embedded.schemas(), "embedded", "", true);
     let effective = embedded.effective(&embedded.schemas(), "origin", "prompt: hi");
     for property in DOCUMENT_METADATA {
         assert!(is_claudine_owned(&effective, property), "`{property}` is a Claudine control");
     }
+}
+
+/// The same agreement holds with the shipped bundle copied into a schema
+/// root above the compiled registration, where the disk triggers import
+/// `document.yaml` from disk. The accepted and rejected cases are separate
+/// tests so each stays inside the test time budget on Windows.
+#[test]
+fn accepted_metadata_verdicts_agree_with_the_shipped_bundle_on_disk() {
+    let on_disk = Locations::new();
+    on_disk.write_bundle(Root::Tree, &shipped_bundle!());
+    assert_metadata_cases_where(&on_disk, &on_disk.schemas(), "disk", "", true, |rejected_at| rejected_at.is_none());
+}
+
+/// See [`accepted_metadata_verdicts_agree_with_the_shipped_bundle_on_disk`].
+#[test]
+fn rejected_metadata_verdicts_agree_with_the_shipped_bundle_on_disk() {
+    let on_disk = Locations::new();
+    on_disk.write_bundle(Root::Tree, &shipped_bundle!());
+    assert_metadata_cases_where(&on_disk, &on_disk.schemas(), "disk", "", true, |rejected_at| rejected_at.is_some());
 }
 
 /// Each metadata trigger alone gives every metadata case the verdict the
@@ -1692,4 +1718,70 @@ fn a_proxy_overlays_lifecycle_stack_is_judged_by_its_own_authored_flags() {
         panic!("the overlay's flag beside `then` is refused");
     };
     assert!(error.contains("cannot sit beside `then`/`else`"), "{error}");
+}
+
+/// A blank `types:` on the published `kind: sequence` definition is no named
+/// types, as its member envelope admits it: the embedded profile still loads
+/// with that kind and every trigger, while a numeric table is refused at
+/// `types`.
+#[test]
+fn a_blank_types_table_on_an_embedded_yaml_kind_keeps_the_profile() {
+    let shipped = bundle::profile_of(RegistrationInventory::claudine()).unwrap_or_else(|refusals| panic!("ships: {refusals:#?}"));
+    let definition = RegistrationInventory::claudine()
+        .members()
+        .find(|file| file.path() == "schemas/formal-sequence-file.yaml")
+        .expect("formal-sequence-file.yaml is a member");
+    let edited = |types: &str| {
+        let text = format!("{}{types}", definition.text().expect("UTF-8"));
+        let inventory = RegistrationInventory::claudine().clone().with_member(PublishedFile::new(
+            definition.path().to_string(),
+            definition.kind(),
+            definition.name().map(str::to_string),
+            text.clone().into_bytes(),
+        ));
+        (text, bundle::profile_of(&inventory))
+    };
+
+    for blank in ["types:\n", "types: null\n"] {
+        let profile = edited(blank).1.unwrap_or_else(|refusals| panic!("{blank:?}: {refusals:#?}"));
+        assert!(
+            profile.yaml_kinds().iter().any(|kind| kind.source().path == "schemas/formal-sequence-file.yaml"),
+            "{blank:?}: the sequence kind is published"
+        );
+        assert_eq!(profile.triggers().len(), shipped.triggers().len(), "{blank:?}: every trigger");
+    }
+
+    let (text, refused) = edited("types: 7\n");
+    let refusals = refused.expect_err("a numeric table");
+    assert_eq!(refusals.len(), 1, "{refusals:#?}");
+    let line = text.lines().position(|line| line.starts_with("types:")).expect("types") + 1;
+    assert_eq!(refusals[0].line, Some(line), "{refusals:#?}");
+}
+
+/// The compiled registration loads as it ships, and the same bundle with one
+/// unused declaration importing an unlisted file is refused as a whole, at
+/// that import in `shared.yaml`: a declaration nothing uses still faces the
+/// bundle boundary on the embedded route Claudine launches through.
+#[test]
+fn an_unused_unlisted_import_refuses_the_embedded_registration() {
+    bundle::profile_of(RegistrationInventory::claudine()).unwrap_or_else(|refusals| panic!("the shipped bundle loads: {refusals:#?}"));
+    let shared = RegistrationInventory::claudine()
+        .members()
+        .find(|file| file.path() == "schemas/shared.yaml")
+        .expect("shared.yaml is a member");
+    let text = format!("{}    optional-host-settings: Options@./options.yaml\n", shared.text().expect("UTF-8"));
+    let inventory = RegistrationInventory::claudine().clone().with_member(PublishedFile::new(
+        shared.path().to_string(),
+        shared.kind(),
+        shared.name().map(str::to_string),
+        text.clone().into_bytes(),
+    ));
+
+    let refusals = bundle::profile_of(&inventory).expect_err("the edited bundle is refused");
+
+    assert_eq!(refusals.len(), 1, "{refusals:#?}");
+    let offset = text.find("./options.yaml").expect("the import");
+    let line = text[..offset].matches('\n').count() + 1;
+    assert_eq!(refusals[0].file.file_name().and_then(|name| name.to_str()), Some("shared.yaml"), "{refusals:#?}");
+    assert_eq!(refusals[0].line, Some(line), "{refusals:#?}");
 }

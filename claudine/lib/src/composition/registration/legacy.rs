@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{CLAUDINE_DIR, Entry, Obstruction, PublishError, entry_at, legacy_manifest_path, legacy_revisions_dir};
+use super::{CLAUDINE_DIR, Entry, Obstruction, PublishError, access_log, entry_at, legacy_manifest_path, legacy_revisions_dir};
 
 /// Why [`remove_legacy_registration`] removed nothing.
 #[derive(Debug, thiserror::Error)]
@@ -88,6 +88,7 @@ pub fn remove_legacy_registration(home: &Path) -> Result<LegacyCleanup, CleanupE
 
     let mut cleanup = LegacyCleanup::default();
     for (path, is_directory) in &tree {
+        access_log::note("remove", path);
         let removed = if *is_directory { fs::remove_dir(path) } else { fs::remove_file(path) };
         removed.map_err(|source| CleanupError::Io { action: "remove", path: path.clone(), source })?;
     }
@@ -95,6 +96,7 @@ pub fn remove_legacy_registration(home: &Path) -> Result<LegacyCleanup, CleanupE
         cleanup.removed.push(revisions);
     }
     if manifest_present {
+        access_log::note("remove", &manifest);
         fs::remove_file(&manifest).map_err(|source| CleanupError::Io { action: "remove", path: manifest.clone(), source })?;
         cleanup.removed.push(manifest);
     }
@@ -109,6 +111,7 @@ fn collect_tree(
     tree: &mut Vec<(PathBuf, bool)>,
 ) -> Result<(), CleanupError> {
     let io = |source| CleanupError::Io { action: "read", path: directory.to_path_buf(), source };
+    access_log::note("list", directory);
     for child in fs::read_dir(directory).map_err(io)? {
         let path = child.map_err(io)?.path();
         match inspect(&path)? {

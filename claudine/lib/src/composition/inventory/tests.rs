@@ -140,16 +140,22 @@ fn ill_formed_member_envelopes_are_refused() {
         ("kind: document\n", "its `kind` is `document`"),
         ("types:\n    a: string\n", "declares no `kind`"),
         ("- kind: schema\n", "not a YAML mapping"),
-        ("kind: [schema]\n", "not a string"),
+        ("kind: [schema]\n", "must be a string"),
         ("kind: schema\n$schema:\n    a: string\ntypes:\n    b: string\n", "may not declare `$schema`"),
         ("kind: schema\ntypes: {}\n", "non-empty `types`"),
-        ("kind: schema-trigger\n$schema:\n    a: string\n", "declares `match`"),
+        ("kind: schema-trigger\n$schema:\n    a: string\n", "declares a non-null `match`"),
         ("kind: namespace-schema\n$schema:\n    a: string\n", "string `namespace`"),
         ("kind: namespace-schema\nnamespace: seq\n", "`$schema` mapping"),
         ("kind: yaml-schema\n", "`$schema` mapping"),
         ("kind: schema\nname: Not_Kebab\ntypes:\n    a: string\n", "not a kebab-case identifier"),
-        ("kind: schema\ndescription: [x]\ntypes:\n    a: string\n", "`description` is not a string"),
+        ("kind: schema\ndescription: [x]\ntypes:\n    a: string\n", "`description` must be a string"),
         ("kind: schema\ntypes:\n  a: [\n", "not one YAML document"),
+        // The shared member admission's closed envelope and null rules
+        // (each field's full matrix is Simplified Schema's
+        // `member_envelope` test).
+        ("kind: schema\ntypes:\n    a: string\nextra: 1\n", "`extra` is not a field of a `kind: schema` member"),
+        ("kind: schema-trigger\nmatch:\n    a: string\ndescription:\n", "`description` must not be null"),
+        ("kind: schema-trigger\nmatch:\n", "declares a non-null `match`"),
     ];
     for (text, needle) in cases {
         let error = walk::check_member(text.as_bytes()).expect_err(text);

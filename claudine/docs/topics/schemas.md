@@ -1410,8 +1410,13 @@ The build compiles that folder in whole, sorted by path, and refuses a
 folder that is not a valid registration inventory: a file that is not
 `.yaml`, a name that is not portable (ASCII letters, digits, `.`, `_`, and
 `-`, not a Windows device name), a symlink or junction, two paths that differ
-only in letter case, text that is not UTF-8, or a file whose `kind` envelope
-is ill-formed. The build's error lists every problem.
+only in letter case, text that is not UTF-8, or a file whose envelope is
+ill-formed: an unknown `kind`, a key its kind does not allow, a missing
+required key, or a value of the wrong type (`name: null`, a library with no
+`types`). That envelope check is the one Darkmatter's registration runs on
+the published files, so the build accepts exactly what registration accepts;
+the full preparation of each file still happens when the shipped artifact is
+generated. The build's error lists every problem.
 
 ```mermaid
 flowchart TD

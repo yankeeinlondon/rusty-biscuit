@@ -6,53 +6,27 @@
 //! inventory and generates the embedded include table from [`walk`]'s
 //! result, and by the library ([`super`]), whose tests drive the same
 //! functions over temporary folders. It therefore depends on `std` and
-//! `serde_yaml_ng` only.
+//! `serde_yaml_ng` only, and reaches Simplified Schema's member admission as
+//! `super::member_envelope`: the library's re-export of
+//! `simplified_schema::member_envelope`, and in `build.rs` that same file
+//! included by path, since the build script does not depend on the crate.
 //!
 //! The checks here are structural: what a member file must be for the
-//! inventory to be well formed. Darkmatter's registration loader still
-//! judges every member's full envelope and payload when Claudine's
-//! generator prepares the inventory, and again when a published bundle is
-//! loaded.
+//! inventory to be well formed. A member's envelope is admitted by the same
+//! structural member admission Darkmatter's registration loader classifies
+//! members with (`simplified_schema::member_envelope`), so the build refuses
+//! exactly the envelopes registration refuses. The loader still judges
+//! every member's full envelope and payload when Claudine's generator
+//! prepares the inventory, and again when a published bundle is loaded.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// What a member file is, by its own `kind`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum MemberKind {
-    /// `kind: schema-trigger`: selects and types Markdown documents.
-    Trigger,
-    /// `kind: yaml-schema`: defines a YAML document kind.
-    YamlSchema,
-    /// `kind: namespace-schema`: declares one expression global.
-    Namespace,
-    /// `kind: schema` with `types` and no `$schema`: reusable types.
-    Library,
-}
+// `super::member_envelope` is `simplified_schema::member_envelope` in the
+// library and the same file, included by path, in `build.rs`.
+use super::member_envelope;
 
-impl MemberKind {
-    /// The `kind` value a member of this kind declares.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Trigger => "schema-trigger",
-            Self::YamlSchema => "yaml-schema",
-            Self::Namespace => "namespace-schema",
-            Self::Library => "schema",
-        }
-    }
-
-    /// The variant's name, as the generated include table spells it.
-    #[must_use]
-    pub const fn variant(self) -> &'static str {
-        match self {
-            Self::Trigger => "Trigger",
-            Self::YamlSchema => "YamlSchema",
-            Self::Namespace => "Namespace",
-            Self::Library => "Library",
-        }
-    }
-}
+pub use member_envelope::MemberKind;
 
 /// One member found by [`walk`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,91 +256,16 @@ pub fn case_collisions(paths: &[String]) -> Vec<InventoryError> {
     errors
 }
 
-/// Checks one member's bytes: UTF-8 text holding one YAML mapping whose
-/// `kind` is an allowed member kind with the fields that kind needs.
+/// Checks one member's bytes: UTF-8 text holding one YAML document whose
+/// envelope the shared structural member admission accepts (its `kind` is a
+/// member kind, its keys that kind's closed set, each of the right type).
 /// Returns the text, the kind, and the optional display `name`.
-///
-/// | `kind` | Requires |
-/// |---|---|
-/// | `schema-trigger` | `match` |
-/// | `yaml-schema` | a `$schema` mapping |
-/// | `namespace-schema` | a string `namespace` and a `$schema` mapping |
-/// | `schema` | a non-empty `types` mapping and no `$schema` |
-///
-/// A `name`, when present, is a kebab-case identifier; a `description`,
-/// when present, is a string.
 ///
 /// ## Errors
 ///
 /// Why the bytes are not a well-formed member.
 pub fn check_member(bytes: &[u8]) -> Result<(String, MemberKind, Option<String>), String> {
     let text = std::str::from_utf8(bytes).map_err(|cause| format!("the file is not UTF-8 text: {cause}"))?;
-    let value: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(text).map_err(|cause| format!("the file is not one YAML document: {cause}"))?;
-    let serde_yaml_ng::Value::Mapping(mapping) = &value else {
-        return Err("the file is not a YAML mapping".to_string());
-    };
-    let field = |key: &str| mapping.get(serde_yaml_ng::Value::String(key.to_string()));
-    let kind = match field("kind") {
-        Some(serde_yaml_ng::Value::String(kind)) => kind.as_str(),
-        Some(_) => return Err("its `kind` is not a string".to_string()),
-        None => return Err(format!("it declares no `kind`; a member is {ALLOWED}")),
-    };
-    let is_mapping = |key: &str| matches!(field(key), Some(serde_yaml_ng::Value::Mapping(_)));
-    let kind = match kind {
-        "schema-trigger" => {
-            if field("match").is_none() {
-                return Err("a `schema-trigger` declares `match`".to_string());
-            }
-            MemberKind::Trigger
-        }
-        "yaml-schema" => {
-            if !is_mapping("$schema") {
-                return Err("a `yaml-schema` declares a `$schema` mapping".to_string());
-            }
-            MemberKind::YamlSchema
-        }
-        "namespace-schema" => {
-            if !matches!(field("namespace"), Some(serde_yaml_ng::Value::String(_))) {
-                return Err("a `namespace-schema` declares a string `namespace`".to_string());
-            }
-            if !is_mapping("$schema") {
-                return Err("a `namespace-schema` declares a `$schema` mapping".to_string());
-            }
-            MemberKind::Namespace
-        }
-        "schema" => {
-            if field("$schema").is_some() {
-                return Err("a `kind: schema` member is a types-only library and may not declare `$schema`".to_string());
-            }
-            match field("types") {
-                Some(serde_yaml_ng::Value::Mapping(types)) if !types.is_empty() => MemberKind::Library,
-                _ => return Err("a `kind: schema` member declares a non-empty `types` mapping".to_string()),
-            }
-        }
-        other => return Err(format!("its `kind` is `{other}`; a member is {ALLOWED}")),
-    };
-    if field("description").is_some_and(|description| !matches!(description, serde_yaml_ng::Value::String(_))) {
-        return Err("its `description` is not a string".to_string());
-    }
-    let name = match field("name") {
-        None => None,
-        Some(serde_yaml_ng::Value::String(name)) if is_kebab_case(name) => Some(name.clone()),
-        Some(serde_yaml_ng::Value::String(name)) => {
-            return Err(format!("its `name` `{name}` is not a kebab-case identifier"));
-        }
-        Some(_) => return Err("its `name` is not a string".to_string()),
-    };
-    Ok((text.to_string(), kind, name))
-}
-
-const ALLOWED: &str = "a `schema-trigger`, `yaml-schema`, `namespace-schema`, or types-only `schema`";
-
-/// Lowercase letters, digits, and inner single dashes, starting with a
-/// letter (`inline-compose-schema`).
-fn is_kebab_case(name: &str) -> bool {
-    name.starts_with(|c: char| c.is_ascii_lowercase())
-        && !name.ends_with('-')
-        && !name.contains("--")
-        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    let admitted = member_envelope::admit_member_text(text).map_err(|refusal| refusal.message)?;
+    Ok((text.to_string(), admitted.kind, admitted.name))
 }

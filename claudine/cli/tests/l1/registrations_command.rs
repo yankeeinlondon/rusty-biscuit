@@ -6,8 +6,17 @@
 //! they run in a home with no configuration at all and create nothing there.
 //! `publish` installs the same set and prints the same listing. An ordinary
 //! command (`claudine errors`, which loads the configuration and launches
-//! nothing) never reads, creates, or repairs anything under
-//! `~/.claudine/registrations`.
+//! nothing, and the other commands in the configured-startup table) never
+//! reads, creates, or repairs anything under `~/.claudine/registrations`.
+//!
+//! Unchanged bytes and modification times cannot show a read, so in a
+//! `test-fixtures` build every run also records the registration module's
+//! file-system calls through the `CLAUDINE_TEST_REGISTRATION_ACCESS` seam
+//! (`lib/src/composition/registration/access_log.rs`): an ordinary command
+//! must leave that log empty, and the publishing routes (`claudine setup`,
+//! `claudine registrations publish`) are the controls that fill it. Darkmatter's
+//! loader of an installed bundle is outside that module, so a source scan
+//! proves Claudine never calls it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -47,10 +56,33 @@ fn expected_listing() -> Value {
     Value::Array(inventory().files().iter().map(expected_entry).collect())
 }
 
+/// Where a run's registration access log is written: in the workspace, so
+/// no snapshot of the home sees it.
+fn access_log(fixture: &CliProcessFixture) -> PathBuf {
+    fixture.workspace_path().join("registration-access.log")
+}
+
+/// Takes the access log the runs so far wrote: one `<operation>\t<path>`
+/// line per file-system call of the registration module, empty when none.
+fn take_accesses(fixture: &CliProcessFixture) -> Vec<String> {
+    let log = access_log(fixture);
+    let lines = std::fs::read_to_string(&log).unwrap_or_default().lines().map(str::to_string).collect();
+    let _ = std::fs::remove_file(&log);
+    lines
+}
+
+/// A `claudine` command that records the registration module's file-system
+/// calls (`test-fixtures` builds only; otherwise the variable is ignored).
+fn command(fixture: &CliProcessFixture) -> assert_cmd::Command {
+    let mut command = fixture.command();
+    command.env("CLAUDINE_TEST_REGISTRATION_ACCESS", access_log(fixture));
+    command
+}
+
 /// Runs `claudine registrations <args>`; returns the exit success, stdout,
 /// and stderr.
 fn registrations(fixture: &CliProcessFixture, args: &[&str]) -> (bool, String, String) {
-    let output = fixture.command().arg("registrations").args(args).output().expect("claudine runs");
+    let output = command(fixture).arg("registrations").args(args).output().expect("claudine runs");
     (
         output.status.success(),
         String::from_utf8(output.stdout).expect("stdout is UTF-8"),
@@ -75,11 +107,23 @@ fn configured(prefix: &str) -> CliProcessFixture {
     fixture
 }
 
-/// Runs `claudine errors`, requiring success; returns stderr.
+/// Runs `claudine errors`, requiring success and, in a `test-fixtures`
+/// build, no file-system call of the registration module; returns stderr.
 fn run_ordinary(fixture: &CliProcessFixture) -> String {
-    let output = fixture.command().env("COLUMNS", "200").arg("errors").output().expect("claudine runs");
+    run_passive(fixture, &["errors"])
+}
+
+/// Runs `claudine <args>`, requiring success and, in a `test-fixtures`
+/// build, an empty registration access log; returns stderr.
+fn run_passive(fixture: &CliProcessFixture, args: &[&str]) -> String {
+    let _ = take_accesses(fixture);
+    let output = command(fixture).env("COLUMNS", "200").args(args).output().expect("claudine runs");
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    assert!(output.status.success(), "claudine errors failed:\n{stderr}");
+    assert!(output.status.success(), "claudine {args:?} failed:\n{stderr}");
+    // The publishing controls below prove the seam records in this binary,
+    // so an empty log means no call was made.
+    #[cfg(feature = "test-fixtures")]
+    assert_eq!(take_accesses(fixture), Vec::<String>::new(), "claudine {args:?} touched the registration");
     stderr
 }
 
@@ -198,12 +242,23 @@ fn registrations_publish_installs_the_listing_and_a_second_publish_changes_nothi
     assert!(!fixture.home().join(".darkmatter.yaml").exists());
     assert!(!fixture.home().join(".claudine").join("config.yaml").exists());
     let installed = snapshot(fixture.home());
+    let _ = take_accesses(&fixture);
 
     let (success, second, stderr) = registrations(&fixture, &["publish"]);
 
     assert!(success, "the second publish failed:\n{stderr}");
     assert_eq!(second, first, "an already current installation prints the same listing");
     assert_eq!(snapshot(fixture.home()), installed, "bytes and modification times are unchanged");
+    #[cfg(feature = "test-fixtures")]
+    {
+        let accesses = take_accesses(&fixture);
+        for file in inventory().files() {
+            let installed = file.path().split('/').fold(root.clone(), |path, name| path.join(name));
+            let read = format!("read\t{}", installed.display());
+            assert!(accesses.contains(&read), "the current publish reads `{}`:\n{accesses:#?}", file.path());
+        }
+        assert!(!accesses.iter().any(|line| line.starts_with("write\t")), "{accesses:#?}");
+    }
 }
 
 #[test]
@@ -274,4 +329,116 @@ fn ordinary_commands_repair_neither_missing_nor_stale_members() {
     assert_eq!(snapshot(&registrations_dir(fixture.home())), damaged, "the damage is left as it was");
     assert!(!missing.exists());
     assert_eq!(std::fs::read_to_string(&stale).unwrap(), "stale: true\n");
+}
+
+/// A configured home after `claudine setup`: the bundle published and
+/// registered in `~/.darkmatter.yaml`, as an installed Claudine leaves it.
+/// Setup is the first control: it must record calls into the bundle.
+#[cfg(feature = "test-fixtures")]
+fn published_and_registered(prefix: &str) -> CliProcessFixture {
+    let fixture = configured(prefix);
+    let output = command(&fixture).arg("setup").write_stdin("").output().expect("claudine runs");
+    assert!(output.status.success(), "setup failed:\n{}", String::from_utf8_lossy(&output.stderr));
+    let registered = std::fs::read_to_string(fixture.home().join(".darkmatter.yaml")).unwrap();
+    assert!(
+        registered.contains(claudine::composition::registration::MANIFEST_REFERENCE),
+        "setup registers the manifest:\n{registered}"
+    );
+    let manifest = claudine::composition::registration::manifest_path(fixture.home());
+    let accesses = take_accesses(&fixture);
+    assert!(
+        accesses.contains(&format!("read\t{}", manifest.display())),
+        "setup's publish reads the manifest:\n{accesses:#?}"
+    );
+    fixture
+}
+
+/// Configured startup reaches no registration code: no row's run makes a
+/// single file-system call of the registration module, while setup on the
+/// same home and a later explicit publish do.
+#[cfg(feature = "test-fixtures")]
+#[rstest::rstest]
+#[case::errors(&["errors"])]
+#[case::compose_dry_run(&["compose", "--dry-run", "prompt.md"])]
+#[case::wrapper_dry_run(&["goose", "--dry-run", "hi"])]
+#[case::completions(&["completions", "bash"])]
+fn configured_startup_never_reads_the_published_bundle(#[case] args: &[&str]) {
+    let fixture = published_and_registered("passive-startup-read");
+    std::fs::write(fixture.cwd().join("prompt.md"), "---\nagent: goose\n---\nSay hi.\n").unwrap();
+    let before = snapshot(&registrations_dir(fixture.home()));
+
+    let stderr = run_passive(&fixture, args);
+
+    assert!(!stderr.contains("registration"), "{stderr}");
+    assert_eq!(snapshot(&registrations_dir(fixture.home())), before);
+    let (success, _, stderr) = registrations(&fixture, &["publish"]);
+    assert!(success, "{stderr}");
+    assert!(
+        take_accesses(&fixture).iter().any(|line| line.starts_with("read\t")),
+        "the explicit publish, the second control, reads the installed bundle"
+    );
+}
+
+/// Darkmatter loads an installed bundle outside Claudine's registration
+/// module, where the access log cannot see it. Claudine's sources must
+/// therefore never call that loader, and must locate the published tree only
+/// inside the module (and setup, which writes its `register` entry).
+#[test]
+fn only_the_registration_module_locates_or_loads_an_installed_bundle() {
+    const DARKMATTER_LOADERS: &[&str] =
+        &["RegisteredHosts::load", "load_registrations", "load_entries", "load_snapshot", "load_snapshot_with"];
+    // A locator function counts where it is called, so a field of the same
+    // name elsewhere (`provider_overlay/lease.rs`'s `lock_path`) is not one.
+    const LOCATORS: &[&str] =
+        &["registrations_dir(", "output_root(", "manifest_path(", "lock_path(", "MANIFEST_REFERENCE"];
+    const SETUP: &[&str] = &["lib/src/config/setup.rs", "cli/src/commands/init_wizard.rs"];
+
+    let area = biscuit_test_harness::manifest_dir!().parent().expect("cli crate has a package area").to_path_buf();
+    let mut files = Vec::new();
+    for sub in ["lib/src", "cli/src"] {
+        let mut pending = vec![area.join(sub)];
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap_or_else(|error| panic!("{}: {error}", dir.display())) {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    assert!(files.len() > 100, "the scan reached both crates: {} files", files.len());
+
+    let mut found = Vec::new();
+    for path in files {
+        let relative = path.strip_prefix(&area).unwrap().to_string_lossy().replace('\\', "/");
+        let in_module = relative == "lib/src/composition/registration.rs"
+            || relative.starts_with("lib/src/composition/registration/");
+        let source = std::fs::read_to_string(&path).unwrap();
+        for (number, line) in source.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for name in DARKMATTER_LOADERS.iter().chain(if in_module { &[][..] } else { LOCATORS }) {
+                if *name == "MANIFEST_REFERENCE" && SETUP.contains(&relative.as_str()) {
+                    continue;
+                }
+                if names_identifier(line, name) {
+                    found.push(format!("{relative}:{}: `{name}`", number + 1));
+                }
+            }
+        }
+    }
+    assert!(found.is_empty(), "an installed bundle is located or loaded outside the registration module:\n{}", found.join("\n"));
+}
+
+/// Whether `line` holds `name` with no identifier character on either side
+/// (on the left only, when `name` ends in its call's parenthesis).
+fn names_identifier(line: &str, name: &str) -> bool {
+    let is_identifier = |c: char| c.is_alphanumeric() || c == '_';
+    line.match_indices(name).any(|(start, _)| {
+        !line[..start].chars().next_back().is_some_and(is_identifier)
+            && (name.ends_with('(') || !line[start + name.len()..].chars().next().is_some_and(is_identifier))
+    })
 }

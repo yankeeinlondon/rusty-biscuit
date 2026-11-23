@@ -131,9 +131,10 @@ libc = "0.2"
 windows = { version = "0.62", features = ["Win32_Foundation"] }
 
 [build-dependencies]
-# `build.rs` compiles `src/composition/inventory/walk.rs`; Simplified Schema is
-# not a build dependency, so the build check is structural and the generator
-# runs the full member preparation.
+# `build.rs` compiles `src/composition/inventory/walk.rs` and, by path,
+# Simplified Schema's `member_envelope.rs`; Simplified Schema is not a build
+# dependency, so the build check is structural and the generator runs the
+# full member preparation.
 serde_yaml_ng = "0.10"
 
 [dev-dependencies]

@@ -25,6 +25,10 @@ use simplified_schema::resolve::bundle::BundleSources;
 
 pub mod walk;
 
+// `walk.rs` names the member admission through its parent, so the same text
+// compiles in `build.rs`, which includes the file by path.
+use simplified_schema::member_envelope;
+
 pub use walk::MemberKind;
 
 /// The inventory's repository-relative folder.

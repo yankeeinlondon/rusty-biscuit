@@ -165,7 +165,14 @@ loads): listing and detail read only `RegistrationInventory::claudine()`
 (XXH64 seed 0 as 16 hex digits), `publish` calls the same
 `registration::publish` and never edits `~/.darkmatter.yaml`, and
 `just install` runs it via `just publish-registrations` with the release
-binary it built. No per-command refresh exists. Tests:
+binary it built. No per-command refresh exists, and no other command reads
+the tree: in a `test-fixtures` build every file-system call of
+`composition/registration/` appends a line to the file the
+`CLAUDINE_TEST_REGISTRATION_ACCESS` seam names (`access_log.rs`; a new call
+there goes through `access_log::note`), which ordinary commands must leave
+empty, and a source scan keeps Darkmatter's installed-bundle loader
+(`load_snapshot`, `load_registrations`, `RegisteredHosts::load`) and the
+tree's locators out of every other Claudine file. Tests:
 `cli/tests/l1/registrations_command.rs`. Maintainer docs:
 [`claudine registrations`](../../../claudine/docs/cli/registrations.md).
 
@@ -1029,8 +1036,10 @@ rebuilt registry equals `claudine_registry()`.
 `claudine/registration/` is compiled in by `build.rs`, which walks it with
 `inventory/walk.rs` (std + `serde_yaml_ng` only, `#[path]`-included by the
 build script) and fails the build listing every nonportable name, non-`.yaml`
-file, symlink/junction, case collision, non-UTF-8 text, or bad `kind`
-envelope. `inventory::members()` is the sorted table (`InventoryMember {path,
+file, symlink/junction, case collision, non-UTF-8 text, or an envelope the
+shared structural member admission refuses (`simplified-schema/lib/src/member_envelope.rs`,
+`#[path]`-included by `build.rs`, `super::member_envelope` in `walk.rs`;
+the same check Darkmatter's registration classifies members with). `inventory::members()` is the sorted table (`InventoryMember {path,
 text, kind, name}`; `bundle_path()` is `schemas/<path>`), `bundle_sources()`
 the embedded `<claudine>` bundle and `bundle_context()` its one detached
 context. `bundle.rs`'s registered profile, `shipped.rs::sources()`, the namespace catalog

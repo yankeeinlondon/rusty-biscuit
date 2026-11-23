@@ -1,7 +1,8 @@
 //! Embeds Claudine's registration inventory, `claudine/registration/`.
 //!
 //! The walk and member checks are `src/composition/inventory/walk.rs`, which
-//! the library compiles too. A folder that is not a valid inventory fails
+//! the library compiles too; its member envelope admission is Simplified
+//! Schema's `member_envelope.rs`, included by path. A folder that is not a valid inventory fails
 //! the build with every problem listed. Otherwise the build writes
 //! `$OUT_DIR/registration_inventory.rs`: one `InventoryMember` per file, in
 //! sorted relative-path order, each including its file's text. Cargo reruns
@@ -15,10 +16,15 @@ use std::path::PathBuf;
 #[path = "src/composition/inventory/walk.rs"]
 mod walk;
 
+#[allow(dead_code)]
+#[path = "../../simplified-schema/lib/src/member_envelope.rs"]
+mod member_envelope;
+
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets CARGO_MANIFEST_DIR"));
     let root = manifest_dir.join("../registration");
     println!("cargo:rerun-if-changed=src/composition/inventory/walk.rs");
+    println!("cargo:rerun-if-changed=../../simplified-schema/lib/src/member_envelope.rs");
     // A directory directive makes Cargo scan the whole tree for changed
     // modification times, which covers additions, deletions, and moves; each
     // file gets its own directive as well.
@@ -43,9 +49,9 @@ fn main() {
         };
         let _ = writeln!(
             table,
-            "    InventoryMember {{ path: {:?}, text: include_str!({file:?}), kind: MemberKind::{}, name: {name} }},",
+            "    InventoryMember {{ path: {:?}, text: include_str!({file:?}), kind: MemberKind::{:?}, name: {name} }},",
             member.path,
-            member.kind.variant()
+            member.kind
         );
     }
     table.push(']');

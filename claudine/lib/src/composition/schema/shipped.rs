@@ -437,7 +437,7 @@ pub fn prepare_kinds() -> Result<Vec<KindRecord>, String> {
             let json_schema = resolved.json_schema.clone();
             let source = RegisteredSource { host: crate::composition::registration::HOST_ID.to_string(), path: path.clone(), file: location };
             let definition =
-                RegisteredDefinition::new(source, resolved, path.clone()).map_err(|error| format!("`{path}` claims no kind: {error}"))?;
+                RegisteredDefinition::new(source, member.text, resolved, path.clone()).map_err(|error| format!("`{path}` claims no kind: {error}"))?;
             Ok(KindRecord { kinds: definition.definition().kinds().to_vec(), path, json_schema })
         })
         .collect()
