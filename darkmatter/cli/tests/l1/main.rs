@@ -16,8 +16,7 @@ mod union_fixtures;
 mod position_fixtures;
 #[path = "../../../lib/tests/content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
-// Only its host texts and lifecycle writer are used here.
-#[allow(dead_code)]
+// Only its bundles are used here; the module allows its own dead code.
 #[path = "../../../lib/tests/host_fixtures/mod.rs"]
 mod host_fixtures;
 

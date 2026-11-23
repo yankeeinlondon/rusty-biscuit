@@ -48,6 +48,7 @@ use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use biscuit_hash::xx_hash_bytes;
+use darkmatter::config::registration::RegisteredHosts;
 use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, Route, YamlContract, YamlValidation};
 use simplified_schema::yaml_documents::LoadedYamlDocument;
@@ -55,6 +56,7 @@ use simplified_schema::resolve::buffers::{self, SourceBuffers};
 use simplified_schema::resolve::observed;
 use simplified_schema::{SchemaError, parse_selected_standalone_schema_document};
 
+use super::hosts::InstalledHosts;
 use super::references::SchemaReferenceFacts;
 use crate::config_contracts::ConfigurationFile;
 use crate::context::DocumentResolution;
@@ -129,6 +131,7 @@ pub(super) struct ContractJob {
     key: u64,
     context: FileResolutionContext,
     kinds: Option<InstalledKinds>,
+    hosts: Option<Arc<RegisteredHosts>>,
     workspace_roots: Vec<PathBuf>,
     sources: SourceBuffers,
     epoch: u64,
@@ -162,6 +165,7 @@ impl YamlContracts {
         context: &FileResolutionContext,
         generation: u64,
         kinds: Option<&InstalledKinds>,
+        hosts: Option<&InstalledHosts>,
     ) -> Option<u64> {
         let text_hash = xx_hash_bytes(text.as_bytes());
         let declaration = match self.declarations.get(path) {
@@ -177,6 +181,8 @@ impl YamlContracts {
         bytes.extend_from_slice(&file_resolution_context_identity(context).to_le_bytes());
         bytes.extend_from_slice(&generation.to_le_bytes());
         bytes.extend_from_slice(&kinds.map_or(0, |kinds| kinds.version).to_le_bytes());
+        // A changed registration can change which definition claims a kind.
+        bytes.extend_from_slice(&hosts.map_or(0, |hosts| hosts.version).to_le_bytes());
         Some(xx_hash_bytes(&bytes))
     }
 
@@ -207,6 +213,7 @@ impl YamlContracts {
         key: u64,
         context: &FileResolutionContext,
         kinds: Option<InstalledKinds>,
+        hosts: Option<Arc<RegisteredHosts>>,
         workspace_roots: &[PathBuf],
         sources: &SourceBuffers,
     ) -> Option<ContractJob> {
@@ -221,6 +228,7 @@ impl YamlContracts {
             key,
             context: context.clone(),
             kinds,
+            hosts,
             workspace_roots: workspace_roots.to_vec(),
             sources: sources.clone(),
             epoch: self.epoch,
@@ -342,8 +350,9 @@ impl OverlayCache {
             return StandaloneNamedTypes::default();
         };
         let kinds = super::schema::trigger_boundary(path, workspace_roots).and_then(|_| self.triggers.lookup_kinds(path));
+        let hosts = self.hosts.lookup(context);
         self.contracts
-            .key(text, path, context, resolution.generation(), kinds.as_ref())
+            .key(text, path, context, resolution.generation(), kinds.as_ref(), hosts.as_ref())
             .and_then(|key| self.contracts.lookup(path, key))
             .and_then(|prepared| prepared.standalone.clone())
             .unwrap_or_default()
@@ -390,9 +399,9 @@ impl ContractJob {
     /// state.
     pub(super) fn run(self) -> PreparedJob {
         work_counters::record_yaml_preparation();
-        let Self { path, text, key, context, kinds, workspace_roots, sources, epoch, seq } = self;
+        let Self { path, text, key, context, kinds, hosts, workspace_roots, sources, epoch, seq } = self;
         let (prepared, observed) = buffers::with(&sources, || {
-            observed::collect(|| prepare(&path, &text, &context, kinds, &workspace_roots))
+            observed::collect(|| prepare(&path, &text, &context, kinds, hosts, &workspace_roots))
         });
         let Prepared { contract, validation, schema_references, standalone, named_types, mut deps } = prepared;
         deps.extend(observed.read);
@@ -445,6 +454,7 @@ fn prepare(
     text: &str,
     context: &FileResolutionContext,
     kinds: Option<InstalledKinds>,
+    hosts: Option<Arc<RegisteredHosts>>,
     workspace_roots: &[PathBuf],
 ) -> Prepared {
     let mut prepared = Prepared {
@@ -475,7 +485,11 @@ fn prepare(
     }
     let registry = kinds.map_or_else(darkmatter::markdown::schemas::shipped_kind_registry, |kinds| kinds.registry);
     let schema_roots = registry.roots().search_paths().to_vec();
-    let schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(registry);
+    let mut schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(registry);
+    // Registered `kind: yaml-schema` definitions: the lowest kind tier.
+    if let Some(hosts) = hosts.filter(|hosts| !hosts.is_empty()) {
+        schemas = schemas.with_registered_hosts(hosts);
+    }
     let contract = schemas.prepare_yaml_contract(&loaded).map_err(Arc::new);
     let kind_route = match &contract {
         Ok(Some(contract)) => matches!(contract.route(), Route::Kind(_)),
@@ -547,4 +561,28 @@ fn watched_folders<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<WatchedF
                 .flatten(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A document's contract is keyed by the installed registrations'
+    /// version, so an install that changes them re-prepares it even when
+    /// nothing else invalidated the contract.
+    #[test]
+    fn the_contract_key_follows_the_installed_registrations_version() {
+        let fixture = crate::host_fixtures::Fixture::new();
+        let hosts = fixture.hosts(&[&format!("../host/{}", crate::host_fixtures::MANIFEST_NAME)]);
+        let installed = |version| InstalledHosts { hosts: Arc::clone(&hosts), version, load_error: None };
+        let path = fixture.path("work/team.yaml");
+        let context = fixture.context().for_source(&path);
+        let mut contracts = YamlContracts::default();
+        let mut key = |hosts: Option<&InstalledHosts>| contracts.key("kind: roster\n", &path, &context, 1, None, hosts).expect("loads");
+
+        let (none, first, again, second) = (key(None), key(Some(&installed(1))), key(Some(&installed(1))), key(Some(&installed(2))));
+        assert_ne!(none, first);
+        assert_eq!(first, again);
+        assert_ne!(first, second);
+    }
 }

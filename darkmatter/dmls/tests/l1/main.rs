@@ -9,14 +9,14 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-// Darkmatter's registered-host fixtures (the `acme` and `relay` installs);
-// only their texts and artifact writers are used here.
-#[allow(dead_code)]
+// Darkmatter's registered-host fixtures (the `acme` and `relay` format 2
+// bundles and the temporary install fixture).
 #[path = "../../../lib/tests/host_fixtures/mod.rs"]
 mod host_fixtures;
 
 mod bench_index;
 mod claudine_editor_parity;
+mod claudine_host;
 mod collection_editor;
 mod config_contracts;
 mod claudine_schema_discovery;
@@ -67,6 +67,8 @@ mod referenced_targets;
 mod host_registration_watches;
 mod registered_host_editor_agreement;
 mod registered_host_views;
+mod registered_trigger_conflict;
+mod registered_yaml_kinds;
 mod registry_observability;
 mod registry_preparation;
 mod repository_contexts;

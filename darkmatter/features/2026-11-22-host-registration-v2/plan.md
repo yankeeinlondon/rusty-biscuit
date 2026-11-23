@@ -3,7 +3,7 @@ kind: plan
 total-phases: 6
 created: 2026-11-22
 status: planned
-phase: 2
+phase: 3
 agent: codex/gpt-6.2-sol
 yolo: true
 packages:
@@ -81,6 +81,74 @@ skills_files_updated_during_phase_1:
 - .claude/skills/simplified-schema/SKILL.md
 - .claude/skills/darkmatter/SKILL.md
 - darkmatter/docs/use-skills/use-dmls/schemas.md
+source_files_during_phase_2:
+- claudine/lib/src/composition/lifecycle/mod.rs
+- claudine/schemas/globals.lifecycle.json
+- claudine/lib/tests/l1/host_catalog.rs
+- claudine/lib/tests/l1/host_publication.rs
+- simplified-schema/lib/src/resolve.rs
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/registration/manifest.rs
+- darkmatter/lib/src/config/registration/namespaces.rs
+- darkmatter/lib/src/config/registration/selection.rs
+- darkmatter/lib/src/lifecycle/host_profile.rs
+- darkmatter/lib/src/lifecycle/host_profile/tests.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/expression/binding.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/catalog/discovery_tests.rs
+- darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/benches/pipeline_work_support/mod.rs
+- darkmatter/lib/tests/host_fixtures/mod.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/host_namespaces.rs
+- darkmatter/lib/tests/l1/host_registration.rs
+- darkmatter/lib/tests/l1/host_selection.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/cli/tests/l1/host_registration.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/dmls/benches/pipeline_work_a3.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/lib.rs
+- darkmatter/dmls/src/overlay/event_views.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/src/overlay/hosts.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- darkmatter/dmls/tests/l1/claudine_host.rs
+- darkmatter/dmls/tests/l1/edit_action_editor.rs
+- darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+- darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+- darkmatter/dmls/tests/l1/host_globals.rs
+- darkmatter/dmls/tests/l1/host_registration_watches.rs
+- darkmatter/dmls/tests/l1/lifecycle_event_views.rs
+- darkmatter/dmls/tests/l1/lifecycle_host_profile.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs
+- darkmatter/dmls/tests/l1/registered_host_views.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/docs/topics/lifecycle/host-artifact.md
+- darkmatter/docs/topics/host-functions.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/schema.md
+- darkmatter/docs/use-skills/use-dmls/schemas.md
 ---
 
 # Host registration v2 implementation plan
@@ -151,16 +219,16 @@ Start on the tree containing the completed `2026-11-22-object-composition` prere
 
 ## Phase 2 — Passive host profiles
 
-- [ ] **Catalog preparation**
+- [x] **Catalog preparation**
   - Implement Rule 6, shared by the verified disk loader and the embedded Claudine generator. Return the prepared catalog and exact dependency digest map from the same preparation pass. Verify multi-file and transitive hash coverage, path-independent identity, declaration and property spans, binding checks, and version 1 and stale artifact refusal.
   - Build v2 fixture constructors in `darkmatter/lib/tests/host_fixtures/mod.rs` and the DMLS L1 helpers. Give them explicit functions to re-address a fixture after legitimate member edits and to corrupt a single boundary without repairing it. Keep representative function catalog and facts pairs. Retain format 1 fixtures only for upgrade diagnostics and legacy-discovery absence tests.
 
-- [ ] **Host selection**
+- [x] **Host selection**
   - Classify each verified files member, prepare every trigger and YAML definition, and build `RegisteredHosts` with matched trigger indices and registered-kind claims. Use the shared resolver, namespace builder, and YAML claim constructor.
   - Migrate `DarkmatterSchemas::registered_selection_for` and `registered_matches`, composition host capture and schema validation, and DMLS `HostView` and `select_host` to the shared Markdown selection result. Remove legacy imports and probes from `config/registration/selection.rs`, `markdown/schemas/catalog.rs`, DMLS `overlay/{hosts,mod}.rs`, and provider test helpers.
   - Convert the previous legacy editor tests for global hover, navigation, and lifecycle typing to explicitly registered fixtures, including `host_globals.rs`, `lifecycle_host_profile.rs`, `lifecycle_event_views.rs`, and `edit_action_editor.rs`. Convert `pipeline_work_a3.rs` and `pipeline_work_support` fixtures to v2 so benchmarks still measure registered host analysis. Change negative legacy tests to assert that a root-local globals file supplies no host. Keep the existing function facts freshness and host-scope tests.
 
-- [ ] **Reader checkpoint**
+- [x] **Reader checkpoint**
   - Regenerate the SimplifiedSchema and Darkmatter shipped artifacts in dependency order using their area `just shipped-schemas` recipes. The root coordinator is used after the Claudine cutover in Phase 4. Run targeted nextest for trigger discovery, shipped envelopes, and v2 registration and selection against the new artifacts.
   - Prove refused registration keeps watches on the manifest, listed paths and missing parents. Cover reordered lists, moved copies, same-host disagreements, multiple hosts, literal mismatch, path qualifiers, malformed presence operands, shared-event-only documents, and grant-independent passive analysis.
 
@@ -188,7 +256,7 @@ At the final checkpoint audit new parse paths for load-bearing `#[serde(default)
 - [ ] **Trigger layer**
   - Implement Rule 8 in `config/registration/merge.rs` and `markdown/schemas/mod.rs`. Carry winning provenance through `EffectiveSchema` and keep the static cache separate from pending slot resolution. Wire compose, clean, validate, detailed trigger reporting, and DMLS schema diagnostics through the same layer. For a failed layer retain syntax diagnostics and omit dependent schema features.
   - Add public effective-schema regressions for equivalent declarations, enum/string narrowing, required vs optional, effective nullability, descriptions/examples/constraints/defaults, recursive aliases, nested rules, and a narrower third type that must still expose an incompatible pair. Cover unmatched conflicts, same-file suppression, arm order, inherited keys, a competing alternative key, second root union, nondefault root constraints, proven local override, passive unresolved templates, and conflict survival under an authored override. Assert the conflict code and source relationships in CLI and DMLS.
-- [ ] **YAML tier**
+- [x] **YAML tier**
   - Own `markdown/schemas/yaml_documents/`, the YAML branch of `cli/src/commands/schema/validate.rs`, and DMLS YAML preparation/key changes in `overlay/yaml_contract.rs`. Implement Rule 9 using the selected definition's host identity. Use the loaded host view for DMLS contract preparation even when no Markdown trigger work is outstanding. Leave debounce and router invalidation to Phase 5.
   - Test identical copies, distinct definitions within and across hosts, built-in and local winners, unreadable roots, an incomplete local claim, registered precedence over a root schema, no kind claim falling through to a root schema, and registered YAML navigation/diagnostics from the source path. Prove only whole-document validation takes place.
 

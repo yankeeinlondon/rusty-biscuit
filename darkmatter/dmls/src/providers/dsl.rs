@@ -291,9 +291,7 @@ fn interpolation_candidates(
 }
 
 /// The host global catalogs of the document's selected host view
-/// ([`DocumentContext::host_view`]); none for an `md` document. A legacy
-/// catalog that failed to load contributes no globals here; [`diagnostics`]
-/// reports it ([`host_catalog_diagnostics`]).
+/// ([`DocumentContext::host_view`]); none for an `md` document.
 pub(crate) fn host_catalogs(ctx: &DocumentContext) -> HostCatalogs {
     HostCatalogs(ctx.host_view())
 }
@@ -323,76 +321,6 @@ fn enter_view_functions(
     view: &crate::overlay::hosts::HostView,
 ) -> Vec<darkmatter::markdown::compose::expression::HostFunctionScope> {
     view.functions().iter().rev().map(|functions| functions.enter()).collect()
-}
-
-/// One `dm.schema.host_catalog` warning per host function catalog that
-/// failed to load (or names a built-in function), at the top of the
-/// document: the functions it declares are unknown here.
-fn host_function_catalog_diagnostics(
-    failed: &[darkmatter::markdown::schemas::catalog::HostFunctionCatalogError],
-    out: &mut Vec<Diagnostic>,
-) {
-    for error in failed {
-        out.push(diagnostic(
-            Range::default(),
-            DiagnosticSeverity::WARNING,
-            code::SCHEMA_HOST_CATALOG,
-            source::SCHEMA,
-            format!("host {error}; the functions it declares are not known to this document"),
-        ));
-    }
-}
-
-/// One `dm.schema.host_catalog` warning per host catalog that failed to load,
-/// at the top of the document: its globals are unknown here, so expressions
-/// reading them are validated as document properties. The message is the
-/// catalog error, which names the file, the field, and the reason.
-fn host_catalog_diagnostics(
-    failed: &[darkmatter::markdown::schemas::catalog::CatalogError],
-    out: &mut Vec<Diagnostic>,
-) {
-    for error in failed {
-        out.push(diagnostic(
-            Range::default(),
-            DiagnosticSeverity::WARNING,
-            code::SCHEMA_HOST_CATALOG,
-            source::SCHEMA,
-            format!("host {error}; the globals it declares are not known to this document"),
-        ));
-    }
-}
-
-/// One `dm.lifecycle.incomplete_analysis` warning per host catalog whose
-/// lifecycle artifact could not be used, at the top of a document with
-/// frontmatter, when no other catalog's could: the document's lifecycle
-/// stacks are then analyzed as the `md` host's, so a host-only event, verb,
-/// or rename is not seen. The message is the artifact's reason.
-/// Without a supplied `host`, the document's selected one is read.
-fn lifecycle_host_diagnostics(
-    ctx: &DocumentContext,
-    host: Option<&crate::overlay::event_views::LifecycleHost>,
-    out: &mut Vec<Diagnostic>,
-) {
-    if ctx.overlay.is_none() {
-        return;
-    }
-    let discovered;
-    let host = match host {
-        Some(host) => host,
-        None => {
-            discovered = crate::overlay::event_views::LifecycleHost::for_document(ctx);
-            &discovered
-        }
-    };
-    for reason in host.incomplete() {
-        out.push(diagnostic(
-            Range::default(),
-            DiagnosticSeverity::WARNING,
-            code::LIFECYCLE_INCOMPLETE_ANALYSIS,
-            source::SCHEMA,
-            format!("{reason}; lifecycle stacks are analyzed as the `md` host's"),
-        ));
-    }
 }
 
 pub(super) fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprCompletion>) -> Vec<CompletionCandidate> {
@@ -821,26 +749,12 @@ pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
 
 // ── Diagnostics ─────────────────────────────────────────────────────────────
 
-/// All Layer-3 DSL diagnostics for the document, reading its lifecycle
-/// host for the incomplete-analysis check.
+/// All Layer-3 DSL diagnostics for the document.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
-    diagnostics_under(ctx, None)
-}
-
-/// [`diagnostics`] with the incomplete-analysis check under `host`, which is
-/// not rediscovered.
-pub fn diagnostics_with_host(ctx: &DocumentContext, host: &crate::overlay::event_views::LifecycleHost) -> Vec<Diagnostic> {
-    diagnostics_under(ctx, Some(host))
-}
-
-fn diagnostics_under(ctx: &DocumentContext, host: Option<&crate::overlay::event_views::LifecycleHost>) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let view = ctx.host_view();
     let _host_functions = enter_view_functions(&view);
-    host_catalog_diagnostics(view.catalog_errors(), &mut out);
-    host_function_catalog_diagnostics(view.function_errors(), &mut out);
     let catalogs = HostCatalogs(view);
-    lifecycle_host_diagnostics(ctx, host, &mut out);
     unknown_directive_diagnostics(ctx, &mut out);
     malformed_option_diagnostics(ctx, &mut out);
     block_pairing_diagnostics(ctx, &mut out);

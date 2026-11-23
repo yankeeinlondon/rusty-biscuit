@@ -173,6 +173,13 @@ pub struct GlobalDeclaration {
 
 #[allow(missing_docs)]
 impl GlobalDeclaration {
+    /// A declaration prepared outside a catalog document: a host's
+    /// `kind: namespace-schema` file
+    /// ([`crate::config::registration::namespaces`]).
+    pub(crate) fn new(name: String, definition: PropertyDef, definitions: Arc<DefinitionTable>) -> Self {
+        Self { name, definition, definitions }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -323,58 +330,6 @@ impl GlobalCatalog {
         })
     }
 
-    /// Loads a host catalog file found by discovery, whose requirements the
-    /// reader does not know: every global it declares must be a non-empty
-    /// object shape, and none may be a reserved root or Darkmatter global.
-    /// Editors use this; a host loads its own catalog with
-    /// [`Self::from_documents`] and its exact [`GlobalRequirement`]s.
-    ///
-    /// ## Errors
-    ///
-    /// As [`Self::from_file`]; a reserved or Darkmatter name is
-    /// [`CatalogErrorReason::Unknown`].
-    pub fn from_host_file(path: &Path, context: &biscuit_file::FileResolutionContext) -> Result<Self, CatalogError> {
-        let text = std::fs::read_to_string(path).map_err(|source| CatalogError {
-            catalog: path.display().to_string(),
-            field: String::new(),
-            reason: CatalogErrorReason::Resolve(Box::new(SchemaError::Io { path: path.to_path_buf(), source })),
-        })?;
-        Self::from_host_text(path, &text, context)
-    }
-
-    /// [`Self::from_host_file`] over `text`, the bytes the caller already
-    /// read from `path`; `path` names the catalog and locates its imports,
-    /// and is not read again. Lifecycle discovery builds a profile from the
-    /// same bytes it hashed against the artifact.
-    pub(crate) fn from_host_text(
-        path: &Path,
-        text: &str,
-        context: &biscuit_file::FileResolutionContext,
-    ) -> Result<Self, CatalogError> {
-        let catalog = path.display().to_string();
-        // A permissive probe for the declared names only: a document it
-        // cannot read, or a non-string key it skips, still fails in `load`,
-        // which validates the whole document with a located error.
-        let declared: Vec<String> = serde_yaml_ng::from_str::<YamlValue>(text)
-            .ok()
-            .and_then(|root| root.get("$schema").and_then(YamlValue::as_mapping).cloned())
-            .map(|map| map.keys().filter_map(|key| key.as_str().map(str::to_string)).collect())
-            .unwrap_or_default();
-        if let Some(name) = declared
-            .iter()
-            .find(|name| DARKMATTER_GLOBALS.iter().any(|global| global.name == name.as_str()))
-        {
-            return Err(CatalogError {
-                catalog,
-                field: format!("$schema.{name}"),
-                reason: CatalogErrorReason::Unknown,
-            });
-        }
-        let requirements: Vec<GlobalRequirement> = declared.into_iter().map(GlobalRequirement::owned_shape).collect();
-        let dir = path.parent().unwrap_or_else(|| Path::new("."));
-        Self::load_disk(&catalog, text, dir, context, &requirements)
-    }
-
     fn load_embedded(
         path: &str,
         documents: &[EmbeddedDocument<'_>],
@@ -456,6 +411,14 @@ impl GlobalCatalog {
             );
         }
         Ok(Self { description, globals })
+    }
+
+    /// A catalog of `declarations` prepared one by one (a registered host's
+    /// namespace files), in the given order. The caller has checked their
+    /// names are distinct.
+    pub(crate) fn from_declarations(declarations: impl IntoIterator<Item = GlobalDeclaration>) -> Self {
+        let globals = declarations.into_iter().map(|declaration| (declaration.name.clone(), declaration)).collect();
+        Self { description: None, globals }
     }
 
     /// The catalog's `description`.
@@ -631,55 +594,7 @@ impl From<Arc<GlobalCatalog>> for CatalogHandle {
     }
 }
 
-/// The host catalogs in a document's schema roots: every top-level
-/// `.yaml`/`.yml` file claiming the catalog envelope, other than one
-/// declaring Darkmatter's own globals, loaded as
-/// [`GlobalCatalog::from_host_file`] loads it, from the bytes read to
-/// recognize it. A file name in an earlier root shadows the same name in
-/// later ones. Passive: files are read once each, nothing runs.
-///
-/// A catalog that fails to load is returned as its error so a caller can
-/// report it; the others still load.
-pub fn host_catalogs(context: &biscuit_file::FileResolutionContext) -> Vec<Result<GlobalCatalog, CatalogError>> {
-    host_catalog_files(context).into_iter().map(|(_, catalog)| catalog).collect()
-}
-
-/// [`host_catalogs`], each catalog beside the file it was loaded from, so a
-/// caller can leave out the catalogs of a known host (host selection's
-/// legacy view).
-pub fn host_catalog_files(
-    context: &biscuit_file::FileResolutionContext,
-) -> Vec<(std::path::PathBuf, Result<GlobalCatalog, CatalogError>)> {
-    let Ok(roots) = simplified_schema::roots::SchemaRoots::for_document(context) else {
-        return Vec::new();
-    };
-    let mut seen = std::collections::BTreeSet::new();
-    let mut catalogs = Vec::new();
-    for root in roots.search_paths() {
-        let Ok(entries) = std::fs::read_dir(root) else { continue };
-        let mut files: Vec<_> = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "yaml" || ext == "yml"))
-            .collect();
-        files.sort();
-        for path in files {
-            let Some(name) = path.file_name().map(|name| name.to_os_string()) else { continue };
-            if !seen.insert(name) {
-                continue;
-            }
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            if !is_global_catalog(&text) || declares_fm(&text) {
-                continue;
-            }
-            let catalog = GlobalCatalog::from_host_text(&path, &text, context);
-            catalogs.push((path, catalog));
-        }
-    }
-    catalogs
-}
-
-/// Why a host function catalog in a schema root did not load.
+/// Why a host function catalog did not load.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostFunctionCatalogError {
     pub path: std::path::PathBuf,
@@ -694,60 +609,6 @@ impl std::fmt::Display for HostFunctionCatalogError {
 
 impl std::error::Error for HostFunctionCatalogError {}
 
-/// The host function catalogs in a document's schema roots, each as an
-/// analysis-only [`HostFunctions`](crate::markdown::compose::expression::HostFunctions)
-/// set: every top-level `.yaml`/`.yml` file claiming the function-catalog
-/// envelope ([`is_host_function_catalog`]), with its facts read from
-/// `<stem>.facts.json` beside it. A file name in an earlier root shadows the
-/// same name in later ones. Passive: files are read, nothing runs, and no
-/// host handler exists in the result.
-///
-/// A catalog that does not load, or that names a built-in function, is
-/// returned as its error; a missing or bad facts artifact is not an error but
-/// makes the affected functions incomplete.
-///
-/// The process keeps one result per catalog path: the catalog's content
-/// hash, the artifact as read, and the loaded set or its error. An unchanged
-/// revision reuses that result, an error included; a changed catalog or
-/// artifact replaces it, so a replaced catalog is freed once no caller holds
-/// a set, clone, or scope guard from it. A set obtained earlier keeps
-/// working after its path's entry is replaced.
-pub fn host_function_catalogs(
-    context: &biscuit_file::FileResolutionContext,
-) -> Vec<Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>> {
-    host_function_catalog_files(context).into_iter().map(|(_, set)| set).collect()
-}
-
-/// [`host_function_catalogs`], each set beside its catalog file.
-pub fn host_function_catalog_files(
-    context: &biscuit_file::FileResolutionContext,
-) -> Vec<(std::path::PathBuf, Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>)> {
-    let Ok(roots) = simplified_schema::roots::SchemaRoots::for_document(context) else {
-        return Vec::new();
-    };
-    let mut seen = std::collections::BTreeSet::new();
-    let mut sets = Vec::new();
-    for root in roots.search_paths() {
-        let Ok(entries) = std::fs::read_dir(root) else { continue };
-        let mut files: Vec<_> = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "yaml" || ext == "yml"))
-            .collect();
-        files.sort();
-        for path in files {
-            let Some(name) = path.file_name().map(|name| name.to_os_string()) else { continue };
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            if !is_host_function_catalog(&text) || !seen.insert(name) {
-                continue;
-            }
-            let set = host_function_set(&path, &text);
-            sets.push((path, set));
-        }
-    }
-    sets
-}
-
 /// The artifact's state, as part of a cache key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ArtifactKey {
@@ -757,11 +618,6 @@ enum ArtifactKey {
 }
 
 impl ArtifactKey {
-    /// The companion file at `path` as a reader receives it.
-    fn read(path: &Path) -> Self {
-        Self::from_read(std::fs::read(path))
-    }
-
     /// The companion file as `read` returned its bytes.
     fn from_read(read: std::io::Result<Vec<u8>>) -> Self {
         match read {
@@ -803,24 +659,21 @@ fn host_function_cache() -> std::sync::MutexGuard<'static, HostFunctionCache> {
     CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn host_function_set(path: &Path, text: &str) -> HostFunctionCacheValue {
-    use crate::markdown::compose::expression::host::facts_artifact_path;
-
-    let facts_path = facts_artifact_path(path);
-    let artifact = ArtifactKey::read(&facts_path);
-    host_function_set_from(path, text, &facts_path, artifact)
-}
-
 /// The analysis-only set of the host function catalog at `path` (bytes
 /// `text`) with its facts read from `facts_path`, which a host registration
-/// manifest names instead of the catalog's stem; `facts` is that read's
-/// result. Shares [`host_function_catalogs`]'s per-path cache and hash checks.
+/// manifest names; `facts` is that read's result.
+///
+/// The process keeps one result per catalog path: the catalog's content
+/// hash, the artifact as read, and the loaded set or its error. An unchanged
+/// revision reuses that result, an error included; a changed catalog or
+/// artifact replaces it, so a replaced catalog is freed once no caller holds
+/// a set, clone, or scope guard from it. A set obtained earlier keeps
+/// working after its path's entry is replaced.
 ///
 /// ## Errors
 ///
-/// As each entry of [`host_function_catalogs`]: a catalog that does not
-/// load or names a built-in function. A missing or bad facts artifact makes
-/// the affected functions incomplete instead.
+/// A catalog that does not load or names a built-in function. A missing or
+/// bad facts artifact makes the affected functions incomplete instead.
 pub(crate) fn host_function_set_at(
     path: &Path,
     text: &str,
@@ -856,276 +709,53 @@ fn host_function_set_from(path: &Path, text: &str, facts_path: &Path, artifact: 
     result
 }
 
-/// The host lifecycle profile recorded beside one host catalog in a
-/// document's schema roots.
-#[derive(Debug, Clone)]
-pub struct HostLifecycleDiscovery {
-    /// The host catalog the artifact belongs to.
-    pub catalog: std::path::PathBuf,
-    /// The rebuilt profile, or why the artifact
-    /// (`<stem>.lifecycle.json`) could not be trusted: absent, unreadable,
-    /// stale against the catalog, or invalid.
-    pub profile: Result<Arc<crate::lifecycle::host_profile::HostLifecycleProfile>, String>,
-}
-
-/// The host lifecycle profiles of a document's schema roots, discovered
-/// lazily: for each host catalog [`host_catalogs`] loads, in the same order
-/// and with the same shadowing, the profile its `<stem>.lifecycle.json`
-/// records ([`crate::lifecycle::host_profile`]). A catalog that is
-/// unreadable or does not load is skipped here; [`host_catalogs`] reports
-/// it. Passive: files are read, nothing runs.
-///
-/// Each root's directory is listed when the iterator reaches it, and a
-/// candidate's catalog and artifact are read only when it is visited, so a
-/// caller that stops at the first usable profile reads nothing after it. A
-/// file name is shadowed by an earlier root's file of the same name even
-/// when that earlier file is unusable.
-///
-/// The process keeps one observation per catalog path: the catalog's
-/// content hash, the artifact as read, and the profile, the reason the
-/// artifact was refused, or that the file is not a host catalog. An
-/// unchanged revision is served from it without being parsed or rebuilt; a
-/// changed one replaces it, so an obsolete profile is released once no
-/// caller holds it. A refusal retains no catalog or registry. A visited path
-/// whose catalog is gone, unreadable, or no longer loads loses its entry.
-pub fn host_lifecycle_profiles(context: &biscuit_file::FileResolutionContext) -> HostLifecycleProfiles<'_> {
-    let roots = simplified_schema::roots::SchemaRoots::for_document(context)
-        .map(|roots| roots.search_paths().to_vec())
-        .unwrap_or_default();
-    HostLifecycleProfiles {
-        context,
-        roots: roots.into_iter(),
-        files: Vec::new().into_iter(),
-        seen: std::collections::BTreeSet::new(),
-    }
-}
-
-/// The lazy iterator [`host_lifecycle_profiles`] returns.
-pub struct HostLifecycleProfiles<'c> {
-    context: &'c biscuit_file::FileResolutionContext,
-    roots: std::vec::IntoIter<std::path::PathBuf>,
-    /// The current root's remaining candidates, sorted.
-    files: std::vec::IntoIter<std::path::PathBuf>,
-    /// File names already claimed by a visited candidate.
-    seen: std::collections::BTreeSet<std::ffi::OsString>,
-}
-
-impl Iterator for HostLifecycleProfiles<'_> {
-    type Item = HostLifecycleDiscovery;
-
-    fn next(&mut self) -> Option<HostLifecycleDiscovery> {
-        loop {
-            let Some(path) = self.files.next() else {
-                let root = self.roots.next()?;
-                self.files = list_root(&root).into_iter();
-                continue;
-            };
-            let Some(name) = path.file_name() else { continue };
-            // Claimed before the candidate is tried, so an unusable file
-            // still shadows its name in later roots.
-            if !self.seen.insert(name.to_os_string()) {
-                continue;
-            }
-            if let Some(found) = observe_candidate(&path, self.context) {
-                return Some(found);
-            }
-        }
-    }
-}
-
-/// What discovery last observed at one catalog path.
-struct Observation {
-    catalog_hash: String,
-    artifact: ArtifactKey,
-    outcome: Observed,
-}
-
-enum Observed {
-    /// The file is not a host catalog, or it declares Darkmatter's own
-    /// globals.
-    NotHostCatalog,
-    Profile(Result<Arc<crate::lifecycle::host_profile::HostLifecycleProfile>, String>),
-}
-
-type ProfileCache = std::collections::HashMap<std::path::PathBuf, Observation>;
-
-fn profile_cache() -> std::sync::MutexGuard<'static, ProfileCache> {
-    static CACHE: std::sync::LazyLock<std::sync::Mutex<ProfileCache>> = std::sync::LazyLock::new(Default::default);
-    CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// The `.yaml`/`.yml` files directly in `root`, sorted. A cached path in
-/// `root` that is no longer listed loses its entry: the listing alone shows
-/// it is gone.
-fn list_root(root: &Path) -> Vec<std::path::PathBuf> {
-    // An unreadable root has no candidates, as a missing one has none.
-    let mut files: Vec<_> = std::fs::read_dir(root)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "yaml" || ext == "yml"))
-                .collect()
-        })
-        .unwrap_or_default();
-    files.sort();
-    profile_cache().retain(|cached, _| cached.parent() != Some(root) || files.binary_search(cached).is_ok());
-    files
-}
-
-/// The profile of the candidate at `path`, from its current catalog and
-/// artifact bytes; `None` when it is not a usable host catalog.
-fn observe_candidate(
-    path: &Path,
-    context: &biscuit_file::FileResolutionContext,
-) -> Option<HostLifecycleDiscovery> {
-    use crate::lifecycle::host_profile::{HostLifecycleProfile, lifecycle_artifact_path};
-
-    let Some(text) = discovery_probe::read(path).ok().and_then(|bytes| String::from_utf8(bytes).ok()) else {
-        profile_cache().remove(path);
-        return None;
-    };
-    let catalog_hash = biscuit_hash::blake3_hash(&text);
-    let artifact = ArtifactKey::from_read(discovery_probe::read(&lifecycle_artifact_path(path)));
-    // Lookup, build, and replacement happen under one lock, so an unchanged
-    // revision is never built twice and each path keeps one observation.
-    let mut cache = profile_cache();
-    if let Some(cached) = cache.get(path)
-        && cached.catalog_hash == catalog_hash
-        && cached.artifact == artifact
-    {
-        return match &cached.outcome {
-            Observed::NotHostCatalog => None,
-            Observed::Profile(profile) => {
-                Some(HostLifecycleDiscovery { catalog: path.to_path_buf(), profile: profile.clone() })
-            }
-        };
-    }
-    if !is_global_catalog(&text) || declares_fm(&text) {
-        cache.insert(path.to_path_buf(), Observation { catalog_hash, artifact, outcome: Observed::NotHostCatalog });
-        return None;
-    }
-    let Ok(catalog) = GlobalCatalog::from_host_text(path, &text, context) else {
-        cache.remove(path);
-        return None;
-    };
-    discovery_probe::note_build();
-    let profile =
-        HostLifecycleProfile::from_artifact(Arc::new(catalog), path, &text, artifact.artifact()).map(Arc::new);
-    cache.insert(
-        path.to_path_buf(),
-        Observation { catalog_hash, artifact, outcome: Observed::Profile(profile.clone()) },
-    );
-    Some(HostLifecycleDiscovery { catalog: path.to_path_buf(), profile })
-}
-
-/// Test-only observation of schema-root discovery on the current thread:
-/// which lifecycle catalog and artifact files it reads, how many lifecycle
-/// profiles it builds, read failures to inject, and what the profile cache
-/// holds for a path.
-/// Compiled for this crate's tests and with the test-only `work-counters`
-/// feature; production builds read the disk directly. The host function
-/// cache's inspection items are crate-private and compiled for tests only.
-#[cfg(any(test, feature = "work-counters"))]
-pub mod discovery_probe {
+/// Test-only observation of the host function cache on the current thread:
+/// how many sets it builds and what it holds for a path. Production builds
+/// count nothing.
+#[cfg(test)]
+mod discovery_probe {
     use std::cell::RefCell;
-    use std::collections::HashMap;
-    use std::path::{Path, PathBuf};
-
-    #[derive(Default)]
-    struct State {
-        builds: usize,
-        #[cfg(test)]
-        host_function_builds: usize,
-        reads: Vec<PathBuf>,
-        failures: HashMap<PathBuf, String>,
-    }
+    use std::path::Path;
 
     thread_local! {
-        static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+        static BUILDS: RefCell<Option<usize>> = const { RefCell::new(None) };
     }
 
-    /// Observes discovery on this thread until dropped.
-    pub struct DiscoveryProbe {
+    /// Observes host function builds on this thread until dropped.
+    pub(super) struct DiscoveryProbe {
         // Thread-local state: the probe must stay on its thread.
         _not_send: std::marker::PhantomData<*const ()>,
     }
 
     impl DiscoveryProbe {
-        /// Starts observing this thread's discovery.
+        /// Starts observing this thread's builds.
         ///
         /// ## Panics
         ///
         /// When this thread already has a probe.
         #[must_use]
-        pub fn install() -> Self {
-            STATE.with_borrow_mut(|state| {
-                assert!(state.is_none(), "one discovery probe per thread");
-                *state = Some(State::default());
+        pub(super) fn install() -> Self {
+            BUILDS.with_borrow_mut(|builds| {
+                assert!(builds.is_none(), "one discovery probe per thread");
+                *builds = Some(0);
             });
             Self { _not_send: std::marker::PhantomData }
         }
 
-        /// Makes each later discovery read of `path` fail with `message`.
-        pub fn fail_reads_of(&self, path: &Path, message: &str) {
-            with_state(|state| state.failures.insert(path.to_path_buf(), message.to_string()));
-        }
-
-        /// Lets discovery read `path` again.
-        pub fn restore_reads_of(&self, path: &Path) {
-            with_state(|state| state.failures.remove(path));
-        }
-
-        /// The profiles discovery built (successfully or not) so far.
-        pub fn builds(&self) -> usize {
-            with_state(|state| state.builds)
-        }
-
-        /// The host function sets `host_function_catalogs` loaded (successfully
-        /// or not) so far; a cached result is not counted.
-        #[cfg(test)]
+        /// The host function sets the cache loaded (successfully or not) so
+        /// far; a cached result is not counted.
         pub(super) fn host_function_builds(&self) -> usize {
-            with_state(|state| state.host_function_builds)
-        }
-
-        /// The catalog and artifact files discovery read so far, in order,
-        /// failed reads included; clears the record.
-        pub fn take_reads(&self) -> Vec<PathBuf> {
-            with_state(|state| std::mem::take(&mut state.reads))
+            BUILDS.with_borrow(|builds| builds.expect("the probe is installed"))
         }
     }
 
     impl Drop for DiscoveryProbe {
         fn drop(&mut self) {
-            STATE.with_borrow_mut(|state| *state = None);
+            BUILDS.with_borrow_mut(|builds| *builds = None);
         }
     }
 
-    fn with_state<T>(f: impl FnOnce(&mut State) -> T) -> T {
-        STATE.with_borrow_mut(|state| f(state.as_mut().expect("the probe is installed")))
-    }
-
-    /// What the process cache holds for one catalog path.
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum CachedOutcome {
-        NotHostCatalog,
-        /// A profile, whose registry holds its catalog.
-        Profile,
-        /// A refused artifact's reason; nothing else is retained.
-        Refused(String),
-    }
-
-    /// The cache's observation of `path`, if it holds one.
-    pub fn cached_outcome(path: &Path) -> Option<CachedOutcome> {
-        super::profile_cache().get(path).map(|cached| match &cached.outcome {
-            super::Observed::NotHostCatalog => CachedOutcome::NotHostCatalog,
-            super::Observed::Profile(Ok(_)) => CachedOutcome::Profile,
-            super::Observed::Profile(Err(reason)) => CachedOutcome::Refused(reason.clone()),
-        })
-    }
-
     /// The facts artifact as the host function cache recorded it.
-    #[cfg(test)]
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub(super) enum CachedArtifact {
         Absent,
@@ -1134,7 +764,6 @@ pub mod discovery_probe {
     }
 
     /// The host function cache's entry for one catalog path.
-    #[cfg(test)]
     #[derive(Debug, Clone)]
     pub(super) struct CachedHostFunctions {
         pub(super) catalog_hash: String,
@@ -1145,7 +774,6 @@ pub mod discovery_probe {
 
     /// The host function cache's entry for `path`, if it holds one. Holds
     /// nothing of the cached set alive.
-    #[cfg(test)]
     pub(super) fn cached_host_functions(path: &Path) -> Option<CachedHostFunctions> {
         super::host_function_cache().get(path).map(|cached| CachedHostFunctions {
             catalog_hash: cached.catalog_hash.clone(),
@@ -1163,49 +791,21 @@ pub mod discovery_probe {
     }
 
     /// How many host function cache entries are for paths under `dir`.
-    #[cfg(test)]
     pub(super) fn host_function_entries_under(dir: &Path) -> usize {
         super::host_function_cache().keys().filter(|path| path.starts_with(dir)).count()
     }
 
-    pub(super) fn read(path: &Path) -> std::io::Result<Vec<u8>> {
-        let injected = STATE.with_borrow_mut(|state| {
-            let state = state.as_mut()?;
-            state.reads.push(path.to_path_buf());
-            state.failures.get(path).cloned()
-        });
-        match injected {
-            Some(message) => Err(std::io::Error::other(message)),
-            None => std::fs::read(path),
-        }
-    }
-
-    pub(super) fn note_build() {
-        STATE.with_borrow_mut(|state| {
-            if let Some(state) = state {
-                state.builds += 1;
-            }
-        });
-    }
-
     pub(super) fn note_host_function_build() {
-        #[cfg(test)]
-        STATE.with_borrow_mut(|state| {
-            if let Some(state) = state {
-                state.host_function_builds += 1;
+        BUILDS.with_borrow_mut(|builds| {
+            if let Some(builds) = builds {
+                *builds += 1;
             }
         });
     }
 }
 
-#[cfg(not(any(test, feature = "work-counters")))]
+#[cfg(not(test))]
 mod discovery_probe {
-    pub(super) fn read(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
-        std::fs::read(path)
-    }
-
-    pub(super) fn note_build() {}
-
     pub(super) fn note_host_function_build() {}
 }
 
@@ -1220,12 +820,6 @@ pub fn is_host_function_catalog(text: &str) -> bool {
                 && matches!(map.get("types"), Some(YamlValue::Mapping(_)))
         })
     })
-}
-
-fn declares_fm(text: &str) -> bool {
-    serde_yaml_ng::from_str::<YamlValue>(text)
-        .ok()
-        .is_some_and(|root| root.get("$schema").and_then(|schema| schema.get("fm")).is_some())
 }
 
 /// Whether `text` claims the global-catalog envelope: `kind: schema` with a
@@ -1421,8 +1015,6 @@ fn same_shape(left: &PropertyDef, right: &PropertyDef) -> bool {
     }
 }
 
-#[cfg(test)]
-mod discovery_tests;
 
 #[cfg(test)]
 mod host_function_cache_tests;
@@ -1442,40 +1034,5 @@ mod tests {
         assert!(is_global_catalog(include_str!("../../../../schemas/darkmatter.yaml")));
         assert!(!is_global_catalog(include_str!("../../../../schemas/partials/fm.yaml")));
         assert!(!is_global_catalog("$schema:\n  title: string\n"));
-    }
-
-    /// A schema-root file is classified by its current bytes: a file that
-    /// becomes a host catalog is discovered, one that stops being a catalog
-    /// is dropped, and an unchanged catalog is served from the cache (the
-    /// same profile) rather than parsed again.
-    #[test]
-    fn lifecycle_profiles_follow_each_root_file_s_current_content() {
-        let catalog = include_str!("../../../benches/fixtures/claudine-schemas/globals.yaml");
-        let artifact = include_str!("../../../benches/fixtures/pipeline-work/globals.lifecycle.json");
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
-        std::fs::create_dir_all(root.join(".git")).expect("repository marker");
-        std::fs::create_dir_all(root.join("schemas")).expect("schema root");
-        let globals = root.join("schemas/globals.yaml");
-        std::fs::write(root.join("schemas/globals.lifecycle.json"), artifact).expect("artifact");
-        let context =
-            biscuit_file::FileResolutionContext::from_snapshot(&root, None, Default::default()).with_repository_root(&root);
-        let discover = || host_lifecycle_profiles(&context).collect::<Vec<_>>();
-        let profile = |found: &[HostLifecycleDiscovery]| match found {
-            [only] => only.profile.clone().expect("the frozen artifact is fresh for the frozen catalog"),
-            other => panic!("one host catalog: {other:?}"),
-        };
-
-        std::fs::write(&globals, "title: not a catalog\n").expect("plain YAML");
-        assert!(discover().is_empty(), "plain YAML is not a host catalog");
-        assert!(discover().is_empty(), "nor is it on a cached call");
-
-        std::fs::write(&globals, catalog).expect("catalog");
-        let first = profile(&discover());
-        let again = profile(&discover());
-        assert!(std::sync::Arc::ptr_eq(&first, &again), "an unchanged catalog is served from the cache");
-
-        std::fs::write(&globals, "title: no longer a catalog\n").expect("plain YAML again");
-        assert!(discover().is_empty(), "a file that stops being a catalog is dropped");
     }
 }

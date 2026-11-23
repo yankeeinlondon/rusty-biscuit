@@ -1257,7 +1257,7 @@ fn byte_range(loaded: &LoadedYaml, segments: &[String]) -> Option<Range<usize>> 
 }
 
 /// The 1-based line and character column of byte `offset` in `text`.
-pub(super) fn line_column(text: &str, offset: usize) -> (usize, usize) {
+pub(crate) fn line_column(text: &str, offset: usize) -> (usize, usize) {
     let offset = offset.min(text.len());
     let before = &text[..text.floor_char_boundary(offset)];
     let line = before.matches('\n').count() + 1;

@@ -4489,24 +4489,6 @@
         }
       },
       {
-        "label": "seq",
-        "kind": 9,
-        "detail": "host global",
-        "textEdit": {
-          "range": {
-            "start": {
-              "line": 37,
-              "character": 14
-            },
-            "end": {
-              "line": 37,
-              "character": 14
-            }
-          },
-          "newText": "seq"
-        }
-      },
-      {
         "label": "group",
         "kind": 9,
         "detail": "host global",
@@ -4522,6 +4504,24 @@
             }
           },
           "newText": "group"
+        }
+      },
+      {
+        "label": "seq",
+        "kind": 9,
+        "detail": "host global",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "seq"
         }
       }
     ]

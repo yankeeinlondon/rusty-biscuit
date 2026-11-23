@@ -139,7 +139,10 @@ impl OverlayCache {
         let prepared = resolution
             .context()
             .ok()
-            .and_then(|context| self.contracts.key(text, path, context, resolution.generation(), kinds.as_ref()))
+            .and_then(|context| {
+                let hosts = self.hosts.lookup(context);
+                self.contracts.key(text, path, context, resolution.generation(), kinds.as_ref(), hosts.as_ref())
+            })
             .and_then(|key| self.contracts.lookup(path, key))
             .cloned();
         let context_key = match resolution.context() {

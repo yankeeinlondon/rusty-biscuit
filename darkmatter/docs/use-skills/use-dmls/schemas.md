@@ -336,8 +336,10 @@ needs no configuration for them.
   `document.yaml`, `claudine.yaml`, `inline-compose.yaml`, and
   `sequence.yaml`. They import each other, so all eight are needed.
 - **Use regular files.** A symlinked trigger is ignored.
-- **For Claudine's globals and lifecycle checks**, also copy `globals.yaml`
-  and `globals.lifecycle.json`.
+- **Claudine's globals and lifecycle checks** come only from Claudine's
+  host registration (a `register` entry in `.darkmatter.yaml`); copying
+  `globals.yaml` and `globals.lifecycle.json` into a schema root supplies
+  nothing.
 
 DMLS reads these only from disk. An installed `claudine` binary doesn't make
 them available to the editor.

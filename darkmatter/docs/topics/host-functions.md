@@ -162,11 +162,14 @@ so a stale artifact fails the build.
 
 ## How the editor reads host functions
 
-DMLS looks in the document's schema roots (the same roots that hold host
-global catalogs) for function catalogs, and reads each one's facts artifact
-beside it. It rebuilds every registration from the catalog's signatures and
+A host ships its function catalogs through its
+[registration](./host-registration.md): each `functions` entry of its
+manifest pairs a catalog with its facts artifact, and both are digest-checked
+members of the host's bundle. For a document one of the host's triggers
+matches, DMLS rebuilds every registration from the catalog's signatures and
 the artifact's facts, through the same registration API, and analyzes the
-document with those functions. It never runs host code.
+document with those functions. It never runs host code. A function catalog in
+a schema root is an ordinary file: nothing discovers it.
 
 ```mermaid
 flowchart LR
@@ -176,11 +179,16 @@ flowchart LR
     R -->|artifact missing or invalid| I[incomplete analysis]
 ```
 
-The artifact is read strictly, as inert data. When it cannot be trusted,
-DMLS does not guess: the affected functions get **incomplete analysis**. A
-call to an incomplete function is still a known function (no
-`unknown_function` error), but it gets no argument category and proves no
-narrowing, and each call is reported as `dm.expression.incomplete_analysis`.
+The artifact is read strictly, as inert data. A registration loads only when
+every function of every catalog is complete: any problem below refuses the
+whole registration with a `dm.host.registration` warning, and none of the
+host's functions, globals, or triggers is used.
+
+A tool that builds a set itself with `HostFunctions::analysis_only` (below)
+gets **incomplete analysis** instead of a refusal. A call to an incomplete
+function is still a known function (no `unknown_function` error), but it gets
+no argument category and proves no narrowing, and each call is reported as
+`dm.expression.incomplete_analysis`.
 
 | Problem | Functions affected |
 | --- | --- |
@@ -203,15 +211,14 @@ function has none.
 
 Editing a catalog changes its hash, so its artifact reads as stale until the
 host regenerates it. A function catalog that does not load, or that declares
-a function a built-in already names, is reported once as
-`dm.schema.host_catalog`, and its functions stay unknown.
+a function a built-in already names, refuses the registration the same way.
 
 ## Catalogs are never document schemas
 
 A function catalog declares signatures and a global catalog declares the
 shapes of globals; each is registered for that role only. Neither is ever
-applied as a document schema: a function catalog in a schema root
-contributes no frontmatter property and is never a schema trigger, so a
+applied as a document schema: a function catalog contributes no
+frontmatter property and is never a schema trigger, so a
 document key named `is_project_file` is an ordinary property.
 
 ## APIs for tools that only analyze
@@ -224,12 +231,12 @@ use:
   implementation in this process".
 - `functions.enter()` makes the set visible on the current thread only,
   while the returned guard lives, ahead of installed sets and the built-ins,
-  so each document can be analyzed with its own schema roots' functions.
+  so each document can be analyzed with its own host's functions.
 - `incomplete_host_calls(expr)` lists the calls in an expression to functions
   that are incomplete in the current scope.
-- `darkmatter::markdown::schemas::catalog::host_function_catalogs(context)`
-  discovers, loads, and caches the sets of a document's schema roots (see
-  [Discovery keeps the latest revision of each catalog](#discovery-keeps-the-latest-revision-of-each-catalog)).
+- `RegisteredHostProfile::functions()` gives a registered host's sets, built
+  from its verified catalogs and facts (see
+  [The latest revision of each catalog is kept](#the-latest-revision-of-each-catalog-is-kept)).
 
 ## How long a loaded catalog lives
 
@@ -261,27 +268,27 @@ Only two things are kept for the rest of the process, deliberately: a set
 passed to `install_host_functions`, which serves every thread, and
 Darkmatter's own built-in catalog, which is built once and hands out
 `&'static` descriptors (`expression_function_descriptors()`,
-`function_descriptors(name)`). The discovery cache described next holds a
-catalog only until a newer revision of the same file replaces it.
+`function_descriptors(name)`). The cache described next holds a catalog only
+until a newer revision of the same file replaces it.
 
-## Discovery keeps the latest revision of each catalog
+## The latest revision of each catalog is kept
 
-The editor calls `host_function_catalogs(context)` each time it analyzes a
-document, so the function caches what it loads. The process keeps **one entry per catalog path**, the
-path as discovery found it:
+Each time a registration loads, its function sets are built from the
+verified bytes of their catalogs and facts artifacts. The process keeps **one
+entry per catalog path** so an unchanged catalog is not rebuilt:
 
 | Stored | Meaning |
 | --- | --- |
 | catalog hash | the BLAKE3 digest of the catalog's bytes |
-| facts artifact | `<stem>.facts.json` as read: absent, unreadable with its reason (bytes that are not UTF-8 count as unreadable), or its exact text |
+| facts artifact | its exact bytes, or why it could not be read (bytes that are not UTF-8 count as unreadable) |
 | result | the analysis-only `HostFunctions` set, or the `HostFunctionCatalogError` |
 
-On each lookup, discovery reads the catalog and its artifact and compares
-both with the entry by their bytes; modification times play no part.
+A lookup compares both with the entry by their bytes; modification times play
+no part.
 
 ```mermaid
 flowchart TD
-    A[read catalog + facts artifact] --> B{same catalog hash and<br/>same artifact as the entry?}
+    A[verified catalog + facts bytes] --> B{same catalog hash and<br/>same artifact as the entry?}
     B -- yes --> C[return the stored result,<br/>a set or an error]
     B -- no --> D[load the catalog and<br/>build the set from these bytes]
     D --> E[replace the path's entry]
@@ -297,17 +304,8 @@ produces a new result and drops the stored one; nothing is kept from earlier
 revisions, so saving a catalog a hundred times still leaves one entry.
 
 **A set already handed out keeps working.** Replacement only drops the
-cache's hold. A caller that still holds the old set, or a guard entered from
-it, keeps the old signatures, registrations, and analysis until it lets go:
-
-```rust
-let before = host_function_catalogs(&context);   // revision 1 of project.yaml
-let _scope = before[0].as_ref().unwrap().enter();
-// ... project.yaml is edited and saved ...
-let after = host_function_catalogs(&context);    // revision 2 replaces the entry
-// Code under `_scope` still sees revision 1; `after` reflects revision 2.
-// Revision 1 is freed when `_scope` and `before` are dropped.
-```
+cache's hold. A profile that still holds the old set, or a guard entered from
+it, keeps the old signatures, registrations, and analysis until it lets go.
 
 **A failing revision never returns the last good set.** If an edit makes the
 catalog fail to load, the lookup returns the error, not the set from before
@@ -316,8 +314,9 @@ the edit. The next valid revision replaces the error and recovers.
 **Facts problems are not catalog failures.** An absent, unreadable, stale, or
 invalid facts artifact still gives a successful set; the affected functions
 are incomplete, each with a reason such as ``the facts artifact
-`schemas/project.facts.json` is absent``. Only a catalog that does not load,
-or that declares a function a built-in already names, is an error.
+`schemas/project.facts.json` is absent``, and the registration loader refuses
+a set with any incomplete function. Only a catalog that does not load, or
+that declares a function a built-in already names, is an error.
 
 | Revision | Result |
 | --- | --- |
@@ -328,16 +327,10 @@ or that declares a function a built-in already names, is an error.
 
 Lookup, comparison, building, and replacement happen under one lock, so a
 revision is built once and each path holds exactly one result. "Latest" means
-the last revision processed: the catalog and its artifact are two files read
-one after the other, not an atomic snapshot of both.
+the last revision processed.
 
 Entries are never evicted. The cache holds one result for each distinct path
 ever looked up in the process: that bounds growth per path, not the total.
-
-Host lifecycle profiles have a cache of their own with different rules: it
-does not keep a catalog that fails to load, and it drops paths that a root's
-listing no longer contains. See
-[Host Lifecycle Artifacts](./lifecycle/host-artifact.md).
 
 ## See Also
 

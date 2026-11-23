@@ -16,9 +16,9 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::common::{LspFixture, LspWorkspace};
-use crate::host_fixtures::{RELAY_GLOBALS, relay_lifecycle_artifact};
+use crate::host_fixtures::{Bundle, Fixture, MANIFEST_NAME, WIDGET_TRIGGER};
 use crate::registered_host_views::{
-    MOTIVATING, REGISTRATION, completion_at, install_relay, labels, repository, with_code, write,
+    MOTIVATING, REGISTRATION, completion_at, install_relay, labels, repository, root_catalog, with_code, write,
 };
 use crate::union_item_editor::{Document, offset_of, open_text, request};
 
@@ -254,25 +254,95 @@ fn an_open_configuration_merges_its_contract_and_registration_diagnostics() {
     fixture.shutdown();
 }
 
-/// A document without frontmatter is analyzed under the same selection: a
-/// registered host's root catalog beside it is never its legacy catalog,
-/// while with no registration that catalog still serves it.
+/// A document without frontmatter is analyzed under the same selection: no
+/// registered trigger matches it, and a catalog with its lifecycle artifact
+/// in the schema root beside it supplies no host, registered or not.
 #[test]
-fn a_document_without_frontmatter_never_gets_a_registered_hosts_globals() {
+fn a_document_without_frontmatter_gets_no_host_from_a_root_catalog() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
-    for (registered, offered) in [(&[".relay"][..], false), (&[][..], true)] {
+    for registered in [&[".relay"][..], &[][..]] {
         let workspace = LspWorkspace::new();
         let root = workspace.path();
         repository(root, registered);
         install_relay(root, ".relay");
-        write(root, "schemas/globals.yaml", RELAY_GLOBALS);
-        write(root, "schemas/globals.lifecycle.json", &relay_lifecycle_artifact());
+        root_catalog(root);
         let mut fixture = start(&workspace);
         let (document, _) = open_text(&mut fixture, &workspace, "plain.md", "{{ seq.na }}\n");
         let members = labels(&request(&mut fixture, "textDocument/completion", &document, offset_of(&document.text, "{{ seq.na", true)));
-        assert_eq!(members.contains(&"seq.name".to_string()), offered, "registered {registered:?}: {members:?}");
+        assert!(!members.contains(&"seq.name".to_string()), "registered {registered:?}: {members:?}");
         fixture.shutdown();
     }
+}
+
+/// In-process: whether the `acme` host is registered for a document its
+/// `widget` trigger matches, and every file the registration load depends
+/// on.
+fn acme_state(state: &dmls::overlay::OverlayState, fixture: &Fixture) -> (bool, std::collections::BTreeSet<std::path::PathBuf>) {
+    use darkmatter::config::registration::HostSelection;
+    use dmls::config::DmlsConfig;
+    use dmls::context::DocumentResolution;
+
+    let path = fixture.path("work/doc.md");
+    let text = "---\nwidget:\n  size: 1\n---\n";
+    fixture.write("work/doc.md", text);
+    let resolution = DocumentResolution::from_context(fixture.context().for_source(&path));
+    let uri: lsp_types::Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+    let roots = [fixture.path("work")];
+    let overlay = state.for_document(&uri, text, &path, &DmlsConfig::default(), &roots, &resolution).expect("frontmatter");
+    let registered = matches!(overlay.host.as_deref().map(|view| view.selection()), Some(HostSelection::Registered(_)));
+    (registered, state.host_dependencies())
+}
+
+/// A refused registration is watched where its repair will appear: the
+/// manifest, every member the manifest lists, and the path of a member that
+/// is missing. Restoring the missing member, or republishing a corrupted one
+/// with its manifest re-addressed, loads the host without a restart.
+#[test]
+fn a_refused_registration_watches_its_manifest_and_members_and_loads_once_repaired() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let fixture = Fixture::new();
+    fixture.write("home/.darkmatter.yaml", &format!("register:\n  - ../host/{MANIFEST_NAME}\n"));
+    let state = dmls::overlay::OverlayState::default();
+    let (registered, _) = acme_state(&state, &fixture);
+    assert!(registered, "the valid install loads");
+
+    // A missing member: the facts artifact.
+    let facts = fixture.path("host/schemas/functions.facts.json");
+    let saved = std::fs::read(&facts).unwrap();
+    std::fs::remove_file(&facts).unwrap();
+    state.invalidate_host_inputs(std::slice::from_ref(&facts));
+    let (registered, watched) = acme_state(&state, &fixture);
+    assert!(!registered, "the missing member refuses the host");
+    assert!(!state.host_registration_diagnostics().is_empty());
+    assert!(watched.contains(&fixture.manifest()), "the manifest: {watched:#?}");
+    for listed in Bundle::acme().listed() {
+        assert!(watched.contains(&fixture.path(&format!("host/{listed}"))), "listed member {listed}: {watched:#?}");
+    }
+    assert!(watched.contains(&facts), "the missing member's path: {watched:#?}");
+    let folders = state.host_watch_folders();
+    assert!(folders.iter().any(|folder| folder.folder == fixture.path("host/schemas")), "{folders:#?}");
+
+    std::fs::write(&facts, saved).unwrap();
+    state.invalidate_host_inputs(std::slice::from_ref(&facts));
+    let (registered, _) = acme_state(&state, &fixture);
+    assert!(registered, "the restored member loads the host");
+    assert!(state.host_registration_diagnostics().is_empty(), "{:#?}", state.host_registration_diagnostics());
+
+    // A member whose bytes the manifest does not address, then the same
+    // bytes republished with the manifest re-addressed.
+    let widget = fixture.path("host/schemas/widget.yaml");
+    let edited = WIDGET_TRIGGER.replace("widget: widget@./library.yaml", "widget: widget@./library.yaml\n    note: string");
+    assert_ne!(edited, WIDGET_TRIGGER);
+    fixture.corrupt_member("host", "schemas/widget.yaml", &edited);
+    state.invalidate_host_inputs(std::slice::from_ref(&widget));
+    let (registered, watched) = acme_state(&state, &fixture);
+    assert!(!registered, "the unaddressed bytes refuse the host");
+    assert!(watched.contains(&widget) && watched.contains(&fixture.manifest()), "{watched:#?}");
+
+    fixture.write_member("host", "schemas/widget.yaml", &edited);
+    state.invalidate_host_inputs(&[fixture.manifest()]);
+    let (registered, _) = acme_state(&state, &fixture);
+    assert!(registered, "the re-addressed republish loads the host");
 }
 
 /// A missing user configuration is one warning per session naming the file

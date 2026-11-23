@@ -112,18 +112,17 @@ Darkmatter's **SimplifiedSchema**:
   complete and validate as md's actions, and an action md does not provide
   passes without being offered. Expressions inside a stack are checked,
   hovered, and completed with that event's globals: reading `err` where the
-  event has no failure is `dm.expression.unavailable_global`. Host-catalog
-  globals (Claudine's `seq`, `loop`, `group`) are always accepted, and a host
-  catalog that fails to load is the warning `dm.schema.host_catalog`. A host
-  that ships a [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md)
-  beside its catalog (Claudine does) has its stacks analyzed with its own
+  event has no failure is `dm.expression.unavailable_global`. The globals of
+  the document's registered host (Claudine's `seq`, `loop`, `group`) are
+  always accepted. A registered host's
+  [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md) has its
+  stacks analyzed with its own
   events, renames, globals, and verbs: Claudine's `start`, `success`,
   `blocked`, `failure`, and `loop` gate are stacks, and `say`, `retry`, or
   `proxy` operands are checked. Each call is typed at its site, narrowed by
   the `when:` items around it until a `set` writes the property, exactly as
-  the host's launch types it. Without a usable artifact the stacks are
-  analyzed as md's and the document carries
-  `dm.lifecycle.incomplete_analysis`. See
+  the host's launch types it. A registration whose artifact is unusable is
+  refused, so its documents are analyzed as md's. See
   [Diagnostics](./diagnostics.md), [Hover](./hover.md), and
   [Autocomplete](./autocomplete.md#lifecycle-stacks).
 
@@ -131,17 +130,15 @@ Host support is data-driven. A document selects its schemas through discovered
 triggers, its own `$schema`, or an explicit `[schema.extensions.*]` mapping.
 Each document is analyzed as one host: a host registered in its
 configuration that identifies it (its manifest supplies the schemas, global
-types, functions, and lifecycle), else a legacy host catalog in its schema
-roots, else `md`; see [Host Registration](../../docs/topics/host-registration.md)
+types, functions, and lifecycle), else `md`; see [Host Registration](../../docs/topics/host-registration.md)
 and [The document's host is selected once](./diagnostics.md#the-documents-host-is-selected-once).
 Every file a registration reads (both configuration files, manifests,
 members, JSON artifacts, and the repository's `HEAD`) is watched, so a change
 takes effect without a restart. A missing `~/.darkmatter.yaml` is one
 message per session naming `md init`; DMLS never creates it.
-The host catalog supplies global types, and its lifecycle artifact supplies
-event names and action rules. For Claudine without a registration, make the
-files under `claudine/schemas/` available in the document's schema roots; an
-installed Claudine executable alone does not install those editor files. See
+A host's namespace files supply global types, and its lifecycle artifact
+supplies event names and action rules. A `globals.yaml` or lifecycle artifact
+in a schema root supplies nothing: only a registration does. See
 [Editor Setup](./editors/README.md) for deployment. DMLS interprets these files
 through Darkmatter's library and does not execute Claudine or its actions.
 

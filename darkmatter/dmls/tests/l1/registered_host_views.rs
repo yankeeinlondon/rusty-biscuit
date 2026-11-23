@@ -1,7 +1,8 @@
 //! DMLS analyzes every Markdown document as exactly one host, selected once
-//! per schema preparation from the registrations of its configuration and
-//! the legacy host catalogs in its schema roots: completion, hover, lifecycle
-//! stacks, host function typing, and diagnostics all read that one view.
+//! per schema preparation from the registrations of its configuration:
+//! completion, hover, lifecycle stacks, host function typing, and diagnostics
+//! all read that one view. A host catalog and lifecycle artifact in a schema
+//! root supply no host.
 //!
 //! The `relay` host (shaped like Claudine: `composed` → `start`, `failed` →
 //! `blocked`, `success`/`failure` of its own, a `seq` global, the
@@ -15,10 +16,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::common::{LspFixture, LspWorkspace};
-use crate::host_fixtures::{
-    FUNCTIONS, GADGET_TRIGGER, GLOBALS, IDENTIFY, LIBRARY, MANIFEST, RELAY_GLOBALS, RELAY_TRIGGER, WIDGET_TRIGGER,
-    facts_artifact, lifecycle_artifact_for, relay_files, relay_lifecycle_artifact,
-};
+use crate::host_fixtures::{Bundle, RELAY_TRIGGER, relay_files, relay_lifecycle_artifact};
 use crate::union_item_editor::{Document, initialize_params, offset_of, open_text, request};
 
 const AMBIGUOUS: &str = "dm.host.ambiguous";
@@ -55,20 +53,19 @@ pub(crate) fn install_relay(root: &Path, folder: &str) {
 }
 
 fn install_acme(root: &Path, folder: &str) {
-    let files = [
-        ("darkmatter-host.yaml", MANIFEST.to_string()),
-        ("schemas/identify.yaml", IDENTIFY.to_string()),
-        ("schemas/widget.yaml", WIDGET_TRIGGER.to_string()),
-        ("schemas/gadget.yaml", GADGET_TRIGGER.to_string()),
-        ("schemas/library.yaml", LIBRARY.to_string()),
-        ("schemas/globals.yaml", GLOBALS.to_string()),
-        ("schemas/globals.lifecycle.json", lifecycle_artifact_for("acme", GLOBALS)),
-        ("schemas/functions.yaml", FUNCTIONS.to_string()),
-        ("schemas/functions.facts.json", facts_artifact()),
-    ];
-    for (name, text) in files {
-        write(root, &format!("home/{folder}/{name}"), &text);
-    }
+    Bundle::acme().write_to(&root.join(format!("home/{folder}")));
+}
+
+/// A host global catalog declaring the relay's `seq`, as a host installed it
+/// in a schema root before registration. It never supplies a host.
+pub(crate) const ROOT_CATALOG: &str =
+    "kind: schema\ndescription: the relay's globals\n$schema:\n    seq:\n        name: \"string -> The current step's name.\"\n";
+
+/// Writes [`ROOT_CATALOG`] and the relay's lifecycle artifact beside it in
+/// the tree root's `schemas/`.
+pub(crate) fn root_catalog(root: &Path) {
+    write(root, "schemas/globals.yaml", ROOT_CATALOG);
+    write(root, "schemas/globals.lifecycle.json", &relay_lifecycle_artifact());
 }
 
 fn start(workspace: &LspWorkspace) -> LspFixture<'_> {
@@ -155,10 +152,11 @@ fn without_a_registration_the_motivating_document_is_an_md_document() {
     fixture.shutdown();
 }
 
-/// A wrong-typed identifying value still identifies the document: the
-/// relay's schema judges it, and its globals apply.
+/// Registered triggers match as ordinary triggers: a `sequence` value the
+/// relay's `match` type does not admit (it covers lists only) does not
+/// identify the document, so no relay global applies.
 #[test]
-fn a_wrong_typed_identifying_value_still_identifies() {
+fn a_value_the_trigger_type_does_not_admit_does_not_identify() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
     let workspace = LspWorkspace::new();
     let root = workspace.path();
@@ -168,46 +166,45 @@ fn a_wrong_typed_identifying_value_still_identifies() {
     let text = "---\nsequence: not a list\n---\n{{ seq.na }}\n";
     let (document, _) = open_text(&mut fixture, &workspace, "notes/wrong.md", text);
     let members = completion_at(&mut fixture, &document, "{{ seq.na");
-    assert!(members.contains(&"seq.name".to_string()), "{members:?}");
+    assert!(!members.contains(&"seq.name".to_string()), "{members:?}");
     fixture.shutdown();
 }
 
-/// A document with only a shared event next to the registered relay's own
-/// root catalog is an `md` document: the registered host is never a legacy
-/// host. Unregistered, that catalog is the legacy fallback.
+/// A document with only a shared event next to a root catalog of the
+/// relay's globals is an `md` document, registered or not: no trigger of
+/// the registered relay matches it, and a root-local catalog supplies no
+/// host.
 #[test]
-fn a_shared_events_only_document_beside_an_installed_hosts_catalog_is_md() {
+fn a_shared_events_only_document_beside_a_root_local_catalog_is_md() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
     let text = "---\ninitialize:\n  - info: hello\n---\n{{ seq.na }}\n";
-    for (registered, offers_seq) in [(&[".relay"][..], false), (&[][..], true)] {
+    for registered in [&[".relay"][..], &[][..]] {
         let workspace = LspWorkspace::new();
         let root = workspace.path();
         repository(root, registered);
         install_relay(root, ".relay");
-        write(root, "schemas/globals.yaml", RELAY_GLOBALS);
-        write(root, "schemas/globals.lifecycle.json", &relay_lifecycle_artifact());
+        root_catalog(root);
         let mut fixture = start(&workspace);
         let (document, diagnostics) = open_text(&mut fixture, &workspace, "shared.md", text);
         let members = completion_at(&mut fixture, &document, "{{ seq.na");
-        assert_eq!(members.contains(&"seq.name".to_string()), offers_seq, "registered {registered:?}: {members:?}");
+        assert!(!members.contains(&"seq.name".to_string()), "registered {registered:?}: {members:?}");
         assert!(with_code(&diagnostics, UNKNOWN_HOST).is_empty(), "{diagnostics:#?}");
         fixture.shutdown();
     }
 }
 
 /// A document two registered hosts identify is ambiguous: one warning, and
-/// `md` analysis with no host's globals and no legacy fallback, while a
-/// document neither identifies still gets the unregistered root catalog.
+/// `md` analysis with no host's globals; a document neither identifies is
+/// `md` too, whatever catalog its schema root holds.
 #[test]
-fn an_ambiguous_document_is_md_and_never_falls_back_to_legacy() {
+fn an_ambiguous_document_is_md_and_a_root_catalog_supplies_no_host() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
     let workspace = LspWorkspace::new();
     let root = workspace.path();
     repository(root, &[".relay", ".acme"]);
     install_relay(root, ".relay");
     install_acme(root, ".acme");
-    write(root, "schemas/globals.yaml", RELAY_GLOBALS);
-    write(root, "schemas/globals.lifecycle.json", &relay_lifecycle_artifact().replace("\"relay\"", "\"legacy\""));
+    root_catalog(root);
     let mut fixture = start(&workspace);
 
     let text = "---\nsequence:\n  - name: one\n    prompt: hi\ngadget: name\n---\n{{ seq.na }} {{ ru }}\n";
@@ -223,7 +220,7 @@ fn an_ambiguous_document_is_md_and_never_falls_back_to_legacy() {
     let (document, diagnostics) = open_text(&mut fixture, &workspace, "neither.md", neither);
     assert!(with_code(&diagnostics, AMBIGUOUS).is_empty(), "{diagnostics:#?}");
     let members = completion_at(&mut fixture, &document, "{{ seq.na");
-    assert!(members.contains(&"seq.name".to_string()), "the unregistered legacy catalog: {members:?}");
+    assert!(!members.contains(&"seq.name".to_string()), "the root catalog supplies no host: {members:?}");
     fixture.shutdown();
 }
 
@@ -280,10 +277,10 @@ fn a_known_host_only_event_in_an_unidentified_document_names_its_host() {
     fixture.shutdown();
 }
 
-/// Replacing a member with one that no longer loads, then reporting the
-/// change, drops the host view at once and reports the new failure on the
-/// member it names: the last-good host is never served, and the document
-/// itself carries no registration warning.
+/// Replacing a member with bytes its manifest does not address, then
+/// reporting the change, drops the host view at once and reports the new
+/// failure on the manifest that lists the member: the last-good host is
+/// never served, and the document itself carries no registration warning.
 #[test]
 fn an_invalid_replacement_clears_the_host_view_and_reports_the_failure() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
@@ -303,10 +300,11 @@ fn an_invalid_replacement_clears_the_host_view_and_reports_the_failure() {
         json!({ "changes": [{ "uri": url::Url::from_file_path(&artifact).unwrap().as_str(), "type": 2 }] }),
     );
     fixture.flush_server_with("textDocument/documentSymbol", json!({ "textDocument": { "uri": document.uri } }));
-    let refused = fixture.take_latest_diagnostics_ending("home/.relay/schemas/globals.lifecycle.json").expect("published on the artifact");
+    let refused = fixture.take_latest_diagnostics_ending("home/.relay/darkmatter-host.yaml").expect("published on the manifest");
     let refused = with_code(&refused, REGISTRATION);
     assert_eq!(refused.len(), 1, "{refused:#?}");
-    assert!(refused[0]["message"].as_str().unwrap().contains("lifecycle"), "{refused:#?}");
+    let message = refused[0]["message"].as_str().unwrap();
+    assert!(message.contains("globals.lifecycle.json") && message.contains("digest"), "{refused:#?}");
     let diagnostics = fixture.take_latest_diagnostics_ending(&document.uri).expect("the document was refreshed");
     assert!(with_code(&diagnostics, REGISTRATION).is_empty(), "not on the document: {diagnostics:#?}");
     assert!(with_code(&diagnostics, UNAVAILABLE).is_empty(), "no relay stacks remain: {diagnostics:#?}");
@@ -353,8 +351,11 @@ fn the_analysis_snapshot_follows_the_registration_revision() {
     assert!(Arc::ptr_eq(&first.analysis, &unchanged.analysis), "an unchanged file keeps the snapshot");
     assert_eq!(revision(&first), revision(&unchanged));
 
-    write(&root, "home/.relay/schemas/relay.yaml", &RELAY_TRIGGER.replace("the run's timeout", "the run's time limit"));
-    state.invalidate_host_inputs(&[trigger]);
+    // A republish of one member: the manifest is re-addressed with it.
+    Bundle::relay()
+        .with_member("schemas/relay.yaml", &RELAY_TRIGGER.replace("the run's timeout", "the run's time limit"))
+        .write_to(&root.join("home/.relay"));
+    state.invalidate_host_inputs(&[trigger, root.join("home/.relay/darkmatter-host.yaml")]);
     let changed = build();
     assert_ne!(revision(&first), revision(&changed), "a changed member is a new revision");
     assert!(!Arc::ptr_eq(&first.analysis, &changed.analysis), "a new revision is a new snapshot");

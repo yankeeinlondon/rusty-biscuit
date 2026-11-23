@@ -2605,8 +2605,7 @@ impl ComposeOptions {
 
     /// The host `source` is analyzed as, judged in `context` (the source's
     /// own context): [`select`](crate::config::registration::select) over the
-    /// attached registered hosts, then the legacy root catalogs only when no
-    /// registered host identifies it. [`HostSelection::Md`](crate::config::registration::HostSelection::Md)
+    /// attached registered hosts. [`HostSelection::Md`](crate::config::registration::HostSelection::Md)
     /// when the caller supplied its own host globals. Passive; the selection's
     /// warnings are returned with it.
     pub fn host_selection_for(
@@ -2615,10 +2614,7 @@ impl ComposeOptions {
         context: &biscuit_file::FileResolutionContext,
     ) -> crate::config::registration::Selected {
         if self.has_caller_host_globals() {
-            return crate::config::registration::Selected {
-                selection: crate::config::registration::HostSelection::Md,
-                diagnostics: Vec::new(),
-            };
+            return crate::config::registration::Selected::md();
         }
         let document = match source.source() {
             Some(crate::markdown::compose::ComposeSource::File(path)) => Some(path.as_path()),

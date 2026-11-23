@@ -15,7 +15,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::common::{LspFixture, LspWorkspace};
-use crate::host_fixtures::{RELAY_GLOBALS, RELAY_TRIGGER};
+use crate::host_fixtures::{Bundle, RELAY_NAMESPACE, RELAY_TRIGGER};
 use crate::host_registration_watches::{CHANGED, CREATED, DELETED, registration_on, report, start, uri};
 use crate::registered_host_views::{
     MOTIVATING, REGISTRATION, UNAVAILABLE, UNKNOWN_FUNCTION, UNKNOWN_HOST, completion_at, hover_at, install_relay,
@@ -25,12 +25,11 @@ use crate::union_item_editor::{Document, open_text};
 
 /// Every file a relay install, or the configuration registering it, can be
 /// warned on.
-const WARNABLE: [&str; 8] = [
+const WARNABLE: [&str; 7] = [
     "home/.darkmatter.yaml",
     "home/.relay/darkmatter-host.yaml",
-    "home/.relay/schemas/identify.yaml",
     "home/.relay/schemas/relay.yaml",
-    "home/.relay/schemas/globals.yaml",
+    "home/.relay/schemas/seq.yaml",
     "home/.relay/schemas/globals.lifecycle.json",
     "home/.relay/schemas/functions.yaml",
     "home/.relay/schemas/functions.facts.json",
@@ -109,9 +108,9 @@ fn replace_atomically(fixture: &mut LspFixture<'_>, document: &Document, path: &
     report(fixture, document, &[(&temporary, CREATED), (&temporary, DELETED), (path, CHANGED)]);
 }
 
-/// The catalog is atomically replaced with one its lifecycle artifact was
-/// not generated for: neither the old nor the new catalog's facts are
-/// served, by any feature, until the valid catalog is restored.
+/// The `seq` namespace file is atomically replaced with bytes its manifest
+/// does not address: neither the old nor the new namespace's facts are
+/// served, by any feature, until the addressed bytes are restored.
 #[test]
 fn every_feature_drops_the_host_after_an_invalid_atomic_replacement_and_restores_it() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
@@ -123,14 +122,14 @@ fn every_feature_drops_the_host_after_an_invalid_atomic_replacement_and_restores
     let (document, diagnostics) = open_text(&mut fixture, &workspace, "notes/relay.md", MOTIVATING);
     assert_eq!(analysis(&mut fixture, &document, &diagnostics), RELAY);
 
-    let catalog = root.join("home/.relay/schemas/globals.yaml");
-    let stale = RELAY_GLOBALS.replace("The current step's name.", "The step's name, renamed.");
-    replace_atomically(&mut fixture, &document, &catalog, &stale);
+    let namespace = root.join("home/.relay/schemas/seq.yaml");
+    let stale = RELAY_NAMESPACE.replace("The current step's name.", "The step's name, renamed.");
+    replace_atomically(&mut fixture, &document, &namespace, &stale);
     assert_eq!(refreshed(&mut fixture, &document), MD, "no last-good or partial host facts");
     let warned = registration_warnings(&mut fixture);
     assert_eq!(warned.len(), 1, "one warning, on the refused install: {warned:?}");
 
-    replace_atomically(&mut fixture, &document, &catalog, RELAY_GLOBALS);
+    replace_atomically(&mut fixture, &document, &namespace, RELAY_NAMESPACE);
     assert_eq!(refreshed(&mut fixture, &document), RELAY);
     assert_eq!(registration_warnings(&mut fixture), [], "the warning is cleared");
     fixture.shutdown();
@@ -195,13 +194,15 @@ macro_rules! refused_install {
 
 refused_install! {
     a_stale_lifecycle_artifact_refuses_the_host:
-        |root| write(root, "home/.relay/schemas/globals.yaml", &RELAY_GLOBALS.replace("current step", "present step"))
+        |root| Bundle::relay()
+            .with_member("schemas/seq.yaml", &RELAY_NAMESPACE.replace("current step", "present step"))
+            .write_to(&root.join("home/.relay"))
         => "home/.relay/schemas/globals.lifecycle.json" at None;
     a_facts_artifact_for_another_catalog_refuses_the_host:
         |root| {
-            let catalog = root.join("home/.relay/schemas/functions.yaml");
-            let text = std::fs::read_to_string(&catalog).unwrap();
-            write(root, "home/.relay/schemas/functions.yaml", &text.replace("The acme label", "The relay label"));
+            let bundle = Bundle::relay();
+            let text = bundle.members["schemas/functions.yaml"].replace("The acme label", "The relay label");
+            bundle.with_member("schemas/functions.yaml", &text).write_to(&root.join("home/.relay"));
         }
         => "home/.relay/schemas/functions.facts.json" at None;
     a_manifest_naming_a_missing_member_refuses_the_host:
@@ -304,7 +305,7 @@ fn a_registered_hosts_required_defaults_are_pending_not_missing() {
             "budget: \"number(required) -> the run's budget\"\n    timeout: \"string(required; default(30m)) -> the run's timeout",
         );
     assert_ne!(trigger, RELAY_TRIGGER);
-    write(root, "home/.relay/schemas/relay.yaml", &trigger);
+    Bundle::relay().with_member("schemas/relay.yaml", &trigger).write_to(&root.join("home/.relay"));
     let mut fixture = start(&workspace);
 
     let text = "---\nsequence:\n  - name: one\n    prompt: hi\n---\n{{ timeout }} {{ seq.name }}\n";

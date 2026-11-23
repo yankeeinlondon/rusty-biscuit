@@ -686,7 +686,13 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
         Ok(context) => context,
         Err(err) => return FileOutcome::YamlLoadError { message: format!("{err:#}"), location: None },
     };
-    let api = api.clone().with_file_resolution_context(context);
+    // Registered hosts' `kind: yaml-schema` definitions are the lowest kind
+    // tier.
+    let hosts = request.registered_hosts(&context);
+    let mut api = api.clone().with_file_resolution_context(context);
+    if let Some(hosts) = hosts {
+        api = api.with_registered_hosts(hosts);
+    }
     let outcome = match api.validate_loaded_yaml_document(&document) {
         Ok(YamlOutcome::NoSchema) => FileOutcome::Validated {
             report_valid: true,
@@ -1159,6 +1165,11 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             // A slot where none may appear (a kind definition) names its code.
             if let Some(code) = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(err) {
                 record["code"] = json!(code);
+            }
+            // A registered host's conflicting triggers name both files.
+            if let SchemaError::HostTriggerConflict(conflict) = err.as_ref() {
+                record["code"] = json!(darkmatter::config::registration::merge::HOST_TRIGGER_CONFLICT_CODE);
+                record["related"] = json!([conflict.first.display().to_string(), conflict.second.display().to_string()]);
             }
             record
         }

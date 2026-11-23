@@ -13,7 +13,8 @@ types:
         error: enum(file_reference,frontmatter_parse,yaml_parse,schema,slots) -> why validation could not run; slots means the schema is a template whose slots did not resolve for this run
         failure: string -> the file-reference failure class
         message: string -> the error's message
-        code: string -> with error schema, the diagnostic code of a slot written where none may appear, e.g. dm.schema.slot_not_allowed_in_kind
+        code: string -> with error schema, the diagnostic code of a slot written where none may appear, e.g. dm.schema.slot_not_allowed_in_kind, or dm.host.trigger_conflict
+        related: string[] -> with code dm.host.trigger_conflict, the two conflicting trigger files
         line: number
         column: number
         warnings: warning[] -> discovery findings, then schema advisories

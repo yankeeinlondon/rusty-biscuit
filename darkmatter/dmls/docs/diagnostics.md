@@ -76,30 +76,23 @@ in this order:
 flowchart TD
     D[document with frontmatter] --> R{how many registered hosts<br/>identify it?}
     R -- one --> H[that host: its schemas, globals,<br/>functions, and lifecycle]
-    R -- several, or a host whose<br/>two manifests disagree --> A[md, with a dm.host.* warning;<br/>no legacy catalog is used]
-    R -- none --> L{a host catalog in the schema roots<br/>whose host is not registered?}
-    L -- yes --> G[that legacy catalog]
-    L -- no --> M[md]
+    R -- several, or a host whose<br/>two manifests disagree --> A[md, with a dm.host.* warning]
+    R -- none --> M[md]
 ```
 
 - **Registered hosts** come from the `register` entries of the document's
   configuration (the home's `.darkmatter.yaml` and the repository's), loaded
   read-only off the request thread, once per configuration. See
   [Host Registration](../../docs/topics/host-registration.md).
-- **Legacy catalogs** are the host catalogs in the document's schema roots
-  (`globals.yaml` beside its `globals.lifecycle.json`), used only when no
-  registered host identifies the document, and never for a registered host's
-  own catalog. Their first usable [lifecycle
-  artifact](../../docs/topics/lifecycle/host-artifact.md) gives the stacks;
-  when none is usable, every catalog's reason is reported.
+- Nothing in a schema root supplies a host: a `globals.yaml` beside a
+  `globals.lifecycle.json` is an ordinary pair of files.
 - A document with no frontmatter is selected the same way, as if its
-  frontmatter were empty: a registered host's root catalog beside it is
-  never its legacy catalog. It never waits for its configuration's
+  frontmatter were empty. It never waits for its configuration's
   registrations to load (startup loads every workspace folder's); until
   they have, it is analyzed as `md`, and it is refreshed when they load.
 
 The choice is kept with the document's schema and made again only when an
-input changes: the text, a schema or catalog file, the trigger registry, the
+input changes: the text, a schema file, the trigger registry, the
 context, or the configuration's registrations. A registration whose files
 change but whose content does not (a save with the same bytes) keeps every
 document's choice. A changed or broken registration replaces it at once: a
@@ -262,12 +255,10 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.schema.kind_check` | A YAML document of one of Darkmatter's kinds (`schema`, `schema-trigger`, `yaml-schema`) fails a check its definition cannot state, such as an invalid trigger `$path` glob. Ranged on the node the library located. |
 | `dm.schema.invalid_suggestion` | A `suggest(...)` candidate is invalid metadata for its target schema (type, range, integer, length, not-empty, or pattern violation, or unrepresentable number syntax). **Warning.** |
 | `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. An envelope error comes first: a tagged envelope with an unsupported key reports this code even when a definition inside it is also invalid, matching `md schema validate`. |
-| `dm.schema.host_catalog` | **Warning.** A host global catalog in the document's schema roots (a `kind: schema` file with a `$schema` mapping of globals and no `types`, such as Claudine's `globals.yaml`) failed to load. The message names the file, the field, and the reason; it is placed at the top of the document. The globals that catalog declares are unknown to this document, so expressions reading them are checked as document properties; every catalog that did load keeps working. The same warning reports a host **function** catalog in those roots (a `kind: schema` file with `categories:` and `function(...)` `types:`) that fails to load or declares a function a built-in already names; its functions stay unknown to this document. Source `darkmatter.schema`. |
 | `dm.host.registration` | **Warning**, on the file whose problem keeps a `register` entry from being used, at the problem's line and column (the top when it has none), whether that file is open or not: the configuration file, at the entry, when the manifest cannot be found, the manifest for its own shape or a member it cannot resolve, otherwise the member (missing, invalid, or remote, or an artifact that is refused). Two manifests that claim one host with different content put it on each manifest, and again at the top of every document such a host identifies. Nothing of that entry is used. An open file keeps its own diagnostics beside it, and the warning is cleared once the problem is fixed. Source `darkmatter.schema`. |
 | `dm.host.identify_too_broad` | **Warning**, on the identifying trigger, like `dm.host.registration`: a registered host's identifying trigger could match on keys `md` owns alone, so the host is not used. |
-| `dm.host.ambiguous` | **Warning**, at the top of the document: two or more registered hosts identify it. It is analyzed as an `md` document; no host's schemas, globals, functions, or lifecycle apply, and no legacy catalog is used either. Source `darkmatter.schema`. |
+| `dm.host.ambiguous` | **Warning**, at the top of the document: two or more registered hosts identify it. It is analyzed as an `md` document; no host's schemas, globals, functions, or lifecycle apply. Source `darkmatter.schema`. |
 | `dm.lifecycle.unknown_host` | **Warning**, at the key. A root key is a lifecycle event only a registered host has (Claudine's `success`, say), but that host does not identify the document, so the key is ordinary data here and its stack never runs as one. The message names the host. A key no registered host uses as an event is never reported. Source `darkmatter.schema`. |
-| `dm.lifecycle.incomplete_analysis` | **Warning**, under both `expressions.strict` settings. No host catalog in the document's schema roots has a usable [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md) (`<catalog stem>.lifecycle.json` beside it): the artifact is absent, unreadable, invalid, written for another version of the catalog, or records a registration the registry refuses. The document's lifecycle stacks are analyzed as the `md` host's, so a host-only event is plain frontmatter, checked unguarded, and a host-only verb's operand is checked on its own. One per host catalog, at the top of a document with frontmatter; the message names the artifact and the reason. Regenerating the artifact clears it. Source `darkmatter.schema`. |
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
 | `dm.style.deprecated_key` | A deprecated `style:` key (a canonical replacement exists). |
 | `dm.expression.malformed` | An `expression`-typed value that does not parse. Emitted only for untagged single-line plain and quoted scalars; block and tagged values keep the schema problem. Pending `{{ … }}` / `$(…)` values are deferred. |
@@ -455,7 +446,6 @@ The expression family follows one ladder: a **warning** means the construct
 | `dm.expression.uncertain_call` | Warning (the call may fail for some values) |
 | `dm.expression.always_false_call` | Warning (the call is valid but can only return `false`) |
 | `dm.expression.incomplete_analysis` | Warning (nothing is known about the call; it may still be right) |
-| `dm.lifecycle.incomplete_analysis` | Warning (lifecycle stacks are analyzed as the `md` host's, which may not be the document's host) |
 | `dm.lifecycle.unknown_host` | Warning (the key is data here, which may be what the author meant) |
 | `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` | Warning (analysis continues as `md`) |
 

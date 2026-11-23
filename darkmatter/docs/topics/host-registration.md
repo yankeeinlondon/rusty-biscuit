@@ -10,10 +10,11 @@ running the host.
 This page covers:
 
 - [registering a host](#registering-a-host) in `.darkmatter.yaml`,
-- [the manifest format](#the-manifest), and
-  [format 2](#manifest-format-2), the verified bundle format that replaces it,
-- [the identifying trigger](#the-identifying-trigger) that decides which
-  documents belong to the host,
+- [the manifest format](#the-manifest), format 2, which lists every file of
+  the host's bundle with its digest,
+- [the files a bundle holds](#the-files-of-a-bundle): triggers, YAML kinds,
+  namespaces, and type libraries,
+- [which documents belong to the host](#which-documents-belong-to-the-host),
 - [how a registration loads](#how-a-registration-loads), from Rust,
 - [which host a document belongs to](#selecting-a-documents-host),
 - [how the host's schemas layer](#layering) into the document's schema,
@@ -30,7 +31,7 @@ a file the host program installs:
 ```yaml
 # ~/.darkmatter.yaml
 register:
-    - ~/.acme/darkmatter-host.yaml
+    - ~/.acme/registration/manifest.yaml
 ```
 
 The reference is an ordinary local file reference, resolved from the
@@ -48,67 +49,16 @@ A host program usually adds its own entry during its setup, through
 `darkmatter::config::init::register_manifest`. That call keeps every
 existing entry, value, and comment. It adds nothing when an entry already
 names the same manifest file, however it is spelled (`~/…` or an absolute
-path). The manifest must already exist. Claudine's setup works this way:
-it publishes `~/.claudine/darkmatter-host.yaml`, then registers it.
+path). The manifest must already exist.
 
 ## The manifest
 
-The host writes the manifest and every file it names; you never edit them by
-hand. This section describes **format 1**, the format `register` entries load
-into host profiles today. [Format 2](#manifest-format-2) is the format the
-shipped envelope schema now describes; loading it into host profiles is
-**planned**, and from then on a format 1 manifest is refused with a request
-to rerun the host's setup.
-
-In format 1, every field is required, and no other field is allowed:
-
-```yaml
-# ~/.acme/darkmatter-host.yaml (written by the acme program)
-kind: darkmatter-host
-format_version: 1
-host: acme
-version: 1.2.0
-identify: ./schemas/identify.yaml
-triggers:
-    - ./schemas/widget.yaml
-    - ./schemas/gadget.yaml
-globals: ./schemas/globals.yaml
-lifecycle: ./schemas/globals.lifecycle.json
-functions:
-    - catalog: ./schemas/functions.yaml
-      facts: ./schemas/functions.facts.json
-```
-
-| Field | What it holds |
-| --- | --- |
-| `kind` | always `darkmatter-host` |
-| `format_version` | the manifest format: the integer `1` (not `"1"`, not `1.0`) |
-| `host` | the host's identifier; its lifecycle artifact must record the same name |
-| `version` | the host release that wrote the manifest (not the format) |
-| `identify` | the [identifying trigger](#the-identifying-trigger) |
-| `triggers` | schema triggers applied, in this order, to the host's documents; may be `[]` |
-| `globals` | the host's global catalog (`kind: schema` with a `$schema` mapping of globals) |
-| `lifecycle` | the lifecycle artifact the host generated for that catalog |
-| `functions` | function catalogs, each with the facts artifact generated for it; write `functions: []` for none |
-
-Every member is a **local** file reference resolved from the manifest's
-directory. A trigger's own imports (`widget@./library.yaml`) resolve from the
-trigger's file, so library files sit beside the triggers. A remote member
-(`https://…`) is refused without being fetched.
-
-The schema of the envelope ships with Darkmatter
-(`darkmatter/schemas/darkmatter-host.yaml`) and is importable as
-`darkmatter-host@darkmatter:host`. That shipped schema is the format 2
-contract; format 1 manifests are still checked against the format 1 shape
-above.
-
-### Manifest format 2
-
-A format 2 manifest lists every file of the host's **bundle** (the
-manifest's directory and everything below it) together with the BLAKE3
-digest of each file's exact bytes. A reader checks every file against its
-digest before using any of it, so it never mixes files from two releases of
-the host, even while the host is publishing a new one.
+The host writes the manifest and every file it lists; you never edit them by
+hand. The manifest lists every file of the host's **bundle** (the manifest's
+directory and everything below it) together with the BLAKE3 digest of each
+file's exact bytes. A reader checks every file against its digest before
+using any of it, so it never mixes files from two releases of the host, even
+while the host is publishing a new one.
 
 ```yaml
 # ~/.acme/registration/manifest.yaml (written by the acme program)
@@ -119,6 +69,7 @@ version: "1.2.0"
 files:
     - ./schemas/widget.yaml
     - ./schemas/library.yaml
+    - ./schemas/run.yaml
 lifecycle: ./globals.lifecycle.json
 functions:
     - catalog: ./functions/catalog.yaml
@@ -126,6 +77,7 @@ functions:
 digests:
     ./schemas/widget.yaml: "<64 lowercase hex digits>"
     ./schemas/library.yaml: "<64 lowercase hex digits>"
+    ./schemas/run.yaml: "<64 lowercase hex digits>"
     ./globals.lifecycle.json: "<64 lowercase hex digits>"
     ./functions/catalog.yaml: "<64 lowercase hex digits>"
     ./functions/facts.json: "<64 lowercase hex digits>"
@@ -135,10 +87,10 @@ digests:
 | --- | --- |
 | `kind` | always `darkmatter-host` |
 | `format_version` | the integer `2` (not `"2"`, not `2.0`) |
-| `host` | the host's identifier, a nonempty string |
+| `host` | the host's identifier, a nonempty string; its lifecycle artifact must record the same name |
 | `version` | the host release that wrote the manifest, a nonempty string |
-| `files` | the bundle's schema files; their order has no effect; may be `[]` |
-| `lifecycle` | the host's lifecycle artifact; always required |
+| `files` | the bundle's schema files ([below](#the-files-of-a-bundle)); their order has no effect; may be `[]` |
+| `lifecycle` | the host's [lifecycle artifact](./lifecycle/host-artifact.md); always required |
 | `functions` | function catalogs, each a closed `{catalog, facts}` pair; write `functions: []` for none |
 | `digests` | one entry per member entry above, keyed by the reference exactly as written |
 
@@ -147,6 +99,18 @@ Every field is required, no other field is allowed, and `files: null` or
 digest for no member, refuses the manifest at that entry. A digest is the
 BLAKE3 hash of the file's bytes as 64 lowercase hexadecimal digits
 (`biscuit_hash::blake3_hash_bytes`); `ABC…` or a short digest is refused.
+
+The schema of the envelope ships with Darkmatter
+(`darkmatter/schemas/darkmatter-host.yaml`) and is importable as
+`darkmatter-host@darkmatter:host`.
+
+**An older manifest is refused, not guessed at.** A format 1 manifest (one
+with `format_version: 1`, or with the removed `identify`, `triggers`, or
+`globals` fields) is refused with one `dm.host.registration` warning at its
+`format_version` that asks you to rerun the host's setup or update the host
+(for `acme`: run `acme setup`, or update `acme`). Nothing else about it is
+judged, and nothing of it is used. The same warning appears for an old entry
+in a repository's configuration, which its owners update.
 
 **Member paths** are written so that one manifest works on macOS, Linux, and
 Windows alike:
@@ -170,13 +134,14 @@ file system would merge them. A symbolic link, or on Windows a junction or
 other reparse point, anywhere between the bundle root and a member is
 refused; it is never followed.
 
-#### Reading a format 2 bundle
+### Reading a bundle
 
 `config::registration::bundle::load_snapshot(manifest, context)` reads a
-format 2 manifest and its members into a `VerifiedSnapshot`, or refuses it
-with a `SnapshotRefusal` (code `dm.host.registration`, located in the
-manifest at the failing field). It parses no member; the snapshot holds each
-member's verified bytes for the code that does.
+manifest and its members into a `VerifiedSnapshot`, or refuses it with a
+`SnapshotRefusal` (code `dm.host.registration`, located in the manifest at
+the failing field). It parses no member; the snapshot holds each member's
+verified bytes for the code that does. [`load_registrations`](#how-a-registration-loads)
+calls it for every entry; call it yourself only to inspect a bundle.
 
 ```rust
 use std::path::Path;
@@ -235,44 +200,113 @@ What a snapshot records:
   the reader retried. A refusal carries the same two lists, so a caller can
   watch for a missing member to appear.
 
-A format 1 manifest given to this reader is refused before the format 2
-rules are checked, with one warning at its `format_version`. The warning
-tells the user to run the host's setup or update the host (for `acme`: run
-`acme setup`, or update `acme`) and sets `SnapshotRefusal::legacy_format`.
+## The files of a bundle
 
-## The identifying trigger
+Each `files` member is classified by its own `kind`:
 
-A host's schemas apply only to documents its identifying trigger matches. It
-is an ordinary `schema-trigger`; it needs no payload, so it can leave
-`$schema` out:
+| `kind` | What it does for the host |
+| --- | --- |
+| `schema-trigger` | selects the host's Markdown documents (its `match:`) and types them (its `$schema`, when it has one) |
+| `yaml-schema` | defines a YAML document kind, such as `kind: sequence` |
+| `namespace-schema` | declares one of the host's expression globals |
+| `schema` with a nonempty `types` table and no `$schema` | a library of reusable types the other files import |
+
+Any other kind, a `kind: schema` file that declares `$schema`, or a library
+with an empty `types` table refuses the registration at that member.
+
+**Imports stay inside the bundle.** Every file is prepared from the verified
+bytes alone. A reference from one member to another is written `./…` or
+`../…` from the referring file (`widget@./library.yaml`) and must name a
+listed member. An unlisted file, a path that leaves the bundle, a bare name
+that would search schema roots, and a URL are refused, so a bundle copied
+to another machine behaves the same. Darkmatter's built-in schemas
+(`Name@darkmatter:lifecycle`) stay available.
+
+**Display names are unique.** A trigger or library may declare a `name`
+(`name: widget-schema`); two files of one registration with the same name
+refuse it, with a warning at each file's `name`.
+
+### Namespace schemas
+
+A namespace schema declares one global the host's expressions read, and its
+members:
 
 ```yaml
-# ./schemas/identify.yaml
-kind: schema-trigger
-match:
-    group:
-        - widget: object(required)
-        - gadget: string(required)
+# ./schemas/run.yaml
+kind: namespace-schema
+namespace: run
+description: The current pass.
+$schema:
+    count: "number(integer; min(1)) -> The one-based pass."
+    label: "label@./library.yaml -> What the pass is called."
+types: {}
 ```
 
-Every alternative must require at least one non-null top-level key that the
+The namespace files together are the host's **global catalog**: one global
+per file, with its description, its members typed by `$schema` (which may
+import bundled libraries or name the file's own private `types`), and its
+location in that file. `$schema: {}` declares a global with no members.
+
+- The name must be an expression identifier (`run`, `seq`, `loop`), and it
+  may not be one Darkmatter already owns: a reserved root, `null`, or one of
+  Darkmatter's globals (`fm`, `ctx`, `current`, `env`, `err`, `timing`). A
+  reserved name is refused at its `namespace:`.
+- Two files declaring one namespace are refused at both declarations.
+- A namespace file is never a document's `$schema` target and never selects
+  a YAML document kind.
+
+The lifecycle artifact is versioned against this catalog: its
+`catalog_hash` is the digest of a canonical JSON object that maps each
+namespace file, and every bundled file its preparation read, to the digest
+of its exact bytes, all by bundle-relative path.
+`config::registration::namespaces::prepare_catalog` prepares the catalog and
+that map in one pass, and `namespace_catalog_hash` gives the hash; a host
+generates its artifact with the same two functions. Editing a namespace file,
+or a library one imports, without regenerating the artifact refuses the host
+as stale. See [the lifecycle artifact](./lifecycle/host-artifact.md).
+
+## Which documents belong to the host
+
+A host's schemas apply only to documents one of its triggers matches. There
+is no separate identifying file: the triggers' own `match:` conditions decide.
+A trigger without `$schema` only identifies documents and contributes no
+types.
+
+```yaml
+# ./schemas/widget.yaml
+kind: schema-trigger
+match:
+    widget: object(required)
+$schema:
+    widget: widget@./library.yaml
+```
+
+Matching is ordinary trigger matching against the document's frontmatter as
+written (before defaults or coercion; a `$schema` key is ignored) and its
+path. A `literal` value must be equal, so `kind: literal(sequence; required)`
+matches `kind: sequence` and not `kind: other`.
+
+Every registered trigger must also be unable to match a document `md` owns:
+each alternative must require at least one non-null top-level key that the
 `md` host does not own. The `md` host owns its baseline frontmatter
 properties, its lifecycle event keys (`initialize`, `composed`, `failed`,
 `cancelled`, `finalize`), and its globals (`fm`, `ctx`, `current`, `env`,
 `err`, `timing`). A document with only `initialize:` belongs to `md` and to
-every host alike, so `initialize` can never identify a host:
+every host alike, so `initialize` can never select a host:
 
 ```yaml
 # refused: dm.host.identify_too_broad
+kind: schema-trigger
 match:
     group:
         - widget: object(required)
         - initialize: object(required)   # shared with md
 ```
 
-An optional key, a `$path` pattern, and a `none:` exclusion never identify a
-host either. The proof is structural: when it cannot be made, the trigger is
-refused with a repair hint rather than guessed at.
+An optional key, a `$path` pattern, and a `none:` exclusion never select a
+host either. The proof is structural: when it cannot be made, the whole
+registration is refused with a warning at the trigger's `match:`, rather than
+guessed at.
 
 ## How a registration loads
 
@@ -282,12 +316,12 @@ flowchart TD
     R -- no --> W[dm.host.registration warning]
     R -- yes --> D{same canonical manifest<br/>already loaded?}
     D -- yes --> J[add the entry to that profile]
-    D -- no --> V{closed darkmatter-host<br/>envelope valid?}
+    D -- no --> V{format 2, every member<br/>matches its digest?}
     V -- no --> W
-    V -- yes --> M[read every member and import once]
-    M --> I{identify admitted?}
+    V -- yes --> K[classify and prepare every file<br/>from the verified bytes]
+    K --> I{every trigger admitted?}
     I -- no --> T[dm.host.identify_too_broad warning]
-    I -- yes --> A{triggers, globals, lifecycle,<br/>functions all load?<br/>host matches lifecycle?}
+    I -- yes --> A{triggers, YAML kinds, namespaces,<br/>lifecycle, functions all load?<br/>host matches lifecycle?}
     A -- no --> W
     A -- yes --> P[publish RegisteredHostProfile]
 ```
@@ -305,6 +339,9 @@ fn hosts(context: &FileResolutionContext) -> Result<(), Box<dyn std::error::Erro
     let loaded = load_registrations(&snapshot, context, md_owned_names());
     for profile in &loaded.profiles {
         println!("{} {} ({} triggers)", profile.host(), profile.version(), profile.triggers().len());
+        for namespace in profile.namespaces() {
+            println!("  global `{}` from {}", namespace.namespace, namespace.path);
+        }
     }
     for diagnostic in &loaded.diagnostics {
         eprintln!("{}: {}", diagnostic.code, diagnostic.message);
@@ -317,29 +354,32 @@ fn hosts(context: &FileResolutionContext) -> Result<(), Box<dyn std::error::Erro
 The rules a load follows:
 
 - **All or nothing.** A profile is published only when every member loads:
-  the envelope, the identifying trigger, each trigger and its payload, the
-  global catalog, the lifecycle artifact, and each function catalog with its
-  facts. Otherwise the entry produces a warning and nothing of it is used: no
-  partial globals, functions, lifecycle events, or trigger payloads.
-- **Strict artifacts.** The lifecycle artifact and each facts artifact must
-  record the hash of the catalog they were generated for. A stale artifact
-  (the catalog changed after it was generated), a missing one, or a function
-  whose facts are incomplete refuses the registration.
+  each trigger and its payload, each YAML kind definition, each library, the
+  namespace catalog, the lifecycle artifact, and each function catalog with
+  its facts. Otherwise the entry produces one or more warnings and nothing
+  of it is used: no partial globals, functions, lifecycle events, trigger
+  payloads, or YAML kinds.
+- **Strict artifacts.** The lifecycle artifact must record the hash of the
+  namespace catalog it was generated for, and each facts artifact the hash
+  of its function catalog. A stale artifact, a missing one, a format 1
+  lifecycle artifact, an artifact that binds a host global no namespace
+  declares, or a function whose facts are incomplete refuses the
+  registration.
 - **One host name.** The manifest's `host` must equal the host the lifecycle
   artifact records.
-- **Each file once.** Every member and every file it imports is read once
-  for the whole load and listed in `dependencies()` with the BLAKE3 hash of
-  its bytes, so a caller (DMLS) knows what to watch. A refused profile has
-  none; `manifest_member_candidates(manifest, context)` lists every location
-  its manifest's members are looked for, existing or not, so a caller can
-  watch for the missing member to appear.
+- **What to watch.** A profile's `dependencies()` lists every file read with
+  the hash of its bytes, and `candidates()` every location looked at,
+  including a path a member referred to that is not listed. A refused entry
+  leaves the same locations in `LoadedRegistrations::watches`, so a caller
+  (DMLS) sees a missing or broken file being repaired.
 - **One manifest, one load.** Entries that resolve to the same canonical
   manifest, from the user file and the repository file, or spelled two ways,
   load it once; `entries()` lists every entry that named it.
-- **A content revision.** `revision()` digests the manifest's meaning (its
-  values, not its comments) and every other file's content, keyed by its
-  route from the manifest's directory. Two installs laid out alike with the
-  same content have the same revision wherever they live.
+- **A content revision.** `revision()` is the snapshot's: two installs of one
+  release have the same revision wherever they live, and in whatever order
+  they list `files`; any member byte changes it.
+- **Bundle order never matters.** `triggers()` and `yaml_kinds()` are in
+  bundle-path order, whatever the order of `files`.
 
 A [`register` entry that is itself invalid](./configuration.md#errors) (not a
 file reference, or a URL) is already reported by the configuration snapshot
@@ -348,20 +388,21 @@ and is not loaded or reported again.
 ### Two manifests for one host
 
 `agreement(&profiles)` groups profiles by `host`. Claims whose revisions are
-equal collapse into the first (`HostClaim::Agreed`). Claims that differ are a
-`HostClaim::Conflict`, and `HostClaim::diagnostics()` gives one
-`dm.host.registration` warning per claim: neither is used, whatever their
-order.
+equal collapse into the first (`HostClaim::Agreed`), so the same release
+installed twice is one host. Claims that differ are a `HostClaim::Conflict`,
+and `HostClaim::diagnostics()` gives one `dm.host.registration` warning per
+claim: neither is used, whatever their order.
 
 ## Diagnostics
 
 Every diagnostic but `dm.host.foreign_document` (a notice, below) is a
 warning. It names the entry (the declaring file and
 its index in `register`), the failing manifest field when one failed
-(`lifecycle`, `triggers[1]`, `functions[0].facts`), and the file, line, and
+(`lifecycle`, `files[1]`, `functions[0].facts`), and the file, line, and
 column of the problem when known: the configuration file, at the entry, when
-the manifest cannot be found, the manifest for its own shape or a member it
-cannot resolve, and the member file for a member that does not load.
+the manifest cannot be found, the manifest for its own shape or a member that
+is missing or does not match its digest, and the member file for a member
+that does not load.
 `markdown::compose::report_diagnostics::registration_diagnostic` turns one
 into the record `md` reports. DMLS reports them on the documents they affect;
 see [In the editor (DMLS)](#in-the-editor-dmls).
@@ -374,51 +415,38 @@ also report the selection warnings of the documents they judge.
 
 | Code | When |
 | --- | --- |
-| `dm.host.registration` | a manifest or member is missing, invalid, or remote; a format 2 member does not match its digest; a format 1 manifest is read as format 2; an artifact is refused; the host name differs from the lifecycle artifact's; or two manifests claim one host with different content (reported for each run, and again for a document such a host identifies) |
-| `dm.host.identify_too_broad` | the identifying trigger could match on keys `md` owns alone |
-| `dm.host.ambiguous` | two or more hosts identify the same document; it is analyzed as an `md` document |
+| `dm.host.registration` | a manifest or member is missing, invalid, or remote; a member does not match its digest; a member has an unsupported `kind` or imports outside the bundle; a namespace is reserved or declared twice; two files share a `name`; a format 1 manifest is read; an artifact is refused; the host name differs from the lifecycle artifact's; or two manifests claim one host with different content (reported for each run, and again for a document such a host identifies) |
+| `dm.host.identify_too_broad` | a registered trigger could match on keys `md` owns alone |
+| `dm.host.ambiguous` | two or more hosts' triggers match the same document; it is analyzed as an `md` document |
 | `dm.host.foreign_document` | `md compose` composes a document a registered host identifies; an `info` notice, once per run, naming the host's own command (see [below](#md-compose-of-a-hosts-document)) |
 | `dm.lifecycle.unknown_host` | DMLS only: a root key of a document no registered host identifies is a lifecycle event only a registered host has (see [below](#in-the-editor-dmls)) |
 
 ## Selecting a document's host
 
 Every document is analyzed as exactly one host. Selection is passive: it
-writes nothing, fetches nothing, prompts for nothing, and reads only the host
-catalogs in the document's schema roots (for the legacy case below).
+reads no file, writes nothing, fetches nothing, and prompts for nothing.
+Nothing in a schema root names a host: a `globals.yaml` and lifecycle
+artifact left in a schema root by an older host install are ordinary files.
 
 ```mermaid
 flowchart TD
-    D[document] --> I{how many registered hosts'<br/>identifying triggers match?}
-    I -- one usable host --> R[Registered: that host's triggers,<br/>globals, functions, and lifecycle]
-    I -- several hosts, or a host<br/>whose claims conflict --> A[Ambiguous: md analysis,<br/>no legacy fallback]
-    I -- none --> L{a root host catalog of a host<br/>that is not registered?}
-    L -- yes --> G[Legacy: that catalog's globals,<br/>functions, and lifecycle]
-    L -- no --> M[Md]
+    D[document] --> I{whose registered triggers<br/>match it?}
+    I -- one usable host's --> R[Registered: the matched triggers,<br/>and the host's globals, functions, lifecycle]
+    I -- several hosts', or a host<br/>whose claims conflict --> A[Ambiguous: md analysis]
+    I -- none --> M[Md]
 ```
 
 | Result | When | What applies |
 | --- | --- | --- |
-| `Registered(profile)` | exactly one registered host identifies the document | that host's matching triggers, its globals, functions, and lifecycle profile, together |
-| `Ambiguous(hosts)` | two hosts identify it (`dm.host.ambiguous`), or a host whose two manifests conflict does (their `dm.host.registration` warnings) | nothing of any host; the document is an `md` document |
-| `Legacy(host)` | no registered host identifies it, and its schema roots hold a host catalog (a `globals.yaml` with its `globals.lifecycle.json`) of a host that is **not** registered | that catalog's globals and function catalogs, and the first usable lifecycle profile |
+| `Registered(profile)` | one usable registered host's triggers match the document; `Selected::matched` lists which | that host's matched triggers, its globals, functions, and lifecycle profile, together |
+| `Ambiguous(hosts)` | two hosts' triggers match it (`dm.host.ambiguous`), or a host whose two manifests conflict does (their `dm.host.registration` warnings) | nothing of any host; the document is an `md` document |
 | `Md` | anything else | no host |
 
-A document is identified judged in its own context: its frontmatter, and its
-own path for `$path` predicates, whose bare and `./` patterns read from the
-document's tree root.
-
-Two rules keep a registered host's facts on its own documents:
-
-- **A conflict never wins.** When two manifests claim one host with different
-  content, neither is used, and a document their identifying triggers match is
-  `Ambiguous`, not handed to a root catalog.
-- **A registered host is never a legacy host.** When a host is registered but
-  its identifying trigger did not match the document, its root catalog (and the
-  function catalogs beside it) is left out of the legacy view, inside the
-  host's own package area and outside it. A document with only shared keys
-  (`initialize:`) next to an installed host's catalog is therefore an `md`
-  document. A root catalog whose host is not registered still serves as the
-  compatibility fallback.
+A document is judged in its own context: its frontmatter, and its own path
+for `$path` predicates, whose bare and `./` patterns read from the
+document's tree root. A conflict never wins: when two manifests claim one
+host with different content, neither is used, and a document their triggers
+match is `Ambiguous`.
 
 From Rust:
 
@@ -432,23 +460,29 @@ use darkmatter::markdown::schemas::frontmatter_as_json;
 fn host_of(snapshot: &ConfigSnapshot, document: &Markdown, path: &std::path::Path, context: &FileResolutionContext) {
     let hosts = RegisteredHosts::load(snapshot, context);
     let selected = select(Some(&hosts), &frontmatter_as_json(document), Some(path), context);
-    match selected.selection {
-        HostSelection::Registered(profile) => println!("{}", profile.host()),
-        HostSelection::Legacy(legacy) => println!("legacy: {} catalogs", legacy.globals().len()),
+    match &selected.selection {
+        HostSelection::Registered(profile) => {
+            let matched: Vec<&str> = selected.matched_triggers().map(|trigger| trigger.bundle_path.as_str()).collect();
+            println!("{} via {matched:?}", profile.host());
+        }
         HostSelection::Ambiguous(hosts) => println!("ambiguous: {hosts:?}"),
         HostSelection::Md => println!("md"),
     }
 }
 ```
 
-`RegisteredHosts::identify` is the same choice without the legacy view; it
-reads nothing. A composition request carries the hosts with
+A composition request carries the hosts with
 `ComposeOptions::with_registered_hosts`, and `ComposeOptions::host_selection_for`
 gives a document's selection. A caller that supplies its own host globals
 (`ComposeOptions::with_host_globals`, as Claudine does when it runs a
 document) keeps them: its documents select `Md`, and no registered layer is
 added. Registration supplies type information only; when the host itself runs
 a document, its own in-process definitions stay authoritative.
+
+`RegisteredHosts::yaml_kinds()` indexes every usable host's `yaml-schema`
+definitions by the kinds they claim. Selecting a YAML document's kind from
+them in `md schema validate` and DMLS, after the built-in and local
+definitions, is **planned**.
 
 ## Layering
 
@@ -457,7 +491,7 @@ lowest to highest:
 
 ```mermaid
 flowchart BT
-    B[Darkmatter baseline] --> H[the host's matching triggers,<br/>in manifest order]
+    B[Darkmatter baseline] --> H[the host's matched triggers,<br/>in bundle-path order]
     H --> R[triggers from the five schema roots]
     R --> D[the document's own $schema]
 ```
@@ -483,8 +517,8 @@ gadget: name      # rejected by the root trigger's `gadget: number`
   schema root (the same file, with the same content), it applies once, as the
   host's. An unrelated file with the same name is a different trigger.
 - **Ordinary matching.** A host trigger applies only when its `match:` matches
-  the document, exactly as a root trigger does; identification only decides
-  which host's triggers are considered.
+  the document, exactly as a root trigger does; the same match that selects
+  the host decides which of its triggers apply.
 - **Imports stay anchored.** A host trigger's relative imports resolve from
   the trigger's own file.
 - **Cache identity.** A host layer's validator identity includes the
@@ -610,13 +644,12 @@ start:
 - **Registrations load once per configuration.** DMLS reads the home's and
   the repository's configuration files read-only, the way `md` does, and
   loads their `register` entries off the request thread: it never migrates a
-  legacy file, writes, prompts, or fetches. Every document whose context
+  file, writes, prompts, or fetches. Every document whose context
   projects the same configuration shares the result. Startup loads the
   configuration of every workspace folder; a document with frontmatter
   elsewhere loads its own before it is analyzed.
 - **A document without frontmatter gets the same choice.** It is analyzed
-  as if its frontmatter were empty, under the installed registrations, so a
-  registered host's root catalog is never its legacy catalog. It never waits
+  as if its frontmatter were empty, under the installed registrations. It never waits
   for a load: until its configuration's registrations are loaded it is an
   `md` document, and it is refreshed when they are.
 - **The choice is made once per schema preparation** and kept with the
@@ -626,13 +659,12 @@ start:
   never answered from facts prepared for another.
 - **A broken replacement is not hidden.** When a manifest or a member
   changes so that the registration no longer loads, the host's view is
-  dropped at once: the document is analyzed as `md` (or its legacy catalog,
-  when one applies), and the new `dm.host.registration` warning appears on
+  dropped at once: the document is analyzed as `md`, and the new
+  `dm.host.registration` warning appears on
   the file that is wrong. A file that is saved with the same bytes changes
   nothing.
-- **Ambiguity never falls back.** A document two registered hosts identify
-  gets one `dm.host.ambiguous` warning and `md` analysis, never a legacy
-  catalog's.
+- **Ambiguity is `md`.** A document two registered hosts identify gets one
+  `dm.host.ambiguous` warning and `md` analysis.
 
 ### Where the warnings appear
 
@@ -659,8 +691,8 @@ DMLS watches everything a registration is loaded from, wherever it lives:
 
 - both configuration files, `~/.darkmatter.yaml` and
   `<repo-root>/.darkmatter.yaml`, whether or not they exist;
-- every manifest, member, imported file, and companion artifact, YAML and
-  JSON alike, and the folders they are in, so a member that is missing
+- every manifest and member, YAML and JSON alike, every unlisted path a
+  member refers to, and the folders they are in, so a member that is missing
   is seen when it is created;
 - the place a `register` entry points at when no manifest is there yet;
 - the repository's `HEAD` and the branch it names, because the repository

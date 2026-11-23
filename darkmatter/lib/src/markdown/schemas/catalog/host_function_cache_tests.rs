@@ -1,10 +1,9 @@
-//! Host function discovery: one cached result per catalog path, replaced
+//! The host function cache: one cached result per catalog path, replaced
 //! when the catalog or its facts artifact changes, with replaced catalogs
 //! freed once no caller holds them. Every test goes through
-//! `host_function_catalogs`, the production lookup, in its own temp roots,
-//! and inspects only its own paths' cache entries.
+//! `host_function_set_at`, the lookup host registration uses, in its own
+//! temp dir, and inspects only its own paths' cache entries.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,41 +15,31 @@ use crate::markdown::compose::expression::{
     incomplete_host_calls, parse_spanned,
 };
 
-/// A repository whose `SCHEMAS_DIR` root (`external`, `earlier`) is searched
-/// before its tree root (`repo/schemas`, `later`).
+/// A temp folder holding catalogs with their facts beside them.
 struct Roots {
     _dir: tempfile::TempDir,
     /// The canonical temp dir every path below is in.
     base: PathBuf,
-    earlier: PathBuf,
-    later: PathBuf,
-    context: biscuit_file::FileResolutionContext,
 }
 
 fn roots() -> Roots {
     let dir = tempfile::TempDir::new().expect("temp dir");
     let base = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
-    let repo = base.join("repo");
-    let tree = repo.join("schemas");
-    let external = base.join("external");
-    std::fs::create_dir_all(repo.join(".git")).expect("repository marker");
-    std::fs::create_dir_all(&tree).expect("tree root");
-    std::fs::create_dir_all(&external).expect("SCHEMAS_DIR root");
-    let env = HashMap::from([("SCHEMAS_DIR".to_string(), external.to_string_lossy().into_owned())]);
-    let context = biscuit_file::FileResolutionContext::from_snapshot(&repo, None, env).with_repository_root(&repo);
-    Roots { _dir: dir, base, earlier: external, later: tree, context }
+    Roots { _dir: dir, base }
 }
 
 impl Roots {
-    fn discover(&self) -> Vec<Result<HostFunctions, HostFunctionCatalogError>> {
-        host_function_catalogs(&self.context)
+    /// The set of the catalog at `path` as it is on disk now, its facts read
+    /// from beside it.
+    fn lookup(&self, path: &Path) -> Result<HostFunctions, HostFunctionCatalogError> {
+        let text = std::fs::read_to_string(path).expect("the catalog is readable");
+        let facts = facts_artifact_path(path);
+        host_function_set_at(path, &text, &facts, std::fs::read(&facts))
     }
 
-    /// The one discovered set, which must have loaded.
-    fn only_set(&self) -> HostFunctions {
-        let mut sets = self.discover();
-        assert_eq!(sets.len(), 1, "{sets:?}");
-        sets.remove(0).expect("the catalog loads")
+    /// The set of the catalog at `path`, which must have loaded.
+    fn only_set(&self, path: &Path) -> HostFunctions {
+        self.lookup(path).expect("the catalog loads")
     }
 
     fn entries(&self) -> usize {
@@ -126,13 +115,13 @@ fn greet_signatures() -> Vec<String> {
 #[test]
 fn a_catalog_only_change_replaces_the_entry_and_frees_the_old_catalog() {
     let roots = roots();
-    let path = roots.earlier.join("greet.yaml");
+    let path = roots.base.join("greet.yaml");
     let first_text = host_catalog("greet", "name", "Greets.");
     write_with_facts(&path, &first_text);
     let facts = std::fs::read_to_string(facts_artifact_path(&path)).expect("the facts");
     let probe = DiscoveryProbe::install();
 
-    let first = roots.only_set();
+    let first = roots.only_set(&path);
     let owner = first.catalog().owner_probe();
     let guard = first.enter();
     let clone = first.catalog().clone();
@@ -143,7 +132,7 @@ fn a_catalog_only_change_replaces_the_entry_and_frees_the_old_catalog() {
     assert_eq!(cached.result.expect("loaded"), ["greet"]);
 
     // Unchanged: reused, not rebuilt.
-    let again = roots.only_set();
+    let again = roots.only_set(&path);
     assert_eq!(probe.host_function_builds(), 1);
     assert_eq!(roots.entries(), 1);
 
@@ -151,7 +140,7 @@ fn a_catalog_only_change_replaces_the_entry_and_frees_the_old_catalog() {
     // its recorded hash is now stale.
     let second_text = host_catalog("greet", "name", "Greets warmly.");
     std::fs::write(&path, &second_text).expect("rewrite the catalog");
-    let second = roots.only_set();
+    let second = roots.only_set(&path);
     assert_eq!(probe.host_function_builds(), 2);
     assert_eq!(roots.entries(), 1);
     let cached = cached_host_functions(&path).expect("an entry");
@@ -172,17 +161,17 @@ fn a_catalog_only_change_replaces_the_entry_and_frees_the_old_catalog() {
 #[test]
 fn an_artifact_only_change_replaces_the_entry_and_frees_the_old_catalog() {
     let roots = roots();
-    let path = roots.earlier.join("greet.yaml");
+    let path = roots.base.join("greet.yaml");
     let text = host_catalog("greet", "name", "Greets.");
     write_with_facts(&path, &text);
     let probe = DiscoveryProbe::install();
 
-    let first = roots.only_set();
+    let first = roots.only_set(&path);
     let owner = first.catalog().owner_probe();
     assert!(first.registration("greet").is_some());
 
     std::fs::remove_file(facts_artifact_path(&path)).expect("remove the facts");
-    let second = roots.only_set();
+    let second = roots.only_set(&path);
     assert_eq!(probe.host_function_builds(), 2);
     assert_eq!(roots.entries(), 1);
     let cached = cached_host_functions(&path).expect("an entry");
@@ -201,18 +190,18 @@ fn an_artifact_only_change_replaces_the_entry_and_frees_the_old_catalog() {
 #[test]
 fn a_failing_catalog_replaces_a_loaded_one_and_a_valid_one_recovers() {
     let roots = roots();
-    let path = roots.earlier.join("greet.yaml");
+    let path = roots.base.join("greet.yaml");
     write_with_facts(&path, &host_catalog("greet", "name", "Greets."));
     let probe = DiscoveryProbe::install();
 
-    let first = roots.only_set();
+    let first = roots.only_set(&path);
     let owner = first.catalog().owner_probe();
     drop(first);
     assert!(owner.is_alive(), "the cache holds the loaded revision");
 
     let failing = failing_catalog();
     std::fs::write(&path, &failing).expect("write the failing catalog");
-    let error = roots.discover().remove(0).expect_err("the catalog does not load");
+    let error = roots.lookup(&path).expect_err("the catalog does not load");
     assert_eq!(error.path, path);
     assert!(error.message.contains("./later.yaml"), "{}", error.message);
     assert!(!owner.is_alive(), "the failing revision released the loaded one");
@@ -222,14 +211,14 @@ fn a_failing_catalog_replaces_a_loaded_one_and_a_valid_one_recovers() {
     assert_eq!(cached.result.expect_err("the cached error"), error);
 
     // Unchanged: the cached error, not a rebuild.
-    let again = roots.discover().remove(0).expect_err("still failing");
+    let again = roots.lookup(&path).expect_err("still failing");
     assert_eq!(again, error);
     assert_eq!(probe.host_function_builds(), 2);
     assert_eq!(roots.entries(), 1);
 
     let recovered_text = host_catalog("greet", "name", "Greets again.");
     write_with_facts(&path, &recovered_text);
-    let recovered = roots.only_set();
+    let recovered = roots.only_set(&path);
     assert_eq!(probe.host_function_builds(), 3);
     assert_eq!(roots.entries(), 1);
     assert_eq!(recovered.incomplete_functions(), Vec::<(&str, &str)>::new());
@@ -245,7 +234,7 @@ fn a_failing_catalog_replaces_a_loaded_one_and_a_valid_one_recovers() {
 #[test]
 fn facts_transitions_classify_each_artifact_state_and_recover() {
     let roots = roots();
-    let path = roots.earlier.join("greet.yaml");
+    let path = roots.base.join("greet.yaml");
     let text = host_catalog("greet", "name", "Greets.");
     write_with_facts(&path, &text);
     let facts_path = facts_artifact_path(&path);
@@ -262,30 +251,30 @@ fn facts_transitions_classify_each_artifact_state_and_recover() {
     };
     let artifact = || cached_host_functions(&path).expect("an entry").artifact;
 
-    assert_eq!(incomplete(&roots.only_set()), None);
+    assert_eq!(incomplete(&roots.only_set(&path)), None);
     assert_eq!(artifact(), CachedArtifact::Text(valid.clone()));
 
     std::fs::remove_file(&facts_path).expect("remove the facts");
-    assert_eq!(incomplete(&roots.only_set()), Some(format!("{file} is absent")));
+    assert_eq!(incomplete(&roots.only_set(&path)), Some(format!("{file} is absent")));
     assert_eq!(artifact(), CachedArtifact::Absent);
 
     std::fs::write(&facts_path, "{ not json").expect("invalid JSON");
-    let reason = incomplete(&roots.only_set()).expect("incomplete");
+    let reason = incomplete(&roots.only_set(&path)).expect("incomplete");
     assert!(reason.starts_with(&file) && reason != format!("{file} is absent"), "{reason}");
     assert_eq!(artifact(), CachedArtifact::Text("{ not json".to_string()));
 
     let stale = valid.replace(&biscuit_hash::blake3_hash(&text), &"0".repeat(64));
     std::fs::write(&facts_path, &stale).expect("stale facts");
-    let reason = incomplete(&roots.only_set()).expect("incomplete");
+    let reason = incomplete(&roots.only_set(&path)).expect("incomplete");
     assert!(reason.contains("records catalog hash `0000") && reason.ends_with("regenerate the artifact"), "{reason}");
     assert_eq!(artifact(), CachedArtifact::Text(stale));
 
     std::fs::write(&facts_path, [0xff, 0xfe, b'{']).expect("non-UTF-8 bytes");
-    assert_eq!(incomplete(&roots.only_set()), Some(format!("{file} cannot be read: the file is not UTF-8 text")));
+    assert_eq!(incomplete(&roots.only_set(&path)), Some(format!("{file} cannot be read: the file is not UTF-8 text")));
     assert_eq!(artifact(), CachedArtifact::Unreadable("the file is not UTF-8 text".to_string()));
 
     std::fs::write(&facts_path, &valid).expect("valid facts again");
-    assert_eq!(incomplete(&roots.only_set()), None);
+    assert_eq!(incomplete(&roots.only_set(&path)), None);
     assert_eq!(artifact(), CachedArtifact::Text(valid));
 
     assert_eq!(probe.host_function_builds(), 6, "every artifact state is a new revision");
@@ -299,16 +288,16 @@ fn facts_transitions_classify_each_artifact_state_and_recover() {
 #[test]
 fn a_held_set_and_guard_survive_replacement_with_their_own_analysis() {
     let roots = roots();
-    let path = roots.earlier.join("greet.yaml");
+    let path = roots.base.join("greet.yaml");
     write_with_facts(&path, &host_catalog("greet", "name", "Greets."));
 
-    let old = roots.only_set();
+    let old = roots.only_set(&path);
     let owner = old.catalog().owner_probe();
     let old_guard = old.enter();
     assert_eq!(greet_signatures(), ["greet(name: string): string"]);
 
     write_with_facts(&path, &host_catalog("greet", "person", "Greets a person."));
-    let new = roots.only_set();
+    let new = roots.only_set(&path);
     assert_eq!(roots.entries(), 1);
 
     let parameter = |set: &HostFunctions| {
@@ -333,39 +322,31 @@ fn a_held_set_and_guard_survive_replacement_with_their_own_analysis() {
     assert!(!owner.is_alive());
 }
 
-/// Two catalog paths keep independent entries in discovery order; a file
-/// shadowed by an earlier root's file of the same name is never loaded, and
-/// replacing one path's revision leaves the other's set and entry intact.
+/// Two catalog paths keep independent entries; replacing one path's
+/// revision leaves the other's set and entry intact.
 #[test]
-fn distinct_paths_keep_independent_entries_in_discovery_order() {
+fn distinct_paths_keep_independent_entries() {
     let roots = roots();
-    let alpha = roots.earlier.join("alpha.yaml");
-    let beta = roots.earlier.join("beta.yaml");
-    let shadowed = roots.later.join("alpha.yaml");
+    let alpha = roots.base.join("alpha.yaml");
+    let beta = roots.base.join("beta.yaml");
     write_with_facts(&alpha, &host_catalog("greet_alpha", "name", "Alpha."));
     write_with_facts(&beta, &host_catalog("greet_beta", "name", "Beta."));
-    write_with_facts(&shadowed, &host_catalog("greet_shadowed", "name", "Shadowed."));
     let probe = DiscoveryProbe::install();
 
-    let names = |sets: &[Result<HostFunctions, HostFunctionCatalogError>]| -> Vec<String> {
-        sets.iter().map(|set| set.as_ref().expect("loads").function_names().join(",")).collect()
-    };
-    let first = roots.discover();
-    assert_eq!(names(&first), ["greet_alpha", "greet_beta"]);
+    let first = [roots.only_set(&alpha), roots.only_set(&beta)];
+    assert_eq!(first.iter().map(|set| set.function_names().join(",")).collect::<Vec<_>>(), ["greet_alpha", "greet_beta"]);
     assert_eq!(roots.entries(), 2);
-    assert!(cached_host_functions(&shadowed).is_none(), "the shadowed file is never loaded");
-    let beta_owner = first[1].as_ref().expect("loads").catalog().owner_probe();
+    let beta_owner = first[1].catalog().owner_probe();
     let beta_hash = cached_host_functions(&beta).expect("an entry").catalog_hash;
 
     write_with_facts(&alpha, &host_catalog("greet_alpha", "name", "Alpha, revised."));
     drop(first);
-    let second = roots.discover();
-    assert_eq!(names(&second), ["greet_alpha", "greet_beta"]);
+    let second = [roots.only_set(&alpha), roots.only_set(&beta)];
+    assert_eq!(second.iter().map(|set| set.function_names().join(",")).collect::<Vec<_>>(), ["greet_alpha", "greet_beta"]);
     assert_eq!(probe.host_function_builds(), 3, "only alpha was rebuilt");
     assert_eq!(roots.entries(), 2);
     assert_eq!(cached_host_functions(&beta).expect("an entry").catalog_hash, beta_hash);
     assert!(beta_owner.is_alive(), "beta's cached set is the one already loaded");
-    let beta_set = second[1].as_ref().expect("loads");
-    assert_eq!(beta_set.incomplete_functions(), Vec::<(&str, &str)>::new());
-    assert!(beta_set.registration("greet_beta").is_some());
+    assert_eq!(second[1].incomplete_functions(), Vec::<(&str, &str)>::new());
+    assert!(second[1].registration("greet_beta").is_some());
 }

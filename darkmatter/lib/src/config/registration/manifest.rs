@@ -28,30 +28,6 @@ pub const HOST_MANIFEST_TYPE: &str = "darkmatter-host";
 /// The manifest format the shipped contract describes.
 pub const HOST_MANIFEST_FORMAT_VERSION: u64 = 2;
 
-/// The format 1 contract, which only the legacy profile loader
-/// ([`read`]) still validates against. It is removed together with legacy
-/// loading; nothing serves it as a shipped schema.
-const LEGACY_MANIFEST_SCHEMA_SOURCE: &str = r#"kind: schema
-description: Darkmatter's host registration manifest.
-types:
-    member-reference: "string(not-empty) -> A local file reference, resolved from the manifest's directory (`./schemas/globals.yaml`)."
-    function-pair:
-        catalog: "member-reference(required) -> The host function catalog: the signatures."
-        facts: "member-reference(required) -> The facts artifact generated from the host's registrations for that catalog."
-        $constraints: { closed: true }
-    darkmatter-host:
-        kind: "literal(darkmatter-host; required) -> The manifest envelope."
-        format_version: "literal(1; required) -> The manifest format; this reader understands 1."
-        host: "string(not-empty; required) -> The host's identifier; its lifecycle artifact must record the same host."
-        version: "string(not-empty; required) -> The host release that wrote the manifest (not the format)."
-        identify: "member-reference(required) -> The identifying schema trigger: a document it matches belongs to this host."
-        triggers: "member-reference[](required) -> Schema triggers applied, in this order, only to documents the host identifies."
-        globals: "member-reference(required) -> The host's global catalog."
-        lifecycle: "member-reference(required) -> The host's lifecycle artifact for that catalog."
-        functions: "function-pair[](required) -> Host function catalogs, each with its facts artifact."
-        $constraints: { closed: true }
-"#;
-
 /// The format 1 fields format 2 removed; any of them marks a manifest
 /// written for the old reader.
 const LEGACY_FIELDS: [&str; 3] = ["identify", "triggers", "globals"];
@@ -67,80 +43,15 @@ fn contract() -> &'static SimplifiedSchema {
     CONTRACT.get_or_init(|| prepare(HOST_MANIFEST_SCHEMA_SOURCE))
 }
 
-/// The prepared format 1 contract; see [`contract`].
-fn legacy_contract() -> &'static SimplifiedSchema {
-    static CONTRACT: OnceLock<SimplifiedSchema> = OnceLock::new();
-    CONTRACT.get_or_init(|| prepare(LEGACY_MANIFEST_SCHEMA_SOURCE))
-}
-
 fn prepare(source: &str) -> SimplifiedSchema {
     SimplifiedSchema::try_from(source)
         .and_then(|schema| schema.select(HOST_MANIFEST_TYPE))
         .unwrap_or_else(|error| panic!("the `{HOST_MANIFEST_TYPE}` type prepares: {error}"))
 }
 
-/// A format 1 manifest the legacy contract accepted. Every field is required by the schema,
-/// so none is defaulted here.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct Manifest {
-    #[serde(rename = "kind")]
-    _kind: String,
-    #[serde(rename = "format_version")]
-    _format_version: u64,
-    pub host: String,
-    pub version: String,
-    pub identify: String,
-    pub triggers: Vec<String>,
-    pub globals: String,
-    pub lifecycle: String,
-    pub functions: Vec<FunctionPair>,
-}
-
-/// One `functions` item.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct FunctionPair {
-    pub catalog: String,
-    pub facts: String,
-}
-
-/// A manifest as read: its text, its positions, and its accepted fields.
-pub(super) struct ReadManifest {
-    pub text: String,
-    pub loaded: LoadedYaml,
-    pub manifest: Manifest,
-}
-
-impl ReadManifest {
-    /// The 1-based line and column of the value at `segments`.
-    pub fn locate(&self, segments: &[&str]) -> Option<(usize, usize)> {
-        locate(&self.loaded, &self.text, segments)
-    }
-
-    /// The manifest as the schema judged it: its meaning, without comments
-    /// or layout.
-    pub fn meaning(&self) -> &Value {
-        &self.loaded.json
-    }
-}
-
 fn locate(loaded: &LoadedYaml, text: &str, segments: &[&str]) -> Option<(usize, usize)> {
     let segments: Vec<String> = segments.iter().map(|segment| (*segment).to_string()).collect();
     loaded.byte_range(&locating_problem(&segments)).map(|range| line_column(text, range.start))
-}
-
-/// Validates the format 1 manifest `bytes` read from `path`: one
-/// admissible YAML mapping that the closed legacy contract accepts.
-pub(super) fn read(path: &Path, bytes: Vec<u8>) -> Result<ReadManifest, Refusal> {
-    let (text, loaded) = load_mapping(path, bytes)?;
-    judge(legacy_contract(), path, &text, &loaded)?;
-    // The contract admitted the shape; this typed read refuses only what a
-    // JSON Schema `const` cannot (a `format_version` written `1.0`).
-    let manifest: Manifest = serde_json::from_value(loaded.json.clone()).map_err(|error| {
-        refusal(path, locate(&loaded, &text, &["format_version"]), format!("the manifest is not a `{HOST_MANIFEST_TYPE}` manifest: {error}"))
-    })?;
-    Ok(ReadManifest { text, loaded, manifest })
 }
 
 fn refusal(path: &Path, at: Option<(usize, usize)>, message: String) -> Refusal {
@@ -237,6 +148,14 @@ pub(super) struct ManifestV2 {
     pub lifecycle: String,
     pub functions: Vec<FunctionPair>,
     pub digests: BTreeMap<String, String>,
+}
+
+/// One `functions` item.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FunctionPair {
+    pub catalog: String,
+    pub facts: String,
 }
 
 /// Why [`read_v2`] refused a manifest.
@@ -484,7 +403,6 @@ mod tests {
             .expect("`darkmatter:host` names a shipped document");
         assert_eq!((shipped.path, shipped.text), (HOST_MANIFEST_SCHEMA_PATH, HOST_MANIFEST_SCHEMA_SOURCE));
         contract();
-        legacy_contract();
     }
 
     #[test]

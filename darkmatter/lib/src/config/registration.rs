@@ -2,41 +2,45 @@
 //! into passive host profiles.
 //!
 //! A `register` entry of `.darkmatter.yaml` names a **host manifest**
-//! (`kind: darkmatter-host`, [`manifest`]), one file a host program installs
-//! that names its identifying trigger, its triggers, its global catalog, its
-//! lifecycle artifact, and its function catalogs. [`load_registrations`]
-//! turns each entry into a [`RegisteredHostProfile`], or into one warning
-//! when anything about it is unusable:
+//! (`kind: darkmatter-host`, format 2, [`manifest`]), one file a host program
+//! publishes that lists every file of its bundle with its BLAKE3 digest:
+//! schema triggers, YAML kind definitions, namespace schemas, and type
+//! libraries under `files`, its lifecycle artifact, and its function
+//! catalogs. [`load_registrations`] turns each entry into a
+//! [`RegisteredHostProfile`], or into warnings when anything about it is
+//! unusable:
 //!
-//! - the manifest is validated against the shipped closed envelope before a
-//!   member is read;
-//! - every member resolves from the manifest's directory as a local
-//!   [`FileReference`]; a remote member is refused without being fetched;
-//! - every member and every file it imports is read once, inside one
-//!   retained read set, and recorded with its content hash;
+//! - [`bundle::load_snapshot`] validates the manifest against the shipped
+//!   closed envelope, then reads every member once and checks its digest; a
+//!   format 1 manifest is refused with an upgrade warning;
+//! - every member is classified by its own `kind` and prepared from the
+//!   verified bytes alone ([`simplified_schema::resolve::bundle`]): an import
+//!   outside the listed members, an escape, or a remote reference is refused;
+//! - the namespace files form the host's global catalog ([`namespaces`]),
+//!   which the lifecycle artifact must be versioned against;
 //! - a profile is published only when all of it loads: no partial globals,
-//!   functions, lifecycle events, or trigger payloads are ever exposed.
-//!
-//! [`bundle::load_snapshot`] reads a format 2 manifest, which lists every
-//! bundle file with its digest, into one verified snapshot; profiles are
-//! still loaded from format 1 manifests.
+//!   functions, lifecycle events, trigger payloads, or YAML kinds are ever
+//!   exposed.
 //!
 //! Registration is passive: it writes nothing, fetches nothing, prompts for
 //! nothing, installs no function handler, and runs no command. A profile is
 //! analysis data, never runtime authority.
 //!
 //! Which host a document belongs to is [`select`]ed over [`RegisteredHosts`]
-//! (built on [`agreement`]); a selected host's triggers layer into the
-//! effective schema through
+//! (built on [`agreement`]): a host one of whose triggers matches the
+//! document's authored frontmatter and path; the selected host's matched
+//! triggers layer into the effective schema through
 //! [`DarkmatterSchemas::with_registered_hosts`](crate::markdown::schemas::DarkmatterSchemas::with_registered_hosts).
 //!
 //! User-facing guide: `darkmatter/docs/topics/host-registration.md`.
 
 pub mod bundle;
 pub mod manifest;
+pub mod merge;
+pub mod namespaces;
 mod selection;
 
-pub use selection::{HostSelection, LegacyHost, RegisteredHosts, Selected, select};
+pub use selection::{HostSelection, RegisteredHosts, Selected, select};
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -45,14 +49,16 @@ use std::sync::{Arc, OnceLock};
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext, PathIdentity, canonicalize_simplified};
 use serde_json::{Value, json};
 use simplified_schema::SchemaRoot;
-use simplified_schema::resolve::buffers;
-use simplified_schema::triggers::assemble::{ResolvedPayload, resolve_trigger_payload};
+use simplified_schema::resolve::bundle::{self as resolve_bundle, BundleSources};
+use simplified_schema::triggers::assemble::{ResolvedPayload, resolve_registered_trigger_payload};
 use simplified_schema::triggers::{
     IdentifyingTrigger, LoadedTrigger, TriggerEnvelope, admit_identifying_trigger, parse_trigger_envelope_from_str,
 };
+use simplified_schema::yaml_documents::{RegisteredDefinition, RegisteredSource};
 
+use self::bundle::{BundleFunctionPair, BundleMember, VerifiedSnapshot};
+use self::namespaces::{NamespaceMember, PreparedCatalog};
 use super::load::{ConfigSnapshot, Registration, line_column};
-use super::migration_receipt::content_hash;
 use crate::lifecycle::host_profile::HostLifecycleProfile;
 use crate::markdown::compose::expression::host::FactsArtifact;
 use crate::markdown::compose::expression::{
@@ -103,7 +109,7 @@ pub struct RegistrationDiagnostic {
     pub column: Option<usize>,
     /// The `register` entry refused.
     pub entry: Registration,
-    /// The manifest field of the failing member (`lifecycle`, `triggers[1]`,
+    /// The manifest field of the failing member (`lifecycle`, `files[1]`,
     /// `functions[0].facts`); `None` when the manifest itself failed.
     pub member: Option<String>,
 }
@@ -127,20 +133,28 @@ pub struct ManifestIdentity {
     pub content_hash: String,
 }
 
-/// A registered trigger file: its loaded envelope and resolved payload.
+/// A registered trigger file: its loaded envelope, resolved payload, and
+/// admitted identifying conditions.
 ///
-/// The trigger's payload resolves from its own file, so relative imports
-/// (`./action.yaml`) are anchored there. Its `pattern_cwd` is the tree root
-/// of the context the registration was loaded in; a caller layering it for
-/// a document in another tree sets that document's tree root, as for a
-/// user-level schema root.
+/// The trigger's payload resolves from its own file inside the bundle, so
+/// relative imports (`./action.yaml`) are anchored there. Its `pattern_cwd`
+/// is the tree root of the context the registration was loaded in; a caller
+/// layering it for a document in another tree sets that document's tree
+/// root, as for a user-level schema root.
 #[derive(Debug, Clone)]
 pub struct RegisteredTrigger {
     /// The loaded trigger, ready for a
     /// [`TriggerRegistry`](simplified_schema::triggers::TriggerRegistry).
     pub trigger: LoadedTrigger,
-    /// Its payload, resolved and checked at load.
+    /// Its payload, resolved and checked at load; empty for a matcher-only
+    /// trigger, which identifies the host and contributes nothing.
     pub payload: ResolvedPayload,
+    /// Its bundle-relative path (`schemas/composition.yaml`): its identity
+    /// wherever the bundle is installed.
+    pub bundle_path: String,
+    /// Its conditions as admitted against the names `md` owns: every
+    /// matching alternative requires a key no `md` document has.
+    pub identifying: IdentifyingTrigger,
 }
 
 impl RegisteredTrigger {
@@ -174,20 +188,52 @@ pub struct RegisteredHostProfile {
     version: String,
     manifest: ManifestIdentity,
     entries: Vec<Registration>,
-    identify: RegisteredTrigger,
-    identifying: IdentifyingTrigger,
+    snapshot: Arc<VerifiedSnapshot>,
     triggers: Vec<RegisteredTrigger>,
-    globals_path: PathBuf,
-    globals: Arc<GlobalCatalog>,
+    kinds: Vec<RegisteredDefinition>,
+    libraries: Vec<String>,
+    catalog: PreparedCatalog,
     lifecycle_path: PathBuf,
     lifecycle: Arc<HostLifecycleProfile>,
     functions: Vec<HostFunctionSet>,
-    dependencies: Vec<HostDependency>,
-    revision: String,
+    candidates: Vec<PathBuf>,
+    /// The checked host layer of each matched set seen so far: the profile
+    /// is one revision, so the sorted matched indices are the whole key.
+    checked: std::sync::Mutex<Vec<(Vec<usize>, CheckedResult)>>,
 }
+
+/// A memoized [`merge::check`] outcome.
+type CheckedResult = Result<Arc<merge::CheckedLayer>, merge::TriggerConflict>;
 
 #[allow(missing_docs)]
 impl RegisteredHostProfile {
+    /// The checked host layer of the triggers at `matched` (indices into
+    /// [`Self::triggers`], bundle-path order) that carry a payload, built
+    /// once per matched set. Every such payload must be concrete: a caller
+    /// with a template payload resolves it and calls [`merge::check`]
+    /// itself, uncached, since the result depends on the resolved values.
+    ///
+    /// ## Errors
+    ///
+    /// The set's [`merge::TriggerConflict`], memoized like a success.
+    pub fn checked_layer(&self, matched: &[usize]) -> CheckedResult {
+        let mut key: Vec<usize> = matched.to_vec();
+        key.sort_unstable();
+        key.dedup();
+        if let Some((_, result)) = self.checked.lock().expect("checked layers poisoned").iter().find(|(seen, _)| *seen == key) {
+            return result.clone();
+        }
+        let payloads: Vec<merge::MatchedPayload<'_>> = key
+            .iter()
+            .filter_map(|&index| Some((index, self.triggers.get(index)?)))
+            .filter(|(_, trigger)| trigger.trigger.envelope.payload.is_some())
+            .map(|(index, trigger)| merge::MatchedPayload { trigger: index, file: trigger.path(), payload: &trigger.payload })
+            .collect();
+        let result = merge::check(&payloads).map(Arc::new);
+        self.checked.lock().expect("checked layers poisoned").push((key, result.clone()));
+        result
+    }
+
     /// The manifest's `host`, which the lifecycle artifact records too.
     #[must_use]
     pub fn host(&self) -> &str {
@@ -211,33 +257,57 @@ impl RegisteredHostProfile {
         &self.entries
     }
 
-    /// The identifying trigger file, as loaded.
+    /// The verified snapshot the profile was prepared from.
     #[must_use]
-    pub const fn identify_trigger(&self) -> &RegisteredTrigger {
-        &self.identify
+    pub const fn snapshot(&self) -> &Arc<VerifiedSnapshot> {
+        &self.snapshot
     }
 
-    /// The identifying trigger's admitted conditions, for
-    /// [`identifies`](simplified_schema::triggers::identifies).
-    #[must_use]
-    pub const fn identifying(&self) -> &IdentifyingTrigger {
-        &self.identifying
-    }
-
-    /// The `triggers`, in manifest order.
+    /// The `files` that are schema triggers, in bundle-path order (the
+    /// order of `files` has no effect).
     #[must_use]
     pub fn triggers(&self) -> &[RegisteredTrigger] {
         &self.triggers
     }
 
+    /// The `files` that are `kind: yaml-schema` definitions, prepared, in
+    /// bundle-path order.
     #[must_use]
-    pub fn globals_path(&self) -> &Path {
-        &self.globals_path
+    pub fn yaml_kinds(&self) -> &[RegisteredDefinition] {
+        &self.kinds
     }
 
+    /// The bundle-relative paths of the `files` that are types-only
+    /// libraries, sorted.
+    #[must_use]
+    pub fn libraries(&self) -> &[String] {
+        &self.libraries
+    }
+
+    /// The host's global catalog: one global per namespace file.
     #[must_use]
     pub const fn globals(&self) -> &Arc<GlobalCatalog> {
-        &self.globals
+        &self.catalog.catalog
+    }
+
+    /// The namespace files the catalog was prepared from, in bundle-path
+    /// order: where each global is declared.
+    #[must_use]
+    pub fn namespaces(&self) -> &[NamespaceMember] {
+        &self.catalog.namespaces
+    }
+
+    /// The namespace file that declares global `name`.
+    #[must_use]
+    pub fn namespace(&self, name: &str) -> Option<&NamespaceMember> {
+        self.catalog.namespaces.iter().find(|member| member.namespace == name)
+    }
+
+    /// The `catalog_hash` the lifecycle artifact was checked against
+    /// ([`namespaces::namespace_catalog_hash`]).
+    #[must_use]
+    pub fn catalog_hash(&self) -> &str {
+        &self.catalog.hash
     }
 
     #[must_use]
@@ -256,22 +326,27 @@ impl RegisteredHostProfile {
         &self.functions
     }
 
-    /// Every file the load read (the manifest, each member, and each file a
-    /// member imports), once each, in read order.
+    /// Every file the load read (the manifest and each member), once each,
+    /// in read order, with the hash of the bytes read.
     #[must_use]
     pub fn dependencies(&self) -> &[HostDependency] {
-        &self.dependencies
+        self.snapshot.dependencies()
     }
 
-    /// The content revision: a BLAKE3 digest over the manifest's meaning
-    /// (its accepted value, not its comments or layout) and every other
-    /// dependency's content hash, keyed by its route from the manifest's
-    /// directory. Two manifests laid out alike with the same content agree
-    /// wherever they are installed; any change to a member or import changes
-    /// it.
+    /// Every location the load looked at, present or not: the manifest, each
+    /// member, and each unlisted path a member's reference resolved to. What
+    /// a watcher observes so a republish is noticed.
+    #[must_use]
+    pub fn candidates(&self) -> &[PathBuf] {
+        &self.candidates
+    }
+
+    /// The content revision ([`VerifiedSnapshot::revision`]): the same for
+    /// two installs of one release wherever they are, and independent of the
+    /// order of `files`; any member byte changes it.
     #[must_use]
     pub fn revision(&self) -> &str {
-        &self.revision
+        self.snapshot.revision()
     }
 
     /// The globals a process other than this host declares while composing a
@@ -295,7 +370,7 @@ impl RegisteredHostProfile {
             .collect();
         let mut roots: Vec<(String, String)> = Vec::new();
         let declared = self
-            .globals
+            .globals()
             .globals()
             .map(|global| (global.name().to_string(), global.description().unwrap_or_default().to_string()))
             .chain(self.lifecycle.registry().host_globals().iter().map(|root| (root.to_string(), String::new())));
@@ -359,6 +434,11 @@ pub struct LoadedRegistrations {
     pub profiles: Vec<Arc<RegisteredHostProfile>>,
     /// One or more warnings per refused entry, in entry order.
     pub diagnostics: Vec<RegistrationDiagnostic>,
+    /// Every location a refused entry's load read or looked at, present or
+    /// not (its manifest, every member of every attempt, and each unlisted
+    /// path a member's reference resolved to): what a watcher observes so
+    /// the creation or repair of any of them loads the host.
+    pub watches: Vec<PathBuf>,
 }
 
 /// Loads every valid `register` entry of `snapshot` (user entries first,
@@ -367,8 +447,8 @@ pub struct LoadedRegistrations {
 ///
 /// `context` is the request's captured context; each entry resolves in a
 /// context derived from it and anchored at the file that declares it.
-/// `owned` holds the top-level names Darkmatter owns, which an identifying
-/// trigger may not rely on alone ([`md_owned_names`]).
+/// `owned` holds the top-level names Darkmatter owns, which no registered
+/// trigger may rely on alone ([`md_owned_names`]).
 #[must_use]
 pub fn load_registrations(
     snapshot: &ConfigSnapshot,
@@ -387,38 +467,41 @@ pub fn load_entries(
     context: &FileResolutionContext,
     owned: &BTreeSet<String>,
 ) -> LoadedRegistrations {
-    buffers::with_reads_retained(|| {
-        let mut manifests: Vec<(PathIdentity, Option<RegisteredHostProfile>)> = Vec::new();
-        let mut diagnostics = Vec::new();
-        for entry in entries {
-            let path = match locate_manifest(entry, context) {
-                Ok(path) => path,
-                Err(refusal) => {
-                    diagnostics.push(refusal.into_diagnostic(entry));
-                    continue;
-                }
-            };
-            let identity = PathIdentity::new(&path);
-            if let Some((_, loaded)) = manifests.iter_mut().find(|(seen, _)| *seen == identity) {
-                if let Some(profile) = loaded {
-                    profile.entries.push(entry.clone());
-                }
+    let mut manifests: Vec<(PathIdentity, Option<RegisteredHostProfile>)> = Vec::new();
+    let mut loaded = LoadedRegistrations::default();
+    for entry in entries {
+        let path = match locate_manifest(entry, context) {
+            Ok(path) => path,
+            Err(refusal) => {
+                loaded.diagnostics.push(refusal.into_diagnostic(entry));
                 continue;
             }
-            match load_manifest(&path, context, owned) {
-                Ok(mut profile) => {
-                    profile.entries.push(entry.clone());
-                    manifests.push((identity, Some(profile)));
+        };
+        let identity = PathIdentity::new(&path);
+        if let Some((_, profile)) = manifests.iter_mut().find(|(seen, _)| *seen == identity) {
+            if let Some(profile) = profile {
+                profile.entries.push(entry.clone());
+            }
+            continue;
+        }
+        match load_manifest(&path, context, owned) {
+            Ok(mut profile) => {
+                profile.entries.push(entry.clone());
+                manifests.push((identity, Some(profile)));
+            }
+            Err(refused) => {
+                loaded.diagnostics.extend(refused.refusals.into_iter().map(|refusal| refusal.into_diagnostic(entry)));
+                for watch in refused.watches {
+                    if !loaded.watches.contains(&watch) {
+                        loaded.watches.push(watch);
+                    }
                 }
-                Err(refusal) => {
-                    diagnostics.push(refusal.into_diagnostic(entry));
-                    manifests.push((identity, None));
-                }
+                manifests.push((identity, None));
             }
         }
-        let profiles = manifests.into_iter().filter_map(|(_, profile)| profile.map(Arc::new)).collect();
-        LoadedRegistrations { profiles, diagnostics }
-    })
+    }
+    loaded.profiles = manifests.into_iter().filter_map(|(_, profile)| profile.map(Arc::new)).collect();
+    loaded
 }
 
 /// The top-level names the `md` host owns: the resolved baseline's
@@ -528,7 +611,7 @@ pub fn agreement(profiles: &[Arc<RegisteredHostProfile>]) -> Vec<HostClaim> {
     groups
         .into_iter()
         .map(|mut group| {
-            if group.iter().all(|claim| claim.revision == group[0].revision) {
+            if group.iter().all(|claim| claim.revision() == group[0].revision()) {
                 let profile = group.remove(0);
                 HostClaim::Agreed { profile, collapsed: group }
             } else {
@@ -575,31 +658,6 @@ impl Refusal {
 /// is passive and grants nothing, so a member may sit outside the tree.
 fn anchored_at(context: &FileResolutionContext, file: &Path) -> FileResolutionContext {
     context.for_trusted_external_source(file).allow_external_relative()
-}
-
-/// Every location the members of the manifest at `path` are probed at,
-/// whether or not a file is there now: what a caller watching a refused
-/// registration (a member missing, unreadable, or invalid) must observe so
-/// the member's creation or repair loads it. Reads only the manifest; empty
-/// when the manifest cannot be read or is not a valid manifest (its own
-/// refusal names it).
-#[must_use]
-pub fn manifest_member_candidates(path: &Path, context: &FileResolutionContext) -> Vec<PathBuf> {
-    let Ok(bytes) = buffers::read(path) else {
-        return Vec::new();
-    };
-    let Ok(read) = manifest::read(path, bytes) else {
-        return Vec::new();
-    };
-    let anchor = anchored_at(context, path);
-    let manifest = &read.manifest;
-    [&manifest.identify, &manifest.globals, &manifest.lifecycle]
-        .into_iter()
-        .chain(&manifest.triggers)
-        .chain(manifest.functions.iter().flat_map(|pair| [&pair.catalog, &pair.facts]))
-        .filter_map(|reference| FileReference::new(reference).ok())
-        .flat_map(|reference| reference.resolve_detailed(&anchor).probed_paths().collect::<Vec<_>>())
-        .collect()
 }
 
 /// The canonical path of the manifest `entry` names.
@@ -649,216 +707,20 @@ fn resolve_local(reference: &str, context: &FileResolutionContext) -> Result<Pat
     }
 }
 
-/// Everything a manifest names, loaded, before its reads are recorded.
-struct Members {
-    read: manifest::ReadManifest,
-    identify: RegisteredTrigger,
-    identifying: IdentifyingTrigger,
-    triggers: Vec<RegisteredTrigger>,
-    globals_path: PathBuf,
-    globals: Arc<GlobalCatalog>,
-    lifecycle_path: PathBuf,
-    lifecycle: Arc<HostLifecycleProfile>,
-    functions: Vec<HostFunctionSet>,
+/// Why a manifest published no profile: every refusal, and what a watcher
+/// observes to notice its repair.
+struct Refused {
+    refusals: Vec<Refusal>,
+    watches: Vec<PathBuf>,
 }
 
-/// The profile of the manifest at `path`, or the first reason it cannot be
-/// one.
-fn load_manifest(
-    path: &Path,
-    context: &FileResolutionContext,
-    owned: &BTreeSet<String>,
-) -> Result<RegisteredHostProfile, Refusal> {
-    let (members, reads) = buffers::recording(|| load_members(path, context, owned));
-    let members = members?;
-    let dependencies: Vec<HostDependency> = reads
-        .iter()
-        .map(|(path, text)| HostDependency { path: path.clone(), content_hash: content_hash(text.as_bytes()) })
-        .collect();
-    let Some(manifest_hash) = dependencies
-        .iter()
-        .find(|dependency| dependency.path == path)
-        .map(|dependency| dependency.content_hash.clone())
-    else {
-        return Err(Refusal {
-            code: HOST_REGISTRATION_CODE,
-            file: path.to_path_buf(),
-            at: None,
-            member: None,
-            message: "the manifest's read was not recorded".to_string(),
-        });
-    };
-    let revision = revision(members.read.meaning(), path, &dependencies);
-    let Members { read, identify, identifying, triggers, globals_path, globals, lifecycle_path, lifecycle, functions } =
-        members;
-    Ok(RegisteredHostProfile {
-        host: read.manifest.host,
-        version: read.manifest.version,
-        manifest: ManifestIdentity { path: path.to_path_buf(), content_hash: manifest_hash },
-        entries: Vec::new(),
-        identify,
-        identifying,
-        triggers,
-        globals_path,
-        globals,
-        lifecycle_path,
-        lifecycle,
-        functions,
-        dependencies,
-        revision,
-    })
-}
-
-/// See [`RegisteredHostProfile::revision`].
-fn revision(meaning: &Value, manifest: &Path, dependencies: &[HostDependency]) -> String {
-    let directory = PathIdentity::new(manifest.parent().unwrap_or(manifest));
-    let mut members: Vec<Value> = dependencies
-        .iter()
-        .filter(|dependency| dependency.path != manifest)
-        .map(|dependency| {
-            let route = match PathIdentity::new(&dependency.path).relative_from(&directory) {
-                Some(route) => json!({
-                    "up": route.parent_hops(),
-                    "names": route.forward().iter().map(|name| name.to_string_lossy().into_owned()).collect::<Vec<_>>(),
-                }),
-                None => json!({ "absolute": biscuit_file::to_portable_string(&dependency.path) }),
-            };
-            json!({ "route": route, "content_hash": dependency.content_hash })
-        })
-        .collect();
-    members.sort_by_cached_key(|member| member.to_string());
-    biscuit_hash::blake3_hash_json(&json!({ "manifest": meaning, "dependencies": members }))
-}
-
-fn load_members(path: &Path, context: &FileResolutionContext, owned: &BTreeSet<String>) -> Result<Members, Refusal> {
-    let bytes = buffers::read(path).map_err(|error| Refusal {
-        code: HOST_REGISTRATION_CODE,
-        file: path.to_path_buf(),
-        at: None,
-        member: None,
-        message: format!("the manifest cannot be read: {error}"),
-    })?;
-    let read = manifest::read(path, bytes)?;
-    let anchor = anchored_at(context, path);
-    let manifest = &read.manifest;
-
-    let member = |segments: &[&str], reference: &str| -> Result<PathBuf, Refusal> {
-        resolve_local(reference, &anchor).map_err(|message| Refusal {
-            code: HOST_REGISTRATION_CODE,
-            file: path.to_path_buf(),
-            at: read.locate(segments),
-            member: Some(field(segments)),
-            message,
-        })
-    };
-
-    let identify_path = member(&["identify"], &manifest.identify)?;
-    let (identify, identifying) = load_identify(&identify_path, context, owned)?;
-
-    let mut triggers = Vec::with_capacity(manifest.triggers.len());
-    for (index, reference) in manifest.triggers.iter().enumerate() {
-        let index = index.to_string();
-        let segments = ["triggers", index.as_str()];
-        let trigger_path = member(&segments, reference)?;
-        let (trigger, _) = load_trigger(&trigger_path, context, &field(&segments))?;
-        triggers.push(trigger);
-    }
-
-    let globals_path = member(&["globals"], &manifest.globals)?;
-    let refuse_at = |file: &Path, member: &str, message: String| Refusal {
-        code: HOST_REGISTRATION_CODE,
-        file: file.to_path_buf(),
-        at: None,
-        member: Some(member.to_string()),
-        message,
-    };
-    let globals_text = buffers::read_to_string(&globals_path)
-        .map_err(|error| refuse_at(&globals_path, "globals", format!("the global catalog cannot be read: {error}")))?;
-    let globals = GlobalCatalog::from_host_text(&globals_path, &globals_text, &anchored_at(context, &globals_path))
-        .map_err(|error| refuse_at(&globals_path, "globals", error.to_string()))?;
-    let globals = Arc::new(globals);
-
-    let lifecycle_path = member(&["lifecycle"], &manifest.lifecycle)?;
-    let lifecycle_read = buffers::read(&lifecycle_path);
-    let lifecycle_text = companion(&lifecycle_read);
-    let lifecycle =
-        HostLifecycleProfile::from_artifact_at(Arc::clone(&globals), &globals_text, &lifecycle_path, lifecycle_text.artifact())
-            .map_err(|reason| refuse_at(&lifecycle_path, "lifecycle", reason))?;
-    let recorded = lifecycle.registry().host();
-    if recorded != manifest.host {
-        return Err(Refusal {
-            code: HOST_REGISTRATION_CODE,
-            file: path.to_path_buf(),
-            at: read.locate(&["host"]),
-            member: Some("host".to_string()),
-            message: format!(
-                "the manifest names host `{}`, but its lifecycle artifact `{}` records host `{recorded}`",
-                manifest.host,
-                lifecycle_path.display()
-            ),
-        });
-    }
-
-    let mut functions = Vec::with_capacity(manifest.functions.len());
-    for (index, pair) in manifest.functions.iter().enumerate() {
-        let index = index.to_string();
-        let catalog_field = ["functions", index.as_str(), "catalog"];
-        let facts_field = ["functions", index.as_str(), "facts"];
-        let catalog = member(&catalog_field, &pair.catalog)?;
-        let facts = member(&facts_field, &pair.facts)?;
-        let text = buffers::read_to_string(&catalog).map_err(|error| {
-            refuse_at(&catalog, &field(&catalog_field), format!("the function catalog cannot be read: {error}"))
-        })?;
-        let set = host_function_set_at(&catalog, &text, &facts, buffers::read(&facts))
-            .map_err(|error| refuse_at(&catalog, &field(&catalog_field), error.message))?;
-        let incomplete = set.incomplete_functions();
-        if !incomplete.is_empty() {
-            let reasons: Vec<String> =
-                incomplete.iter().map(|(name, reason)| format!("`{name}`: {reason}")).collect();
-            return Err(refuse_at(&facts, &field(&facts_field), format!("its functions are incomplete: {}", reasons.join("; "))));
-        }
-        functions.push(HostFunctionSet { catalog, facts, functions: set });
-    }
-
-    Ok(Members {
-        identify,
-        identifying,
-        triggers,
-        globals_path,
-        globals,
-        lifecycle_path,
-        lifecycle: Arc::new(lifecycle),
-        functions,
-        read,
-    })
-}
-
-/// A companion artifact's read as the profile readers receive it.
-enum Companion {
-    Text(String),
-    Unreadable(String),
-}
-
-impl Companion {
-    fn artifact(&self) -> FactsArtifact<'_> {
-        match self {
-            Self::Text(text) => FactsArtifact::Text(text),
-            Self::Unreadable(error) => FactsArtifact::Unreadable(error),
-        }
+impl Refused {
+    fn one(refusal: Refusal, watches: Vec<PathBuf>) -> Self {
+        Self { refusals: vec![refusal], watches }
     }
 }
 
-fn companion(read: &std::io::Result<Vec<u8>>) -> Companion {
-    match read {
-        Err(error) => Companion::Unreadable(error.to_string()),
-        Ok(bytes) => match std::str::from_utf8(bytes) {
-            Ok(text) => Companion::Text(text.to_string()),
-            Err(_) => Companion::Unreadable("the file is not UTF-8 text".to_string()),
-        },
-    }
-}
-
-/// `identify[...]` written from segments: `triggers[1]`,
+/// A manifest field written from segments: `files[1]`,
 /// `functions[0].facts`.
 fn field(segments: &[&str]) -> String {
     let mut text = String::new();
@@ -875,56 +737,368 @@ fn field(segments: &[&str]) -> String {
     text
 }
 
-/// The identifying trigger at `path`, admitted against `owned`.
-fn load_identify(
-    path: &Path,
+/// The profile of the manifest at `path`, or every reason it cannot be one.
+fn load_manifest(path: &Path, context: &FileResolutionContext, owned: &BTreeSet<String>) -> Result<RegisteredHostProfile, Refused> {
+    let snapshot = bundle::load_snapshot(path, context).map_err(|refusal| {
+        let mut watches = refusal.candidates.clone();
+        watches.extend(refusal.dependencies.iter().map(|dependency| dependency.path.clone()));
+        let refusal = Refusal {
+            code: refusal.code,
+            file: refusal.file,
+            at: refusal.line.zip(refusal.column),
+            member: refusal.member,
+            message: refusal.message,
+        };
+        Refused::one(refusal, dedup(watches))
+    })?;
+    let manifest_hash = snapshot.manifest_hash().to_string();
+    let snapshot = Arc::new(snapshot);
+    let members = prepare_members(&snapshot, context, owned);
+    let mut candidates: Vec<PathBuf> = snapshot.candidates().to_vec();
+    candidates.extend(members.missing.iter().cloned());
+    let candidates = dedup(candidates);
+    if !members.refusals.is_empty() {
+        return Err(Refused { refusals: members.refusals, watches: candidates });
+    }
+    let Members { triggers, kinds, libraries, catalog, lifecycle, functions, .. } = members;
+    let (Some(catalog), Some((lifecycle_path, lifecycle))) = (catalog, lifecycle) else {
+        unreachable!("a preparation without refusals has a catalog and a lifecycle profile");
+    };
+    Ok(RegisteredHostProfile {
+        host: snapshot.host().to_string(),
+        version: snapshot.version().to_string(),
+        manifest: ManifestIdentity { path: path.to_path_buf(), content_hash: manifest_hash },
+        entries: Vec::new(),
+        triggers,
+        kinds,
+        libraries,
+        catalog,
+        lifecycle_path,
+        lifecycle: Arc::new(lifecycle),
+        functions,
+        candidates,
+        snapshot,
+        checked: std::sync::Mutex::default(),
+    })
+}
+
+fn dedup(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen: Vec<PathBuf> = Vec::with_capacity(paths.len());
+    for path in paths {
+        if !seen.contains(&path) {
+            seen.push(path);
+        }
+    }
+    seen
+}
+
+/// Everything a verified snapshot's members prepare into, with every
+/// refusal found.
+#[derive(Default)]
+struct Members {
+    triggers: Vec<RegisteredTrigger>,
+    kinds: Vec<RegisteredDefinition>,
+    libraries: Vec<String>,
+    catalog: Option<PreparedCatalog>,
+    lifecycle: Option<(PathBuf, HostLifecycleProfile)>,
+    functions: Vec<HostFunctionSet>,
+    /// Unlisted locations the members' references resolved to.
+    missing: Vec<PathBuf>,
+    refusals: Vec<Refusal>,
+}
+
+/// A `files` member's display `name`, for the registration-wide uniqueness
+/// check.
+struct Label {
+    name: String,
+    member: String,
+    file: PathBuf,
+    at: Option<(usize, usize)>,
+}
+
+/// Classifies and prepares every member of `snapshot` from its verified
+/// bytes alone.
+fn prepare_members(snapshot: &VerifiedSnapshot, context: &FileResolutionContext, owned: &BTreeSet<String>) -> Members {
+    let mut members = Members::default();
+    let sources = match BundleSources::on_disk(snapshot.bundle_root(), snapshot.bytes().clone()) {
+        Ok(sources) => sources,
+        Err(error) => {
+            members.refusals.push(Refusal {
+                code: HOST_REGISTRATION_CODE,
+                file: snapshot.manifest().to_path_buf(),
+                at: None,
+                member: None,
+                message: error.to_string(),
+            });
+            return members;
+        }
+    };
+    let mut namespaces: Vec<&str> = Vec::new();
+    let mut labels: Vec<Label> = Vec::new();
+    let mut files: Vec<&BundleMember> = snapshot.files().iter().collect();
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    for member in files {
+        let refuse = |at: Option<(usize, usize)>, message: String| Refusal {
+            code: HOST_REGISTRATION_CODE,
+            file: member.location.clone(),
+            at,
+            member: Some(member.field.clone()),
+            message,
+        };
+        let Some(text) = member_text(snapshot, member) else {
+            members.refusals.push(refuse(None, "the file is not UTF-8 text".to_string()));
+            continue;
+        };
+        let anchor = anchored_at(context, &member.location);
+        match member_kind(text, &member.location) {
+            Ok(MemberKind::Trigger) => {
+                let (loaded, reads) = resolve_bundle::with(&sources, || load_trigger(member, text, &anchor, context, owned));
+                members.missing.extend(reads.missing);
+                match loaded {
+                    Ok(trigger) => {
+                        if let Some(name) = &trigger.trigger.envelope.name {
+                            labels.push(label(name, member, text));
+                        }
+                        members.triggers.push(trigger);
+                    }
+                    Err(refusal) => members.refusals.push(refusal),
+                }
+            }
+            Ok(MemberKind::YamlSchema) => {
+                let (prepared, reads) = resolve_bundle::with(&sources, || {
+                    simplified_schema::resolve::prepare_yaml_schema_text(
+                        &member.location,
+                        text,
+                        &[],
+                        &anchor,
+                        crate::markdown::schemas::embedded::SHIPPED_SOURCES,
+                    )
+                });
+                members.missing.extend(reads.missing);
+                let source = RegisteredSource {
+                    host: snapshot.host().to_string(),
+                    path: member.path.clone(),
+                    file: member.location.clone(),
+                };
+                let sameness = format!("{}\0{}", snapshot.revision(), member.path);
+                match prepared.and_then(|resolved| RegisteredDefinition::new(source, resolved, sameness)) {
+                    Ok(definition) => members.kinds.push(definition),
+                    Err(error) => {
+                        members.refusals.push(refuse(None, format!("the YAML kind definition does not load: {error}")));
+                    }
+                }
+            }
+            Ok(MemberKind::Namespace) => namespaces.push(member.path.as_str()),
+            Ok(MemberKind::Library) => match library(text, &member.location) {
+                Ok(name) => {
+                    if let Some(name) = name {
+                        labels.push(label(&name, member, text));
+                    }
+                    members.libraries.push(member.path.clone());
+                }
+                Err(message) => members.refusals.push(refuse(None, message)),
+            },
+            Err(message) => members.refusals.push(refuse(None, message)),
+        }
+    }
+    members.refusals.extend(duplicate_labels(&labels));
+
+    match namespaces::prepare_catalog(&sources, snapshot.bytes(), &namespaces, context) {
+        Ok(catalog) => members.catalog = Some(catalog),
+        Err(refusals) => members.refusals.extend(refusals.into_iter().map(|refusal| Refusal {
+            code: HOST_REGISTRATION_CODE,
+            member: snapshot.files().iter().find(|member| member.path == refusal.path).map(|member| member.field.clone()),
+            file: refusal.location,
+            at: refusal.at,
+            message: refusal.message,
+        })),
+    }
+    if let Some(catalog) = &members.catalog {
+        match load_lifecycle(snapshot, catalog) {
+            Ok(lifecycle) => members.lifecycle = Some(lifecycle),
+            Err(refusal) => members.refusals.push(refusal),
+        }
+    }
+    for pair in snapshot.functions() {
+        match load_functions(snapshot, pair) {
+            Ok(set) => members.functions.push(set),
+            Err(refusal) => members.refusals.push(refusal),
+        }
+    }
+    members
+}
+
+fn member_text<'a>(snapshot: &'a VerifiedSnapshot, member: &BundleMember) -> Option<&'a str> {
+    std::str::from_utf8(snapshot.member_bytes(&member.path)?).ok()
+}
+
+/// What a `files` member is, by its own `kind`.
+enum MemberKind {
+    Trigger,
+    YamlSchema,
+    Namespace,
+    Library,
+}
+
+const MEMBER_KINDS: &str = "`schema-trigger`, `yaml-schema`, `namespace-schema`, or a types-only `schema` library";
+
+fn member_kind(text: &str, location: &Path) -> Result<MemberKind, String> {
+    let loaded = simplified_schema::yaml_documents::load_yaml_document(text, location)
+        .map_err(|error| format!("the file is not one YAML mapping: {error}"))?;
+    match loaded.json.get("kind").and_then(Value::as_str) {
+        Some("schema-trigger") => Ok(MemberKind::Trigger),
+        Some("yaml-schema") => Ok(MemberKind::YamlSchema),
+        Some("namespace-schema") => Ok(MemberKind::Namespace),
+        Some("schema") => Ok(MemberKind::Library),
+        Some(other) => Err(format!("its `kind` is `{other}`; a registered file is a {MEMBER_KINDS}")),
+        None => Err(format!("it declares no string `kind`; a registered file is a {MEMBER_KINDS}")),
+    }
+}
+
+/// The display name of the types-only library `text`, once it proved to be
+/// one: `kind: schema` with a non-empty `types` table and no `$schema`.
+fn library(text: &str, location: &Path) -> Result<Option<String>, String> {
+    let document = simplified_schema::parse_standalone_schema_document(text, location)
+        .map_err(|error| format!("the type library is invalid: {error}"))?
+        .ok_or_else(|| "the file is not a schema document".to_string())?;
+    if document.exports_schema {
+        return Err("a registered `kind: schema` file is a types-only library; it may not declare `$schema`".to_string());
+    }
+    if document.named_types().is_none_or(|types| types.properties.is_empty() && types.pattern_keys.is_empty()) {
+        return Err("a registered type library must declare a non-empty `types` table".to_string());
+    }
+    Ok(document.name)
+}
+
+fn label(name: &str, member: &BundleMember, text: &str) -> Label {
+    let at = simplified_schema::yaml_documents::load_yaml_document(text, &member.location).ok().and_then(|loaded| {
+        loaded.byte_range(&simplified_schema::yaml_documents::locating_problem(&["name".to_string()])).map(|range| line_column(text, range.start))
+    });
+    Label { name: name.to_string(), member: member.field.clone(), file: member.location.clone(), at }
+}
+
+/// One refusal per file whose `name` another file of the registration also
+/// declares, at that file's `name`.
+fn duplicate_labels(labels: &[Label]) -> Vec<Refusal> {
+    labels
+        .iter()
+        .filter_map(|label| {
+            let others: Vec<String> = labels
+                .iter()
+                .filter(|other| other.name == label.name && other.file != label.file)
+                .map(|other| format!("`{}`", other.file.display()))
+                .collect();
+            (!others.is_empty()).then(|| Refusal {
+                code: HOST_REGISTRATION_CODE,
+                file: label.file.clone(),
+                at: label.at,
+                member: Some(label.member.clone()),
+                message: format!("the name `{}` is also declared by {}; names are unique within a registration", label.name, others.join(", ")),
+            })
+        })
+        .collect()
+}
+
+/// The lifecycle artifact, checked against `catalog`.
+fn load_lifecycle(snapshot: &VerifiedSnapshot, catalog: &PreparedCatalog) -> Result<(PathBuf, HostLifecycleProfile), Refusal> {
+    let member = snapshot.lifecycle();
+    let refuse = |message: String| Refusal {
+        code: HOST_REGISTRATION_CODE,
+        file: member.location.clone(),
+        at: None,
+        member: Some(member.field.clone()),
+        message,
+    };
+    let artifact = match member_text(snapshot, member) {
+        Some(text) => FactsArtifact::Text(text),
+        None => FactsArtifact::Unreadable("the file is not UTF-8 text"),
+    };
+    let lifecycle = HostLifecycleProfile::from_artifact_at(Arc::clone(&catalog.catalog), &catalog.hash, &member.location, artifact)
+        .map_err(refuse)?;
+    let recorded = lifecycle.registry().host();
+    if recorded != snapshot.host() {
+        return Err(Refusal {
+            code: HOST_REGISTRATION_CODE,
+            file: snapshot.manifest().to_path_buf(),
+            at: None,
+            member: Some("host".to_string()),
+            message: format!(
+                "the manifest names host `{}`, but its lifecycle artifact `{}` records host `{recorded}`",
+                snapshot.host(),
+                member.location.display()
+            ),
+        });
+    }
+    Ok((member.location.clone(), lifecycle))
+}
+
+/// One `functions` pair's analysis-only set, from verified bytes.
+fn load_functions(snapshot: &VerifiedSnapshot, pair: &BundleFunctionPair) -> Result<HostFunctionSet, Refusal> {
+    let refuse = |member: &BundleMember, message: String| Refusal {
+        code: HOST_REGISTRATION_CODE,
+        file: member.location.clone(),
+        at: None,
+        member: Some(member.field.clone()),
+        message,
+    };
+    let text = member_text(snapshot, &pair.catalog)
+        .ok_or_else(|| refuse(&pair.catalog, "the function catalog is not UTF-8 text".to_string()))?;
+    let facts = snapshot.member_bytes(&pair.facts.path).map(|bytes| bytes.to_vec()).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "the facts artifact is not a verified member")
+    });
+    let set = host_function_set_at(&pair.catalog.location, text, &pair.facts.location, facts)
+        .map_err(|error| refuse(&pair.catalog, error.message))?;
+    let incomplete = set.incomplete_functions();
+    if !incomplete.is_empty() {
+        let reasons: Vec<String> = incomplete.iter().map(|(name, reason)| format!("`{name}`: {reason}")).collect();
+        return Err(refuse(&pair.facts, format!("its functions are incomplete: {}", reasons.join("; "))));
+    }
+    Ok(HostFunctionSet { catalog: pair.catalog.location.clone(), facts: pair.facts.location.clone(), functions: set })
+}
+
+/// The registered trigger `member` (text `text`), its payload resolved from
+/// its own folder inside the bundle and its conditions admitted against
+/// `owned`.
+fn load_trigger(
+    member: &BundleMember,
+    text: &str,
+    anchor: &FileResolutionContext,
     context: &FileResolutionContext,
     owned: &BTreeSet<String>,
-) -> Result<(RegisteredTrigger, IdentifyingTrigger), Refusal> {
-    let (trigger, text) = load_trigger(path, context, "identify")?;
-    let identifying = admit_identifying_trigger(&trigger.trigger.envelope.conditions, owned).map_err(|refusal| {
-        // Only the position: the envelope already parsed this text.
+) -> Result<RegisteredTrigger, Refusal> {
+    let path = &member.location;
+    let refuse = |code: &'static str, at: Option<(usize, usize)>, message: String| Refusal {
+        code,
+        file: path.clone(),
+        at,
+        member: Some(member.field.clone()),
+        message,
+    };
+    let text: Arc<str> = Arc::from(text);
+    let envelope: TriggerEnvelope = match parse_trigger_envelope_from_str(&text) {
+        Ok(Some(envelope)) => envelope,
+        Ok(None) => return Err(refuse(HOST_REGISTRATION_CODE, None, "the file is not a schema trigger (`kind: schema-trigger`)".to_string())),
+        Err(error) => return Err(refuse(HOST_REGISTRATION_CODE, None, format!("the trigger is invalid: {error}"))),
+    };
+    let identifying = admit_identifying_trigger(&envelope.conditions, owned).map_err(|refusal| {
         let at = simplified_schema::yaml_documents::load_yaml_document(&text, path).ok().and_then(|loaded| {
             loaded
                 .byte_range(&simplified_schema::yaml_documents::locating_problem(&["match".to_string()]))
                 .map(|range| line_column(&text, range.start))
         });
-        Refusal {
-            code: HOST_IDENTIFY_TOO_BROAD_CODE,
-            file: path.to_path_buf(),
+        refuse(
+            HOST_IDENTIFY_TOO_BROAD_CODE,
             at,
-            member: Some("identify".to_string()),
-            message: format!("its identifying trigger is too broad: {refusal}"),
-        }
+            format!("the trigger could match a document `md` owns, so it cannot identify the host: {refusal}"),
+        )
     })?;
-    Ok((trigger, identifying))
-}
-
-/// The schema trigger at `path` with its payload resolved from its own
-/// folder, and the text read.
-fn load_trigger(path: &Path, context: &FileResolutionContext, member: &str) -> Result<(RegisteredTrigger, Arc<str>), Refusal> {
-    let refuse = |message: String| Refusal {
-        code: HOST_REGISTRATION_CODE,
-        file: path.to_path_buf(),
-        at: None,
-        member: Some(member.to_string()),
-        message,
-    };
-    let text: Arc<str> = buffers::read_to_string(path)
-        .map_err(|error| refuse(format!("the trigger cannot be read: {error}")))?
-        .into();
-    let envelope: TriggerEnvelope = match parse_trigger_envelope_from_str(&text) {
-        Ok(Some(envelope)) => envelope,
-        Ok(None) => return Err(refuse("the file is not a schema trigger (`kind: schema-trigger`)".to_string())),
-        Err(error) => return Err(refuse(format!("the trigger is invalid: {error}"))),
-    };
-    let anchor = anchored_at(context, path);
-    let trigger = LoadedTrigger::from_file(path.to_path_buf(), Arc::clone(&text), envelope, context.base_dir().to_path_buf());
+    let trigger = LoadedTrigger::from_file(path.clone(), Arc::clone(&text), envelope, context.base_dir().to_path_buf());
     // A registered trigger is its own source: its payload resolves from its
-    // file, never through the document's schema roots.
-    let payload = resolve_trigger_payload(&trigger, &[], &anchor, crate::markdown::schemas::embedded::SHIPPED_SOURCES)
-        .map_err(|error| refuse(format!("the trigger's payload does not load: {error}")))?;
-    Ok((RegisteredTrigger { trigger, payload }, text))
+    // file, never through the document's schema roots. It may be a root
+    // union, which the host's checked layer owns.
+    let payload = resolve_registered_trigger_payload(&trigger, anchor, crate::markdown::schemas::embedded::SHIPPED_SOURCES)
+        .map_err(|error| refuse(HOST_REGISTRATION_CODE, None, format!("the trigger's payload does not load: {error}")))?;
+    Ok(RegisteredTrigger { trigger, payload, bundle_path: member.path.clone(), identifying })
 }
 
 #[cfg(test)]
@@ -933,8 +1107,8 @@ mod tests {
 
     #[test]
     fn fields_name_list_items_by_index() {
-        assert_eq!(field(&["identify"]), "identify");
-        assert_eq!(field(&["triggers", "1"]), "triggers[1]");
+        assert_eq!(field(&["lifecycle"]), "lifecycle");
+        assert_eq!(field(&["files", "1"]), "files[1]");
         assert_eq!(field(&["functions", "0", "facts"]), "functions[0].facts");
     }
 

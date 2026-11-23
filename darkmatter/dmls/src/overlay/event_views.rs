@@ -3,9 +3,8 @@
 //!
 //! A document's lifecycle stacks are analyzed under one [`LifecycleHost`]:
 //! the lifecycle of the host the document's selected host view names
-//! ([`crate::overlay::hosts::HostView`]): a registered host's profile, the
-//! profile recorded beside a legacy host catalog in the document's schema
-//! roots, or the `md` host ([`md_host::registry`]). Its
+//! ([`crate::overlay::hosts::HostView`]): a registered host's profile, or
+//! the `md` host ([`md_host::registry`]). Its
 //! registry decides which root frontmatter keys are stacks, and its parse
 //! options which verbs carry expression operands. An expression inside the
 //! value of a root key the registry resolves to one of its events reads that
@@ -39,44 +38,30 @@ use crate::overlay::{FmEntry, FmPathSegment, FmValueKind, FrontmatterAst};
 pub struct LifecycleHost {
     registry: Arc<EventRegistry>,
     profile: Option<Arc<HostLifecycleProfile>>,
-    incomplete: Vec<String>,
 }
 
 impl LifecycleHost {
-    /// The `md` host, with nothing reported.
+    /// The `md` host.
     pub fn md() -> Self {
-        Self { registry: md_host::registry().clone(), profile: None, incomplete: Vec::new() }
+        Self { registry: md_host::registry().clone(), profile: None }
     }
 
     /// The lifecycle host of the document's selected host view
     /// ([`HostView`](crate::overlay::hosts::HostView)): a registered host's
-    /// profile, a legacy root catalog's first usable profile (or the `md`
-    /// host with each catalog's reason its artifact could not be trusted,
-    /// [`Self::incomplete`]), or the `md` host. Reads nothing: the view was
-    /// selected when the document's schema was prepared.
+    /// profile, or the `md` host. Reads nothing: the view was selected when
+    /// the document's schema was prepared.
     pub fn for_document(ctx: &crate::providers::DocumentContext) -> Self {
         ctx.host_view().lifecycle().clone()
     }
 
-    /// The host of `profile`, or the `md` host with `incomplete`'s reasons
-    /// when there is none.
-    pub(crate) fn of(profile: Option<Arc<HostLifecycleProfile>>, incomplete: Vec<String>) -> Self {
-        match profile {
-            Some(profile) => Self { registry: profile.registry().clone(), profile: Some(profile), incomplete: Vec::new() },
-            None => Self { incomplete, ..Self::md() },
-        }
+    /// The host of a registered host's lifecycle `profile`.
+    pub(crate) fn of(profile: Arc<HostLifecycleProfile>) -> Self {
+        Self { registry: profile.registry().clone(), profile: Some(profile) }
     }
 
     /// The host's event registry.
     pub fn registry(&self) -> &Arc<EventRegistry> {
         &self.registry
-    }
-
-    /// Why each host catalog's lifecycle artifact was not used, when none
-    /// was: the document's host lifecycle is then analyzed as the `md` host's,
-    /// which may not be the host's.
-    pub fn incomplete(&self) -> &[String] {
-        &self.incomplete
     }
 
     /// Parses and statically validates the document's lifecycle under this
@@ -451,56 +436,31 @@ mod tests {
         assert_eq!(crate::work_counters::work_counts().since(before).stack_walks, 1);
     }
 
-    /// A host catalog in `dir` named `name`, with an artifact when `fresh`.
-    fn host_catalog(dir: &Path, name: &str, fresh: bool) -> std::path::PathBuf {
-        use darkmatter::lifecycle::host_profile::{lifecycle_artifact, lifecycle_artifact_path};
-        use darkmatter::lifecycle::{LifecycleParseOptions, UnknownVerbPolicy};
-
-        let text = format!("kind: schema\ndescription: {name}\n$schema:\n    run:\n        count: number\n");
-        let path = dir.join(name);
-        std::fs::write(&path, &text).expect("catalog");
-        if fresh {
-            let options = LifecycleParseOptions {
-                is_known_effect: &|_| false,
-                authored: None,
-                authored_values: None,
-                unknown_verbs: UnknownVerbPolicy::Reject,
-                registry: &EventRegistry::new("test"),
-            };
-            std::fs::write(lifecycle_artifact_path(&path), lifecycle_artifact(&options, &[], &text)).expect("artifact");
-        }
-        path
-    }
-
-    /// A legacy view's host is the first usable profile in root order; with
-    /// none usable, every reason is kept in order.
+    /// A document a registered host identifies is analyzed under that host's
+    /// lifecycle; one it does not identify is `md`'s, even beside a catalog
+    /// and lifecycle artifact in its schema root.
     #[test]
-    fn the_legacy_host_is_the_first_usable_profile() {
-        use darkmatter::lifecycle::host_profile::lifecycle_artifact_path;
+    fn the_lifecycle_host_is_the_registered_host_that_identifies_the_document() {
+        let fixture = crate::host_fixtures::Fixture::new();
+        fixture.install_relay("relay");
+        fixture.root_catalog("work/schemas", "acme");
+        let installed = crate::overlay::hosts::InstalledHosts {
+            hosts: fixture.hosts(&[&format!("../relay/{}", crate::host_fixtures::MANIFEST_NAME)]),
+            version: 1,
+            load_error: None,
+        };
+        let context = fixture.repository(None);
+        let path = fixture.path("work/doc.md");
+        let select = |frontmatter: serde_json::Value| {
+            crate::overlay::hosts::HostView::select(Some(&installed), &frontmatter, &path, &context.for_source(&path))
+        };
 
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
-        let schemas = root.join("schemas");
-        std::fs::create_dir_all(root.join(".git")).expect("repository marker");
-        std::fs::create_dir_all(&schemas).expect("schema root");
-        let context =
-            biscuit_file::FileResolutionContext::from_snapshot(&root, None, Default::default()).with_repository_root(&root);
-        let unusable = host_catalog(&schemas, "a.yaml", false);
-        let winner = host_catalog(&schemas, "b.yaml", true);
-        let later = host_catalog(&schemas, "c.yaml", true);
+        let relay = select(serde_json::json!({ "start": [] }));
+        assert_eq!(relay.lifecycle().registry().host(), "relay", "{relay:?}");
+        assert!(relay.lifecycle().event_of_key("start").is_some(), "the relay renames `composed` to `start`");
 
-        let view = crate::overlay::hosts::HostView::unregistered(&context);
-        assert_eq!(view.lifecycle().registry().host(), "test");
-        assert!(view.lifecycle().incomplete().is_empty());
-
-        std::fs::remove_file(lifecycle_artifact_path(&winner)).expect("remove artifact");
-        std::fs::remove_file(lifecycle_artifact_path(&later)).expect("remove artifact");
-        let view = crate::overlay::hosts::HostView::unregistered(&context);
-        assert_eq!(view.lifecycle().registry().host(), "md");
-        let artifacts: Vec<_> = [&unusable, &winner, &later]
-            .into_iter()
-            .map(|catalog| format!("the lifecycle artifact `{}` is absent", lifecycle_artifact_path(catalog).display()))
-            .collect();
-        assert_eq!(view.lifecycle().incomplete(), artifacts);
+        let plain = select(serde_json::json!({ "title": "x" }));
+        assert_eq!(plain.lifecycle().registry().host(), "md", "{plain:?}");
+        assert!(plain.catalogs().is_empty(), "a root-local catalog supplies no host globals");
     }
 }

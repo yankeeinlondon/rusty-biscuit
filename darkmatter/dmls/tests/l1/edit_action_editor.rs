@@ -1,6 +1,7 @@
 //! DMLS over the lifecycle `edit` action, in an `md` document (Darkmatter's
 //! baseline) and in a Claudine document (Claudine's schemas found by trigger
-//! discovery, with its lifecycle artifact beside its host catalog):
+//! discovery, analyzed under the lifecycle of an explicitly registered
+//! Claudine-shaped host, [`crate::claudine_host`]):
 //! completion offers `edit`, hover shows its schema description, and a
 //! malformed operand is diagnosed where it is written, in a branch the run
 //! would not take as well as one it would.
@@ -16,9 +17,6 @@ use serde_json::{Value, json};
 
 use crate::claudine_schema_discovery::{Fixture, initialize_params, open, uri_of, write};
 use crate::common::{LspFixture, LspWorkspace};
-
-const GLOBALS: &str = include_str!("../../../../claudine/schemas/globals.yaml");
-const ARTIFACT: &str = include_str!("../../../../claudine/schemas/globals.lifecycle.json");
 
 /// Two malformed operands in `initialize`: a numeric `gui` in the branch the
 /// run would not take, and a blank target in the one it would.
@@ -52,11 +50,21 @@ initialize:\n  \
 
 #[derive(Clone, Copy, Debug)]
 enum Host {
-    /// A repository with no host catalog: Darkmatter's baseline types the
-    /// document.
+    /// A repository with no registered host: Darkmatter's baseline types
+    /// the document.
     Md,
-    /// Claudine's schema bundle, host catalog, and lifecycle artifact.
+    /// Claudine's schema bundle, and the registered Claudine-shaped host
+    /// whose trigger the document's marker matches.
     Claudine,
+}
+
+/// `text` as `host` opens it: a Claudine document carries the registered
+/// host's marker.
+fn host_text(host: Host, text: &str) -> String {
+    match host {
+        Host::Md => text.to_string(),
+        Host::Claudine => crate::claudine_host::marked(text),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -120,9 +128,7 @@ fn answers(host: Host, text: &str, asks: &[Ask]) -> Vec<Value> {
     let (repo, document, snapshot) = match host {
         Host::Claudine => {
             let fixture = Fixture::new(workspace.path());
-            let schemas = fixture.repo().join("claudine/schemas");
-            write(&schemas.join("globals.yaml"), GLOBALS);
-            write(&schemas.join("globals.lifecycle.json"), ARTIFACT);
+            crate::claudine_host::register(&workspace.path().join("home"), &crate::claudine_host::bundle());
             (fixture.repo(), fixture.document("doc.md", text), fixture.snapshot().with_env(env))
         }
         Host::Md => {
@@ -197,18 +203,20 @@ fn schema_diagnostics(diagnostics: &Value) -> Vec<&Value> {
 /// Asserts the malformed fixture's two operands are each diagnosed, by
 /// schema, at the value written there.
 fn assert_malformed_operands_diagnosed(host: Host) {
-    let found = answers(host, MALFORMED, &[Ask::Diagnostics]);
+    let text = host_text(host, MALFORMED);
+    let text = text.as_str();
+    let found = answers(host, text, &[Ask::Diagnostics]);
     let schema = schema_diagnostics(&found[0]);
     let paths: Vec<&str> = schema.iter().filter_map(|diagnostic| diagnostic["data"]["instance_path"].as_str()).collect();
     for (pointer, offset, needle) in [
-        ("/initialize/0/then/0/edit/gui", at(MALFORMED, "gui: ", "5"), "must be a boolean"),
-        ("/initialize/0/else/0/edit", at(MALFORMED, "else:", "\"   \""), "must not be blank"),
+        ("/initialize/0/then/0/edit/gui", at(text, "gui: ", "5"), "must be a boolean"),
+        ("/initialize/0/else/0/edit", at(text, "else:", "\"   \""), "must not be blank"),
     ] {
         let diagnostic = schema
             .iter()
             .find(|diagnostic| diagnostic["data"]["instance_path"] == json!(pointer))
             .unwrap_or_else(|| panic!("{host:?}: no schema diagnostic at `{pointer}` among {paths:?}: {schema:#?}"));
-        assert_eq!(diagnostic["range"]["start"], position(MALFORMED, offset), "{host:?} {pointer}: {diagnostic:#?}");
+        assert_eq!(diagnostic["range"]["start"], position(text, offset), "{host:?} {pointer}: {diagnostic:#?}");
         assert!(
             diagnostic["message"].as_str().is_some_and(|message| message.contains(needle)),
             "{host:?} {pointer}: {diagnostic:#?}"
@@ -225,7 +233,7 @@ fn assert_malformed_operands_diagnosed(host: Host) {
 }
 
 fn assert_motivating_workflow_is_clean(host: Host) {
-    let found = answers(host, MOTIVATING, &[Ask::Diagnostics]);
+    let found = answers(host, &host_text(host, MOTIVATING), &[Ask::Diagnostics]);
     let schema = schema_diagnostics(&found[0]);
     assert!(schema.is_empty(), "{host:?}: {schema:#?}");
 }
@@ -278,7 +286,8 @@ fn md_completion_offers_edit_in_initialize_and_composed_and_hover_describes_it()
 /// hover on it shows the schema's description.
 #[test]
 fn claudine_completion_offers_edit_in_initialize_and_start_and_hover_describes_it() {
-    let text = "---\ninitialize:\n  - \n  - edit: notes.md\nstart:\n  - info: hi\n  - \n---\nBody\n";
+    let text = host_text(Host::Claudine, "---\ninitialize:\n  - \n  - edit: notes.md\nstart:\n  - info: hi\n  - \n---\nBody\n");
+    let text = text.as_str();
     let found = answers(
         Host::Claudine,
         text,

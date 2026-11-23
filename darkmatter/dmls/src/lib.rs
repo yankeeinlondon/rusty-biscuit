@@ -35,6 +35,12 @@ pub mod work_counters;
 pub mod validation_timing;
 pub mod workspace;
 
+/// Darkmatter's registered-host fixtures (format 2 bundles and a temporary
+/// install), shared by the unit tests that select a registered host.
+#[cfg(test)]
+#[path = "../../lib/tests/host_fixtures/mod.rs"]
+mod host_fixtures;
+
 pub use bench::{BenchReport, bench_index};
 pub use capabilities::{ClientProfile, negotiate_position_encoding, server_capabilities};
 pub use config::{ConfigState, DmlsConfig};

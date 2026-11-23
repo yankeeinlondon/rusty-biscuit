@@ -3,7 +3,18 @@ use crate::lifecycle::registry::generic_view;
 use crate::markdown::schemas::catalog::{GlobalCatalog, GlobalRequirement};
 
 const CATALOG_PATH: &str = "host/globals.yaml";
+const ARTIFACT_PATH: &str = "host/globals.lifecycle.json";
 const CATALOG_TEXT: &str = "kind: schema\ndescription: host\n$schema:\n    run:\n        count: \"number -> The pass.\"\n";
+
+/// The `catalog_hash` of a one-namespace catalog whose file is
+/// `CATALOG_TEXT`.
+fn catalog_hash() -> String {
+    let digests = std::collections::BTreeMap::from([(
+        "schemas/run.yaml".to_string(),
+        crate::config::registration::namespaces::member_digest(CATALOG_TEXT.as_bytes()),
+    )]);
+    crate::config::registration::namespaces::namespace_catalog_hash(&digests)
+}
 
 fn catalog() -> &'static GlobalCatalog {
     static CATALOG: std::sync::OnceLock<GlobalCatalog> = std::sync::OnceLock::new();
@@ -48,11 +59,11 @@ fn options(registry: &EventRegistry) -> LifecycleParseOptions<'_> {
 }
 
 fn artifact(registry: &EventRegistry) -> String {
-    lifecycle_artifact(&options(registry), &["chime", "unknown-one"], CATALOG_TEXT)
+    lifecycle_artifact(&options(registry), &["chime", "unknown-one"], &catalog_hash())
 }
 
 fn load(text: &str) -> Result<HostLifecycleProfile, String> {
-    HostLifecycleProfile::from_artifact(catalog(), Path::new(CATALOG_PATH), CATALOG_TEXT, FactsArtifact::Text(text))
+    HostLifecycleProfile::from_artifact_at(catalog(), &catalog_hash(), Path::new(ARTIFACT_PATH), FactsArtifact::Text(text))
 }
 
 #[test]
@@ -67,21 +78,16 @@ fn a_profile_round_trips_to_an_equal_registry_and_the_same_parse_options() {
     assert!((rebuilt.is_known_effect)("chime") && (rebuilt.is_known_effect)("Chime"));
     assert!(!(rebuilt.is_known_effect)("unknown-one"), "only accepted names are recorded");
     // Writing the rebuilt profile gives the same bytes.
-    assert_eq!(lifecycle_artifact(&rebuilt, &["chime", "unknown-one"], CATALOG_TEXT), text);
+    assert_eq!(lifecycle_artifact(&rebuilt, &["chime", "unknown-one"], &catalog_hash()), text);
 }
 
 #[test]
 fn the_md_profile_round_trips() {
     let md = crate::lifecycle::md_host::parse_options(None);
-    let text = lifecycle_artifact(&md, &[], CATALOG_TEXT);
+    let text = lifecycle_artifact(&md, &[], &catalog_hash());
     let profile = load(&text).expect("the md artifact reads");
     assert_eq!(profile.registry().as_ref(), md.registry);
     assert_eq!(profile.parse_options(None).unknown_verbs, md.unknown_verbs);
-}
-
-#[test]
-fn the_artifact_sits_beside_its_catalog() {
-    assert_eq!(lifecycle_artifact_path(Path::new("a/globals.yaml")), PathBuf::from("a/globals.lifecycle.json"));
 }
 
 /// Each problem is a reason naming the artifact; nothing is defaulted.
@@ -92,14 +98,20 @@ fn an_absent_stale_or_lacking_artifact_is_refused_with_its_reason() {
         assert!(text.contains(from), "{from}");
         text.replacen(from, to, 1)
     };
-    let absent = HostLifecycleProfile::from_artifact(catalog(), Path::new(CATALOG_PATH), CATALOG_TEXT, FactsArtifact::Absent);
+    let absent = HostLifecycleProfile::from_artifact_at(catalog(), &catalog_hash(), Path::new(ARTIFACT_PATH), FactsArtifact::Absent);
     let cases: Vec<(String, Result<HostLifecycleProfile, String>)> = vec![
         ("is absent".into(), absent),
         (
             "regenerate the artifact".into(),
-            HostLifecycleProfile::from_artifact(catalog(), Path::new(CATALOG_PATH), "kind: schema\n", FactsArtifact::Text(&text)),
+            HostLifecycleProfile::from_artifact_at(catalog(), "0000", Path::new(ARTIFACT_PATH), FactsArtifact::Text(&text)),
         ),
-        ("unknown `format_version` 2".into(), load(&edit("\"format_version\": 1", "\"format_version\": 2"))),
+        // A format 1 artifact (a catalog hashed by its bytes) is unknown.
+        ("unknown `format_version` 1".into(), load(&edit("\"format_version\": 2", "\"format_version\": 1"))),
+        // With `global_catalog: true`, a bound global the catalog lacks.
+        (
+            "binds host global `walk` (`host_globals[0]`), which no namespace".into(),
+            load(&edit("\"host_globals\": [\n    \"run\"\n  ]", "\"host_globals\": [\n    \"walk\"\n  ]")),
+        ),
         // An outcome alternative whose event the artifact lacks.
         ("refuses".into(), load(&edit("\"name\": \"lost\"", "\"name\": \"dropped\""))),
         ("unknown field `extra`".into(), load(&edit("\"host\": \"test\"", "\"host\": \"test\", \"extra\": 1"))),
@@ -147,7 +159,7 @@ fn owned_globals_and_ignored_verbs_round_trip_with_unchanged_bytes() {
         unknown_verbs: UnknownVerbPolicy::IgnoreUnprovided(vec![String::from("say")].into()),
         registry: &owned,
     };
-    let text = lifecycle_artifact(&options, &["chime", "unknown-one"], CATALOG_TEXT);
+    let text = lifecycle_artifact(&options, &["chime", "unknown-one"], &catalog_hash());
     assert_eq!(text, statics);
 
     let profile = load(&text).expect("the artifact reads");
@@ -155,7 +167,7 @@ fn owned_globals_and_ignored_verbs_round_trip_with_unchanged_bytes() {
     assert!(matches!(&rebuilt.unknown_verbs, UnknownVerbPolicy::IgnoreUnprovided(crate::lifecycle::VerbList::Shared(_))));
     assert!(rebuilt.unknown_verbs.ignores("say") && !rebuilt.unknown_verbs.ignores("shell"));
     assert_eq!(profile.registry().host_globals(), ["err", "timing", "run"]);
-    assert_eq!(lifecycle_artifact(&rebuilt, &["chime", "unknown-one"], CATALOG_TEXT), statics);
+    assert_eq!(lifecycle_artifact(&rebuilt, &["chime", "unknown-one"], &catalog_hash()), statics);
 }
 
 /// The two owned collections, `host_globals` and
@@ -199,4 +211,20 @@ fn owned_collection_fields_refuse_every_invalid_shape_and_admit_an_empty_list() 
     assert!(!empty_verbs.parse_options(None).unknown_verbs.ignores("say"));
     let empty_globals = with(&globals(json!([]))).expect("an empty host-global list is valid");
     assert_eq!(empty_globals.registry().host_globals(), ["err", "timing"]);
+}
+
+/// A profile read with a shared catalog holds that catalog itself (never a
+/// copy) and releases it when dropped.
+#[test]
+fn a_profile_holds_the_shared_catalog_it_was_given_and_releases_it() {
+    let shared = Arc::new(catalog().clone());
+    let text = artifact(&host_registry());
+    let profile = HostLifecycleProfile::from_artifact_at(Arc::clone(&shared), &catalog_hash(), Path::new(ARTIFACT_PATH), FactsArtifact::Text(&text))
+        .expect("the artifact reads");
+    match profile.registry().global_catalog_handle() {
+        Some(CatalogHandle::Shared(held)) => assert!(Arc::ptr_eq(held, &shared)),
+        other => panic!("the shared catalog: {other:?}"),
+    }
+    drop(profile);
+    assert_eq!(Arc::strong_count(&shared), 1, "nothing else holds the catalog");
 }

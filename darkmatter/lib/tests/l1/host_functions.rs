@@ -908,14 +908,12 @@ fn declaring_and_using_a_catalog_fact_enters_no_handler() {
     assert_eq!(entries(), (0, 0), "narrowing a guarded call ran nothing");
 }
 
-/// A function catalog in a schema root is discovered for its role only: it
-/// is not a global catalog, contributes no document property, and is no
-/// trigger.
+/// A function catalog (with its facts) in a schema root supplies no host:
+/// only a registration manifest names a host's functions. It is not a global
+/// catalog, contributes no document property, and is no trigger.
 #[test]
-fn a_function_catalog_in_a_schema_root_is_never_a_document_schema() {
-    use darkmatter::markdown::schemas::catalog::{
-        host_catalogs, host_function_catalogs, is_global_catalog, is_host_function_catalog,
-    };
+fn a_function_catalog_in_a_schema_root_supplies_no_host_and_no_document_schema() {
+    use darkmatter::markdown::schemas::catalog::{is_global_catalog, is_host_function_catalog};
     let catalog = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.yaml"))
         .expect("the test catalog");
     let artifact = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.facts.json"))
@@ -931,12 +929,6 @@ fn a_function_catalog_in_a_schema_root_is_never_a_document_schema() {
     std::fs::write(root.join("schemas/project.facts.json"), &artifact).unwrap();
     let context =
         biscuit_file::FileResolutionContext::from_snapshot(&root, None, Default::default()).with_repository_root(&root);
-
-    let found = host_function_catalogs(&context);
-    assert_eq!(found.len(), 1, "{found:?}");
-    let functions = found[0].as_ref().expect("the catalog loads");
-    assert!(functions.incomplete_functions().is_empty(), "{:?}", functions.incomplete_functions());
-    assert!(host_catalogs(&context).is_empty(), "a function catalog is not a global catalog");
 
     let api = darkmatter::markdown::schemas::DarkmatterSchemas::new(context)
         .with_darkmatter_baseline_json_schema()

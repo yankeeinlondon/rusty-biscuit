@@ -3,11 +3,10 @@
 //! that cannot run that registration (the editor).
 //!
 //! A host whose events, renames, per-event globals, or accepted verbs differ
-//! from the `md` host's writes the artifact beside its host global catalog,
-//! named `<stem>.lifecycle.json` (`globals.yaml` → `globals.lifecycle.json`),
-//! with one call ([`lifecycle_artifact`]). A reader rebuilds an
-//! [`EventRegistry`] and [`LifecycleParseOptions`] from it
-//! ([`HostLifecycleProfile::from_artifact`]) through the same registration
+//! from the `md` host's ships the artifact as the `lifecycle` member of its
+//! registration bundle, written with one call ([`lifecycle_artifact`]). A
+//! reader rebuilds an [`EventRegistry`] and [`LifecycleParseOptions`] from it
+//! ([`HostLifecycleProfile::from_artifact_at`]) through the same registration
 //! calls the host makes, so a registration the artifact cannot carry fails
 //! exactly as it would in the host. The library's one scoped walk
 //! ([`super::lifecycle_call_checks`]) then types the document's lifecycle as
@@ -15,16 +14,19 @@
 //! handlers, or effects.
 //!
 //! Like the facts artifact of a host function catalog, the file is versioned
-//! against its catalog by the BLAKE3 hash of the catalog's bytes, the writer
-//! emits deterministic bytes (keys sorted at every level, pretty-printed, one
-//! trailing newline), and the reader is strict: a duplicate key, trailing
-//! content, an unknown field, or a field that is absent, `null` where `null`
-//! means nothing, or of the wrong type is never defaulted. Any problem makes
-//! the whole profile unusable, with a human-readable reason.
+//! against the host's global catalog: `catalog_hash` is the
+//! [`namespace_catalog_hash`](crate::config::registration::namespaces::namespace_catalog_hash)
+//! of the namespace files (and every bundled file they import) the catalog
+//! was prepared from. The writer emits deterministic bytes (keys sorted at
+//! every level, pretty-printed, one trailing newline), and the reader is
+//! strict: a duplicate key, trailing content, an unknown field, or a field
+//! that is absent, `null` where `null` means nothing, or of the wrong type is
+//! never defaulted. Any problem makes the whole profile unusable, with a
+//! human-readable reason.
 //!
 //! ```json
 //! {
-//!   "catalog_hash": "<BLAKE3 hex of the catalog's bytes>",
+//!   "catalog_hash": "<BLAKE3 hex of the namespace digest map>",
 //!   "effects": ["doorbell", "sad-trombone"],
 //!   "events": [
 //!     { "actions": ["communicate", "expression", "flow"], "core": "initialize",
@@ -33,7 +35,7 @@
 //!     { "actions": [ … ], "core": null, "globals": { … }, "name": "success",
 //!       "position": "after-composition", "role": "terminal-outcome" }
 //!   ],
-//!   "format_version": 1,
+//!   "format_version": 2,
 //!   "global_catalog": true,
 //!   "host": "claudine",
 //!   "host_globals": ["loop", "group"],
@@ -49,10 +51,11 @@
 //! is `"reject"`, `"ignore"`, or `{ "ignore_unprovided": [verbs] }`. `effects`
 //! lists the effect names the host's `is_known_effect` accepts; the rebuilt
 //! predicate compares names by their lowercase letters and digits alone, the
-//! rule Playa's lookup falls back to.
+//! rule Playa's lookup falls back to. With `global_catalog: true`, every
+//! `host_globals` name must be a namespace the catalog declares.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 
@@ -71,7 +74,7 @@ use crate::markdown::compose::expression::{Availability, BindingView, ScopeId, U
 use crate::markdown::schemas::catalog::CatalogHandle;
 
 /// The artifact format this library writes and reads.
-pub const LIFECYCLE_ARTIFACT_FORMAT_VERSION: u64 = 1;
+pub const LIFECYCLE_ARTIFACT_FORMAT_VERSION: u64 = 2;
 
 const TOP_FIELDS: &[&str] = &[
     "catalog_hash",
@@ -100,19 +103,15 @@ const ACTION_TYPES: [(ActionType, &str); 4] = [
     (ActionType::Shell, "shell"),
 ];
 
-/// The artifact beside `catalog`: its file stem plus `.lifecycle.json`
-/// (`globals.yaml` → `globals.lifecycle.json`).
-pub fn lifecycle_artifact_path(catalog: &Path) -> PathBuf {
-    catalog.with_extension("lifecycle.json")
-}
-
 /// The lifecycle artifact of the host whose profile `options` is, for the
-/// host global catalog whose bytes are `catalog_text`: its registry's events,
+/// host global catalog whose
+/// [`namespace_catalog_hash`](crate::config::registration::namespaces::namespace_catalog_hash)
+/// is `catalog_hash`: its registry's events,
 /// renames, per-event globals and action types, outcome pair, and late
 /// globals, its unknown-verb policy, and those of `effect_names` its
 /// `is_known_effect` accepts, plus the catalog's hash and
 /// [`LIFECYCLE_ARTIFACT_FORMAT_VERSION`]. The bytes depend only on these.
-pub fn lifecycle_artifact(options: &LifecycleParseOptions<'_>, effect_names: &[&str], catalog_text: &str) -> String {
+pub fn lifecycle_artifact(options: &LifecycleParseOptions<'_>, effect_names: &[&str], catalog_hash: &str) -> String {
     let registry = options.registry;
     let mut events: Vec<Value> = CoreEvent::ALL
         .into_iter()
@@ -144,7 +143,7 @@ pub fn lifecycle_artifact(options: &LifecycleParseOptions<'_>, effect_names: &[&
     };
     let effects: BTreeSet<&str> = effect_names.iter().copied().filter(|name| (options.is_known_effect)(name)).collect();
     let root = json!({
-        "catalog_hash": biscuit_hash::blake3_hash(catalog_text),
+        "catalog_hash": catalog_hash,
         "effects": effects.into_iter().collect::<Vec<_>>(),
         "events": events,
         "format_version": LIFECYCLE_ARTIFACT_FORMAT_VERSION,
@@ -237,10 +236,11 @@ impl HostLifecycleProfile {
         }
     }
 
-    /// The profile `artifact` records for `catalog`, loaded from
-    /// `catalog_path` with bytes `catalog_text`; the registry types the host's
-    /// globals with `catalog` when the host registered its catalog. Passive:
-    /// nothing is run.
+    /// The profile `artifact` records for `catalog`, whose
+    /// [`namespace_catalog_hash`](crate::config::registration::namespaces::namespace_catalog_hash)
+    /// is `catalog_hash`; `artifact_path` is where `artifact` was read, and
+    /// errors name it. The registry types the host's globals with `catalog`
+    /// when the host registered its catalog. Passive: nothing is run.
     ///
     /// The profile owns what it reads: its registry holds the catalog, the
     /// late-global names, and the `ignore_unprovided` verbs, and releases
@@ -250,40 +250,24 @@ impl HostLifecycleProfile {
     ///
     /// A human-readable reason naming the artifact when it is absent or
     /// unreadable, is not strict JSON, records another catalog's hash or an
-    /// unknown format, has a field it should not or lacks one it should, or
+    /// unknown format (format 1 included), has a field it should not or lacks
+    /// one it should, binds a host global the catalog does not declare, or
     /// records a registration the registry refuses (an outcome alternative
     /// with no event, a renamed fixed event, a reserved root, …).
-    pub fn from_artifact(
-        catalog: impl Into<CatalogHandle>,
-        catalog_path: &Path,
-        catalog_text: &str,
-        artifact: FactsArtifact<'_>,
-    ) -> Result<Self, String> {
-        Self::from_artifact_at(catalog, catalog_text, &lifecycle_artifact_path(catalog_path), artifact)
-    }
-
-    /// [`Self::from_artifact`] for an artifact that a caller located itself
-    /// (a host registration manifest names it) rather than beside the
-    /// catalog: `artifact_path` is where `artifact` was read, and errors name
-    /// it. The artifact must still record the hash of `catalog_text`.
-    ///
-    /// ## Errors
-    ///
-    /// As [`Self::from_artifact`].
     pub fn from_artifact_at(
         catalog: impl Into<CatalogHandle>,
-        catalog_text: &str,
+        catalog_hash: &str,
         artifact_path: &Path,
         artifact: FactsArtifact<'_>,
     ) -> Result<Self, String> {
         let file = format!("the lifecycle artifact `{}`", artifact_path.display());
-        read(catalog.into(), catalog_text, artifact).map_err(|reason| format!("{file} {reason}"))
+        read(catalog.into(), catalog_hash, artifact).map_err(|reason| format!("{file} {reason}"))
     }
 }
 
 // ── reader ──────────────────────────────────────────────────────────────────
 
-fn read(catalog: CatalogHandle, catalog_text: &str, artifact: FactsArtifact<'_>) -> Result<HostLifecycleProfile, String> {
+fn read(catalog: CatalogHandle, expected: &str, artifact: FactsArtifact<'_>) -> Result<HostLifecycleProfile, String> {
     let text = match artifact {
         FactsArtifact::Text(text) => text,
         FactsArtifact::Absent => return Err("is absent".to_string()),
@@ -305,7 +289,6 @@ fn read(catalog: CatalogHandle, catalog_text: &str, artifact: FactsArtifact<'_>)
         None => return Err(format!("has `format_version` {} instead of an integer", describe(version))),
     }
     let hash = string(required(&root, "catalog_hash")?, "catalog_hash")?;
-    let expected = biscuit_hash::blake3_hash(catalog_text);
     if hash != expected {
         return Err(format!(
             "records catalog hash `{hash}`, but the loaded catalog's hash is `{expected}`; regenerate the artifact"
@@ -384,14 +367,21 @@ fn read(catalog: CatalogHandle, catalog_text: &str, artifact: FactsArtifact<'_>)
         registry.register_outcome_pair(outcome).map_err(refused)?;
     }
 
+    let with_catalog = match required(&root, "global_catalog")? {
+        Value::Bool(flag) => *flag,
+        other => return Err(format!("has `global_catalog` {} instead of a boolean", describe(other))),
+    };
     for (index, name) in array(required(&root, "host_globals")?, "host_globals")?.iter().enumerate() {
         let name = string(name, &format!("host_globals[{index}]"))?;
+        if with_catalog && catalog.global(name).is_none() {
+            return Err(format!(
+                "binds host global `{name}` (`host_globals[{index}]`), which no namespace of the host's catalog declares"
+            ));
+        }
         registry.declare_host_global(name.to_string()).map_err(refused)?;
     }
-    match required(&root, "global_catalog")? {
-        Value::Bool(true) => registry.register_global_catalog(catalog).map_err(refused)?,
-        Value::Bool(false) => {}
-        other => return Err(format!("has `global_catalog` {} instead of a boolean", describe(other))),
+    if with_catalog {
+        registry.register_global_catalog(catalog).map_err(refused)?;
     }
     registry.validate().map_err(refused)?;
 

@@ -114,10 +114,10 @@ no `$schema` in the document. Anywhere else, put a complete bundle of regular
 files (all eight, so their relative imports resolve) in the repository root's
 `schemas/`, the folder an absolute `SCHEMAS_DIR` names, or `~/schemas`. A
 symlinked trigger file is ignored, and `$schema: claudine.yaml` fails, because
-a trigger activates by placement and match, never by reference. Copy the
-companion `globals.yaml` host catalog and `globals.lifecycle.json` artifact too
-for Claudine-specific expression globals and event analysis; they are separate
-from the eight-file trigger bundle.
+a trigger activates by placement and match, never by reference. Claudine's
+expression globals and event analysis come only from its
+[registration](../host-registration.md); a `globals.yaml` and
+`globals.lifecycle.json` copied into a schema root supply nothing.
 
 DMLS reads these files **only from disk**: it has no Claudine dependency and
 registers no embedded bundle. The `claudine` binary carries its own embedded

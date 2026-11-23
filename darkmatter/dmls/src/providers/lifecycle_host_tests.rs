@@ -1,24 +1,20 @@
 //! One combined diagnostics pass reads the lifecycle host from the document's
-//! selected host view and shares it with the frontmatter and DSL providers;
-//! a panic while reading it drops only those two providers' diagnostics.
+//! selected host view and shares it with the frontmatter provider; a panic
+//! while reading it drops only that provider's diagnostics.
 //!
-//! Discovery is counted by the reads of a host catalog that
-//! [`DiscoveryProbe`] observes on this thread: the overlay's schema
-//! preparation selects the host, and no diagnostics pass reads a catalog
-//! again.
+//! The host comes from an explicitly registered format 2 bundle
+//! ([`crate::host_fixtures`]); a lifecycle artifact beside a catalog in a schema
+//! root supplies none.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use darkmatter::lifecycle::host_profile::{lifecycle_artifact, lifecycle_artifact_path};
-use darkmatter::lifecycle::registry::EventRegistry;
-use darkmatter::lifecycle::{LifecycleParseOptions, UnknownVerbPolicy};
-use darkmatter::markdown::schemas::catalog::discovery_probe::DiscoveryProbe;
-use lsp_types::{Diagnostic, DiagnosticSeverity, InitializeParams, NumberOrString, Range, Uri};
+use lsp_types::{Diagnostic, InitializeParams, NumberOrString, Uri};
 
 use super::*;
 use crate::config::DmlsConfig;
+use crate::context::DocumentResolution;
 use crate::diagnostics::codes::code;
 use crate::overlay::OverlayState;
 use crate::source_map::PositionEncoding;
@@ -26,11 +22,12 @@ use crate::workspace::file_path_to_uri;
 
 /// A lifecycle stack in Darkmatter's `finalize` event: under strict
 /// expressions the call after the guard is narrowed and the one after the
-/// write warns.
+/// write warns. Its `widget` matches the `acme` host's trigger.
 const DOCUMENT: &str = concat!(
     "---\n",
     "$schema:\n  count: number\n",
     "count: 1\n",
+    "widget:\n  size: 2\n",
     "finalize:\n",
     "  - when: count\n",
     "    then:\n",
@@ -42,55 +39,32 @@ const DOCUMENT: &str = concat!(
     "Body\n",
 );
 
-/// A repository whose `schemas/` root holds the host catalogs.
-struct Repository {
-    _dir: tempfile::TempDir,
-    root: PathBuf,
-    schemas: PathBuf,
+/// A temporary home and working directory with the `acme` bundle installed
+/// under `host/`, registered by the user configuration when `registered`.
+struct Workspace {
+    fixture: crate::host_fixtures::Fixture,
 }
 
-impl Repository {
-    fn new() -> Self {
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
-        let schemas = root.join("schemas");
-        std::fs::create_dir_all(root.join(".git")).expect("repository marker");
-        std::fs::create_dir_all(&schemas).expect("schema root");
-        Self { _dir: dir, root, schemas }
+impl Workspace {
+    fn new(registered: bool) -> Self {
+        let fixture = crate::host_fixtures::Fixture::new();
+        if registered {
+            fixture.write("home/.darkmatter.yaml", &format!("register:\n  - ../host/{}\n", crate::host_fixtures::MANIFEST_NAME));
+        } else {
+            fixture.write("home/.darkmatter.yaml", "{}\n");
+        }
+        Self { fixture }
     }
 
-    /// A host catalog named `name` declaring the `run` global, without a
-    /// lifecycle artifact.
-    fn host_catalog(&self, name: &str) -> PathBuf {
-        let path = self.schemas.join(name);
-        std::fs::write(&path, catalog_text(name)).expect("catalog");
-        path
-    }
-
-    /// Writes the artifact of the `test` host, which declares no events,
-    /// beside `catalog`.
-    fn write_artifact(&self, catalog: &Path) {
-        let name = catalog.file_name().expect("file name").to_string_lossy();
-        let options = LifecycleParseOptions {
-            is_known_effect: &|_| false,
-            authored: None,
-            authored_values: None,
-            unknown_verbs: UnknownVerbPolicy::Reject,
-            registry: &EventRegistry::new("test"),
-        };
-        std::fs::write(lifecycle_artifact_path(catalog), lifecycle_artifact(&options, &[], &catalog_text(&name)))
-            .expect("artifact");
-    }
-
-    /// Runs `f` with a strict-expressions context for [`DOCUMENT`] in the
-    /// repository.
+    /// Runs `f` with a strict-expressions context for [`DOCUMENT`] at
+    /// `work/doc.md`, its overlay prepared (registrations included).
     fn with_ctx<R>(&self, f: impl FnOnce(&DocumentContext) -> R) -> R {
-        let path = self.root.join("doc.md");
+        let path = self.fixture.path("work/doc.md");
         let uri: Uri = file_path_to_uri(&path).expect("document uri");
         let mut config = DmlsConfig::default();
         config.expressions.strict = true;
-        let roots = [self.root.clone()];
-        let resolution = crate::context::test_support::resolution_in_repository(&self.root, &path);
+        let roots: [PathBuf; 1] = [self.fixture.path("work")];
+        let resolution = DocumentResolution::from_context(self.fixture.context().for_source(&path));
         let overlay = OverlayState::default().for_document(&uri, DOCUMENT, &path, &config, &roots, &resolution);
         let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(DOCUMENT));
         let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
@@ -112,10 +86,6 @@ impl Repository {
     }
 }
 
-fn catalog_text(name: &str) -> String {
-    format!("kind: schema\ndescription: {name}\n$schema:\n    run:\n        count: number\n")
-}
-
 fn with_code<'d>(diagnostics: &'d [Diagnostic], wanted: &str) -> Vec<&'d Diagnostic> {
     diagnostics
         .iter()
@@ -134,7 +104,7 @@ fn line_of(needle: &str) -> u32 {
 }
 
 /// What each provider of the default registry reports on its own, in
-/// registry order, each discovering for itself.
+/// registry order.
 fn standalone(ctx: &DocumentContext) -> Vec<Diagnostic> {
     let mut out = SubstrateProvider.diagnostics(ctx);
     out.extend(WikiProvider.diagnostics(ctx));
@@ -143,75 +113,42 @@ fn standalone(ctx: &DocumentContext) -> Vec<Diagnostic> {
     out
 }
 
-/// One pass under a catalog with no usable artifact reads no catalog and
-/// reports exactly what the providers report on their own: the incomplete
-/// warning, and the `md` host's narrowing of the `finalize` stack. With the
-/// artifact repaired, the next overlay selects afresh and the warning is
-/// gone.
+/// A document the registered `acme` host identifies is analyzed under the
+/// host's lifecycle, and one combined pass reports exactly what the
+/// providers report on their own: the host's `finalize` narrows the guarded
+/// call and the call after the write warns.
 #[test]
-fn one_lifecycle_discovery_serves_a_combined_pass_and_a_repair_shows_next_request() {
-    let repository = Repository::new();
-    let catalog = repository.host_catalog("host.yaml");
+fn a_registered_lifecycle_host_serves_a_combined_pass() {
+    let workspace = Workspace::new(true);
     let registry = ProviderRegistry::with_substrate();
-    let catalog_reads = |probe: &DiscoveryProbe| probe.take_reads().iter().filter(|read| **read == catalog).count();
 
-    repository.with_ctx(|ctx| {
-        let probe = DiscoveryProbe::install();
+    workspace.with_ctx(|ctx| {
+        assert_eq!(ctx.host_view().lifecycle().registry().host(), "acme", "{:?}", ctx.host_view());
         let combined = registry.diagnostics(ctx);
-        assert_eq!(catalog_reads(&probe), 0, "the pass reads the host its overlay selected");
-
-        let incomplete = with_code(&combined, code::LIFECYCLE_INCOMPLETE_ANALYSIS);
-        assert_eq!(incomplete.len(), 1, "{combined:#?}");
-        assert_eq!(incomplete[0].range, Range::default());
-        assert_eq!(incomplete[0].severity, Some(DiagnosticSeverity::WARNING));
-        let artifact = lifecycle_artifact_path(&catalog);
-        assert!(incomplete[0].message.contains(&artifact.display().to_string()), "{}", incomplete[0].message);
         assert_eq!(
             lines_of(&combined, code::EXPRESSION_UNCERTAIN_CALL),
             [line_of("min(count, 6)")],
-            "the md host narrows the guarded call: {combined:#?}"
+            "the host's `finalize` narrows the guarded call: {combined:#?}"
         );
         assert_eq!(combined, standalone(ctx), "the shared host changes no provider's result");
-        assert_eq!(catalog_reads(&probe), 0, "standalone frontmatter and DSL read the same view");
-    });
-
-    repository.write_artifact(&catalog);
-    repository.with_ctx(|ctx| {
-        let probe = DiscoveryProbe::install();
-        let combined = registry.diagnostics(ctx);
-        assert_eq!(catalog_reads(&probe), 0, "the pass reads the host its overlay selected");
-        assert!(with_code(&combined, code::LIFECYCLE_INCOMPLETE_ANALYSIS).is_empty(), "{combined:#?}");
-        assert_eq!(
-            lines_of(&combined, code::EXPRESSION_UNCERTAIN_CALL),
-            [line_of("min(count, 6)")],
-            "the `test` host's `finalize` narrows the guarded call: {combined:#?}"
-        );
-        assert_eq!(combined, standalone(ctx));
     });
 }
 
-/// A broken host catalog is reported by the DSL provider's own catalog
-/// check in a combined pass, beside a usable host the overlay selected.
+/// A catalog with a lifecycle artifact beside it in the document's schema
+/// root, which a host installed before registration, supplies no host: the
+/// document is analyzed under `md`, and the pass still agrees with the
+/// providers on their own.
 #[test]
-fn a_broken_host_catalog_is_still_reported_in_a_combined_lifecycle_pass() {
-    let repository = Repository::new();
-    std::fs::write(
-        repository.schemas.join("broken.yaml"),
-        "kind: schema\ndescription: broken\n$schema:\n    seq: 42\n",
-    )
-    .expect("broken catalog");
-    let catalog = repository.host_catalog("host.yaml");
-    repository.write_artifact(&catalog);
+fn a_root_local_catalog_and_artifact_supply_no_lifecycle_host() {
+    let workspace = Workspace::new(false);
+    workspace.fixture.root_catalog("work/schemas", "acme");
     let registry = ProviderRegistry::with_substrate();
 
-    repository.with_ctx(|ctx| {
-        let probe = DiscoveryProbe::install();
+    workspace.with_ctx(|ctx| {
+        assert_eq!(ctx.host_view().lifecycle().registry().host(), "md", "{:?}", ctx.host_view());
+        assert!(ctx.host_view().catalogs().is_empty());
         let combined = registry.diagnostics(ctx);
-        assert_eq!(probe.take_reads().iter().filter(|read| **read == catalog).count(), 0);
-        let reported = with_code(&combined, code::SCHEMA_HOST_CATALOG);
-        assert_eq!(reported.len(), 1, "{combined:#?}");
-        assert!(reported[0].message.contains("broken.yaml"), "{}", reported[0].message);
-        assert!(with_code(&combined, code::LIFECYCLE_INCOMPLETE_ANALYSIS).is_empty(), "{combined:#?}");
+        assert_eq!(lines_of(&combined, code::EXPRESSION_UNCERTAIN_CALL), [line_of("min(count, 6)")], "{combined:#?}");
         assert_eq!(combined, standalone(ctx));
     });
 }
@@ -229,23 +166,25 @@ impl Provider for Fixed {
     }
 }
 
-/// A panic while discovering the pass's host is logged as a panic of the
-/// frontmatter and DSL providers and drops only their diagnostics; the
-/// providers around them still report, in order.
+/// A panic while reading the pass's host is logged as a panic of the
+/// frontmatter provider and drops only its diagnostics; the providers around
+/// it, the DSL provider included, still report, in order.
 #[test]
 #[tracing_test::traced_test]
-fn a_lifecycle_discovery_panic_drops_only_the_frontmatter_and_dsl_diagnostics() {
-    let repository = Repository::new();
-    repository.host_catalog("host.yaml");
+fn a_lifecycle_host_panic_drops_only_the_frontmatter_diagnostics() {
+    let workspace = Workspace::new(true);
     let registry = ProviderRegistry {
         providers: vec![Box::new(Fixed("before")), Box::new(FrontmatterProvider), Box::new(DslProvider), Box::new(Fixed("after"))],
     };
 
-    repository.with_ctx(|ctx| {
-        assert!(!crate::diagnostics::frontmatter::diagnostics(ctx).is_empty() && !dsl::diagnostics(ctx).is_empty());
-        let combined = registry.diagnostics_discovering(ctx, |_| panic!("injected lifecycle discovery panic"));
+    workspace.with_ctx(|ctx| {
+        assert!(!crate::diagnostics::frontmatter::diagnostics(ctx).is_empty());
+        let dsl = dsl::diagnostics(ctx);
+        let combined = registry.diagnostics_discovering(ctx, |_| panic!("injected lifecycle host panic"));
         let messages: Vec<&str> = combined.iter().map(|diagnostic| diagnostic.message.as_str()).collect();
-        assert_eq!(messages, ["before", "after"]);
+        let expected: Vec<&str> =
+            std::iter::once("before").chain(dsl.iter().map(|d| d.message.as_str())).chain(["after"]).collect();
+        assert_eq!(messages, expected);
     });
 
     logs_assert(|lines: &[&str]| {
@@ -256,7 +195,7 @@ fn a_lifecycle_discovery_panic_drops_only_the_frontmatter_and_dsl_diagnostics() 
             })
         };
         match panics.len() {
-            2 if logged("frontmatter") && logged("dsl") => Ok(()),
+            1 if logged("frontmatter") => Ok(()),
             _ => Err(format!("{panics:#?}")),
         }
     });

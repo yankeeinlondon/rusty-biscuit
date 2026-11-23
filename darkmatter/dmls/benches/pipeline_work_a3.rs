@@ -10,8 +10,10 @@
 //! graph, provider registry) persists across loops, as in a running server.
 //! The document is typed by Claudine's trigger files from the frozen bundle
 //! in `darkmatter/lib/benches/fixtures/claudine-schemas/`, and its events
-//! are Claudine's through the bundle's lifecycle artifact, as in the
-//! repository.
+//! and globals are Claudine's through an explicitly registered format 2 host
+//! bundle built from the frozen lifecycle artifact and host catalog (the L1
+//! tests' `claudine_host` fixture), so every loop analyzes a registered
+//! host's document.
 //!
 //! Prints one tab-separated row per phase and per loop total, at 1× and 10×
 //! the document's lifecycle stacks, warm (process caches kept) and cold
@@ -62,9 +64,11 @@ const CLAUDINE_SCHEMAS: [(&str, &str); 9] = [
     ("sequence.yaml", include_str!("../../lib/benches/fixtures/claudine-schemas/sequence.yaml")),
 ];
 
-/// Claudine's host lifecycle artifact, frozen beside the A3 document; fresh
-/// for the frozen bundle, whose `globals.yaml` it is keyed by.
-const CLAUDINE_LIFECYCLE_ARTIFACT: &str = include_str!("../../lib/benches/fixtures/pipeline-work/globals.lifecycle.json");
+#[path = "../../lib/tests/host_fixtures/mod.rs"]
+mod host_fixtures;
+
+#[path = "../tests/l1/claudine_host.rs"]
+mod claudine_host;
 
 /// Timed loops after the counted one; the median is reported.
 const TIMED_RUNS: usize = 5;
@@ -78,7 +82,8 @@ fn write(path: &Path, text: &str) {
 }
 
 /// A repository whose `claudine/schemas/` holds the frozen bundle, as the
-/// DMLS L1 Claudine fixture lays it out, with an empty home.
+/// DMLS L1 Claudine fixture lays it out, with a home that registers the
+/// Claudine-shaped host.
 struct Fixture {
     _dir: tempfile::TempDir,
     root: PathBuf,
@@ -99,8 +104,8 @@ impl Fixture {
         for (name, text) in CLAUDINE_SCHEMAS {
             write(&repo.join("claudine/schemas").join(name), text);
         }
-        write(&repo.join("claudine/schemas/globals.lifecycle.json"), CLAUDINE_LIFECYCLE_ARTIFACT);
         std::fs::create_dir_all(root.join("home")).expect("home");
+        claudine_host::register(&root.join("home"), &claudine_host::a3_bundle());
         Self { _dir: dir, root }
     }
 
@@ -235,6 +240,10 @@ impl Server {
         };
         let (diagnostics, diagnostics_cost) = measure(|| self.registry.diagnostics(&ctx));
         assert!(overlay.is_some(), "the document has a frontmatter overlay");
+        assert!(
+            ctx.host_view().selection().registered().is_some_and(|profile| profile.host() == "claudine"),
+            "the registered host identifies the document"
+        );
         std::hint::black_box(diagnostics);
         let (_, completion_cost) = measure(|| self.registry.completion(&ctx, completion_at));
         let (_, verb_cost) = measure(|| self.registry.hover(&ctx, hover_verb));

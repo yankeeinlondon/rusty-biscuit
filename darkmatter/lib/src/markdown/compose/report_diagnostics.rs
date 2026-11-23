@@ -215,7 +215,7 @@ pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
         }
         if let Some(records) = error
             .downcast_ref::<simplified_schema::SchemaError>()
-            .and_then(|schema| template_diagnostics(schema, Path::new("unknown")))
+            .and_then(|schema| schema_error_diagnostics(schema, Path::new("unknown")))
         {
             return records;
         }
@@ -399,12 +399,28 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
         }
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
         MarkdownError::SchemaValidationFailed { path, source: Some(source), .. }
-            if let Some(records) = source.downcast_ref::<simplified_schema::SchemaError>().and_then(|schema| template_diagnostics(schema, path)) =>
+            if let Some(records) = source.downcast_ref::<simplified_schema::SchemaError>().and_then(|schema| schema_error_diagnostics(schema, path)) =>
         {
             records
         }
         _ => with_expression_cause(leaf_diagnostic(leaf), expression_cause(leaf)),
     }
+}
+
+/// The coded records of a schema preparation failure: a template's
+/// ([`template_diagnostics`]), or one
+/// [`HOST_TRIGGER_CONFLICT_CODE`](crate::config::registration::merge::HOST_TRIGGER_CONFLICT_CODE)
+/// error on the document whose registered host's matched triggers conflict.
+/// `None` for any other schema error.
+pub fn schema_error_diagnostics(error: &simplified_schema::SchemaError, document: &Path) -> Option<Vec<Diagnostic>> {
+    if let simplified_schema::SchemaError::HostTriggerConflict(conflict) = error {
+        let file = conflict.document.clone().or_else(|| named(document));
+        return Some(vec![Diagnostic {
+            source: file_only(file),
+            ..unlocated(crate::config::registration::merge::HOST_TRIGGER_CONFLICT_CODE, Severity::Error, error.to_string())
+        }]);
+    }
+    template_diagnostics(error, document)
 }
 
 /// The records of a schema that is a template: each slot's own failure,

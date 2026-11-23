@@ -5882,8 +5882,15 @@ fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
         }),
     );
     // The partial claims no `kind`: it is data of its root `$schema`, and a
-    // buffer that does not load is the YAML loader's one parse problem.
-    let current = fixture.wait_for_diagnostics(uri.as_str());
+    // buffer that does not load is the YAML loader's one parse problem. The
+    // installed host registrations may republish version 1 first: a YAML
+    // kind can be a registered host's.
+    let current = loop {
+        let params = fixture.wait_for_diagnostics_params(uri.as_str());
+        if params["version"] == json!(2) {
+            break params["diagnostics"].as_array().cloned().unwrap_or_default();
+        }
+    };
     assert_eq!(current.len(), 1, "the malformed current buffer must own exactly one diagnostic: {current:?}");
     assert_eq!(current[0]["code"], json!("dm.frontmatter.yaml_parse"), "{current:?}");
     assert_eq!(

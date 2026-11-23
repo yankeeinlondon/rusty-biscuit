@@ -78,6 +78,74 @@ skills_files_updated_during_phase_1:
     - .claude/skills/simplified-schema/SKILL.md
     - .claude/skills/darkmatter/SKILL.md
     - darkmatter/docs/use-skills/use-dmls/schemas.md
+source_files_during_phase_2:
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/schemas/globals.lifecycle.json
+    - claudine/lib/tests/l1/host_catalog.rs
+    - claudine/lib/tests/l1/host_publication.rs
+    - simplified-schema/lib/src/resolve.rs
+    - darkmatter/lib/src/config/load.rs
+    - darkmatter/lib/src/config/registration.rs
+    - darkmatter/lib/src/config/registration/manifest.rs
+    - darkmatter/lib/src/config/registration/namespaces.rs
+    - darkmatter/lib/src/config/registration/selection.rs
+    - darkmatter/lib/src/lifecycle/host_profile.rs
+    - darkmatter/lib/src/lifecycle/host_profile/tests.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/discovery_tests.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/benches/pipeline_work_support/mod.rs
+    - darkmatter/lib/tests/host_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/host_namespaces.rs
+    - darkmatter/lib/tests/l1/host_registration.rs
+    - darkmatter/lib/tests/l1/host_selection.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/host_registration.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/benches/pipeline_work_a3.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/hosts.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+    - darkmatter/dmls/tests/l1/claudine_host.rs
+    - darkmatter/dmls/tests/l1/edit_action_editor.rs
+    - darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+    - darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+    - darkmatter/dmls/tests/l1/host_globals.rs
+    - darkmatter/dmls/tests/l1/host_registration_watches.rs
+    - darkmatter/dmls/tests/l1/lifecycle_event_views.rs
+    - darkmatter/dmls/tests/l1/lifecycle_host_profile.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs
+    - darkmatter/dmls/tests/l1/registered_host_views.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/topics/host-registration.md
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+    - darkmatter/docs/topics/host-functions.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/library-surfaces.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/schema.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
 decisions-for-review:
     - |-
         Format 1 manifests still load through the old profile loader during this phase. The plan's Rule 5 says format 1 is refused with an upgrade warning. That warning is implemented in the new format 2 reader (`bundle::load_snapshot`), but `load_registrations` still loads format 1 into host profiles, because host profiles are not built from a format 2 snapshot until Phase 2, and dozens of existing tests use format 1 fixtures that Phase 2 converts. The old format 1 contract text now lives privately in `manifest.rs`; the shipped `darkmatter-host.yaml` is format 2. Alternative: refuse format 1 everywhere now, which would break every registered-host test until Phase 2. Redo cost if reversed: none beyond what Phase 2 already removes.
@@ -97,8 +165,28 @@ decisions-for-review:
         Registered YAML kinds: two different registered definitions claiming one kind reuse the existing duplicate cause, listing files in host-then-path order, so the message names files but not hosts. A registered selection reuses the existing "selected by kind" result; the host is read from the definition's source. Copies collapse when the caller-supplied sameness key (meant to be host revision plus path) is equal. A registered definition whose claim fails is refused when it is built and never indexed, so it cannot block a kind; Phase 2 is expected to refuse the whole registration in that case. Adding a host-carrying cause or failure entries is small to moderate work.
     - |-
         The bundle resolver is a thread-local scope consulted inside the existing file-selection and read functions (the same pattern as unsaved editor buffers), not a parameter threaded through every resolver call. Embedded bundles use a virtual root spelled `<name>`. Because the envelope for a file-backed example requires `kind: example` and a bundle refuses `kind: example` members, no `example(file)` can succeed inside a bundle in v2; the scope also governs any host read made through the shared read function while it is in force, so a host must evaluate template slot data outside the scope. Threading an explicit context instead would touch every resolver signature.
+    - |-
+        Claudine still publishes format 1 manifests until Phase 4, and the loader now refuses format 1 with the upgrade warning. Claudine's registration tests that load its published manifest through Darkmatter (installed registration, identification, refresh, publication round trips) are therefore expected to fail between Phase 2 and Phase 4. The alternative was to keep a format 1 loader alive until the cutover, which the plan removes in this phase. Redo cost: none; Phase 4 publishes format 2.
+    - |-
+        Claudine's committed `globals.lifecycle.json` is regenerated with a transitional `catalog_hash`: `namespace_catalog_hash({"globals.yaml": member_digest(HOST_CATALOG_TEXT)})`, a one-entry map over its existing single catalog, so the artifact is format 2 and its freshness test still passes. Phase 4 replaces this with the hash of Claudine's real namespace files. Alternative: leave Claudine's artifact at format 1 until Phase 4, which would fail Claudine's freshness test now. Redo cost: one line in `claudine/lib/src/composition/lifecycle/mod.rs`.
+    - |-
+        `triggers()` and `yaml_kinds()` are in bundle-path order (the order of `files` has no effect, matching the revision rule). Matched triggers layer in that order, so a host that relied on manifest order now gets path order. DMLS's A3 completion golden changed accordingly (`group` before `seq`). Alternative: keep authored order, which would make two installs with reordered `files` layer differently despite an equal revision. Redo cost: small (sort site in `prepare_members`).
+    - |-
+        The lifecycle binding check is `host_globals` ⊆ the namespace catalog when `global_catalog` is true. Event views' declaration roots are not separately checked against the catalog, because they are already validated by the registry rebuild (a reserved or unknown root is refused there). Alternative: also cross-check every event view root. Redo cost: small, in `host_profile.rs::read`.
+    - |-
+        An empty namespace (`$schema: {}`) declares a global with no members and is valid, as the input robustness matrix allows. Alternative: refuse an empty payload. Redo cost: one check in `namespaces.rs::prepare_one`.
+    - |-
+        When two manifests of one host conflict, both claims' YAML definitions stay in `RegisteredHosts::yaml_kinds()`, so a conflicting kind is reported by the shared YAML selection as a duplicate claim rather than silently disappearing. Markdown selection still refuses a conflicted host. Alternative: drop a conflicting host's kinds entirely. Redo cost: small, in `selection.rs`.
+    - |-
+        `RegisteredHosts::yaml_kinds()` is built and tested, but `md schema validate` and DMLS do not pass it to `select_with_registered` yet; that wiring is Phase 3's YAML tier. The docs mark it planned.
+    - |-
+        Two DMLS diagnostic codes were removed with legacy discovery: `dm.lifecycle.incomplete_analysis` and `dm.schema.host_catalog`. Both described schema-root host catalogs, which no longer exist; a registered host's unusable artifact or function catalog refuses the registration with `dm.host.registration` instead. Alternative: keep the codes for the refused-registration case, which would duplicate `dm.host.registration`. Redo cost: moderate (re-add emitters and tests).
+    - |-
+        A trigger or library `name` that fails the label pattern is refused by the envelope parser without a line (`line: None`); the test asserts the file, member, and `/name` in the message. Locating it needs the envelope parser to return the key span. Redo cost: small to moderate in SimplifiedSchema's envelope parsing.
+    - |-
+        `md`'s run-level registration warnings show the message on stderr without the file and line (they are present in `--output json`). Changing `output::report_run_notices` affects every run-level notice, including configuration ones, so it was left as is.
 message-to-agent: |-
-    Phase 1 left format 1 manifests loading through the old profile path on purpose: `load_registrations` still calls `manifest::read` (v1, validated against a private legacy contract in `manifest.rs`), because host profiles were not yet built from format 2. Phase 2 must switch `load_registrations` to `config::registration::bundle::load_snapshot` (format 1 then gets the upgrade warning it already returns), build profiles from the `VerifiedSnapshot`, and delete `manifest::read` and the legacy contract. Use `simplified_schema::resolve::bundle::{BundleSources::on_disk(snapshot.bundle_root(), snapshot.bytes().clone()), with}` for every member resolution so reads come only from verified bytes; `BundleReads` gives attempted/missing paths for watches. For YAML, wrap each registered yaml-schema in `yaml_documents::RegisteredDefinition::new(RegisteredSource{host, path, file}, resolved, sameness)` (sameness = host revision + path) and pass `RegisteredKinds` to `yaml_documents::select_with_registered`. A namespace file is parsed with `simplified_schema::parse_namespace_schema_document`; the reserved-name checks (expression roots, Darkmatter globals, `null`) are not done yet and belong to Phase 2 catalog preparation. Explicit null on optional envelope fields is refused only by the envelope parsers, not the kind definitions. `claudine/schemas/sequence-types.yaml` exists untracked in this tree (from other in-progress work) and three tests include it; see decisions-for-review.
+    Phase 2 removed every legacy host path: no `identify` field, no schema-root host catalogs or lifecycle discovery (`host_lifecycle_profiles`, `host_function_catalogs`, `HostSelection::Legacy` are gone), and format 1 manifests are refused. Profiles are built from `bundle::load_snapshot`; members are classified in `config::registration::load_manifest`, and `registration::namespaces::prepare_catalog` gives the global catalog plus the lifecycle `catalog_hash`. `select` returns `Selected{selection, matched}`; the trigger layer already filters by `matched` (`markdown/schemas/mod.rs::registered_matches`). For Phase 3: `RegisteredHosts::yaml_kinds()` is built but not yet passed to `simplified_schema::yaml_documents::select_with_registered` from `prepare_yaml_contract`/DMLS. Claudine still publishes format 1 (Phase 4), so Claudine's registration round-trip tests fail until then, and its committed lifecycle artifact carries a transitional one-entry catalog hash (`claudine/lib/src/composition/lifecycle/mod.rs`). Shared v2 fixtures: `darkmatter/lib/tests/host_fixtures/mod.rs` (`Bundle::{acme, relay}`, `Fixture::{write_member, corrupt_member, readdress}`), and `darkmatter/dmls/tests/l1/claudine_host.rs` for a Claudine-shaped bundle built from frozen fixtures.
 ---
 
 # Implementation Log for 2026-11-22-host-registration-v2 (6 phases)
@@ -242,3 +330,118 @@ message-to-agent: |-
   `resolve::bundle::with`, indexes registered YAML definitions with
   `yaml_documents::{RegisteredDefinition, RegisteredKinds}`, and removes the
   interim format 1 loader (`manifest::read` and its private legacy contract).
+
+## Phase 2
+
+- Started 2026-11-22. The orchestrator wrote the core (catalog preparation,
+  member classification, profile loading, selection, removal of legacy
+  discovery, the v2 fixture constructors, and the docs); three subagents then
+  migrated the library tests and benches, DMLS, and the `md` CLI tests, each
+  verifying only what it changed. Gates ran once, after all three finished.
+
+### Catalog preparation
+
+- `config/registration/namespaces.rs` (new): `prepare_catalog` prepares
+  every `namespace-schema` member from verified bytes inside
+  `simplified_schema::resolve::bundle::with`, returning the `GlobalCatalog`,
+  each namespace's location, and the exact `{bundle path → digest}` map of
+  the namespace files and every bundled file their resolution read
+  (`BundleReads::served`); `namespace_catalog_hash` is the lifecycle
+  `catalog_hash`. Names are checked with the expression-root and
+  Darkmatter-global rules (`check_root`, `null`); duplicates are refused on
+  every declaration. `simplified_schema::resolve::resolve_namespace_payload`
+  resolves a namespace's `$schema` with its private `types`.
+- Lifecycle artifact format 2: `lifecycle_artifact(options, effects,
+  catalog_hash)`, `HostLifecycleProfile::from_artifact_at(catalog, hash,
+  path, artifact)`; format 1 is refused; `global_catalog: true` requires
+  `host_globals` ⊆ the catalog. Claudine's committed artifact is regenerated
+  with a transitional one-entry hash (see `decisions-for-review`).
+- `darkmatter/lib/tests/host_fixtures/mod.rs` rewritten for v2
+  (`Bundle::{acme, acme_named, relay}`, `with_file`, `without_file`,
+  `Fixture::{install_bundle, write_member, corrupt_member, readdress,
+  edit_manifest, root_catalog}`), with one function catalog and facts pair.
+  DMLS builds a Claudine-shaped bundle from frozen fixtures in
+  `dmls/tests/l1/claudine_host.rs`.
+
+### Host selection
+
+- `load_manifest` classifies each `files` member by `kind` (trigger,
+  `yaml-schema`, `namespace-schema`, types-only library), refuses any other
+  kind, duplicate labels, and imports outside the bundle; every trigger must
+  pass `admit_identifying_trigger`. Triggers and YAML kinds are in
+  bundle-path order. Refused entries leave `LoadedRegistrations::watches`
+  (manifest, every member, unlisted import targets).
+- `select` returns `Selected{selection, matched}`; `RegisteredHosts` indexes
+  YAML claims (`yaml_kinds()`). `DarkmatterSchemas::registered_matches`,
+  composition host capture, and DMLS `HostView` read the matched indices.
+- Removed: `HostSelection::Legacy`, `LegacyHost`, schema-root host catalog,
+  lifecycle, and function discovery (`host_catalogs`,
+  `host_lifecycle_profiles`, `host_function_catalogs`, `from_host_text`),
+  `lifecycle_artifact_path`, `from_artifact`, the format 1 manifest
+  contract, `manifest_member_candidates`, `catalog/discovery_tests.rs`, and
+  the DMLS codes `dm.lifecycle.incomplete_analysis` and
+  `dm.schema.host_catalog`.
+- Converted: DMLS `host_globals.rs`, `lifecycle_host_profile.rs`,
+  `lifecycle_event_views.rs`, `edit_action_editor.rs`,
+  `host_function_diagnostics.rs`, `registered_host_*`,
+  `host_registration_watches.rs`, `frontmatter_response_contracts.rs`
+  (A3 completion golden reordered), `benches/pipeline_work_a3.rs`; library
+  `benches/pipeline_work_support` (format 2 bundle built in a temp dir);
+  negative legacy tests now assert a root-local catalog supplies no host.
+- Claudine tests `host_catalog.rs` and `host_publication.rs` were updated to
+  the new APIs so the suite compiles.
+
+### Reader checkpoint
+
+- `just shipped-schemas` in `simplified-schema/` and `darkmatter/`: both
+  artifacts byte-identical (no prepared input changed).
+- Watches: `host_registration::a_missing_member_is_refused_and_watched`,
+  `…does_not_match_its_digest…`, `…unlisted_import…its_target_watched`;
+  DMLS `host_registration_watches::a_refused_registration_watches_its_manifest_and_members_and_loads_once_repaired`
+  (missing parent folder watched, repair loads).
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+|---|---|
+| Rule 6 catalog, multi-file, transitive hash, path-independent identity, spans | `host_namespaces::*` (multi-file order, `at == (2, 12)`, transitive library hash, two-folder identity) |
+| Binding check, version 1 and stale artifacts | `host_profile::tests` (format 1, wrong hash, unbound `host_globals`), `host_namespaces::an_artifact_binding_a_namespace_the_catalog_lacks_is_refused`, `host_registration::a_format_1_lifecycle_artifact_is_refused` |
+| Member classification and envelopes | `host_registration::a_member_that_is_no_registered_kind_is_refused_at_its_entry`, `…invalid_trigger…`, `…matcher_only_trigger…`, label tests, `host_namespaces::an_explicit_null_or_a_wrong_shape…`, `…reserved_or_malformed_namespace_name…`, `…declared_twice…` |
+| YAML readers | `host_registration::the_member_yaml_reader_refuses_every_malformed_document` |
+| Broad trigger branches | `host_registration::an_identifying_trigger_on_md_owned_keys_is_too_broad_at_its_match` |
+| Reordered lists, moved copies | `host_selection::reordered_files_keep_the_revision_and_the_selection`, `…moved_copy_collapses…`, `host_namespaces::one_bundle_installed_in_two_folders_has_one_identity` |
+| Same-host disagreement, multiple hosts | converted `host_registration` agreement/conflict tests, `host_selection` ambiguity tests |
+| Literal mismatch, path qualifiers | `host_selection::a_literal_trigger_matches_only_an_equal_value`, `…path_qualified_trigger…` |
+| Malformed presence operands, shared-event-only documents | `host_selection::a_malformed_presence_operand_or_a_shared_event_only_document_stays_md` |
+| Matched trigger indices | `host_selection::matched_lists_exactly_the_matching_triggers`, `…layers_the_host_triggers_in_bundle_path_order` |
+| Grant-independent passive analysis | `host_registration::loading_is_independent_of_permissions_and_writes_nothing` |
+| No legacy discovery | `host_selection::a_root_local_globals_lifecycle_and_function_catalog_supply_no_host`, `host_functions::a_function_catalog_in_a_schema_root_supplies_no_host_and_no_document_schema`, DMLS `host_globals`/`lifecycle_event_views` negatives |
+| YAML claims indexed | `host_selection::a_registered_yaml_kind_is_indexed_by_the_kinds_it_claims` |
+| CLI wiring (one positive, located refusals) | `darkmatter-cli` `host_registration::a_format_2_bundle_types_the_document_its_trigger_matches`, `…format_1_manifest_is_refused…`, `…member_that_fails_its_digest…` |
+| Watches on refusal | see Reader checkpoint |
+
+Input robustness matrix rows covered this phase: manifest scalars and paths
+and digests (Phase 1 snapshot tests plus two `load_entries` checks), member
+envelopes, lifecycle JSON, YAML readers, and strict JSON (existing
+`artifact.rs` and facts tests). Config mutation is unchanged this phase
+(Phase 4). Not done: a label that fails its pattern is refused without a
+line (see `decisions-for-review`).
+
+### Gates
+
+- `simplified-schema`: `just test` — 2125 passed; `just lint` passed.
+- `darkmatter`: `just test` — 17594 passed, 10 skipped;
+  `🐢 L1 run recorded: 17594 test(s), none at or above 5.0s`. `just lint`
+  passed (including the zed-dmls wasm check).
+- `just check-tier-coverage darkmatter` and `simplified-schema`: nothing
+  stranded.
+- Dependents: `cargo nextest run -p claudine -p claudine-cli -E
+  'test(/host|registration|identif|lifecycle_artifact|publication|globals|catalog|schema|shipped|trigger/)'`
+  — 1723 passed, 28 failed. All 28 are `host_publication::*`,
+  `installed_registration::*`, and `host_registration_refresh::*`, which
+  load Claudine's published format 1 manifest and now get the upgrade
+  warning; expected until Phase 4. `cargo clippy -p claudine --tests` clean.
+- `just publish-skills` in `darkmatter/` (`use-dmls` changed): published.
+- Windows (`just cross-check <package> --os windows`): `darkmatter` 12743
+  passed, 66 skipped; `darkmatter-lsp` 2112 passed, 9 skipped;
+  `darkmatter-cli` 2639 passed, 85 skipped. No `os-failing` needed.

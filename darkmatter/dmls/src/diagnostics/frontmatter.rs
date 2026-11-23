@@ -407,8 +407,18 @@ fn schema_prepare_diagnostic_with_origin(
             if let SchemaError::SchemaDocument { path, .. } = other {
                 related.extend(named_types::referenced_definition_related(ctx, path, other).unwrap_or_default());
             }
-            let code_value = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(other)
-                .unwrap_or(code::SCHEMA_PREPARE);
+            // Conflicting host triggers: each trigger file is related.
+            if let SchemaError::HostTriggerConflict(conflict) = other {
+                for (path, message) in [(&conflict.first, "the first conflicting trigger"), (&conflict.second, "the second conflicting trigger")] {
+                    if let Some(uri) = file_path_to_uri(path) {
+                        related.push(DiagnosticRelatedInformation { location: Location::new(uri, zero_range()), message: message.to_string() });
+                    }
+                }
+            }
+            let code_value = match other {
+                SchemaError::HostTriggerConflict(_) => code::HOST_TRIGGER_CONFLICT,
+                other => darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(other).unwrap_or(code::SCHEMA_PREPARE),
+            };
             (code_value, other.to_string(), fallback_span.clone())
         }
     };

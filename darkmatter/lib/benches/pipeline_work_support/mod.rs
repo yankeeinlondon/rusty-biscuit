@@ -20,7 +20,6 @@ use darkmatter::markdown::compose::expression::{
     DeclaredTypes, FunctionRegistration, TypeScope, one_based_position, parse,
 };
 use darkmatter::markdown::compose::shell_expansion::template::{DeferredShellRoots, parse_authored};
-use darkmatter::markdown::schemas::catalog::host_lifecycle_profiles;
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
 use darkmatter::markdown::schemas::rewrite::rewrite_eager_file_values;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, reset_process_caches_for_bench};
@@ -168,19 +167,62 @@ const CLAUDINE_SCHEMAS: [(&str, &str); 9] = [
 pub const A3_DOCUMENT: &str = include_str!("../fixtures/pipeline-work/implement-plan.md");
 
 /// The host lifecycle artifact `claudine/schemas/globals.lifecycle.json`,
-/// frozen beside the A3 document. It is keyed by the hash of `globals.yaml`,
-/// which the frozen bundle shares with the live one, so it is fresh for it.
+/// frozen beside the A3 document in its format 1 form, keyed by the hash of
+/// the frozen `globals.yaml`. [`claudine_profile`] re-keys it for the
+/// registered bundle it builds.
 const CLAUDINE_LIFECYCLE_ARTIFACT: &str = include_str!("../fixtures/pipeline-work/globals.lifecycle.json");
 
-/// Claudine's lifecycle host profile (its event names, verbs, and
-/// globals), discovered from the frozen bundle and its lifecycle artifact
-/// exactly as DMLS discovers it.
+/// Claudine's lifecycle host profile (its event names, verbs, and globals),
+/// loaded the way analysis loads a registered host: a format 2 bundle whose
+/// namespace files are the frozen `globals.yaml`'s three globals, with the
+/// frozen lifecycle artifact re-keyed to their catalog, read through
+/// `load_entries`.
 fn claudine_profile() -> std::sync::Arc<HostLifecycleProfile> {
-    let repository = ClaudineRepository::new();
-    std::fs::write(repository.root.join("schemas/globals.lifecycle.json"), CLAUDINE_LIFECYCLE_ARTIFACT).expect("write artifact");
-    host_lifecycle_profiles(&repository.context())
-        .find_map(|discovery| discovery.profile.ok())
-        .expect("the frozen bundle's lifecycle artifact is fresh")
+    use darkmatter::config::load::{ConfigRevision, Registration};
+    use darkmatter::config::registration::namespaces::{member_digest, namespace_catalog_hash};
+    use darkmatter::config::registration::{load_entries, md_owned_names};
+
+    let (dir, root) = temp_root();
+    let catalog: YamlValue = serde_yaml_ng::from_str(include_str!("../fixtures/claudine-schemas/globals.yaml")).expect("the frozen catalog");
+    let mut members: Vec<(String, String)> = Vec::new();
+    for name in ["group", "loop", "seq"] {
+        let mut namespace = serde_yaml_ng::Mapping::new();
+        namespace.insert("kind".into(), "namespace-schema".into());
+        namespace.insert("namespace".into(), name.into());
+        namespace.insert("$schema".into(), catalog["$schema"][name].clone());
+        let text = serde_yaml_ng::to_string(&YamlValue::Mapping(namespace)).expect("a namespace file");
+        members.push((format!("schemas/{name}.yaml"), text));
+    }
+    let digests: std::collections::BTreeMap<String, String> =
+        members.iter().map(|(path, text)| (path.clone(), member_digest(text.as_bytes()))).collect();
+    let mut artifact: Value = serde_json::from_str(CLAUDINE_LIFECYCLE_ARTIFACT).expect("the frozen artifact");
+    artifact["format_version"] = json!(2);
+    artifact["catalog_hash"] = json!(namespace_catalog_hash(&digests));
+    let files: Vec<String> = members.iter().map(|(path, _)| path.clone()).collect();
+    members.push(("schemas/globals.lifecycle.json".to_string(), serde_json::to_string_pretty(&artifact).expect("JSON") + "\n"));
+    let mut manifest = String::from("kind: darkmatter-host\nformat_version: 2\nhost: claudine\nversion: 0.0.0\nfiles:\n");
+    for file in &files {
+        manifest.push_str(&format!("    - ./{file}\n"));
+    }
+    manifest.push_str("lifecycle: ./schemas/globals.lifecycle.json\nfunctions: []\ndigests:\n");
+    for (path, text) in &members {
+        let path_in_bundle = root.join(path);
+        std::fs::create_dir_all(path_in_bundle.parent().expect("a parent")).expect("member folder");
+        std::fs::write(&path_in_bundle, text).expect("write member");
+        manifest.push_str(&format!("    ./{path}: \"{}\"\n", member_digest(text.as_bytes())));
+    }
+    std::fs::write(root.join("darkmatter-host.yaml"), manifest).expect("write manifest");
+    let entry = Registration {
+        reference: "./darkmatter-host.yaml".to_string(),
+        index: 0,
+        declared_in: root.join(".darkmatter.yaml"),
+        revision: ConfigRevision::User,
+        at: None,
+    };
+    let loaded = load_entries(&[entry], &context_at(&root), md_owned_names());
+    drop(dir);
+    let [profile] = loaded.profiles.as_slice() else { panic!("the frozen Claudine bundle registers: {:#?}", loaded.diagnostics) };
+    std::sync::Arc::clone(profile.lifecycle())
 }
 
 /// A temporary repository with the frozen bundle in its `schemas/` root, as

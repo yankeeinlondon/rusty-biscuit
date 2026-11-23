@@ -22,15 +22,12 @@ use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::config::load::{CONFIG_MIGRATION_CODE, CONFIG_MISSING_CODE, ConfigRevision};
 use darkmatter::config::migration_receipt::content_hash;
 use darkmatter::config::registration::{
-    HostClaim, HostSelection, LegacyHost, LoadedRegistrations, RegisteredHosts, RegistrationDiagnostic,
-    manifest_member_candidates, select,
+    HostClaim, HostSelection, LoadedRegistrations, RegisteredHosts, RegistrationDiagnostic, select,
 };
-use darkmatter::lifecycle::host_profile::lifecycle_artifact_path;
 use darkmatter::lifecycle::md_host;
 use darkmatter::lifecycle::registry::KeyResolution;
 use darkmatter::markdown::compose::expression::HostFunctions;
-use darkmatter::markdown::compose::expression::host::facts_artifact_path;
-use darkmatter::markdown::schemas::catalog::{CatalogError, GlobalCatalog, HostFunctionCatalogError};
+use darkmatter::markdown::schemas::catalog::GlobalCatalog;
 use serde_json::Value;
 
 use crate::overlay::event_views::LifecycleHost;
@@ -298,6 +295,18 @@ impl HostPreparation {
                 deps.files.insert(normalized(&dependency.path), Some(dependency.content_hash.clone()));
                 deps.record_folder_of(&dependency.path);
             }
+            // Every location the load looked at, present or not: a member or
+            // import created there republishes the host.
+            for candidate in profile.candidates() {
+                deps.record_file(candidate);
+                deps.record_folder_of(candidate);
+            }
+        }
+        // Everything a refused entry read or probed: its manifest and every
+        // member, where a repair or creation will appear.
+        for watched in &hosts.loaded().watches {
+            deps.record_file(watched);
+            deps.record_folder_of(watched);
         }
         for diagnostic in &hosts.loaded().diagnostics {
             // A manifest that cannot be found names its configuration file;
@@ -305,12 +314,6 @@ impl HostPreparation {
             for candidate in entry_candidates(&diagnostic.entry.reference, &diagnostic.entry.declared_in, &self.context) {
                 deps.record_file(&candidate);
                 deps.record_folder_of(&candidate);
-                // A member that is missing or broken is where its repair or
-                // creation will appear.
-                for member in manifest_member_candidates(&candidate, &self.context) {
-                    deps.record_file(&member);
-                    deps.record_folder_of(&member);
-                }
             }
             let declaring = diagnostic.file == diagnostic.entry.declared_in;
             deps.record_file(&diagnostic.file);
@@ -451,9 +454,9 @@ impl HostRegistrations {
 
     /// Every folder a configuration's load depends on: the configuration
     /// files' folders, each manifest's, member's, and import's folder, and
-    /// the folders a refused entry's manifest was searched in, each absent
-    /// one with the nearest existing ancestor its preparation observed. A
-    /// lookup only.
+    /// the folders a refused entry's manifest and members were searched in,
+    /// each absent one with the nearest existing ancestor its preparation
+    /// observed. A lookup only.
     pub fn watch_folders(&self) -> BTreeSet<WatchedFolder> {
         self.scopes.values().flat_map(|scope| scope.deps.watched_folders()).collect()
     }
@@ -538,12 +541,10 @@ impl HostView {
 
     /// The view `select` gives a document with `frontmatter` at `path`,
     /// judged in its own `context`, under `installed` (the configuration's
-    /// registrations, when prepared). Only the document's own selection
-    /// warnings are part of the view; the configuration's are published on
-    /// the files they name ([`HostRegistrations::diagnostics`]).
-    ///
-    /// Reads the legacy host catalogs in the document's schema roots only
-    /// when no registered host identifies the document.
+    /// registrations, when prepared; `md` without them). Only the document's
+    /// own selection warnings are part of the view; the configuration's are
+    /// published on the files they name ([`HostRegistrations::diagnostics`]).
+    /// Reads nothing: a schema root's files never supply a host.
     pub fn select(
         installed: Option<&InstalledHosts>,
         frontmatter: &Value,
@@ -559,31 +560,12 @@ impl HostView {
         view
     }
 
-    /// The legacy view of `context`'s schema roots alone, with no
-    /// registration excluded: only for a caller with no installed
-    /// registrations to select under (a provider test building its own
-    /// [`DocumentContext`](crate::providers::DocumentContext)). A served
-    /// document's view always comes from [`select`](Self::select).
-    pub fn unregistered(context: &FileResolutionContext) -> Self {
-        let legacy = LegacyHost::discover(context, None);
-        if legacy.is_empty() {
-            Self::md()
-        } else {
-            Self::of(HostSelection::Legacy(Arc::new(legacy)), Vec::new())
-        }
-    }
-
     fn of(selection: HostSelection, diagnostics: Vec<RegistrationDiagnostic>) -> Self {
         let (lifecycle, catalogs, functions) = match &selection {
             HostSelection::Registered(profile) => (
-                LifecycleHost::of(Some(Arc::clone(profile.lifecycle())), Vec::new()),
+                LifecycleHost::of(Arc::clone(profile.lifecycle())),
                 vec![GlobalCatalog::clone(profile.globals())],
                 profile.functions().iter().map(|set| set.functions.clone()).collect(),
-            ),
-            HostSelection::Legacy(legacy) => (
-                LifecycleHost::of(legacy.lifecycle().cloned(), legacy.incomplete().to_vec()),
-                legacy.globals().iter().map(|(_, catalog)| GlobalCatalog::clone(catalog)).collect(),
-                legacy.functions().iter().map(|(_, functions)| functions.clone()).collect(),
             ),
             HostSelection::Md | HostSelection::Ambiguous(_) => (LifecycleHost::md(), Vec::new(), Vec::new()),
         };
@@ -601,30 +583,15 @@ impl HostView {
         &self.lifecycle
     }
 
-    /// The host global catalogs, in root order for a legacy host.
+    /// The host global catalogs: the registered host's one catalog, built
+    /// from its namespace files; none for any other selection.
     pub fn catalogs(&self) -> &[GlobalCatalog] {
         &self.catalogs
-    }
-
-    /// The legacy host catalogs that did not load.
-    pub fn catalog_errors(&self) -> &[CatalogError] {
-        match &self.selection {
-            HostSelection::Legacy(legacy) => legacy.catalog_errors(),
-            _ => &[],
-        }
     }
 
     /// The analysis-only host function sets; an earlier set wins a name.
     pub fn functions(&self) -> &[HostFunctions] {
         &self.functions
-    }
-
-    /// The legacy function catalogs that did not load.
-    pub fn function_errors(&self) -> &[HostFunctionCatalogError] {
-        match &self.selection {
-            HostSelection::Legacy(legacy) => legacy.function_errors(),
-            _ => &[],
-        }
     }
 
     /// The selection's warnings: `dm.host.ambiguous`, and a conflicting
@@ -639,29 +606,6 @@ impl HostView {
     pub fn unknown_events(&self) -> &[UnknownHostEvent] {
         &self.unknown_events
     }
-
-    /// The files a legacy view read, whose content a cached view depends on,
-    /// and the artifact locations beside them, whose presence it depends on.
-    pub(crate) fn legacy_inputs(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
-        let HostSelection::Legacy(legacy) = &self.selection else {
-            return (Vec::new(), Vec::new());
-        };
-        let catalogs: Vec<PathBuf> = legacy
-            .globals()
-            .iter()
-            .map(|(path, _)| path.clone())
-            .chain(legacy.catalog_errors().iter().map(|error| PathBuf::from(&error.catalog)))
-            .collect();
-        let functions: Vec<PathBuf> = legacy
-            .functions()
-            .iter()
-            .map(|(path, _)| path.clone())
-            .chain(legacy.function_errors().iter().map(|error| error.path.clone()))
-            .collect();
-        let probes =
-            catalogs.iter().map(|path| lifecycle_artifact_path(path)).chain(functions.iter().map(|path| facts_artifact_path(path))).collect();
-        (catalogs.into_iter().chain(functions).collect(), probes)
-    }
 }
 
 /// The root keys of `frontmatter` that the document's own lifecycle treats
@@ -669,7 +613,7 @@ impl HostView {
 /// own events (an event `md` does not have under that name). Only a
 /// document no registered host identified has any.
 fn unknown_host_events(view: &HostView, hosts: &RegisteredHosts, frontmatter: &Value) -> Vec<UnknownHostEvent> {
-    if !matches!(view.selection, HostSelection::Md | HostSelection::Legacy(_)) {
+    if !matches!(view.selection, HostSelection::Md) {
         return Vec::new();
     }
     let Some(map) = frontmatter.as_object() else {

@@ -473,12 +473,10 @@ struct TriggerLayer {
     registered: Option<Arc<crate::config::registration::RegisteredHostProfile>>,
 }
 
-/// A matched trigger awaiting layering: the trigger, its payload, and the
-/// registered host that supplied it (`None` for a root or bundle trigger).
+/// A matched root or bundle trigger awaiting layering, with its payload.
 type MatchedTrigger<'a> = (
     &'a library_triggers::LoadedTrigger,
     std::borrow::Cow<'a, library_triggers::assemble::ResolvedPayload>,
-    Option<&'a Arc<crate::config::registration::RegisteredHostProfile>>,
 );
 
 /// The registered origin of `layers`' registered triggers, when any layered.
@@ -491,34 +489,34 @@ fn registered_layers(layers: &[TriggerLayer]) -> Option<RegisteredLayers> {
     registered
 }
 
-/// The registered `profile`'s triggers with a payload that match the
-/// document, in manifest order, judged with ordinary trigger semantics in
-/// the document's `context`. Bare and `./` `$path` patterns read from the
-/// document's tree root, as for a user-level schema root.
+/// The registered `profile`'s triggers at `matched` (the selection's matched
+/// indices, bundle-path order) that carry a payload: what layers into the
+/// document's schema. A matcher-only trigger identifies the host and
+/// contributes nothing.
 fn registered_matches<'p>(
     profile: &'p crate::config::registration::RegisteredHostProfile,
-    frontmatter: &Value,
-    document: Option<&Path>,
-    context: &biscuit_file::FileResolutionContext,
+    matched: &[usize],
 ) -> Vec<&'p crate::config::registration::RegisteredTrigger> {
-    ValidationStage::Match.time(|| {
-        profile
-            .triggers()
-            .iter()
-            .filter(|registered| registered.trigger.envelope.payload.is_some())
-            .filter(|registered| {
-                let subject = match document {
-                    Some(document) => library_triggers::PathSubject::new(document, context).with_pattern_cwd(context.base_dir()),
-                    None => library_triggers::PathSubject::detached(),
-                };
-                let matched = registered.trigger.envelope.conditions.matches(frontmatter, &subject);
-                if matched {
-                    timings::matched_trigger(|| registered.trigger.source.file_name().map_or_else(|| registered.trigger.source.to_string(), str::to_owned));
-                }
-                matched
-            })
-            .collect()
-    })
+    matched
+        .iter()
+        .filter_map(|index| profile.triggers().get(*index))
+        .filter(|registered| registered.trigger.envelope.payload.is_some())
+        .inspect(|registered| {
+            timings::matched_trigger(|| registered.trigger.source.file_name().map_or_else(|| registered.trigger.source.to_string(), str::to_owned));
+        })
+        .collect()
+}
+
+/// [`registered_matches`] with each trigger's index in the profile.
+fn registered_matches_indexed<'p>(
+    profile: &'p crate::config::registration::RegisteredHostProfile,
+    matched: &[usize],
+) -> Vec<(usize, &'p crate::config::registration::RegisteredTrigger)> {
+    matched
+        .iter()
+        .filter_map(|&index| Some((index, profile.triggers().get(index)?)))
+        .filter(|(_, registered)| registered.trigger.envelope.payload.is_some())
+        .collect()
 }
 
 /// Whether the root trigger `root` (with its pre-resolved payload, when the
@@ -602,8 +600,7 @@ impl DarkmatterSchemas {
 
     /// The host `source` is analyzed as, judged in this instance's context
     /// (the document's own): [`select`](crate::config::registration::select)
-    /// over the attached registered hosts, falling back to the legacy root
-    /// catalogs only when no registered host identifies it. Passive.
+    /// over the attached registered hosts. Passive.
     #[must_use]
     pub fn host_selection_for(&self, source: &Markdown) -> crate::config::registration::Selected {
         crate::config::registration::select(
@@ -617,16 +614,16 @@ impl DarkmatterSchemas {
     /// The condition-by-condition trace of the registered host that
     /// identifies `source`, for inspection (`md schema triggers`): its
     /// origin, with [`RegisteredLayers::triggers`] naming the triggers that
-    /// layer, and every trigger in manifest order. `None` when no single
+    /// layer, and every trigger in bundle-path order. `None` when no single
     /// registered host identifies the document.
     #[must_use]
     pub fn registered_trace(&self, source: &Markdown) -> Option<RegisteredTrace> {
-        let profile = self.registered_identification(source)?;
+        let (profile, matched) = self.registered_identification(source)?;
         let frontmatter = frontmatter_as_json(source);
         let document = document_path(source);
         let context = &self.file_resolution_context;
         let mut origin = RegisteredLayers::of(&profile);
-        origin.triggers = registered_matches(&profile, &frontmatter, document, context)
+        origin.triggers = registered_matches(&profile, &matched)
             .into_iter()
             .map(|trigger| trigger.path().to_path_buf())
             .collect();
@@ -668,27 +665,28 @@ impl DarkmatterSchemas {
 
     /// Which registered host identifies `source`
     /// ([`RegisteredHosts::identify`](crate::config::registration::RegisteredHosts::identify)
-    /// in this instance's context), with its warnings: never
-    /// [`HostSelection::Legacy`](crate::config::registration::HostSelection::Legacy),
-    /// and reads nothing. [`HostSelection::Md`](crate::config::registration::HostSelection::Md)
+    /// in this instance's context), with its matched triggers and warnings.
+    /// Reads nothing. [`HostSelection::Md`](crate::config::registration::HostSelection::Md)
     /// without registered hosts.
     #[must_use]
     pub fn registered_selection_for(&self, source: &Markdown) -> crate::config::registration::Selected {
         match &self.registered_hosts {
             Some(hosts) => hosts.identify(&frontmatter_as_json(source), document_path(source), &self.file_resolution_context),
-            None => crate::config::registration::Selected {
-                selection: crate::config::registration::HostSelection::Md,
-                diagnostics: Vec::new(),
-            },
+            None => crate::config::registration::Selected::md(),
         }
     }
 
-    /// The registered host whose triggers layer into `source`'s schema;
-    /// `None` without registrations or a single identifying host.
-    fn registered_identification(&self, source: &Markdown) -> Option<Arc<crate::config::registration::RegisteredHostProfile>> {
+    /// The registered host whose triggers layer into `source`'s schema, with
+    /// the indices of its matched triggers; `None` without registrations or a
+    /// single identifying host.
+    fn registered_identification(
+        &self,
+        source: &Markdown,
+    ) -> Option<(Arc<crate::config::registration::RegisteredHostProfile>, Vec<usize>)> {
         self.registered_hosts.as_ref()?;
-        match self.registered_selection_for(source).selection {
-            crate::config::registration::HostSelection::Registered(profile) => Some(profile),
+        let selected = self.registered_selection_for(source);
+        match selected.selection {
+            crate::config::registration::HostSelection::Registered(profile) => Some((profile, selected.matched)),
             _ => None,
         }
     }
@@ -1060,11 +1058,14 @@ impl DarkmatterSchemas {
     /// merges the layers in precedence order:
     ///
     /// 1. The caller-configured baseline (if any).
-    /// 2. Matching schema-trigger payloads — first schema root first,
+    /// 2. The registered host's checked layer: its matched triggers'
+    ///    payloads combined, each property declared once
+    ///    ([`config::registration::merge`](crate::config::registration::merge)).
+    /// 3. Matching schema-trigger payloads — first schema root first,
     ///    filename-lexicographic within a root, then embedded bundle triggers
     ///    (the registry's built-in order). Shadowing is applied before matching
     ///    (a shadowed file is never in the registry).
-    /// 3. The document `$schema` (always wins on conflict).
+    /// 4. The document `$schema` (always wins on conflict).
     ///
     /// When `$schema` is absent, no baseline is configured, and no triggers
     /// match, returns `Ok(None)`.
@@ -1072,7 +1073,9 @@ impl DarkmatterSchemas {
     /// ## Errors
     ///
     /// Propagates [`SchemaError`] from parsing, resolution, conversion,
-    /// validator construction, trigger-payload resolution, or cycle detection.
+    /// validator construction, trigger-payload resolution, or cycle
+    /// detection, and [`SchemaError::HostTriggerConflict`] when the host's
+    /// matched triggers cannot be layered as one.
     pub fn effective_for(&self, source: &Markdown) -> Result<Option<EffectiveSchema>, SchemaError> {
         self.effective_for_with_override(source, None)
     }
@@ -1311,11 +1314,13 @@ impl DarkmatterSchemas {
     /// reads their slots will make: the document `$schema` layer, then each
     /// matched trigger payload that is a template, in layer order.
     ///
-    /// Only the effective schema's slots count: a trigger payload is taken
-    /// without the top-level properties the document `$schema` or a later
-    /// matched trigger redeclares (the selection [`Self::effective_for`]
-    /// resolves), and one left with no slot is not listed. An unmatched
-    /// trigger contributes nothing.
+    /// Only the effective schema's slots count: a root trigger payload is
+    /// taken without the top-level properties the document `$schema` or a
+    /// later matched root trigger redeclares (the selection
+    /// [`Self::effective_for`] resolves), and one left with no slot is not
+    /// listed. A registered host's matched payload is listed whole, since its
+    /// checked layer compares every declaration. An unmatched trigger
+    /// contributes nothing.
     ///
     /// Passive with respect to slots: schema files are read as validation
     /// reads them, but no slot is admitted or evaluated and nothing a slot
@@ -1352,10 +1357,16 @@ impl DarkmatterSchemas {
         let registered = self.registered_identification(source);
         let registered_matches = registered
             .as_ref()
-            .map(|profile| registered_matches(profile, &fm_json, document, &self.file_resolution_context))
+            .map(|(profile, matched)| registered_matches(profile, matched))
             .unwrap_or_default();
-        let mut matched: Vec<&library_triggers::assemble::ResolvedPayload> =
-            registered_matches.iter().map(|registered| &registered.payload).collect();
+        // A registered payload is checked whole, so every slot it holds
+        // resolves.
+        for registered in &registered_matches {
+            if let Some(pending) = registered.payload.pending.as_ref().filter(|pending| !pending.slots().is_empty()) {
+                templates.push(PendingTemplate { slots: pending.slots().to_vec(), pending: pending.clone() });
+            }
+        }
+        let mut matched: Vec<&library_triggers::assemble::ResolvedPayload> = Vec::new();
         if let Some(registry) = self.triggers.as_ref().filter(|registry| registry.payloads().len() == registry.triggers.len()) {
             matched.extend(
                 library_triggers::assemble::evaluate_registry(registry, &fm_json, document)
@@ -1385,18 +1396,25 @@ impl DarkmatterSchemas {
         templates
     }
 
-    /// Matches the selected registered host's triggers (manifest order) and
-    /// then the configured trigger registry (first schema root first)
-    /// against the document and resolves each matching payload. Returns the
-    /// ordered trigger layers. Empty when neither applies or nothing matches.
+    /// Takes the selected registered host's checked layer
+    /// ([`Self::registered_trigger_layers`]) and then the configured trigger
+    /// registry (first schema root first) against the document and resolves
+    /// each matching payload. Returns the ordered trigger layers. Empty when
+    /// neither applies or nothing matches.
     ///
     /// A root trigger that is the same file with the same content as a
     /// matched registered trigger is layered once, as the registered one.
     ///
-    /// A template payload resolves without the top-level properties
-    /// `document_declared` or a later matched payload redeclares
-    /// ([`discarded_by_higher_layers`]): the merge would replace them, so
-    /// their slots are never evaluated.
+    /// A root trigger's template payload resolves without the top-level
+    /// properties `document_declared` or a later matched root payload
+    /// redeclares ([`discarded_by_higher_layers`]): the merge would replace
+    /// them, so their slots are never evaluated. A registered payload is
+    /// checked whole, before any higher layer discards a property.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::HostTriggerConflict`] when the host's matched triggers
+    /// cannot be layered as one, and every payload resolution error.
     fn resolve_trigger_layers(
         &self,
         source: &Markdown,
@@ -1414,17 +1432,16 @@ impl DarkmatterSchemas {
         // Frontmatter snapshot for matching (strip the `$schema` control key).
         let fm_json = frontmatter_as_json(source);
 
-        // Every matched payload first (passive: a template stays pending), so
-        // each layer knows what the layers above it redeclare.
-        let mut matched: Vec<MatchedTrigger<'_>> = Vec::new();
-        let registered_matches = registered
-            .as_ref()
-            .map(|profile| registered_matches(profile, &fm_json, document, &self.file_resolution_context))
-            .unwrap_or_default();
-        for trigger in &registered_matches {
-            matched.push((&trigger.trigger, std::borrow::Cow::Borrowed(&trigger.payload), registered.as_ref()));
-        }
+        let mut layers = match &registered {
+            Some((profile, matched)) => self.registered_trigger_layers(profile, matched, document)?,
+            None => Vec::new(),
+        };
+        let registered_matches: Vec<&crate::config::registration::RegisteredTrigger> =
+            registered.as_ref().map(|(profile, matched)| registered_matches(profile, matched)).unwrap_or_default();
 
+        // Every matched root payload first (passive: a template stays
+        // pending), so each layer knows what the layers above it redeclare.
+        let mut matched: Vec<MatchedTrigger<'_>> = Vec::new();
         if let Some(registry) = registry {
             // Registries built by `scan` carry pre-resolved payloads; programmatically
             // constructed registries do not and fall back to on-demand resolution.
@@ -1460,43 +1477,112 @@ impl DarkmatterSchemas {
                         registry.sources(),
                     )?),
                 };
-                matched.push((eval.trigger, payload, None));
+                matched.push((eval.trigger, payload));
             }
         }
-        let declared: Vec<Vec<String>> = matched.iter().map(|(_, payload, _)| declared_by_payload(payload)).collect();
+        let declared: Vec<Vec<String>> = matched.iter().map(|(_, payload)| declared_by_payload(payload)).collect();
         let discarded = discarded_by_higher_layers(document_declared, &declared);
 
-        let mut layers = Vec::with_capacity(matched.len());
-        for ((trigger, payload, host), discarded) in matched.iter().zip(discarded) {
+        for ((trigger, payload), discarded) in matched.iter().zip(discarded) {
             let mut payload: &library_triggers::assemble::ResolvedPayload = payload;
             // A matched template payload resolves now, in this document's
             // slot session, and then passes the ordinary payload rules.
             let concrete;
             if let Some(pending) = &payload.pending {
-                concrete = self.resolve_pending_payload(trigger, &pending.without_properties(&discarded))?;
+                concrete = self.resolve_pending_payload(
+                    trigger,
+                    &pending.without_properties(&discarded),
+                    library_triggers::assemble::PayloadForm::Object,
+                )?;
                 payload = &concrete;
             }
-            let (json_schema, shape, definitions, dependencies, advisories) = (
-                payload.json_schema.clone(),
-                payload.shape.clone(),
-                Arc::clone(&payload.definitions),
-                payload.dependencies.clone(),
-                payload.advisories.clone(),
-            );
             // A prepared payload's digest was generated with it; any other is
             // hashed once per allocation (a template's once per resolution).
-            let digest = payload.digest.unwrap_or_else(|| self.cache.canonical_digest_shared(&json_schema));
-            let digest = host.map_or(digest, |host| registered_digest(digest, host));
+            let digest = payload.digest.unwrap_or_else(|| self.cache.canonical_digest_shared(&payload.json_schema));
             layers.push(TriggerLayer {
                 source: trigger.source.clone(),
-                json_schema,
+                json_schema: payload.json_schema.clone(),
                 digest,
-                shape,
-                definitions,
-                dependencies,
-                advisories,
+                shape: payload.shape.clone(),
+                definitions: Arc::clone(&payload.definitions),
+                dependencies: payload.dependencies.clone(),
+                advisories: payload.advisories.clone(),
                 default_files: payload.default_files.clone(),
-                registered: host.map(Arc::clone),
+                registered: None,
+            });
+        }
+        Ok(layers)
+    }
+
+    /// The registered host `profile`'s layers for the triggers at `matched`:
+    /// its checked layer
+    /// ([`checked_layer`](crate::config::registration::RegisteredHostProfile::checked_layer)),
+    /// one trigger layer per contributing payload with every declaration
+    /// another payload won removed, the root union last. A template payload
+    /// resolves whole in this document's slot session first, and the check
+    /// over it is not memoized.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::HostTriggerConflict`] for `document`, or a template's
+    /// resolution error.
+    fn registered_trigger_layers(
+        &self,
+        profile: &Arc<crate::config::registration::RegisteredHostProfile>,
+        matched: &[usize],
+        document: Option<&Path>,
+    ) -> Result<Vec<TriggerLayer>, SchemaError> {
+        use crate::config::registration::merge;
+        let contributing: Vec<(usize, &crate::config::registration::RegisteredTrigger)> = registered_matches_indexed(profile, matched);
+        if contributing.is_empty() {
+            return Ok(Vec::new());
+        }
+        let resolved: Vec<std::borrow::Cow<'_, library_triggers::assemble::ResolvedPayload>> = contributing
+            .iter()
+            .map(|(_, registered)| match &registered.payload.pending {
+                Some(pending) => self
+                    .resolve_pending_payload(
+                        &registered.trigger,
+                        &pending.without_properties(&[]),
+                        library_triggers::assemble::PayloadForm::ObjectOrUnion,
+                    )
+                    .map(std::borrow::Cow::Owned),
+                None => Ok(std::borrow::Cow::Borrowed(&registered.payload)),
+            })
+            .collect::<Result<_, _>>()?;
+        let checked = if contributing.iter().any(|(_, registered)| registered.payload.pending.is_some()) {
+            let inputs: Vec<merge::MatchedPayload<'_>> = contributing
+                .iter()
+                .zip(&resolved)
+                .map(|((index, registered), payload)| merge::MatchedPayload { trigger: *index, file: registered.path(), payload })
+                .collect();
+            merge::check(&inputs).map(Arc::new)
+        } else {
+            profile.checked_layer(matched)
+        }
+        .map_err(|conflict| conflict.into_error(profile.host(), document))?;
+
+        let mut layers = Vec::with_capacity(checked.payloads.len());
+        for part in &checked.payloads {
+            let Some(position) = contributing.iter().position(|(index, _)| *index == part.trigger) else { continue };
+            let (registered, payload) = (contributing[position].1, &resolved[position]);
+            // The payload itself keeps its prepared or memoized digest; a
+            // pruned copy is hashed once per allocation.
+            let digest = if Arc::ptr_eq(&part.json_schema, &payload.json_schema) {
+                payload.digest.unwrap_or_else(|| self.cache.canonical_digest_shared(&payload.json_schema))
+            } else {
+                self.cache.canonical_digest_shared(&part.json_schema)
+            };
+            layers.push(TriggerLayer {
+                source: registered.trigger.source.clone(),
+                json_schema: Arc::clone(&part.json_schema),
+                digest: registered_digest(digest, profile),
+                shape: part.shape.clone(),
+                definitions: Arc::clone(&payload.definitions),
+                dependencies: payload.dependencies.clone(),
+                advisories: payload.advisories.clone(),
+                default_files: payload.default_files.clone(),
+                registered: Some(Arc::clone(profile)),
             });
         }
         Ok(layers)
@@ -1516,6 +1602,7 @@ impl DarkmatterSchemas {
         &self,
         trigger: &library_triggers::LoadedTrigger,
         pending: &simplified_schema::slots::PendingSchema,
+        form: library_triggers::assemble::PayloadForm,
     ) -> Result<library_triggers::assemble::ResolvedPayload, SchemaError> {
         let (TriggerSource::File(source), Some(payload)) = (&trigger.source, trigger.envelope.payload.as_ref()) else {
             return Err(SchemaError::UnresolvedSlots(Box::new(simplified_schema::UnresolvedSlots::new(
@@ -1523,7 +1610,7 @@ impl DarkmatterSchemas {
             ))));
         };
         if pending.slots().is_empty() {
-            return library_triggers::assemble::finish_file_payload(source, payload, pending.resolve_without_slots()?);
+            return library_triggers::assemble::finish_file_payload_as(source, payload, pending.resolve_without_slots()?, form);
         }
         // The omitted properties are part of the identity: the same files
         // and slots resolve to a different schema without them.
@@ -1536,7 +1623,7 @@ impl DarkmatterSchemas {
         let mut unresolved = simplified_schema::UnresolvedSlots::new(pending.slots().to_vec());
         unresolved.pending = Some(pending.clone());
         let resolved = self.resolve_template(SchemaError::UnresolvedSlots(Box::new(unresolved)), &identity)?;
-        library_triggers::assemble::finish_file_payload(source, payload, resolved)
+        library_triggers::assemble::finish_file_payload_as(source, payload, resolved, form)
     }
 
     /// Validates a document's frontmatter, returning a [`ValidationReport`].
@@ -1783,8 +1870,8 @@ pub struct EffectiveSchema {
     digest: Option<SchemaDigest>,
     /// Per-top-level-property origins (document vs baseline vs referenced
     /// file), so diagnostics can point `relatedInformation` at the schema
-    /// source (R-5 Priority 2). Empty for root-union schemas, whose per-arm
-    /// property provenance is not modelled in v1.
+    /// source (R-5 Priority 2). For a root union, each key any arm declares,
+    /// attributed to the highest layer declaring it in any arm.
     pub origins: SchemaOriginMap,
     /// The schema file declaring each default a `Name@file` import brought
     /// into the layer that won its top-level property, from that layer's
@@ -3123,6 +3210,13 @@ fn merged_trigger_schema(
     }
     let digest = identity.finish();
 
+    // A registered host's root union (the top of its checked layer) is
+    // merged with everything around it at once.
+    if let Some(union) = layers.iter().position(|layer| layer.json_schema.get("anyOf").is_some()) {
+        let merged = Arc::new(merge_around_union(baseline.map(|(json, _)| json.as_ref()), layers, union, doc.clone())?);
+        return Ok(remember_merge(baseline, layers, doc, merged, digest));
+    }
+
     // The lowest layer is borrowed as the first merge base; each higher one
     // is cloned because a merge consumes it.
     let (lowest, rest): (Option<&Value>, &[TriggerLayer]) = match (baseline, layers.split_first()) {
@@ -3143,7 +3237,17 @@ fn merged_trigger_schema(
         (Some(lowest), None) => Arc::new(lowest.clone()),
         (None, None) => unreachable!("the caller merges at least one schema"),
     };
+    Ok(remember_merge(baseline, layers, doc, merged, digest))
+}
 
+/// Records `merged` in the recent-merge memo and returns it with `digest`.
+fn remember_merge(
+    baseline: Option<(&Arc<Value>, SchemaDigest)>,
+    layers: &[TriggerLayer],
+    doc: Option<Value>,
+    merged: Arc<Value>,
+    digest: SchemaDigest,
+) -> (Arc<Value>, SchemaDigest) {
     let mut merges = MERGES.lock().expect("trigger merge memo poisoned");
     if merges.len() == RECENT_MERGES {
         merges.remove(0);
@@ -3156,7 +3260,61 @@ fn merged_trigger_schema(
         merged: Arc::clone(&merged),
         digest,
     });
-    Ok((merged, digest))
+    (merged, digest)
+}
+
+/// The merge of `baseline`, `layers`, and `doc` when `layers[union]` is a
+/// root union (only a registered host's checked layer has one, at its top).
+///
+/// The property merge takes its lower side as a simple object, so it cannot
+/// put a layer over a union directly. The same result is built instead:
+/// everything below the union merges first, then everything above it over
+/// that, and the union, without the properties the layers above it
+/// redeclare (which win), merges over the result, so each arm gets its own
+/// declarations, then the higher layers', then the lower ones'.
+///
+/// ## Errors
+///
+/// A merge error, or [`SchemaError::Baseline`] when the document's
+/// `$schema` is a root union too.
+fn merge_around_union(
+    baseline: Option<&Value>,
+    layers: &[TriggerLayer],
+    union: usize,
+    doc: Option<Value>,
+) -> Result<Value, SchemaError> {
+    use simplified_schema::resolve::merge_baseline;
+    let chain = |lowest: Option<Value>, higher: Vec<Value>| -> Result<Option<Value>, SchemaError> {
+        let mut acc = lowest;
+        for layer in higher {
+            acc = Some(match acc {
+                Some(lower) => merge_baseline(&lower, layer)?,
+                None => layer,
+            });
+        }
+        Ok(acc)
+    };
+    if doc.as_ref().is_some_and(|doc| doc.get("anyOf").is_some()) {
+        return Err(SchemaError::Baseline {
+            message: "the document's root-union `$schema` cannot layer over a registered host's root union".into(),
+            source: None,
+        });
+    }
+    let lower = chain(baseline.cloned(), layers[..union].iter().map(|layer| layer.json_schema.as_ref().clone()).collect())?;
+    let higher = chain(None, layers[union + 1..].iter().map(|layer| layer.json_schema.as_ref().clone()).chain(doc).collect())?;
+    let mut top = layers[union].json_schema.as_ref().clone();
+    if let Some(higher) = &higher {
+        let redeclared = declared_by_json(higher);
+        crate::config::registration::merge::remove_properties(&mut top, &redeclared);
+    }
+    let base = match (lower, higher) {
+        (Some(lower), Some(higher)) => Some(merge_baseline(&lower, higher)?),
+        (lower, higher) => lower.or(higher),
+    };
+    match base {
+        Some(base) => merge_baseline(&base, top),
+        None => Ok(top),
+    }
 }
 
 
@@ -3326,15 +3484,12 @@ fn build_origin_map_with_triggers(
     merged: &Value,
 ) -> SchemaOriginMap {
     let mut out = SchemaOriginMap::new();
-    let Some(props) = merged.get("properties").and_then(Value::as_object) else {
+    let keys = top_level_keys(merged);
+    if keys.is_empty() {
         return out;
-    };
-    let doc_props = resolved
-        .map(|r| &r.json_schema)
-        .and_then(|s| s.get("properties"))
-        .and_then(Value::as_object);
-    for key in props.keys() {
-        let origin = if doc_props.is_some_and(|doc| doc.contains_key(key)) {
+    }
+    for key in &keys {
+        let origin = if resolved.is_some_and(|document| declares_property(&document.json_schema, key)) {
             // Document schema contributed this property.
             resolved
                 .map(|r| r.origin.clone())
@@ -3342,19 +3497,43 @@ fn build_origin_map_with_triggers(
         } else {
             // Check trigger payloads in reverse order — the last trigger that
             // declares the property won the merge slot.
-            let from_trigger = trigger_layers.iter().rev().find_map(|layer| {
-                layer
-                    .json_schema
-                    .get("properties")
-                    .and_then(Value::as_object)
-                    .is_some_and(|p| p.contains_key(key))
-                    .then(|| SchemaOrigin::for_trigger(&layer.source))
-            });
+            let from_trigger = trigger_layers
+                .iter()
+                .rev()
+                .find_map(|layer| declares_property(&layer.json_schema, key).then(|| SchemaOrigin::for_trigger(&layer.source)));
             from_trigger.unwrap_or_else(SchemaOrigin::baseline)
         };
         out.insert(key.clone(), origin);
     }
     out
+}
+
+/// Whether `schema` declares the top-level property `key`, in its own
+/// properties or in a root-union arm's.
+fn declares_property(schema: &Value, key: &str) -> bool {
+    let declares = |schema: &Value| schema.get("properties").and_then(Value::as_object).is_some_and(|p| p.contains_key(key));
+    match schema.get("anyOf").and_then(Value::as_array) {
+        Some(arms) => arms.iter().any(declares),
+        None => declares(schema),
+    }
+}
+
+/// Every top-level property `schema` declares, in declaration order: its
+/// own, or each root-union arm's, first arm first.
+fn top_level_keys(schema: &Value) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    let arms: Vec<&Value> = match schema.get("anyOf").and_then(Value::as_array) {
+        Some(arms) => arms.iter().collect(),
+        None => vec![schema],
+    };
+    for arm in arms {
+        for key in arm.get("properties").and_then(Value::as_object).into_iter().flat_map(serde_json::Map::keys) {
+            if !keys.contains(key) {
+                keys.push(key.clone());
+            }
+        }
+    }
+    keys
 }
 
 /// The imported-default files of the layer that won each top-level property
@@ -3372,7 +3551,7 @@ fn build_default_files(
             simplified_schema::SchemaOriginKind::Trigger => trigger_layers
                 .iter()
                 .rev()
-                .find(|layer| layer.json_schema.get("properties").and_then(Value::as_object).is_some_and(|p| p.contains_key(key)))
+                .find(|layer| declares_property(&layer.json_schema, key))
                 .map(|layer| &layer.default_files),
             simplified_schema::SchemaOriginKind::Baseline => None,
         };
@@ -5258,10 +5437,9 @@ mod phase4_trigger_assembly {
     }
 
     /// A root-union authored `$schema` receives every matching trigger layer in
-    /// each arm, and the merged schema records no per-property origins, because
-    /// there are no top-level properties to attribute.
+    /// each arm, and each arm's keys are attributed to the layer declaring them.
     #[test]
-    fn root_union_document_schema_merges_trigger_per_arm_without_origins() {
+    fn root_union_document_schema_merges_trigger_per_arm_with_arm_origins() {
         let repo = repo_fixture();
         let root = repo.path();
         write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
@@ -5276,7 +5454,10 @@ mod phase4_trigger_assembly {
         let doc = md_from_file(&doc_path);
 
         let effective = api.effective_for(&doc).unwrap().unwrap();
-        assert!(effective.origins.is_empty(), "root union has no attributed properties");
+        let kind = |key: &str| effective.origins.get(key).map(|origin| origin.kind);
+        assert_eq!(kind("title"), Some(SchemaOriginKind::Document), "an arm's key is the document's");
+        assert_eq!(kind("name"), Some(SchemaOriginKind::Document));
+        assert_eq!(kind("model"), Some(SchemaOriginKind::Trigger), "the trigger's key in every arm");
         assert!(effective.json_schema.get("anyOf").is_some(), "the root stays a union");
         let report = api.validate(&doc).unwrap();
         assert!(!report.valid, "the trigger's `model: string` applies in every arm");

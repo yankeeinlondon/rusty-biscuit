@@ -9,7 +9,10 @@
 //!
 //! A YAML document selects its schema by its top-level `kind` when a
 //! `kind: yaml-schema` definition claims it, and otherwise by a root
-//! `$schema`; a document with neither is not validated. The selected schema
+//! `$schema`; a document with neither is not validated. The attached
+//! registered hosts' definitions
+//! ([`DarkmatterSchemas::with_registered_hosts`]) claim only a kind the
+//! shipped and local definitions establish is unclaimed. The selected schema
 //! alone validates the document: no Markdown baseline and no trigger layers
 //! apply, on either route. Validation is soft, on a converted copy that is
 //! never written back, and whole-value `{{ … }}` / `$(…)` strings are
@@ -30,7 +33,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use simplified_schema::yaml_documents::{
-    FILE_READING_KINDS, KindHost, KindRegistry, LoadedYaml, LoadedYamlDocument, RegistryScope, Selection, select,
+    DefinitionSource, FILE_READING_KINDS, KindHost, KindRegistry, LoadedYaml, LoadedYamlDocument, RegisteredSource,
+    RegistryScope, Selection, select_with_registered,
 };
 use simplified_schema::triggers::assemble;
 use simplified_schema::{SchemaError, ValidationProblem};
@@ -203,14 +207,21 @@ impl DarkmatterSchemas {
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| context.cwd().to_path_buf(), Path::to_path_buf);
         let schema_roots = registry.roots().search_paths().to_vec();
-        let selection = select(&registry, &loaded.value)?;
+        // Registered hosts' definitions are the lowest tier: consulted only
+        // for a kind the shipped and local definitions leave unclaimed.
+        let registered_kinds = self.registered_hosts.as_deref().map(crate::config::registration::RegisteredHosts::yaml_kinds);
+        let selection = select_with_registered(&registry, registered_kinds, &loaded.value)?;
         if !matches!(selection, Selection::NoSchema) {
             crate::note_work!(YamlContractPreparation);
         }
+        let mut registered = None;
         let (route, definition, effective) = match selection {
             Selection::NoSchema => return Ok(None),
             Selection::Kind { kind, definition } => {
                 let effective = EffectiveSchema::for_yaml_document(definition.resolved().clone(), base_dir, self)?;
+                if let DefinitionSource::Registered(source) = definition.source() {
+                    registered = Some(source.clone());
+                }
                 (Route::Kind(kind), definition.source().label(), effective)
             }
             Selection::RootSchema(value) => {
@@ -253,6 +264,7 @@ impl DarkmatterSchemas {
         Ok(Some(YamlContract {
             route,
             definition,
+            registered,
             effective: Arc::new(effective),
             schema_roots,
             context: context.clone(),
@@ -287,6 +299,7 @@ impl DarkmatterSchemas {
         Ok(YamlContract {
             route: Route::Configuration,
             definition: definition.into(),
+            registered: None,
             effective: Arc::new(effective),
             schema_roots: Vec::new(),
             context: context.clone(),
@@ -301,6 +314,9 @@ impl DarkmatterSchemas {
 pub struct YamlContract {
     route: Route,
     definition: String,
+    /// The registered host definition that was selected, when the kind came
+    /// from the registered tier.
+    registered: Option<RegisteredSource>,
     effective: Arc<EffectiveSchema>,
     schema_roots: Vec<PathBuf>,
     context: biscuit_file::FileResolutionContext,
@@ -311,6 +327,7 @@ impl std::fmt::Debug for YamlContract {
         f.debug_struct("YamlContract")
             .field("route", &self.route)
             .field("definition", &self.definition)
+            .field("registered", &self.registered)
             .finish_non_exhaustive()
     }
 }
@@ -320,6 +337,14 @@ impl YamlContract {
     #[must_use]
     pub fn route(&self) -> &Route {
         &self.route
+    }
+
+    /// The registered host and definition that judge the document, when its
+    /// `kind` was left unclaimed by the shipped and local definitions and a
+    /// registered host's `kind: yaml-schema` claims it.
+    #[must_use]
+    pub fn registered(&self) -> Option<&RegisteredSource> {
+        self.registered.as_ref()
     }
 
     /// The selected schema alone, as [`YamlValidation::effective`].
