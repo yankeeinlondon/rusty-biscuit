@@ -194,7 +194,7 @@ decisions-for-review:
     - |-
         A manifest is treated as format 1 (and gets the upgrade warning) when `format_version` is the number 1, or when it carries `identify`, `triggers`, or `globals` with any version other than 2. With `format_version: 2`, a stray `identify` is an ordinary unknown-field error. The alternative is to call any legacy field an upgrade case; that would hide genuine authoring mistakes in new manifests.
     - |-
-        Explicit `null` for the optional envelope fields (`name`, `description`, `types` on triggers; optional namespace-schema fields) is refused by the envelope parsers, not by the shipped kind definitions, because the schema language admits null for any optional property. Whole-YAML validation of such a file (for example in the editor) therefore does not flag the null yet; the docs mark that as planned. The alternative is a new schema-language option that forbids null on an optional key, which is a larger language change.
+        Explicit `null` for the optional envelope fields (`name`, `description`, `types` on triggers; optional namespace-schema fields) is refused by the envelope parsers, not by the shipped kind definitions, because the schema language admits null for any optional property. At review, whole-YAML validation rejects a null trigger or type-library label through semantic checks. It still accepts a null namespace description. See the dated correction below. The alternative is a new schema-language option that forbids null on an optional key, which is a larger language change.
     - |-
         Duplicate trigger/library `name` labels inside one schema root reuse the existing trigger-match error type located at `name`, so a types-only library that takes part in a duplicate is worded as a "schema trigger" finding. A file shadowed by a same-named file in a higher-priority root still counts toward its own root's names. A dedicated error variant would mean touching every exhaustive match of that error.
     - |-
@@ -208,7 +208,7 @@ decisions-for-review:
     - |-
         `triggers()` and `yaml_kinds()` are in bundle-path order (the order of `files` has no effect, matching the revision rule). Matched triggers layer in that order, so a host that relied on manifest order now gets path order. DMLS's A3 completion golden changed accordingly (`group` before `seq`). Alternative: keep authored order, which would make two installs with reordered `files` layer differently despite an equal revision. Redo cost: small (sort site in `prepare_members`).
     - |-
-        The lifecycle binding check is `host_globals` ⊆ the namespace catalog when `global_catalog` is true. Event views' declaration roots are not separately checked against the catalog, because they are already validated by the registry rebuild (a reserved or unknown root is refused there). Alternative: also cross-check every event view root. Redo cost: small, in `host_profile.rs::read`.
+        The lifecycle binding check is `host_globals` ⊆ the namespace catalog when `global_catalog` is true. Event views' declaration roots are checked by the registry rebuild for syntax and reserved names. The rebuild does not check that a valid root exists in the namespace catalog. The review verified that an undeclared root can survive in both core and host event bindings, and in `host_globals` when `global_catalog` is false.
     - |-
         An empty namespace (`$schema: {}`) declares a global with no members and is valid, as the input robustness matrix allows. Alternative: refuse an empty payload. Redo cost: one check in `namespaces.rs::prepare_one`.
     - |-
@@ -273,8 +273,8 @@ decisions-for-review:
         Only the watch-limited save fallback (a client that cannot root watchers at folders, or rejected them) schedules the debounced registration reload on save. A client with no watcher at all (`ServerRescan`), a `.dmls.toml` or client settings change, a package manifest or `.git` change, and other explicit full invalidations still reload registrations immediately, as the plan's 'preserve explicit configuration reload behavior' asks. Alternative: debounce the `ServerRescan` save too. Redo cost: one call site.
     - |-
         When a configuration's first load (nothing installed yet) is touched by a change while it runs, its result is installed anyway, so documents get a view, and another reload is scheduled after the window. A warm configuration's touched or superseded result is dropped and the installed view kept. Alternative: drop the first result too and leave documents on `md` until the second load. Redo cost: small.
-message-to-agent: |-
-    Phase 5 landed debounced DMLS registration reloads (`darkmatter/dmls/src/overlay/hosts.rs`): per-configuration `due`/`generation`, `REGISTRATION_SETTLE` = 300 ms (measured publish 0.306 ms), router timer + `start_due_host_reloads` before every message, path-only matching on the router thread, `invalidate_unwatched_inputs` for the save fallback. The docs already describe the 300 ms wait in `darkmatter/docs/topics/host-registration.md` ("Changes are followed without a restart") and `dmls/docs/diagnostics.md`; Phase 6 still needs `dmls/docs/editors/README.md` and the `use-dmls` caller skill to mention it, plus the stale Claudine/DMLS doc text listed by Phase 4 (`claudine/docs/topics/schemas.md` "eight files" table, `claudine/schemas/README.md`, `.claude/skills/claudine/cli-commands.md`, `darkmatter/dmls/docs` mentions of `globals.yaml`, `darkmatter/docs/topics/schemas/dmls-schema-support.md`). Caller skills have not been republished in Phases 4 or 5 (`just publish-skills` not run). L1 tests of the window use `LspFixture::start_with_registration_settle` with a `ManualClock`; every other `LspFixture` uses a zero window.
+    - |-
+        Recovery of a lost `register` entry in `~/.darkmatter.yaml` is documented as a hand edit (add `~/.claudine/registrations/darkmatter/manifest.yaml` back), and a damaged bundle as `claudine registrations publish`. The plan asked for "recovery" docs but did not say which command recovers. Claudine's setup runs only on a first run (when `~/.claudine/config.yaml` is missing), so "rerun setup" would not work. Alternative: make setup re-runnable, or let `claudine registrations publish` also restore the `register` entry. That would be a small Claudine change plus rewording the recovery sections in `claudine/docs/topics/schemas.md`, `claudine/docs/use-skills/use-claudine/config.md`, and `darkmatter/docs/topics/host-registration.md`. The planned `claudine doctor` (the next spec) is the natural home for it.
 source_files_during_phase_4:
     - claudine/registration/action.yaml
     - claudine/registration/claudine-config.yaml
@@ -439,6 +439,305 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_6:
+    - "schemas/kind.yaml"
+docs_updated_during_phase_6:
+    - "claudine/README.md"
+    - "claudine/docs/cli/registrations.md"
+    - "claudine/docs/topics/configuration.md"
+    - "claudine/docs/topics/configuring-actions.md"
+    - "claudine/docs/topics/frontmatter-properties.md"
+    - "claudine/docs/topics/schemas.md"
+    - "claudine/schemas/README.md"
+    - "darkmatter/README.md"
+    - "darkmatter/dmls/README.md"
+    - "darkmatter/dmls/docs/diagnostics.md"
+    - "darkmatter/dmls/docs/editors/README.md"
+    - "darkmatter/dmls/docs/features.md"
+    - "darkmatter/docs/topics/host-registration.md"
+    - "darkmatter/docs/topics/lifecycle/host-artifact.md"
+    - "darkmatter/docs/topics/schemas/dmls-schema-support.md"
+    - "docs/kind-documents.md"
+    - "simplified-schema/README.md"
+    - "simplified-schema/docs/topics/language-core.md"
+    - "simplified-schema/docs/topics/language/schema-documents.md"
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - ".claude/skills/claudine/SKILL.md"
+    - ".claude/skills/claudine/architecture.md"
+    - ".claude/skills/claudine/cli-commands.md"
+    - ".claude/skills/claudine/module-map.md"
+    - ".claude/skills/darkmatter/library-surfaces.md"
+    - ".claude/skills/simplified-schema/SKILL.md"
+    - ".claude/skills/simplified-schema/schema-documents.md"
+    - ".claude/skills/os/build-hosts.md"
+    - "claudine/docs/use-skills/use-claudine/cli.md"
+    - "claudine/docs/use-skills/use-claudine/composition.md"
+    - "claudine/docs/use-skills/use-claudine/config.md"
+    - "darkmatter/docs/use-skills/use-dmls/SKILL.md"
+    - "darkmatter/docs/use-skills/use-dmls/features.md"
+    - "darkmatter/docs/use-skills/use-dmls/schemas.md"
+source-code:
+    - "simplified-schema/schemas/namespace-schema.yaml"
+    - "simplified-schema/schemas/schema-trigger.yaml"
+    - "simplified-schema/schemas/schema.yaml"
+    - "simplified-schema/lib/generated/shipped.json"
+    - "simplified-schema/lib/src/envelope.rs"
+    - "simplified-schema/lib/src/errors.rs"
+    - "simplified-schema/lib/src/lib.rs"
+    - "simplified-schema/lib/src/resolve.rs"
+    - "simplified-schema/lib/src/resolve/bundle.rs"
+    - "simplified-schema/lib/src/resolve/buffers.rs"
+    - "simplified-schema/lib/src/resolve/select.rs"
+    - "simplified-schema/lib/src/schema/export.rs"
+    - "simplified-schema/lib/src/schema/layer.rs"
+    - "simplified-schema/lib/src/shipped/registry.rs"
+    - "simplified-schema/lib/src/simplified/mod.rs"
+    - "simplified-schema/lib/src/simplified/standalone.rs"
+    - "simplified-schema/lib/src/triggers/assemble.rs"
+    - "simplified-schema/lib/src/triggers/discovery.rs"
+    - "simplified-schema/lib/src/triggers/envelope.rs"
+    - "simplified-schema/lib/src/triggers/finding.rs"
+    - "simplified-schema/lib/src/triggers/mod.rs"
+    - "simplified-schema/lib/src/triggers/prepared.rs"
+    - "simplified-schema/lib/src/yaml_documents/mod.rs"
+    - "simplified-schema/lib/src/yaml_documents/registry.rs"
+    - "simplified-schema/lib/src/yaml_documents/select.rs"
+    - "simplified-schema/lib/tests/l1/bundle_resolution.rs"
+    - "simplified-schema/lib/tests/l1/kind_envelopes.rs"
+    - "simplified-schema/lib/tests/l1/main.rs"
+    - "simplified-schema/lib/tests/l1/shipped_artifacts.rs"
+    - "simplified-schema/lib/tests/l1/yaml_kind_selection.rs"
+    - "darkmatter/schemas/darkmatter-host.yaml"
+    - "darkmatter/lib/generated/shipped.json"
+    - "darkmatter/lib/src/config/registration.rs"
+    - "darkmatter/lib/src/config/registration/bundle.rs"
+    - "darkmatter/lib/src/config/registration/manifest.rs"
+    - "darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs"
+    - "darkmatter/lib/src/markdown/output/command/data.rs"
+    - "darkmatter/lib/src/markdown/schemas/mod.rs"
+    - "darkmatter/lib/tests/l1/host_registration_snapshot.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "darkmatter/lib/tests/l1/shipped_schema_corpus.rs"
+    - "darkmatter/lib/tests/l1/trigger_discovery_recovery.rs"
+    - "darkmatter/lib/tests/l1/yaml_kind_registry.rs"
+    - "darkmatter/cli/schemas/output/schema-triggers.yaml"
+    - "darkmatter/cli/src/commands/schema/triggers.rs"
+    - "darkmatter/cli/tests/l1/invalid_trigger_warnings.rs"
+    - "darkmatter/dmls/src/providers/frontmatter/schema_value_hover.rs"
+    - "claudine/lib/generated/shipped.json"
+    - "claudine/lib/src/composition/schema/shipped.rs"
+    - "claudine/lib/tests/l1/invalid_trigger_findings.rs"
+    - "claudine/cli/tests/l1/invalid_trigger_warnings.rs"
+    - "claudine/lib/src/composition/lifecycle/mod.rs"
+    - "claudine/schemas/globals.lifecycle.json"
+    - "claudine/lib/tests/l1/host_catalog.rs"
+    - "claudine/lib/tests/l1/host_publication.rs"
+    - "darkmatter/lib/src/config/load.rs"
+    - "darkmatter/lib/src/config/registration/namespaces.rs"
+    - "darkmatter/lib/src/config/registration/selection.rs"
+    - "darkmatter/lib/src/lifecycle/host_profile.rs"
+    - "darkmatter/lib/src/lifecycle/host_profile/tests.rs"
+    - "darkmatter/lib/src/markdown/compose/context/options.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/binding.rs"
+    - "darkmatter/lib/src/markdown/schemas/catalog.rs"
+    - "darkmatter/lib/src/markdown/schemas/catalog/discovery_tests.rs"
+    - "darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs"
+    - "darkmatter/lib/benches/pipeline_work_support/mod.rs"
+    - "darkmatter/lib/tests/host_fixtures/mod.rs"
+    - "darkmatter/lib/tests/l1/host_functions.rs"
+    - "darkmatter/lib/tests/l1/host_namespaces.rs"
+    - "darkmatter/lib/tests/l1/host_registration.rs"
+    - "darkmatter/lib/tests/l1/host_selection.rs"
+    - "darkmatter/cli/tests/l1/host_registration.rs"
+    - "darkmatter/cli/tests/l1/main.rs"
+    - "darkmatter/dmls/benches/pipeline_work_a3.rs"
+    - "darkmatter/dmls/src/diagnostics/codes.rs"
+    - "darkmatter/dmls/src/lib.rs"
+    - "darkmatter/dmls/src/overlay/event_views.rs"
+    - "darkmatter/dmls/src/overlay/expressions.rs"
+    - "darkmatter/dmls/src/overlay/hosts.rs"
+    - "darkmatter/dmls/src/overlay/mod.rs"
+    - "darkmatter/dmls/src/providers/dsl.rs"
+    - "darkmatter/dmls/src/providers/lifecycle_host_tests.rs"
+    - "darkmatter/dmls/src/providers/mod.rs"
+    - "darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json"
+    - "darkmatter/dmls/tests/l1/claudine_host.rs"
+    - "darkmatter/dmls/tests/l1/edit_action_editor.rs"
+    - "darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs"
+    - "darkmatter/dmls/tests/l1/host_function_diagnostics.rs"
+    - "darkmatter/dmls/tests/l1/host_globals.rs"
+    - "darkmatter/dmls/tests/l1/host_registration_watches.rs"
+    - "darkmatter/dmls/tests/l1/lifecycle_event_views.rs"
+    - "darkmatter/dmls/tests/l1/lifecycle_host_profile.rs"
+    - "darkmatter/dmls/tests/l1/main.rs"
+    - "darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs"
+    - "darkmatter/dmls/tests/l1/registered_host_views.rs"
+    - "darkmatter/lib/src/config/registration/merge.rs"
+    - "darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+    - "darkmatter/lib/tests/l1/host_trigger_merge.rs"
+    - "darkmatter/lib/tests/l1/registered_yaml_kinds.rs"
+    - "darkmatter/cli/schemas/output/schema-validate.yaml"
+    - "darkmatter/cli/src/commands/schema/validate.rs"
+    - "darkmatter/dmls/src/diagnostics/frontmatter.rs"
+    - "darkmatter/dmls/src/overlay/yaml_contract.rs"
+    - "darkmatter/dmls/src/overlay/yaml_document.rs"
+    - "darkmatter/dmls/tests/l1/lsp_session.rs"
+    - "darkmatter/dmls/tests/l1/registered_trigger_conflict.rs"
+    - "darkmatter/dmls/tests/l1/registered_yaml_kinds.rs"
+    - "claudine/registration/action.yaml"
+    - "claudine/registration/claudine-config.yaml"
+    - "claudine/registration/composition.yaml"
+    - "claudine/registration/content-policy.yaml"
+    - "claudine/registration/document.yaml"
+    - "claudine/registration/formal-sequence-file.yaml"
+    - "claudine/registration/group.yaml"
+    - "claudine/registration/inline-composition.yaml"
+    - "claudine/registration/lifecycle-events.yaml"
+    - "claudine/registration/linking.yaml"
+    - "claudine/registration/loop.yaml"
+    - "claudine/registration/seq.yaml"
+    - "claudine/registration/sequence-document.yaml"
+    - "claudine/registration/sequence.yaml"
+    - "claudine/registration/shared.yaml"
+    - "claudine/schemas/action.yaml"
+    - "claudine/schemas/claudine-config.yaml"
+    - "claudine/schemas/claudine-document.yaml"
+    - "claudine/schemas/claudine.yaml"
+    - "claudine/schemas/document.yaml"
+    - "claudine/schemas/globals.yaml"
+    - "claudine/schemas/inline-compose.yaml"
+    - "claudine/schemas/lifecycle.yaml"
+    - "claudine/schemas/linking.yaml"
+    - "claudine/schemas/sequence-types.yaml"
+    - "claudine/schemas/sequence.yaml"
+    - "claudine/lib/build.rs"
+    - "claudine/lib/Cargo.toml"
+    - "claudine/lib/generated/globals.lifecycle.json"
+    - "claudine/lib/examples/lifecycle_artifact.rs"
+    - "claudine/lib/examples/shipped_schemas.rs"
+    - "claudine/lib/benches/pipeline_work.rs"
+    - "claudine/lib/benches/pipeline_work_alloc.rs"
+    - "claudine/lib/src/composition/mod.rs"
+    - "claudine/lib/src/composition/inventory.rs"
+    - "claudine/lib/src/composition/inventory/walk.rs"
+    - "claudine/lib/src/composition/inventory/tests.rs"
+    - "claudine/lib/src/composition/lifecycle/tests/nested_span.rs"
+    - "claudine/lib/src/composition/registration.rs"
+    - "claudine/lib/src/composition/registration/legacy.rs"
+    - "claudine/lib/src/composition/registration/published.rs"
+    - "claudine/lib/src/composition/schema/bundle.rs"
+    - "claudine/lib/src/composition/schema/globals.rs"
+    - "claudine/lib/src/composition/schema/mod.rs"
+    - "claudine/lib/src/composition/sequence/mod.rs"
+    - "claudine/lib/src/composition/sequence/declarations/tests.rs"
+    - "claudine/lib/src/composition/sequence/preflight/inputs/tests.rs"
+    - "claudine/lib/src/config/atomic.rs"
+    - "claudine/lib/src/config/schema.rs"
+    - "claudine/lib/src/config/setup.rs"
+    - "claudine/lib/tests/l1/claudine_identification.rs"
+    - "claudine/lib/tests/l1/claudine_schema_parity.rs"
+    - "claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs"
+    - "claudine/lib/tests/l1/claudine_schemas.rs"
+    - "claudine/lib/tests/l1/claudine_schemas_embedded.rs"
+    - "claudine/lib/tests/l1/claudine_schemas_matrix.rs"
+    - "claudine/lib/tests/l1/claudine_trigger_selection_parity.rs"
+    - "claudine/lib/tests/l1/container_schema_recursion.rs"
+    - "claudine/lib/tests/l1/context_construction_guard.rs"
+    - "claudine/lib/tests/l1/embedded_inventory_preflight.rs"
+    - "claudine/lib/tests/l1/installed_registration.rs"
+    - "claudine/lib/tests/l1/installed_registration_agreement.rs"
+    - "claudine/lib/tests/l1/main.rs"
+    - "claudine/lib/tests/l1/registration_inventory.rs"
+    - "claudine/lib/tests/l1/sequence_schema.rs"
+    - "claudine/lib/tests/l1/shipped_artifacts.rs"
+    - "claudine/cli/src/args.rs"
+    - "claudine/cli/src/main.rs"
+    - "claudine/cli/src/telemetry.rs"
+    - "claudine/cli/src/commands/mod.rs"
+    - "claudine/cli/src/commands/registrations.rs"
+    - "claudine/cli/src/commands/init_wizard.rs"
+    - "claudine/cli/src/completion/schema_completion/tests.rs"
+    - "claudine/cli/tests/l1/error_guards/transport-allow.toml"
+    - "claudine/cli/tests/l1/host_registration_refresh.rs"
+    - "claudine/cli/tests/l1/launch_trigger_schemas.rs"
+    - "claudine/cli/tests/l1/main.rs"
+    - "claudine/cli/tests/l1/registrations_command.rs"
+    - "claudine/cli/tests/l1/shipped_prompts.rs"
+    - "claudine/cli/src/commands/wrap/runaway_guard.rs"
+    - "claudine/cli/tests/l1/implement_plan_commit_message.rs"
+    - "claudine/cli/tests/l1/lifecycle_refusal_reports.rs"
+    - "claudine/cli/tests/l1/lifecycle_edit_action.rs"
+    - "claudine/justfile"
+    - "darkmatter/lib/src/config/init.rs"
+    - "darkmatter/lib/tests/l1/base_schema_end_to_end.rs"
+    - "darkmatter/lib/tests/l1/config_init.rs"
+    - "darkmatter/lib/tests/l1/config_widening.rs"
+    - "darkmatter/lib/tests/l1/context_construction_guard.rs"
+    - "darkmatter/lib/tests/l1/embedded_registration.rs"
+    - "darkmatter/lib/tests/l1/schema_phase_validation.rs"
+    - "darkmatter/lib/tests/l1/trigger_spelling_guard.rs"
+    - "darkmatter/cli/tests/l1/claudine_schema_bundle.rs"
+    - "darkmatter/cli/tests/l1/init_command.rs"
+    - "darkmatter/cli/tests/l1/schema_validate.rs"
+    - "darkmatter/dmls/src/config_contracts.rs"
+    - "darkmatter/dmls/src/context.rs"
+    - "darkmatter/dmls/src/diagnostics/nested_span.rs"
+    - "darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs"
+    - "darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs"
+    - "darkmatter/dmls/tests/l1/claudine_schema_discovery.rs"
+    - "darkmatter/dmls/tests/l1/config_contracts.rs"
+    - "simplified-schema/lib/src/prepared.rs"
+    - "simplified-schema/lib/src/shipped/wire_support.rs"
+    - "simplified-schema/lib/tests/l1/shipped_corpus.rs"
+    - "simplified-schema/lib/src/phase.rs"
+    - "simplified-schema/lib/tests/l1/phase_projection.rs"
+    - "simplified-schema/lib/tests/l1/schema_identities.rs"
+    - "tools/test-toolkit/tests/shipped_schemas_coordinator_contracts.rs"
+    - "scripts/shipped_schemas.py"
+    - "justfile"
+    - "Cargo.lock"
+    - ".github/ci/permission-inputs.json"
+    - "darkmatter/dmls/src/router.rs"
+    - "darkmatter/dmls/src/work_counters.rs"
+    - "darkmatter/dmls/src/workspace/watch.rs"
+    - "darkmatter/dmls/tests/common/mod.rs"
+    - "darkmatter/dmls/tests/l1/registration_reload_scheduling.rs"
+    - "schemas/kind.yaml"
+documentation:
+    - "simplified-schema/docs/topics/language/schema-documents.md"
+    - "simplified-schema/docs/topics/language-core.md"
+    - "simplified-schema/docs/topics/diagnostics.md"
+    - "simplified-schema/docs/topics/selecting-schema-files.md"
+    - "darkmatter/docs/topics/host-registration.md"
+    - "darkmatter/docs/topics/schemas/schema-triggers.md"
+    - "darkmatter/docs/topics/schemas/authoring-schemas.md"
+    - "darkmatter/docs/cli/clean.md"
+    - "darkmatter/dmls/docs/diagnostics.md"
+    - "claudine/docs/topics/schemas.md"
+    - "darkmatter/docs/topics/lifecycle/host-artifact.md"
+    - "darkmatter/docs/topics/host-functions.md"
+    - "darkmatter/docs/topics/schemas/dmls-schema-support.md"
+    - "darkmatter/docs/lsp/features.md"
+    - "darkmatter/dmls/docs/autocomplete.md"
+    - "darkmatter/dmls/docs/features.md"
+    - "darkmatter/docs/topics/schemas/definition.md"
+    - "claudine/schemas/README.md"
+    - "claudine/docs/cli/index.md"
+    - "claudine/docs/dependencies.md"
+    - "claudine/docs/topics/configuration.md"
+    - "claudine/docs/cli/registrations.md"
+    - "claudine/README.md"
+    - "claudine/docs/topics/configuring-actions.md"
+    - "claudine/docs/topics/frontmatter-properties.md"
+    - "darkmatter/README.md"
+    - "darkmatter/dmls/README.md"
+    - "darkmatter/dmls/docs/editors/README.md"
+    - "docs/kind-documents.md"
+    - "simplified-schema/README.md"
+completed-phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-11-22-host-registration-v2 (6 phases)
@@ -966,10 +1265,12 @@ line (see `decisions-for-review`).
   `~/.claudine/registrations/.darkmatter.lock` (deadline 10 s, backoff
   20 ms). Preflight (no-follow metadata plus a pure reparse-point
   classifier) runs before the lock file is created and again under the
-  lock. Only changed members are written; retired entries come from the
-  previous valid format 2 manifest; regular temps with the reserved prefix
-  `.claudine-registration-` are removed; unknown files are kept; the
-  manifest is written last and only when its bytes differ.
+  lock. Only changed members are written. The publisher uses a separate
+  parser of the previous format 2 manifest to authorize retirement. The
+  review found that some malformed manifests pass that parser. Regular
+  temps with the reserved prefix `.claudine-registration-` are removed,
+  and files outside the chosen removal list are kept. The manifest is
+  written last and only when its bytes differ.
   `PublishOutcome::{Current, Published{changes}}`.
 - `config/atomic.rs::atomic_write_registration` reuses the sibling-temp
   writer and its Windows persist retry with the reserved prefix.
@@ -982,7 +1283,8 @@ line (see `decisions-for-review`).
   no-op with unchanged mtimes, single changed member, interruption at a
   member and before the manifest then convergence, readers at every step,
   two cooperating publishers, lock timeout, temp cleanup with unknown files
-  kept, retirement, an invalid/escaping previous manifest removes nothing,
+  kept, retirement, refusal to remove the sole retirement candidate when its
+  path escapes,
   misplaced entries stop before any write), 6 `obstructions::*` symlink
   tests (Unix), 5 `registration::tests` unit tests including the
   reparse-bit classifier, and 2 `atomic::tests` (reserved prefix; Windows
@@ -1275,7 +1577,7 @@ DMLS, Claudine, and SimplifiedSchema. The verification ran afterwards.
 - `darkmatter/docs/topics/host-registration.md`:
   - added the format 2 manifest example at `~/.claudine/registrations/darkmatter/manifest.yaml` and the matching `register` entry;
   - stated that reads are passive;
-  - added the format 1 refusal text and repair (`claudine setup` / `claudine registrations publish`);
+  - added the format 1 refusal text and named `claudine setup` as a repair. The review verified that this subcommand is unavailable. `claudine registrations publish` republishes the files and leaves the configured entry as it was;
   - added a located `dm.host.trigger_conflict` example taken from `md schema validate --output json`, with the reason strings from `merge.rs`;
   - added a Mermaid diagram of the reload flow (batches → 300 ms settle with the old view kept → latest completed view installed).
 - `docs/topics/lifecycle/host-artifact.md`: the revision-folder publisher is replaced by the one-tree publisher, which writes only changed files and the manifest last.
@@ -1354,3 +1656,54 @@ The live sources (lib, cli, dmls, build scripts, benches, scripts, test-toolkit)
 - the shipped schema's own file name `darkmatter-host.yaml`;
 - the frozen bench fixture `fixtures/claudine-schemas/globals.yaml`;
 - test literals in `dmls` (`event_views.rs`, `watch.rs`) and `lifecycle/host_profile/tests.rs`.
+
+### Gates and suites
+
+- Scope calculator: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gave `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, test-toolkit]`, `change_class: package` (narrowed test-input cells). The gates were not skipped.
+- Darkmatter area `just test`: 17653 passed, 10 skipped, `none at or above 5.0s`. `just lint`: clean, and the zed-dmls wasm check passed. `just check-tier-coverage darkmatter`: nothing stranded.
+- SimplifiedSchema `just test`: 2526 recorded, none slow; `just lint` clean.
+- Claudine `just test` (library and CLI): 12701 passed, 15 skipped, none slow; `just lint` clean.
+- `cargo nextest run -p test-toolkit`: 450 passed, 1 failed. The failure predates this phase and does not depend on it: `ci_workflow_contracts::the_lint_step_measures_a_sub_second_command_instead_of_recording_zero` fails alone too, with `wrote "duration_s=0.0"`. The lint step in `.github/workflows/_package-ci.yml` rounds `time.monotonic()` to milliseconds (`round(…, 3)`), and on this host the stubbed `just` finishes in under 0.5 ms. This phase changed nothing under `.github/`, `scripts/`, or `tools/`. The workflow was left alone, because the fix belongs to CI, outside this feature. The likely fix is to publish more decimals or to stub a measurable delay.
+- `registrations_command` (claudine-cli): 8 passed, run by the Claudine docs agent after it regenerated the `docs/cli/registrations.md` sample.
+
+### Cross-OS evidence
+
+- WSL2 (`just cross-check <pkg> --os wsl`, all passed): `claudine` 7016 passed; `darkmatter` 12844 passed (66 skipped); `claudine-cli` 5364 passed (319 skipped); `simplified-schema` 2526 passed.
+- Native Windows: reused. This phase changed no code, so the build-win runs recorded under Phases 1, 2, 4, and 5 cover the current code of every touched package. That includes Phase 4's claudine replacement and copied-root paths, after its two fixes. No `os-failing`.
+- macOS (bolt): **unavailable**. Every leg compiled and archived, then failed with `just: command not found`. bolt's bash login `PATH` (which `cross-check` uses through `bash -lc`) lacks `/opt/homebrew/bin`, the only place `just` is installed. This is a problem with the rig, not the change. The chain was stopped after `claudine` and `darkmatter` failed the same way. The trap is recorded in `.claude/skills/os/build-hosts.md` ("Host traps"); the fix is to add `brew shellenv` to bolt's `~/.bash_profile`. CI's `macos-latest` leg on the pull request supplies the macOS evidence.
+
+### Acceptance checklist
+
+- A complete bundle works outside the checkout: the end-to-end table above (CLI and DMLS, temporary home, no schema roots). Refusals with locations (missing or unlisted imports, path escapes, duplicates, stale artifacts, invalid trigger matches) and order independence of `files` were covered in Phases 1–3. The tampered member above was refused with its location.
+- Shared events only → Darkmatter, a wrong literal kind, Claudine validation of malformed values, ambiguity, and registered YAML kind precedence and collisions: Phase 2 and 3 tests. Plain, `both.md`, and YAML were confirmed above.
+- Merge checks (equivalent, narrowing, constraint and presence conflicts, three-way, never-together) and the exactly-one-of-`prompt`/`sections` rule: Phase 3. `both.md` was confirmed above.
+- Interrupted or overlapping publication, retry convergence, identical-publish timestamps: Phase 4. The timestamps and tamper repair were confirmed above. DMLS reload and repair without restart: Phase 5.
+- Inventory against published bytes, setup, and ordinary commands not touching the bundle: Phase 4.
+
+### Handoff
+
+This is the final phase. `message-to-agent` was removed, and `completed-phase: 6` and `implemented: true` were set on the plan and the log, with `implemented` and `implemented-by` on the spec. Two unrelated modified files in the tree belong to other sessions and were not touched: `claudine/features/2026-11-18-ergonomic-sequences/spec.md` and `claudine/features/2026-11-22-current-pid/spec.md`.
+
+
+### Review record corrections (2026-11-23)
+
+- Whole-YAML validation was described as uniformly accepting explicit null
+  in optional member metadata. With the worktree's `md schema validate
+  --output json`, `name: null` was refused at the field in both a trigger
+  and a types-only library. `description:` in a namespace definition was
+  accepted in the CLI and in a DMLS stdio session.
+- The lifecycle decision attributed catalog membership checking to the
+  event-registry rebuild. In a temporary publication, replacing a binding
+  root in `initialize` or `success` with an undeclared identifier and
+  refreshing the artifact digest left the Claudine trigger active in
+  `md schema validate --output json`. A `host_globals` edit was refused
+  with the catalog flag enabled and accepted with it disabled.
+- The publisher summary overstated previous-manifest admission. In a
+  temporary published bundle, the normal reader refused malformed version,
+  digest and member path shapes. Claudine publication still deleted a
+  renamed old member in several of those cases. The existing escaping-path
+  test only demonstrates that its single escaping candidate is preserved.
+- The format 1 documentation note named `claudine setup` as a working
+  upgrade. The worktree binary returned exit 2 and an unrecognized-command
+  error in a configured temporary home. The explicit publish command
+  succeeded and did not migrate the configuration.
