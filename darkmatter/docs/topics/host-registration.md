@@ -395,8 +395,8 @@ claim: neither is used, whatever their order.
 
 ## Diagnostics
 
-Every diagnostic but `dm.host.foreign_document` (a notice, below) is a
-warning. It names the entry (the declaring file and
+Every diagnostic but `dm.host.foreign_document` (a notice, below) and
+`dm.host.trigger_conflict` (an error, below) is a warning. It names the entry (the declaring file and
 its index in `register`), the failing manifest field when one failed
 (`lifecycle`, `files[1]`, `functions[0].facts`), and the file, line, and
 column of the problem when known: the configuration file, at the entry, when
@@ -418,6 +418,7 @@ also report the selection warnings of the documents they judge.
 | `dm.host.registration` | a manifest or member is missing, invalid, or remote; a member does not match its digest; a member has an unsupported `kind` or imports outside the bundle; a namespace is reserved or declared twice; two files share a `name`; a format 1 manifest is read; an artifact is refused; the host name differs from the lifecycle artifact's; or two manifests claim one host with different content (reported for each run, and again for a document such a host identifies) |
 | `dm.host.identify_too_broad` | a registered trigger could match on keys `md` owns alone |
 | `dm.host.ambiguous` | two or more hosts' triggers match the same document; it is analyzed as an `md` document |
+| `dm.host.trigger_conflict` | an error on the document: two of the host's triggers that match it declare a property, or the root rules, in ways that cannot be layered as one (see [When two triggers declare one property](#when-two-triggers-declare-one-property)); it names the host, the property or "the root rules", and both trigger files |
 | `dm.host.foreign_document` | `md compose` composes a document a registered host identifies; an `info` notice, once per run, naming the host's own command (see [below](#md-compose-of-a-hosts-document)) |
 | `dm.lifecycle.unknown_host` | DMLS only: a root key of a document no registered host identifies is a lifecycle event only a registered host has (see [below](#in-the-editor-dmls)) |
 
@@ -479,10 +480,42 @@ document) keeps them: its documents select `Md`, and no registered layer is
 added. Registration supplies type information only; when the host itself runs
 a document, its own in-process definitions stay authoritative.
 
-`RegisteredHosts::yaml_kinds()` indexes every usable host's `yaml-schema`
-definitions by the kinds they claim. Selecting a YAML document's kind from
-them in `md schema validate` and DMLS, after the built-in and local
-definitions, is **planned**.
+### Whole YAML documents
+
+A whole `.yaml`/`.yml` document whose `kind` a registered host's
+`kind: yaml-schema` file claims is judged by that definition, in
+`md schema validate` and in DMLS. Registered definitions are the lowest kind
+tier:
+
+1. the built-in kinds (`schema`, `yaml-schema`, `schema-trigger`, …);
+2. a definition in one of the document's schema roots;
+3. a registered host's definition.
+
+A higher tier always wins, including its failures: a broken local definition
+claiming `roster` makes `kind: roster` unavailable rather than falling through
+to the host's. An identical copy of a host registered twice is one claim; two
+different registered definitions of one kind, in one host or across hosts,
+refuse the kind and name each definition file. A selected kind outranks the
+document's own root `$schema`; a kind nothing claims falls through to it.
+
+```yaml
+# ~/.acme/schemas/roster.yaml (a member of the acme bundle)
+kind: yaml-schema
+$schema:
+    kind: literal(roster; required)
+    platforms: string[](required)
+```
+
+```yaml
+# team.yaml: judged by acme's definition; `platforms: 3` is a problem
+kind: roster
+platforms: 3
+```
+
+A YAML document gets no trigger layer: registered triggers apply only to
+Markdown frontmatter. `RegisteredHosts::yaml_kinds()` is the index, and
+`YamlContract::registered()` names the host, bundle path, and file of the
+definition that judged a document.
 
 ## Layering
 
@@ -491,7 +524,7 @@ lowest to highest:
 
 ```mermaid
 flowchart BT
-    B[Darkmatter baseline] --> H[the host's matched triggers,<br/>in bundle-path order]
+    B[Darkmatter baseline] --> H[the host's matched triggers,<br/>checked as one host layer]
     H --> R[triggers from the five schema roots]
     R --> D[the document's own $schema]
 ```
@@ -524,6 +557,51 @@ gadget: name      # rejected by the root trigger's `gadget: number`
 - **Cache identity.** A host layer's validator identity includes the
   manifest's identity and content revision, so a changed host install never
   reuses a validator compiled for another.
+
+### When two triggers declare one property
+
+A document can match several of one host's triggers. Together they form one
+host layer, so they must agree wherever they overlap. Each property two or
+more matched triggers declare is compared pair by pair, after named types and
+`$extends` are resolved (an inherited property counts as declared):
+
+| The two declarations | Result |
+| --- | --- |
+| the same type and the same rules | they coalesce; the first trigger in bundle-path order is the property's origin |
+| one type is strictly narrower (`enum(claude, codex)` inside `string`) and presence, null admission, defaults, descriptions, and constraints agree | the narrower one applies, with its own origin |
+| incomparable types (`number` and `boolean`), or a narrower type whose rules differ (`string(required)` and an optional `enum(...)`; `string` and `string \| null`; different descriptions, defaults, or constraints) | `dm.host.trigger_conflict` |
+
+Every pair counts: a third trigger narrower than both does not hide an
+incompatible pair. Only matched triggers are compared, so two triggers that
+never match the same document never conflict.
+
+```yaml
+# ./schemas/a.yaml                     # ./schemas/b.yaml
+kind: schema-trigger                    kind: schema-trigger
+match:                                  match:
+    team: string(required)                  team: string(required)
+$schema:                                $schema:
+    agent: string                           agent: enum(claude, codex)
+```
+
+A document with `team: core` gets `agent: enum(claude, codex)`. Were `a.yaml`
+to declare `agent: string(required)`, the document would fail with
+`dm.host.trigger_conflict` naming `agent`, `a.yaml`, and `b.yaml`.
+
+The root of the payloads is compared too:
+
+- A single matched trigger keeps its root rules (`$constraints`, for example
+  `closed: true`).
+- With two or more, none may write root rules, and at most one may be a root
+  union. The other triggers' properties are merged into every arm of that
+  union, arm order kept, and none of them may declare a key that tells the
+  arms apart (one some arm omits or declares differently).
+
+A conflict is a schema preparation error, not a validation problem: the
+document is not validated or composed, and nothing a higher layer declares,
+the document's own `$schema` included, clears it. A trigger whose payload is
+a `{{ … }}` template is listed whole by `pending_templates_for` and checked
+only once it is resolved.
 
 `--disable schema-triggers` turns off the registered layer together with the
 schema roots' triggers. `md schema triggers` reports the registered host and

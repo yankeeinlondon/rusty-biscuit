@@ -142,9 +142,10 @@ behavior.
   (built-ins, host catalogs, `FunctionRegistration::builder`/
   `builder_from_types`). Do not reintroduce a Rust-side fact setter.
 - Host function catalogs (`HostFunctionCatalog`, `HostFunctions`) share one
-  `Arc` freed with the last holder. `host_function_catalogs` caches one result
-  per discovery path, replaced on any catalog/artifact byte change and never
-  evicted; see `expressions.md` and `docs/topics/host-functions.md`.
+  `Arc` freed with the last holder. `catalog::host_function_set_at` (called
+  by the registration loader with verified bytes) caches one result per
+  catalog path, replaced on any catalog/artifact byte change and never
+  evicted; schema roots are never searched for them; see `expressions.md` and `docs/topics/host-functions.md`.
 - Non-function `types:` entries are named helper types that signatures use:
   `ip-address` (IPv4, IPv6, or a scoped `fe80::1%en0` literal; no DNS),
   `agentic-cli` (an `enum(...)` that a test pins to

@@ -594,8 +594,7 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   taken from `ConfigSnapshot::dependencies` except the `RepositoryHead`
   revision, read otherwise) of the config files present or absent, every
   `profile.dependencies()` path, a refused entry's probed manifest
-  candidates and their members' candidates
-  (`config::registration::manifest_member_candidates`), and the repository's
+  locations (`LoadedRegistrations::watches`), and the repository's
   `HEAD` plus the branch ref it names (`slot_jobs::head_files`, watched by
   path through the slot registration, never by folder);
   `invalidate_trigger_inputs`/`invalidate_all_trigger_registries` also
@@ -612,8 +611,8 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `DocumentContext::host`, which the router fills from
   `OverlayState::unframed_host` (the same `HostView::select` over an empty
   frontmatter under the installed hosts, cached per path; `md` while none
-  are installed and for YAML). `HostView::unregistered` is only the fallback
-  of a `DocumentContext` built outside a server (`host: None`). Selection
+  are installed and for YAML). A `DocumentContext` built outside a server
+  (`host: None`) gets the `md` view. Selection
   warnings and `dm.lifecycle.unknown_host` are published on the document by
   `diagnostics/frontmatter.rs::host_diagnostics`; configuration-level ones
   (`HostRegistrations::diagnostics`) on the file each names by
@@ -625,29 +624,26 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `tests/l1/registered_host_views.rs` (host fixtures by `#[path]`),
   `tests/l1/host_registration_watches.rs`.
 - Lifecycle stacks: `overlay/event_views.rs::LifecycleHost::for_document`
-  reads the selected view's lifecycle: a registered profile's, a legacy
-  catalog's first usable `<stem>.lifecycle.json`
-  (`lifecycle::host_profile::HostLifecycleProfile`; Claudine's
-  `claudine/schemas/globals.lifecycle.json`), else `md_host`. Its registry's
+  reads the selected view's lifecycle: the registered profile's
+  (`lifecycle::host_profile::HostLifecycleProfile`), else `md_host`; no
+  schema-root catalog or artifact is ever read. Its registry's
   `resolve_key` (never a hand list) maps a root key to a `StackEvent`
   (event plus registry) and gives every `{{ … }}` span, `when` condition, and
   expression-typed value inside that stack the event's registry
   `BindingView`; `diagnostics/frontmatter.rs::GuardedStackCalls` parses with
   the host's parse options and calls the library's one walk,
   `lifecycle_call_checks`, with the host's registry, for stack spans and
-  expression-typed stack values alike. Without a usable artifact the stacks
-  are md's and `dm.lifecycle.incomplete_analysis` names each catalog's
-  reason. A combined diagnostics pass (`ProviderRegistry::diagnostics`)
-  reads the host once, in its own panic boundary, and hands it to providers
-  whose `reads_lifecycle_host()` is true via `diagnostics_with_host`; a panic
-  there is logged as each such provider's panic and drops their diagnostics.
+  expression-typed stack values alike. An unusable artifact refuses the
+  registration, so the stacks are md's. A combined diagnostics pass
+  (`ProviderRegistry::diagnostics`) reads the host once, in its own panic
+  boundary, for the frontmatter provider (the DSL provider no longer reads
+  it); a panic there drops only that provider's diagnostics.
   Standalone `diagnostics(ctx)`, hover, and completion read the same view. DMLS never depends on a host crate; `md_host::` appears only in
   `event_views.rs` (the fallback and its tests). Completion offers only the
   globals the event may read; `err` where the event has none is
   `dm.expression.unavailable_global` (the view's reason, never `fm.err`).
-  Host-catalog globals (`seq`, `loop`, `group`) are `ExecutionDependent` in
-  every view (`validation_view`), and a host catalog that fails to load is the
-  warning `dm.schema.host_catalog`. A schema problem's diagnostic carries the
+  Registered host globals (`seq`, `loop`, `group`) are `ExecutionDependent` in
+  every view (`validation_view`). A schema problem's diagnostic carries the
   library's message without the declared description; guidance such as
   "use `start`" on Claudine's `composed` shows in hover only.
 - Matching trigger payloads feed completion and hover as well as

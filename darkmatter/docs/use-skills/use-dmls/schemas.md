@@ -310,6 +310,9 @@ one. Otherwise it isn't validated.
   compose step.
 - Every root's definitions count; there's no shadowing here. Two definitions
   claiming the same kind is an error.
+- A registered host's `kind: yaml-schema` files claim kinds too, below the
+  shipped and schema-root definitions: a host's `roster` applies only where
+  no local definition claims `roster`.
 - In the editor, this needs DMLS attached to YAML buffers; see
   [install.md](install.md#yaml-files).
 

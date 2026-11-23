@@ -166,9 +166,10 @@ does, through the same library entry point, and then projects the result:
   [Configuration files](#configuration-files)). Their `kind` and `$schema`
   select nothing.
 - **By `kind`.** A top-level `kind` claimed by a `kind: yaml-schema`
-  definition (one of the shipped ones, or one in the document's
-  [schema roots](./definition.md#schema-roots)) selects that definition, and
-  only that definition. The document's own `$schema`, if any, is then
+  definition (one of the shipped ones, one in the document's
+  [schema roots](./definition.md#schema-roots), or, below both, one a
+  [registered host](../host-registration.md#whole-yaml-documents) ships)
+  selects that definition, and only that definition. The document's own `$schema`, if any, is then
   ordinary data.
 - **By a root `$schema`.** With no claimed `kind`, a root `$schema` is the
   contract, resolved as frontmatter resolves it. `$schema` itself is never an

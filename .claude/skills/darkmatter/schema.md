@@ -1626,9 +1626,9 @@ become optional document properties (no catalog-specific refusal).
 Hosts declare their own globals in a catalog of the same format
 (`claudine/schemas/globals.yaml`, loaded with `GlobalCatalog::from_documents`
 and the host's requirements). DMLS hovers and completes host globals from the
-catalogs in a document's schema roots (`catalog::host_catalogs`), treating
-each as `ExecutionDependent` (DMLS cannot know loop/group membership); a
-catalog that fails to load is a `dm.schema.host_catalog` warning. Inside an
+selected registered host's namespace catalog (`RegisteredHostProfile::globals`),
+treating each as `ExecutionDependent` (DMLS cannot know loop/group
+membership); schema roots are never searched for a host catalog. Inside an
 md event's stack DMLS uses that event's registry `BindingView`
 (`dmls/src/overlay/event_views.rs`), so `err` where the event has none is
 `dm.expression.unavailable_global`.

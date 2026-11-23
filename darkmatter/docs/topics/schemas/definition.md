@@ -864,6 +864,9 @@ in one of two ways:
   every YAML document whose top-level `kind` names that kind is judged by the
   definition. This is the way to give a family of files one contract without
   each file pointing at it.
+  A registered host's `kind: yaml-schema` files claim kinds too, as the
+  lowest tier: a shipped or schema-root definition of the same kind wins (see
+  [Host Registration](../host-registration.md#whole-yaml-documents)).
 - **By a root `$schema`.** A document whose `kind` no definition claims can
   carry its own `$schema`, exactly as frontmatter does.
 
@@ -1373,7 +1376,7 @@ The `layers` object says which schema layers judged the document, so a consumer 
 
 The terminal output names the same layers; see [Behavior Without `$schema`](#behavior-without-schema).
 
-A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
+A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, a `schema` record for a registered host whose matched triggers conflict has `code` `dm.host.trigger_conflict` and `related`, the two trigger files (see [When two triggers declare one property](../host-registration.md#when-two-triggers-declare-one-property)), and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
 ### Problem Locations
 

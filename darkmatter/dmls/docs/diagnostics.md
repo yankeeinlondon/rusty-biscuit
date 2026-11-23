@@ -257,6 +257,7 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. An envelope error comes first: a tagged envelope with an unsupported key reports this code even when a definition inside it is also invalid, matching `md schema validate`. |
 | `dm.host.registration` | **Warning**, on the file whose problem keeps a `register` entry from being used, at the problem's line and column (the top when it has none), whether that file is open or not: the configuration file, at the entry, when the manifest cannot be found, the manifest for its own shape or a member it cannot resolve, otherwise the member (missing, invalid, or remote, or an artifact that is refused). Two manifests that claim one host with different content put it on each manifest, and again at the top of every document such a host identifies. Nothing of that entry is used. An open file keeps its own diagnostics beside it, and the warning is cleared once the problem is fixed. Source `darkmatter.schema`. |
 | `dm.host.identify_too_broad` | **Warning**, on the identifying trigger, like `dm.host.registration`: a registered host's identifying trigger could match on keys `md` owns alone, so the host is not used. |
+| `dm.host.trigger_conflict` | **Error**, at the top of the document: two of the selected host's triggers that match it declare a property, or the root rules, in ways that cannot be layered as one host layer ([When two triggers declare one property](../../docs/topics/host-registration.md#when-two-triggers-declare-one-property)). The message names the host, the property or "the root rules", and both trigger files, and each trigger file is related information. No schema applies to the document until the bundle is fixed; a higher layer does not clear it. Source `darkmatter.schema`. |
 | `dm.host.ambiguous` | **Warning**, at the top of the document: two or more registered hosts identify it. It is analyzed as an `md` document; no host's schemas, globals, functions, or lifecycle apply. Source `darkmatter.schema`. |
 | `dm.lifecycle.unknown_host` | **Warning**, at the key. A root key is a lifecycle event only a registered host has (Claudine's `success`, say), but that host does not identify the document, so the key is ordinary data here and its stack never runs as one. The message names the host. A key no registered host uses as an event is never reported. Source `darkmatter.schema`. |
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
@@ -317,9 +318,14 @@ judged by its scope's configuration contract instead, whatever its `kind` or
 
 - a file that is not one admissible YAML document gets one
   `dm.frontmatter.yaml_parse` error and nothing else;
-- a `kind` that cannot select its definition (claimed twice, reserved by a
-  failed definition, unavailable) is one `dm.schema.prepare` error on the
-  `kind` value, with the definition files as related information;
+- a `kind` only a registered host's `kind: yaml-schema` file claims is
+  judged by that definition, below the built-in and local definitions, under
+  the registrations installed for the file's configuration; a registration
+  change re-prepares the file without a restart;
+- a `kind` that cannot select its definition (claimed twice, including by
+  two registered hosts that define it differently, reserved by a failed
+  definition, unavailable) is one `dm.schema.prepare` error on the `kind`
+  value, with the definition files as related information;
 - a problem with the document is coded and ranged as in frontmatter, and a
   missing required key and an undeclared key are errors in either mode;
 - each problem is published once: in a claimed `kind: schema` or
@@ -448,6 +454,7 @@ The expression family follows one ladder: a **warning** means the construct
 | `dm.expression.incomplete_analysis` | Warning (nothing is known about the call; it may still be right) |
 | `dm.lifecycle.unknown_host` | Warning (the key is data here, which may be what the author meant) |
 | `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` | Warning (analysis continues as `md`) |
+| `dm.host.trigger_conflict` | Error (the host's schema cannot be prepared; `md` refuses the document too) |
 
 ### Call diagnostics
 
@@ -819,6 +826,8 @@ Some diagnostics attach secondary locations:
   document's reference into that file and relates the failing operand there.
   Two operands into the same file are told apart by position, so only the
   failing one is ranged.
+- `dm.host.trigger_conflict` relates the top of each of the two conflicting
+  trigger files.
 - `dm.transclusion.cycle` lists the transclusion ancestry that forms the cycle.
 - A schema failure of an [observed property value](#observed-property-values)
   that comes straight from a local data file points at the failing value in
