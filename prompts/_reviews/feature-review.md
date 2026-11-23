@@ -338,11 +338,15 @@ For every high or medium finding:
   a newly found sibling of an earlier finding gets a new ID that names the earlier
   one. For a legacy review without IDs, use its filename plus the finding title
 - classify it in one sentence that names the defect class, not the file
+- state the invariant the finding violates. Where the contract permits,
+  pair a meaning-preserving rewrite with a small input change that must
+  produce a different result. Check both at each relevant decision
 - enumerate every sibling site within the boundary: each parser, reader,
   detector, or projection that handles the same kind of input or makes the
   same kind of decision
-- check each one, using the same reproduction you used for the first (copy a
-  real fixture, change one field, run the shipped CLI or public API)
+- check each one using those probes. Start from the same real fixture where
+  possible, change only the input needed for each probe, and run the shipped
+  CLI or public API
 - report the class as **one finding** with an instance table: child ID
   (`R{{iteration}}-F1.1`, …), site, shape tested, observed result, expected
   result. The repair's finding ledger uses these IDs row for row
@@ -372,7 +376,9 @@ in this directory. If a finding belongs to the same class as an earlier one:
   a sibling the earlier sweep missed, and which sites that fix should have
   swept and did not
 - sweep them all now, within the spec boundary, so this review carries the
-  complete list
+  complete list. Trace the probes through every decision that can accept,
+  reject, or classify the same input. Record the expected and observed results
+  in the instance table
 - set the frontmatter property `recurrence` to `true`; the review loop does not
   stop on it, so the next repair cycle implements exactly the list this review
   carries

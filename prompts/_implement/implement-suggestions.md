@@ -269,6 +269,12 @@ rulings unblock are repaired in this same cycle.
 names the sibling sites an earlier fix missed. That list is the minimum scope
 for this cycle, apart from any finding you dispute: fix every site it names,
 then run your own sweep for any it missed.
+
+Before editing, identify where the decisions diverge and whether they can
+reuse one authoritative rule. Show the smallest failing example and a control
+whose result must differ. After editing, run the earlier cases from the same
+defect class alongside the new probes. Record which rule the decisions now
+share, or explain why their answers legitimately differ.
 ::end-block
 
 The repository's surgical-changes rule bounds each change to the defect class.
