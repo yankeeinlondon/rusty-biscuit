@@ -181,19 +181,34 @@ static RUN_NOTICES: std::sync::Mutex<Vec<Diagnostic>> = std::sync::Mutex::new(Ve
 
 /// Reports run-level `notices` once for the invocation: on stderr as status
 /// rows for a formatted output (an `info` notice as an info row, every other
-/// one as a warning row), or held for the data output's `diagnostics`
-/// (the first [`command::CommandRun`] or [`report::ReportSink`] to begin takes
-/// them), keeping stderr empty.
+/// one as a warning row), each led by its `file:line:column` when the notice
+/// has a position ([`notice_text`]), or held for the data output's
+/// `diagnostics` (the first [`command::CommandRun`] or [`report::ReportSink`]
+/// to begin takes them), keeping stderr empty.
 pub fn report_run_notices(notices: Vec<Diagnostic>, data_output: bool) {
     if data_output {
         RUN_NOTICES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend(notices);
     } else {
         for notice in &notices {
+            let text = notice_text(notice);
             match notice.severity {
-                Severity::Info => stderr_status(&notice.message, biscuit_terminal::prelude::StatusState::Info),
-                _ => stderr_warning(&notice.message),
+                Severity::Info => stderr_status(&text, biscuit_terminal::prelude::StatusState::Info),
+                _ => stderr_warning(&text),
             }
         }
+    }
+}
+
+/// A run notice's formatted text: its message, led by `file:line:column: `
+/// when its source has a file and a position (a notice without a position
+/// names its file in the message, if at all).
+#[must_use]
+pub fn notice_text(notice: &Diagnostic) -> String {
+    match notice.source.as_ref().and_then(|source| Some((source.file.as_ref()?, source.line?, source.column?))) {
+        Some((file, line, column)) => {
+            format!("{}:{line}:{column}: {}", biscuit_file::to_portable_string(file), notice.message)
+        }
+        None => notice.message.clone(),
     }
 }
 

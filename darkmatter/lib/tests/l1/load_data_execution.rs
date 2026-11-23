@@ -384,11 +384,11 @@ rejects! {
     json_inexact_integer_is_malformed: "d.json", "[9007199254740993]", "number[]" => Some((1, 2));
     empty_json_is_malformed: "d.json", "", "string[]" => Some((1, 1));
 
-    // The YAML parser locates a duplicate key at the start of the mapping
-    // that holds it.
-    yaml_duplicate_key_is_malformed: "d.yaml", "a: 1\na: 2\n", "{ <string>: number }" => Some((1, 1));
-    yaml_nested_duplicate_key_is_located_at_its_mapping: "d.yaml", "x: 0\nm:\n  a: 1\n  a: 2\n", "{ <string>: unknown }"
-        => Some((3, 3));
+    // The YAML parser marks a duplicate key at the mapping that holds it;
+    // the loader reports the key's second spelling instead.
+    yaml_duplicate_key_is_malformed: "d.yaml", "a: 1\na: 2\n", "{ <string>: number }" => Some((2, 1));
+    yaml_nested_duplicate_key_is_located_at_its_second_spelling: "d.yaml", "x: 0\nm:\n  a: 1\n  a: 2\n", "{ <string>: unknown }"
+        => Some((4, 3));
     // The YAML parser reports a second document without a position; the
     // event marks put it at the `---` that starts it.
     yaml_multiple_documents_are_malformed: "d.yaml", "- a\n---\n- b\n", "string[]" => Some((2, 1));

@@ -117,10 +117,10 @@ pub(crate) fn failure_diagnostics(
             && let Some(origin) = slot.as_ref().and_then(|slot| slot.origin.as_deref())
             && let Some(uri) = file_path_to_uri(origin)
         {
-            let at = record.source.as_ref().map_or(Position::default(), |source| Position {
-                line: source.line.map_or(0, |line| line.saturating_sub(1)) as u32,
-                character: source.column.map_or(0, |column| column.saturating_sub(1)) as u32,
-            });
+            let at = slot
+                .as_ref()
+                .and_then(|slot| related_position(ctx, slot_error, slot, &record, &uri))
+                .unwrap_or_default();
             published.related_information = Some(vec![DiagnosticRelatedInformation {
                 location: Location::new(uri, Range::new(at, at)),
                 message: "the slot".to_string(),
@@ -173,6 +173,30 @@ fn local_span(
 ) -> Option<std::ops::Range<usize>> {
     let (_, text) = report_diagnostics::template_slot_text(error, slot)?;
     (*text == *ctx.text).then(|| record.span.clone()).flatten()
+}
+
+/// Where `record` is in the other file `uri` its slot was written in: its
+/// span in the text the resolution kept, counted in the client's encoding
+/// (the record's column is not), or the start of its line when no kept
+/// text proves the span.
+fn related_position(
+    ctx: &DocumentContext,
+    error: &SchemaError,
+    slot: &simplified_schema::simplified::Slot,
+    record: &darkmatter::markdown::compose::expression::diagnostics::Diagnostic,
+    uri: &lsp_types::Uri,
+) -> Option<Position> {
+    let kept = report_diagnostics::template_slot_text(error, slot)
+        .map(|(_, text)| text)
+        .zip(record.span.as_ref())
+        .and_then(|(text, span)| {
+            let map = crate::source_map::SourceMap::new(uri.clone(), 0, ctx.source_map.encoding(), text);
+            map.byte_to_lsp(span.start)
+        });
+    kept.or_else(|| {
+        let line = record.source.as_ref()?.line?;
+        Some(Position::new(u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX), 0))
+    })
 }
 
 /// The `$schema` value, else the frontmatter block, else the document start.

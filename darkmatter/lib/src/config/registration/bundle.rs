@@ -27,7 +27,7 @@ use serde_json::json;
 
 use super::manifest::{self, ManifestRefusal, MemberSpec, ReadManifestV2};
 use super::{HOST_REGISTRATION_CODE, HostDependency, Refusal, RegistrationDiagnostic};
-use crate::config::load::Registration;
+use crate::config::load::{Registration, SourcePosition};
 
 /// One member entry of a format 2 manifest, resolved and checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,10 +43,8 @@ pub struct BundleMember {
     pub path: String,
     /// Where it is read from.
     pub location: PathBuf,
-    /// 1-based line of the entry's value in the manifest, when known.
-    pub line: Option<usize>,
-    /// 1-based character column, when [`Self::line`] is known.
-    pub column: Option<usize>,
+    /// Where the entry's value is written in the manifest, when known.
+    pub at: Option<SourcePosition>,
     /// The manifest's digest for it, which its bytes matched in a
     /// [`VerifiedSnapshot`] (an [`AdmittedManifest`] reads no bytes).
     pub digest: String,
@@ -66,6 +64,7 @@ pub struct BundleFunctionPair {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedSnapshot {
     host: String,
+    host_at: Option<SourcePosition>,
     version: String,
     manifest: PathBuf,
     manifest_hash: String,
@@ -122,10 +121,10 @@ impl VerifiedSnapshot {
         let MemberSpec { files, lifecycle, functions } = read.embedded_members(&path).map_err(|refusal| refuse(refusal, false))?;
         let mut table: BTreeMap<String, Arc<[u8]>> = BTreeMap::new();
         for member in self::members(&files, &lifecycle, &functions) {
-            let at = member.line.zip(member.column);
+            let at = member.at.clone();
             let refuse_member = |message: String| {
                 refuse(
-                    Refusal { code: HOST_REGISTRATION_CODE, file: path.clone(), at, member: Some(member.field.clone()), message },
+                    Refusal { code: HOST_REGISTRATION_CODE, file: path.clone(), at: at.clone(), member: Some(member.field.clone()), message },
                     false,
                 )
             };
@@ -142,9 +141,11 @@ impl VerifiedSnapshot {
             table.insert(member.path.clone(), Arc::clone(bytes));
         }
         let revision = revision(&read, &files, &lifecycle, &functions);
+        let host_at = read.locate(&["host"]);
         let ReadManifestV2 { manifest: accepted, .. } = read;
         Ok(Self {
             host: accepted.host,
+            host_at,
             version: accepted.version,
             manifest: path,
             manifest_hash: content_hash(manifest),
@@ -170,6 +171,12 @@ impl VerifiedSnapshot {
     #[must_use]
     pub fn host(&self) -> &str {
         &self.host
+    }
+
+    /// Where the manifest's `host` value is written.
+    #[must_use]
+    pub const fn host_position(&self) -> Option<&SourcePosition> {
+        self.host_at.as_ref()
     }
 
     /// The host release that wrote the manifest, not the format.
@@ -280,6 +287,9 @@ pub struct SnapshotRefusal {
     pub line: Option<usize>,
     /// 1-based character column, when [`Self::line`] is known.
     pub column: Option<usize>,
+    /// The line's text before [`Self::column`] (see
+    /// [`SourcePosition::line_prefix`]), when [`Self::line`] is known.
+    pub line_prefix: Option<String>,
     /// The manifest field of the failing entry (`files[1]`, `lifecycle`,
     /// `digests../schemas/a.yaml`); `None` when the manifest itself failed.
     pub member: Option<String>,
@@ -294,6 +304,31 @@ pub struct SnapshotRefusal {
 }
 
 impl SnapshotRefusal {
+    /// A refusal at `refusal`'s file and position.
+    pub(super) fn of(refusal: Refusal, legacy_format: bool, dependencies: Vec<HostDependency>, candidates: Vec<PathBuf>) -> Self {
+        let (line, column, line_prefix) = match refusal.at {
+            Some(at) => (Some(at.line), Some(at.column), Some(at.line_prefix)),
+            None => (None, None, None),
+        };
+        Self {
+            code: refusal.code,
+            message: refusal.message,
+            file: refusal.file,
+            line,
+            column,
+            line_prefix,
+            member: refusal.member,
+            legacy_format,
+            dependencies,
+            candidates,
+        }
+    }
+
+    /// Where the refusal is in [`Self::file`], when known.
+    pub(super) fn position(&self) -> Option<SourcePosition> {
+        Some(SourcePosition { line: self.line?, column: self.column?, line_prefix: self.line_prefix.clone()? })
+    }
+
     /// The refusal as the warning of the `register` entry that named the
     /// manifest.
     #[must_use]
@@ -301,7 +336,7 @@ impl SnapshotRefusal {
         Refusal {
             code: self.code,
             file: self.file.clone(),
-            at: self.line.zip(self.column),
+            at: self.position(),
             member: self.member.clone(),
             message: self.message.clone(),
         }
@@ -402,31 +437,32 @@ pub fn load_snapshot_with(
         Err(failure) => failure,
     };
     if !failure.retryable {
-        return Err(reads.refuse(failure.refusal, failure.legacy));
+        return Err(reads.refuse(*failure.refusal, failure.legacy));
     }
     // Only a changed manifest earns the retry: the same bytes describe the
     // same release, whose members did not match.
     let second = match reads.read_manifest(manifest, read) {
         Ok(second) if second != first => second,
-        _ => return Err(reads.refuse(failure.refusal, failure.legacy)),
+        _ => return Err(reads.refuse(*failure.refusal, failure.legacy)),
     };
     match attempt(manifest, context, &second, read, &mut reads) {
         Ok(snapshot) => Ok(reads.finish(snapshot)),
-        Err(failure) => Err(reads.refuse(failure.refusal, failure.legacy)),
+        Err(failure) => Err(reads.refuse(*failure.refusal, failure.legacy)),
     }
 }
 
 /// What one verification attempt refused.
 struct Failure {
-    refusal: Refusal,
+    // Boxed: a located refusal keeps its line's text, and the error stays small.
+    refusal: Box<Refusal>,
     /// A missing member or a digest mismatch: a publish may be in progress.
     retryable: bool,
     legacy: bool,
 }
 
 impl Failure {
-    const fn fatal(refusal: Refusal) -> Self {
-        Self { refusal, retryable: false, legacy: false }
+    fn fatal(refusal: Refusal) -> Self {
+        Self { refusal: Box::new(refusal), retryable: false, legacy: false }
     }
 }
 
@@ -478,17 +514,7 @@ impl Reads {
     }
 
     fn refuse_ref(&self, refusal: Refusal, legacy_format: bool) -> Box<SnapshotRefusal> {
-        Box::new(SnapshotRefusal {
-            code: refusal.code,
-            message: refusal.message,
-            file: refusal.file,
-            line: refusal.at.map(|(line, _)| line),
-            column: refusal.at.map(|(_, column)| column),
-            member: refusal.member,
-            legacy_format,
-            dependencies: self.dependencies.clone(),
-            candidates: self.candidates.clone(),
-        })
+        Box::new(SnapshotRefusal::of(refusal, legacy_format, self.dependencies.clone(), self.candidates.clone()))
     }
 
     fn refuse(self, refusal: Refusal, legacy_format: bool) -> Box<SnapshotRefusal> {
@@ -513,7 +539,7 @@ fn attempt(
 ) -> Result<VerifiedSnapshot, Failure> {
     let manifest_hash = content_hash(bytes);
     let manifest = manifest::read_v2(path, bytes.to_vec()).map_err(|refusal| match refusal {
-        ManifestRefusal::Format1(refusal) => Failure { refusal, retryable: false, legacy: true },
+        ManifestRefusal::Format1(refusal) => Failure { refusal: Box::new(refusal), retryable: false, legacy: true },
         ManifestRefusal::Invalid(refusal) => Failure::fatal(refusal),
     })?;
     let MemberSpec { files, lifecycle, functions } = manifest.members(path, context).map_err(Failure::fatal)?;
@@ -527,9 +553,11 @@ fn attempt(
         table.insert(member.path.clone(), bytes);
     }
     let revision = revision(&manifest, &files, &lifecycle, &functions);
+    let host_at = manifest.locate(&["host"]);
     let ReadManifestV2 { manifest: accepted, .. } = manifest;
     Ok(VerifiedSnapshot {
         host: accepted.host,
+        host_at,
         version: accepted.version,
         manifest: path.to_path_buf(),
         manifest_hash,
@@ -575,13 +603,13 @@ fn verify(
     reads: &mut Reads,
 ) -> Result<Arc<[u8]>, Failure> {
     let refuse = |message: String, retryable: bool| Failure {
-        refusal: Refusal {
+        refusal: Box::new(Refusal {
             code: HOST_REGISTRATION_CODE,
             file: manifest.to_path_buf(),
-            at: member.line.zip(member.column),
+            at: member.at.clone(),
             member: Some(member.field.clone()),
             message,
-        },
+        }),
         retryable,
         legacy: false,
     };

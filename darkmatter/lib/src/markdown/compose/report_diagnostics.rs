@@ -1090,12 +1090,12 @@ fn slot_record(
         None => (slot.origin.clone(), None),
     };
     let span = text.as_deref().and_then(|text| proven_slot_span(text, slot, span));
-    let position = span.as_ref().zip(text.as_deref()).map(|(span, text)| crate::markdown::span::line_col_of_offset(text, span.start));
+    let position = span.as_ref().zip(text.as_deref()).map(|(span, text)| crate::config::load::line_column(text, span.start));
     Diagnostic {
         source: Some(DiagnosticSource {
             file,
-            line: position.map(|(line, _)| line),
-            column: position.map(|(_, column)| column),
+            line: position.as_ref().map(|position| position.line),
+            column: position.as_ref().map(|position| position.column),
             section: None,
             inserted: false,
         }),

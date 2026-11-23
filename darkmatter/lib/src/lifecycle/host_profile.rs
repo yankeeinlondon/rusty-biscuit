@@ -70,7 +70,8 @@ use super::registry::{
 use crate::markdown::Frontmatter;
 use crate::markdown::compose::expression::host::FactsArtifact;
 use crate::markdown::compose::expression::host::artifact::{
-    array, describe, nullable, object, parse_strict, reject_unknown, required, required_in, sorted, string,
+    ReasonSite, array, describe, nullable, object, parse_strict, reason_site, reject_unknown, required, required_in, sorted,
+    string,
 };
 use crate::markdown::compose::expression::{Availability, BindingView, ScopeId, UnavailabilityReason};
 use crate::markdown::schemas::catalog::{CatalogHandle, GlobalCatalog};
@@ -262,8 +263,19 @@ impl HostLifecycleProfile {
         artifact_path: &Path,
         artifact: FactsArtifact<'_>,
     ) -> Result<Self, String> {
+        Self::from_artifact_located(catalog, catalog_hash, artifact_path, artifact).map_err(|(message, _)| message)
+    }
+
+    /// [`Self::from_artifact_at`], whose error also says where in the
+    /// artifact's text the reason is about, when it names a field.
+    pub(crate) fn from_artifact_located(
+        catalog: impl Into<CatalogHandle>,
+        catalog_hash: &str,
+        artifact_path: &Path,
+        artifact: FactsArtifact<'_>,
+    ) -> Result<Self, (String, Option<ReasonSite>)> {
         let file = format!("the lifecycle artifact `{}`", artifact_path.display());
-        read(catalog.into(), catalog_hash, artifact).map_err(|reason| format!("{file} {reason}"))
+        read(catalog.into(), catalog_hash, artifact).map_err(|reason| (format!("{file} {reason}"), reason_site(&reason)))
     }
 }
 

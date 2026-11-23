@@ -35,6 +35,7 @@
 //! User-facing guide: `darkmatter/docs/topics/host-registration.md`.
 
 pub mod bundle;
+mod locate;
 pub mod manifest;
 pub mod merge;
 pub mod namespaces;
@@ -47,8 +48,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext, PathIdentity, canonicalize_simplified};
-use serde_json::{Value, json};
+use serde_json::json;
 use simplified_schema::SchemaRoot;
+use simplified_schema::member_envelope::{MemberKind, admit_member_text};
 use simplified_schema::resolve::bundle::{self as resolve_bundle, BundleSources};
 use simplified_schema::triggers::assemble::{ResolvedPayload, resolve_registered_trigger_payload};
 use simplified_schema::triggers::{
@@ -58,9 +60,10 @@ use simplified_schema::yaml_documents::{RegisteredDefinition, RegisteredSource};
 
 use self::bundle::{BundleFunctionPair, BundleMember, VerifiedSnapshot};
 use self::namespaces::{NamespaceMember, PreparedCatalog};
-use super::load::{ConfigSnapshot, Registration, line_column};
+use super::load::{ConfigSnapshot, Registration, SourcePosition, line_column};
 use crate::lifecycle::host_profile::{self, HostLifecycleProfile};
 use crate::markdown::compose::expression::host::FactsArtifact;
+use crate::markdown::compose::expression::host::artifact::facts_reason_site;
 use crate::markdown::compose::expression::{
     Availability, BindingView, HostFunctions, HostGlobals, RuntimeBinding, ScopeId, Severity, UnavailabilityReason,
     is_reserved_namespace,
@@ -107,6 +110,10 @@ pub struct RegistrationDiagnostic {
     pub line: Option<usize>,
     /// 1-based character column, when [`Self::line`] is known.
     pub column: Option<usize>,
+    /// The line's text before [`Self::column`], when [`Self::line`] is
+    /// known: an editor counts the column in its own position encoding from
+    /// it (see [`SourcePosition::line_prefix`]).
+    pub line_prefix: Option<String>,
     /// The `register` entry refused.
     pub entry: Registration,
     /// The manifest field of the failing member (`lifecycle`, `files[1]`,
@@ -428,6 +435,7 @@ impl RegisteredHostProfile {
             file: document.to_path_buf(),
             line: None,
             column: None,
+            line_prefix: None,
             entry: self.entries.first().cloned().unwrap_or_else(|| Registration {
                 reference: self.manifest.path.display().to_string(),
                 index: 0,
@@ -577,7 +585,7 @@ impl HostClaim {
     }
 
     /// One [`HOST_REGISTRATION_CODE`] warning per conflicting claim, at its
-    /// manifest, naming the others; none for an agreed claim.
+    /// manifest's `host`, naming the others; none for an agreed claim.
     #[must_use]
     pub fn diagnostics(&self) -> Vec<RegistrationDiagnostic> {
         let Self::Conflict { host, claims } = self else {
@@ -596,7 +604,7 @@ impl HostClaim {
                 let refusal = Refusal {
                     code: HOST_REGISTRATION_CODE,
                     file: claim.manifest.path.clone(),
-                    at: None,
+                    at: claim.snapshot.host_position().cloned(),
                     member: None,
                     message: format!(
                         "claims host `{host}`, which {} also claims with different content; neither is used",
@@ -640,7 +648,7 @@ pub fn agreement(profiles: &[Arc<RegisteredHostProfile>]) -> Vec<HostClaim> {
 struct Refusal {
     code: &'static str,
     file: PathBuf,
-    at: Option<(usize, usize)>,
+    at: Option<SourcePosition>,
     member: Option<String>,
     message: String,
 }
@@ -659,8 +667,9 @@ impl Refusal {
                 self.message
             ),
             file: self.file,
-            line: self.at.map(|(line, _)| line),
-            column: self.at.map(|(_, column)| column),
+            line: self.at.as_ref().map(|at| at.line),
+            column: self.at.as_ref().map(|at| at.column),
+            line_prefix: self.at.map(|at| at.line_prefix),
             entry: entry.clone(),
             member: self.member,
         }
@@ -678,7 +687,7 @@ fn locate_manifest(entry: &Registration, context: &FileResolutionContext) -> Res
     let refuse = |message: String| Refusal {
         code: HOST_REGISTRATION_CODE,
         file: entry.declared_in.clone(),
-        at: entry.at,
+        at: entry.at.clone(),
         member: None,
         message,
     };
@@ -800,8 +809,8 @@ fn load_manifest(path: &Path, context: &FileResolutionContext, owned: &BTreeSet<
         watches.extend(refusal.dependencies.iter().map(|dependency| dependency.path.clone()));
         let refusal = Refusal {
             code: refusal.code,
+            at: refusal.position(),
             file: refusal.file,
-            at: refusal.line.zip(refusal.column),
             member: refusal.member,
             message: refusal.message,
         };
@@ -834,17 +843,7 @@ pub fn load_embedded(
     owned: &BTreeSet<String>,
     prepared: &dyn Fn(&str) -> Option<ResolvedPayload>,
 ) -> Result<RegisteredHostProfile, Vec<bundle::SnapshotRefusal>> {
-    let as_refusal = |refusal: Refusal| bundle::SnapshotRefusal {
-        code: refusal.code,
-        message: refusal.message,
-        file: refusal.file,
-        line: refusal.at.map(|(line, _)| line),
-        column: refusal.at.map(|(_, column)| column),
-        member: refusal.member,
-        legacy_format: false,
-        dependencies: Vec::new(),
-        candidates: Vec::new(),
-    };
+    let as_refusal = |refusal: Refusal| bundle::SnapshotRefusal::of(refusal, false, Vec::new(), Vec::new());
     if snapshot.embedded_bundle().is_none() {
         return Err(vec![as_refusal(Refusal {
             code: HOST_REGISTRATION_CODE,
@@ -883,15 +882,19 @@ pub fn prepare_embedded_payload(
     let name = snapshot.embedded_bundle().ok_or_else(|| "the snapshot is not embedded".to_string())?;
     let member = snapshot.files().iter().find(|member| member.path == path).ok_or_else(|| format!("`{path}` is not a member"))?;
     let text = member_text(snapshot, member).ok_or_else(|| format!("`{path}` is not UTF-8 text"))?;
-    if !matches!(member_kind(text, &member.location)?, MemberKind::Trigger) {
+    if !matches!(member_kind(text, &member.location).map_err(|refusal| refusal.message)?, MemberKind::Trigger) {
         return Ok(None);
     }
     let sources = BundleSources::embedded(name, snapshot.bytes().clone()).map_err(|error| error.to_string())?.with_revision(snapshot.revision());
     let context = embedded_context(snapshot);
     let anchor = anchored_at(&context, &member.location);
-    let (loaded, _) =
-        resolve_bundle::with(&sources, || load_trigger(member, text, &anchor, &context, owned, Some(name), &|_| None));
-    loaded.map(|trigger| Some(trigger.payload)).map_err(|refusal| refusal.message)
+    let texts = |location: &Path| verified_text(snapshot, location);
+    let (loaded, _) = resolve_bundle::with(&sources, || {
+        load_trigger(member, &anchor, &context, owned, Some(name), &|_| None, &texts)
+    });
+    let trigger = loaded.map_err(|refusal| refusal.message)?;
+    declared_types(&sources, member, text, &anchor, &texts, &mut Vec::new()).map_err(|refusal| refusal.message)?;
+    Ok(Some(trigger.payload))
 }
 
 /// The profile of `snapshot`, prepared in `context`.
@@ -968,7 +971,7 @@ struct Label {
     name: String,
     member: String,
     file: PathBuf,
-    at: Option<(usize, usize)>,
+    at: Option<SourcePosition>,
 }
 
 /// Classifies and prepares every member of `snapshot` from its verified
@@ -999,11 +1002,15 @@ fn prepare_members(
         }
     };
     let mut namespaces: Vec<&str> = Vec::new();
+    // Set when a member that is or might be a namespace was refused: the
+    // catalog would lack it, so no lifecycle artifact is checked against it.
+    let mut catalog_incomplete = false;
     let mut labels: Vec<Label> = Vec::new();
+    let texts = |location: &Path| verified_text(snapshot, location);
     let mut files: Vec<&BundleMember> = snapshot.files().iter().collect();
     files.sort_by(|left, right| left.path.cmp(&right.path));
     for member in files {
-        let refuse = |at: Option<(usize, usize)>, message: String| Refusal {
+        let refuse = |at: Option<SourcePosition>, message: String| Refusal {
             code: HOST_REGISTRATION_CODE,
             file: member.location.clone(),
             at,
@@ -1011,16 +1018,20 @@ fn prepare_members(
             message,
         };
         let Some(text) = member_text(snapshot, member) else {
+            // Reported at its manifest entry ([`related`]). Its kind is
+            // unknown, so it might have been a namespace.
+            catalog_incomplete = true;
             members.refusals.push(refuse(None, "the file is not UTF-8 text".to_string()));
             continue;
         };
         let anchor = anchored_at(context, &member.location);
         match member_kind(text, &member.location) {
             Ok(MemberKind::Trigger) => {
-                let (loaded, reads) =
-                    resolve_bundle::with(&sources, || load_trigger(member, text, &anchor, context, owned, embedded, prepared));
+                let (loaded, reads) = resolve_bundle::with(&sources, || {
+                    load_trigger(member, &anchor, context, owned, embedded, prepared, &texts)
+                });
                 members.missing.extend(reads.missing);
-                match loaded {
+                match loaded.and_then(|trigger| declared_types(&sources, member, text, &anchor, &texts, &mut members.missing).map(|()| trigger)) {
                     Ok(trigger) => {
                         if let Some(name) = &trigger.trigger.envelope.name {
                             labels.push(label(name, member, text));
@@ -1047,10 +1058,18 @@ fn prepare_members(
                     file: member.location.clone(),
                 };
                 let sameness = format!("{}\0{}", snapshot.revision(), member.path);
-                match prepared.and_then(|resolved| RegisteredDefinition::new(source, resolved, sameness)) {
-                    Ok(definition) => members.kinds.push(definition),
+                match prepared.and_then(|resolved| RegisteredDefinition::new(source, text, resolved, sameness)) {
+                    Ok(definition) => match declared_types(&sources, member, text, &anchor, &texts, &mut members.missing) {
+                        Ok(()) => members.kinds.push(definition),
+                        Err(refusal) => members.refusals.push(refusal),
+                    },
                     Err(error) => {
-                        members.refusals.push(refuse(None, format!("the YAML kind definition does not load: {error}")));
+                        let site = locate::schema_error(&error, &member.location, &texts);
+                        members.refusals.push(Refusal {
+                            file: site.file,
+                            at: site.at,
+                            ..refuse(None, format!("the YAML kind definition does not load: {error}"))
+                        });
                     }
                 }
             }
@@ -1060,17 +1079,41 @@ fn prepare_members(
                     if let Some(name) = name {
                         labels.push(label(&name, member, text));
                     }
-                    members.libraries.push(member.path.clone());
+                    match declared_types(&sources, member, text, &anchor, &texts, &mut members.missing) {
+                        Ok(()) => members.libraries.push(member.path.clone()),
+                        Err(refusal) => members.refusals.push(refusal),
+                    }
                 }
-                Err(message) => members.refusals.push(refuse(None, message)),
+                Err((at, message)) => members.refusals.push(refuse(at, message)),
             },
-            Err(message) => members.refusals.push(refuse(None, message)),
+            Err(refusal) => {
+                // A member refused before its kind was known (not YAML, no
+                // or an unknown `kind`) might have been a namespace.
+                catalog_incomplete |= refusal.kind.is_none_or(|kind| kind == MemberKind::Namespace);
+                members.refusals.push(refuse(refusal.at, refusal.message));
+            }
         }
     }
     members.refusals.extend(duplicate_labels(&labels));
 
     match namespaces::prepare_catalog(&sources, snapshot.bytes(), &namespaces, context) {
-        Ok(catalog) => members.catalog = Some(catalog),
+        Ok(_) if catalog_incomplete => {}
+        Ok(catalog) => {
+            // A namespace's unused declarations are checked once its payload
+            // prepared, and before the catalog or the lifecycle artifact
+            // checked against it is used.
+            let refused = members.refusals.len();
+            for member in snapshot.files().iter().filter(|member| namespaces.contains(&member.path.as_str())) {
+                let text = member_text(snapshot, member).unwrap_or_default();
+                let anchor = anchored_at(context, &member.location);
+                if let Err(refusal) = declared_types(&sources, member, text, &anchor, &texts, &mut members.missing) {
+                    members.refusals.push(refusal);
+                }
+            }
+            if members.refusals.len() == refused {
+                members.catalog = Some(catalog);
+            }
+        }
         Err(refusals) => members.refusals.extend(refusals.into_iter().map(|refusal| Refusal {
             code: HOST_REGISTRATION_CODE,
             member: snapshot.files().iter().find(|member| member.path == refusal.path).map(|member| member.field.clone()),
@@ -1091,47 +1134,140 @@ fn prepare_members(
             Err(refusal) => members.refusals.push(refusal),
         }
     }
+    members.refusals = members.refusals.into_iter().map(|refusal| related(snapshot, refusal)).collect();
     members
+}
+
+/// The bundle boundary applied to every declaration in `member`'s `types`
+/// table, used by its export or not
+/// ([`simplified_schema::resolve::check_declared_types`] inside the bundle's
+/// verified bytes): refused at the authored import or example reference
+/// that leaves the bundle or names no listed member, so the whole host is
+/// refused with it.
+fn declared_types(
+    sources: &BundleSources,
+    member: &BundleMember,
+    text: &str,
+    anchor: &FileResolutionContext,
+    texts: &locate::Texts<'_>,
+    missing: &mut Vec<PathBuf>,
+) -> Result<(), Refusal> {
+    let (checked, reads) = resolve_bundle::with(sources, || {
+        simplified_schema::resolve::check_declared_types(text, &member.location, anchor, crate::markdown::schemas::embedded::SHIPPED_SOURCES)
+    });
+    missing.extend(reads.missing);
+    checked.map(drop).map_err(|error| {
+        let site = locate::declared_type_error(&error, &member.location, texts);
+        Refusal {
+            code: HOST_REGISTRATION_CODE,
+            file: site.file,
+            at: site.at,
+            member: Some(member.field.clone()),
+            message: format!("a declared type does not resolve: {error}"),
+        }
+    })
+}
+
+/// Every member the manifest lists: `files`, the lifecycle artifact, then
+/// each function pair.
+fn listed(snapshot: &VerifiedSnapshot) -> impl Iterator<Item = &BundleMember> {
+    snapshot
+        .files()
+        .iter()
+        .chain(std::iter::once(snapshot.lifecycle()))
+        .chain(snapshot.functions().iter().flat_map(|pair| [&pair.catalog, &pair.facts]))
+}
+
+/// The verified text of the member read from `location`.
+fn verified_text<'a>(snapshot: &'a VerifiedSnapshot, location: &Path) -> Option<&'a str> {
+    listed(snapshot).find(|member| member.location == location).and_then(|member| member_text(snapshot, member))
+}
+
+/// `refusal` reported where its problem is: a problem located in another
+/// member (a library a trigger imports) is that member's refusal, and its
+/// message names the member that imported it. An unlocated problem in a
+/// member that is not text is reported at that member's manifest entry.
+fn related(snapshot: &VerifiedSnapshot, refusal: Refusal) -> Refusal {
+    let Some(importer) = refusal.member.as_deref().and_then(|field| listed(snapshot).find(|member| member.field == field)) else {
+        return refusal;
+    };
+    let Some(failed) = listed(snapshot).find(|member| member.location == refusal.file) else {
+        return refusal;
+    };
+    let refusal = if importer.location == failed.location {
+        refusal
+    } else {
+        Refusal {
+            member: Some(failed.field.clone()),
+            message: format!("imported by `{}` (`{}`): {}", importer.field, importer.path, refusal.message),
+            ..refusal
+        }
+    };
+    if refusal.at.is_none() && member_text(snapshot, failed).is_none() {
+        return Refusal { file: snapshot.manifest().to_path_buf(), at: failed.at.clone(), ..refusal };
+    }
+    refusal
 }
 
 fn member_text<'a>(snapshot: &'a VerifiedSnapshot, member: &BundleMember) -> Option<&'a str> {
     std::str::from_utf8(snapshot.member_bytes(&member.path)?).ok()
 }
 
-/// What a `files` member is, by its own `kind`.
-enum MemberKind {
-    Trigger,
-    YamlSchema,
-    Namespace,
-    Library,
+/// What a `files` member is, by its own `kind`, once its envelope passed
+/// the structural member admission Claudine's build runs too
+/// ([`simplified_schema::member_envelope`]); refused at the value of the
+/// field it names, or at the document's mapping when that field is absent.
+fn member_kind(text: &str, location: &Path) -> Result<MemberKind, MemberKindRefusal> {
+    let loaded = simplified_schema::yaml_documents::load_yaml_document(text, location).map_err(|error| MemberKindRefusal {
+        kind: None,
+        at: locate::schema_error(&error, location, &|path: &Path| (path == location).then_some(text)).at,
+        message: format!("the file is not one YAML mapping: {error}"),
+    })?;
+    admit_member_text(text).map(|admitted| admitted.kind).map_err(|refusal| {
+        let segments = match refusal.field {
+            Some(_) if refusal.absent => Some(Vec::new()),
+            Some(field) => Some(vec![field]),
+            None => None,
+        };
+        let at = segments.and_then(|segments| {
+            loaded
+                .byte_range(&simplified_schema::yaml_documents::locating_problem(&segments))
+                .map(|range| line_column(text, range.start))
+        });
+        MemberKindRefusal { kind: refusal.kind, at, message: refusal.message }
+    })
 }
 
-const MEMBER_KINDS: &str = "`schema-trigger`, `yaml-schema`, `namespace-schema`, or a types-only `schema` library";
-
-fn member_kind(text: &str, location: &Path) -> Result<MemberKind, String> {
-    let loaded = simplified_schema::yaml_documents::load_yaml_document(text, location)
-        .map_err(|error| format!("the file is not one YAML mapping: {error}"))?;
-    match loaded.json.get("kind").and_then(Value::as_str) {
-        Some("schema-trigger") => Ok(MemberKind::Trigger),
-        Some("yaml-schema") => Ok(MemberKind::YamlSchema),
-        Some("namespace-schema") => Ok(MemberKind::Namespace),
-        Some("schema") => Ok(MemberKind::Library),
-        Some(other) => Err(format!("its `kind` is `{other}`; a registered file is a {MEMBER_KINDS}")),
-        None => Err(format!("it declares no string `kind`; a registered file is a {MEMBER_KINDS}")),
-    }
+/// A member [`member_kind`] refused: the kind its `kind` named, when it
+/// named one, and where and why.
+struct MemberKindRefusal {
+    kind: Option<MemberKind>,
+    at: Option<SourcePosition>,
+    message: String,
 }
+
+/// A refusal's position in the member it is about, and why.
+type LocatedMessage = (Option<SourcePosition>, String);
 
 /// The display name of the types-only library `text`, once it proved to be
-/// one: `kind: schema` with a non-empty `types` table and no `$schema`.
-fn library(text: &str, location: &Path) -> Result<Option<String>, String> {
+/// one: `kind: schema` with a non-empty `types` table and no `$schema`; else
+/// where and why it is not.
+fn library(text: &str, location: &Path) -> Result<Option<String>, LocatedMessage> {
+    let at = |field: &str| locate::field(text, location, &[field.to_string()]);
     let document = simplified_schema::parse_standalone_schema_document(text, location)
-        .map_err(|error| format!("the type library is invalid: {error}"))?
-        .ok_or_else(|| "the file is not a schema document".to_string())?;
+        .map_err(|error| {
+            let site = locate::schema_error(&error, location, &|path: &Path| (path == location).then_some(text));
+            (site.at, format!("the type library is invalid: {error}"))
+        })?
+        .ok_or_else(|| (None, "the file is not a schema document".to_string()))?;
     if document.exports_schema {
-        return Err("a registered `kind: schema` file is a types-only library; it may not declare `$schema`".to_string());
+        return Err((
+            at("$schema"),
+            "a registered `kind: schema` file is a types-only library; it may not declare `$schema`".to_string(),
+        ));
     }
     if document.named_types().is_none_or(|types| types.properties.is_empty() && types.pattern_keys.is_empty()) {
-        return Err("a registered type library must declare a non-empty `types` table".to_string());
+        return Err((at("types"), "a registered type library must declare a non-empty `types` table".to_string()));
     }
     Ok(document.name)
 }
@@ -1157,7 +1293,7 @@ fn duplicate_labels(labels: &[Label]) -> Vec<Refusal> {
             (!others.is_empty()).then(|| Refusal {
                 code: HOST_REGISTRATION_CODE,
                 file: label.file.clone(),
-                at: label.at,
+                at: label.at.clone(),
                 member: Some(label.member.clone()),
                 message: format!("the name `{}` is also declared by {}; names are unique within a registration", label.name, others.join(", ")),
             })
@@ -1179,8 +1315,12 @@ fn load_lifecycle(snapshot: &VerifiedSnapshot, catalog: &PreparedCatalog) -> Res
         Some(text) => FactsArtifact::Text(text),
         None => FactsArtifact::Unreadable("the file is not UTF-8 text"),
     };
-    let lifecycle = HostLifecycleProfile::from_artifact_at(Arc::clone(&catalog.catalog), &catalog.hash, &member.location, artifact)
-        .map_err(refuse)?;
+    let lifecycle =
+        HostLifecycleProfile::from_artifact_located(Arc::clone(&catalog.catalog), &catalog.hash, &member.location, artifact)
+            .map_err(|(message, site)| Refusal {
+                at: member_text(snapshot, member).and_then(|text| locate::artifact(text, &member.location, site.as_ref())),
+                ..refuse(message)
+            })?;
     // The reader checks a root's syntax and reserved names, and `host_globals`
     // only when `global_catalog` attaches the catalog; registration admits a
     // root only when Darkmatter or one of the host's namespaces declares it.
@@ -1207,7 +1347,7 @@ fn load_lifecycle(snapshot: &VerifiedSnapshot, catalog: &PreparedCatalog) -> Res
         return Err(Refusal {
             code: HOST_REGISTRATION_CODE,
             file: snapshot.manifest().to_path_buf(),
-            at: None,
+            at: snapshot.host_position().cloned(),
             member: Some("host".to_string()),
             message: format!(
                 "the manifest names host `{}`, but its lifecycle artifact `{}` records host `{recorded}`",
@@ -1233,30 +1373,40 @@ fn load_functions(snapshot: &VerifiedSnapshot, pair: &BundleFunctionPair) -> Res
     let facts = snapshot.member_bytes(&pair.facts.path).map(|bytes| bytes.to_vec()).ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "the facts artifact is not a verified member")
     });
-    let set = host_function_set_at(&pair.catalog.location, text, &pair.facts.location, facts)
-        .map_err(|error| refuse(&pair.catalog, error.message))?;
+    let set = host_function_set_at(&pair.catalog.location, text, &pair.facts.location, facts).map_err(|error| Refusal {
+        at: error.span.as_ref().map(|span| line_column(text, span.start)),
+        ..refuse(&pair.catalog, error.message)
+    })?;
     let incomplete = set.incomplete_functions();
-    if !incomplete.is_empty() {
+    if let Some((function, reason)) = incomplete.first() {
         let reasons: Vec<String> = incomplete.iter().map(|(name, reason)| format!("`{name}`: {reason}")).collect();
-        return Err(refuse(&pair.facts, format!("its functions are incomplete: {}", reasons.join("; "))));
+        // Reported at the first incomplete function's problem.
+        let site = facts_reason_site(function, reason, &pair.facts.location);
+        return Err(Refusal {
+            at: member_text(snapshot, &pair.facts)
+                .and_then(|facts| locate::artifact(facts, &pair.facts.location, site.as_ref())),
+            ..refuse(&pair.facts, format!("its functions are incomplete: {}", reasons.join("; ")))
+        });
     }
     Ok(HostFunctionSet { catalog: pair.catalog.location.clone(), facts: pair.facts.location.clone(), functions: set })
 }
 
-/// The registered trigger `member` (text `text`), its payload resolved from
-/// its own folder inside the bundle and its conditions admitted against
-/// `owned`.
+/// The registered trigger `member`, read from `texts` (which serve every
+/// verified member, so a refusal in a file it imports is located there),
+/// its payload resolved from its own folder inside the bundle and its
+/// conditions admitted against `owned`.
 fn load_trigger(
     member: &BundleMember,
-    text: &str,
     anchor: &FileResolutionContext,
     context: &FileResolutionContext,
     owned: &BTreeSet<String>,
     embedded: Option<&str>,
     prepared: &dyn Fn(&str) -> Option<ResolvedPayload>,
+    texts: &locate::Texts<'_>,
 ) -> Result<RegisteredTrigger, Refusal> {
     let path = &member.location;
-    let refuse = |code: &'static str, at: Option<(usize, usize)>, message: String| Refusal {
+    let text = texts(path).unwrap_or_default();
+    let refuse = |code: &'static str, at: Option<SourcePosition>, message: String| Refusal {
         code,
         file: path.clone(),
         at,
@@ -1267,7 +1417,10 @@ fn load_trigger(
     let envelope: TriggerEnvelope = match parse_trigger_envelope_from_str(&text) {
         Ok(Some(envelope)) => envelope,
         Ok(None) => return Err(refuse(HOST_REGISTRATION_CODE, None, "the file is not a schema trigger (`kind: schema-trigger`)".to_string())),
-        Err(error) => return Err(refuse(HOST_REGISTRATION_CODE, None, format!("the trigger is invalid: {error}"))),
+        Err(error) => {
+            let at = locate::schema_error(&error, path, &|location: &Path| (location == path).then_some(&*text)).at;
+            return Err(refuse(HOST_REGISTRATION_CODE, at, format!("the trigger is invalid: {error}")));
+        }
     };
     let identifying = admit_identifying_trigger(&envelope.conditions, owned).map_err(|refusal| {
         let at = simplified_schema::yaml_documents::load_yaml_document(&text, path).ok().and_then(|loaded| {
@@ -1287,8 +1440,15 @@ fn load_trigger(
     // union, which the host's checked layer owns.
     let mut payload = match prepared(&member.path) {
         Some(payload) => payload,
-        None => resolve_registered_trigger_payload(&trigger, anchor, crate::markdown::schemas::embedded::SHIPPED_SOURCES)
-            .map_err(|error| refuse(HOST_REGISTRATION_CODE, None, format!("the trigger's payload does not load: {error}")))?,
+        None => resolve_registered_trigger_payload(&trigger, anchor, crate::markdown::schemas::embedded::SHIPPED_SOURCES).map_err(
+            |error| {
+                let site = locate::schema_error(&error, path, texts);
+                Refusal {
+                    file: site.file,
+                    ..refuse(HOST_REGISTRATION_CODE, site.at, format!("the trigger's payload does not load: {error}"))
+                }
+            },
+        )?,
     };
     // An embedded trigger resolved from its virtual path; from here on it is
     // known by its bundle identity, never as a file.

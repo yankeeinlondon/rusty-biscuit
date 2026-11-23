@@ -58,9 +58,8 @@ fn malformed_yaml_inside_the_fences_is_a_located_load_error() {
     assert_eq!((line, column), (3, 1), "located where the unclosed list ends: {message}");
 }
 
-/// The shared YAML loader locates a duplicate key at the mapping that holds
-/// it, line and column inside the block, as it does for a whole YAML
-/// document; the message names the key.
+/// The frontmatter loader locates a duplicate key at the mapping that holds
+/// it, line and column inside the block; the message names the key.
 #[test]
 fn a_duplicate_key_inside_the_fences_is_a_located_load_error() {
     let (rendered, line, column, message) = load_error("twice.md", "status: a\ntitle: T\nstatus: b\n");

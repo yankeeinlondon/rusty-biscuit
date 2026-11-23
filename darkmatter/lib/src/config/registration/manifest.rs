@@ -14,7 +14,7 @@ use simplified_schema::{SchemaError, SimplifiedSchema, ValidationFailure, Valida
 
 use super::bundle::{BundleFunctionPair, BundleMember};
 use super::{HOST_REGISTRATION_CODE, Refusal};
-use crate::config::load::line_column;
+use crate::config::load::{SourcePosition, line_column};
 
 /// The virtual path of the shipped manifest schema.
 pub const HOST_MANIFEST_SCHEMA_PATH: &str = crate::markdown::schemas::embedded::HOST_MANIFEST_SCHEMA_PATH;
@@ -49,12 +49,12 @@ fn prepare(source: &str) -> SimplifiedSchema {
         .unwrap_or_else(|error| panic!("the `{HOST_MANIFEST_TYPE}` type prepares: {error}"))
 }
 
-fn locate(loaded: &LoadedYaml, text: &str, segments: &[&str]) -> Option<(usize, usize)> {
+fn locate(loaded: &LoadedYaml, text: &str, segments: &[&str]) -> Option<SourcePosition> {
     let segments: Vec<String> = segments.iter().map(|segment| (*segment).to_string()).collect();
     loaded.byte_range(&locating_problem(&segments)).map(|range| line_column(text, range.start))
 }
 
-fn refusal(path: &Path, at: Option<(usize, usize)>, message: String) -> Refusal {
+fn refusal(path: &Path, at: Option<SourcePosition>, message: String) -> Refusal {
     Refusal { code: HOST_REGISTRATION_CODE, file: path.to_path_buf(), at, member: None, message }
 }
 
@@ -75,7 +75,7 @@ fn load_mapping(path: &Path, bytes: Vec<u8>) -> Result<(String, LoadedYaml), Ref
     })?;
     if !loaded.json.is_object() {
         let what = if loaded.json.is_null() { "is empty" } else { "is not a mapping" };
-        return Err(refusal(path, Some((1, 1)), format!("the manifest {what}; a `{HOST_MANIFEST_TYPE}` manifest is a mapping")));
+        return Err(refusal(path, Some(SourcePosition::START), format!("the manifest {what}; a `{HOST_MANIFEST_TYPE}` manifest is a mapping")));
     }
     Ok((text, loaded))
 }
@@ -101,12 +101,12 @@ fn judge(contract: &SimplifiedSchema, path: &Path, text: &str, loaded: &LoadedYa
 
 /// Where `problem` is: the offending key for an unknown one, else its value
 /// (a missing field's parent).
-fn problem_location(loaded: &LoadedYaml, text: &str, problem: &ValidationProblem) -> Option<(usize, usize)> {
+fn problem_location(loaded: &LoadedYaml, text: &str, problem: &ValidationProblem) -> Option<SourcePosition> {
     let mut segments: Vec<&str> = problem.instance_path.segments().iter().map(String::as_str).collect();
     if let Some(key) = unknown_key(problem) {
         segments.push(key);
     }
-    locate(loaded, text, &segments).or(Some((1, 1)))
+    locate(loaded, text, &segments).or(Some(SourcePosition::START))
 }
 
 fn unknown_key(problem: &ValidationProblem) -> Option<&str> {
@@ -207,7 +207,7 @@ fn format_1_refusal(path: &Path, text: &str, loaded: &LoadedYaml) -> Refusal {
     let at = std::iter::once("format_version")
         .chain(LEGACY_FIELDS)
         .find_map(|field| loaded.json.get(field).and_then(|_| locate(loaded, text, &[field])))
-        .or(Some((1, 1)));
+        .or(Some(SourcePosition::START));
     let repair = match loaded.json.get("host").and_then(Value::as_str).filter(|host| !host.is_empty()) {
         Some(host) => format!("run `{host} setup`, or update `{host}`, to publish a format 2 manifest"),
         None => "rerun the host program's setup, or update it, to publish a format 2 manifest".to_string(),
@@ -224,7 +224,7 @@ fn format_1_refusal(path: &Path, text: &str, loaded: &LoadedYaml) -> Refusal {
 
 impl ReadManifestV2 {
     /// The 1-based line and column of the value at `segments`.
-    pub fn locate(&self, segments: &[&str]) -> Option<(usize, usize)> {
+    pub fn locate(&self, segments: &[&str]) -> Option<SourcePosition> {
         locate(&self.loaded, &self.text, segments)
     }
 
@@ -275,7 +275,7 @@ impl ReadManifestV2 {
             let refuse = |message: String| Refusal {
                 code: HOST_REGISTRATION_CODE,
                 file: manifest.to_path_buf(),
-                at,
+                at: at.clone(),
                 member: Some(field.clone()),
                 message,
             };
@@ -306,8 +306,7 @@ impl ReadManifestV2 {
                 reference: authored.to_string(),
                 path,
                 location,
-                line: at.map(|(line, _)| line),
-                column: at.map(|(_, column)| column),
+                at,
                 digest: digest.clone(),
             });
         }

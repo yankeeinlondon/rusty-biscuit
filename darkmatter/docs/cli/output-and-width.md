@@ -361,7 +361,10 @@ that would need interactive approval fails the run instead of prompting.
 **Formatted outputs** write the deliverable to stdout, in the requested format.
 Everything else (warnings, a composition's problem report, `-v` summaries, `--perf`
 timings, lifecycle output) goes to stderr, styled according to what stderr itself
-supports.
+supports. A run-level warning or notice that has a source position (a host
+registration refused at a member's field, for example) starts with it, as
+`path:line:column:`, with the path written with forward slashes; one without a
+position is its message alone.
 
 **A report that is the deliverable** goes to stdout in the requested format. This
 is the case for commands run to produce a report: `md validate refs`,

@@ -404,7 +404,7 @@ use simplified_schema::SchemaError;
         let error = parse_trigger_envelope_from_str(&source)
             .expect_err("trigger match eager must be rejected");
         assert!(
-            matches!(error, SchemaError::TriggerForbiddenConstraint { ref property, ref constraint }
+            matches!(error, SchemaError::TriggerForbiddenConstraint { ref property, ref constraint, .. }
                 if property == "candidate" && constraint == "eager"),
             "{definition}: {error:?}",
         );

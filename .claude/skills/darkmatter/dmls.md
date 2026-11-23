@@ -640,7 +640,11 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `diagnostics/frontmatter.rs::host_diagnostics`; configuration-level ones
   (`HostRegistrations::diagnostics`) on the file each names by
   `router.rs::publish_registration_files` (merged into an open file's
-  refresh and `closed_file_diagnostics`). The router shows
+  refresh and `closed_file_diagnostics`). A `RegistrationDiagnostic`'s
+  `column` counts characters; `registration_range` encodes its kept
+  `line_prefix` (`config::load::SourcePosition`, filled wherever the loader
+  locates a problem in text it read) with `PositionEncoding::units`, never
+  `column - 1`, and nothing is read at publication. The router shows
   `host_config_notices` (`dm.config.missing` once per session,
   `dm.config.migration` once per file) as `window/showMessage`
   (`Router::show_config_notices`). Tests:

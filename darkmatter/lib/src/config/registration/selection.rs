@@ -242,6 +242,7 @@ impl RegisteredHosts {
                 file,
                 line: None,
                 column: None,
+                line_prefix: None,
                 entry,
                 member: None,
             });

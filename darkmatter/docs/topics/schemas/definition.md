@@ -969,7 +969,8 @@ The file is read as exactly one YAML document:
   (such as `9007199254740993`, which no `f64` holds exactly) are load
   errors (`SchemaError::SchemaDocument` naming the file, with the byte span
   of the failure: where the parser stops, the `---` that starts a second
-  document, or the non-string key itself, even in a file with an alias). Quote a key such as `1:` or
+  document, the second spelling of a duplicate key, or the non-string key
+  itself, even in a file with an alias). Quote a key such as `1:` or
   `true:` to keep it as text.
 
 ```yaml
@@ -1002,7 +1003,7 @@ platforms: []
 
 ### Kind Checks
 
-The three shipped kinds, which Simplified Schema defines and checks, have
+The four shipped kinds, which Simplified Schema defines and checks, have
 rules that their definitions cannot express, such as whether a trigger's
 `$path` glob is valid. Once a document satisfies its
 definition, these checks run on the same document and add their problems to
@@ -1013,11 +1014,32 @@ the same report:
 | `schema` | the schema document parses as a schema: category entries, categories that `category(...)` uses but `categories` does not declare, duplicate or disagreeing overloads; and every named-type import resolves. A [template](./schema-slots.md) is then resolved through the same read approval a document naming it gets, and the resolved schema is checked; a slot that is refused or fails is a `slots` record (exit 1) |
 | `schema-trigger` | the trigger grammar: each `$path` glob, an empty `match` list, a vacuous match, `min-match` count bounds, and match-safe conditions (see [Repository Trigger Schemas](#repository-trigger-schemas)) |
 | `yaml-schema` | its exported `$schema` prepares and claims a finite set of kinds |
+| `namespace-schema` | the preparation a host's [registration](../host-registration.md#namespace-schemas) runs: `description` and `types` are not written as `null`, `$schema` is one mapping, and it resolves with the file's private `types`. A namespace file is still never a `$schema` target of another document |
 
 A kind check is an error in the file itself, with the problem code
 `KindCheck` (diagnostic code `dm.schema.kind_check`), located at the node it
 is about. A document that fails its definition reports only the definition's
 problems, so nothing is reported twice.
+
+A declaration that does not resolve or parse is located at the declaration
+itself, in the section that wrote it (`$schema` or `types`), and inside a
+union at the failing arm. In this namespace file the problem's path is
+`/$schema/count/1` at line 6, not `/$schema`, the first arm, or `label`:
+
+```yaml
+kind: namespace-schema
+namespace: run
+$schema:
+    count:
+        - number
+        - Missing        # line 6: unknown named type `Missing`
+    label: string
+```
+
+The same holds for a declaration your file's definition rejects while it
+reads a `$schema` or `types` value: a trigger whose second root-union arm
+writes `gadget: string(requird)` reports `/$schema/1/gadget` at the token
+`requird`, not the whole `$schema`. The editor publishes the same positions.
 
 Kind checks judge meaning, never shape. The selected definition alone
 decides which keys a document may have and what type each value is, and the
@@ -1029,7 +1051,9 @@ shipped one (see [Schema Discovery](./schema-discovery.md)): with the root
 `schema-trigger.yaml`, a trigger with an extra `note: hi` key passes, and
 its `$path` globs are still checked. What a document imports (`Name@file`)
 is loaded directly and is still checked against the definitions built into
-the binary. A kind defined in your own
+the binary. So is a `namespace-schema` file's check, because it is the
+check registration runs, which judges the file against the built-in
+definition. A kind defined in your own
 `yaml-schema` has no kind checks: its definition is its whole contract.
 
 ```yaml
@@ -1195,7 +1219,8 @@ md schema validate schemas/roster.yaml data/platforms.yaml
 - **Load errors exit `1`.** A file that is not one admissible YAML document
   (malformed YAML, a duplicate key, a second document) is reported as "is not
   a valid YAML document" with its location, and in JSON with
-  `"error": "yaml_parse"` plus `line` and `column`. A `$schema` naming a file
+  `"error": "yaml_parse"` plus `line` and `column` (one-based, the column
+  counting characters, not bytes). A `$schema` naming a file
   that fails to load is a schema error of the document (`"error": "schema"`),
   not a load error.
 - **Selection errors exit `1`.** A kind claimed by two definitions, or by a

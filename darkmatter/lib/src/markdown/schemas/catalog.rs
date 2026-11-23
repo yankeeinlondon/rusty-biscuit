@@ -599,6 +599,11 @@ impl From<Arc<GlobalCatalog>> for CatalogHandle {
 pub struct HostFunctionCatalogError {
     pub path: std::path::PathBuf,
     pub message: String,
+    /// The rejected token's byte range in the catalog's text, when the
+    /// catalog loader located its failure ([`HostCatalogError::span`]).
+    ///
+    /// [`HostCatalogError::span`]: crate::markdown::compose::expression::HostCatalogError::span
+    pub span: Option<std::ops::Range<usize>>,
 }
 
 impl std::fmt::Display for HostFunctionCatalogError {
@@ -698,9 +703,9 @@ fn host_function_set_from(path: &Path, text: &str, facts_path: &Path, artifact: 
         return cached.result.clone();
     }
     discovery_probe::note_host_function_build();
-    let fail = |message: String| HostFunctionCatalogError { path: path.to_path_buf(), message };
-    let result = HostFunctionCatalog::load(text, path).map_err(|error| fail(error.to_string())).and_then(|catalog| {
-        HostFunctions::analysis_only_at(catalog, facts_path, artifact.artifact()).map_err(|error| fail(error.to_string()))
+    let fail = |message: String, span: Option<std::ops::Range<usize>>| HostFunctionCatalogError { path: path.to_path_buf(), message, span };
+    let result = HostFunctionCatalog::load(text, path).map_err(|error| fail(error.to_string(), error.span().cloned())).and_then(|catalog| {
+        HostFunctions::analysis_only_at(catalog, facts_path, artifact.artifact()).map_err(|error| fail(error.to_string(), None))
     });
     cache.insert(
         path.to_path_buf(),

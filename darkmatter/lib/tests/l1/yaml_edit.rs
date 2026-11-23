@@ -302,6 +302,17 @@ fn a_location_counts_the_byte_order_mark_in_its_offset() {
     assert_eq!(error.location.offset, "\u{feff}a: 1\n".len());
 }
 
+/// R4-F2.7: a column counts characters, so `é` and `🧪` before the problem
+/// each move it by one; the offset stays a byte offset.
+#[test]
+fn a_location_column_counts_characters() {
+    let source = "a: 1\ncafé🧪: x: y\n";
+    let error = refused(source, &[set("a", json!(2))]);
+    assert_eq!(error.kind, YamlEditErrorKind::Parse, "{error:?}");
+    assert_eq!((error.location.line, error.location.column), (2, 9), "{error:?}");
+    assert_eq!(error.location.offset, source.find(": y").unwrap(), "{error:?}");
+}
+
 #[test]
 fn a_root_that_is_not_a_mapping_is_refused() {
     let error = refused("# list\n- a\n", &[set("b", json!(2))]);

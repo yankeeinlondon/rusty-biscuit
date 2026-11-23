@@ -124,8 +124,8 @@ pub struct ConfigFile {
     effective: Value,
     defaults: Vec<AppliedDefault>,
     permissions: Result<PermissionsSetting, ConfigError>,
-    /// The 1-based line and column of the `permissions` value, when written.
-    permissions_at: Option<(usize, usize)>,
+    /// Where the `permissions` value is written, when it is.
+    permissions_at: Option<SourcePosition>,
     registrations: Vec<Registration>,
     findings: Vec<ConfigError>,
 }
@@ -196,9 +196,26 @@ pub struct Registration {
     pub declared_in: PathBuf,
     #[allow(missing_docs)]
     pub revision: ConfigRevision,
-    /// The 1-based line and character column of the entry in
-    /// [`Self::declared_in`], when known.
-    pub at: Option<(usize, usize)>,
+    /// Where the entry is written in [`Self::declared_in`], when known.
+    pub at: Option<SourcePosition>,
+}
+
+/// A 1-based line and character column in a file that was read.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SourcePosition {
+    #[allow(missing_docs)]
+    pub line: usize,
+    /// Counted in Unicode characters, a leading byte order mark excluded.
+    pub column: usize,
+    /// The line's text before [`Self::column`]: what an editor counts the
+    /// column from in its own unit (UTF-8 bytes, UTF-16 code units) without
+    /// reading the file again.
+    pub line_prefix: String,
+}
+
+impl SourcePosition {
+    /// The first character of a file.
+    pub const START: Self = Self { line: 1, column: 1, line_prefix: String::new() };
 }
 
 /// The valid registrations of the user file and the repository working
@@ -635,7 +652,7 @@ impl Observe<'_> {
                 (text, Some(loaded))
             }
         };
-        let locate = |pointer: &[String]| -> Option<(usize, usize)> {
+        let locate = |pointer: &[String]| -> Option<SourcePosition> {
             let loaded = loaded.as_ref()?;
             byte_range(loaded, pointer).map(|range| line_column(&text, range.start))
         };
@@ -652,7 +669,7 @@ impl Observe<'_> {
                         path,
                         revision,
                         "",
-                        Some((1, 1)),
+                        Some(SourcePosition::START),
                         format!("the configuration {what}; write `{{}}` for one that keeps every default"),
                     ),
                 ));
@@ -670,7 +687,7 @@ impl Observe<'_> {
                         problem.offending_properties.iter().collect()
                     };
                     if keys.is_empty() {
-                        root.push(problem_at(path, revision, "", Some((1, 1)), message(problem)));
+                        root.push(problem_at(path, revision, "", Some(SourcePosition::START), message(problem)));
                     }
                     for key in keys {
                         let at = std::slice::from_ref(key);
@@ -1016,8 +1033,8 @@ pub(crate) fn check_permissions_text(
     }
 }
 
-/// The 1-based line and column of the value at a path, when it has one.
-type Locate<'a> = dyn Fn(&[String]) -> Option<(usize, usize)> + 'a;
+/// Where the value at a path is written, when it has a position.
+type Locate<'a> = dyn Fn(&[String]) -> Option<SourcePosition> + 'a;
 
 /// Where a setting's problems are located.
 struct SettingContext<'a> {
@@ -1256,14 +1273,35 @@ fn byte_range(loaded: &LoadedYaml, segments: &[String]) -> Option<Range<usize>> 
     loaded.byte_range(&locating_problem(segments))
 }
 
-/// The 1-based line and character column of byte `offset` in `text`.
-pub(crate) fn line_column(text: &str, offset: usize) -> (usize, usize) {
+/// The position of byte `offset` in `text`: the convention of every
+/// published `line`/`column` (a `Diagnostic`'s `source`, a `path:line:col:`
+/// notice), whose column counts characters.
+pub fn line_column(text: &str, offset: usize) -> SourcePosition {
     let offset = offset.min(text.len());
     let before = &text[..text.floor_char_boundary(offset)];
     let line = before.matches('\n').count() + 1;
     let line_start = before.rfind('\n').map_or(0, |at| at + 1);
-    let column = before[line_start..].trim_start_matches('\u{feff}').chars().count() + 1;
-    (line, column)
+    let line_prefix = before[line_start..].trim_start_matches('\u{feff}');
+    SourcePosition { line, column: line_prefix.chars().count() + 1, line_prefix: line_prefix.to_string() }
+}
+
+/// The position a parser reported as a 1-based `line` and `column` in
+/// `text`, the column counted in characters (a YAML parser's) or, when
+/// `bytes`, in bytes (`serde_json`'s); `None` past the last line.
+pub(crate) fn reported_position(text: &str, line: usize, column: usize, bytes: bool) -> Option<SourcePosition> {
+    let start = match line {
+        0 | 1 => 0,
+        _ => text.match_indices('\n').nth(line - 2)?.0 + 1,
+    };
+    let rest = &text[start..];
+    let content = &rest[..rest.find('\n').unwrap_or(rest.len())];
+    let skipped = if start == 0 && !bytes { content.len() - content.trim_start_matches('\u{feff}').len() } else { 0 };
+    let within = if bytes {
+        column.saturating_sub(1).min(content.len())
+    } else {
+        content[skipped..].char_indices().nth(column.saturating_sub(1)).map_or(content.len(), |(at, _)| skipped + at)
+    };
+    Some(line_column(text, start + within))
 }
 
 fn pointer_of(segments: &[String]) -> String {
@@ -1274,15 +1312,15 @@ fn problem_at(
     path: &Path,
     revision: ConfigRevision,
     pointer: &str,
-    at: Option<(usize, usize)>,
+    at: Option<SourcePosition>,
     message: String,
 ) -> ConfigProblem {
     ConfigProblem {
         file: path.to_path_buf(),
         revision,
         pointer: pointer.to_string(),
-        line: at.map(|(line, _)| line),
-        column: at.map(|(_, column)| column),
+        line: at.as_ref().map(|at| at.line),
+        column: at.as_ref().map(|at| at.column),
         message,
     }
 }
@@ -1294,8 +1332,22 @@ mod tests {
     #[test]
     fn line_and_column_count_characters_and_skip_a_byte_order_mark() {
         let text = "\u{feff}a: 1\nbé: [x]\n";
-        assert_eq!(line_column(text, 3), (1, 1));
-        assert_eq!(line_column(text, text.find('[').unwrap()), (2, 5));
+        let at = |offset: usize| {
+            let position = line_column(text, offset);
+            (position.line, position.column, position.line_prefix)
+        };
+        assert_eq!(at(3), (1, 1, String::new()));
+        assert_eq!(at(text.find('[').unwrap()), (2, 5, "bé: ".to_string()));
+    }
+
+    #[test]
+    fn a_reported_position_is_read_in_its_parsers_unit() {
+        let text = "\u{feff}é: 1\n🧪 x: [y]\n";
+        let at = |line, column, bytes| reported_position(text, line, column, bytes).map(|position| (position.line, position.column));
+        assert_eq!(at(1, 3, false), Some((1, 3)), "characters, past the byte order mark");
+        assert_eq!(at(2, 6, true), Some((2, 3)), "bytes: `🧪 ` is five");
+        assert_eq!(at(2, 3, false), Some((2, 3)));
+        assert_eq!(at(9, 1, false), None);
     }
 
     #[test]

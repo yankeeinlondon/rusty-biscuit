@@ -30,8 +30,8 @@ use super::super::permissions::{PolicyLayer, lexically_normal};
 use super::super::schema::{ConfigScope, permissions_contract};
 use super::{
     ConfigDependency, ConfigError, ConfigErrorKind, ConfigFile, ConfigProblem, ConfigRevision, Observe,
-    PermissionsReference, PermissionsSetting, SettingContext, apply_defaults, byte_range, failure_problems,
-    line_column, problem_at,
+    PermissionsReference, PermissionsSetting, SettingContext, SourcePosition, apply_defaults, byte_range,
+    failure_problems, line_column, problem_at,
 };
 use crate::config::migration_receipt::content_hash;
 
@@ -71,7 +71,7 @@ impl Observe<'_> {
                 PolicyLayer::new(file.revision, file.path.clone(), file.path.clone(), block.clone())
             }
             PermissionsSetting::Reference(reference) => {
-                let source = Source { reference, revision: file.revision, at: file.permissions_at };
+                let source = Source { reference, revision: file.revision, at: file.permissions_at.clone() };
                 let (target, bytes) = self.follow(&source, place)?;
                 dependencies.push(ConfigDependency {
                     revision: file.revision,
@@ -233,7 +233,7 @@ pub(crate) fn follow_on_disk(
     };
     let portable = context.portable_variables();
     let observe = Observe { context, portable: &portable };
-    let source = Source { reference, revision: file.revision, at: file.permissions_at };
+    let source = Source { reference, revision: file.revision, at: file.permissions_at.clone() };
     let place = match (scope, context.repository_root()) {
         (ConfigScope::User, _) => Where::User,
         (ConfigScope::Repository, Some(root)) => Where::Worktree { root },
@@ -248,12 +248,12 @@ pub(crate) fn follow_on_disk(
 struct Source<'a> {
     reference: &'a PermissionsReference,
     revision: ConfigRevision,
-    at: Option<(usize, usize)>,
+    at: Option<SourcePosition>,
 }
 
 impl Source<'_> {
     fn problem(&self, message: String) -> ConfigProblem {
-        problem_at(&self.reference.declared_in, self.revision, "/permissions", self.at, message)
+        problem_at(&self.reference.declared_in, self.revision, "/permissions", self.at.clone(), message)
     }
 
     /// An error located at the reference, naming its target.

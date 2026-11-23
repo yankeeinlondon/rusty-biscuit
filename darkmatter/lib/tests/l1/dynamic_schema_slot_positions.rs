@@ -223,6 +223,16 @@ mod inline_document {
         assert_at(&case.compose_records(DOC), WRONG_SHAPE, &case.path(DOC), 4, 14, span);
     }
 
+    /// R4-F2.7: the column counts characters, so `é` and `🧪` before the
+    /// slot each move it by one, not by their UTF-8 width.
+    #[test]
+    fn the_column_counts_characters_before_the_slot() {
+        let case = Case::document("$schema:\n  os: enum(café, 🧪, {{ 123 }})\nos: café\n");
+        let span = nth_slot(&case.text(DOC), 0);
+        assert_at(&case.validate_records(DOC), WRONG_SHAPE, &case.path(DOC), 3, 21, span.clone());
+        assert_at(&case.compose_records(DOC), WRONG_SHAPE, &case.path(DOC), 3, 21, span);
+    }
+
     /// R1-F3.17: a second slot with the same expression in another property
     /// is located at its own bytes, never the first one's.
     #[test]

@@ -418,3 +418,50 @@ fn a_closed_document_schema_refuses_an_undeclared_key_over_a_registered_root_uni
     assert!(with_code(&diagnostics, REGISTRATION).is_empty(), "{diagnostics:#?}");
     fixture.shutdown();
 }
+
+/// A registration warning sits on a line whose earlier text is ASCII prose,
+/// `café`, or `🧪 café`. The library locates it by line and character
+/// column; each client receives that point counted in the encoding it
+/// negotiated (UTF-8 bytes or UTF-16 code units), on the unopened member and
+/// on the same member once it is open.
+#[test]
+fn a_registration_warning_is_published_in_each_clients_position_encoding() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    for prose in ["plain prose", "café", "🧪 café"] {
+        let types = format!("types: {{label: 'string -> {prose}', review-entry: 'string(example(./options.yaml))'}}\n");
+        let trigger = format!("{RELAY_TRIGGER}{types}");
+        let line = line_containing(&trigger, "review-entry");
+        let prefix = &types[..types.find("./options.yaml").unwrap()];
+        for (encoding, character) in [("utf-8", prefix.len()), ("utf-16", prefix.encode_utf16().count())] {
+            let case = format!("{prose} / {encoding}");
+            let workspace = LspWorkspace::new();
+            let root = workspace.path();
+            repository(root, &[".relay"]);
+            Bundle::relay().with_member("schemas/relay.yaml", &trigger).write_to(&root.join("home/.relay"));
+            let mut fixture = LspFixture::start(&workspace);
+            let mut params = initialize_params(root);
+            params["capabilities"]["general"]["positionEncodings"] = json!([encoding]);
+            let initialized = fixture.initialize(params);
+            assert_eq!(initialized["capabilities"]["positionEncoding"], json!(encoding), "{case}");
+            let expected = json!({ "line": line, "character": character });
+
+            let (document, _) = open_text(&mut fixture, &workspace, "notes/relay.md", MOTIVATING);
+            fixture.flush_server_with("textDocument/documentSymbol", json!({ "textDocument": { "uri": document.uri } }));
+            let closed = fixture.take_latest_diagnostics_ending("home/.relay/schemas/relay.yaml").expect("published on the member");
+            let closed = with_code(&closed, REGISTRATION);
+            assert_eq!(closed.len(), 1, "{case}: {closed:#?}");
+            assert_eq!(closed[0]["range"]["start"], expected, "{case}: unopened: {closed:#?}");
+
+            let member = url::Url::from_file_path(root.join("home/.relay/schemas/relay.yaml")).unwrap().to_string();
+            fixture.notify(
+                "textDocument/didOpen",
+                json!({ "textDocument": { "uri": member, "languageId": "yaml", "version": 1, "text": trigger } }),
+            );
+            let opened = fixture.wait_for_diagnostics(&member);
+            let opened = with_code(&opened, REGISTRATION);
+            assert_eq!(opened.len(), 1, "{case}: {opened:#?}");
+            assert_eq!(opened[0]["range"]["start"], expected, "{case}: opened: {opened:#?}");
+            fixture.shutdown();
+        }
+    }
+}

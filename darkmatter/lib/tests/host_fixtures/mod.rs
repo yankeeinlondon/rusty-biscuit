@@ -45,6 +45,23 @@ $schema:
     gadget: gadget@./library.yaml
 ";
 
+/// `gadget.yaml` with its condition in a nested `group` under `all`, shaped
+/// like Claudine's published inline-composition trigger, and the payload
+/// declaring the same `gadget` property, so a locator that loses the
+/// condition's path cannot land on the right line by accident.
+pub const GROUPED_GADGET_TRIGGER: &str = "\
+kind: schema-trigger
+match:
+    all:
+        - group:
+              - gizmo: string(required)
+              - gadget: string(required)
+        - none:
+              - sequence: string(required)
+$schema:
+    gadget: gadget@./library.yaml
+";
+
 pub const LIBRARY: &str = "\
 kind: schema
 types:

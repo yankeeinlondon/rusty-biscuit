@@ -122,8 +122,30 @@ trigger file when Darkmatter can find the node the failure is about:
 - for an envelope or `match` grammar failure whose message names a field,
   such as `` `match.all[0].$path` ``, the node at that field: the offending
   `$path` glob, the `count` of a `min-match`, or an empty `match` list;
-- for a vacuous match, a mapping that mixes combinators with property
-  conditions, or a forbidden constraint in a condition, the `match` value.
+- for a trigger that omits `match`, the trigger's mapping, at its first key
+  after any leading comments (a `match` written as `null` is reported at
+  that value);
+- for a property condition that does not parse or uses a constraint a match
+  may not (an imported type, a default), the condition's own value, however
+  deep in `all`, `group`, `none`, or `min-match` lists it sits, never the
+  payload property of the same name;
+- for a mapping that mixes combinators with property conditions, that
+  mapping;
+- for a vacuous match, the `match` value.
+
+For example, in this trigger the typo is reported at line 6, column 23,
+the value of the `kind` condition inside the `group`:
+
+```yaml
+kind: schema-trigger
+match:
+    all:
+        - group:
+              - prompt: string(required)
+              - kind: literal(inline-compose; requird)
+$schema:
+    kind: string
+```
 
 Any other envelope failure (an unknown top-level key) has no position.
 

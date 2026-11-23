@@ -221,8 +221,7 @@ fn a_valid_bundle_loads_into_one_verified_snapshot() {
 
     let second = &snapshot.files()[1];
     assert_eq!((second.field.as_str(), second.reference.as_str()), ("files[1]", "./schemas/b.yaml"));
-    assert_eq!(second.line, Some(line_of(&manifest_text, "- './schemas/b.yaml'")));
-    assert!(second.column.is_some());
+    assert_eq!(second.at.as_ref().map(|at| at.line), Some(line_of(&manifest_text, "- './schemas/b.yaml'")));
     assert_eq!(second.location, bundle.host().join("schemas/b.yaml"));
 
     let read: Vec<&Path> = snapshot.dependencies().iter().map(|dependency| dependency.path.as_path()).collect();

@@ -79,7 +79,7 @@ fn a_global_is_located_at_its_namespace_and_its_members_resolve() {
     let profile = &loaded.profiles[0];
     let run = profile.namespace("run").expect("`run` is declared");
     assert_eq!(run.location, fixture.path("host/schemas/run.yaml"));
-    assert_eq!(run.at, Some((2, 12)), "at the `namespace` value");
+    assert_eq!(run.at.as_ref().map(|at| (at.line, at.column)), Some((2, 12)), "at the `namespace` value");
     let global = profile.globals().global("run").expect("the `run` global");
     assert!(global.member("count").is_some(), "{:?}", global.definition());
     assert!(global.member("missing").is_none());
@@ -151,6 +151,8 @@ fn an_explicit_null_or_a_wrong_shape_in_the_envelope_is_refused_in_its_file() {
     for text in [
         "kind: namespace-schema\nnamespace: run\ndescription: null\n$schema:\n    count: number\n",
         "kind: namespace-schema\nnamespace: run\ntypes: null\n$schema:\n    count: number\n",
+        "kind: namespace-schema\nnamespace: run\ntypes:\n$schema:\n    count: number\n",
+        "kind: namespace-schema\nnamespace: run\ntypes: 7\n$schema:\n    count: number\n",
         "kind: namespace-schema\nnamespace: run\n$schema: null\n",
         "kind: namespace-schema\nnamespace: null\n$schema:\n    count: number\n",
         "kind: namespace-schema\nnamespace: run\n$schema: [count]\n",

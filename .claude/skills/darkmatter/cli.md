@@ -105,7 +105,7 @@ and raises a usage error (exit 2) for assignments or `--schema` with any YAML in
 baseline is loaded only when some input is not YAML. The YAML route
 (`validate.rs::validate_yaml`) loads with `simplified_schema::yaml_documents::LoadedYamlDocument::load` (failure
 → `FileOutcome::YamlLoadError`, record `error: "yaml_parse"` with
-`line`/`column`) and validates with `validate_loaded_yaml_document` (error →
+`line`/`column`, the column in characters via `config::load::line_column`) and validates with `validate_loaded_yaml_document` (error →
 record `error: "schema"`; `NoSchema` → the Markdown no-schema record); every
 failure exits 1, and the record's `error` tells them apart. A `KindCheck`
 problem's `kind` is `kind_check`. Wiring tests:

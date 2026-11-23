@@ -26,9 +26,10 @@ use biscuit_file::FileResolutionContext;
 use serde_json::{Value, json};
 use simplified_schema::resolve::bundle::{self, BundleSources};
 use simplified_schema::yaml_documents::{load_yaml_document, locating_problem};
-use simplified_schema::{PropertyAtom, PropertyDef, TypeExpr, parse_namespace_schema_document};
+use simplified_schema::resolve::NamespaceDocumentError;
+use simplified_schema::{PropertyAtom, PropertyDef, TypeExpr};
 
-use crate::config::load::line_column;
+use crate::config::load::{SourcePosition, line_column};
 use crate::markdown::compose::expression::binding::{NULL_ROOT, check_root};
 use crate::markdown::schemas::catalog::{DARKMATTER_GLOBALS, GlobalCatalog, GlobalDeclaration};
 
@@ -43,7 +44,7 @@ pub struct NamespaceMember {
     /// embedded bundle. A global's declaration and members are located here.
     pub location: PathBuf,
     /// 1-based line and column of the `namespace` value, when known.
-    pub at: Option<(usize, usize)>,
+    pub at: Option<SourcePosition>,
 }
 
 /// A host's global catalog with the inputs it was prepared from.
@@ -70,7 +71,7 @@ pub struct NamespaceRefusal {
     /// Where it was read.
     pub location: PathBuf,
     /// 1-based line and column, when known.
-    pub at: Option<(usize, usize)>,
+    pub at: Option<SourcePosition>,
     #[allow(missing_docs)]
     pub message: String,
 }
@@ -120,7 +121,7 @@ pub fn prepare_catalog(
     let mut digests = BTreeMap::new();
     for path in sorted {
         let location = sources.path_of(path).unwrap_or_else(|| sources.root().join(path));
-        let refuse = |at: Option<(usize, usize)>, message: String| NamespaceRefusal {
+        let refuse = |at: Option<SourcePosition>, message: String| NamespaceRefusal {
             path: path.to_string(),
             location: location.clone(),
             at,
@@ -137,7 +138,8 @@ pub fn prepare_catalog(
         digests.insert(path.to_string(), member_digest(bytes));
         match prepare_one(sources, members, path, &location, text, context, &mut digests) {
             Ok(entry) => prepared.push(entry),
-            Err((at, message)) => refusals.push(refuse(at, message)),
+            // The problem may be in a file the namespace imports.
+            Err((site, message)) => refusals.push(NamespaceRefusal { location: site.file, ..refuse(site.at, message) }),
         }
     }
 
@@ -155,7 +157,7 @@ pub fn prepare_catalog(
             refusals.push(NamespaceRefusal {
                 path: member.path.clone(),
                 location: member.location.clone(),
-                at: member.at,
+                at: member.at.clone(),
                 message: format!("namespace `{name}` is also declared by {}", others.join(", ")),
             });
         }
@@ -169,8 +171,9 @@ pub fn prepare_catalog(
     Ok(PreparedCatalog { catalog: Arc::new(GlobalCatalog::from_declarations(declarations)), namespaces, digests, hash })
 }
 
-/// A refusal of one namespace file: its position, when known, and why.
-type Refused = (Option<(usize, usize)>, String);
+/// A refusal of one namespace file: where its problem is (the namespace
+/// file, or a file it imports), and why.
+type Refused = (super::locate::Site, String);
 
 /// The member and declaration of the namespace file at `path`, recording in
 /// `digests` every bundled file its resolution read.
@@ -188,30 +191,11 @@ fn prepare_one(
             loaded.byte_range(&locating_problem(&[field.to_string()])).map(|range| line_column(text, range.start))
         })
     };
-    let document = match parse_namespace_schema_document(text, location) {
-        Ok(Some(document)) => document,
-        Ok(None) => return Err((None, "the file is not a namespace schema (`kind: namespace-schema`)".to_string())),
-        Err(error) => {
-            let at = match &error {
-                simplified_schema::SchemaError::SchemaDocument { span: Some(span), .. } => Some(line_column(text, span.start)),
-                _ => None,
-            };
-            return Err((at, format!("the namespace schema is invalid: {error}")));
-        }
-    };
-    let at = position("namespace");
-    let name = document.namespace.clone();
-    if let Err(error) = check_root(&name) {
-        return Err((at, format!("namespace `{name}` cannot be declared: {error}")));
-    }
-    if name == NULL_ROOT {
-        return Err((at, "namespace `null` cannot be declared: `null` is the null literal".to_string()));
-    }
-    if DARKMATTER_GLOBALS.iter().any(|global| global.name == name.as_str()) {
-        return Err((at, format!("namespace `{name}` cannot be declared: `{name}` is a Darkmatter global")));
-    }
-    let (resolved, reads) = bundle::with(sources, || {
-        simplified_schema::resolve::resolve_namespace_payload(
+    let here = |at: Option<SourcePosition>| super::locate::Site { file: location.to_path_buf(), at };
+    // The one namespace check `md schema validate` and DMLS run too; only
+    // the reserved-name rules below are this host's.
+    let (prepared, reads) = bundle::with(sources, || {
+        simplified_schema::resolve::prepare_namespace_document(
             text,
             location,
             context,
@@ -223,10 +207,48 @@ fn prepare_one(
             digests.insert(served.clone(), member_digest(bytes));
         }
     }
-    let resolved = resolved.map_err(|error| (position("$schema"), format!("the namespace's `$schema` does not resolve: {error}")))?;
-    let Some(simplified_schema::SchemaRoot::Single(shape)) = resolved.simplified else {
-        return Err((position("$schema"), "the namespace's `$schema` must be one object".to_string()));
+    let prepared = match prepared {
+        Ok(Some(prepared)) => prepared,
+        Ok(None) => return Err((here(None), "the file is not a namespace schema (`kind: namespace-schema`)".to_string())),
+        Err(error) => {
+            let texts = |file: &std::path::Path| {
+                if file == location {
+                    return Some(text);
+                }
+                members
+                    .iter()
+                    .find(|(member, _)| sources.path_of(member).as_deref() == Some(file))
+                    .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
+            };
+            let site = match &error {
+                NamespaceDocumentError::Invalid(error) | NamespaceDocumentError::Unresolved(error) => {
+                    super::locate::schema_error(error, location, &texts)
+                }
+                NamespaceDocumentError::NotOneObject => here(None),
+            };
+            // An unresolved payload with nothing more specific is reported at
+            // its `$schema`.
+            let site = match (&error, &site.at) {
+                (NamespaceDocumentError::Unresolved(_) | NamespaceDocumentError::NotOneObject, None) if site.file == location => {
+                    here(position("$schema"))
+                }
+                _ => site,
+            };
+            return Err((site, error.to_string()));
+        }
     };
+    let at = position("namespace");
+    let name = prepared.document.namespace.clone();
+    if let Err(error) = check_root(&name) {
+        return Err((here(at.clone()), format!("namespace `{name}` cannot be declared: {error}")));
+    }
+    if name == NULL_ROOT {
+        return Err((here(at.clone()), "namespace `null` cannot be declared: `null` is the null literal".to_string()));
+    }
+    if DARKMATTER_GLOBALS.iter().any(|global| global.name == name.as_str()) {
+        return Err((here(at), format!("namespace `{name}` cannot be declared: `{name}` is a Darkmatter global")));
+    }
+    let (document, shape, resolved) = (prepared.document, prepared.shape, prepared.resolved);
     let definition = PropertyDef::Single(PropertyAtom {
         ty: TypeExpr::InlineObject(shape),
         is_array: false,

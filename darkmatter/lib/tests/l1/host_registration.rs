@@ -216,16 +216,48 @@ fn a_second_type_library_is_a_valid_member() {
 fn a_member_that_is_no_registered_kind_is_refused_at_its_entry() {
     for (text, needle) in [
         ("kind: widget-thing\ntypes:\n    bolt: string\n", "its `kind` is `widget-thing`"),
-        ("types:\n    bolt: string\n", "declares no string `kind`"),
-        ("kind: [schema]\ntypes:\n    bolt: string\n", "declares no string `kind`"),
+        ("types:\n    bolt: string\n", "declares no `kind`"),
+        ("kind: [schema]\ntypes:\n    bolt: string\n", "`kind` must be a string"),
         ("kind: example\nvalue: 1\n", "its `kind` is `example`"),
         ("kind: schema\n$schema:\n    bolt: string\ntypes:\n    bolt: string\n", "may not declare `$schema`"),
         ("kind: schema\n$schema:\n    bolt: string\n", "may not declare `$schema`"),
-        ("kind: schema\ntypes: {}\n", "`/types`"),
+        ("kind: schema\ntypes: {}\n", "non-empty `types`"),
+        ("kind: schema\ntypes:\n    bolt: string\nextra: 1\n", "`extra` is not a field of a `kind: schema` member"),
     ] {
         let fixture = with_extra(text);
         let diagnostic = refused_at(&fixture.load(), &fixture.path("host/schemas/extra.yaml"), EXTRA_MEMBER);
         assert!(diagnostic.message.contains(needle), "{text}: {}", diagnostic.message);
+    }
+}
+
+/// A trigger's and a library's `types` keep their envelope rules through the
+/// later declared-type check: a trigger may write an empty table but never a
+/// blank or numeric one; a library needs a non-empty table. Each refusal is
+/// at the member's `types`.
+#[test]
+fn trigger_and_library_types_tables_keep_their_envelope_rules() {
+    const TRIGGER: &str = "kind: schema-trigger\nmatch:\n    bolt: string(required)\n";
+    let fixture = with_extra(&format!("{TRIGGER}types: {{}}\n"));
+    let loaded = fixture.load();
+    assert!(loaded.diagnostics.is_empty(), "an empty trigger table: {:#?}", loaded.diagnostics);
+    assert_eq!(loaded.profiles[0].triggers().len(), 3);
+    // A library's admitted `$schema: null` is the absent payload there too.
+    let loaded = with_extra("kind: schema\n$schema:\ntypes:\n    bolt: string\n").load();
+    assert!(loaded.diagnostics.is_empty(), "a library's null payload: {:#?}", loaded.diagnostics);
+    assert_eq!(loaded.profiles[0].libraries(), ["schemas/extra.yaml", "schemas/library.yaml"]);
+
+    for text in [
+        format!("{TRIGGER}types:\n"),
+        format!("{TRIGGER}types: null\n"),
+        format!("{TRIGGER}types: 7\n"),
+        "kind: schema\ntypes:\n".to_string(),
+        "kind: schema\ntypes: 7\n".to_string(),
+    ] {
+        let fixture = with_extra(&text);
+        let diagnostic = refused_at(&fixture.load(), &fixture.path("host/schemas/extra.yaml"), EXTRA_MEMBER);
+        let line = text.lines().position(|line| line.starts_with("types:")).unwrap() + 1;
+        assert_eq!(diagnostic.line, Some(line), "{text:?}: {diagnostic:#?}");
+        assert!(diagnostic.message.contains("`types`"), "{text:?}: {}", diagnostic.message);
     }
 }
 
@@ -328,7 +360,8 @@ fn a_label_shared_by_a_trigger_and_a_library_is_refused_on_both() {
 fn a_label_outside_the_name_pattern_is_refused() {
     let fixture = with_extra("name: Parts_List\nkind: schema\ntypes:\n    bolt: string\n");
     let diagnostic = refused_at(&fixture.load(), &fixture.path("host/schemas/extra.yaml"), EXTRA_MEMBER);
-    assert!(diagnostic.message.contains("`/name`"), "{}", diagnostic.message);
+    assert!(diagnostic.message.contains("`Parts_List` is not a kebab-case identifier"), "{}", diagnostic.message);
+    assert_eq!(diagnostic.line, Some(1), "located at `name`: {diagnostic:#?}");
 }
 
 // ── members, and what a refused entry watches ──────────────────────────────
@@ -521,6 +554,7 @@ fn distinct_manifests_with_different_content_conflict() {
     assert_eq!(diagnostics.len(), 2);
     assert!(diagnostics.iter().all(|diagnostic| diagnostic.code == HOST_REGISTRATION_CODE));
     assert_eq!(diagnostics[0].file, fixture.manifest());
+    assert_eq!((diagnostics[0].line, diagnostics[0].column), (Some(3), Some(7)), "at the manifest's `host`: {diagnostics:#?}");
     assert!(diagnostics[0].message.contains("copy"), "{}", diagnostics[0].message);
 }
 

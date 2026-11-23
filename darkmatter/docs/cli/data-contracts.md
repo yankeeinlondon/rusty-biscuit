@@ -230,7 +230,7 @@ result, so transclusion cannot shift it:
 |---|---|
 | `file` | the resolved path of the file that holds the problem; `null` for stdin |
 | `line` | the authored line, one-based; `null` when no authored position is proven, as for a document built in memory or a line counted in rewritten text |
-| `column` | the authored column, one-based and counting characters; `null` as for `line`, and for a problem whose producer knows only the line |
+| `column` | the authored column, one-based and counting characters; `null` as for `line`, and for a problem whose producer knows only the line. One exception: a frontmatter property that fails schema validation (a `dm.schema.*` validation problem, not a slot record) keeps the validator's UTF-8 byte column (a `😀` before the node counts as 4), as described in [Problem Locations](../topics/schemas/definition.md#problem-locations) |
 | `section` | the composed anchor slug of the innermost heading at or before the problem; absent above the first heading, and on diagnostics that do not compute it |
 | `inserted` | `true` when an expression, a shell step, or a `replace:` value created the reference, so `line` and `column` point at the construct that created it |
 
@@ -1023,9 +1023,8 @@ or the position map cannot prove one:
   example: `b: x` on the next line is reported as `/b` with no position. A
   guessed position is never reported in its place. A parser error in such a
   file keeps the parser's line and column.
-- **A duplicate key** is located at the start of the mapping that holds it, not
-  at the second key: `a: 1` then `a: 2` at the top of a file is line 1,
-  column 1, with no pointer.
+- **A duplicate key** is located at its second spelling: `a: 1` then `a: 2`
+  at the top of a file is line 2, column 1, with no pointer.
 
 These are always located, because they are problems in the YAML itself, not
 contract mismatches:

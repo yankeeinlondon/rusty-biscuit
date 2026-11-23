@@ -41,7 +41,7 @@ use crate::overlay::named_types::AuthoredDeclaration;
 use crate::overlay::schema::MetaSchemaKind;
 use crate::providers::DocumentContext;
 use crate::providers::frontmatter::ExpressionValue;
-use crate::source_map::SourceMap;
+use crate::source_map::{PositionEncoding, SourceMap};
 use crate::workspace::file_path_to_uri;
 
 /// All frontmatter/schema diagnostics for the current document, reading
@@ -171,7 +171,7 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     }
 
     if let SuggestionState::TriggerWarning(finding) = &overlay.suggestions {
-        let span = trigger_yaml_span(ctx.text, finding.cause()).unwrap_or(0..ctx.text.len());
+        let span = trigger_error_range(ctx.text, finding.cause());
         let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
         out.push(invalid_trigger_diagnostic_at(finding, range));
     }
@@ -179,7 +179,7 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     // Only a document whose `kind` names the trigger envelope, and that its
     // selected definition has not judged, carries this error.
     if let SuggestionState::TriggerError(error) = &overlay.suggestions {
-        let span = trigger_yaml_span(ctx.text, error).unwrap_or(0..ctx.text.len());
+        let span = trigger_error_range(ctx.text, error);
         out.push(diagnostic(
             ctx.source_map
                 .byte_range_to_lsp(span)
@@ -197,18 +197,25 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
 /// A configuration-level host registration warning (a refused entry, a
 /// same-host conflict), published on the file it names at its line and
 /// column, or at the top when it has none.
-pub(crate) fn registration_diagnostic(found: &darkmatter::config::registration::RegistrationDiagnostic) -> Diagnostic {
-    let range = match found.line {
-        Some(line) => {
-            let start = lsp_types::Position {
-                line: u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX),
-                character: u32::try_from(found.column.unwrap_or(1).saturating_sub(1)).unwrap_or(u32::MAX),
-            };
-            Range { start, end: start }
-        }
-        None => zero_range(),
-    };
+pub(crate) fn registration_diagnostic(
+    found: &darkmatter::config::registration::RegistrationDiagnostic,
+    encoding: PositionEncoding,
+) -> Diagnostic {
+    let range = registration_range(found, encoding).unwrap_or_else(zero_range);
     diagnostic(range, registration_severity(found), source::SCHEMA, found.code, found.message.clone())
+}
+
+/// The zero-width range at a registration warning's position in the file
+/// it names. Its column is a character count; the protocol column is the
+/// line text before it, which the loader kept from the bytes it read,
+/// counted in `encoding`.
+fn registration_range(
+    found: &darkmatter::config::registration::RegistrationDiagnostic,
+    encoding: PositionEncoding,
+) -> Option<Range> {
+    let line = u32::try_from(found.line?.saturating_sub(1)).unwrap_or(u32::MAX);
+    let start = Position::new(line, found.line_prefix.as_deref().map_or(0, |prefix| encoding.units(prefix)));
+    Some(Range { start, end: start })
 }
 
 fn registration_severity(found: &darkmatter::config::registration::RegistrationDiagnostic) -> DiagnosticSeverity {
@@ -232,16 +239,7 @@ fn host_diagnostics(
     for found in view.diagnostics() {
         let severity = registration_severity(found);
         let here = found.file == ctx.path;
-        let range = match (here, found.line) {
-            (true, Some(line)) => {
-                let start = lsp_types::Position {
-                    line: u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX),
-                    character: u32::try_from(found.column.unwrap_or(1).saturating_sub(1)).unwrap_or(u32::MAX),
-                };
-                Range { start, end: start }
-            }
-            _ => zero_range(),
-        };
+        let range = here.then(|| registration_range(found, ctx.source_map.encoding())).flatten().unwrap_or_else(zero_range);
         let message = match (here, found.line) {
             (true, _) => found.message.clone(),
             (false, Some(line)) => format!("{} ({}:{line})", found.message, found.file.display()),
@@ -1872,6 +1870,21 @@ pub(crate) fn diagnostic(
 /// characters of the source with any initial BOM removed, so the column is
 /// walked in characters here and the source map converts the byte span into
 /// the negotiated position encoding.
+/// Where a trigger file's own `error` is in its `text`: the parser's line
+/// and column, else the node the error names
+/// ([`simplified_schema::triggers::envelope::trigger_error_span`], so a
+/// nested `match` condition is found at its value), and the whole document
+/// only when neither exists.
+fn trigger_error_range(text: &str, error: &SchemaError) -> std::ops::Range<usize> {
+    let error = match error {
+        SchemaError::TriggerLoad { source, .. } => source,
+        other => other,
+    };
+    trigger_yaml_span(text, error)
+        .or_else(|| simplified_schema::triggers::envelope::trigger_error_span(text, error))
+        .unwrap_or(0..text.len())
+}
+
 fn trigger_yaml_span(text: &str, error: &SchemaError) -> Option<std::ops::Range<usize>> {
     let (line, column) = match error {
         SchemaError::TriggerEnvelopeYaml { line: Some(line), column, .. } => (*line, column.unwrap_or(1)),

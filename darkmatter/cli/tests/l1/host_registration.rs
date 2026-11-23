@@ -218,6 +218,153 @@ fn a_lifecycle_binding_no_namespace_declares_refuses_the_host_at_the_binding_in_
     assert!(refusals[0]["message"].as_str().is_some_and(|message| message.contains("binds `typo_root`")), "{value:#}");
 }
 
+/// A malformed member the widget trigger imports (an unknown type in the
+/// library) is reported at the failed declaration in the library, with the
+/// same position in a data output's record and before a formatted
+/// warning's message.
+#[test]
+fn a_malformed_imported_member_is_located_in_both_output_families() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let library = crate::host_fixtures::LIBRARY.replace("number ->", "numbr ->");
+    let (line, column) = library
+        .lines()
+        .enumerate()
+        .find_map(|(index, text)| text.find("\"numbr").map(|at| (index as u64 + 1, at as u64 + 1)))
+        .expect("the edit is in the library");
+    let bundle = acme().with_member("schemas/library.yaml", &library);
+    let fixture = registered_bundle("host-located-member", &bundle, false);
+
+    let data = run(&fixture, &["schema", "validate", "notes.md", "--output", "json"]);
+    let formatted = run(&fixture, &["schema", "validate", "notes.md"]);
+
+    let value = data_value(&data, include_str!("../../schemas/output/schema-validate.yaml"));
+    // The library is refused for itself and for its importer, both at the
+    // failed declaration.
+    let refusals = records(&value, REGISTRATION);
+    assert_eq!(refusals.len(), 2, "{value:#}");
+    for refusal in &refusals {
+        let source = &refusal["source"];
+        let file = source["file"].as_str().expect("the refusal names a file");
+        assert!(std::path::Path::new(file).ends_with(".acme/schemas/library.yaml"), "in the library: {value:#}");
+        assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(line), Some(column)), "{value:#}");
+    }
+    let stderr = stderr_of(&formatted);
+    assert!(formatted.status.success(), "{stderr}");
+    assert_eq!(stderr.matches("is not loaded").count(), 2, "one warning per refusal: {stderr}");
+    let located = format!(".acme/schemas/library.yaml:{line}:{column}: host registration");
+    assert!(stderr.contains(&located), "led by `{located}`: {stderr}");
+}
+
+/// A registered trigger whose condition in a nested `group` fails its type
+/// grammar is reported at that condition's value, not at the payload's
+/// property of the same name.
+#[test]
+fn a_failing_grouped_match_condition_is_located_at_its_value() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let trigger = crate::host_fixtures::GROUPED_GADGET_TRIGGER.replacen("gadget: string(required)", "gadget: string(requird)", 1);
+    let (line, column) = trigger
+        .lines()
+        .enumerate()
+        .find_map(|(index, text)| text.find("string(requird)").map(|at| (index as u64 + 1, at as u64 + 1)))
+        .expect("the edit is in the trigger");
+    let bundle = acme().with_member("schemas/gadget.yaml", &trigger);
+    let fixture = registered_bundle("host-located-condition", &bundle, false);
+
+    let data = run(&fixture, &["schema", "validate", "notes.md", "--output", "json"]);
+
+    let value = data_value(&data, include_str!("../../schemas/output/schema-validate.yaml"));
+    let refusals = records(&value, REGISTRATION);
+    assert_eq!(refusals.len(), 1, "{value:#}");
+    let source = &refusals[0]["source"];
+    let file = source["file"].as_str().expect("the refusal names a file");
+    assert!(std::path::Path::new(file).ends_with(".acme/schemas/gadget.yaml"), "in the trigger: {value:#}");
+    assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(line), Some(column)), "{value:#}");
+}
+
+/// A registered trigger whose payload is a bare unlisted file reference,
+/// with the same path repeated in its description, is reported at the
+/// `$schema` carrier in a data output's record and before a formatted
+/// warning's message, never at the description.
+#[test]
+fn an_unlisted_payload_reference_repeated_in_prose_is_located_at_its_carrier() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let trigger = crate::host_fixtures::GADGET_TRIGGER
+        .replacen("kind: schema-trigger\n", "kind: schema-trigger\ndescription: Settings may come from ./options.yaml.\n", 1)
+        .replacen("$schema:\n    gadget: gadget@./library.yaml\n", "$schema: ./options.yaml\n", 1);
+    let (line, column) = trigger
+        .lines()
+        .enumerate()
+        .find_map(|(index, text)| text.strip_prefix("$schema: ").map(|_| (index as u64 + 1, "$schema: ".len() as u64 + 1)))
+        .expect("the edit is in the trigger");
+    let bundle = acme().with_member("schemas/gadget.yaml", &trigger);
+    let fixture = registered_bundle("host-located-carrier", &bundle, false);
+    fixture.write_file("home/.acme/schemas/options.yaml", "kind: schema\ntypes:\n    Options: string\n");
+
+    let data = run(&fixture, &["schema", "validate", "notes.md", "--output", "json"]);
+    let formatted = run(&fixture, &["schema", "validate", "notes.md"]);
+
+    let value = data_value(&data, include_str!("../../schemas/output/schema-validate.yaml"));
+    let refusals = records(&value, REGISTRATION);
+    assert_eq!(refusals.len(), 1, "{value:#}");
+    let source = &refusals[0]["source"];
+    assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(line), Some(column)), "{value:#}");
+    let stderr = stderr_of(&formatted);
+    let located = format!(".acme/schemas/gadget.yaml:{line}:{column}: host registration");
+    assert!(stderr.contains(&located), "led by `{located}`: {stderr}");
+}
+
+/// A registered trigger whose unused `types` import follows a sibling
+/// declaration whose description names the same file is reported at the
+/// import, in a data output's record and before a formatted warning's
+/// message, never at the sibling's description.
+#[test]
+fn an_unlisted_import_after_a_sibling_description_is_located_at_the_import() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let trigger = format!(
+        "{}types:\n    review-setting: 'string -> Read options from ./options.yaml.'\n    review-entry: Options@./options.yaml\n",
+        crate::host_fixtures::GADGET_TRIGGER
+    );
+    let (line, column) = trigger
+        .lines()
+        .enumerate()
+        .find_map(|(index, text)| text.find("@./options.yaml").map(|at| (index as u64 + 1, at as u64 + 2)))
+        .expect("the import is in the trigger");
+    let bundle = acme().with_member("schemas/gadget.yaml", &trigger);
+    let fixture = registered_bundle("host-located-sibling", &bundle, false);
+    fixture.write_file("home/.acme/schemas/options.yaml", "kind: schema\ntypes:\n    Options: string\n");
+
+    let data = run(&fixture, &["schema", "validate", "notes.md", "--output", "json"]);
+    let formatted = run(&fixture, &["schema", "validate", "notes.md"]);
+
+    let value = data_value(&data, include_str!("../../schemas/output/schema-validate.yaml"));
+    let refusals = records(&value, REGISTRATION);
+    assert_eq!(refusals.len(), 1, "{value:#}");
+    let source = &refusals[0]["source"];
+    assert_eq!((source["line"].as_u64(), source["column"].as_u64()), (Some(line), Some(column)), "{value:#}");
+    let stderr = stderr_of(&formatted);
+    let located = format!(".acme/schemas/gadget.yaml:{line}:{column}: host registration");
+    assert!(stderr.contains(&located), "led by `{located}`: {stderr}");
+}
+
+/// A registered trigger that omits `match` is refused in a formatted
+/// warning led by the mapping that lacks it, never by the file alone.
+#[test]
+fn a_trigger_without_match_is_rendered_at_its_mapping() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let trigger = "# The gadget trigger.\n\nkind: schema-trigger\n$schema:\n    gadget: gadget@./library.yaml\n";
+    let bundle = acme().with_member("schemas/gadget.yaml", trigger);
+    let fixture = registered_bundle("host-missing-match", &bundle, false);
+
+    let formatted = run(&fixture, &["schema", "validate", "notes.md"]);
+
+    let stderr = stderr_of(&formatted);
+    assert!(formatted.status.success(), "{stderr}");
+    assert_eq!(stderr.matches("is not loaded").count(), 1, "one warning: {stderr}");
+    let located = ".acme/schemas/gadget.yaml:3:1: host registration";
+    assert!(stderr.contains(located), "led by `{located}`: {stderr}");
+    assert!(stderr.contains("`match`"), "names the missing field: {stderr}");
+}
+
 #[test]
 fn selecting_a_host_never_migrates_a_repository_legacy_policy_file() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
@@ -351,6 +498,29 @@ fn schema_validate_judges_a_yaml_document_by_a_registered_hosts_kind() {
     let problems: Vec<&str> = files[0]["problems"].as_array().unwrap().iter().filter_map(|problem| problem["path"].as_str()).collect();
     assert_eq!(problems, ["/platforms"], "{value:#}");
     assert_eq!(files[1]["valid"], true, "{value:#}");
+}
+
+/// A blank `types:` on the registered definition is no named types: `md`
+/// loads the host, so its trigger judges the widget and its kind judges the
+/// crew, with no registration warning; the same text validates standalone.
+#[test]
+fn a_blank_types_table_on_a_registered_kind_keeps_the_host() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let definition = format!("{ROSTER}types:\n");
+    let fixture = registered_bundle("host-yaml-blank-types", &acme().with_file("schemas/roster.yaml", &definition), false);
+    fixture.write_file("cwd/crew.yaml", "kind: roster\nplatforms: [linux]\n");
+    fixture.write_file("cwd/roster-definition.yaml", &definition);
+
+    let output = run(&fixture, &["schema", "validate", "--output", "json", "widget.md", "crew.yaml", "roster-definition.yaml"]);
+
+    assert_eq!(output.status.code(), Some(1), "the widget is invalid: {}", String::from_utf8_lossy(&output.stdout));
+    let value = data_value(&output, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert_eq!(value.get("diagnostics").map_or(0, registration_records), 0, "the host loads: {value:#}");
+    let files = value["files"].as_array().expect("one record per file");
+    let problems: Vec<&str> = files[0]["problems"].as_array().unwrap().iter().filter_map(|problem| problem["path"].as_str()).collect();
+    assert_eq!(problems, ["/widget/size"], "the host's trigger applies: {value:#}");
+    assert_eq!(files[1]["valid"], true, "the host's kind applies: {value:#}");
+    assert_eq!(files[2]["valid"], true, "the definition validates standalone: {value:#}");
 }
 
 #[test]

@@ -92,6 +92,101 @@ fn a_kind_semantic_check_failure_exits_1_as_a_kind_check_record() {
     assert_eq!((problems[0]["line"].as_u64(), problems[0]["column"].as_u64()), (Some(4), Some(12)));
 }
 
+// ── Namespace files: checked as a host's registration prepares them ────────
+
+/// Claudine's published `loop` namespace, unedited.
+const PUBLISHED_NAMESPACE: &str = include_str!("../../../../claudine/registration/loop.yaml");
+
+#[test]
+fn control_an_unedited_published_namespace_validates_as_itself() {
+    let process = CliProcessFixture::new();
+    let doc = write(&process, "loop.yaml", PUBLISHED_NAMESPACE);
+
+    process
+        .command()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("is valid based on its definition built-in simplified-schema/schemas/namespace-schema.yaml"));
+}
+
+#[test]
+fn a_namespace_with_a_null_description_or_an_undeclared_type_exits_1_at_the_field() {
+    for (text, path, line, needle) in [
+        ("kind: namespace-schema\nnamespace: thing\ndescription:\n$schema: {}\n", "/description", 3, "must not be null"),
+        ("kind: namespace-schema\nnamespace: thing\n$schema:\n    item: Missing\n", "/$schema/item", 4, "unknown named type `Missing`"),
+    ] {
+        let process = CliProcessFixture::new();
+        let doc = write(&process, "thing.yaml", text);
+        let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{}", stdout_of(&output));
+        let record = json_record(&output);
+        let problems = record["problems"].as_array().unwrap();
+        assert_eq!(problems.len(), 1, "{record}");
+        assert_eq!(problems[0]["kind"], "kind_check", "{record}");
+        assert_eq!(problems[0]["path"], path, "{record}");
+        assert_eq!(problems[0]["line"].as_u64(), Some(line), "{record}");
+        assert!(problems[0]["message"].as_str().unwrap().contains(needle), "{record}");
+    }
+}
+
+/// A declaration that fails inside a union arm is reported at that arm,
+/// not at the carrier or a valid sibling: an unresolved type in a
+/// namespace's second property arm (kind check), and a constraint typo in a
+/// trigger payload's second root-union arm (the definition's parse), at the
+/// parser's rejected token.
+#[test]
+fn a_failure_inside_a_union_arm_exits_1_at_that_arm() {
+    for (name, text, path, needle) in [
+        (
+            "thing.yaml",
+            "kind: namespace-schema\nnamespace: thing\n$schema:\n    count:\n        - number\n        - Missing\n    label: string\n",
+            "/$schema/count/1",
+            "Missing\n",
+        ),
+        (
+            "gadget.yaml",
+            "kind: schema-trigger\nmatch:\n    gadget: string(required)\n$schema:\n    - gadget: string(required)\n    - gadget: string(requird)\n",
+            "/$schema/1/gadget",
+            "requird)",
+        ),
+    ] {
+        let process = CliProcessFixture::new();
+        let doc = write(&process, name, text);
+        let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{}", stdout_of(&output));
+        let record = json_record(&output);
+        let problems = record["problems"].as_array().unwrap();
+        assert_eq!(problems.len(), 1, "{record}");
+        assert_eq!(problems[0]["path"], path, "{record}");
+        let offset = text.find(needle).unwrap();
+        let line = text[..offset].matches('\n').count() + 1;
+        let column = offset - text[..offset].rfind('\n').map_or(0, |at| at + 1) + 1;
+        assert_eq!(
+            (problems[0]["line"].as_u64(), problems[0]["column"].as_u64()),
+            (Some(line as u64), Some(column as u64)),
+            "{record}"
+        );
+    }
+}
+
+#[test]
+fn a_document_naming_a_namespace_as_its_schema_is_still_refused() {
+    let process = CliProcessFixture::new();
+    write(&process, "loop.yaml", PUBLISHED_NAMESPACE);
+    let doc = write(&process, "service.yaml", "$schema: ./loop.yaml\ncount: 1\n");
+
+    process
+        .command()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("has a schema definition error"))
+        .stdout(predicate::str::contains("namespace-schema"));
+}
+
 /// A checkout copy of the shipped definition `shipped` at its
 /// repository-relative path `relative`, with its root closure removed, is
 /// the selected definition: `document` passes it (exit `0`), and so does
@@ -386,6 +481,20 @@ fn malformed_yaml_exits_1_located_and_reported_as_yaml_parse() {
     let record = json_record(&output);
     assert_eq!(record["error"], "yaml_parse");
     assert_eq!((record["line"].as_u64(), record["column"].as_u64()), (Some(2), Some(1)));
+}
+
+/// R4-F2.7: the load error's column counts characters, so `é` and `🧪`
+/// before the problem each move it by one, not by their UTF-8 width.
+#[test]
+fn malformed_yaml_column_counts_characters() {
+    let process = CliProcessFixture::new();
+    let doc = write(&process, "broken.yaml", "ok: 1\ncafé🧪: x: y\n");
+
+    let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let record = json_record(&output);
+    assert_eq!(record["error"], "yaml_parse", "{record:#}");
+    assert_eq!((record["line"].as_u64(), record["column"].as_u64()), (Some(2), Some(9)), "{record:#}");
 }
 
 #[test]

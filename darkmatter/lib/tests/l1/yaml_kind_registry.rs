@@ -206,6 +206,46 @@ fn a_types_table_entry_named_extends_is_an_ordinary_declaration() {
     }
 }
 
+/// A local definition's optional `types` table, by shape, as the direct
+/// check of the definition and the local kind lookup judge it: absent,
+/// blank or `null` (no named types), and populated are a valid definition
+/// claiming its kind; numeric and empty are invalid at `/types` and claim
+/// it broken.
+#[test]
+fn a_local_definition_s_optional_types_table_keeps_one_rule_in_both_tiers() {
+    const ROSTER: &str = "kind: yaml-schema\n$schema:\n    kind: literal(roster; required)\n    platforms: string[](required)\n";
+    for (types, valid) in [
+        ("", true),
+        ("types:\n", true),
+        ("types: null\n", true),
+        ("types:\n    platform: string\n", true),
+        ("types: 7\n", false),
+        ("types: {}\n", false),
+    ] {
+        let text = format!("{ROSTER}{types}");
+        let fixture = Fixture::new();
+        let definition = fixture.package().join("schemas/roster.yaml");
+        write(&definition, &text);
+        let document = fixture.package().join("docs/roster.yaml");
+        let context = fixture.context(&document, &[]);
+
+        let schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(darkmatter::markdown::schemas::shipped_kind_registry());
+        let direct = validated(schemas.validate_yaml_document(&text, &definition));
+        assert_eq!(direct.route, Route::Kind("yaml-schema".into()), "{types:?}");
+        let paths: Vec<&str> = direct.report.problems.iter().map(|problem| problem.path.as_str()).collect();
+        if valid {
+            assert!(paths.is_empty(), "{types:?}: {:?}", direct.report.problems);
+            assert_eq!(healthy_source(&registry(&context), "roster"), DefinitionSource::File(definition.clone()), "{types:?}");
+            let selected = validated(fixture.validate(&document, "kind: roster\nplatforms: [linux]\n"));
+            assert_eq!(selected.route, Route::Kind("roster".into()), "{types:?}");
+            assert!(selected.report.valid, "{types:?}: {:?}", selected.report.problems);
+        } else {
+            assert!(!paths.is_empty() && paths.iter().all(|path| *path == "/types"), "{types:?}: {:?}", direct.report.problems);
+            assert!(!matches!(registry(&context).claim("roster"), Some(Claim::Healthy(_))), "{types:?}: no healthy claim");
+        }
+    }
+}
+
 #[test]
 fn a_registry_built_outside_a_repository_holds_the_shipped_kinds_only() {
     let fixture = Fixture::new();
@@ -554,6 +594,29 @@ fn a_kind_definition_holding_a_slot_is_a_broken_claim_with_the_slot_code() {
         assert_eq!(own.report.problems[0].code, ValidationProblemCode::KindCheck, "{case}");
         assert!(own.report.problems[0].message.contains("a kind definition cannot hold"), "{case}: {:?}", own.report.problems);
     }
+}
+
+/// A local definition whose `kind` claim goes through a named type too
+/// broad to claim a finite set is incomplete, its failure spanning the
+/// `kind` declaration in `$schema`; its own check reports that declaration
+/// at the same position, the path a registered copy is refused at.
+#[test]
+fn a_named_kind_claim_that_claims_nothing_is_incomplete_and_located_at_its_declaration() {
+    let fixture = Fixture::new();
+    let definition = fixture.repo().join("schemas/token.yaml");
+    let text = "kind: yaml-schema\n$schema:\n    kind: kind-token(required)\n    name: string\ntypes:\n    kind-token: string\n";
+    write(&definition, text);
+    let registry = registry(&fixture.context(&fixture.package().join("a.yaml"), &[]));
+    let [incomplete] = registry.incomplete() else { panic!("{:#?}", registry.incomplete()) };
+    assert_eq!(incomplete.file, definition);
+    let declaration = text.find("kind-token(required)").unwrap();
+    let SchemaError::SchemaDocument { span, .. } = incomplete.problem.as_ref() else { panic!("{:?}", incomplete.problem) };
+    assert_eq!(span.as_ref().map(|span| span.start), Some(declaration), "{:?}", incomplete.problem);
+
+    let own = validated(fixture.validate(&definition, text));
+    let [problem] = own.report.problems.as_slice() else { panic!("{:?}", own.report.problems) };
+    assert_eq!(problem.path, "/$schema/kind");
+    assert_eq!(problem.line.zip(problem.column), Some((3, 11)), "{problem:?}");
 }
 
 #[test]

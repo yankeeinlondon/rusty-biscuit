@@ -558,6 +558,100 @@ fn position(value: &Value, field: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("has `{field}` {} instead of a non-negative integer", describe(value)))
 }
 
+// ── where a reason points ───────────────────────────────────────────────────
+
+/// What a reader reason (the facts artifact's here, the lifecycle
+/// artifact's in [`crate::lifecycle::host_profile`], both written with the
+/// helpers above) is about in the artifact's text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReasonSite {
+    /// The value at these JSON pointer segments; an absent field is reported
+    /// at the object that lacks it.
+    Field(Vec<String>),
+    /// The parser's own 1-based line and column, for text that is not JSON.
+    Position(usize, usize),
+}
+
+/// Where `reason`, a reason of one of the strict artifact readers without
+/// its leading file phrase, is about: the inverse of the field-naming forms
+/// the readers write (`has no `x` field`, `has `events[0].name` a number
+/// instead of a string`, `records catalog hash …`). `None` for a reason
+/// naming no field (a registration the registry refuses).
+pub(crate) fn reason_site(reason: &str) -> Option<ReasonSite> {
+    if reason.starts_with("is not valid JSON") || reason.starts_with("has content after its JSON value") {
+        // `serde_json` ends its message with ` at line L column C`.
+        let (_, at) = reason.rsplit_once(" at line ")?;
+        let (line, column) = at.split_once(" column ")?;
+        return Some(ReasonSite::Position(line.trim().parse().ok()?, column.trim().parse().ok()?));
+    }
+    let ticked: Vec<&str> = reason.split('`').skip(1).step_by(2).collect();
+    let field = |text: &str| ReasonSite::Field(field_segments(text));
+    let first = ticked.first().copied();
+    let site = if reason.starts_with("is ") {
+        ReasonSite::Field(Vec::new())
+    } else if reason.starts_with("records catalog hash") {
+        field("catalog_hash")
+    } else if reason.starts_with("binds host global") {
+        field(ticked.get(1)?)
+    } else if reason.starts_with("gives Darkmatter event") {
+        field(ticked.last()?)
+    } else if reason.starts_with("lists Darkmatter event") || reason.starts_with("does not list every Darkmatter event") {
+        field("events")
+    } else if reason.starts_with("has an entry for") {
+        ReasonSite::Field(vec!["functions".to_string(), first?.to_string()])
+    } else if reason.starts_with("lists ") || reason.starts_with("records no fact") || reason.starts_with("records a fact") {
+        field("facts")
+    } else if reason.starts_with("has unknown field") {
+        field(first?)
+    } else if let Some(owner) = reason.strip_prefix('`').and_then(|rest| rest.split_once("` has unknown field `")) {
+        ReasonSite::Field([field_segments(owner.0), field_segments(owner.1.trim_end_matches('`'))].concat())
+    } else if reason.starts_with("has no `") {
+        let mut segments = field_segments(first?);
+        segments.pop();
+        ReasonSite::Field(segments)
+    } else if reason.starts_with("has `") || reason.starts_with("has unknown `") || reason.starts_with("has an empty `") || reason.starts_with("records `") {
+        field(first?.split(':').next().unwrap_or_default())
+    } else {
+        return None;
+    };
+    Some(site)
+}
+
+/// `events[0].globals.declarations[1].root` as pointer segments.
+fn field_segments(field: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    for part in field.split('.') {
+        let (name, mut indexes) = part.split_once('[').map_or((part, ""), |(name, rest)| (name, rest));
+        if !name.is_empty() {
+            segments.push(name.to_string());
+        }
+        while let Some((index, rest)) = indexes.split_once(']') {
+            segments.push(index.to_string());
+            indexes = rest.strip_prefix('[').unwrap_or(rest);
+        }
+    }
+    segments
+}
+
+/// Where a facts artifact reason about catalog function `function` (one of
+/// [`HostFunctions::incomplete_functions`]) is about in the facts artifact
+/// read at `path`: a whole-file reason at its field, an entry reason under
+/// `functions.<function>`, and a missing entry at `functions`.
+pub(crate) fn facts_reason_site(function: &str, reason: &str, path: &Path) -> Option<ReasonSite> {
+    let file = format!("the facts artifact `{}` ", path.display());
+    if let Some(reason) = reason.strip_prefix(&file) {
+        return reason_site(reason);
+    }
+    if let Some(reason) = reason.strip_prefix("its facts artifact entry ") {
+        let entry = vec!["functions".to_string(), function.to_string()];
+        return Some(match reason_site(reason) {
+            Some(ReasonSite::Field(segments)) => ReasonSite::Field([entry, segments].concat()),
+            _ => ReasonSite::Field(entry),
+        });
+    }
+    (reason == "the facts artifact has no entry for it").then(|| ReasonSite::Field(vec!["functions".to_string()]))
+}
+
 // ── strict JSON ─────────────────────────────────────────────────────────────
 
 /// Parses `text` as one JSON value, rejecting a duplicate object key
@@ -570,6 +664,51 @@ pub(crate) fn parse_strict(text: &str) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_field_naming_reason_form_points_at_its_field() {
+        let field = |segments: &[&str]| Some(ReasonSite::Field(segments.iter().map(|segment| (*segment).to_string()).collect()));
+        for (reason, expected) in [
+            ("is not valid JSON: EOF while parsing an object at line 3 column 1", Some(ReasonSite::Position(3, 1))),
+            ("has content after its JSON value: trailing characters at line 1 column 4", Some(ReasonSite::Position(1, 4))),
+            ("is an array instead of an object", field(&[])),
+            ("has no `format_version` field", field(&[])),
+            ("has no `outcome_pair` field (write `null` for none)", field(&[])),
+            ("has no `events[2].globals` field", field(&["events", "2"])),
+            ("has no `events[0].position` for host event `x`", field(&["events", "0"])),
+            ("has `effects: null`", field(&["effects"])),
+            ("has `events[0].globals.declarations[1].root` a number instead of a string", field(&["events", "0", "globals", "declarations", "1", "root"])),
+            ("has `outcome_pair.downgrades[0][1]` a number instead of a string", field(&["outcome_pair", "downgrades", "0", "1"])),
+            ("has unknown field `extra`", field(&["extra"])),
+            ("`events[1]` has unknown field `extra`", field(&["events", "1", "extra"])),
+            ("has unknown `format_version` 3; this reader understands 2", field(&["format_version"])),
+            ("records catalog hash `00`, but the loaded catalog's hash is `11`; regenerate the artifact", field(&["catalog_hash"])),
+            ("binds host global `stray` (`host_globals[1]`), which no namespace of the host's catalog declares", field(&["host_globals", "1"])),
+            ("gives Darkmatter event `composed` a position or role at `events[3]`", field(&["events", "3"])),
+            ("lists Darkmatter event `composed` twice", field(&["events"])),
+            ("does not list every Darkmatter event", field(&["events"])),
+            ("has an entry for `stray`, which the catalog does not declare", field(&["functions", "stray"])),
+            ("has `lazy: true`; host functions are evaluated eagerly", field(&["lazy"])),
+            ("has an empty `source_exclusions[0].kinds`; an exclusion names at least one kind", field(&["source_exclusions", "0", "kinds"])),
+            ("lists 2 facts; a function registers at most one", field(&["facts"])),
+            ("records no fact, but the catalog declares one for `value`", field(&["facts"])),
+            ("records `facts[0].position` 1, but `value` is at position 0 in the catalog", field(&["facts", "0", "position"])),
+            ("records a registration the registry refuses: boom", None),
+        ] {
+            assert_eq!(reason_site(reason), expected, "{reason}");
+        }
+    }
+
+    #[test]
+    fn a_facts_reason_is_placed_in_the_whole_file_or_under_its_function() {
+        let path = Path::new("f.json");
+        let field = |segments: &[&str]| Some(ReasonSite::Field(segments.iter().map(|segment| (*segment).to_string()).collect()));
+        assert_eq!(facts_reason_site("a", "the facts artifact `f.json` has no `catalog_hash` field", path), field(&[]));
+        assert_eq!(facts_reason_site("a", "its facts artifact entry has `lazy` 1 instead of a boolean", path), field(&["functions", "a", "lazy"]));
+        assert_eq!(facts_reason_site("a", "its facts artifact entry does not register: boom", path), field(&["functions", "a"]));
+        assert_eq!(facts_reason_site("a", "the facts artifact has no entry for it", path), field(&["functions"]));
+        assert_eq!(facts_reason_site("a", "something else", path), None);
+    }
 
     #[test]
     fn the_strict_parser_rejects_duplicate_keys_at_any_depth_and_trailing_content() {

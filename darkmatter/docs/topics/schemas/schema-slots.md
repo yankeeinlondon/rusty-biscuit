@@ -962,7 +962,9 @@ observation is withheld.
 
 A failed slot is reported at the slot, in the file it is written in. The
 record's `source.file`, `line`, and `column` and its `span` (byte offsets in
-that file) point at the slot's `{{ … }}` as you wrote it:
+that file) point at the slot's `{{ … }}` as you wrote it. `line` and `column`
+are one-based and the column counts characters, as every record's does: in
+`os: enum(café, {{ 123 }})` the slot starts at column 16, not 17.
 
 | The slot is written in | The record names |
 | --- | --- |

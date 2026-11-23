@@ -371,7 +371,8 @@ mod failures {
     }
 
     fn slot_position(text: &str) -> (usize, usize) {
-        crate::markdown::span::line_col_of_offset(text, text.find("{{").unwrap())
+        let position = crate::config::load::line_column(text, text.find("{{").unwrap());
+        (position.line, position.column)
     }
 
     #[test]
@@ -420,9 +421,9 @@ mod failures {
         assert!(host.evaluations().is_empty());
         let record = &slot_resolution_diagnostics(&error, &texts(&root))[0];
         assert_eq!(record.code, SLOT_FORBIDDEN_BINDING_CODE);
-        let expected = crate::markdown::span::line_col_of_offset(schema, schema.find("fm.platforms").unwrap());
+        let expected = crate::config::load::line_column(schema, schema.find("fm.platforms").unwrap());
         let source = record.source.as_ref().unwrap();
-        assert_eq!((source.line, source.column), (Some(expected.0), Some(expected.1)));
+        assert_eq!((source.line, source.column), (Some(expected.line), Some(expected.column)));
     }
 
     #[test]

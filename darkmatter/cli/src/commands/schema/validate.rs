@@ -672,7 +672,10 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
         Ok(document) => document,
         Err(err) => {
             let location = match &err {
-                SchemaError::SchemaDocument { span: Some(span), .. } => Some(simplified_schema::line_col_of_offset(&text, span.start)),
+                SchemaError::SchemaDocument { span: Some(span), .. } => {
+                    let position = darkmatter::config::load::line_column(&text, span.start);
+                    Some((position.line, position.column))
+                }
                 _ => None,
             };
             let message = match err {
@@ -729,15 +732,17 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
 /// constraints and template types) through the run's slot session, after
 /// one batched approval of the reads they name, then every import the
 /// result needs. A YAML document that is not a schema file has nothing to
-/// resolve.
+/// resolve, and a namespace file is never a schema target: its kind check
+/// already resolved it as a host's registration does.
 ///
 /// ## Errors
 ///
 /// A slot that was refused or failed, or a returned definition or import
 /// that does not resolve: the check is unavailable, never a success.
 fn resolve_schema_file(api: &DarkmatterSchemas, path: &Path, text: &str) -> Result<(), SchemaError> {
-    if !matches!(simplified_schema::parse_standalone_schema_document(text, path), Ok(Some(_))) {
-        return Ok(());
+    match simplified_schema::parse_standalone_schema_document(text, path) {
+        Ok(Some(document)) if document.envelope != simplified_schema::StandaloneSchemaEnvelope::NamespaceSchema => {}
+        _ => return Ok(()),
     }
     // A handler that cannot answer leaves the reads undecided, which the
     // resolution reports as approval-required.

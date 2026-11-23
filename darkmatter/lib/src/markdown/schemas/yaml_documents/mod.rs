@@ -366,7 +366,10 @@ impl YamlContract {
     /// [`declaration_key`](LoadedYamlDocument::declaration_key) of the
     /// document this contract was prepared from, against the prepared
     /// schema, then (only when the schema reports nothing) runs its kind's
-    /// checks over the copy the schema accepted. Passive unless
+    /// checks over the copy the schema accepted; when it reports a problem
+    /// at a kind's `$schema` or `types` carrier whose declaration does not
+    /// parse, the problem is narrowed to the failing declaration
+    /// ([`LoadedYamlDocument::locate_declaration_problems`]). Passive unless
     /// [`Self::checks_read_files`].
     #[must_use]
     pub fn validate(&self, document: &LoadedYamlDocument) -> YamlValidation {
@@ -382,13 +385,16 @@ impl YamlContract {
             map.shift_remove("$schema");
         }
         let mut report = self.effective.validate_data(&instance, &loaded.positions);
-        if report.valid
-            && let Route::Kind(kind) = &self.route
+        if let Route::Kind(kind) = &self.route
             && simplified_schema::yaml_documents::CHECKED_KINDS.contains(&kind.as_str())
         {
-            let accepted = self.effective.data_copy(&instance);
-            report.problems = document.kind_checks(kind, &accepted, &self.schema_roots, &self.context, SHIPPED_SOURCES);
-            report.valid = report.problems.is_empty();
+            if report.valid {
+                let accepted = self.effective.data_copy(&instance);
+                report.problems = document.kind_checks(kind, &accepted, &self.schema_roots, &self.context, SHIPPED_SOURCES);
+                report.valid = report.problems.is_empty();
+            } else {
+                document.locate_declaration_problems(kind, &mut report.problems);
+            }
         }
         YamlValidation {
             route: self.route.clone(),

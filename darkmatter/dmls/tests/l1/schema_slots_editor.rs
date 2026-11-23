@@ -771,6 +771,31 @@ fn a_trigger_slot_points_at_its_position_in_the_trigger_file() {
     assert_eq!(related["range"]["start"], slot_range(&trigger, 0)["start"], "{:#?}", approval[0]);
 }
 
+/// A trigger slot written after `🧪 café` on its line: the related
+/// information's character is counted in the client's negotiated encoding.
+#[test]
+fn a_trigger_slot_after_non_ascii_text_is_pointed_at_in_the_clients_encoding() {
+    let trigger = "kind: schema-trigger\nmatch:\n  topic: literal(sandbox; required)\n$schema: {note: 'string -> 🧪 café', os: 'enum({{ load_data(\"../data/os.yaml\", \"string[]\") }}; required)'}\n";
+    let before = &trigger[..trigger.find("{{").unwrap()];
+    let prefix = &before[before.rfind('\n').unwrap() + 1..];
+    for (encoding, character) in [("utf-8", prefix.len()), ("utf-16", prefix.encode_utf16().count())] {
+        let workspace = LspWorkspace::new();
+        let root = trigger_slot_workspace(&workspace);
+        std::fs::write(root.join("schemas/a.trigger.yaml"), trigger).unwrap();
+        let doc = root.join("docs/doc.md");
+        let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+        let mut initialize = params(&root);
+        initialize["capabilities"]["general"]["positionEncodings"] = json!([encoding]);
+        fixture.initialize(initialize);
+
+        let diagnostics = open_and_resolve(&mut fixture, &doc, "---\ntopic: sandbox\nos: Windows\n---\n\n# Doc\n");
+        let approval = with_code(&diagnostics, "dm.schema.slot_approval_required");
+        assert_eq!(approval.len(), 1, "{encoding}: {diagnostics:#?}");
+        let related = &approval[0]["relatedInformation"][0]["location"];
+        assert_eq!(related["range"]["start"], json!({ "line": 3, "character": character }), "{encoding}: {:#?}", approval[0]);
+    }
+}
+
 /// R1-F5: every editor response projected from a template's snapshot says
 /// so when that snapshot is not current: candidates from every completion
 /// site, a body expression's hover, and a quick fix that inserts a value

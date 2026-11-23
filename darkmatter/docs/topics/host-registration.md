@@ -312,6 +312,36 @@ Each `files` member is classified by its own `kind`:
 Any other kind, a `kind: schema` file that declares `$schema`, or a library
 with an empty `types` table refuses the registration at that member.
 
+**Each kind's top level is closed.** Before a file is prepared, its envelope
+is checked against the keys its kind allows, each with a value of the right
+YAML type. A host that compiles its bundle in (Claudine) runs the same check
+when it builds, so a file the build accepts is one registration accepts:
+
+| `kind` | Allowed keys | Rules |
+| --- | --- | --- |
+| `schema-trigger` | `kind`, `name`, `description`, `match`, `$schema`, `types` | `match` is required; a missing or `null` `$schema` makes a matcher-only trigger |
+| `yaml-schema` | `kind`, `description`, `categories`, `$schema`, `types` | `$schema` is a required mapping |
+| `namespace-schema` | `kind`, `namespace`, `description`, `$schema`, `types` | `namespace` is a required string; `$schema` a required mapping, `{}` allowed |
+| `schema` (types-only) | `kind`, `name`, `description`, `categories`, `$schema`, `types` | `types` is a required nonempty mapping; `$schema` absent or `null` |
+
+An optional field may be left out. Written as `null`, a `name`, a trigger's
+or namespace's `description`, and a trigger's or namespace's `types` are
+refused; a `yaml-schema`'s or library's `description` and a `yaml-schema`'s
+`types` read as absent, as they do wherever such a file is read. A
+`yaml-schema`'s `types`, when written as a table, must not be empty
+(`types: {}` is refused; omit it or leave it blank). Every later check of the
+member, such as the check of every `types` declaration below, reads those fields as the
+envelope admitted them. A refusal names the key it is about and is located
+there:
+
+```yaml
+# ./schemas/library.yaml — refused at `extra`
+kind: schema
+types:
+    widget: string
+extra: 1
+```
+
 **Imports stay inside the bundle.** Every file is prepared from the verified
 bytes alone. A reference from one member to another is written `./…` or
 `../…` from the referring file (`widget@./library.yaml`) and must name a
@@ -319,6 +349,26 @@ listed member. An unlisted file, a path that leaves the bundle, a bare name
 that would search schema roots, and a URL are refused, so a bundle copied
 to another machine behaves the same. Darkmatter's built-in schemas
 (`Name@darkmatter:lifecycle`) stay available.
+
+The rule covers every declaration in a file's `types` table, not only the
+ones the file's `$schema` uses. Each import, `$extends`, spread, and union
+arm a declaration names, and each file-backed `example(…)`, must stay inside
+the bundle even when nothing uses that declaration yet. One that does not
+refuses the whole registration, located at the reference:
+
+```yaml
+# ./schemas/library.yaml — refused at `./options.yaml` (not a listed member)
+kind: schema
+types:
+    widget: string
+    optional-host-settings: Options@./options.yaml   # used by nothing
+    review-note: string(example(./options.yaml))     # used by nothing
+```
+
+This check selects each referenced file and does not read it. A listed
+example's content is judged when a declaration that uses it is prepared.
+A `{{ … }}` template is not evaluated at load time: what it returns is
+checked when it is resolved (see the next paragraph).
 
 The same rule holds for a trigger whose payload is a `{{ … }}` template.
 When the template is resolved for a document, its slots still need the
@@ -373,6 +423,10 @@ location in that file. `$schema: {}` declares a global with no members.
 - Two files declaring one namespace are refused at both declarations.
 - A namespace file is never a document's `$schema` target and never selects
   a YAML document kind.
+- Checking the file itself (`md schema validate ./schemas/run.yaml`, or the
+  file open in an editor running DMLS) runs the same preparation, so it
+  reports what registering it would refuse, at the field; only the reserved
+  names above are registration's alone.
 
 The lifecycle artifact is versioned against this catalog: its
 `catalog_hash` is the digest of a canonical JSON object that maps each
@@ -527,10 +581,75 @@ that does not load.
 into the record `md` reports. DMLS reports them on the documents they affect;
 see [In the editor (DMLS)](#in-the-editor-dmls).
 
+### Where a refusal points
+
+A refusal points at the most specific place its problem has. You can jump
+from the warning straight to the line to fix:
+
+| Problem | Reported at |
+| --- | --- |
+| a field a member requires that is missing (a trigger's `match`, a `yaml-schema`'s `$schema`, a namespace's `namespace` or `$schema`, a library's `types`, any member's `kind`) | the mapping that lacks it, at its first key after any leading comments; the same field written as `null` is reported at its value |
+| a field of a member with a wrong value (a trigger's `name`, a `match` condition, a namespace's `$schema` entry) | that field's value; a `match` condition inside an `all`/`group`/`none`/`min-match` list at its own value, never at a payload property of the same name |
+| a key written twice in a member | the second spelling of the key |
+| a declaration that does not resolve (an unknown type, a bad `$extends` target) | that declaration's value, in the section (`$schema` or `types`) that wrote it; inside a union (a root-union arm or a list of property arms) at the failing arm, never at another arm, its `$extends`, or a same-named declaration in the other section |
+| a declaration the type grammar rejects (`string(requird)`) | the rejected token (`requird`) inside the declaration, in its own arm |
+| a reference that names no listed member, or leaves the bundle (also a missing, remote, or unresolvable reference) | the reference as written, where the type grammar reads it as a reference: after the `@` of an import (`widget@./extra.yaml` at `./extra.yaml`, a `$extends: widget@./extra.yaml` operand alike) or as an `example(...)` argument (`string(example(./extra.yaml))` at `./extra.yaml`); a whole payload written as a reference (`$schema: ./extra.yaml`) at that value; a reference written inside an imported library, including an `example(...)` file, in that library. The same path repeated in prose is never reported: not in a comment, a top-level `description`, or the `-> description` of any declaration, its own or a sibling's (`a: 'string -> Read ./extra.yaml.'` above `b: Options@./extra.yaml` is reported at `b`). When two declarations reference the same file, the first written is reported; when none spells it as written, the `$schema` or `types` section it was reached through |
+| a `kind: yaml-schema` definition whose `kind` claims no fixed set of kinds (`kind: kind-token(required)` where `kind-token` is a `string`) | the `kind` declaration's value in `$schema`, the position `md schema validate` reports for the definition |
+| a broken declaration in a file another member imports | the declaration, in the imported file; the message names the importer |
+| a file another member imports that does not load at all (not valid YAML, no or an unknown `kind`) | the imported file, at the parser's position when the YAML does not parse; the message names the importer |
+| a member that is not UTF-8 text | its entry in the manifest |
+| a lifecycle or facts artifact field the reader refuses (a stale `catalog_hash`, a wrong type, an unknown field, a `host_globals` name the catalog lacks) | that field in the JSON; a missing field at the object that lacks it; text that is not JSON at the parser's position |
+| a function catalog signature that does not load | the rejected token in the catalog |
+| a manifest `host` that differs from the lifecycle artifact's, or two manifests claiming one host | the manifest's `host` |
+
+For example, a library a trigger imports declares an unknown type:
+
+```yaml
+# ./schemas/library.yaml
+kind: schema
+types:
+    widget:
+        size: "numbr -> The widget's size."   # line 4
+```
+
+The one warning is reported in `schemas/library.yaml` at line 4, column 15
+(the declaration), under that file's manifest field `files[2]`, and its
+message begins `imported by `files[0]` (`schemas/widget.yaml`)`. When a
+library several members import is broken, each importer's warning is
+reported at the same place.
+
+A failure inside a union is reported in its own arm. In this trigger, the
+second arm's unknown type is reported at line 8, column 15, not at the first
+arm's `gadget` (line 6) or at either `$extends`:
+
+```yaml
+kind: schema-trigger
+match:
+    gadget: string(required)
+$schema:
+    - $extends: widget@./library.yaml
+      gadget: "gadget(required)@./library.yaml"
+    - $extends: widget@./library.yaml
+      gadget: "Missing(required)"           # line 8
+```
+
+A refused member never adds a second, misleading refusal elsewhere. When a
+`files` member is refused before its `kind` is known (it is not UTF-8, not
+valid YAML, or declares no or an unknown `kind`), or a namespace member is
+refused, the member might be missing from the host's catalog, so Darkmatter
+does not check the lifecycle artifact against that catalog. You see the
+member's own refusal, not also a stale `catalog_hash`; fix it and reload to
+see any refusal the lifecycle artifact still has.
+
 `md` loads the registrations once per run (per repository a run's documents
 resolve in) and reports each distinct warning once: on stderr for a formatted
 output, in the result's `diagnostics` for a data output, whose stderr stays
-empty. `md compose`, `md clean`, `md schema validate`, and `md schema triggers`
+empty. A formatted warning with a position starts with it, as
+`path:line:column:` (the path written with forward slashes):
+
+```text
+/home/me/.acme/schemas/library.yaml:4:15: host registration `./.acme/darkmatter-host.yaml` (entry 0 of `register` in `/home/me/.darkmatter.yaml`) is not loaded at `files[2]`: imported by `files[0]` (`schemas/widget.yaml`): …
+``` `md compose`, `md clean`, `md schema validate`, and `md schema triggers`
 also report the selection warnings of the documents they judge.
 
 | Code | When |
@@ -998,7 +1117,11 @@ start:
 ### Where the warnings appear
 
 A warning about a registration is published on the file that has the
-problem, at its line and column, whether that file is open or not. A warning
+problem, at its line and column, whether that file is open or not. The
+column `md` prints counts characters; the editor receives the same point in
+the position encoding it negotiated, so after `café` or `🧪` on the line a
+UTF-8 client gets a larger column than a UTF-16 one, and both land on the
+same character. A warning
 about how one document was analyzed is published on that document:
 
 | Code | Where |

@@ -1275,7 +1275,7 @@ impl ServerState {
             current
                 .entry(crate::overlay::registry::normalized(&found.file))
                 .or_default()
-                .push(crate::diagnostics::frontmatter::registration_diagnostic(&found));
+                .push(crate::diagnostics::frontmatter::registration_diagnostic(&found, self.profile.position_encoding));
         }
         let changed: std::collections::BTreeSet<PathBuf> = {
             let mut published = self.registration_files.borrow_mut();

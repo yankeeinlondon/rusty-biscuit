@@ -297,6 +297,55 @@ fn a_kind_check_is_published_once_on_the_node_it_judges() {
     assert_eq!(diagnostic.range.start.line, 2, "{diagnostic:#?}");
 }
 
+/// A namespace file gets the check a host's registration runs: the
+/// unedited published namespace is clean, and a `description:` its
+/// definition reads as absent is the registration's refusal, on the field.
+#[test]
+fn a_namespace_file_is_judged_as_registration_prepares_it() {
+    let probe = Probe::new();
+    let published = include_str!("../../../../claudine/registration/loop.yaml");
+    assert!(probe.schema_diagnostics("loop.yaml", published).is_empty());
+
+    let text = "kind: namespace-schema\nnamespace: thing\ndescription:\n$schema: {}\n";
+    let diagnostics = probe.schema_diagnostics("thing.yaml", text);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.kind_check", "{diagnostic:#?}");
+    assert_eq!(diagnostic.range.start.line, 2, "{diagnostic:#?}");
+    assert!(diagnostic.message.contains("must not be null"), "{diagnostic:#?}");
+}
+
+/// The editor publishes a declaration failing inside a union arm at that
+/// arm, as `md schema validate` reports it: an unresolved type in a
+/// namespace's second property arm, never the carrier or a valid sibling.
+#[test]
+fn a_failure_inside_a_union_arm_is_published_at_that_arm() {
+    let probe = Probe::new();
+    let text = "kind: namespace-schema\nnamespace: thing\n$schema:\n    count:\n        - number\n        - Missing\n    label: string\n";
+    let diagnostics = probe.schema_diagnostics("thing.yaml", text);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.kind_check", "{diagnostic:#?}");
+    assert_eq!(start(diagnostic), position_of(text, "Missing\n"), "{diagnostic:#?}");
+}
+
+/// A trigger file whose `kind` cannot select a definition (a schema root
+/// also claims `schema-trigger`) is judged by the trigger parser alone; its
+/// failing `match` condition is published at that condition, never across
+/// the whole document.
+#[test]
+fn a_trigger_error_without_a_selected_definition_is_published_at_its_condition() {
+    let probe = Probe::new();
+    write(&probe.path("schemas/claims-triggers.yaml"), "kind: yaml-schema\n$schema:\n    kind: literal(schema-trigger; required)\n");
+    let text = "kind: schema-trigger\nmatch:\n    all:\n        - group:\n              - gadget: string(requird)\n$schema:\n    gadget: string\n";
+    assert_eq!(probe.outcome("schemas/gadget.yaml", text), "failed", "kind selection fails for the trigger");
+    let diagnostics = probe.schema_diagnostics("schemas/gadget.yaml", text);
+    let trigger = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("requird"))
+        .unwrap_or_else(|| panic!("the trigger error is published: {diagnostics:#?}"));
+    assert_eq!(start(trigger), position_of(text, "string(requird)"), "{trigger:#?}");
+    assert_ne!(trigger.range.end.line, text.lines().count() as u32, "not the whole document: {trigger:#?}");
+}
+
 #[test]
 fn a_kind_claimed_twice_is_one_error_on_the_kind_naming_both_definitions() {
     let probe = Probe::new();

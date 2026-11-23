@@ -202,3 +202,47 @@ fn a_registered_yaml_document_is_judged_whole_with_no_trigger_layer() {
     assert!(validation.effective().layers().triggers.is_empty());
     assert!(validation.effective().layers().registered.is_none());
 }
+
+/// The shapes of a registered definition's optional `types` table, as its
+/// member envelope judges them: absent, blank or `null` (no named types), and
+/// populated publish the host with its kind and triggers; numeric and empty
+/// refuse the host at `types`.
+const TYPES_SHAPES: [(&str, Option<&str>); 6] = [
+    ("", None),
+    ("types:\n", None),
+    ("types: null\n", None),
+    ("types:\n    platform: string\n", None),
+    ("types: 7\n", Some("7")),
+    ("types: {}\n", Some("{}")),
+];
+
+#[test]
+fn an_installed_definition_s_optional_types_table_keeps_the_envelope_s_rules() {
+    for (types, refused_at) in TYPES_SHAPES {
+        let text = format!("{ROSTER}{types}");
+        let fixture = Fixture::new();
+        fixture.install_bundle("host", &Bundle::acme().with_file("schemas/roster.yaml", &text));
+        let loaded = fixture.load();
+        match refused_at {
+            None => {
+                assert!(loaded.diagnostics.is_empty(), "{types:?}: {:#?}", loaded.diagnostics);
+                let [profile] = loaded.profiles.as_slice() else { panic!("{types:?}: one profile") };
+                assert_eq!(profile.yaml_kinds().len(), 1, "{types:?}: the roster kind");
+                assert_eq!(profile.triggers().len(), 2, "{types:?}: both Markdown triggers");
+                let hosts = fixture.hosts(&[HOST]);
+                let valid = validated(validate(&fixture, &hosts, "team.yaml", "kind: roster\nplatforms: [linux]\n"));
+                assert_eq!(valid.route, Route::Kind("roster".into()), "{types:?}");
+                assert!(valid.report.valid, "{types:?}: {:#?}", valid.report.problems);
+            }
+            Some(value) => {
+                assert!(loaded.profiles.is_empty(), "{types:?}: nothing is published");
+                let [diagnostic] = loaded.diagnostics.as_slice() else { panic!("{types:?}: {:#?}", loaded.diagnostics) };
+                assert_eq!(diagnostic.file, fixture.path("host/schemas/roster.yaml"), "{types:?}");
+                let line = text.lines().position(|line| line.starts_with("types:")).unwrap() + 1;
+                let column = "types: ".len() + 1;
+                assert_eq!(diagnostic.line.zip(diagnostic.column), Some((line, column)), "{types:?} at `{value}`: {diagnostic:#?}");
+                assert!(diagnostic.message.contains("`types`"), "{types:?}: {}", diagnostic.message);
+            }
+        }
+    }
+}
