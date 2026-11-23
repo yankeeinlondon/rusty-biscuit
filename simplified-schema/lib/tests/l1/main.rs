@@ -62,6 +62,7 @@ mod template_type_results;
 mod template_types_passive;
 mod test_layout;
 mod trigger_condition_locations;
+mod union_unknown_keys;
 mod validation_contract;
 mod yaml_kind_selection;
 mod yaml_schema_envelope;

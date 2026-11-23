@@ -899,6 +899,12 @@ fn is_match_rule_out(problem: &ValidationProblem) -> bool {
 /// than `/config`. When no arm drills deeper (e.g. `[null, string]` against a
 /// wrong-typed scalar — every arm fails at the wrapper path) the original
 /// `anyOf` problem is kept.
+///
+/// The `additionalProperties` error of an object arm names the union's own
+/// path, so the drill-down above never sees it. A key every arm that admits
+/// the value's type rejects at that node is reported as one ordinary
+/// unknown-key problem (see [`union_unknown_key_problem`]) beside whatever the
+/// drill-down finds.
 fn build_problems(
     err: &jsonschema::ValidationError<'_>,
     arm_index: Option<usize>,
@@ -906,17 +912,22 @@ fn build_problems(
 ) -> Vec<ValidationProblem> {
     if let ValidationErrorKind::AnyOf { context } = err.kind() {
         let parent = err.instance_path().as_str();
+        let unknown: Vec<ValidationProblem> = union_unknown_key_problem(context, parent, arm_index, anchors)
+            .into_iter()
+            .collect();
         let mut branches = Vec::new();
         union_branch_errors(context, parent, &mut branches);
-        let mut deeper: Vec<ValidationProblem> = branches
-            .into_iter()
-            .filter(|nested| {
-                let path = nested.instance_path().as_str();
-                path.len() > parent.len() && path.starts_with(parent)
-            })
-            .flat_map(|nested| build_problems(nested, arm_index, anchors))
-            .collect();
-        if !deeper.is_empty() {
+        let mut deeper: Vec<ValidationProblem> = unknown.clone();
+        deeper.extend(
+            branches
+                .into_iter()
+                .filter(|nested| {
+                    let path = nested.instance_path().as_str();
+                    path.len() > parent.len() && path.starts_with(parent)
+                })
+                .flat_map(|nested| build_problems(nested, arm_index, anchors)),
+        );
+        if deeper.len() > unknown.len() {
             // Distinct arms can fail identically against the same value (e.g.
             // overlapping inline-object arms); collapse exact duplicates so the
             // report points at each offending site once. Duplicates need not be
@@ -935,6 +946,7 @@ fn build_problems(
             .flat_map(|nested| build_problems(nested, arm_index, anchors))
             .collect();
         if !same_path_file_errors.is_empty() {
+            same_path_file_errors.splice(0..0, unknown);
             let mut seen: HashSet<(String, String)> = HashSet::new();
             same_path_file_errors.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
             return same_path_file_errors;
@@ -962,10 +974,14 @@ fn build_problems(
                 .flat_map(|nested| build_problems(nested, arm_index, anchors))
                 .collect();
             if !typed.is_empty() {
+                typed.splice(0..0, unknown);
                 let mut seen: HashSet<(String, String)> = HashSet::new();
                 typed.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
                 return typed;
             }
+        }
+        if !unknown.is_empty() {
+            return unknown;
         }
     }
     let problem = build_problem(err, arm_index, anchors);
@@ -991,6 +1007,98 @@ fn union_branch_errors<'e>(
             }
             _ => out.push(nested),
         }
+    }
+}
+
+/// The keys a failed union rejects at its own node (`parent`), with the
+/// `additionalProperties` / `unevaluatedProperties` errors that named them.
+struct RejectedKeys<'e> {
+    /// In the order the first contributing error lists them: the instance's
+    /// key order, as an ordinary unknown-key problem reports them.
+    keys: Vec<String>,
+    sources: Vec<&'e jsonschema::ValidationError<'static>>,
+}
+
+/// The unknown keys every arm that admits the value's type rejects at
+/// `parent`, or `None` when no arm admits it.
+///
+/// An arm that fails `type`, `const`, or `enum` at `parent` cannot accept the
+/// value whatever its keys, so it neither proposes nor vetoes a key. Every
+/// other arm vetoes each key it does not itself reject there: a key another
+/// arm admits is never labeled stray.
+fn union_rejected_keys<'e>(
+    context: &'e [Vec<jsonschema::ValidationError<'static>>],
+    parent: &str,
+) -> Option<RejectedKeys<'e>> {
+    let mut applicable = context.iter().filter_map(|arm| arm_rejected_keys(arm, parent));
+    let first = applicable.next()?;
+    Some(applicable.fold(first, |mut all, arm| {
+        all.keys.retain(|key| arm.keys.contains(key));
+        all.sources.extend(arm.sources);
+        all
+    }))
+}
+
+/// The keys one union arm rejects at `parent`: its own unknown-key errors
+/// there plus what a same-node union inside it rejects (a reference to a
+/// union type). `None` when the arm rejects the value's type.
+fn arm_rejected_keys<'e>(arm: &'e [jsonschema::ValidationError<'static>], parent: &str) -> Option<RejectedKeys<'e>> {
+    let mut rejected = RejectedKeys { keys: Vec::new(), sources: Vec::new() };
+    let add = |rejected: &mut RejectedKeys<'e>, keys: &[String]| {
+        for key in keys {
+            if !rejected.keys.contains(key) {
+                rejected.keys.push(key.clone());
+            }
+        }
+    };
+    for err in arm.iter().filter(|err| err.instance_path().as_str() == parent) {
+        match err.kind() {
+            ValidationErrorKind::Type { .. }
+            | ValidationErrorKind::Constant { .. }
+            | ValidationErrorKind::Enum { .. } => return None,
+            ValidationErrorKind::AdditionalProperties { unexpected }
+            | ValidationErrorKind::UnevaluatedProperties { unexpected } => {
+                add(&mut rejected, unexpected);
+                rejected.sources.push(err);
+            }
+            ValidationErrorKind::AnyOf { context } => {
+                let inner = union_rejected_keys(context, parent)?;
+                add(&mut rejected, &inner.keys);
+                rejected.sources.extend(inner.sources);
+            }
+            _ => {}
+        }
+    }
+    Some(rejected)
+}
+
+/// The unknown-key problem of a failed union, shaped as the ordinary problem
+/// of a closed object (instance path at the object, the keys in
+/// `offending_properties`, jsonschema's wording) so a host that locates
+/// unknown keys handles it unchanged. `schema_path` is the first arm's
+/// keyword that rejected the first key.
+fn union_unknown_key_problem(
+    context: &[Vec<jsonschema::ValidationError<'static>>],
+    parent: &str,
+    arm_index: Option<usize>,
+    anchors: FileRefAnchors<'_>,
+) -> Option<ValidationProblem> {
+    let rejected = union_rejected_keys(context, parent)?;
+    let first = rejected.keys.first()?;
+    let source = rejected.sources.iter().find(|err| offending_properties_of(err.kind()).contains(first))?;
+    let mut problem = build_problem(source, arm_index, anchors);
+    let noun = match source.kind() {
+        ValidationErrorKind::UnevaluatedProperties { .. } => "Unevaluated",
+        _ => "Additional",
+    };
+    let quoted: Vec<String> = rejected.keys.iter().map(|key| format!("'{key}'")).collect();
+    let verb = if rejected.keys.len() == 1 { "was" } else { "were" };
+    problem.message = format!("{noun} properties are not allowed ({} {verb} unexpected)", quoted.join(", "));
+    problem.offending_property = Some(first.clone());
+    problem.offending_properties = rejected.keys;
+    match anchors {
+        FileRefAnchors::Resolved { excused: Some(excused), .. } if excused(&problem) => None,
+        _ => Some(problem),
     }
 }
 

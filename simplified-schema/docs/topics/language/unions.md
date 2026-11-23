@@ -618,7 +618,40 @@ An arm is selected **only when** all of the following hold:
 - the instance contains that key with an authored value, and
 - exactly **one** arm's typed literal equals the instance value.
 
-Equality is **type-sensitive**: a typed `2` does not select an arm tagged `'2'`. If multiple discriminant keys qualify, they must all select the same arm. For an absent, unknown, duplicate, or conflicting discriminant, validation and completion fall back to the normal merged/union behavior — narrowing never guesses an arm from a partial or ambiguous match. Schemas without literal discriminants keep byte-identical `anyOf` diagnostics.
+Equality is **type-sensitive**: a typed `2` does not select an arm tagged `'2'`. If multiple discriminant keys qualify, they must all select the same arm. For an absent, unknown, duplicate, or conflicting discriminant, validation and completion fall back to the normal merged/union behavior — narrowing never guesses an arm from a partial or ambiguous match. Schemas without literal discriminants keep the ordinary union report described below.
+
+### Unknown Keys in a Union
+
+When a value fails a union only because it carries a key the union does not
+allow, you get the same unknown-key problem a plain closed object gives, not
+the generic "is not valid under any of the schemas" union failure:
+
+```yaml
+$schema:
+    tts: "boolean | { provider: string, voice: string }"
+```
+
+| Value of `tts` | Reported |
+| --- | --- |
+| `{ provider: say, bogus: 1 }` | `Additional properties are not allowed ('bogus' was unexpected)` at `/tts`, with `offending_properties: ["bogus"]` |
+| `{ provider: 3, bogus: 1 }` | that unknown-key problem and the type problem at `/tts/provider` |
+
+A key is reported only when **every arm that could hold the value rejects
+it**. An arm whose type, `literal`, or `enum` cannot match the value at all
+(`boolean` above, for a mapping) is left out of the decision. Every other arm
+must reject the key at that same mapping, so a key another arm declares, or
+one an open mapping (a `<string>` catch-all, the `object` type) admits, is
+never called unknown:
+
+| Union | Value | Reported |
+| --- | --- | --- |
+| `{ a: number } \| { b: number }` | `{ a: 1, zzz: 1 }` | unknown key `zzz` |
+| `{ a: number } \| { b: number }` | `{ a: 1, b: 1 }` | the ordinary union failure: each key is known to one arm |
+| `{ a: number } \| { b: number, <string>: string }` | `{ a: 1, zzz: 3 }` | no unknown key: the second arm admits `zzz` and reports the values it rejects |
+
+The rule sees through a union nested at the same place, such as an arm that
+names another union type, and applies wherever the union sits: a property, a
+list item, or a nested field.
 
 ### Choosing an Arm: Reporting versus Changing Data
 
