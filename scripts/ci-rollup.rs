@@ -634,24 +634,26 @@ struct CellBuild {
 /// One consumer's stages, as its own job measured them.
 ///
 /// Seconds where a portable `date +%s` is the only clock every consumer OS
-/// spells the same way, milliseconds where the verifier measured itself.
+/// spells the same way, milliseconds where the verifier measured itself. Each
+/// stage is separately optional: a whole-second window measures a fast stage
+/// as `0`, so a stage nobody measured is `None`, never that same `0`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct ConsumerTimings {
     /// Downloading the build artifact.
-    #[serde(default)]
-    download_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    download_seconds: Option<u64>,
     /// Strict verification, which includes the extraction below.
-    #[serde(default)]
-    verify_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verify_seconds: Option<u64>,
     /// Extracting the archive. `cargo nextest run --archive-file` extracts
     /// inside the run, so this is the verifier's own full extraction of the
     /// same archive on the same host — the stage cost, not folded into test
     /// time.
-    #[serde(default)]
-    extract_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    extract_ms: Option<u64>,
     /// The gate command: the tier recipe, start to finish.
-    #[serde(default)]
-    execute_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    execute_seconds: Option<u64>,
 }
 
 /// One companion suite's result as the report carries it.
@@ -782,12 +784,15 @@ struct BuildReport {
     timings: Option<ProducerTimings>,
 }
 
+/// The owner job's whole-second windows. Each is separately optional: a fast
+/// stage measures `0`, so one the job could not measure (a queue with no
+/// published plan time) is `None`, never that same `0`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct ProducerStageSeconds {
-    #[serde(default)]
-    queue_seconds: u64,
-    #[serde(default)]
-    upload_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    upload_seconds: Option<u64>,
 }
 
 /// The producer's internal stages. `cargo nextest archive` compiles and
@@ -4324,10 +4329,10 @@ fn render_build_provenance(rollup: &Rollup) -> String {
                 cell_text(&build.key),
                 cell_text(&build.digest),
                 cell_text(&build.producer),
-                seconds_text(timings.map(|entry| entry.download_seconds)),
-                seconds_text(timings.map(|entry| entry.verify_seconds)),
-                ms_text(timings.map(|entry| entry.extract_ms)),
-                seconds_text(timings.map(|entry| entry.execute_seconds)),
+                seconds_text(timings.and_then(|entry| entry.download_seconds)),
+                seconds_text(timings.and_then(|entry| entry.verify_seconds)),
+                ms_text(timings.and_then(|entry| entry.extract_ms)),
+                seconds_text(timings.and_then(|entry| entry.execute_seconds)),
             ));
         }
         out.push('\n');
@@ -4352,9 +4357,9 @@ fn render_build_provenance(rollup: &Rollup) -> String {
                 } else {
                     format!("{} ({})", build.result, build.stage)
                 }),
-                seconds_text(build.stage_seconds.map(|entry| entry.queue_seconds)),
+                seconds_text(build.stage_seconds.and_then(|entry| entry.queue_seconds)),
                 ms_text(build.timings.map(|entry| entry.compile_archive_ms)),
-                seconds_text(build.stage_seconds.map(|entry| entry.upload_seconds)),
+                seconds_text(build.stage_seconds.and_then(|entry| entry.upload_seconds)),
             ));
         }
         out.push('\n');

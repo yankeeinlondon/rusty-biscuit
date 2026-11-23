@@ -284,7 +284,7 @@ jobs:
         env:
           BISCUIT_CI_JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
           BISCUIT_CI_STAGE_SECONDS: >-
-            {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 0 }}}
+            {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 'null' }}}
         run: |
           set -euo pipefail
           just _ci_build_report \
@@ -889,9 +889,9 @@ jobs:
         env:
           BISCUIT_CI_JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
           BISCUIT_CI_STAGE_SECONDS: >-
-            {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 0 }},
-             "gate_seconds":${{ steps.gate.outputs.seconds || 0 }},
-             "setup_seconds":${{ steps.gate.outputs.setup_seconds || 0 }}}
+            {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 'null' }},
+             "gate_seconds":${{ steps.gate.outputs.seconds || 'null' }},
+             "setup_seconds":${{ steps.gate.outputs.setup_seconds || 'null' }}}
         run: |
           set -euo pipefail
           just _ci_build_report \
@@ -992,10 +992,10 @@ jobs:
           # cell's identity stays {package, environment, gate} and the rollup
           # keys nothing on a duration.
           TIMINGS: >-
-            {"download_seconds":${{ steps.verified.outputs.download_seconds || 0 }},
-             "verify_seconds":${{ steps.verified.outputs.verify_seconds || 0 }},
-             "extract_ms":${{ steps.verified.outputs.extract_ms || 0 }},
-             "execute_seconds":${{ steps.gate.outputs.seconds || 0 }}}
+            {"download_seconds":${{ steps.verified.outputs.download_seconds || 'null' }},
+             "verify_seconds":${{ steps.verified.outputs.verify_seconds || 'null' }},
+             "extract_ms":${{ steps.verified.outputs.extract_ms || 'null' }},
+             "execute_seconds":${{ steps.gate.outputs.seconds || 'null' }}}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
@@ -1008,6 +1008,10 @@ jobs:
           if ! printf '%s' "$timings" | jq -e 'type == "object"' >/dev/null 2>&1; then
             timings='{}'
           fi
+          # Per stage too: a whole-second window measures a fast stage as `0`,
+          # so an unreported stage arrives as `null` and is dropped here rather
+          # than published as the same `0`.
+          timings="$(jq -c 'with_entries(select(.value != null))' <<<"$timings")"
           # `result` is the CELL's conclusion, not the job's (see the header).
           result="$JOB_STATUS"
           if [ "$result" = "success" ] && { [ "$GATE" = "failure" ] || [ "$COMPANION" = "failure" ]; }; then
@@ -1277,12 +1281,15 @@ jobs:
       # run finishes in under a second still made a measurement, and the
       # integer clock recorded `0` for it, which the report could not tell
       # apart from a step that never ran (AC13). `python3` is already a hard
-      # dependency of these workflows (`scripts/ci/*.py`) and `time.monotonic`
-      # is immune to a clock step; the portable alternatives are not —
-      # `EPOCHREALTIME` needs Bash 5 (macOS ships 3.2) and `date +%N` is a GNU
-      # extension BSD `date` does not have.
+      # dependency of these workflows (`scripts/ci/*.py`) and
+      # `time.perf_counter_ns` is a monotonic integer clock, immune to a clock
+      # step, at the platform's finest resolution; the portable alternatives
+      # are not — `EPOCHREALTIME` needs Bash 5 (macOS ships 3.2) and `date +%N`
+      # is a GNU extension BSD `date` does not have. The value is published
+      # from integer nanoseconds with nine decimals, never rounded: rounding to
+      # milliseconds once published a sub-0.5 ms run as `0.0`.
       #
-      # Python fixes the reference point of `time.monotonic` only WITHIN one
+      # Python fixes the reference point of its monotonic clocks only WITHIN one
       # process, so the timing process is the one that owns the child: reading
       # the two endpoints in separate interpreters subtracts unrelated origins.
       # macOS's `/usr/bin/python3` (CPython 3.9) is the counterexample that
@@ -1336,13 +1343,17 @@ jobs:
           import sys
           import time
 
-          started = time.monotonic()
+          started = time.perf_counter_ns()
           completed = subprocess.run(["just", "_lint", sys.argv[1]], check=False)
-          elapsed = round(time.monotonic() - started, 3)
+          # A command that ran took time even when it finished inside one tick
+          # of the clock, and `0` is how the report spells "not measured", so
+          # the floor is the smallest positive unit, one nanosecond.
+          elapsed_ns = max(time.perf_counter_ns() - started, 1)
+          seconds, fraction = divmod(elapsed_ns, 1_000_000_000)
           destination = os.environ.get("GITHUB_OUTPUT")
           if destination:
               with open(destination, "a", encoding="utf-8") as output:
-                  output.write(f"duration_s={elapsed}\n")
+                  output.write(f"duration_s={seconds}.{fraction:09d}\n")
           sys.exit(completed.returncode)
           PY
       # ADVISORY, and structurally so: `continue-on-error` keeps a broken
@@ -1354,7 +1365,7 @@ jobs:
         env:
           BISCUIT_CI_JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
           BISCUIT_CI_STAGE_SECONDS: >-
-            {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 0 }}}
+            {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 'null' }}}
         run: |
           set -euo pipefail
           just _ci_build_report \

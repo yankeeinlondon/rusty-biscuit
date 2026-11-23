@@ -831,15 +831,16 @@ jobs:
           fi
           # This cell's stages. The guest cannot write `$GITHUB_OUTPUT`, so each
           # window it measured crossed the 9p mount as a file; a guest that died
-          # leaves none, and the stage reports 0 rather than a fabricated
-          # duration. Reporting only — the cell's identity stays
-          # {package, environment, gate}.
-          # Anything that is not a plain count reports 0. This step runs under
-          # `always()` and is the cell's only evidence: instrumentation must not
-          # be able to lose it.
+          # leaves none, and that stage is OMITTED rather than reported as `0`:
+          # a whole-second window measures a fast stage as `0`, so a missing one
+          # spelled the same way would read as an instant transfer. Reporting
+          # only — the cell's identity stays {package, environment, gate}.
+          # Anything that is not a plain count is omitted the same way. This
+          # step runs under `always()` and is the cell's only evidence:
+          # instrumentation must not be able to lose it.
           number() {
             case "${1:-}" in
-              ''|*[!0-9]*) echo 0 ;;
+              ''|*[!0-9]*) echo null ;;
               *) echo "$1" ;;
             esac
           }
@@ -847,12 +848,12 @@ jobs:
             if [ -f "wsl-timing/$1" ]; then
               number "$(tr -cd '0-9' <"wsl-timing/$1")"
             else
-              echo 0
+              echo null
             fi
           }
-          extract_ms=0
+          extract_ms=""
           if [ -f wsl-timing/verdict.json ]; then
-            extract_ms="$(jq -r '.timings.extract_ms // 0' wsl-timing/verdict.json 2>/dev/null || echo 0)"
+            extract_ms="$(jq -r '.timings.extract_ms // ""' wsl-timing/verdict.json 2>/dev/null || true)"
           fi
           timings="$(jq -cn \
             --argjson download "$(number "${DOWNLOAD_SECONDS:-}")" \
@@ -860,7 +861,8 @@ jobs:
             --argjson extract "$(number "$extract_ms")" \
             --argjson execute "$(read_seconds l1.seconds)" \
             '{download_seconds: $download, verify_seconds: $verify,
-              extract_ms: $extract, execute_seconds: $execute}')"
+              extract_ms: $extract, execute_seconds: $execute}
+             | with_entries(select(.value != null))')"
           jq -cn \
             --arg package "$PACKAGE" --arg job "$JOB" --arg environment "$ENVIRONMENT" \
             --arg result "$result" --arg detail "$detail" \
