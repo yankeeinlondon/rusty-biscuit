@@ -117,7 +117,7 @@ fn every_container_level_is_typed() {
         (
             "level2-invalid",
             include_str!("../fixtures/sequence-schema/level2-invalid.md"),
-            Invalid(&[("/sequence/0/sequence/0/group", "\"execution\"")]),
+            Invalid(&[("/sequence/0/sequence/0/group", "'execution' was unexpected")]),
         ),
         ("level3-valid", include_str!("../fixtures/sequence-schema/level3-valid.md"), Valid),
         (
@@ -125,7 +125,7 @@ fn every_container_level_is_typed() {
             include_str!("../fixtures/sequence-schema/level3-invalid.md"),
             Invalid(&[
                 ("/sequence/0/sequence/0/sequence/0/with", "not of type \"object\""),
-                ("/sequence/0/sequence/0/sequence/1/group", "\"execution\""),
+                ("/sequence/0/sequence/0/sequence/1/group", "'execution' was unexpected"),
             ]),
         ),
         (
@@ -133,7 +133,7 @@ fn every_container_level_is_typed() {
             include_str!("../fixtures/sequence-schema/level4-invalid.md"),
             Invalid(&[
                 ("/sequence/0/sequence/0/sequence/0/sequence/0/with", "not of type \"object\""),
-                ("/sequence/0/sequence/0/sequence/0/sequence/0/sequence/0/group", "\"execution\""),
+                ("/sequence/0/sequence/0/sequence/0/sequence/0/sequence/0/group", "'execution' was unexpected"),
             ]),
         ),
     ]);
@@ -153,12 +153,12 @@ fn removed_and_misspelled_keys_are_reported_by_name() {
         (
             "group-execution",
             include_str!("../fixtures/sequence-schema/group-execution.md"),
-            Invalid(&[("/sequence/0/group", "\"execution\"")]),
+            Invalid(&[("/sequence/0/group", "'execution' was unexpected")]),
         ),
         (
             "group-misspelled-max-parallel",
             include_str!("../fixtures/sequence-schema/group-misspelled-max-parallel.md"),
-            Invalid(&[("/sequence/0/group", "\"max_paralel\"")]),
+            Invalid(&[("/sequence/0/group", "'max_paralel' was unexpected")]),
         ),
         (
             "root-fail-fast",

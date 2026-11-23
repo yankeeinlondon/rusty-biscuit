@@ -32,7 +32,7 @@ use darkmatter::config::write::{ConfigTransaction, ConfigWriteError, TargetChang
 use serde_json::Value;
 use simplified_schema::yaml_documents::load_yaml_document;
 
-use super::load::{ConfigProblem, line_column};
+use super::load::{ConfigProblem, ConfigProblemKind, line_column};
 use super::migration;
 use super::schema::ConfigScope;
 use crate::error::{ClaudineError, Result};
@@ -111,6 +111,7 @@ pub(crate) fn prepare_scope(yaml_path: &Path, scope: ConfigScope, notices: &mut 
                         error.receipt.display(),
                         yaml_path.display(),
                     ),
+                    kind: ConfigProblemKind::InvalidSetting,
                 }]));
             }
         }
@@ -120,7 +121,7 @@ pub(crate) fn prepare_scope(yaml_path: &Path, scope: ConfigScope, notices: &mut 
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(ScopeState::Ready),
         Err(error) => {
-            return Err(conversion_error(vec![ConfigProblem::whole(Some(&json_path), format!("cannot be read: {error}"))]));
+            return Err(conversion_error(vec![ConfigProblem::whole(Some(&json_path), ConfigProblemKind::InvalidSetting, format!("cannot be read: {error}"))]));
         }
     };
 
@@ -165,15 +166,22 @@ fn receipt_pending(yaml_path: &Path) -> bool {
 fn parse_legacy(bytes: &[u8], path: &Path) -> std::result::Result<Value, Vec<ConfigProblem>> {
     let at = |text: &str, offset: usize, pointer: String, message: String| {
         let (line, column) = line_column(text, offset);
-        vec![ConfigProblem { file: Some(path.to_path_buf()), pointer, line: Some(line), column: Some(column), message }]
+        vec![ConfigProblem {
+            file: Some(path.to_path_buf()),
+            pointer,
+            line: Some(line),
+            column: Some(column),
+            message,
+            kind: ConfigProblemKind::Syntax,
+        }]
     };
     let text = std::str::from_utf8(bytes).map_err(|error| {
         at(&String::from_utf8_lossy(bytes), error.valid_up_to(), String::new(), "the file is not valid UTF-8".into())
     })?;
     let parsed = biscuit_file::Json5::from_str(text)
-        .map_err(|error| vec![ConfigProblem::whole(Some(path), format!("not valid JSON5: {error}"))])?;
+        .map_err(|error| vec![ConfigProblem::whole(Some(path), ConfigProblemKind::Syntax, format!("not valid JSON5: {error}"))])?;
     let scan = biscuit_file::json5_scan(text)
-        .map_err(|error| vec![ConfigProblem::whole(Some(path), format!("not valid JSON5: {error}"))])?;
+        .map_err(|error| vec![ConfigProblem::whole(Some(path), ConfigProblemKind::Syntax, format!("not valid JSON5: {error}"))])?;
     if let Some(duplicate) = scan.duplicate_key {
         let pointer = format!("{}/{}", duplicate.object_pointer, duplicate.key.replace('~', "~0").replace('/', "~1"));
         return Err(at(text, duplicate.offset, pointer, format!("the key `{}` is written more than once", duplicate.key)));
@@ -185,6 +193,7 @@ fn parse_legacy(bytes: &[u8], path: &Path) -> std::result::Result<Value, Vec<Con
             line: Some(error.line),
             column: Some(error.column),
             message: error.to_string(),
+            kind: ConfigProblemKind::Syntax,
         }]
     })?;
     Ok(parsed.as_json_value().clone())
@@ -211,6 +220,7 @@ fn convert(
         Ok(_) => {
             return Err(conversion_error(vec![ConfigProblem::whole(
                 Some(backup_path),
+                ConfigProblemKind::InvalidSetting,
                 format!(
                     "{} cannot be converted because {} already exists with other content; both are kept. Move {} away and run again",
                     json_path.display(),
@@ -221,7 +231,7 @@ fn convert(
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => MigrationSource::backup(json_path, bytes, backup_path),
         Err(error) => {
-            return Err(conversion_error(vec![ConfigProblem::whole(Some(backup_path), format!("cannot be read: {error}"))]));
+            return Err(conversion_error(vec![ConfigProblem::whole(Some(backup_path), ConfigProblemKind::InvalidSetting, format!("cannot be read: {error}"))]));
         }
     };
     let removed_duplicate = matches!(source.action, darkmatter::config::migration_receipt::MigrationAction::Delete);
@@ -248,7 +258,7 @@ fn convert(
             ConfigWriteError::Layout { source, .. } => format!("holds a value that cannot be written as YAML: {source}"),
             other => format!("{} could not be written; nothing was changed: {other}", yaml_path.display()),
         };
-        return Err(conversion_error(vec![ConfigProblem::whole(Some(json_path), message)]));
+        return Err(conversion_error(vec![ConfigProblem::whole(Some(json_path), ConfigProblemKind::InvalidSetting, message)]));
     }
 
     let written = std::fs::read_to_string(yaml_path).map_err(ClaudineError::Io)?;
@@ -256,6 +266,7 @@ fn convert(
     if reread.as_ref() != Some(value) {
         return Err(conversion_error(vec![ConfigProblem::whole(
             Some(yaml_path),
+            ConfigProblemKind::InvalidSetting,
             format!("does not read back as {}; {} is kept", json_path.display(), json_path.display()),
         )]));
     }
@@ -266,6 +277,7 @@ fn convert(
             line: None,
             column: None,
             message: format!("{} was written but {} could not be moved: {error}", yaml_path.display(), json_path.display()),
+            kind: ConfigProblemKind::InvalidSetting,
         }])
     })?;
     notices.push(converted_notice(json_path, yaml_path, backup_path, !removed_duplicate));

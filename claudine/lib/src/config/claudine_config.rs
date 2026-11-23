@@ -428,7 +428,11 @@ impl Default for ClaudineConfig {
 /// types, reported against the file rather than panicking.
 fn typed_read_failure(file: Option<&std::path::Path>, error: &serde_json::Error) -> ClaudineError {
     ClaudineError::ConfigInvalid {
-        problems: vec![super::load::ConfigProblem::whole(file, format!("the configuration cannot be read: {error}"))],
+        problems: vec![super::load::ConfigProblem::whole(
+            file,
+            super::load::ConfigProblemKind::InvalidSetting,
+            format!("the configuration cannot be read: {error}"),
+        )],
     }
 }
 

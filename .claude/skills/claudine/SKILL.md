@@ -92,7 +92,11 @@ the `actions` and `configurations` fields turn them into the internally tagged
 everywhere else. A flat (`type:`/`provider:`) entry is refused by `load.rs`
 with its keyed spelling, and `json_conversion` rewrites it (`wire::upgrade_flat`). Errors are
 `ClaudineError::ConfigInvalid`/`ConfigConversion` with file:line:column and
-JSON pointer. A legacy `config.json` beside a canonical
+JSON pointer; each `ConfigProblem` carries a `ConfigProblemKind`
+(`UnknownKey`, whose pointer names the key and whose position is the key
+token; `Syntax`; `InvalidSetting`), which `claudine doctor`
+(`lib/src/doctor/`) reports without the message, since messages can quote
+authored values. A legacy `config.json` beside a canonical
 `<base>/.claudine/config.yaml` is converted by the temporary
 `json_conversion` module through Darkmatter's `ConfigTransaction` and
 migration receipt. Event and provider maps list their keys explicitly; the
@@ -854,7 +858,9 @@ container cells are `lib/tests/l1/container_schema_recursion.rs` over the
 `tests/fixtures/sequence-schema/containers-depth4-*.md` controls (see
 [Schemas](topics/schemas.md#sequence-containers)). A group is closed but a
 union with a file reference, so `execution`/`max_paralel` are reported at
-`/…/group` with the value in the message; a `sequence`, task `prompt`,
+`/…/group` as unknown keys by name (SimplifiedSchema names a key every
+type-applicable union arm rejects; a key another arm declares is never
+called stray); a `sequence`, task `prompt`,
 or `group` reference is `string(no-coerce)`, so `sequence: 42` or
 `prompt: true` is a schema error, as the parser's refusal is. So are the
 top-level texts whose runtime reader refuses a non-string (`prompt`,

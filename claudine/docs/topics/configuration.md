@@ -57,8 +57,12 @@ flowchart TD
   keeps every default.
 - **Located.** Each problem names the file, line, column, and the JSON pointer
   of the value (`~/.claudine/config.yaml:4:12 at /protect/enabled: …`).
-- **Closed.** A key the scope does not declare is an error at that key. A
-  repository file that sets `tts`, for example, fails.
+- **Closed.** A key the scope does not declare is an error at that key, and
+  its line and column are the key's own. A repository file that sets `tts`,
+  for example, fails. The same holds inside a setting that takes several
+  forms: `tts: { provider: say, pitch: 3 }` is reported as the unknown key
+  `pitch` at `/tts`, because no form of `tts` declares it, while a key one
+  form does declare is never reported as unknown.
 - **Semantic checks** run after the schema: sound effect names, Protect
   patterns and `allow_paths`, exit-expression regexes and `scope` agents, and
   that the active messenger route exists.

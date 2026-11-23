@@ -195,6 +195,26 @@ fn compile_canonical_action_mapper(
         .transpose()
 }
 
+/// The actions whose mapper [`compile_canonical_runtime`] refuses, by event
+/// and position in that event's list, without building the rest of the
+/// runtime. A matcher that fails to compile is tolerated there, so it is
+/// not reported here either.
+pub(crate) fn refused_action_mappers(config: &ClaudineConfig) -> Vec<(AgenticEvent, usize)> {
+    let mut refused: Vec<(AgenticEvent, usize)> = config
+        .actions
+        .iter()
+        .flat_map(|(event, actions)| {
+            actions
+                .iter()
+                .enumerate()
+                .filter(|(_, action)| compile_canonical_action_mapper(action, *event).is_err())
+                .map(|(index, _)| (*event, index))
+        })
+        .collect();
+    refused.sort_by_key(|(event, index)| (event.to_string(), *index));
+    refused
+}
+
 /// Compile a single mapper without provider context.
 fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<CompiledMapper> {
     match mapper {

@@ -1627,29 +1627,34 @@ fn passive_parity_tests_cover_every_ac5_fixture() {
 /// every acyclic helper was inlined at each use.
 #[test]
 fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
-    use simplified_schema::ValidationProblemCode::ConstraintViolation;
+    use simplified_schema::ValidationProblemCode::{ConstraintViolation, UnknownKey};
     use simplified_schema::validate::build_position_map;
 
-    const BARE_VERB: &str = "a zero-argument verb written as a bare list item";
     let bare = Bare::new();
     let schemas = bare.schemas(Arc::clone(claudine_hosts()));
-    /// `(instance path, line, column, explanation)` of each expected problem.
-    type Expected = &'static [(&'static str, u32, u32, &'static str)];
+    /// `(instance path, line, column, code, explanation)` of each expected
+    /// problem. A key no arm of the action union declares is reported by
+    /// name, as an unknown key with no arm's explanation.
+    type Expected = &'static [(&'static str, u32, u32, simplified_schema::ValidationProblemCode, Option<&'static str>)];
     let cases: [(&str, Expected); 5] = [
         (
             "start:\n  - inf0: hi\nfinalize:\n  - say: hi\n  - inf0: hi\n",
-            &[("/start/0", 2, 5, BARE_VERB), ("/finalize/1", 5, 5, BARE_VERB)],
+            &[("/start/0", 2, 5, UnknownKey, None), ("/finalize/1", 5, 5, UnknownKey, None)],
         ),
         (
             "success:\n  - when: \"{{ ready }}\"\n    then:\n      - say: hi\n      - inf0: hi\n",
-            &[("/success/0/then/1", 5, 9, BARE_VERB)],
+            &[("/success/0/then/1", 5, 9, UnknownKey, None)],
         ),
-        ("start:\n  - say: hi\n    inf0: hi\n", &[("/start/0", 2, 5, BARE_VERB)]),
+        // Beside a known verb, the unknown key's own token is the position.
+        ("start:\n  - say: hi\n    inf0: hi\n", &[("/start/0", 3, 5, UnknownKey, None)]),
         // `cancelled` admits a shell; `initialize` never does. The shared
         // events select nothing alone, so `agent` selects composition.yaml.
-        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\nagent: claude\n", &[("/initialize/0", 2, 5, BARE_VERB)]),
+        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\nagent: claude\n", &[("/initialize/0", 2, 5, UnknownKey, None)]),
         // A loop action missing its required `prop`.
-        ("loop:\n  action:\n    op: set\n", &[("/loop/action", 3, 5, "an iteration action such as increment(iteration)")]),
+        (
+            "loop:\n  action:\n    op: set\n",
+            &[("/loop/action", 3, 5, ConstraintViolation, Some("an iteration action such as increment(iteration)"))],
+        ),
     ];
     for (frontmatter, expected) in cases {
         let markdown = memory_document(frontmatter);
@@ -1663,7 +1668,7 @@ fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
             .collect();
         let expected: Vec<_> = expected
             .iter()
-            .map(|(path, line, column, description)| (ConstraintViolation, *path, Some(*line), Some(*column), Some(*description)))
+            .map(|(path, line, column, code, description)| (*code, *path, Some(*line), Some(*column), *description))
             .collect();
         assert_eq!(found, expected, "`{frontmatter}`");
         for property in instance.as_object().expect("a mapping").keys() {

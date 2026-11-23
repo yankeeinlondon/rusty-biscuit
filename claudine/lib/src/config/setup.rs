@@ -318,6 +318,8 @@ fn identity(path: &Path) -> PathIdentity {
     PathIdentity::new(&canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf()))
 }
 
-fn same_file(left: &Path, right: &Path) -> bool {
+/// Whether `left` and `right` name one file, by canonical identity (each
+/// path as written when it cannot be canonicalized).
+pub(crate) fn same_file(left: &Path, right: &Path) -> bool {
     identity(left) == identity(right)
 }
