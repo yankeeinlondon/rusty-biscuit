@@ -3,7 +3,7 @@ kind: plan
 total-phases: 6
 created: 2026-11-22
 status: planned
-phase: 3
+phase: 4
 agent: codex/gpt-6.2-sol
 yolo: true
 packages:
@@ -149,6 +149,41 @@ skills_files_updated_during_phase_2:
 - .claude/skills/darkmatter/lifecycle.md
 - .claude/skills/darkmatter/schema.md
 - darkmatter/docs/use-skills/use-dmls/schemas.md
+source_files_during_phase_3:
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/triggers/assemble.rs
+- simplified-schema/lib/src/triggers/finding.rs
+- simplified-schema/lib/src/triggers/prepared.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/registration/merge.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/tests/l1/host_trigger_merge.rs
+- darkmatter/lib/tests/l1/registered_yaml_kinds.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/host_registration.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/yaml_contract.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/tests/l1/lsp_session.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/registered_trigger_conflict.rs
+- darkmatter/dmls/tests/l1/registered_yaml_kinds.rs
+docs_updated_during_phase_3:
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/SKILL.md
+- darkmatter/docs/use-skills/use-dmls/schemas.md
 ---
 
 # Host registration v2 implementation plan
@@ -253,14 +288,14 @@ At the final checkpoint audit new parse paths for load-bearing `#[serde(default)
 
 ### Wave 3
 
-- [ ] **Trigger layer**
+- [x] **Trigger layer**
   - Implement Rule 8 in `config/registration/merge.rs` and `markdown/schemas/mod.rs`. Carry winning provenance through `EffectiveSchema` and keep the static cache separate from pending slot resolution. Wire compose, clean, validate, detailed trigger reporting, and DMLS schema diagnostics through the same layer. For a failed layer retain syntax diagnostics and omit dependent schema features.
   - Add public effective-schema regressions for equivalent declarations, enum/string narrowing, required vs optional, effective nullability, descriptions/examples/constraints/defaults, recursive aliases, nested rules, and a narrower third type that must still expose an incompatible pair. Cover unmatched conflicts, same-file suppression, arm order, inherited keys, a competing alternative key, second root union, nondefault root constraints, proven local override, passive unresolved templates, and conflict survival under an authored override. Assert the conflict code and source relationships in CLI and DMLS.
 - [x] **YAML tier**
   - Own `markdown/schemas/yaml_documents/`, the YAML branch of `cli/src/commands/schema/validate.rs`, and DMLS YAML preparation/key changes in `overlay/yaml_contract.rs`. Implement Rule 9 using the selected definition's host identity. Use the loaded host view for DMLS contract preparation even when no Markdown trigger work is outstanding. Leave debounce and router invalidation to Phase 5.
   - Test identical copies, distinct definitions within and across hosts, built-in and local winners, unreadable roots, an incomplete local claim, registered precedence over a root schema, no kind claim falling through to a root schema, and registered YAML navigation/diagnostics from the source path. Prove only whole-document validation takes place.
 
-- [ ] **Consumer checkpoint**
+- [x] **Consumer checkpoint**
   - Run Darkmatter CLI, library, and DMLS L1 filters for host registration, schema triggers, YAML validation, and registered-view function/lifecycle behavior. Keep the v2 fixtures isolated from workspace and user roots. Exercise the CLI error in `commands/schema/validate.rs::FileOutcome::schema_error` and DMLS related locations in `diagnostics/frontmatter.rs::schema_prepare_diagnostic`; reuse `diagnostics/yaml_document.rs::selection_diagnostic` for registered kind collisions.
 
 ## Phase 4 — Claudine bundle and publication

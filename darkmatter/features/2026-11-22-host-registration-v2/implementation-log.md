@@ -146,6 +146,41 @@ skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/lifecycle.md
     - .claude/skills/darkmatter/schema.md
     - darkmatter/docs/use-skills/use-dmls/schemas.md
+source_files_during_phase_3:
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/triggers/assemble.rs
+    - simplified-schema/lib/src/triggers/finding.rs
+    - simplified-schema/lib/src/triggers/prepared.rs
+    - darkmatter/lib/src/config/registration.rs
+    - darkmatter/lib/src/config/registration/merge.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/host_trigger_merge.rs
+    - darkmatter/lib/tests/l1/registered_yaml_kinds.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/cli/schemas/output/schema-validate.yaml
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/host_registration.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/yaml_contract.rs
+    - darkmatter/dmls/src/overlay/yaml_document.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/registered_trigger_conflict.rs
+    - darkmatter/dmls/tests/l1/registered_yaml_kinds.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/host-registration.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/SKILL.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
 decisions-for-review:
     - |-
         Format 1 manifests still load through the old profile loader during this phase. The plan's Rule 5 says format 1 is refused with an upgrade warning. That warning is implemented in the new format 2 reader (`bundle::load_snapshot`), but `load_registrations` still loads format 1 into host profiles, because host profiles are not built from a format 2 snapshot until Phase 2, and dozens of existing tests use format 1 fixtures that Phase 2 converts. The old format 1 contract text now lives privately in `manifest.rs`; the shipped `darkmatter-host.yaml` is format 2. Alternative: refuse format 1 everywhere now, which would break every registered-host test until Phase 2. Redo cost if reversed: none beyond what Phase 2 already removes.
@@ -185,8 +220,26 @@ decisions-for-review:
         A trigger or library `name` that fails the label pattern is refused by the envelope parser without a line (`line: None`); the test asserts the file, member, and `/name` in the message. Locating it needs the envelope parser to return the key span. Redo cost: small to moderate in SimplifiedSchema's envelope parsing.
     - |-
         `md`'s run-level registration warnings show the message on stderr without the file and line (they are present in `--output json`). Changing `output::report_run_notices` affects every run-level notice, including configuration ones, so it was left as is.
+    - |-
+        Root unions are admitted only in registered trigger payloads (`resolve_registered_trigger_payload`, `PayloadForm::ObjectOrUnion`); embedded and schema-root trigger payloads still refuse a root union. A union arm must be inline (a `Name@file` arm is refused). Phase 4 needs Claudine's inline-composition union payload to take the registered path. Alternative: admit unions for every trigger, which changes the root-trigger merge contract. Redo cost: small (the gate is one `form` argument).
+    - |-
+        A layer stack with a root-union host layer is merged by `merge_around_union`: the baseline and lower layers merge, the higher layers and document merge on top of them, and then the union, with the keys the higher layers declare removed from its arms, is merged last. A document `$schema` that is itself a root union over a union host layer is a `SchemaError::Baseline`. A higher layer's `closed` root is not carried over the union, because the union arms own the root. Alternative: lower the union to per-arm full stacks, which multiplies validator size. Redo cost: moderate.
+    - |-
+        Origins and default-file attribution now cover root-union schemas: each key any arm declares is attributed to the highest layer declaring it in any arm (`declares_property`, `top_level_keys`). This replaces the old rule that a root-union schema has no origins, and one existing unit test changed from asserting empty origins to asserting per-key origins (`root_union_document_schema_merges_trigger_per_arm_with_arm_origins`). This is needed so a registered union layer's defaults and related locations work. Alternative: attribute only for host unions. Redo cost: small.
+    - |-
+        A registered template payload is resolved whole (`without_properties(&[])`), with no discard of properties a higher layer redeclares, and its checked layer is not memoized; `pending_templates_for` lists it whole. That makes a conflict visible even under an override, at the cost of resolving slots a higher layer would discard. Alternative: discard first, as root triggers do, which would let an authored override hide a conflict. Redo cost: small.
+    - |-
+        `RegisteredHostProfile::checked_layer` memoizes static results (successes and conflicts) per sorted matched set with no bound. The number of distinct matched sets is at most the power set of a host's triggers and in practice a handful. Alternative: a bounded LRU. Redo cost: small.
+    - |-
+        Examples are compared as part of the constraint set (reason: "their constraints differ"), not with a separate message. A registered bundle cannot carry a `kind: example` file (refused as a listed member, unreadable unlisted), so no registered payload can declare an `example(...)` today and the case has no L1 test. Redo cost: small if bundles later admit example files.
+    - |-
+        `SchemaError::HostTriggerConflict` is boxed (`HostTriggerConflict(Box<simplified_schema::HostTriggerConflict>)`) to keep `SchemaError` under clippy's large-error threshold, following `UnresolvedSlots`.
+    - |-
+        `md schema validate --output json` gives a conflict's `schema` record `code: dm.host.trigger_conflict` and a new `related` array (the two trigger files); the output schema gained `related`. DMLS relates each trigger file at a zero range (the top of the file), because the property's span in the trigger is not carried through the checked layer. Locating the declarations needs the payload's source map in `merge::check`. Redo cost: moderate.
+    - |-
+        A whole YAML document now waits for its configuration's host registrations in DMLS (`registry_demand`, `prepare_need`), and the contract key folds in the installed registrations' version. Their install republishes the document's current version, so an editor can see one extra publication of the same version; `lsp_session::meta_schema_phase6_shipped_schema_activation_and_current_error` now waits for the version 2 publication instead of the next one. Alternative: suppress a republish whose diagnostics are unchanged. Redo cost: small.
 message-to-agent: |-
-    Phase 2 removed every legacy host path: no `identify` field, no schema-root host catalogs or lifecycle discovery (`host_lifecycle_profiles`, `host_function_catalogs`, `HostSelection::Legacy` are gone), and format 1 manifests are refused. Profiles are built from `bundle::load_snapshot`; members are classified in `config::registration::load_manifest`, and `registration::namespaces::prepare_catalog` gives the global catalog plus the lifecycle `catalog_hash`. `select` returns `Selected{selection, matched}`; the trigger layer already filters by `matched` (`markdown/schemas/mod.rs::registered_matches`). For Phase 3: `RegisteredHosts::yaml_kinds()` is built but not yet passed to `simplified_schema::yaml_documents::select_with_registered` from `prepare_yaml_contract`/DMLS. Claudine still publishes format 1 (Phase 4), so Claudine's registration round-trip tests fail until then, and its committed lifecycle artifact carries a transitional one-entry catalog hash (`claudine/lib/src/composition/lifecycle/mod.rs`). Shared v2 fixtures: `darkmatter/lib/tests/host_fixtures/mod.rs` (`Bundle::{acme, relay}`, `Fixture::{write_member, corrupt_member, readdress}`), and `darkmatter/dmls/tests/l1/claudine_host.rs` for a Claudine-shaped bundle built from frozen fixtures.
+    Phase 3 landed Rule 8 and Rule 9. `config::registration::merge::check` turns a host's matched payloads into one `CheckedLayer` (or a `TriggerConflict`, boxed as `SchemaError::HostTriggerConflict`, code `dm.host.trigger_conflict`); `RegisteredHostProfile::checked_layer(&matched)` memoizes static results, and `markdown/schemas/mod.rs::registered_trigger_layers` uses it (template payloads resolve whole, unmemoized). Registered payloads are loaded by `simplified_schema::triggers::assemble::resolve_registered_trigger_payload` with `PayloadForm::ObjectOrUnion`, so one root union is allowed and merged by `merged_trigger_schema`'s `merge_around_union`; embedded and root triggers still refuse unions. For Phase 4: Claudine's inline-composition union payload must ship as a registered trigger (inline arms only, no `Name@file` arm) and must not share alternative-defining keys (`prompt`, `sections`, ...) with Claudine's other triggers. Registered `yaml-schema` kinds are the lowest tier of `prepare_yaml_contract` in the CLI and DMLS (`YamlContract::registered()`). Claudine's format 1 round-trip tests (`host_publication`, `installed_registration`, `host_registration_refresh`) still fail with the format 1 upgrade warning until Phase 4 publishes format 2. Tests: `darkmatter/lib/tests/l1/host_trigger_merge.rs`, `registered_yaml_kinds.rs`, DMLS `registered_trigger_conflict.rs` and `registered_yaml_kinds.rs`, and two CLI tests at the end of `darkmatter/cli/tests/l1/host_registration.rs`.
 ---
 
 # Implementation Log for 2026-11-22-host-registration-v2 (6 phases)
@@ -445,3 +498,101 @@ line (see `decisions-for-review`).
 - Windows (`just cross-check <package> --os windows`): `darkmatter` 12743
   passed, 66 skipped; `darkmatter-lsp` 2112 passed, 9 skipped;
   `darkmatter-cli` 2639 passed, 85 skipped. No `os-failing` needed.
+
+## Phase 3
+
+- Started 2026-11-22, finished 2026-11-23. Tasks: Trigger layer (Rule 8),
+  YAML tier (Rule 9), Consumer checkpoint. All three are checked off in the
+  plan.
+
+### What was built
+
+- **Checked trigger layer.** `darkmatter/lib/src/config/registration/merge.rs`
+  (new) compares every pair of a host's matched payloads per top-level
+  property: subtype in both directions
+  (`is_definition_subtype_with_definitions` over a combined definition
+  table), then presence, null admission, defaults, descriptions, and the
+  remaining constraints separately; a structural comparator that is
+  coinductive over named types coalesces recursive aliases. The unique
+  narrowest class wins and every other payload's declaration is removed, so
+  the winner keeps its origin. Root checks: at most one root union, no root
+  rules when two or more payloads contribute, and no other payload may
+  declare a key that tells the union's arms apart.
+  `RegisteredHostProfile::checked_layer` memoizes static results per sorted
+  matched set; `DarkmatterSchemas::resolve_trigger_layers` and
+  `pending_templates_for` use it (templates resolve whole and bypass the
+  memo). A conflict is `SchemaError::HostTriggerConflict` (boxed), reported
+  as `dm.host.trigger_conflict` by `report_diagnostics::schema_error_diagnostics`
+  (compose and validate), the CLI's JSON `schema` record (`code`, `related`),
+  and DMLS (`schema_prepare_diagnostic`, related information in both trigger
+  files).
+- **Registered root unions.** `resolve_registered_trigger_payload` with
+  `PayloadForm::ObjectOrUnion` admits one inline root union in a registered
+  payload; `merged_trigger_schema` layers around it (`merge_around_union`),
+  and origins and default files are attributed per arm key.
+- **YAML tier.** `prepare_yaml_contract` passes
+  `RegisteredHosts::yaml_kinds()` to `select_with_registered`; the CLI
+  attaches the run's hosts for YAML inputs; DMLS prepares the YAML
+  document's host registrations and folds their version into the contract
+  key. `YamlContract::registered()` names the host, path, and file.
+
+### Requirement to test
+
+| Requirement | Test |
+| --- | --- |
+| Equivalent declarations coalesce, first path is origin | `host_trigger_merge::equivalent_declarations_coalesce_under_the_first_trigger` |
+| Enum narrows string | `host_trigger_merge::a_narrower_enum_wins_over_a_string_whose_other_rules_agree` |
+| Required vs optional | `host_trigger_merge::a_required_string_and_an_optional_enum_conflict_on_presence` |
+| Nullability, descriptions, constraints, defaults | `host_trigger_merge::equivalent_types_that_differ_in_nullability_description_constraint_or_default_conflict` (no example case; see `decisions-for-review`) |
+| Nested rules | `host_trigger_merge::nested_declarations_are_walked` |
+| Recursive aliases | `host_trigger_merge::recursive_definitions_compare_by_structure_not_storage` |
+| A narrower third still exposes an incompatible pair | `host_trigger_merge::a_narrower_third_declaration_cannot_hide_an_incompatible_pair` |
+| Inherited keys | `host_trigger_merge::an_inherited_property_is_compared_as_declared` |
+| Unmatched conflicts | `host_trigger_merge::conflicting_triggers_that_never_match_together_are_no_conflict` |
+| Memo per matched set | `host_trigger_merge::a_static_result_is_memoized_per_matched_set` |
+| Arm order, ordinary keys in every arm | `host_trigger_merge::ordinary_properties_merge_into_each_arm_of_the_root_union_in_arm_order` |
+| Competing alternative key | `host_trigger_merge::another_trigger_may_not_declare_a_key_that_defines_the_union` |
+| Second root union, nondefault root rules | `host_trigger_merge::a_second_root_union_or_root_rules_with_two_payloads_conflict_on_the_root` |
+| Proven local override; conflict survives an authored override | `host_trigger_merge::a_document_override_applies_to_a_prepared_layer_but_never_clears_a_conflict`, `host_trigger_merge::a_root_trigger_refines_a_prepared_union_layer` |
+| Passive unresolved templates | `host_trigger_merge::a_registered_template_stays_passive_and_is_listed_whole` |
+| Same-file suppression | `host_selection::a_registered_trigger_also_visible_in_a_root_applies_once` (existing) |
+| Conflict code and sources: library | `host_trigger_merge::the_conflict_is_one_coded_error_on_the_document` |
+| Conflict code and sources: CLI (`FileOutcome::schema_error`, compose) | `darkmatter-cli` `host_registration::two_matched_triggers_that_disagree_are_one_coded_conflict_naming_both` |
+| Conflict code and sources: DMLS (`schema_prepare_diagnostic` related) | `darkmatter-lsp` `registered_trigger_conflict::a_conflict_between_matched_triggers_is_one_error_related_to_both_files` |
+| Registered YAML tier: identity, precedence, copies, duplicates, no trigger layer | `registered_yaml_kinds::*` (9 tests, library) |
+| CLI YAML tier | `darkmatter-cli` `host_registration::schema_validate_judges_a_yaml_document_by_a_registered_hosts_kind`, `…refuses_a_kind_two_registered_hosts_define_differently` |
+| DMLS YAML tier, `selection_diagnostic` for kind collisions, reload | `darkmatter-lsp` `registered_yaml_kinds::a_registered_kind_judges_the_document_and_a_competing_definition_refuses_it_until_removed` |
+| DMLS contract key follows the host version | `overlay::yaml_contract::tests::the_contract_key_follows_the_installed_registrations_version` |
+
+### Changes to existing tests
+
+- `markdown::schemas::…::root_union_document_schema_merges_trigger_per_arm_without_origins`
+  was renamed `…_with_arm_origins` and now asserts per-key origins (root-union
+  origins are now attributed; the `EffectiveSchema::origins` doc was stale
+  and is corrected).
+- `lsp_session::meta_schema_phase6_shipped_schema_activation_and_current_error`
+  waits for the version 2 publication: the host-registration install now
+  republishes version 1 of a YAML document first.
+- `registered_yaml_kinds::a_local_definition_claiming_the_kind_wins_over_the_registered_one`
+  compares the definition as a `Path` (it failed on Windows with mixed
+  separators).
+
+### Gates
+
+- `darkmatter`: `just test` — 17626 passed, 10 skipped; slowest L1 test
+  2.15 s. `just lint` passed.
+- `simplified-schema`: `just test` — 2525 passed; `just lint` passed.
+- `just check-tier-coverage darkmatter` and `simplified-schema`: nothing
+  stranded.
+- Dependents: `cargo check --tests` of `claudine`, `claudine-cli`,
+  `claudine-gen`, `biscuit-icon-cli`, `biscuit-terminal-cli`,
+  `sniff-detection-cli`, `biscuit-speaks-cli`, `messenger`, `messenger-cli`,
+  `playa-cli`, `research`: clean. `claudine` filtered
+  (`host|regist|trigger|yaml|schema|publication|catalog`): 1510 passed, 26
+  failed; `claudine-cli` filtered: 414 passed, 2 failed. All 28 failures are
+  `host_publication::*`, `installed_registration::*`, and
+  `host_registration_refresh::*`, refused with the format 1 upgrade warning,
+  as recorded in Phase 2; expected until Phase 4.
+- `just publish-skills` in `darkmatter/`: published.
+- Windows (`just cross-check darkmatter --os windows`): 12769 passed, 66
+  skipped, after the path-comparison fix above. No `os-failing` needed.
