@@ -1263,3 +1263,94 @@ configuration reader; the window is a constant, not configuration.
 - The affected-scope calculator was not used to skip gates; both gates ran.
 - Unrelated uncommitted files from earlier work remain in the tree and
   were not touched by this phase.
+
+## Phase 6
+
+Documentation and end-to-end proof. No production code changed in this
+phase. Three documentation agents ran in parallel, one per area: Darkmatter and
+DMLS, Claudine, and SimplifiedSchema. The verification ran afterwards.
+
+### Darkmatter and DMLS documentation
+
+- `darkmatter/docs/topics/host-registration.md`:
+  - added the format 2 manifest example at `~/.claudine/registrations/darkmatter/manifest.yaml` and the matching `register` entry;
+  - stated that reads are passive;
+  - added the format 1 refusal text and repair (`claudine setup` / `claudine registrations publish`);
+  - added a located `dm.host.trigger_conflict` example taken from `md schema validate --output json`, with the reason strings from `merge.rs`;
+  - added a Mermaid diagram of the reload flow (batches → 300 ms settle with the old view kept → latest completed view installed).
+- `docs/topics/lifecycle/host-artifact.md`: the revision-folder publisher is replaced by the one-tree publisher, which writes only changed files and the manifest last.
+- `dmls/docs/{diagnostics,features}.md`, `dmls/docs/editors/README.md`, `dmls/README.md`:
+  - the 300 ms settle window, the save fallback, and repaired warnings clearing without a restart;
+  - the stale "copy eight files and `globals.yaml`" text and the schema-root host catalog wording are removed.
+- `docs/topics/schemas/dmls-schema-support.md`: the "Claudine documents" section is rewritten for the published bundle; a registered-host node is added to the diagram.
+- `darkmatter/README.md`: an overview line for host registration.
+- `use-dmls` caller skill (`SKILL.md`, `features.md`, `schemas.md`) updated; `use-darkmatter` needed nothing. `just publish-skills` (darkmatter) succeeded.
+- Drift fixed, with the code winning:
+  - `dm.host.trigger_conflict` sits on the frontmatter, not at the top of the document;
+  - `dm.expression.incomplete_analysis` no longer cites facts files in schema roots.
+- Repo skill: `.claude/skills/darkmatter/library-surfaces.md` (the mirrored files are now `claudine/registration/{action,lifecycle-events}.yaml`). `SKILL.md`, `dmls.md`, `schema.md` and `lifecycle.md` already matched the code.
+
+### Claudine documentation
+
+- `claudine/docs/topics/schemas.md`:
+  - "The registration folder" (the authored tree, the four kinds, a table of the 15 files, the import graph) replaces the stale "eight files" table;
+  - "When the schemas apply" is rewritten;
+  - new "Inline compositions: `prompt` or `sections`";
+  - a table from authored files to published paths, a publication diagram, and "Hand edits, recovery, and overrides".
+- `configuration.md`: a setup-order diagram with each step's failure path.
+- `docs/cli/registrations.md`: real `claudine registrations` output (17 entries) and the unknown-path error.
+- `claudine/schemas/README.md` is cut down; `claudine/README.md` gets an overview line.
+- Stale paths are fixed in `configuring-actions.md` and `frontmatter-properties.md`.
+- Repo skill: `.claude/skills/claudine/{SKILL,cli-commands,architecture,module-map}.md`.
+- `use-claudine`: `config.md`, `composition.md`, `cli.md`. `just publish-skills` (claudine) succeeded.
+- Scope of inline `sections` validation, as documented:
+  - checked: exactly one of `prompt`/`sections` (the other only `null`); `kind: inline-compose` with neither is refused; `prompt` is a string and `sections` a mapping; the shared controls are typed;
+  - not checked: section headings or values;
+  - `claudine inline-compose` then refuses a `sections` document with `PromptPropertyMissing`, because running sections is not built.
+- Drift found:
+  - setup runs only on a first run, so recovery of a lost `register` entry is documented as a hand edit;
+  - a root-union trigger gets no DMLS completion or hover (documented as a limit);
+  - `claudine/lib/src/composition/registration.rs` module docs mention a "doctor" that does not exist yet. This was left for `2026-11-22-claudine-doctor`, the spec's `next-spec`.
+
+### Schema documentation
+
+- `simplified-schema/docs/topics/language/schema-documents.md` gains three sections: "Resolving a namespace's payload" (private `types`, `./` imports), "A label is unique within its schema root" (with the exact duplicate error), and "Path-based imports inside a bundle" (what resolves, what `SchemaError::BundleBoundary` refuses).
+- `language-core.md` module table, `simplified-schema/README.md`.
+- `docs/kind-documents.md`:
+  - a section on host namespaces;
+  - label uniqueness;
+  - corrected "ship with Darkmatter" to SimplifiedSchema shipping all four definitions.
+- `schemas/kind.yaml` adds `namespace-schema` to the `kind` enum.
+- Repo skill: `.claude/skills/simplified-schema/{SKILL,schema-documents}.md`.
+- Dependency inventories: the only crate added in this feature is `serde_yaml_ng` in `claudine/lib`, which `claudine/docs/dependencies.md` already records. No change was needed.
+
+### End-to-end proof against the published bundle
+
+The test home was a temporary one, `HOME=/tmp/p6-e2e.*/home`, with the working directory outside the repository, no `SCHEMAS_DIR`, and no user `schemas/`. `claudine registrations publish` wrote `~/.claudine/registrations/darkmatter/` (the manifest, the lifecycle artifact, and 15 schemas). Then `~/.darkmatter.yaml` was given `register: [~/.claudine/registrations/darkmatter/manifest.yaml]`.
+
+| Input | `md schema validate` | DMLS (stdio session, `didOpen`) |
+| --- | --- | --- |
+| `prompt: Say hello` | valid by `inline-composition.yaml` (exit 0) | no diagnostics |
+| `prompt` + `sections: [a]` | refused, `sections ["a"] is not of type "null"` at 4:3 (exit 1) | same message |
+| `prompt: [1, 2]` | refused, not a string at 2:9 (exit 1) | — |
+| `kind: inline-composer` + `sections: 3` | selected through `sections`, refused as not an object (exit 1) | — |
+| plain `title:` | Darkmatter default only (exit 0) | — |
+| `kind: sequence` YAML | valid by `claudine:schemas/formal-sequence-file.yaml` | no diagnostics |
+| `kind: sequence`, `sequence: 5` | refused, not an array at 2:11 (exit 1) | same message |
+
+- An identical second `publish` left every member and manifest mtime unchanged.
+- Tampering `schemas/loop.yaml` made `md` warn `files[10]` `does not match its digest … the host may be mid-publish, or its bundle was edited`, and the document fell back to the Darkmatter default. A republish repaired it: the trigger applied again.
+
+### Generated artifacts and source inputs
+
+- `just shipped-schemas` was run twice. Each run printed `every shipped artifact is current`, and the sha256 of all four artifacts (`simplified-schema`, `darkmatter`, and `claudine` `shipped.json`, plus `claudine` `globals.lifecycle.json`) stayed identical across both runs.
+- `cargo nextest run -p test-toolkit --test shipped_schemas_coordinator_contracts`: 6 passed. The `shipped_artifact_is_fresh` tests of simplified-schema, darkmatter, and claudine: 3 passed (these spell each `source-inputs` file).
+
+### Leftover-name search
+
+The live sources (lib, cli, dmls, build scripts, benches, scripts, test-toolkit) contain no `LegacyHost`, no `claudine-document.yaml`, and no per-command refresh. The remaining hits are deliberate:
+
+- `LEGACY_MANIFEST_REFERENCE` and the setup migration of `~/.claudine/darkmatter-host.yaml`;
+- the shipped schema's own file name `darkmatter-host.yaml`;
+- the frozen bench fixture `fixtures/claudine-schemas/globals.yaml`;
+- test literals in `dmls` (`event_views.rs`, `watch.rs`) and `lifecycle/host_profile/tests.rs`.

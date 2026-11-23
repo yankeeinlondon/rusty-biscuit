@@ -501,11 +501,11 @@ At the final checkpoint audit new parse paths for load-bearing `#[serde(default)
 
 ### Wave 5
 
-- [ ] **Darkmatter documentation**
+- [x] **Darkmatter documentation**
   - Update `darkmatter/docs/topics/host-registration.md`, `docs/topics/lifecycle/host-artifact.md`, `dmls/docs/{diagnostics.md,editors/README.md}`, `darkmatter/README.md`, the Darkmatter repo skill and the canonical `use-darkmatter` and `use-dmls` skills. Show the v2 envelope, YAML selection, checked merges, passive capabilities, and editor reload flow. Include the v1 repair instruction and a compact example of a located conflict. Run Darkmatter's `just publish-skills`.
-- [ ] **Claudine documentation**
+- [x] **Claudine documentation**
   - Update `claudine/docs/topics/{schemas,configuration}.md`, `claudine/schemas/README.md`, the `claudine/docs/cli/` maintainer reference and index, `claudine/README.md`, and the Claudine repo and `use-claudine` skills. Explain the authored and published layouts, inventory JSON, setup order, recovery, supported overrides, and the scope of inline sections validation. Run Claudine's `just publish-skills`.
-- [ ] **Schema documentation**
+- [x] **Schema documentation**
   - Update `simplified-schema/docs/topics/language/schema-documents.md`, its README and repo skill, and the monorepo kind catalog. Show namespace payload and private types, per-root label uniqueness, and path-based imports. Document any build dependency additions in the relevant dependency inventories.
 
 - [ ] **Final verification**
