@@ -14,7 +14,7 @@ Initialization runs these stages in order:
 3. Ensures Cargo artifact maintenance and GitNexus are usable.
 4. Ensures `sniff`, reports whether the runtime is native, WSL 1, or WSL 2,
    and ensures the core Rusty Biscuit developer CLIs. A CLI already on PATH
-   is kept unless it is more than 30 days old; see
+   is kept unless it is more than 30 days old or cannot start; see
    [Installed Developer Tools](#installed-developer-tools).
 
 The recipe is idempotent. Running it again repairs missing tools.
@@ -352,6 +352,23 @@ binary name, init looks it up on PATH and decides:
 | No binary of that name | builds and installs it from its package area |
 | A binary built 30 days ago or less | keeps it, whoever built it |
 | A binary built more than 30 days ago | reinstalls it from its package area |
+| A binary that cannot start, whatever its age | reinstalls it from its package area |
+
+A binary "cannot start" when the loader kills it before it runs: it was linked
+against a shared library the host has since removed. init probes each binary
+with `--version` and treats exit code 127 (the Linux and Git Bash loader
+failure) or a signal (macOS dyld aborts) as broken; any other exit, including
+a CLI that rejects `--version`, counts as starting.
+
+```text
+sniff: /Users/you/.cargo/bin/sniff does not start (exit 134); reinstalling from sniff/
+```
+
+The usual cause is `libpcre2-8`, which the `pcre2-sys` crate links
+dynamically whenever `pkg-config` finds it. The shared `just/devops.just`
+exports `PCRE2_SYS_STATIC=1` to every `just` recipe, so a CLI built through
+`just install` carries its own copy; a bare `cargo install` outside `just` does
+not.
 
 Every decision is printed to stderr with the binary's path and build date
 (its file modification time), so you can see what you are running:

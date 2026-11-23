@@ -23,9 +23,9 @@ log="${scratch}/installs.log"
 printf '#!/usr/bin/env bash\necho "install $(basename "$PWD")" >> "%s"\n' "${log}" > "${bin_dir}/just"
 chmod +x "${bin_dir}/just"
 
-# make_binary <name> <days old>
+# make_binary <name> <days old> [body]
 make_binary() {
-    printf '#!/usr/bin/env bash\n' > "${bin_dir}/$1"
+    printf '#!/usr/bin/env bash\n%s\n' "${3:-}" > "${bin_dir}/$1"
     chmod +x "${bin_dir}/$1"
     local stamp
     case "$(uname -s)" in
@@ -58,12 +58,20 @@ check() {
 make_binary fresh 2
 make_binary edge 30
 make_binary stale 31
+# A loader that cannot resolve a shared library kills the process (macOS dyld
+# raises SIGABRT) or exits 127 (Linux, Git Bash) before argument parsing.
+make_binary aborts 2 'kill -ABRT $$'
+make_binary unloadable 2 'exit 127'
+make_binary rejects-flag 2 'exit 2'
 
 check "missing binary installs"        install "not found on PATH"            -- absent area
 check "fresh binary is kept"           keep    "keeping .*fresh \(built .*2 days ago\)" -- fresh area
 check "30-day-old binary is kept"      keep    "30 days ago"                  -- edge area
 check "31-day-old binary reinstalls"   install "31 days ago\), older than 30" -- stale area
 check "--rebuild replaces fresh"       install "--rebuild requested"          -- --rebuild fresh area
+check "signalled binary reinstalls"    install "does not start \(exit 134\)"  -- aborts area
+check "exit-127 binary reinstalls"     install "does not start \(exit 127\)"  -- unloadable area
+check "flag-rejecting binary is kept"  keep    "keeping .*rejects-flag"       -- rejects-flag area
 
 if PATH="${bin_dir}:/usr/bin:/bin" bash "${SUBJECT}" only-one >/dev/null 2>&1; then
     FAIL=$((FAIL + 1)); FAILED_TESTS+=("wrong arity: expected a usage error")
