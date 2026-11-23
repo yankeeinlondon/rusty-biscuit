@@ -4,9 +4,53 @@ area: claudine
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 1
+phase: 2
 agent: codex/gpt-6.2-sol
 yolo: true
+source_files_during_phase_1:
+- claudine/lib/src/doctor/mod.rs
+- claudine/lib/src/doctor/report.rs
+- claudine/lib/src/doctor/config.rs
+- claudine/lib/src/doctor/tests.rs
+- claudine/lib/src/doctor/config_tests.rs
+- claudine/lib/src/lib.rs
+- claudine/lib/src/config/load.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/config/claudine_config.rs
+- claudine/lib/src/config/setup.rs
+- claudine/lib/src/dispatch/loader.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/sequence_schema.rs
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/init.rs
+- darkmatter/lib/src/markdown/schemas/tests/lazy_positions.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/config_inspect_working_file.rs
+- darkmatter/lib/tests/content_policy_fixtures/mod.rs
+- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+- darkmatter/dmls/tests/l1/core_schema_types.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_faults.json
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/union_unknown_keys.rs
+docs_updated_during_phase_1:
+- claudine/docs/topics/configuration.md
+- darkmatter/docs/topics/configuration.md
+- simplified-schema/docs/topics/language/unions.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/claudine/SKILL.md
+packages:
+- claudine
+- darkmatter
+- darkmatter-cli
+- darkmatter-lsp
+- simplified-schema
 ---
 
 # Claudine doctor implementation plan
@@ -40,27 +84,27 @@ An inspection leaves the filesystem as found and performs no network requests or
 17. **Use one output path per mode.** Render human rows with an `UnorderedList` of `Prose` entries containing a styled severity label, descriptor title and summary, with hard line breaks for details. Use `log::terminal` for capability and width, forcing color off on redirected stdout even under `FORCE_COLOR` and on `--plain`. Buffer the finished report, then call `std::io::stdout().lock().write_all` with one trailing newline and return the I/O error through existing CLI dispatch. This route has no wrapper output worker, and `terminal_gate::write` discards direct write errors. Serialize the same rows to a single JSON array plus newline with `serde_json`. Put `doctor` immediately after `config` within Administration in both `commands/help.rs::groups` and `completion/root_menu.rs`. Use clap definitions for its flags through the existing completion engine delegation. Update both dispatch exhaustiveness and `telemetry.rs::command_name`. Keep help usable with invalid configuration and no process fixture writes.
 18. **Use fixed, hermetic verification with no runtime spike.** Every open behavior follows a spec rule or a traced source seam. The Windows timeout is a production bound exercised by a short injected test timeout, with no separate performance measurement. The working tree has the v2 planning artifact and still uses `HostRevision` and `refresh_host_registration`; implement this plan on the completed v2 code, with no v1 compatibility branch. Regular cross-OS CI supplies remote coverage under the repository's existing scheduling. The declared remote hosts are macOS, native Windows, and WSL2. The local cross-check recipe internally creates a throwaway commit, so leave it out of this implementation's local verification. No new CI cells or test tiers are required.
 
-- [ ] **Report Foundation**
+- [x] **Report Foundation**
   - Create the library module, typed rows, registry, pass orchestration, and test-only probe injection described in Rules 1–4. Leave registry integration of the seven production callbacks to Phase 4. Give the feature modules crate-private interfaces and keep the mock seams private.
   - Write L1 tests of aggregation, blocked checks, post-repair severity and fixability, partial failure, stable ordering, and redaction through the injected in-crate runner that returns the public rows.
 
 ### Wave 1
 
-- [ ] **Union Diagnostics**
+- [x] **Union Diagnostics**
   - Own SimplifiedSchema validation and its focused L1 tests. Implement Rule 9 and verify the public unknown key, instance path, and key span, including a nullable object, a deeper validation failure beside a same-node key, alternative-arm known fields, and a valid control with no additional key.
   - Run `just test` from `simplified-schema/` with the new test-name filter before handing off to the shared configuration task.
 
-- [ ] **Darkmatter Observation**
+- [x] **Darkmatter Observation**
   - Own Darkmatter's passive inspect API in Rules 5 and 7. Keep the single-file parser and source-byte reader shared with setup, with a path and coordinates attached to parse and field errors where available.
   - Prove both scopes, shape findings on otherwise readable files, and no write, migration or policy merge in focused Darkmatter L1 tests. Run the area's `just test` with the new test-name filter.
 
-- [ ] **Claudine Observation**
+- [x] **Claudine Observation**
   - Own Claudine's structured loader problems and passive config inspection in Rules 5, 6, and 8. Implement `doctor/config.rs` for `config`, `repo-config`, and `stray-config-keys`, with reusable observations of Claudine documents and typed user/override config. Update every `ConfigProblem` initializer and share loader helpers without calling its migration entry point.
   - Use root and ordinary nested cases while Wave 1 is active.
 
 ### Configuration integration
 
-- [ ] **Observation Integration**
+- [x] **Observation Integration**
   - After Wave 1, assemble the integrated four-file observations and prove the imported, nullable, and keyed-union cases against the doctor row contract. Run focused Claudine library L1. Give Phases 2 and 3 a shared observation record carrying scoped paths, scope identity, validated typed configuration, and availability and invalidity reasons.
 
 ### Input Robustness Matrix
