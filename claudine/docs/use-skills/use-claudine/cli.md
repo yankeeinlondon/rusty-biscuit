@@ -161,7 +161,7 @@ They take every wrapper switch above, plus:
 ## Files
 
 - `~/.claudine/config.yaml`, and a repo `.claudine/config.yaml` (YAML,
-  validated against `claudine/schemas/claudine-config.yaml`; a legacy
+  validated against `claudine/registration/claudine-config.yaml`; a legacy
   `config.json` is converted on the next load)
 - `~/.claudine/logs/`, `~/.claudine/mcp/`, and `~/.claudine/overlays/`
 - `~/.claudine/system-prompt.md` and a repo `system-prompt.md`

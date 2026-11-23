@@ -99,6 +99,7 @@ Go deep: read every caller.
 |---|---|
 | `agent`, `model` | default provider and model (see above) |
 | `prompt` | the prompt for `inline-compose` |
+| `sections` | the prompt as a heading → content mapping; schema-checked only, since `inline-compose` can't run it yet |
 | `interactive` | run interactively (not allowed in a sequence document) |
 | `yolo` | turn on the provider's permission bypass; it does **not** approve shell |
 | `argv` | reserved: the extra bare words from the command line |
@@ -117,6 +118,11 @@ Claudine's trigger schemas type these keys automatically, even with no
 - A schema problem with an optional key that your own `$schema` declares
   is dropped with a warning.
 - Redeclaring a Claudine key in your `$schema` takes it over.
+- An inline composition (`prompt`, `sections`, or `kind: inline-compose`,
+  and no `sequence`) must set exactly one of `prompt` and `sections`. Both,
+  or `kind: inline-compose` with neither, is a schema error. In the editor
+  such a document gets diagnostics but no completion or hover from
+  Claudine's schemas.
 
 In your own `$schema`, a missing key and `null` are the same value:
 

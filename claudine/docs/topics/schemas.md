@@ -78,7 +78,7 @@ Claudine types its own frontmatter: the lifecycle events, `loop`, `agent`,
 `model`, a sequence document's steps, the timeouts, the linking keys, and the
 rest of the
 [frontmatter catalog](frontmatter-properties.md). The schemas live in
-[`claudine/schemas/`](../../schemas/README.md) and are used in two places:
+[`claudine/registration/`](#the-registration-folder) and are used in two places:
 
 - **In the editor.** DMLS reports a misspelled verb, a malformed long form, or
   a `shell` action in `initialize` as you type, with no `$schema` in the
@@ -104,80 +104,128 @@ remains the authority on what can run. The schemas catch most mistakes early,
 but a document they accept can still be rejected by the parser (see
 [What only the parser checks](#what-only-the-parser-checks)).
 
-### The eight files
+### The registration folder
 
-| File | Kind | Holds |
+Every schema Claudine ships is one file in
+[`claudine/registration/`](../../registration/), the **authored** copy you
+edit in the repository. The `claudine` binary compiles the whole folder in,
+and Claudine's setup **publishes** the same bytes to your home directory for
+`md` and DMLS (see
+[The published host registration](#the-published-host-registration)). The
+folder name says what it is for: everything in it is part of Claudine's
+registration with Darkmatter, and nothing else belongs there.
+`claudine/schemas/` keeps only schemas used inside this repository, such as
+`review.yaml`, and is never compiled in or published.
+
+```text
+claudine/registration/                 (authored, in the repository)
+├── composition.yaml                   trigger
+├── inline-composition.yaml            trigger
+├── sequence-document.yaml             trigger
+├── formal-sequence-file.yaml          yaml-schema
+├── group.yaml, loop.yaml, seq.yaml    namespace-schema
+└── action.yaml, claudine-config.yaml, content-policy.yaml, document.yaml,
+    lifecycle-events.yaml, linking.yaml, sequence.yaml, shared.yaml
+                                       type libraries (kind: schema)
+```
+
+Each file declares its role with its `kind`, and the build accepts only
+these four:
+
+| `kind` | What it does | Files |
 |---|---|---|
-| [`action.yaml`](../../schemas/action.yaml) | library (`kind: schema`) | the four action types and the two dictionary-bundle types, each verb's shape referenced from Darkmatter |
-| [`lifecycle.yaml`](../../schemas/lifecycle.yaml) | library (`kind: schema`) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`) and the `loop:` block type |
-| [`sequence-types.yaml`](../../schemas/sequence-types.yaml) | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
-| [`linking.yaml`](../../schemas/linking.yaml) | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
-| [`document.yaml`](../../schemas/document.yaml) | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that both `claudine.yaml` and `inline-compose.yaml` import, so the two triggers declare them identically |
-| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model` (exactly the documents identified as Claudine's); types `initialize`, `cancelled`, and `finalize` on those documents; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
-| [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
-| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, `$state`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` or `kind: sequence`; requires `sequence` |
+| `schema-trigger` | selects a Markdown document by its frontmatter (`match:`) and types it (`$schema`) | `composition.yaml`, `inline-composition.yaml`, `sequence-document.yaml` |
+| `yaml-schema` | defines a YAML document kind | `formal-sequence-file.yaml` (a `kind: sequence` YAML file) |
+| `namespace-schema` | declares one expression global that Claudine provides | `group.yaml`, `loop.yaml`, `seq.yaml` |
+| `schema` with a non-empty `types` and no `$schema` | supplies reusable named types, reached only through imports | the other eight |
 
-Three of the eight are triggers; the other five are libraries. A library
-reaches a document only through a trigger's imports, so the eight files work
-as one bundle:
+A `kind: schema` file that also declares a `$schema`, any other `kind`, or a
+file with no `kind` fails the build, and so does a file that is not
+`.yaml`, a symlink, or a name that is not portable (see
+[How the built-in copy is prepared](#how-the-built-in-copy-is-prepared)).
+A trigger or a type library may carry an optional `name`, a kebab-case
+display label (`inline-compose-schema`) that diagnostics and
+[`claudine registrations`](../cli/registrations.md) show beside the path;
+imports always use the path.
+
+| File | Holds |
+|---|---|
+| [`composition.yaml`](../../registration/composition.yaml) | Claudine's catalog for a document it runs that is not an inline composition: a `compose` prompt, a sequence document, or any document that sets one of Claudine's controls |
+| [`inline-composition.yaml`](../../registration/inline-composition.yaml) | the catalog for an inline composition: exactly one of `prompt` or `sections` (see [Inline compositions: `prompt` or `sections`](#inline-compositions-prompt-or-sections)) |
+| [`sequence-document.yaml`](../../registration/sequence-document.yaml) | the sequence keys of a Markdown sequence document (`sequence`, `template`, `$state`, and the removed root `fail_fast`); requires `sequence` |
+| [`formal-sequence-file.yaml`](../../registration/formal-sequence-file.yaml) | a `kind: sequence` YAML file run directly (see [Sequence declarations](#sequence-declarations)) |
+| [`shared.yaml`](../../registration/shared.yaml) | `common-attributes`: every control a Claudine Markdown document shares (provider and model, run controls, the lifecycle events, linking keys, managed metadata); declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
+| [`document.yaml`](../../registration/document.yaml) | the document metadata types `prompt`, `sections`, `hash`, and `last_updated` |
+| [`lifecycle-events.yaml`](../../registration/lifecycle-events.yaml) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`) and the `loop:` block type |
+| [`action.yaml`](../../registration/action.yaml) | the four action types and the dictionary-bundle types, each verb's shape referenced from Darkmatter |
+| [`sequence.yaml`](../../registration/sequence.yaml) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
+| [`linking.yaml`](../../registration/linking.yaml) | the eleven optional linking keys of a linked skill, command, or agent |
+| [`content-policy.yaml`](../../registration/content-policy.yaml) | a byte-for-byte copy of Content Policy's types for `content_policy`, so the bundle needs nothing outside it; a test keeps the copy equal to its source |
+| [`claudine-config.yaml`](../../registration/claudine-config.yaml) | the schema of Claudine's own `config.yaml` files, used by configuration validation and DMLS rather than by any trigger |
+| [`group.yaml`](../../registration/group.yaml), [`loop.yaml`](../../registration/loop.yaml), [`seq.yaml`](../../registration/seq.yaml) | the host globals `group`, `loop`, and `seq` (see [What Claudine adds to expression checking](#what-claudine-adds-to-expression-checking)) |
+
+A library reaches a document only through a trigger's imports. Every
+import is an explicit relative path to another file of the folder, or a
+reserved `@darkmatter:` reference to Darkmatter's compiled-in schemas, so
+the folder works as one self-contained bundle wherever it is copied:
 
 | Trigger | Imports, directly or through another library |
 |---|---|
-| `claudine.yaml` | `document.yaml`, `lifecycle.yaml` (and through it `action.yaml`), `linking.yaml` |
-| `inline-compose.yaml` | `document.yaml` |
-| `sequence.yaml` | `sequence-types.yaml` (and through it `lifecycle.yaml` and `action.yaml`) |
+| `composition.yaml` | `shared.yaml` (and through it `document.yaml`, `lifecycle-events.yaml`, `action.yaml`, `linking.yaml`, `content-policy.yaml`), `document.yaml` |
+| `inline-composition.yaml` | the same as `composition.yaml` |
+| `sequence-document.yaml` | `sequence.yaml` (and through it `lifecycle-events.yaml` and `action.yaml`) |
 
-The document metadata is declared once, in `document.yaml`, and both
-metadata triggers import it by name:
+The controls are declared once, in `shared.yaml`, and both document
+triggers extend them, so every control has the same type and description
+whichever trigger applies:
 
 ```yaml
-# claudine.yaml and inline-compose.yaml
+# composition.yaml
 $schema:
+    $extends: common-attributes@./shared.yaml
     prompt: prompt@./document.yaml
-    hash: hash@./document.yaml
-    last_updated: last_updated@./document.yaml
 ```
-
-So `prompt`, `hash` (shorthand string or longhand mapping), and
-`last_updated` have the same type and description whichever trigger applies.
-The library is not a trigger: the two triggers still match, apply, and are
-shadowed independently.
 
 There is no separate identifying trigger: every trigger in
 `claudine/registration/` identifies a Claudine document by its own `match:`,
-so a document that selects none of them is not Claudine's (see
-[The published host registration](#the-published-host-registration)).
+so a document that selects none of them is not Claudine's.
 
-Copy the bundle files together (see [On disk](#on-disk)). Claudine's host
-globals are declared by the namespace files `group.yaml`, `loop.yaml`, and
-`seq.yaml` beside them; these describe the host rather than adding document
-properties. The bundle does not need Darkmatter's schema files beside it (see
+The namespace files `group.yaml`, `loop.yaml`, and `seq.yaml` describe the
+host rather than adding document properties. The bundle does not need
+Darkmatter's schema files beside it (see
 [Verb shapes are Darkmatter's](#verb-shapes-are-darkmatters)).
 
 ### When the schemas apply
 
 A trigger selects a document by the **presence of a non-null value**, whatever
 its type. A value of the wrong type still selects the trigger, so the payload
-can reject it:
+can reject it. Exactly one of the two document triggers applies to a Claudine
+document: `inline-composition.yaml` when it is an inline composition (it sets
+`prompt` or `sections`, or writes `kind: inline-compose`, and is not a
+sequence), and `composition.yaml` otherwise.
 
-| Frontmatter | `claudine.yaml` | `inline-compose.yaml` | Verdict |
+| Frontmatter | `composition.yaml` | `inline-composition.yaml` | Verdict |
 |---|---|---|---|
 | `start: [{ say: "hi" }]` | applies | — | valid |
 | `start: 42` | applies | — | invalid: `start` is not a stack |
 | `agent: []` | applies | — | invalid: an agent list needs at least one entry |
 | `start: null` or `start:` | — | — | no Claudine trigger |
 | `finalize: [{ info: "done" }]` alone | — | — | no Claudine trigger: `initialize`, `cancelled`, and `finalize` belong to Darkmatter's `md` host too |
-| `finalize: [{ info: "done" }]` with `prompt: "write it"` | applies | applies | `finalize` is typed by `claudine.yaml` |
+| `finalize: [{ info: "done" }]` with `prompt: "write it"` | — | applies | `finalize` is typed by the shared controls |
 | `ticket: 123` alone | — | — | no Claudine trigger |
-| `prompt: "write it"` | applies | applies | judged by both |
-| `prompt: "write it"` with `sequence: [a, b]` | applies | — | a sequence is not an inline document (`sequence.yaml` applies too) |
-| `prompt: "write it"` with `sequence: { a: 1 }` | applies | — | invalid: `sequence` is a list or a file reference (`sequence.yaml`) |
+| `prompt: "write it"` | — | applies | valid |
+| `prompt: "write it"` with `agent: claude` | — | applies | valid: the inline catalog types `agent` too |
+| `sections: { Goal: "fix it" }` | — | applies | valid to the schema (see [below](#inline-compositions-prompt-or-sections)) |
+| `prompt: "write it"` with `sections: { Goal: "fix it" }` | — | applies | invalid: an inline composition has one or the other |
+| `kind: inline-compose` alone | — | applies | invalid: it needs `prompt` or `sections` |
+| `prompt: "write it"` with `sequence: [a, b]` | applies | — | a sequence is not an inline document (`sequence-document.yaml` applies too) |
+| `prompt: "write it"` with `sequence: { a: 1 }` | applies | — | invalid: `sequence` is a list or a file reference (`sequence-document.yaml`) |
 
-`sequence.yaml` selects every document with a non-null `sequence` or
-`kind: sequence`, so a sequence document with no other control is judged
+`sequence-document.yaml` selects every document with a non-null `sequence`
+or `kind: sequence`, so a sequence document with no other control is judged
 too, and it requires `sequence`:
 
-| Frontmatter | `sequence.yaml` | Verdict |
+| Frontmatter | `sequence-document.yaml` | Verdict |
 |---|---|---|
 | `sequence: [build, test]` | applies | valid |
 | `sequence: "@steps.yaml"` | applies | valid: a file reference |
@@ -188,13 +236,14 @@ too, and it requires `sequence`:
 | `fail_fast: true` beside `sequence:` | applies | invalid at `/fail_fast`: a sequence document has no `fail_fast` |
 | `fail_fast: null` beside `sequence:` | applies | valid to the schema; the sequence parser rejects any root `fail_fast`, null included, before anything runs |
 
-Only `sequence.yaml` declares `sequence`. A non-null `sequence` also selects
-`claudine.yaml`, so a sequence document's events, `loop`, and every other
-Claudine control (`timeout`, `agent`, …) are typed there, and Darkmatter's
-`composed:` is refused as it is in any Claudine document. No key has two
-declarations to keep in step.
+Only `sequence-document.yaml` declares `sequence`. A non-null `sequence` also
+selects `composition.yaml`, so a sequence document's events, `loop`, and every
+other Claudine control (`timeout`, `agent`, …) are typed there, and
+Darkmatter's `composed:` is refused as it is in any Claudine document. A
+sequence document is never an inline composition, so it may carry both
+`prompt` and `sections`. No key has two declarations to keep in step.
 
-`initialize`, `cancelled`, and `finalize` never select `claudine.yaml` on
+`initialize`, `cancelled`, and `finalize` never select a Claudine trigger on
 their own, because Darkmatter's `md` host owns those events too. A document
 whose only Claudine-looking keys are those three (a router prompt with only
 an `initialize` stack and no `prompt`, `agent`, or `sequence`) is not judged by Claudine's catalog: its schema verdict comes from
@@ -210,7 +259,7 @@ initialize:
 ```
 
 ```yaml
-# `agent` selects claudine.yaml, so this is also a schema error
+# `agent` selects composition.yaml, so this is also a schema error
 agent: claude
 initialize:
     - shell: "git fetch"
@@ -231,13 +280,56 @@ match:
         # ... the same five alternatives for every other identifying key
 ```
 
-`inline-compose.yaml` wraps a `group:` of the five `prompt` alternatives in
-`all:` beside a `none:` of the five `sequence` alternatives, and
-`sequence.yaml` matches a `group:` of the five `sequence` alternatives.
+`inline-composition.yaml` matches `kind: inline-compose` or any of the
+`prompt` and `sections` alternatives, under `all:` beside a `none:` of the
+`sequence` alternatives and `kind: sequence`. `composition.yaml` repeats that
+whole condition under `none:`, which is what keeps the two from ever applying
+together. `sequence-document.yaml` matches `kind: sequence` or any of the
+`sequence` alternatives.
 
-The payloads declare **no required property**. Selection only adds types where
-a key appears; it never asks for an execution input. `inline-compose` keeps its
-own missing-`prompt` check, applied after caller overlays.
+Selection only adds types where a key appears, so the payloads require
+almost nothing: `sequence-document.yaml` requires `sequence`, and
+`inline-composition.yaml` requires its one of `prompt` or `sections`.
+`inline-compose` also keeps its own missing-`prompt` check, applied after
+caller overlays.
+
+### Inline compositions: `prompt` or `sections`
+
+An inline composition carries its prompt in its frontmatter, either whole
+(`prompt`) or as `sections`, a mapping from a heading to that section's
+content. `inline-composition.yaml`'s payload is a **root union** of two arms,
+and a document must match exactly one:
+
+```yaml
+$schema:
+    - $extends: common-attributes@./shared.yaml
+      prompt: "prompt(required)@./document.yaml"
+      sections: "null -> an inline composition with a `prompt` has no `sections`"
+    - $extends: common-attributes@./shared.yaml
+      prompt: "null -> an inline composition with `sections` has no `prompt`"
+      sections: "sections(required)@./document.yaml"
+```
+
+What the schema checks, the same way in `md`, in DMLS, and in Claudine's own
+launch verdict:
+
+| Frontmatter | Verdict |
+|---|---|
+| `prompt: "Fix the bug."` | valid (the `prompt` arm) |
+| `sections: { Goal: "Fix the bug." }` | valid (the `sections` arm) |
+| `prompt: "Fix the bug."` with `sections: null` | valid: `null` is absence |
+| `prompt` and `sections` both set | invalid: no arm admits both |
+| `kind: inline-compose` with neither | invalid: each arm requires its key |
+| `prompt: { text: "Fix the bug." }` | invalid: `prompt` is a string |
+| `sections: [Goal]` | invalid: `sections` is a mapping |
+| `sections: { Goal: "x" }` with `content_policy: []` | invalid at `/content_policy`: each arm checks every shared control |
+
+What it does **not** check: `sections` is typed only as an object, so the
+schema says nothing about its headings or their values, their order, or
+whether the result makes a usable prompt. Running a `sections` document is
+not built yet either. Its schema verdict passes, and then `claudine
+inline-compose` refuses it because it has no `prompt`, before any provider
+starts. Treat `sections` as validated-only until that lands.
 
 The document stays **open**: keys Claudine does not know are application data
 and are kept.
@@ -309,7 +401,7 @@ Claudine runs, such as `say`, `retry`, `proxy`, and `break`. Those shapes live
 in Darkmatter's partial
 [`lifecycle.yaml`](../../../darkmatter/schemas/partials/lifecycle.yaml), as
 `<verb>-short` and `<verb>-long` types. Claudine's `action.yaml` and
-`lifecycle.yaml` choose which verbs each action type and event admits, and
+`lifecycle-events.yaml` choose which verbs each action type and event admits, and
 name each shape instead of copying it:
 
 ```yaml
@@ -323,7 +415,7 @@ communicate:
 `Name` in Darkmatter's shipped partial `<stem>.yaml`, read from the schemas
 compiled into Darkmatter, never from disk. It therefore resolves the same way
 whether the referring file is in the monorepo checkout, embedded in the
-`claudine` binary, or published in a host revision folder without Darkmatter's files, where a relative path to
+`claudine` binary, or published under `~/.claudine/registrations/darkmatter/` without Darkmatter's files, where a relative path to
 `darkmatter/schemas/` would not exist. An unknown stem is a schema error
 naming the reference.
 
@@ -335,7 +427,7 @@ naming the reference.
 | expression-function signatures | Darkmatter | `darkmatter/schemas/partials/functions.yaml` |
 | side-effect parameter types | Darkmatter | `darkmatter/schemas/partials/mutations.yaml` |
 | the generated verb types, projected from those two catalogs | Darkmatter | the generated regions of `lifecycle.yaml`, written by `darkmatter::lifecycle::schema_projection` |
-| which verbs each event and action type admits | Claudine | `claudine/schemas/action.yaml` and `claudine/schemas/lifecycle.yaml` |
+| which verbs each event and action type admits | Claudine | `claudine/registration/action.yaml` and `claudine/registration/lifecycle-events.yaml` |
 
 Claudine's files select `<verb>-short@darkmatter:lifecycle` and
 `<verb>-long@darkmatter:lifecycle` for a single-verb item, and the short form
@@ -367,7 +459,7 @@ checked-in regions no longer match the catalogs.
 Claudine's files name the generated types by reference, so a changed
 signature needs no Claudine edit. A verb added to or removed from a catalog
 does: its key is listed by name in `action.yaml`'s `expression` type and
-bundles and in `lifecycle.yaml`'s `loop:` keys, and
+bundles and in `lifecycle-events.yaml`'s `loop:` keys, and
 `generated_verb_keys_equal_the_darkmatter_catalogs` in
 `claudine/lib/tests/l1/claudine_schemas.rs` fails until they match.
 
@@ -383,7 +475,7 @@ Which names are typed depends on which schemas apply:
 | `composed`, `failed` | typed with the `md` host's verbs | declared `null`, so any non-null value is an error |
 | `start`, `blocked` | untyped frontmatter data | typed lifecycle events |
 
-`claudine.yaml` gives the two `null` declarations a description naming the
+`shared.yaml` gives the two `null` declarations a description naming the
 event to write instead:
 
 ```yaml
@@ -393,7 +485,9 @@ composed:                     # invalid: Claudine names this event `start`
 ```
 
 `md schema validate` prints that description with the error. In the editor,
-DMLS shows it when you hover the key; the diagnostic itself carries only the
+DMLS shows it when you hover the key in a document `composition.yaml` types
+(an inline composition gets no hover; see [In the editor](#in-the-editor));
+the diagnostic itself carries only the
 schema error, not the description. The lifecycle parser reports the same
 mistake as `LifecycleRenamedEvent` before anything runs (see
 [Lifecycle — Validation](flow-control/lifecycle.md#validation)).
@@ -570,11 +664,11 @@ success:
 
 ### Sequence containers
 
-`sequence.yaml` types a document's `sequence:` list with the step types of
-`sequence-types.yaml`. A step is a name (a bare value) or a `task` object; a
+`sequence-document.yaml` types a document's `sequence:` list with the step
+types of `sequence.yaml`. A step is a name (a bare value) or a `task` object; a
 task's inline `sequence:` list, its `group:`, and a group's `tasks:` legs are
 typed too. You can import the types for your own properties, for example
-`$schema: { nested: task@./sequence-types.yaml }`.
+`$schema: { nested: task@./sequence.yaml }`.
 
 ```yaml
 sequence:
@@ -667,7 +761,7 @@ sequence:
     - { name: blue, color: blue }
 ```
 
-On a task, `sequence-types.yaml` declares `$schema`, `$state`, and `template`
+On a task, `sequence.yaml` declares `$schema`, `$state`, and `template`
 as an inline nested sequence's own options: `$state` and `template` for its
 children, and `$schema` as a check of the values the container sees at its
 turn. Because a task object is open and one type covers every task, the
@@ -708,7 +802,7 @@ categories, the loop helpers, and the verb short forms, because each is used
 from two or more places in one trigger payload (see
 [Shared Named Types](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types)).
 Some uses are still copied: a union named as an arm of another union (such as
-`entry` inside `item` in `lifecycle.yaml`) and any type used only once. The
+`entry` inside `item` in `lifecycle-events.yaml`) and any type used only once. The
 bundles are copied for that reason: each is written once, inside `entry`,
 and `entry` is copied into both `stack` and `item`. The Darkmatter baseline
 layer stores its own repeated types in its own definitions, which are never
@@ -719,7 +813,7 @@ than adding a fixed number of copied container or conditional levels.
 The embedded-bundle regression test
 `embedded_trigger_payloads_resolve_within_one_megabyte` in
 `lib/tests/l1/claudine_schemas_embedded.rs` checks three cases: the
-`claudine.yaml` trigger, the `sequence.yaml` trigger, and both together. Each
+`composition.yaml` trigger, the `sequence-document.yaml` trigger, and both together. Each
 resolved effective schema must fit within **1,000,000 UTF-8 bytes** of compact
 JSON, including `$defs` and the built-in baseline. The test resolves the
 embedded bundle in isolation, with no user schemas or disk bundle, so its
@@ -1436,18 +1530,25 @@ diagnostics, completion, and hover from the matching triggers:
 Key completion works in block mappings only: DMLS offers no keys inside a
 YAML flow mapping such as `ensure_file: { fi }`.
 
-Each key is declared by exactly one trigger, and completion offers only the
-keys of triggers that already apply. A sequence document matches both
-`sequence.yaml` and `claudine.yaml`, because `sequence` identifies a Claudine
+Each key is declared by one of the triggers that apply, and completion
+offers only the keys of triggers that already apply. A sequence document matches both
+`sequence-document.yaml` and `composition.yaml`, because `sequence` identifies a Claudine
 document, so it is offered `start`, `loop`, and the other root keys too. A
 document whose only Claudine-looking keys are shared events (`initialize`,
 `cancelled`, `finalize`) matches neither and is completed as an `md` document.
 
 A property the document's own `$schema` redeclares is completed and hovered
-from the author's declaration, as it is validated (see below). One limit
-remains: a document gets editor help only when Claudine's host registration
-is in place (run Claudine's setup once), even though the CLI validates it
-without one.
+from the author's declaration, as it is validated (see below). Two limits
+remain:
+
+- A document gets editor help only when Claudine's host registration is in
+  place (run Claudine's setup once), even though the CLI validates it
+  without one.
+- An inline composition (a document `inline-composition.yaml` selects, such
+  as one whose frontmatter is just `prompt: hi`) gets diagnostics but no
+  completion or hover from Claudine's schemas, because that trigger's payload
+  is a root union and DMLS builds editor help only from a single object
+  schema. Validation is unaffected.
 
 See [DMLS Schema Support](../../../darkmatter/docs/topics/schemas/dmls-schema-support.md).
 
@@ -1468,6 +1569,32 @@ Claudine publishes it like this:
     ├── manifest.yaml          every file below and its BLAKE3 digest
     ├── globals.lifecycle.json
     └── schemas/…              the files of `claudine/registration/`
+```
+
+The published tree is the authored folder plus two generated files. Each
+authored file keeps its relative path under `schemas/`, so the imports
+between them (`@./shared.yaml`) resolve the same way in both places:
+
+| Authored, in the repository | Published, in your home |
+|---|---|
+| `claudine/registration/composition.yaml` | `~/.claudine/registrations/darkmatter/schemas/composition.yaml` |
+| `claudine/registration/<file>.yaml` (every file) | `~/.claudine/registrations/darkmatter/schemas/<file>.yaml` |
+| `claudine/lib/generated/globals.lifecycle.json` (generated by `just shipped-schemas`) | `~/.claudine/registrations/darkmatter/globals.lifecycle.json` |
+| none: written by the publisher from the files above | `~/.claudine/registrations/darkmatter/manifest.yaml` |
+
+The published bytes are the ones compiled into the `claudine` binary that
+published them, not the files of any checkout. Editing
+`claudine/registration/` changes nothing in your home until a binary built
+from that edit publishes. [`claudine registrations`](../cli/registrations.md)
+lists exactly what the running binary would publish.
+
+```mermaid
+flowchart LR
+    A["claudine/registration/<br/>(authored)"] -->|"compiled in by the build"| B["claudine binary"]
+    G["globals.lifecycle.json<br/>(generated)"] -->|"compiled in"| B
+    B -->|"setup, or<br/>claudine registrations publish"| P["~/.claudine/registrations/darkmatter/<br/>manifest.yaml + published files"]
+    C["~/.darkmatter.yaml<br/>register entry"] --> P
+    P -->|"read, never written"| D["md and DMLS"]
 ```
 
 - There is one tree at fixed paths, with no version folders. Every file is
@@ -1532,6 +1659,51 @@ Registration is for `md` and DMLS only. A `claudine` run always uses the
 schemas and event registry compiled into the binary, even when a repository
 registers some other manifest that claims to be `claudine`.
 
+The order is what makes setup safe to interrupt and to run again; the
+[setup diagram](configuration.md#darkmatters-permissions) shows each step's
+failure path.
+
+#### Hand edits, recovery, and overrides
+
+**The publisher owns the published files.** Do not edit them. `md` and DMLS
+check every file against the digest the manifest records, so an edited,
+missing, or half-written file makes them refuse Claudine's whole
+registration with a `dm.host.registration` warning that names the file;
+they never use some files of one publish and some of another. Until it is
+fixed, Claudine documents get no Claudine schemas in `md` or the editor.
+`claudine` runs are unaffected, because they use the compiled-in copy.
+
+To recover, publish again. Each of these rewrites only the files that
+differ from the binary's copy, removes leftover temporary files, and writes
+the manifest last:
+
+| Situation | What to run |
+|---|---|
+| a published file was edited or deleted | `claudine registrations publish` |
+| a publish was interrupted (killed, or the disk filled) | `claudine registrations publish` |
+| you upgraded Claudine with `just install` | nothing: it publishes with the new binary |
+| you upgraded Claudine some other way | `claudine registrations publish` |
+| `~/.darkmatter.yaml` lost Claudine's `register` entry | add `~/.claudine/registrations/darkmatter/manifest.yaml` to its `register` list by hand; setup writes the entry only on a first run, and `registrations publish` never edits `~/.darkmatter.yaml` |
+| a publish reports a symbolic link or junction | remove or replace the link it names, then publish again |
+
+**To change what a Claudine property accepts, override it; do not edit the
+registration.** Two overrides are supported, and both apply above the
+registered schemas without touching them:
+
+- **A trigger file in one of the five schema locations** (`SCHEMAS_DIR`,
+  the package, package-area, or repository-root `schemas/`, or `~/schemas`).
+  Its declaration of a property replaces the registered one wherever both
+  triggers match (see [On disk](#on-disk)). A copy of a registered file under
+  the same name is just another such trigger: it never replaces or hides the
+  registered file.
+- **A document's own `$schema`**, which applies last (see
+  [The authored `$schema` applies last](#the-authored-schema-applies-last)).
+
+A file placed inside `~/.claudine/registrations/darkmatter/` is not an
+override. One the manifest does not list is ignored by `md` and DMLS and
+left alone by the publisher; editing one it does list disables the whole
+registration, as described above.
+
 ### The authored `$schema` applies last
 
 Darkmatter merges the matching trigger payloads first and the document's own
@@ -1548,7 +1720,7 @@ start:
 ```
 
 Here `model` follows the authored declaration, so it is now required, while
-`start` is still judged by `claudine.yaml`. Redeclaring a Claudine property can weaken its type; the
+`start` is still judged by `composition.yaml`. Redeclaring a Claudine property can weaken its type; the
 parser still enforces the execution rules.
 
 
@@ -1568,13 +1740,17 @@ parser still enforces the execution rules.
         - [Context Variables Schema (`ctx` and `current` namespaces)](^darkmatter/schemas/partials/context-variables.yaml)
         - [Error Schema (`err` namespace)](^darkmatter/schemas/partials/error.yaml)
         - [Timing Schema (`timing` namespace)](^darkmatter/schemas/partials/timing.yaml)
-    - Claudine ([overview of the bundle](../../schemas/README.md))
+    - Claudine ([overview of the registration folder](#the-registration-folder))
         - [Composition trigger](../../registration/composition.yaml)
         - [Inline-compose trigger](../../registration/inline-composition.yaml)
         - [Sequence-document trigger](../../registration/sequence-document.yaml)
         - [Formal `kind: sequence` YAML file](../../registration/formal-sequence-file.yaml)
         - Host globals: [`group`](../../registration/group.yaml), [`loop`](../../registration/loop.yaml), [`seq`](../../registration/seq.yaml)
+        - [Shared controls (`common-attributes`)](../../registration/shared.yaml)
         - [Action types](../../registration/action.yaml)
         - [Lifecycle stacks and `loop:`](../../registration/lifecycle-events.yaml)
+        - [Sequence steps and containers](../../registration/sequence.yaml)
         - [Linking keys](../../registration/linking.yaml)
-        - [Document metadata (`prompt`, `hash`, `last_updated`)](../../registration/document.yaml)
+        - [Document metadata (`prompt`, `sections`, `hash`, `last_updated`)](../../registration/document.yaml)
+        - [Content Policy types (bundled copy)](../../registration/content-policy.yaml)
+        - [Claudine's configuration files](../../registration/claudine-config.yaml)

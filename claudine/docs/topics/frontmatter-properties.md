@@ -192,7 +192,7 @@ The former runtime reads `state`, `previous`, `previous_state`, `next`, `next_st
 
 ## Linking Properties
 
-These frontmatter properties are used in the cross-provider skill/command/agent synchronization subsystem. Claudine's schema imports their types from [`linking.yaml`](../../schemas/linking.yaml), so a linked prompt raises no unknown-key warning; each type keeps every form the providers write.
+These frontmatter properties are used in the cross-provider skill/command/agent synchronization subsystem. Claudine's schema imports their types from [`linking.yaml`](../../registration/linking.yaml), so a linked prompt raises no unknown-key warning; each type keeps every form the providers write.
 
 | Property | Description | Details | Symbols |
 |----------|-------------|---------|---------|

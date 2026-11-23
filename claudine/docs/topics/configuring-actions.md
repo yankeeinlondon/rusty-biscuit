@@ -407,7 +407,7 @@ also turns hook `speak` actions on. A user with `tts: false` who wants
 pre-warm off therefore gets hook speech with the default provider as well.
 
 The value is validated strictly against the shipped schema
-(`claudine/schemas/claudine-config.yaml`) when `config.yaml` loads:
+(`claudine/registration/claudine-config.yaml`) when `config.yaml` loads:
 
 - an unknown key in the object (for example `enabled` or `pre_warm`) is
   rejected;

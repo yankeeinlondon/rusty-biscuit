@@ -8,7 +8,7 @@ Claudine reads two YAML files:
 | repository | `{repo-root}/.claudine/config.yaml` | only the overrides listed below, plus `permissions` |
 
 Both are described by one shipped schema,
-[`claudine/schemas/claudine-config.yaml`](../../schemas/claudine-config.yaml):
+[`claudine/registration/claudine-config.yaml`](../../registration/claudine-config.yaml):
 its `user-config` type is the user file and its `repository-config` type is the
 repository file. The schema is the authority for every setting's shape and for
 the user file's defaults, so an editor with a SimplifiedSchema language server
@@ -226,6 +226,27 @@ and the old manifest and its `~/.claudine/darkmatter-host/` folder are
 removed once the entry is written. The entry is written even when the
 `permissions` handshake below reports a conflict, and a repository's
 `.darkmatter.yaml` is never changed.
+
+Setup runs these steps in this order, so a step that fails leaves what
+the earlier steps wrote in a usable state:
+
+```mermaid
+flowchart TD
+    S["setup starts"] --> P{"1. publish the registration<br/>under ~/.claudine/registrations/"}
+    P -- fails --> X["stop with an error:<br/>no configuration is written"]
+    P -- "published, or already current" --> H["2. write Claudine's config.yaml<br/>and the permissions handshake"]
+    H -- "Claudine's own write fails" --> Y["stop with an error"]
+    H -- "done, or a permissions conflict (warning)" --> R{"3. register the manifest<br/>in ~/.darkmatter.yaml"}
+    R -- fails --> W["warning: the old files are kept"]
+    R -- done --> C{"4. remove the old<br/>~/.claudine/darkmatter-host* files"}
+    C -- "a link is in the way" --> L["warning: nothing is removed"]
+    C -- done --> OK["setup complete"]
+```
+
+Publishing again later, without touching either configuration file, is
+`claudine registrations publish`; see
+[Hand edits, recovery, and overrides](schemas.md#hand-edits-recovery-and-overrides)
+for when you need it.
 
 First-run setup writes Claudine's own file, then Darkmatter's:
 

@@ -252,12 +252,16 @@ Now you'll want to run the following from the repo's root:
 # ensure host has appropriate build tools and a few CLI's from the monorepo
 # used for devops are installed on the system
 just init
-# now install the claudine CLI
-just install-claudine
+# now install the claudine CLI (this also publishes Claudine's schemas for md and DMLS)
+just install_claudine
 # the first command that needs a config (for example `claudine hooks`) runs a short
 # interactive setup interview; change settings later with `claudine config`
 claudine hooks
 ```
+
+Setup also registers Claudine's schemas with Darkmatter, so `md` and the DMLS editor
+integration recognize and check Claudine documents in any folder; see
+[The published host registration](./docs/topics/schemas.md#the-published-host-registration).
 
 Prebuilt `claudine` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md), which also covers the ALSA library `claudine` needs on Linux.
 

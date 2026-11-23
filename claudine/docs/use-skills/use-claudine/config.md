@@ -4,7 +4,7 @@
 
 - **Locations.** `~/.claudine/config.yaml` (user) and `<repo>/.claudine/config.yaml`
   (repo). Both are YAML, validated against the shipped schema
-  `claudine/schemas/claudine-config.yaml`. A legacy JSON5 `config.json` beside
+  `claudine/registration/claudine-config.yaml`. A legacy JSON5 `config.json` beside
   either is converted on the next load and renamed `config.json.bak` (its
   comments are not carried over). The conversion writes actions and routes
   in the keyed form below; if the schema refuses the converted value, nothing
@@ -203,3 +203,35 @@ registration, which Claudine's setup publishes and registers in
 `~/.darkmatter.yaml`, so a Claudine document is typed in any folder. The
 editor's lifecycle checks come from the generated lifecycle artifact the
 registration carries.
+
+```text
+~/.claudine/registrations/darkmatter/
+├── manifest.yaml           lists every file below with its digest
+├── globals.lifecycle.json
+└── schemas/…               the files of claudine/registration/
+~/.darkmatter.yaml:
+  register:
+    - ~/.claudine/registrations/darkmatter/manifest.yaml
+```
+
+- **Setup order.** Setup publishes first (a failed publish stops setup
+  before anything else is written), then writes Claudine's config and the
+  `permissions` handshake, then adds the `register` entry (replacing the old
+  `~/.claudine/darkmatter-host.yaml` entry if there is one), then deletes the
+  old `~/.claudine/darkmatter-host*` files. It never edits a repository's
+  `.darkmatter.yaml`.
+- **Don't edit the published files.** `md` and DMLS check each one against
+  the manifest's digest; one edited, missing, or half-written file makes
+  them refuse the whole registration with a `dm.host.registration` warning.
+  `claudine` runs are unaffected, since they use the built-in copy.
+- **Repair or refresh** with `claudine registrations publish` (hidden from
+  `--help`). It rewrites only the files that differ, writes the manifest
+  last, prints the file list as JSON, and never edits `~/.darkmatter.yaml`.
+  `just install` runs it for you. If the `register` entry itself is gone,
+  add it back by hand. `claudine registrations` (no argument) lists what the
+  binary would publish.
+- **Change a Claudine key's type** with a `kind: schema-trigger` file in a
+  schema location (`SCHEMAS_DIR`, a `schemas/` folder, or `~/schemas`) or
+  with the document's own `$schema`. Both apply above Claudine's schemas. A
+  same-named copy of a Claudine file there is just another trigger: it
+  doesn't replace Claudine's.

@@ -1,7 +1,8 @@
 # Claudine schemas
 
 This folder holds one standalone schema, `review.yaml`, the schema of a
-specification review document (`$schema`).
+specification review document (`$schema`). Schemas here are for use inside
+this repository: they are never compiled into `claudine` or published.
 
 The schemas that type Claudine's own documents are not here. They are the
 registration inventory, `claudine/registration/`: the trigger files, the type
@@ -15,4 +16,7 @@ host registration. The generated lifecycle artifact is
 the repository root and commit both.
 
 [Schemas](../docs/topics/schemas.md) explains what the schemas check and how a
-document reaches them.
+document reaches them; [The registration folder](../docs/topics/schemas.md#the-registration-folder)
+lists each file, and
+[The published host registration](../docs/topics/schemas.md#the-published-host-registration)
+covers where setup installs it.

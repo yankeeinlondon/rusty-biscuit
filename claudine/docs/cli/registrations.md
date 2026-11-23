@@ -49,29 +49,44 @@ and nothing else there. Errors and their causes go to stderr with a nonzero
 exit status, and stdout stays empty.
 
 A listing is an array sorted by `filepath`. It always includes the manifest
-(`kind: manifest`) and the lifecycle artifact (`kind: lifecycle`). An
-excerpt (the hashes are illustrative):
+(`kind: manifest`) and the lifecycle artifact (`kind: lifecycle`), followed
+by one entry for each file of `claudine/registration/` under `schemas/`
+(17 entries in all today). The start of a real listing:
 
 ```json
 [
   {
     "kind": "lifecycle",
     "filepath": "globals.lifecycle.json",
-    "hash": "5f0c2a9e81d34b77"
+    "hash": "65b2a01fc37ee498"
   },
   {
     "kind": "manifest",
     "filepath": "manifest.yaml",
-    "hash": "0b6e1f2d3c4a5968"
+    "hash": "c267e7f25cd136dd"
+  },
+  {
+    "kind": "schema",
+    "filepath": "schemas/action.yaml",
+    "hash": "3aacfe80b81d5c8b"
+  },
+  {
+    "kind": "schema",
+    "filepath": "schemas/claudine-config.yaml",
+    "hash": "3156d81967419cca"
   },
   {
     "kind": "schema-trigger",
     "filepath": "schemas/composition.yaml",
-    "hash": "9a8b7c6d5e4f3021",
+    "hash": "da76020c2097827c",
     "name": "composition"
   }
 ]
 ```
+
+The hashes change whenever a file's bytes change, so compare them between
+two binaries, or between a binary and an installation, rather than with
+this page.
 
 | Field | Meaning |
 | --- | --- |
@@ -82,7 +97,33 @@ excerpt (the hashes are illustrative):
 
 Printing one file adds `contents`, its complete text. The files are UTF-8,
 so encoding `contents` as UTF-8 gives back exactly the bytes `hash`
-describes.
+describes. A path that is not in the listing, in any other spelling
+included (`./schemas/seq.yaml`, a backslash), exits 1 with nothing on stdout:
+
+```text
+Error: `./schemas/seq.yaml` is not a published registration path; run `claudine registrations` for the list
+```
+
+The manifest's `contents` is the format 2 `darkmatter-host` manifest
+Darkmatter reads. It lists every other file with its BLAKE3 digest (a
+different hash from the listing's XXH64 `hash`):
+
+```yaml
+# Written by Claudine from the registration compiled into it, and rewritten when that changes; do not edit.
+kind: darkmatter-host
+format_version: 2
+host: claudine
+version: "0.1.0"
+files:
+    - "./schemas/action.yaml"
+    # … every other file under schemas/, in path order
+lifecycle: "./globals.lifecycle.json"
+functions: []
+digests:
+    "./globals.lifecycle.json": "73347213b879e94fe6fc409e460f322fd03825d329e82d43b8163b35d367901a"
+    "./schemas/action.yaml": "b89504d935dc16eaa8b837245bbd244c33f59a7ac31e904f346d46bef833651f"
+    # … one digest for each listed file
+```
 
 ## Publishing
 
@@ -98,7 +139,9 @@ points `md` and DMLS at the manifest is added by Claudine's first-run setup.
 
 No other `claudine` command reads or repairs the installed files. If a file
 is missing or edited, run `claudine registrations publish` (or
-`just install`) to restore it.
+`just install`) to restore it; until then `md` and DMLS refuse the whole
+registration (see
+[Schemas → Hand edits, recovery, and overrides](../topics/schemas.md#hand-edits-recovery-and-overrides)).
 
 ## How `just install` publishes
 
