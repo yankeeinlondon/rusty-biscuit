@@ -8,11 +8,12 @@ depends-on:
 related:
     - 2026-11-22-better-errors-and-dry-run
     - 2026-07-02-inline-sections
+    - 2026-11-14-absent-equals-null
 references:
     spike-isolated-schema.md: >-
         Cross-stack verification of the Simplified Schema `isolated` constraint across all five property forms, sticky-union `EffectiveSchema::isolated_keys()` plumbing across Darkmatter's four child-inheritance sites, host-trigger conflict avoidance, and `just shipped-schemas` regeneration.
     spike-default-model.md: >-
-        Verified 10-provider, 4-OS passive config lookup matrix for `get_default_model(provider)`, including `pi`/`kilo`/`kimi` metadata reconciliation, `OverlayPlan` Tier-6 forwarding predicates, cache-key/deduplication design, and `< 10ms` malformed-config resilience.
+        Research-derived 10-provider, 4-OS passive config lookup matrix for `get_default_model(provider)` (sourced from the provider research corpus, not exercised on each OS), including `pi`/`kilo`/`kimi` metadata reconciliation, `OverlayPlan` Tier-6 forwarding predicates, cache-key/deduplication design, and `< 10ms` malformed-config resilience.
 $schema:
     status: |-
         enum(
@@ -31,6 +32,9 @@ $schema:
     reviewed-on: date -> the date the spec was reviewed
     review-iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    clarified-by: string -> the agent and model used in the clarification
+    review-note: string -> a free-text note qualifying the review
+    needs-rulings: boolean -> indicates whether open questions still need the author's ruling
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented-by: string -> the agent who implemented the plan
 clarified: true
@@ -72,7 +76,7 @@ This specification adds explicit `compose:` and `inline-compose:` task executabl
 3. **Caller → Callee Layering in `fm` & Child-Sequence Isolation.**
    - Support two distinct value channels — **defined values** (override child-authored values) and **default values** (fill only what nothing else sets, including child-authored values) — within the `fm` workspace without colliding with read-only `seq`, `group`, and `loop` workspaces.
    - Apply uniform `with:` merge semantics with zero special cases: `with:` merges onto the effective `fm` workspace first (so `with: { agent: null }` clears any pinned value), and normal resolution then consults `default-values:` or fails/prompts if required and unresolved.
-   - Preserve modular isolation across **referenced formal child sequence documents** (`is_formal_sequence == true`, via `sequence: <file-ref>`, root `sequence: <file-ref>`, or `prompt:` resolving to a formal child sequence) via a split boundary: the parent sequence's authored root `fm` does not leak across the sequence boundary, while `with:`, CLI `key=value`, runtime `set`, and inherited `default-values:` (nearer/child wins) cross cleanly. Informal data-file, offset, or operator step lists feeding a Markdown document's own body steps keep that Markdown document's own root `fm`.
+   - Preserve modular isolation across **referenced formal child sequence documents** (`is_formal_sequence == true`, via `sequence: <file-ref>`, root `sequence: <file-ref>`, or `prompt:` resolving to a formal child sequence) via a split boundary: the parent sequence's authored root `fm` does not leak across the sequence boundary, while `with:`, CLI `key=value` and runtime `set` (non-isolated keys only), and inherited `default-values:` (nearer/child wins) cross cleanly. Informal data-file, offset, or operator step lists feeding a Markdown document's own body steps keep that Markdown document's own root `fm`.
    - Forbid runtime `set:` writes to `default-values` (adding `"default-values"` to `SEQUENCE_DECLARATION_KEYS`).
    - Support `with:` and `default-values:` on group legs identically to tasks; support `default-values:` (and forbid `with:`) on inline nested `sequence: [ ... ]` blocks.
 4. **Schema-Driven Frontmatter Isolation (`isolated`).**
@@ -227,7 +231,7 @@ Across a split boundary (for `is_formal_sequence == true`):
 - **Does NOT cross:** The parent/root sequence's own authored root `fm` (including authored root `agent:` or `model:`) does **not** leak into the referenced formal child sequence document. Authored root properties stay scoped to the parent document and its direct prompt tasks.
 - **DOES cross:**
   - **Explicit `with:`** on the calling task (applied as a defined override on top of the child sequence's root `fm`).
-  - **Parent runtime `set` and CLI `key=value`** state (including root `initialize` `set:` writes for a root `sequence: <file-ref>`).
+  - **Parent runtime `set` and CLI `key=value`** state (including root `initialize` `set:` writes for a root `sequence: <file-ref>`), **non-isolated keys only**: the same `isolated` filter as Decision 2.2 rank 2 applies (Decision 3.2, item 3).
   - **Inherited `default-values:`** (propagating recursively into the child sequence, with nearer defaults winning).
 
 Exact precedence inside a referenced formal child sequence, **highest to lowest**:
@@ -299,7 +303,7 @@ sequence:
 - **Verified consumer wiring points (from [spike-isolated-schema.md](./spike-isolated-schema.md)):**
   - `simplified-schema/lib`: `grammar.rs::validate_semantic_constraints` (so `"$schema": "schema(isolated)"` and `"$state": "schema(isolated)"` parse cleanly); `resolve.rs` (`is_union_marker`, `is_flag` for deduplication when written on both library type and use site); `resolve/recursive.rs` (`is_use_site_marker`, `is_arm_property_marker`); `convert.rs` (`is_reference_annotation`, `value_constraints` filtering, hoisting/stripping); `validate.rs` (`NON_ASSERTING_KEYWORDS` so `"x-darkmatter-isolated"` beside `$ref` / `anyOf` never triggers spurious `allOf` wrapping); `narrowing.rs` (`has_ordinary_constraints`, `type_identity`). `triggers/grammar.rs::is_match_safe_constraint` intentionally excludes `Isolated`.
   - `darkmatter/lib`: `call_binding/translate.rs` (`is_annotation`, `inline_object`, `literal`) so expression call-binding accepts isolated inline objects and literals (`guard_settings`, `kind: literal(sequence; required; isolated)`); `darkmatter/lib/src/markdown/schemas/about.rs` descriptor catalogs and all **4 closed parity tests** (`type_accepted_constraints_match_lowering`, `block_constraint_keys_match_the_lowering`, `constraint_set_matches_descriptor_set`, `match_safe_constraint_descriptor_set_matches_implementation`).
-- **Schema bundle revision:** Bump `PREPARATION_REVISION` (`4 → 5`) in `simplified-schema/lib/src/shipped/registry.rs` before running root `just shipped-schemas` so stale downstream artifacts are rejected.
+- **Schema bundle revision:** Bump `PREPARATION_REVISION` (`4 → 5`) in `simplified-schema/lib/src/shipped/registry.rs` before running root `just shipped-schemas`. Darkmatter's and Claudine's artifacts record each lower artifact's revision and digest under `dependencies`, so this bump makes their checked-in artifacts stale too. Each owner has its own revision (Darkmatter's `darkmatter/lib/src/markdown/schemas/shipped.rs`, currently `4`; Claudine's `claudine/lib/src/composition/schema/shipped.rs`, currently `7`): bump either one **only** if the implementation changes what that owner's preparation code produces or the shape of a record it stores (for example, storing isolated keys in `TriggerBundleRecord`), per the bump table in `simplified-schema/docs/topics/shipped-artifacts.md`. Edits to shipped YAML text alone need no bump, because the source digests already differ.
 
 #### 2. Sticky-Union Plumbing & Full Cross-Stack Rollout (All 4 Darkmatter Sites)
 
@@ -317,7 +321,15 @@ sequence:
      4. `darkmatter/lib/src/markdown/reference/graph.rs` (`inclusion_child_options` across body `::file`, `prologue`, and `epilogue`).
      - Sites 3 and 4 receive `isolated_keys` via `ComposeReport.isolated_keys: Option<Arc<BTreeSet<String>>>` (populated only on inline-pre-only passes where `BlockTransclusion` is disabled, matching `body_data` so normal reports keep `None` and `ComposeReport::PartialEq` tests stay green).
      - **Zero `ComposeOptions` cache-hash changes needed:** `inherited_child_options` writes the already-filtered map into `child_request.external_state`, which `ComposeOptions::classify_options` already hashes into `options_hash(&child_request)`.
-3. **`claudine`**: sequence value propagation consults `EffectiveSchema::isolated_keys()` **unioned with `darkmatter_baseline_isolated_keys()`** to decide which owning-sequence `fm` keys are excluded from the defined-value implicit inheritance channel (without restricting explicit `with:`).
+3. **`claudine`** (ruled 2026-11-23): sequence value propagation excludes a key from the defined-value implicit inheritance channel when it is isolated on **either side** of the hop: the caller's (owning sequence's) `EffectiveSchema::isolated_keys()` ∪ the callee's (child document's or child sequence's) `EffectiveSchema::isolated_keys()` ∪ `darkmatter_baseline_isolated_keys()`. The caller's controls never leak out (`sequence`, `template`), and the callee's controls are never overwritten (`prompt` on an inline-compose child). The filter applies to **every implicit channel**, at direct prompt tasks and at the split boundary alike: authored root `fm`, CLI `key=value`, and runtime `set`. Only an explicit `with:` passes an isolated key.
+
+   ```text
+   $ claudine sequence s.yaml title="Run 42" topic=auth     # with initialize: set: { prompt: "x" }
+     direct task  compose: a.md       -> receives topic=auth (title, prompt blocked)
+     child        sequence: sub.yaml  -> receives topic=auth (title, prompt blocked)
+     - sequence: sub.yaml
+       with: { title: "Run 42" }      -> title crosses (explicit with:)
+   ```
 
 #### 3. Schema Layering & `default-values` Propagation
 
@@ -353,7 +365,7 @@ Running root `just shipped-schemas` (after bumping `PREPARATION_REVISION` in `si
 
 ### Decision 4 — Document Classification & Sequence Forms
 
-*(This terminology and matrix must also be documented clearly under `claudine/docs/` so authors have a single canonical reference for Markdown vs. YAML/data sequence forms.)*
+*(This terminology and matrix are documented in `claudine/docs/topics/flow-control/sequences.md`, the single canonical reference for Markdown vs. YAML/data sequence forms; see [Documentation to update](#documentation-to-update).)*
 
 #### 1. Unified Pure Document Classifier (`claudine-lib`)
 
@@ -414,6 +426,13 @@ The parallel `explicit_provider` override channel in composition and sequence ex
 
 - **Disambiguation:** On `claudine sequence`, `--<provider>` disambiguation is strictly by **file format** (Markdown vs. YAML/data).
 - **CLI conflict rule:** Passing both `--<provider>` (or `--provider <name>`) and `agent=<val>` on the same command is a **hard CLI usage error** (`usage.invalid_argument`, exit `2`).
+- **Flag vs. setter on a YAML/data sequence (ruled 2026-11-23):** the two spellings deliberately differ there. `--<provider>` is a *preference* (`default-values.agent`, which every task's `with:`, document `agent:`, and root `agent:` outrank); `agent=<val>` is a CLI setter and *forces* (root live `fm`, rank 2 in Decision 2.2, which also crosses into referenced child sequences per Decision 2.4). "Same priority as CLI `agent=<provider>`" holds only for `compose`, `inline-compose`, and Markdown `sequence`. The split exists because on a Markdown sequence the body-default steps compose the document itself, so a default would always lose to the document's own `agent:`.
+
+  ```text
+  # review.yaml (kind: sequence): `find` composes _find.md (no agent), `review` composes _review.md (agent: codex)
+  $ claudine sequence review.yaml --claude        # find -> claude, review -> codex
+  $ claudine sequence review.yaml agent=claude    # find -> claude, review -> claude
+  ```
 
 #### 2. Caller → Callee Symmetry for `--model`
 
@@ -435,19 +454,29 @@ The parallel `explicit_provider` override channel in composition and sequence ex
 
 | Tier | Source | Notes |
 | :---: | --- | --- |
-| 1 | **Caller-passed `model`** | CLI `--model` / `model=` on direct or Markdown invocation, or parent `with.model` on a task call |
-| 2 | **Provider-specific model env var (`<PROVIDER>_MODEL`)** | Checked in each provider's declared `model_env_vars` order — 7 providers (`CLAUDE_MODEL`/`ANTHROPIC_MODEL`, `CODEX_MODEL`/`OPENAI_MODEL`, `GEMINI_MODEL`, `GOOSE_MODEL`, `KIMI_MODEL`, `OPENCODE_MODEL`, `QWEN_MODEL`); `kilo`, `pi`, and `antigravity` declare `[]` *(fixing two live generator bugs: `pi` currently leaks `PI_OFFLINE` and `kilo` leaks `KILO_PROVIDER`; pin `model_env_vars: []` in `claudine/docs/providers/overrides/{pi,kilo}.yaml` and regenerate via `cargo run -p claudine-gen -- generate`)* |
+| 1 | **Caller-passed `model`** | CLI `--model` on `compose`, `inline-compose`, or a Markdown `sequence`; a CLI `model=` setter on any command; or parent `with.model` on a task call. A CLI-supplied value keeps Tier 1 for **every task it reaches** inside a sequence, including referenced child sequences (ruled 2026-11-23); it is tracked by origin in the caller input layers, not read back as owning-sequence `fm`. Within Tier 1 a task's `with.model` beats the CLI value (Decision 2.2 rank 1 over rank 2). For `model` only, this places a CLI value above a runtime `set` (Tier 4), the reverse of Decision 2.2's `CLI key=value < runtime set` order for other keys. `--model` on a YAML/data sequence is Tier 5 (`default-values.model`). |
+| 2 | **Provider-specific model env var (`<PROVIDER>_MODEL`)** | Checked in each provider's declared `model_env_vars` order — 7 providers (`CLAUDE_MODEL`/`ANTHROPIC_MODEL`, `CODEX_MODEL`/`OPENAI_MODEL`, `GEMINI_MODEL`, `GOOSE_MODEL`, `KIMI_MODEL`, `OPENCODE_MODEL`, `QWEN_MODEL`); `kilo`, `pi`, and `antigravity` declare `[]` *(fixing two live generator bugs: `pi` currently leaks `PI_OFFLINE` and `kilo` leaks `KILO_PROVIDER`; pin `model_env_vars: []` in `claudine/docs/providers/overrides/{pi,kilo}.yaml` and regenerate via `claudine providers generate --yes`)* |
 | 3 | **Generic `MODEL` env var** | Sole generic env var — **do NOT add `CLAUDINE_MODEL`** |
-| 4 | **Document's authored `fm.model` (and owning sequence's authored or runtime-`set` `fm.model` for direct prompt tasks)** | CLI `--model` / `model=` on direct or Markdown runs already sits in Tier 1; for direct prompt tasks, the owning sequence's authored or runtime-`set` `fm.model` outranks the child document's authored `fm.model` (Rank 2 vs. Rank 3 in Decision 2.2) |
+| 4 | **Document's authored `fm.model` (and owning sequence's authored or runtime-`set` `fm.model` for direct prompt tasks)** | CLI-supplied values never sit here (Tier 1). For direct prompt tasks, the owning sequence's authored or runtime-`set` `fm.model` outranks the child document's authored `fm.model` (Rank 2 vs. Rank 3 in Decision 2.2) |
 | 5 | **`default-values.model`** | `task default-values.model` > `sequence default-values.model` > inherited parent `default-values.model` (including CLI `--model` on YAML sequences) |
 | 6 | **Provider's configured default model** | Resolved via `get_default_model(provider, ctx)` in `claudine-lib` (full 10-provider matrix in [spike-default-model.md](./spike-default-model.md)) |
 
+Example, with `CLAUDE_MODEL=sonnet` in the environment:
+
+```text
+$ claudine compose x.md model=opus          # opus   (Tier 1)
+$ claudine sequence s.yaml model=opus       # opus   (Tier 1 for every task it reaches)
+$ claudine sequence s.md --model opus       # opus   (Tier 1)
+$ claudine sequence s.yaml --model opus     # sonnet (Tier 2 beats the Tier 5 fallback)
+# s.yaml authoring a root `model: opus`     # sonnet (Tier 2 beats authored root fm, Tier 4)
+```
+
 #### 4. Unified `get_default_model(provider: Provider, ctx: &DefaultModelContext)` Operational Contract (`claudine-lib`)
 
-One fast, passive, provider-neutral config lookup function in `claudine-lib` (`claudine/lib/src/provider/default_model.rs`) serves **all 10 registered providers** (`claude`, `codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`, `antigravity`), retiring `OpencodeWrapper::configured_default_model` and wiring `claudine/lib/src/composition/select.rs` to Tier 6 before failing with `composition.model_required`:
+One fast, passive, provider-neutral config lookup function in `claudine-lib` (`claudine/lib/src/provider/default_model.rs`) serves **all 10 registered providers** (`claude`, `codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`, `antigravity`), retiring the `WrapperProfile::configured_default_model` hook (a `claudine-cli` trait method in `claudine/cli/src/commands/wrap/profile/mod.rs`, overridden only by OpenCode's profile in `profile/opencode.rs`; its removal is `claudine/cli` work) and wiring `claudine/lib/src/composition/select.rs` to Tier 6 before failing with `composition.model_required`:
 
 - **All 10 providers passively readable with zero new crate dependencies:** Every registered provider exposes a passively readable local config parsed with crates already in `claudine/lib/Cargo.toml` (`serde_json` for JSON, `biscuit_file::Json5` for JSONC, `toml` for TOML, `serde_yaml_ng` for YAML — full precedence and extraction matrix in [spike-default-model.md](./spike-default-model.md)):
-  - **Live metadata fixes (`claudine-gen`):** Pin `model_env_vars: []` in `claudine/docs/providers/overrides/pi.yaml` (removing `PI_OFFLINE`) and `claudine/docs/providers/overrides/kilo.yaml` (removing `KILO_PROVIDER`), then run `cargo run -p claudine-gen -- generate`.
+  - **Live metadata fixes (`claudine-gen`):** Pin `model_env_vars: []` in `claudine/docs/providers/overrides/pi.yaml` (removing `PI_OFFLINE`) and `claudine/docs/providers/overrides/kilo.yaml` (removing `KILO_PROVIDER`), then run `claudine providers generate --yes`.
   - **Kimi Code two-generation probe:** Check exclusive `$KIMI_CODE_HOME/config.toml` (if set and absolute) → `~/.kimi-code/config.toml` (Kimi Code 2.x) → legacy `$KIMI_SHARE_DIR` / `~/.kimi/config.{toml,json}` (1.x) **only** when `KIMI_CODE_HOME` is unset.
   - **Goose XDG-primary across all 4 OSes:** Check exclusive `$GOOSE_PATH_ROOT/config/config.yaml` (if set and absolute) → XDG primary (`$XDG_CONFIG_HOME/goose/config.yaml` else `<home>/.config/goose/config.yaml` on all 4 OSes) → legacy OS fallbacks (`%APPDATA%\Block\goose\config\config.yaml` on Windows; `~/Library/Application Support/Block/goose/config/config.yaml` on macOS) → `GOOSE_ADDITIONAL_CONFIG_FILES` → system config.
   - **Pi compound merge & `--no-approve` awareness:** Merge `defaultProvider` and `defaultModel` across project `.pi/settings.json` (only when `include_project_config` is `true`, skipping it under Pi's `--no-approve` structured mode) and user `$PI_CODING_AGENT_DIR/settings.json` / `~/.pi/agent/settings.json`; `Antigravity` reads `<home>/.gemini/antigravity-cli/settings.json`.
@@ -459,7 +488,13 @@ One fast, passive, provider-neutral config lookup function in `claudine-lib` (`c
   - Strictly passive local file reads only (zero subprocesses, zero network, zero directory walks), targeting `< 10ms` per provider.
   - Enforces a `1 MiB` (`MAX_CONFIG_FILE_BYTES`) cap on config files and inline JSON env vars (`OPENCODE_CONFIG_CONTENT`, `KILO_CONFIG_CONTENT`), rejects non-regular files (FIFOs/sockets/directories) before reading, and bounds upward project walks (`Codex`, `OpenCode`, `Kilo`) to `MAX_ANCESTOR_DEPTH = 32` ancestors stopped at `repo_root`.
   - Memoized per invocation on `InvocationContext` (`Mutex<HashMap<DefaultModelCacheKey, DefaultModelLookup>>`) keyed by `(Provider, ConfigPlatform, home, project_cwd, repo_root, include_project_config, provider_env_fingerprint)`, normalizing `project_cwd` and `repo_root` to `None` for user-only providers (`Goose`, `KimiCode`, `Antigravity`).
-- **Context & visibility:** Populates `ctx.model` and `env.MODEL` with the discovered default model name (falling back to `"default"` when `get_default_model` resolves no model), and surfaces both the resolved model and its provenance (tier/source) in `--dry-run` output and execution logs.
+- **Context & visibility (ruled 2026-11-23):** `ctx.model` holds the resolved model name. When Tier 6 is reached it holds the discovered default, or the display placeholder `"default"` when `get_default_model` resolves none. `--dry-run` output and execution logs show the resolved model and its provenance (tier and source, for example `Tier 6, ~/.claude/settings.json`, or `provider default` for the placeholder). The child's `MODEL` environment variable is exported **only** when a `--model` (or provider equivalent) is actually forwarded on argv, as today. `"default"` is never forwarded and never exported, so a nested `claudine` call never reads it as a Tier 3 `MODEL`.
+
+  ```text
+  no model resolved          ctx.model = "default"   argv: no --model             child MODEL: not set
+  Tier 6 found, not forwarded ctx.model = "sonnet"   argv: no --model             child MODEL: not set
+  Tier 6 found, forwarded     ctx.model = "zai/glm-5.2" argv: --model zai/glm-5.2  child MODEL: zai/glm-5.2
+  ```
 - **Child `--model` argv forwarding & `exec_prep` ordering:**
   - **Tiers 1–5** (caller, env var, authored `fm.model`, or `default-values.model`): **always** forward `--model` (or provider equivalent) to the child provider process.
   - **Tier 6** (discovered provider default from `get_default_model`): forward **only** when `(non_interactive && info.model_required_in_non_tty)` (OpenCode) **or** `overlay_hides_native_config` is true, where `OverlayPlan::hides_native_config(&self) -> bool` (in `claudine/lib/src/provider_overlay/plan.rs`) is:
@@ -532,6 +567,8 @@ All new Claudine diagnostics are added additively to `claudine/lib/src/diagnosti
 
 ##### Reused / Updated Diagnostic Codes
 
+Only `composition.lifecycle_invalid`, `usage.invalid_argument`, and `composition.missing_properties` are registered today. `dm.reference.missing_document`, `dm.check.not_checked`, `composition.no_executable`, `composition.selection_key_as_data`, `composition.provider_unresolved`, and `composition.model_required` are introduced by `2026-11-22-better-errors-and-dry-run`; this specification updates them once that prerequisite lands.
+
 | Code | Severity | Role in This Specification |
 | --- | --- | --- |
 | `composition.lifecycle_invalid` | `error` | Reused when a runtime `set:` or lifecycle write targets `default-values` (now in `SEQUENCE_DECLARATION_KEYS`). |
@@ -574,6 +611,15 @@ The following confirmed behavior changes differ from current behavior:
 5. **`--dry-run` warnings-only exit code changes from `2` to `1`.**
    - *Before (as designed in `2026-11-22-better-errors-and-dry-run`):* Both errors and warnings exited `2`.
    - *After:* Warnings with no errors exit `1`; errors (and CLI usage errors) exit `2`; clean / `info`-only exits `0`.
+6. **A root `agent:` no longer reaches referenced formal child sequences.**
+   - *Before:* A task with no `agent` of its own took the nearest enclosing sequence document's `agent`: a referenced sequence file's own first, then outward to the root.
+   - *After:* Across the split boundary (Decision 2.4) the parent's authored root `agent:` does not cross. A referenced formal child sequence's tasks resolve from the child's own `fm`, `with:`, CLI / runtime state, and inherited `default-values:`. Authors who relied on a root `agent:` reaching a referenced child move it under `default-values:`.
+7. **A task's `with: { model: … }` moves above the model environment variables.**
+   - *Before:* A task's `with:` value resolved like frontmatter `model`, below `--model`, `<PROVIDER>_MODEL`, and `MODEL` in the model chain.
+   - *After:* `with.model` is a caller-passed model (Tier 1 in Decision 5.3), so it outranks `<PROVIDER>_MODEL` and `MODEL`.
+8. **`with: { agent: null }` falls back to `default-values:`, not to an enclosing document's `agent`.**
+   - *Before:* A `null` in a task's `with:` hid the lower layers and left the task missing a provider, so it took the nearest enclosing sequence document's `agent` (or went to review / failed).
+   - *After:* The `null` merges onto the effective `fm` workspace, clearing the owning sequence's defined `agent` as well, and resolution consults `default-values.agent` before reviewing or failing (Decision 2.3).
 
 In-repo migration of the 21 affected research files is pre-authorized for the same implementation PR; see [Pre-Authorized Preparatory & Cross-Cutting Actions](#pre-authorized-preparatory--cross-cutting-actions) below.
 
@@ -584,23 +630,76 @@ In-repo migration of the 21 affected research files is pre-authorized for the sa
 The following preparatory, migration, and documentation updates are explicitly pre-authorized as part of implementing this specification:
 
 1. **Bump `PREPARATION_REVISION` and regenerate all 4 checked-in schema bundles atomically:**
-   - Bump `PREPARATION_REVISION` (`4 → 5`) in `simplified-schema/lib/src/shipped/registry.rs`, then run root `just shipped-schemas` to regenerate:
+   - Bump `PREPARATION_REVISION` (`4 → 5`) in `simplified-schema/lib/src/shipped/registry.rs` (and Darkmatter's or Claudine's own revision only under the rule in Decision 3.1), then run root `just shipped-schemas` to regenerate:
      - `simplified-schema/lib/generated/shipped.json`
      - `darkmatter/lib/generated/shipped.json`
      - `claudine/lib/generated/shipped.json`
      - `claudine/lib/generated/globals.lifecycle.json`
 2. **Fix `pi` and `kilo` `model_env_vars` metadata bugs via `claudine-gen`:**
-   - Pin `model_env_vars: []` in `claudine/docs/providers/overrides/pi.yaml` (removing `PI_OFFLINE`) and `claudine/docs/providers/overrides/kilo.yaml` (removing `KILO_PROVIDER`), then run `cargo run -p claudine-gen -- generate` (and verify `cargo run -p claudine-gen -- check`).
+   - Pin `model_env_vars: []` in `claudine/docs/providers/overrides/pi.yaml` (removing `PI_OFFLINE`) and `claudine/docs/providers/overrides/kilo.yaml` (removing `KILO_PROVIDER`), then run `claudine providers generate --yes` (and verify with `claudine providers generate --check`). The generator only writes drift after a confirmation on a terminal; without a TTY and without `--yes` it reports and exits non-zero.
 3. **Migrate the 21 in-repo research files in the same implementation PR:**
    - The **20 coordinator `claudine/docs/research/*/_fleet.md` files** (19 `_provider-tasks.yaml` coordinators plus `claudine/docs/research/local_runners/_fleet.md`), and
    - **`claudine/docs/research/_TEMPLATE.md`**.
    - Migration scope: move root `agent:` / `model:` under `default-values:` so these coordinator fleets preserve their intended fallback semantics under the new Caller → Callee model. Leave `agent-cli`, `reasoning-level`, and `sandboxing/providers` untouched.
-4. **Update canonical docs, caller skills, and repo skills:**
-   - Canonical docs under `simplified-schema/docs/`, `darkmatter/docs/`, and `claudine/docs/` (covering `isolated`, Markdown vs. YAML/data sequence forms and the Document Classification Matrix, `compose:`/`inline-compose:`/`prompt:`/`sequence:` rules, Caller → Callee `fm` layering and `default-values:`, unified `--<provider>`/`--model` and six-tier model precedence, recursive `agent` pre-flight, and three-way `--dry-run` exit codes).
-   - Caller skills under `claudine/docs/use-skills/use-claudine/{sequences,cli,composition}.md` (and `darkmatter/docs/use-skills/use-darkmatter/authoring.md` if needed), followed by running `just publish-skills`.
-   - Repo skills under `.claude/skills/` reflecting the new schema constraint, classifier, and layering architecture.
+4. **Update canonical docs, caller skills, and repo skills** exactly as listed in [Documentation to update](#documentation-to-update).
 5. **Leave `2026-11-22-better-errors-and-dry-run` untouched:**
    - Keep `2026-11-22-better-errors-and-dry-run` untouched as its reviewed snapshot; record the two supersessions (retained `prompt:` alongside `compose:`/`inline-compose:` and `--dry-run` `0`/`1`/`2` exit codes) exclusively in this specification.
+
+---
+
+## Documentation to update
+
+The `docs/` tree is the current record of behavior, written for a developer new to this repository: lead with what the reader can do, give a compact example per rule, and use a Mermaid diagram where a flow or precedence order is easier to see than to read. Behavior decided here but not yet built is written into these pages and marked **planned**; the change that ships it removes the marker. No page links to or names this spec, its spikes, or `2026-11-22-better-errors-and-dry-run`: content that today lives only in [spike-default-model.md](./spike-default-model.md) or [spike-isolated-schema.md](./spike-isolated-schema.md) is restated on the page that owns it.
+
+Several Claudine pages are also edited by `2026-11-22-better-errors-and-dry-run` (the "Dry run" sections of `cli/sequence.md` and `topics/flow-control/sequences.md`, `topics/composition.md`, `topics/pre-flight-checks.md`). Edit them on top of that change; the warnings-only exit status there becomes `1`.
+
+**Claudine**
+
+- `claudine/docs/topics/flow-control/sequences.md`: the canonical sequence reference.
+    - The task executables, including the new `compose:` and `inline-compose:`, with `prompt:` as generic dispatch, and the per-executable options table (Decision 1.3).
+    - A new "Document classes" section: the five classes, how each is detected, and the classification matrix (Decision 4.2), including why `prompt:` takes a plain file reference while `sequence:` keeps `->` / `::`.
+    - `with:` and `default-values:`: the two channels, the six-rank precedence for direct prompt tasks (Decision 2.2) as a diagram, `with: { key: null }`, inline nested `sequence: [ … ]`, and group legs.
+    - The split boundary for referenced formal child sequences versus informal step lists (Decision 2.4), with an example of what crosses and what does not, and the `isolated` filter (caller ∪ callee ∪ baseline keys, applied to authored `fm`, CLI setters, and runtime `set`; only `with:` passes an isolated key).
+    - "Fail-fast, exit codes, and dry-run": the `0` / `1` / `2` dry-run statuses.
+- `claudine/docs/cli/sequence.md`:
+    - "Choosing providers": replace the flowchart, whose "provider flag given → every task uses it; no review screen" branch and "nearest enclosing sequence document's `agent`" fallback stop being true. Cover `--<provider>` / `--model` writing `fm` on a Markdown sequence and `default-values` on a YAML/data sequence (with the flag-prefers / setter-forces example from Decision 5.1), recursive `agent` pre-flight, `--silent` as non-interactive, and the `composition.agent_conditional_set` / `composition.agent_unverifiable_target` warnings.
+    - "Failures and exit codes" and the flags table: both `usage.invalid_argument` conflicts and the dry-run exit statuses.
+- `claudine/docs/topics/composition.md`:
+    - "Model Resolution": replace the five-step chain with the six tiers (Decision 5.3), including where `with.model` and `default-values.model` sit, that a CLI-supplied model keeps Tier 1 inside a sequence, the provenance shown in `--dry-run` and logs, and that the child's `MODEL` is exported only alongside a forwarded `--model` (never the `"default"` placeholder).
+    - "Providers That Require a Model in Non-Interactive Mode": replace the `WrapperProfile::configured_default_model` description with `get_default_model` and the Tier-6 forwarding rule.
+    - "Frontmatter `agent` and `model`" and "Shorthand Flags": `--<provider>` / `--model` as `fm` writes on `compose` and `inline-compose`, and the conflict errors.
+- A new `claudine/docs/topics/default-models.md`, linked from "Model Resolution": how Claudine finds a provider's configured default model. It restates the per-provider file, format, key, and precedence matrix for all 10 providers across the four OS environments, the environment variables that redirect each lookup, the `1 MiB` and 32-ancestor limits, the `"default"` fallback, and `config.provider_default_unreadable`.
+- `claudine/docs/topics/pre-flight-checks.md`: recursive `agent` validation (which containers it walks, which `set: { agent: … }` it credits, cycle detection, dynamic targets), and `dm.check.not_checked` for unresolved dynamic targets.
+- `claudine/docs/topics/schemas.md`: which keys each registration file (`shared.yaml`, `document.yaml`, `linking.yaml`, `composition.yaml`, `inline-composition.yaml`, `sequence-document.yaml`, `formal-sequence-file.yaml`) marks `isolated`, that `agent` and `model` never are, and `default-values` in the sequence schemas.
+- `claudine/docs/topics/frontmatter-properties.md`: `default-values`, and which properties a child document inherits from its owning sequence.
+- `claudine/docs/topics/argv-normalization.md`, `claudine/docs/topics/cli-pre-parsing.md`, `claudine/docs/topics/execution-flow.md`: provider flags become `fm` / `default-values` writes rather than a separate override that "runtime provider selection only ever reads".
+- `claudine/docs/topics/provider-metadata.md`: `model_env_vars` is empty for `kilo`, `pi`, and `antigravity`, and Tier 2 reads only declared variables.
+- `claudine/docs/topics/non-interactive-sessions.md`: `--silent` fails fast instead of opening the provider review screen.
+
+**Darkmatter**
+
+- `darkmatter/docs/transclusion/fm-transclusion.md`: replace the "Propagation Exception" callout (which today names only `prologue` and `epilogue`, omitting `ctx`) with schema-driven isolation: the `fm.yaml` keys that are isolated, the six that stay inherited for partials, and how a document's `$schema` adds isolated keys.
+- `darkmatter/docs/topics/schemas/schema-constraints.md`: the `x-darkmatter-isolated` annotation and what it means to Darkmatter.
+- `darkmatter/docs/topics/schemas/schema-triggers.md`: isolated keys are the union across the baseline, every matched trigger, and the document `$schema`; a later layer cannot un-isolate a key.
+- `darkmatter/docs/topics/compose-requests.md`: data-origin defaults layering and how a relative file path written in a default layer resolves from the file that authored it.
+
+**Simplified Schema**
+
+- `simplified-schema/docs/topics/language/types.md`: the `isolated` constraint beside `generated`: what it emits, that it is metadata only (never affects validation or `required`), and that it is refused in a root `$constraints`.
+- `simplified-schema/docs/topics/language/objects-and-named-types.md`: `$constraints: { isolated: true }` on block objects and `(isolated)` on inline objects and imported references.
+- `simplified-schema/docs/topics/language/unions.md`: annotating one arm or every arm of a property union means the same thing.
+
+**Skills**
+
+- Repo skills:
+    - `.claude/skills/claudine/`: the "Per-task provider selection" section of `SKILL.md` (it describes the provider-flag channel being removed), plus `architecture.md` / `module-map.md` for the unified classifier, Caller → Callee layering, and `provider/default_model.rs`.
+    - `.claude/skills/darkmatter/` (`frontmatter.md`, `schema.md`): `isolated_keys` plumbing and the four child-inheritance sites.
+    - `.claude/skills/simplified-schema/`: the `isolated` constraint's lowering and hoisting.
+- Caller skills:
+    - `claudine/docs/use-skills/use-claudine/`: `SKILL.md`, `sequences.md`, `cli.md`, `composition.md`, and `config.md` (`preferred_agent` is a review seed only).
+    - `darkmatter/docs/use-skills/use-darkmatter/authoring.md`: which frontmatter a `::file` partial inherits.
+    - `darkmatter/docs/use-skills/use-dmls/`: writing `isolated` in schema files.
+    - Then run `just publish-skills` in `claudine/` and `darkmatter/`.
 
 ---
 
@@ -628,21 +727,21 @@ Implementation is complete when all package-level acceptance criteria and cross-
 ### `claudine/lib`
 
 - **Task grammar & options:** `compose:` and `inline-compose:` accept Markdown `<file-ref>` only; `prompt:` accepts plain `<file-ref>` only (rejecting `->` / `::`, rejecting explicit `operation:`/`flow:` when dispatching to a sequence, and silently ignoring inherited group `operation`/`flow` defaults); `sequence:` preserves full `<file-ref> [-> offset] [::op(args)]` grammar; `task:` remains immutable at call sites (`name` and `when` only); inline nested `sequence: [ ... ]` allows `default-values:` and rejects `with:`; zero-executable Markdown body steps reject `with:` and `default-values:`; group legs accept `with:` and `default-values:` identically to tasks; all forbidden options emit `composition.task_option_invalid`.
-- **Caller → Callee & split boundary:** Six-rank precedence for direct prompt tasks and uniform `with:` merge semantics (including `with: { agent: null }` clearing pinned values and falling back to `default-values:`) are verified by unit and integration tests. Referenced formal child sequence documents (`is_formal_sequence == true`, nested or root) enforce the split boundary; informal data-file/offset/operator step lists (`is_formal_sequence == false`) keep the owning Markdown document's root `fm`. `"default-values"` is in `SEQUENCE_DECLARATION_KEYS` and rejected on `set:` writes (`composition.lifecycle_invalid`).
+- **Caller → Callee & split boundary:** Six-rank precedence for direct prompt tasks and uniform `with:` merge semantics (including `with: { agent: null }` clearing pinned values and falling back to `default-values:`) are verified by unit and integration tests. Referenced formal child sequence documents (`is_formal_sequence == true`, nested or root) enforce the split boundary; informal data-file/offset/operator step lists (`is_formal_sequence == false`) keep the owning Markdown document's root `fm`. Authored root `fm`, CLI setters, and runtime `set` are filtered by the union of caller, callee, and baseline isolated keys at every hop, and only explicit `with:` passes an isolated key. `"default-values"` is in `SEQUENCE_DECLARATION_KEYS` and rejected on `set:` writes (`composition.lifecycle_invalid`).
 - **Schema layering & parity:** `claudine/registration/{shared.yaml,document.yaml,linking.yaml,composition.yaml,inline-composition.yaml}` mark Claudine/document/linking controls (including `title`, `description`, `metadata`, `name`) `isolated` while keeping `agent` and `model` non-isolated; `sequence-document.yaml` isolates `replace`, `tags`, `draft` and sequence controls without triggering `dm.host.trigger_conflict`; `formal-sequence-file.yaml` covers Claudine root controls (`$extends: common-attributes@./shared.yaml` or sequence-valid subset) and sequence propagation unions `effective.isolated_keys()` with `darkmatter_baseline_isolated_keys()`; enforced by an L1 schema-parity test in `claudine-lib`.
 - **Unified pure document classifier:** Replaces the three fragmented classification checks (`mismatch.rs`, `preflight/mod.rs::load_prompt`, `commands/wrap/sequence/mod.rs`), inspects authored frontmatter only with absent-equals-null semantics, enforces every cell of the Decision 4.2 matrix (`composition.operation_mismatch`), leaves the `sections:` hook inactive until `2026-07-02-inline-sections`, and defers unresolved dynamic `{{ expr }}` targets to runtime (`dm.check.not_checked` in `--dry-run`).
 - **Recursive `agent` pre-flight:** Traverses nested sequences, `prompt:`-dispatched sequences, inline `sequence: [ ... ]`, `group:` (inline/file/catalog), and `task:` files with cycle detection; credits only causally preceding `initialize` and earlier sequential `side_effect` `set: { agent: ... }` (`composition.agent_conditional_set`, `warning`); emits `composition.agent_unverifiable_target` (`warning`) for unresolved dynamic targets without an upstream agent; treats `--silent` as non-interactive fail-fast with full nested `Trail` reporting while preserving interactive TTY `review_sequence`.
 - **Six-tier model precedence, provider metadata fixes & `get_default_model`:**
   - Implements the six-tier chain (without `CLAUDINE_MODEL`), honoring declared `model_env_vars` for Tier 2 and authored/runtime-`set` owning-sequence `fm.model` for Tier 4.
-  - Fixes `pi` and `kilo` `model_env_vars` via `claudine/docs/providers/overrides/{pi,kilo}.yaml` + `cargo run -p claudine-gen -- generate` (verified with `cargo run -p claudine-gen -- check`).
+  - Fixes `pi` and `kilo` `model_env_vars` via `claudine/docs/providers/overrides/{pi,kilo}.yaml` + `claudine providers generate --yes` (verified with `claudine providers generate --check`).
   - `get_default_model(provider, ctx)` covers all 10 registered providers using strictly passive local reads with zero new crate dependencies, explicit `DefaultModelContext` (zero new `context_construction_guard` or `path_lookup_guard` allowlist entries), `ConfigPlatform`-aware Windows ASCII case-insensitive env lookup (`AppData`, `ProgramData`, `UserProfile`), `1 MiB` file/env cap, 32-ancestor walk cap, `< 10ms` per-provider latency, and `InvocationContext` memoization keyed by `(Provider, ConfigPlatform, home, project_cwd, repo_root, include_project_config, provider_env_fingerprint)`.
-  - Implements `OverlayPlan::hides_native_config()`, wires `claudine/lib/src/composition/select.rs` to consult Tier 6 before failing with `composition.model_required`, returns `DefaultModelLookup` supporting malformed-config fallthrough and deduplicated `config.provider_default_unreadable` (`info`) per `(Provider, DefaultModelSource)`, and populates `ctx.model`/`env.MODEL` with provenance in `--dry-run`/logs.
+  - Implements `OverlayPlan::hides_native_config()`, wires `claudine/lib/src/composition/select.rs` to consult Tier 6 before failing with `composition.model_required`, returns `DefaultModelLookup` supporting malformed-config fallthrough and deduplicated `config.provider_default_unreadable` (`info`) per `(Provider, DefaultModelSource)`, populates `ctx.model` with provenance in `--dry-run`/logs, and exports the child's `MODEL` only alongside a forwarded `--model` (never the `"default"` placeholder).
   - L1 tests cover all 10 providers (including `pi` compound merge, `kimi` two-generation probe, and `goose` XDG-primary + legacy fallbacks), `DefaultModelContext` Windows case-insensitive env-lookup parity across all 3 `ConfigPlatform` variants, `> 1 MiB` cap, malformed fallthrough/deduplication, memoization reuse/invalidation, and `OverlayPlan::hides_native_config()`.
 - **Diagnostics:** Registers all 6 new diagnostic codes and updates all reused codes in `claudine/lib/src/diagnostics/registry.rs` adhering to What/Where/Why/Hint and preserving locked `err.*` codes.
 
 ### `claudine/cli`
 
-- Eliminates the parallel `explicit_provider` override channel and retires `OpencodeWrapper::configured_default_model`; wires `--<provider>` (`--claude`, `--codex`, …, `--provider <name>`) and `--model` into `fm.agent`/`fm.model` for `compose`, `inline-compose`, and Markdown `sequence`, and into `default-values.agent`/`default-values.model` for YAML/data `sequence`.
+- Eliminates the parallel `explicit_provider` override channel and retires the `WrapperProfile::configured_default_model` hook (and OpenCode's override of it); wires `--<provider>` (`--claude`, `--codex`, …, `--provider <name>`) and `--model` into `fm.agent`/`fm.model` for `compose`, `inline-compose`, and Markdown `sequence`, and into `default-values.agent`/`default-values.model` for YAML/data `sequence`.
 - Evaluates Tier-6 `--model` forwarding (`OverlayPlan::hides_native_config()` / `model_required_in_non_tty`) in `exec_prep/mod.rs` **after** `ensure_provider_overlay` (or accounting for pending `NativeRoot` MCP overlays for Codex/Gemini), verified by an `exec_prep` overlay-ordering test.
 - Rejects both `--<provider>` + `agent=<val>` and `--model <val>` + `model=<val>` conflicts on the same command with `usage.invalid_argument` (exit `2`).
 - Maps `--dry-run` exit status to `0` (clean or `info`-only), `1` (warnings with no errors — including `composition.agent_conditional_set` and `composition.agent_unverifiable_target`), and `2` (any `error` or CLI usage error).
@@ -650,8 +749,8 @@ Implementation is complete when all package-level acceptance criteria and cross-
 
 ### Cross-Cutting Definition of Done
 
-- `PREPARATION_REVISION` is bumped (`4 → 5`) in `simplified-schema/lib/src/shipped/registry.rs`, all 4 checked-in schema bundles (`simplified-schema/lib/generated/shipped.json`, `darkmatter/lib/generated/shipped.json`, `claudine/lib/generated/shipped.json`, `claudine/lib/generated/globals.lifecycle.json`) are freshly regenerated via root `just shipped-schemas` with zero uncommitted drift, and `cargo run -p claudine-gen -- check` passes after regenerating `pi` and `kilo` provider data.
-- All canonical docs (`simplified-schema/docs/`, `darkmatter/docs/`, `claudine/docs/`), caller skills (`claudine/docs/use-skills/use-claudine/{sequences,cli,composition}.md` and `darkmatter/docs/use-skills/use-darkmatter/authoring.md` if needed, published with `just publish-skills`), and repo skills (`.claude/skills/`) are updated with zero drift against shipped behavior.
+- `PREPARATION_REVISION` is bumped (`4 → 5`) in `simplified-schema/lib/src/shipped/registry.rs`, all 4 checked-in schema bundles (`simplified-schema/lib/generated/shipped.json`, `darkmatter/lib/generated/shipped.json`, `claudine/lib/generated/shipped.json`, `claudine/lib/generated/globals.lifecycle.json`) are freshly regenerated via root `just shipped-schemas` with zero uncommitted drift, and `claudine providers generate --check` passes after regenerating `pi` and `kilo` provider data.
+- Every page and skill in [Documentation to update](#documentation-to-update) states the shipped behavior, carries no **planned** marker for behavior this implementation ships, and names no feature or fix spec; caller skills are republished with `just publish-skills` in each affected area.
 - All 21 migrated research files (20 coordinator `claudine/docs/research/*/_fleet.md` files + `claudine/docs/research/_TEMPLATE.md`) pass `claudine sequence --dry-run` cleanly, and `agent-cli`, `reasoning-level`, and `sandboxing/providers` remain untouched and valid.
 - `just test` and `just lint` pass across `simplified-schema`, `darkmatter`, and `claudine` on all supported OS environments.
 
