@@ -234,6 +234,23 @@ An `example(./ex.yaml)` that names a listed member is also refused
 still faces the normal example envelope check, so it fails as
 `SchemaError::InvalidExample`.
 
+Resolving a file's `$schema` follows only the declarations it uses. To hold
+a whole member to the bundle, also run `resolve::check_declared_types(text,
+path, &ctx, shipped)` inside the scope. It checks every declaration of the
+file's `types` table, used or not: each import, `$extends`, spread, union
+arm, and `Name@this` chain resolves, and each `example(…)` file is selected
+(not read). Run it after the member envelope
+(`member_envelope::admit_member`) admitted the file: it judges no shape of
+`types` the envelope owns. A file without `types`, or with a blank or
+`null` one (which the envelope admits only for a `kind: yaml-schema`
+definition), passes, and no template is evaluated:
+
+```rust
+// `optional: Options@./options.yaml` in `types`, used by nothing, unlisted
+let (checked, _) = bundle::with(&sources, || resolve::check_declared_types(&text, &path, &ctx, shipped));
+assert!(checked.is_err()); // SchemaError::BundleBoundary, BundleRefusal::Unlisted
+```
+
 An installed bundle's members keep their real paths under the bundle folder,
 so diagnostics and `reads.missing` name files a host can watch. An embedded
 bundle uses the virtual root `<name>` (`<claudine>/schemas/shared.yaml`),

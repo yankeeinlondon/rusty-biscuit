@@ -50,7 +50,7 @@ pub use source::{
     SchemaConstraintParticipant, SchemaReferenceSite, SchemaSourceId,
     SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection,
     SchemaValueEntry, SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
-    locate_standalone_definition_failure,
+    locate_carrier_definition_failure, locate_standalone_definition_failure,
     mapping_separator,
     parse_property_definition_with_source, parse_schema_declaration_with_source, parse_schema_table_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,

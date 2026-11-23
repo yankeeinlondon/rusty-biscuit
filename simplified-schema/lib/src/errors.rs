@@ -889,17 +889,20 @@ pub enum SchemaError {
     /// match-safe subset (constraints that resolve files, import types, load
     /// examples, provide defaults, mark generated values, or eager-existence-
     /// check `file`). `property` names the offending property; `constraint`
-    /// names the forbidden constraint keyword.
+    /// names the forbidden constraint keyword; `field` is the condition's
+    /// place in the trigger, written from `match` down as the
+    /// [`SchemaError::TriggerMatch`] messages are (`match.all[0].group[6].prompt`).
     #[error(
         "schema-trigger match condition for `{property}` uses a forbidden constraint: {constraint}"
     )]
-    TriggerForbiddenConstraint { property: String, constraint: String },
+    TriggerForbiddenConstraint { property: String, constraint: String, field: String },
 
     /// A schema-trigger match mapping mixes structural keys (combinators
     /// `all`/`group`/`none`/`min-match` or the `$path` predicate) with
     /// property-condition keys. Mixing is a load error — never a guess about
     /// the author's intent. `structural` and `properties` list the offending
-    /// keys.
+    /// keys; `field` is the mixed mapping's place, written from `match` down
+    /// (`match.all[1]`).
     #[error(
         "schema-trigger match mapping mixes structural keys ({structural:?}) with property keys \
          ({properties:?}); use `all:` to combine them"
@@ -907,6 +910,7 @@ pub enum SchemaError {
     TriggerMixedMapping {
         structural: Vec<String>,
         properties: Vec<String>,
+        field: String,
     },
 
     /// A schema-trigger's whole match expression is vacuous: some way of
@@ -1766,7 +1770,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     .hint(TRIGGER_YAML_HINT)
             }
 
-            SchemaError::TriggerForbiddenConstraint { property, constraint } => {
+            SchemaError::TriggerForbiddenConstraint { property, constraint, .. } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
@@ -1790,6 +1794,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             SchemaError::TriggerMixedMapping {
                 structural,
                 properties,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",

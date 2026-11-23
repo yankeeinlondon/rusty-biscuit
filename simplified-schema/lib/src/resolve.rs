@@ -412,6 +412,68 @@ pub fn resolve_namespace_payload(
     resolve_trigger_payload_value(payload, root.get("types"), path, None, base_dir, &[], request_context, shipped)
 }
 
+/// A `kind: namespace-schema` file admitted and resolved by
+/// [`prepare_namespace_document`].
+#[derive(Debug, Clone)]
+pub struct PreparedNamespaceDocument {
+    #[allow(missing_docs)]
+    pub document: crate::NamespaceSchemaDocument,
+    /// The namespace's value: its `$schema` object, resolved.
+    pub shape: SchemaShape,
+    /// The whole resolution of `$schema`, whose `definitions` the shape's
+    /// references name.
+    pub resolved: ResolvedSchema,
+}
+
+/// Why [`prepare_namespace_document`] refused a namespace file.
+#[derive(Debug)]
+pub enum NamespaceDocumentError {
+    /// The envelope, a label, or the payload or `types` grammar is invalid
+    /// ([`crate::parse_namespace_schema_document`]); located by its span.
+    Invalid(SchemaError),
+    /// `$schema` does not resolve.
+    Unresolved(SchemaError),
+    /// `$schema` resolved to something other than one object.
+    NotOneObject,
+}
+
+impl std::fmt::Display for NamespaceDocumentError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(error) => write!(formatter, "the namespace schema is invalid: {error}"),
+            Self::Unresolved(error) => write!(formatter, "the namespace's `$schema` does not resolve: {error}"),
+            Self::NotOneObject => formatter.write_str("the namespace's `$schema` must be one object"),
+        }
+    }
+}
+
+/// Admits the `kind: namespace-schema` file at `path` (text `text`) and
+/// resolves its value: the one check every reader of a namespace file runs,
+/// so a host's registration and a direct check of the file (`md schema
+/// validate`, the editor) refuse the same files. Reserved-name checks on
+/// the namespace are the host's. `Ok(None)` when `text` does not claim
+/// `kind: namespace-schema`.
+///
+/// ## Errors
+///
+/// [`NamespaceDocumentError`].
+pub fn prepare_namespace_document(
+    text: &str,
+    path: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<Option<PreparedNamespaceDocument>, NamespaceDocumentError> {
+    let Some(document) = crate::parse_namespace_schema_document(text, path).map_err(NamespaceDocumentError::Invalid)? else {
+        return Ok(None);
+    };
+    let resolved =
+        resolve_namespace_payload(text, path, request_context, shipped).map_err(NamespaceDocumentError::Unresolved)?;
+    let Some(SchemaRoot::Single(shape)) = resolved.simplified.clone() else {
+        return Err(NamespaceDocumentError::NotOneObject);
+    };
+    Ok(Some(PreparedNamespaceDocument { document, shape, resolved }))
+}
+
 /// A trigger's `types` table as the named types its payload resolves with.
 pub(crate) fn parse_trigger_types(types: &YamlValue) -> Result<SchemaShape, SchemaError> {
     match crate::simplified::parse_schema_table(types)? {
@@ -831,21 +893,96 @@ pub fn check_standalone_named_types(
         )?.imports);
     }
     if let Some(types) = &document.local_types {
-        let (_, read, _) = expand_imports(
-            SchemaRoot::Single(types.clone()),
-            Some(types),
-            base_dir,
-            DefNamespace::File(canonical_path(&document.path)),
-            &SchemaSourcePath::root().property("types"),
-            NamespaceSource::Files { schema_roots: schema_roots.to_vec(), context: Box::new(request_context.clone()) },
-            Sharing::Automatic,
-            &mut BTreeSet::new(),
-            &mut DefinitionTable::default(),
-            shipped,
-        )?;
-        imports.extend(read);
+        let root = SchemaSourcePath::root().property("types");
+        imports.extend(expand_local_types(types, &document.path, &root, schema_roots, request_context, shipped, &mut BTreeSet::new())?);
     }
     Ok(imports.into_iter().collect())
+}
+
+/// Every named type `types` (the `types` table of the file at `path`)
+/// declares, expanded as one object so a declaration no export reaches is
+/// resolved too: its imports, `Name@this` references, `$extends`, spreads,
+/// and union arms. `root` is the table's path in the diagnostics a failure
+/// reports. Returns the files imported.
+fn expand_local_types(
+    types: &SchemaShape,
+    path: &Path,
+    root: &SchemaSourcePath,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+    searched: &mut BTreeSet<PathBuf>,
+) -> Result<Vec<PathBuf>, SchemaError> {
+    let (_, read, _) = expand_imports(
+        SchemaRoot::Single(types.clone()),
+        Some(types),
+        path.parent().unwrap_or_else(|| Path::new(".")),
+        DefNamespace::File(canonical_path(path)),
+        root,
+        NamespaceSource::Files { schema_roots: schema_roots.to_vec(), context: Box::new(request_context.clone()) },
+        Sharing::Automatic,
+        searched,
+        &mut DefinitionTable::default(),
+        shipped,
+    )?;
+    Ok(read)
+}
+
+/// Checks every declaration in the `types` table of the schema file `text`
+/// (read from `path`: a type library, a trigger, a `yaml-schema`, or a
+/// namespace), whether or not anything the file exports uses it: each
+/// named-type import resolves (the [`check_standalone_named_types`]
+/// traversal) and each file-backed `example(...)` reference selects its
+/// file. Inside [`bundle::with`] that is the bundle's boundary, so an unused
+/// declaration cannot carry an unlisted, escaping, or remote reference into
+/// an admitted bundle. Passive: no template is evaluated, and an example
+/// file is selected, not read. Returns the files imported; a file without
+/// `types`, or with a null one, checks nothing.
+///
+/// Runs after the member envelope ([`crate::member_envelope::admit_member`])
+/// admitted the file, and judges no shape of `types` that envelope owns: a
+/// null table is the absent one, as every load path of a `yaml-schema` reads
+/// it, and the kinds that refuse a null table refuse it there first.
+///
+/// ## Errors
+///
+/// [`SchemaError::SchemaDocument`] when `text` is not YAML; the `types`
+/// grammar's errors; every resolution error of an import or example
+/// reference, such as [`SchemaError::BundleBoundary`].
+pub fn check_declared_types(
+    text: &str,
+    path: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<Vec<PathBuf>, SchemaError> {
+    let root: YamlValue = serde_yaml_ng::from_str(text).map_err(|error| SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+        source: None,
+        span: None,
+    })?;
+    let Some(types) = root.get("types").filter(|types| !types.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let types = parse_trigger_types(types)?;
+    let mut searched = BTreeSet::new();
+    // A failure names the declaration's path inside `types`, as a payload's
+    // names its path inside `$schema`, so a host locates both alike.
+    let imports = expand_local_types(&types, path, &SchemaSourcePath::root(), &[], request_context, shipped, &mut searched)?;
+    // A declaration's own examples stay as authored through expansion (only
+    // a definition inlined elsewhere is rehomed), so each is selected here.
+    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut declared = types;
+    for def in declared.properties.values_mut().chain(declared.pattern_keys.iter_mut().map(|pattern| &mut pattern.def)) {
+        let atoms = match def {
+            PropertyDef::Single(atom) => std::slice::from_mut(atom),
+            PropertyDef::Union(arms) => arms.as_mut_slice(),
+        };
+        for atom in atoms {
+            rehome_atom_examples(atom, base_dir, Some(path), &[], request_context, &mut searched, None)?;
+        }
+    }
+    Ok(imports)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3495,7 +3632,7 @@ impl ImportEngine<'_> {
         }
         match namespace {
             DefNamespace::File(file) | DefNamespace::FileRootUnionArm(file, _) => {
-                self.rehome_examples(base, &file.clone())
+                self.rehome_examples(base, &file.clone()).map_err(|error| self.written_in_import(namespace, error))
             }
             // An embedded definition's examples are rejected once the
             // embedded schema is lowered (`prepare_embedded_schema`).
@@ -3505,6 +3642,30 @@ impl ImportEngine<'_> {
             | DefNamespace::TriggerPayloadUnionArm(..)
             | DefNamespace::Embedded(_)
             | DefNamespace::Shipped(_) => Ok(base),
+        }
+    }
+
+    /// `error`, raised by a reference written in `namespace`, as a failure of
+    /// that file when it is one this expansion imported: a host then reports
+    /// the reference where it is written, in the imported file, instead of
+    /// in the document being prepared. A reference the document itself
+    /// wrote is returned unchanged.
+    fn written_in_import(&self, namespace: &DefNamespace, error: SchemaError) -> SchemaError {
+        match namespace {
+            DefNamespace::File(file) | DefNamespace::FileRootUnionArm(file, _) if self.namespace_cache.contains_key(file) => {
+                match error {
+                    SchemaError::BundleBoundary { .. }
+                    | SchemaError::NoMatch { .. }
+                    | SchemaError::Unresolved { .. }
+                    | SchemaError::RemoteUnsupported { .. }
+                    | SchemaError::BareNameSiblingExists { .. }
+                    | SchemaError::InvalidExample { .. } => {
+                        SchemaError::ReferencedSchema { path: file.clone(), source: Box::new(error) }
+                    }
+                    other => other,
+                }
+            }
+            _ => error,
         }
     }
 
@@ -3599,7 +3760,7 @@ impl ImportEngine<'_> {
                         None => named_type_file_path(reference, &current.base_dir, schema_roots, context, &mut probed),
                     };
                     self.searched.extend(probed.iter().cloned());
-                    let path = selected?;
+                    let path = selected.map_err(|error| self.written_in_import(&current.key, error))?;
                     let canonical = canonical_path(&path);
                     self.selected_files.insert(
                         site,

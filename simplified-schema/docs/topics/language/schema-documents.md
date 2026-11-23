@@ -100,7 +100,7 @@ flowchart TD
 | YAML mapping without `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) |
 | YAML that is not a mapping, or a JSON value that is not an object | `NotASchemaDocument` (`NotAMapping`) |
 | YAML with `$schema` and a key outside `$schema`, `types`, `description`, `categories` (no `kind: schema` or `kind: yaml-schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
-| YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location |
+| YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location; a duplicate key at its second spelling |
 | JSON object without a string `$schema` | `NotASchemaDocument` (`JsonMissingDialect`) |
 | JSON `$schema` other than exactly `https://json-schema.org/draft/2020-12/schema` (including `""` and a trailing `#`) | `UnsupportedJsonDialect` |
 | JSON declaring 2020-12 that fails the dialect's meta-schema | `InvalidJsonSchema` |
@@ -450,11 +450,27 @@ types:
 | `types` | optional mapping of named types, `{}` included; private to this file |
 
 No other key is allowed, and neither `description` nor `types` may be written
-as `null`: omit the key instead. Opened as a whole YAML document, a namespace
-file is judged by `namespace-schema.yaml` alone, which admits a `null`
-optional field and a reference `$schema`; **planned**: the parser's refusals
-apply there too. Which names a host reserves (its own globals, expression
-roots) is the host's check, not this library's.
+as `null`: omit the key instead. Which names a host reserves (its own
+globals, expression roots) is the host's check, not this library's.
+
+Opened as a whole YAML document (`md schema validate loop.yaml`, or the file
+open in the editor), a namespace file is first judged by
+`namespace-schema.yaml`, which reads a `null` optional field as absent and
+admits a reference `$schema`. Its `namespace-schema` kind check then runs the
+same preparation a host's registration runs
+([`prepare_namespace_document`](#resolving-a-namespaces-payload)), so the
+file is reported exactly as registering it would refuse it:
+
+```text
+kind: namespace-schema
+namespace: thing
+description:           # kind check: `description`: must not be null; omit it instead
+$schema:
+    item: Missing      # kind check: unknown named type `Missing` in the inline `$schema`
+```
+
+This checks the file itself; naming it from another document is still
+refused (see below).
 
 Read one with `parse_namespace_schema_document(text, path)`, which admits it
 against `namespace-schema.yaml` and returns a `NamespaceSchemaDocument`:
@@ -496,7 +512,12 @@ let Some(SchemaRoot::Single(members)) = resolved.simplified else { unreachable!(
 
 Envelope admission is the caller's step (`parse_namespace_schema_document`);
 `resolve_namespace_payload` reads only `$schema` and `types`, and refuses a
-`$schema` that is not a mapping. An empty `$schema: {}` resolves to an object
+`$schema` that is not a mapping. `resolve::prepare_namespace_document(text,
+path, &context, shipped)` is the two steps together, plus the check that the
+result is one object: it returns the `NamespaceSchemaDocument`, the resolved
+object, and its `ResolvedSchema`, or a `NamespaceDocumentError` saying which
+step refused the file. Every reader that judges a namespace file calls it, so
+they all accept and refuse the same files. An empty `$schema: {}` resolves to an object
 with no members. A host that loads the namespace from a checked bundle runs
 this inside the bundle's scope, so its imports follow
 [path-based imports](#path-based-imports-inside-a-bundle).

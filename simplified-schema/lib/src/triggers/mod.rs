@@ -57,7 +57,7 @@ pub use discovery::{enumerate_root_files, scan, scan_with_embedded};
 pub use finding::InvalidTriggerFinding;
 pub use envelope::{
     NAME_PATTERN, TriggerEnvelope, claims_trigger_envelope, is_valid_name, parse_trigger_envelope,
-    parse_trigger_envelope_from_str,
+    parse_trigger_envelope_from_str, trigger_error_span,
 };
 pub use grammar::{
     COMBINATOR_KEYS, PATH_KEY, MatchConditions, MatchExpr, PathGlobs, is_match_safe_constraint,

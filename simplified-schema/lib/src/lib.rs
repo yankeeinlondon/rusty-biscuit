@@ -54,6 +54,7 @@ pub mod format;
 pub mod frontmatter_shape;
 pub mod json_shape;
 pub mod mapping_orders;
+pub mod member_envelope;
 pub mod numeric;
 pub mod origin;
 pub mod outcome;
@@ -138,7 +139,8 @@ pub use simplified::{
     is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions,
     is_union_arm_path, lint_suggestions, locate_composition_operand_cursor,
     locate_composition_operand_cursor_in_scalar, locate_schema_declaration_cursor,
-    locate_schema_declaration_cursor_in_scalar, locate_schema_value, locate_standalone_definition_failure,
+    locate_schema_declaration_cursor_in_scalar, locate_schema_value, locate_carrier_definition_failure,
+    locate_standalone_definition_failure,
     locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, mapping_separator,
     parse_property_definition, parse_property_definition_with_source, parse_schema_declaration,
     parse_namespace_schema_document, parse_type_definition_value,

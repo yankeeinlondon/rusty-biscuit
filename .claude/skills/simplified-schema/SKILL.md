@@ -167,6 +167,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Use a captured context / editor buffer | `SchemaSource::from(path).bound(ctx).with_text(buffer)` |
 | Resolve over every unsaved buffer (targets, imports, examples, unsaved-only files) | `resolve::buffers::with(&SourceBuffers, \|\| …)` (thread-scoped; reads and selection only) |
 | Resolve against a checked bundle's bytes only (listed `./`/`../` members and host built-ins; everything else refused unread) | `resolve::bundle::with(&BundleSources::on_disk(root, bytes)?, \|\| …)` → `(T, BundleReads { attempted, missing, served })`; `BundleSources::embedded(name, bytes)` for a virtual root ([details](../../../simplified-schema/docs/topics/selecting-schema-files.md#resolving-inside-a-bundle)) |
+| Hold every `types` declaration of a member (used or not: imports, `$extends`, spreads, arms, `example(file)` selection) to the bundle | `resolve::check_declared_types(text, path, &ctx, shipped)` inside `resolve::bundle::with` |
 | Several resolutions in one host operation reading each file once | `resolve::buffers::with_reads_retained(\|\| …)`; read a file you will resolve with `resolve::buffers::read_to_string` (test builds count opens in `observed::Observed::opened`) |
 | One named type as its own schema | `schema.select("Person")` |
 | Resolve a template, drop replaced properties, slot positions and texts | see [templates.md](templates.md#slot-and-template-apis) |
@@ -180,6 +181,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | A host namespace file (`kind: namespace-schema`): admit, then resolve its `$schema` with its private `types` | `parse_namespace_schema_document(text, path)` → `NamespaceSchemaDocument`; `resolve::resolve_namespace_payload(text, path, &ctx, shipped)` ([details](../../../simplified-schema/docs/topics/language/schema-documents.md#kind-namespace-schema), [code map](schema-documents.md#namespaces-labels-and-bundles)) |
 | Lower only | `to_json_schema`, `to_json_schema_with_definitions` (needed once a `TypeExpr::Ref` exists) |
 | Strings a schema claims for a property | `claimed_values(&resolved, "kind")` → `Vec<String>` / `ClaimProblem` |
+| Locate a resolver failure in a whole YAML file (carrier `$schema`/`types` restored, union arms followed as sequence indices, the spelled name picks the section, never a `-> description` that mentions it) | `yaml_documents::{reference_site, declaration_segments}`; a declaration's text with its descriptions blanked, offsets kept: `simplified::grammar::without_descriptions`; a grammar failure under any document's carrier: `locate_carrier_definition_failure(text, "$schema")`; a validation problem a `schema` carrier reported at itself: `LoadedYamlDocument::locate_declaration_problems` |
 
 `ValidationFailure` is `#[non_exhaustive]`: `InvalidData { problems }`,
 `UnavailableCheck { problems }` (a check this build or an in-memory schema

@@ -23,12 +23,14 @@ use std::sync::Arc;
 
 use crate::SchemaError;
 
+pub mod declaration;
 pub mod load;
 mod marks;
 pub mod registry;
 pub mod select;
 pub mod semantic;
 
+pub use declaration::{claim_segments, declaration_segments, reference_site, source_path_segments};
 pub use load::{LoadedYaml, first_tag_start, load_yaml_document, locating_problem, pointer_string};
 pub use registry::{
     Claim, DefinitionSource, Incomplete, KindDefinition, KindHost, KindRegistry, RegisteredDefinition, RegisteredKinds,
@@ -118,6 +120,19 @@ impl LoadedYamlDocument {
     #[must_use]
     pub fn json(&self) -> &serde_json::Value {
         &self.loaded.json
+    }
+
+    /// Narrows each of `problems` (this document's validation against its
+    /// `kind`'s definition) that a `schema` carrier reported at the carrier
+    /// itself (`/$schema` or `/types`) for a declaration that does not parse,
+    /// to the failing declaration inside it: its path through union-arm
+    /// indices, and the parser's position of the rejected token. Every other
+    /// problem, and every kind without [`semantic`] checks, is left as is.
+    /// Passive.
+    pub fn locate_declaration_problems(&self, kind: &str, problems: &mut [crate::ValidationProblem]) {
+        if CHECKED_KINDS.contains(&kind) {
+            semantic::locate_carrier_problems(&self.text, problems);
+        }
     }
 
     /// Runs `kind`'s checks ([`semantic`]) over this document; `accepted` is

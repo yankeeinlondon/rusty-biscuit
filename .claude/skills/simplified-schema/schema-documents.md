@@ -50,6 +50,25 @@ admission; metadata from `accepted`) and prepares a `yaml-schema` with
 judges its shape twice. Tests: `envelope_admission.rs`,
 `yaml_schema_envelope.rs`.
 
+Host registration members have one *structural* admission,
+`member_envelope.rs` (`admit_member`/`admit_member_text` →
+`AdmittedMember {kind, name}` or `MemberRefusal {kind, field, absent, message}`;
+`absent` marks an omitted required key, which a reader locates at the
+document's mapping rather than at a value):
+the four member kinds' closed key sets and value types, std +
+`serde_yaml_ng` only because Claudine's `build.rs` includes it by `#[path]`
+(the library reaches it as `simplified_schema::member_envelope`). Darkmatter's
+`config::registration::member_kind` classifies every member with it before
+full preparation. Its null rules mirror the full admission (a null
+`yaml-schema`/library `description` is absent, a trigger's/namespace's is
+refused), and `tests/l1/member_envelope.rs::the_closed_key_sets_are_the_definitions_keys`
+pins `MemberKind::keys` to the definition files; edit both together.
+A namespace file's whole check is `resolve::prepare_namespace_document`
+(admission + `resolve_namespace_payload` + one-object), shared by
+registration (`namespaces::prepare_one`) and the `namespace-schema` kind
+check (`yaml_documents/semantic.rs`), which is why `md schema validate` and
+DMLS skip resolving it as a schema target.
+
 Null carriers are absent: a null `description`/`categories`/`types` is
 omitted, a tagged `$schema: null` beside a usable `types` table is a
 types-only document, an untagged document whose `$schema` is null is
@@ -83,8 +102,9 @@ into its `EffectiveSchema`/`ValidationReport` (`YamlContract`, `YamlValidation`,
 - **Namespace files** (`kind: namespace-schema`) are catalog inputs only.
   `simplified/standalone.rs::parse_namespace_schema_document` admits the
   envelope and refuses explicit `null` for `description`/`types` (the
-  definition cannot: an optional property admits `null`; whole-YAML loading
-  does not refuse it yet, and `CHECKED_KINDS` has no namespace entry).
+  definition cannot: an optional property admits `null`); whole-YAML loading
+  reaches the same refusal through the `namespace-schema` kind check
+  (`prepare_namespace_document`, see above).
   `resolve.rs::resolve_namespace_payload` resolves `$schema` beside the
   private `types` through the trigger-payload path (`InlineOwner::Trigger`),
   so the file owns its inline types and no other file reaches them. Naming a

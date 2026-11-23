@@ -265,8 +265,9 @@ let source = RegisteredSource {
     path: "schemas/action.yaml".into(),              // bundle-relative definition path
     file: installed.join("schemas/action.yaml"),     // where its text was read
 };
-// `resolved` is the definition's `$schema`, resolved by the host.
-let definition = RegisteredDefinition::new(source, resolved, "claudine@<revision>:schemas/action.yaml")?;
+// `text` is the definition's verified text; `resolved` its `$schema`,
+// resolved by the host.
+let definition = RegisteredDefinition::new(source, &text, resolved, "claudine@<revision>:schemas/action.yaml")?;
 let registered = RegisteredKinds::new([definition]);
 let selection = select_with_registered(&registry, Some(&registered), &document)?;
 ```
@@ -274,7 +275,10 @@ let selection = select_with_registered(&registry, Some(&registered), &document)?
 The kinds a registered definition claims are read by the same rule as a
 local definition's (its `$schema`'s `kind` declaration), and a definition
 that claims no finite set of kinds fails `RegisteredDefinition::new` with the
-same `SchemaDocument` error, naming `file`.
+same `SchemaDocument` error, naming `file`. Its `span` is the `kind`
+declaration in `text` (`yaml_documents::claim_segments` of the
+`ClaimProblem`, the node the whole-YAML check reports), so a host reports
+the failure where it is written, as it does for a local definition.
 
 For a document with a string `kind`, selection runs in this order; the first
 step that decides wins:

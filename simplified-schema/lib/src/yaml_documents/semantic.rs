@@ -19,6 +19,14 @@
 //! | `schema` | the library's parse of the accepted document without envelope admission (category entries, undeclared categories, duplicate overloads) and its named-type imports |
 //! | `schema-trigger` | the `match` grammar: `$path` globs, empty or vacuous `match`, `min-match` count bounds, match-safe conditions |
 //! | `yaml-schema` | the same parse; its export prepares and claims a finite set of kinds |
+//! | `namespace-schema` | the preparation a host's registration runs ([`crate::resolve::prepare_namespace_document`]): its labels' exact forms (an explicit `null` `description` or `types` is refused), a `$schema` written as one mapping, and its resolution with the file's private `types` |
+//!
+//! A namespace file is the one exception to the rule above: its check is
+//! the registration's own preparation, which admits the envelope against
+//! the compiled definition again, so a file this check accepts is one every
+//! host registration accepts. That is also why a namespace is checked here
+//! and never resolved as a `$schema` target: naming one from another
+//! document stays refused.
 //!
 //! Every problem is a [`ValidationProblemCode::KindCheck`] located in the
 //! document's text. In the file itself it is an error; the same trigger
@@ -32,20 +40,21 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 use crate::{
-    SchemaError, SchemaSourcePath, SchemaSourcePathSegment, ValidationProblem, ValidationProblemCode,
+    SchemaError, ValidationProblem, ValidationProblemCode,
     ValidationProblemKind,
 };
 
 use crate::embedded::ShippedSources;
 use crate::triggers::envelope::{check_trigger_semantics, trigger_error_segments};
+use super::declaration::{claim_segments, source_path_segments};
 use super::load::{LoadedYaml, locating_problem};
 
 /// The document kinds that have checks here.
-pub const CHECKED_KINDS: &[&str] = &["schema", "schema-trigger", "yaml-schema"];
+pub const CHECKED_KINDS: &[&str] = &["schema", "schema-trigger", "yaml-schema", "namespace-schema"];
 
 /// The checked kinds whose checks resolve what the document imports, so
 /// read files; the `schema-trigger` checks are passive.
-pub const FILE_READING_KINDS: &[&str] = &["schema", "yaml-schema"];
+pub const FILE_READING_KINDS: &[&str] = &["schema", "yaml-schema", "namespace-schema"];
 
 /// Runs `kind`'s checks over `document`; `accepted` is the copy of it the
 /// selected definition accepted. `schema_roots`, `context`, and the host's
@@ -68,9 +77,35 @@ pub(crate) fn kind_checks(
         "schema-trigger" => trigger_checks(loaded),
         "schema" => schema_checks(body, path, accepted, schema_roots, context, sources),
         "yaml-schema" => yaml_schema_checks(body, path, accepted, schema_roots, context, sources),
+        "namespace-schema" => namespace_checks(body, path, context, sources),
         _ => Vec::new(),
     };
-    findings.into_iter().map(|finding| finding.into_problem(text, loaded)).collect()
+    findings.into_iter().map(|finding| finding.at_reference(text, path, loaded).into_problem(text, loaded)).collect()
+}
+
+/// [`super::LoadedYamlDocument::locate_declaration_problems`]: a problem at
+/// a carrier whose own parse fails with the same message moves to the
+/// parser's located failure.
+pub(crate) fn locate_carrier_problems(text: &str, problems: &mut [ValidationProblem]) {
+    for problem in problems {
+        let Some(key) = problem.path.strip_prefix('/').filter(|key| matches!(*key, "$schema" | "types")) else {
+            continue;
+        };
+        let Some(located) = crate::locate_carrier_definition_failure(text, key) else {
+            continue;
+        };
+        if !problem.message.contains(&located.error.to_string()) {
+            continue;
+        }
+        let relocated = locating_problem(&source_path_segments(&located.path));
+        problem.path = relocated.path;
+        problem.instance_path = relocated.instance_path;
+        if let Some(span) = located.authored_span.or(located.value_span) {
+            let (line, column) = crate::line_col_of_offset(text, span.start);
+            problem.line = u32::try_from(line).ok();
+            problem.column = u32::try_from(column).ok();
+        }
+    }
 }
 
 /// One check failure before it is located.
@@ -80,6 +115,9 @@ struct Finding {
     /// The exact byte range in the YAML text, when the failure carries one.
     span: Option<Range<usize>>,
     message: String,
+    /// The resolver's reference site, when the failure records one and no
+    /// span located it: [`Self::at_reference`] moves the finding there.
+    site: Option<(crate::SchemaReferenceSite, String)>,
 }
 
 impl Finding {
@@ -88,7 +126,34 @@ impl Finding {
             SchemaError::SchemaDocument { span, .. } => span.clone(),
             _ => None,
         };
-        Self { segments, span, message: error.to_string() }
+        let site = super::declaration::reference_site(error).map(|(site, name)| (site.clone(), name.to_string()));
+        Self { segments, span, message: error.to_string(), site }
+    }
+
+    /// This finding at its reference site's declaration, when the site is in
+    /// this document (`path`, or the inline payload being prepared): the
+    /// carrier the finding named is tried first, and the spelled name keeps
+    /// a same-named declaration in the other carrier from standing in for it.
+    fn at_reference(mut self, text: &str, path: &Path, loaded: &LoadedYaml) -> Self {
+        let Some((site, name)) = self.site.take() else {
+            return self;
+        };
+        let here = match &site.source {
+            crate::SchemaSourceId::File(source) => source == path,
+            crate::SchemaSourceId::InlineDocument => true,
+            crate::SchemaSourceId::Embedded(_) => false,
+        };
+        if !here || self.span.is_some() {
+            return self;
+        }
+        let carriers: &[&str] = match self.segments.first().map(String::as_str) {
+            Some("types") => &["types", "$schema"],
+            _ => &["$schema", "types"],
+        };
+        if let Some(segments) = super::declaration::declaration_segments(loaded, text, &site.path, carriers, Some(&name)) {
+            self.segments = segments;
+        }
+        self
     }
 
     fn into_problem(self, text: &str, loaded: &LoadedYaml) -> ValidationProblem {
@@ -167,12 +232,25 @@ fn yaml_schema_checks(
     };
     match crate::claimed_values(&resolved, "kind") {
         Ok(_) => Vec::new(),
-        Err(problem) => {
-            let mut segments = vec!["$schema".to_string()];
-            segments.extend(source_path_segments(&problem.path));
-            vec![Finding::at(segments, &super::registry::claim_error(path, &problem))]
-        }
+        Err(problem) => vec![Finding::at(claim_segments(&problem), &super::registry::claim_error(path, &problem, body))],
     }
+}
+
+fn namespace_checks(body: &str, path: &Path, context: &FileResolutionContext, sources: ShippedSources) -> Vec<Finding> {
+    use crate::resolve::NamespaceDocumentError;
+    let error = match crate::resolve::prepare_namespace_document(body, path, context, sources) {
+        Ok(_) => return Vec::new(),
+        Err(error) => error,
+    };
+    let mut finding = match &error {
+        NamespaceDocumentError::Invalid(cause) | NamespaceDocumentError::Unresolved(cause) => definition_failure(body, cause),
+        NamespaceDocumentError::NotOneObject => Finding { segments: Vec::new(), span: None, message: String::new(), site: None },
+    };
+    if finding.segments.is_empty() && finding.span.is_none() {
+        finding.segments = vec!["$schema".to_string()];
+    }
+    finding.message = error.to_string();
+    vec![finding]
 }
 
 /// A standalone document's parse or preparation failure, at the definition
@@ -183,6 +261,7 @@ fn definition_failure(body: &str, error: &SchemaError) -> Finding {
             segments: source_path_segments(&located.path),
             span: located.authored_span.or(located.value_span),
             message: error.to_string(),
+            site: None,
         },
         None => Finding::at(named_field(error), error),
     }
@@ -202,20 +281,5 @@ fn named_field(error: &SchemaError) -> Vec<String> {
         .split('.')
         .flat_map(|part| part.split(['[', ']']).filter(|segment| !segment.is_empty()))
         .map(str::to_string)
-        .collect()
-}
-
-/// A schema source path as instance-path segments: a property is its name,
-/// a union arm its index (a root-union arm is a sequence item). A spread is
-/// text inside its object's scalar, not a YAML node, so the path ends at the
-/// scalar that holds it.
-fn source_path_segments(path: &SchemaSourcePath) -> Vec<String> {
-    path.segments()
-        .iter()
-        .map_while(|segment| match segment {
-            SchemaSourcePathSegment::Property(name) => Some(name.clone()),
-            SchemaSourcePathSegment::UnionArm(index) => Some(index.to_string()),
-            SchemaSourcePathSegment::Spread(_) => None,
-        })
         .collect()
 }

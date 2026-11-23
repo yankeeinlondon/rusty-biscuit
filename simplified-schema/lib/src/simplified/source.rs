@@ -614,6 +614,36 @@ pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefin
     Some(locate_keyed_failure(failure, payload, source, payload_key, 0))
 }
 
+/// Finds the definition failure of the declaration under the top-level `key`
+/// (`$schema`, or a `types` table) of any YAML mapping document `source`,
+/// such as a schema trigger or a namespace file, and locates it in `source`.
+///
+/// The declaration is parsed by the same shared parser every carrier uses,
+/// so the failure is the semantic error that parser reports first; its path
+/// starts at `key` and keeps union-arm indices. Ranges are byte offsets into
+/// `source` (a leading byte-order mark included).
+///
+/// ## Returns
+///
+/// `None` when `source` is not one YAML mapping, has no non-null `key`, or
+/// its declaration parses, and for a failure on no property (the
+/// declaration's own shape, which its envelope reports).
+///
+/// ## Notes
+///
+/// Passive: reads no files, resolves no imports, evaluates nothing.
+pub fn locate_carrier_definition_failure(source: &str, key: &str) -> Option<LocatedDefinitionFailure> {
+    let offset = if source.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
+    let body = &source[offset..];
+    let document = crate::numeric::load_admitted_yaml(body).ok()?;
+    let payload = document.as_mapping()?.get(key).filter(|payload| !payload.is_null())?;
+    let failure = parse_schema_declaration_located_as(payload, MappingMode::of_carrier(key)).err()?;
+    if !failure.path.segments().iter().any(|segment| matches!(segment, SchemaSourcePathSegment::Property(_))) {
+        return None;
+    }
+    Some(locate_keyed_failure(failure, payload, body, key, offset))
+}
+
 /// Parses `value`, the entry `key` of the YAML mapping authored as
 /// `mapping_source`, as a schema declaration. A failure is located in
 /// `mapping_source` with `source_offset` applied, its path starting at `key`.

@@ -443,6 +443,43 @@ pub(super) fn quoted_end(bytes: &[u8], start: usize, end: usize) -> Option<usize
     None
 }
 
+/// `text`, a declaration as authored (a YAML scalar's source, quotes
+/// included), with every `-> description` replaced by spaces, so byte
+/// offsets into the result are offsets into `text` and a search of it finds
+/// only what the declaration's types and constraints spell. A description
+/// outside any inline object runs to the end; inside one it ends where the
+/// parser ends it ([`inline_description_end`]). A `->` inside a quoted
+/// constraint argument is not told apart and hides the rest of the text,
+/// which only makes a search find less.
+#[must_use]
+pub fn without_descriptions(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut kept = bytes.to_vec();
+    let mut braces = 0usize;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' => braces += 1,
+            b'}' => braces = braces.saturating_sub(1),
+            b'-' if bytes.get(index + 1) == Some(&b'>') => {
+                let end = if braces == 0 {
+                    bytes.len()
+                } else {
+                    inline_description_end(bytes, index + 2, bytes.len()).unwrap_or_else(|unbalanced| unbalanced)
+                };
+                // Every byte of the prose, multi-byte characters included,
+                // becomes an ASCII space, so the result stays UTF-8.
+                kept[index..end].fill(b' ');
+                index = end;
+                continue;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    String::from_utf8(kept).expect("only whole descriptions are replaced, by ASCII")
+}
+
 /// The index of the `,` or `}` ending an inline-object property description
 /// that starts at `start`, or `end` when neither occurs.
 ///
@@ -4234,6 +4271,23 @@ mod tests {
 
     fn parse(input: &str) -> PropertyAtom {
         parse_type_expr("test", input).expect("parse failed")
+    }
+
+    #[test]
+    fn without_descriptions_keeps_offsets_and_only_declaration_text() {
+        let cases = [
+            ("'string -> Read ./x.yaml.'", "'string"),
+            ("A@./x.yaml -> from ./y.yaml", "A@./x.yaml"),
+            ("{ a: string -> see ./x.yaml, b: B@./x.yaml }", "{ a: string                , b: B@./x.yaml }"),
+            ("{ a: string -> (see, ./x.yaml) }", "{ a: string                    }"),
+            ("string -> café ./x.yaml", "string"),
+            ("string(example(./x.yaml))", "string(example(./x.yaml))"),
+        ];
+        for (text, kept) in cases {
+            let masked = without_descriptions(text);
+            assert_eq!(masked.len(), text.len(), "{text}");
+            assert_eq!(masked.trim_end(), kept, "{text}");
+        }
     }
 
     fn parse_err(input: &str) -> SchemaError {

@@ -204,7 +204,15 @@ structurally:
   ```
 - **`ReferencedSchema`** wraps an error raised inside another schema file
   with that file's `path`, so per-property detail survives while the
-  diagnostic points at the file that authored it.
+  diagnostic points at the file that authored it. A reference written in a
+  file the schema imports a named type from (`Name@./lib.yaml`), and that
+  cannot be followed (a missing or refused file, an `example(...)` that
+  fails), is wrapped the same way, naming the imported file, so a host
+  reports it where it is written rather than in the importing document.
+
+  ```text
+  referenced schema `/repo/schemas/lib.yaml` is invalid: could not resolve $schema reference `./options.yaml`
+  ```
 
 A `SchemaSourceId` is one of three sources:
 

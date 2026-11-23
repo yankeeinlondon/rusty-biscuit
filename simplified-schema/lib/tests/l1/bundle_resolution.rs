@@ -19,7 +19,7 @@ use biscuit_file::FileResolutionContext;
 use serde_json::{Value, json};
 use simplified_schema::embedded::{EmbeddedDocument, ShippedSources};
 use simplified_schema::resolve::bundle::{self, BundleReads, BundleRefusal, BundleSources};
-use simplified_schema::resolve::{ResolvedSchema, resolve_yaml_schema, resolve_yaml_schema_with_roots};
+use simplified_schema::resolve::{ResolvedSchema, check_declared_types, resolve_yaml_schema, resolve_yaml_schema_with_roots};
 use simplified_schema::slots::{
     SchemaRead, SchemaReadOutcome, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, SlotResolutionError,
     SlotRunRequest, TemplateReads,
@@ -262,6 +262,84 @@ fn file_backed_examples_face_the_boundary_and_their_envelope_check() {
 
     let (not_example, _) = fixture.resolve("name: string(example(./types.yaml))\n");
     assert!(matches!(not_example, Err(SchemaError::InvalidExample { .. })), "{not_example:?}");
+}
+
+/// `check_declared_types` judges every declaration of a file's `types`
+/// table against the bundle, including declarations nothing uses: each
+/// import, `$extends`, spread, union arm, and `Name@this` chain, and each
+/// file-backed example. Listed members and built-ins still resolve.
+#[test]
+fn every_declared_type_faces_the_boundary_used_or_not() {
+    let fixture = Fixture::new(
+        &[
+            ("schemas/types.yaml", NUMBER_OWNER),
+            ("schemas/base.yaml", "kind: schema\ntypes:\n  Base:\n    id: string\n"),
+            ("schemas/lib.yaml", "kind: schema\ntypes:\n  a: string\n"),
+        ],
+        &[("schemas/unlisted.yaml", STRING_OWNER)],
+    );
+    write(fixture.dir.path(), "outside.yaml", STRING_OWNER);
+    let path = fixture.root().join("schemas/lib.yaml");
+    let check = |declarations: &str| {
+        let text = format!("kind: schema\ntypes:\n  used: Owner@./types.yaml\n{declarations}");
+        bundle::with(&fixture.sources, || check_declared_types(&text, &path, &fixture.context(), HOST))
+    };
+
+    for listed in [
+        "  unused: Owner@./types.yaml\n",
+        "  unused: Owner@host:owner\n",
+        "  unused:\n    $extends: Base@./base.yaml\n",
+        "  unused: Owner@this\n  Owner: string(example(this))\n",
+    ] {
+        let (checked, reads) = check(listed);
+        checked.unwrap_or_else(|error| panic!("{listed}: {error}"));
+        assert!(reads.missing.is_empty(), "{listed}: {reads:?}");
+    }
+
+    for (unused, expected) in [
+        ("  unused: Owner@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused: Owner@../../outside.yaml\n", BundleRefusal::Escapes),
+        ("  unused:\n    $extends: Base@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused:\n    ...: base\n  base:\n    o: Owner@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused: string | Owner@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused: Hidden@this\n  Hidden: Owner@./unlisted.yaml\n", BundleRefusal::Unlisted),
+        ("  unused: string(example(./unlisted.yaml))\n", BundleRefusal::Unlisted),
+        ("  unused:\n    nested: string(example(../../outside.yaml))\n", BundleRefusal::Escapes),
+    ] {
+        let (checked, _) = check(unused);
+        let error = checked.expect_err(unused);
+        assert_eq!(refusal(&error), Some(expected), "{unused}: {error:?}");
+    }
+
+    let (remote, reads) = check("  unused: Owner@https://example.invalid/types.yaml\n");
+    assert!(matches!(remote, Err(SchemaError::RemoteUnsupported { .. })), "{remote:?}");
+    assert!(reads.served.iter().all(|member| member == "schemas/types.yaml"), "nothing remote is read: {reads:?}");
+
+    let (none, _) = bundle::with(&fixture.sources, || {
+        check_declared_types("kind: schema-trigger\nmatch:\n  a: string(required)\n", &path, &fixture.context(), HOST)
+    });
+    assert_eq!(none.expect("a file without types checks nothing"), Vec::<PathBuf>::new());
+}
+
+/// A null `types` is the absent table the member envelope admitted for a
+/// `yaml-schema` (blank or written `null`): the declaration check reads it
+/// as no named types, never as a table, while a written table is still
+/// judged.
+#[test]
+fn a_null_types_table_declares_nothing_to_check() {
+    let fixture = Fixture::new(&[("schemas/types.yaml", NUMBER_OWNER)], &[]);
+    let path = fixture.root().join("schemas/kind.yaml");
+    let head = "kind: yaml-schema\n$schema:\n  kind: literal(roster; required)\n";
+    let check = |types: &str| {
+        let text = format!("{head}{types}");
+        bundle::with(&fixture.sources, || check_declared_types(&text, &path, &fixture.context(), HOST)).0
+    };
+    for blank in ["types:\n", "types: null\n", "types: ~\n"] {
+        assert_eq!(check(blank).unwrap_or_else(|error| panic!("{blank:?}: {error}")), Vec::<PathBuf>::new(), "{blank:?}");
+    }
+    check("types:\n  used: Owner@./types.yaml\n").expect("a listed import");
+    let unlisted = check("types:\n  unused: Owner@./unlisted.yaml\n").expect_err("an unlisted import");
+    assert_eq!(refusal(&unlisted), Some(BundleRefusal::Unlisted), "{unlisted:?}");
 }
 
 #[test]

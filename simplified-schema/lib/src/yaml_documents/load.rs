@@ -56,8 +56,12 @@ pub fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, SchemaE
     let offset = if text.starts_with(BYTE_ORDER_MARK) { BYTE_ORDER_MARK.len_utf8() } else { 0 };
     let body = &text[offset..];
     let value = crate::numeric::load_admitted_yaml(body).map_err(|error| {
-        // Only a second document has no parser location.
-        let start = error.location().map(|location| location.index()).or_else(|| marks::second_document_start(body));
+        // Only a second document has no parser location; a duplicate key's
+        // is its mapping's start, so the repeated key is found instead.
+        let duplicate = error.to_string().contains("duplicate entry").then(|| marks::duplicate_key_start(body)).flatten();
+        let start = duplicate
+            .or_else(|| error.location().map(|location| location.index()))
+            .or_else(|| marks::second_document_start(body));
         let span = start.map(|start| {
             let start = (start + offset).min(text.len());
             start..start
