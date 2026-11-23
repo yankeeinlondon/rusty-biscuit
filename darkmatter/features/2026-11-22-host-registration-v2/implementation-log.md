@@ -1010,8 +1010,15 @@ line (see `decisions-for-review`).
   property: subtype in both directions
   (`is_definition_subtype_with_definitions` over a combined definition
   table), then presence, null admission, defaults, descriptions, and the
-  remaining constraints separately; a structural comparator that is
-  coinductive over named types coalesces recursive aliases. The unique
+  remaining constraints separately. The original strict narrowing comparison
+  pooled descriptions and constraints across property alternatives. The
+  iteration 6 repair keeps those rules on their alternatives. The
+  iteration 7 repair pairs list item alternatives for grouped lists and
+  plain uses of stored lists. A use-site description or constraint can
+  leave a stored list opaque to this comparison. Equivalent named and
+  inline declarations can also be refused when only the named form is
+  stored as a reference. A structural comparator that is coinductive
+  over named types coalesces the tested recursive aliases. The unique
   narrowest class wins and every other payload's declaration is removed, so
   the winner keeps its origin. Root checks: at most one root union, no root
   rules when two or more payloads contribute, and no other payload may
@@ -1721,3 +1728,78 @@ in the installed inline trigger refused the host but its warning pointed
 to line 44, the payload, instead of the edited condition on line 25. The
 original tests cover reached references and the trigger cases they exercised.
 See [review 2](review-2.md#unblocked-findings) for the remaining cases.
+
+### Departure: reference refusals point at their declaration (2026-11-23)
+
+Review 5 found `example(...)` refusals placed at a working import of the
+same file, or in the importing trigger. The locator had recovered every
+file-reference position by searching the member's text for the reference's
+spelling, and each earlier repair (R1-F11, R2-F2, R3-F1, R4-F1) narrowed
+that search. By the author's ruling the search is gone. SimplifiedSchema
+records the declaration that wrote a reference where it first reads it, as
+an optional `SchemaReferenceSite` on `Unresolved`, `NoMatch`,
+`RemoteUnsupported`, `BundleBoundary`, `BareNameSiblingExists` and
+`InvalidExample` for the selection and example failures the repair
+covered. Darkmatter's locator follows that site for those failures.
+`TriggerSchemaReferenced` has the same optional field. The iteration 5
+constructor left it unset. The current Markdown and YAML document routes
+pass the writing declaration through that constructor when the resolver has
+recorded it. There are two changes for failures that reach the new locator:
+
+- a reference refusal now points at the start of the declaration's value
+  (`size: widget@./extra.yaml` at `widget@…`), no longer at the argument
+  after the `@` or inside `example(...)`;
+- a refusal whose declaration is unknown (two declarations of one payload
+  wrote the same `example(...)` file) names the file without a position,
+  where the search used to pick the first spelling, in every member kind; a
+  namespace payload is reported at its `$schema` only for a failure that is
+  not a reference (a payload that is not one object, for example).
+
+### Review 6 record correction — 2026-11-23
+
+The reference-location departure attributed populated sites to
+`TriggerSchemaReferenced`. Its constructor leaves the site unset.
+Direct Markdown and YAML CLI checks against a local trigger returned the
+trigger-specific refusal. On a temporary published installation, a
+registered trigger payload that pointed at another trigger produced a
+warning without coordinates in JSON and a 0:0 anchor in DMLS.
+
+The Phase 3 description also omitted that strict narrowing compares
+descriptions and constraints pooled across a property's union. A
+temporary published bundle kept both triggers matched and narrowed a
+string alternative to an enum while swapping the scalar and array
+descriptions. Validation, trigger inspection and composition succeeded
+and the editor reported no conflict. Moving `no-coerce` between the two
+arms also succeeded. The control with the original description
+assignment succeeded as expected, and the incomparable-type control
+failed with the coded conflict. [Review 6](review-6.md#unblocked-findings)
+records both findings.
+
+### Review 7 record correction — 2026-11-23
+
+The checked-layer description still said the current comparison pooled
+rules. The iteration 6 tests for swapped descriptions and moved constraints
+now pass because the check compares rules at their alternatives and levels.
+In a fresh Claudine publication, the checked layer still refused
+`string[]` as a narrowing of `(string | number)[]` on all three CLI routes
+and in DMLS. Exchanging the declarations between the two triggers gives
+the same false conflict.
+
+The source-location departure still described a constructor that always
+left the trigger reference site empty. The constructor now accepts the
+site. The Markdown and YAML document Level 1 tests assert that the returned
+trigger refusal retains the declaration, and the installed and embedded
+registration tests assert source positions for the related role refusals.
+[Review 7 verification](review-7.md#previous-finding-verification).
+
+### Review 8 record correction — 2026-11-23
+
+The Phase 3 account still described item-alternative narrowing as refused.
+The current CLI accepts `string[]` against `(string | number)[]`, and the
+Level 1 checked-layer tests confirm the retained declaration and rules.
+A temporary Claudine publication also confirmed the remaining limit.
+Reusing a named list under an ordinary use-site description can make
+validation, composition, trigger inspection and DMLS refuse a narrowing
+whose inline equivalent succeeds. The equivalent-declaration and
+union-arm checks can also distinguish a stored reference from its inline
+body. [Review 8](review-8.md#unblocked-findings) records the reproductions.

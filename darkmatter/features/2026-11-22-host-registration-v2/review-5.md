@@ -16,10 +16,13 @@ reviewed-by: codex/gpt-6.2-sol
 recurrence: true
 created: "2026-11-23T15:20:40+00:00"
 spec: 2026-11-22-host-registration-v2/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-11-22-host-registration-v2/spec.md`"
 feature: 2026-11-22-host-registration-v2/review-5.md
 previous: 2026-11-22-host-registration-v2/review-4.md
+next: 2026-11-22-host-registration-v2/review-6.md
+log: /home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-host-registration-v2/log.md
+implemented-by: claude/opus
 ---
 
 # Host registration v2 review, iteration 5

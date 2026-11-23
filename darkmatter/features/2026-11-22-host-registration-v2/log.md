@@ -5,6 +5,9 @@ implementation_1: "2026-11-23T06:55:29+00:00"
 implementation_2: "2026-11-23T11:21:52+00:00"
 implementation_3: "2026-11-23T12:47:53+00:00"
 implementation_4: "2026-11-23T13:59:41+00:00"
+implementation_5: "2026-11-23T17:06:02+00:00"
+implementation_6: "2026-11-23T18:36:40+00:00"
+implementation_7: "2026-11-23T19:47:53+00:00"
 ---
 
 # Host registration v2 — review repair log
@@ -744,32 +747,455 @@ The R4-F2.7 decision said every published CLI and library column counted Unicode
 
 | ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
 | --- | --- | --- | --- |
-| RULING-1 | (high) carry out ruling on item 1: resolver provenance (`SchemaReferenceSite`) on every text-searched `SchemaError` variant; delete the locator's text search; docs and log departure | pending | |
-| RULING-1.a | SimplifiedSchema: `InvalidExample`, `BundleBoundary`, `NoMatch`, `Unresolved`, `RemoteUnsupported`, `BareNameSiblingExists`, `TriggerSchemaReferenced` carry the writing source and declaration path, recorded before normalization or inheritance | pending | |
-| RULING-1.b | Darkmatter: locator routes them through the reference site; `file_reference`, `reference_in`, `in_example` deleted, no fallback; unknown provenance stays file-level | pending | |
-| RULING-1.c | Regression tests per earlier sibling (R1-F11, R2-F2, R3-F1, R4-F1) through the new path | pending | |
-| RULING-1.d | Docs: `host-registration.md` "Where a refusal points" rule restated; error-type docs and simplified-schema skill/docs updated; implementation-log departure recorded | pending | |
-| R5-F1 | (medium) Example refusals point to successful imports or the importing trigger | pending | |
-| R5-F1.1 | Trigger payload (object, root union arm, composition): bad example after valid `$extends` → its own arm 46:37, installed and embedded | pending | |
-| R5-F1.2 | Registered YAML-kind payload: bad example below working `step[]` import → 22:35 | pending | |
-| R5-F1.3 | Namespace payload: bad example after a working import of the same path → 14:35, single refusal | pending | |
-| R5-F1.4 | Shared-library type used by two triggers: point at `shared.yaml` 31:39 and name each importing trigger | pending | |
-| R5-F1.5 | CLI formatted/JSON and DMLS carry the corrected source; refusal and fallback selection preserved | pending | |
-| R5-F1.6 | Controls: sole bad example at its argument; unused listed example passes; unlisted/remote/escaping/bare-payload tests keep their results | pending | |
-| R5-F2 | (high) Registration diagnostics omit declared display names | pending | |
-| R5-F2.1 | Registered trigger envelope/identification/payload refusals show the valid name with the path | pending | |
-| R5-F2.2 | Registered library refusals carry the library label; importer context names each importer by its label and path | pending | |
-| R5-F2.3 | Checked trigger conflict (validate, compose, inspection, DMLS) names both triggers' labels beside their paths | pending | |
-| R5-F2.4 | Embedded loader, JSON and formatted CLI, DMLS publications render the same label and path | pending | |
-| R5-F2.5 | Controls: ordinary skipped-trigger discovery, successful registered trace, inventory, duplicate-name checks unchanged; path alone when no valid label | pending | |
-| R5-F2.6 | Controls: manifest, YAML-kind and namespace errors and pre-verification failures keep entry/file reference only | pending | |
-| R5-F2.7 | Claudine build inventory rejection names `inline-compose-schema` / `sequence-schema` beside the file paths | pending | |
-| R5-F3 | (low) Same-host conflict warnings misstate YAML selection | pending | |
-| R5-F3.1 | Warning text scopes "unused" to Markdown triggers; YAML kinds from both installations stay indexed; CLI and DMLS publish the new text | pending | |
-| R5-F3.2 | Guide "two manifests for one host" explains the distinction | pending | |
-| R5-F4 | (low) The source position helper overstates its column convention | pending | |
-| R5-F4.1 | `config::load::line_column` comment scoped to what it returns; sweep sibling comments claiming every published column counts characters | pending | |
+| RULING-1 | (high) carry out ruling on item 1: resolver provenance (`SchemaReferenceSite`) on every text-searched `SchemaError` variant; delete the locator's text search; docs and log departure | fixed | The seven reference variants have a site field and the locator text search is deleted. RULING-1.a still loses sites on refused schema targets. See the review 6 correction. |
+| RULING-1.a | SimplifiedSchema: `InvalidExample`, `BundleBoundary`, `NoMatch`, `Unresolved`, `RemoteUnsupported`, `BareNameSiblingExists`, `TriggerSchemaReferenced` carry the writing source and declaration path, recorded before normalization or inheritance | fixed | `written_at` attaches the site for selection errors, and examples carry it from expansion to the error. `TriggerSchemaReferenced` has a site field that its constructor always leaves unset. A listed but ineligible target can lose its writing site after selection. The provenance tests pass for the cases they exercise. |
+| RULING-1.b | Darkmatter: locator routes them through the reference site; `file_reference`, `reference_in`, `in_example` deleted, no fallback; unknown provenance stays file-level | fixed | `locate.rs` routes all seven through `reference_site`; `file_reference`, `reference_in`, `in_example`, `string_scalars` deleted with no fallback; namespace payloads no longer default a site-less reference failure to `$schema` (`an_example_written_by_two_namespace_declarations_is_refused_without_a_position`, red `Some((5, 5))` vs `None`) |
+| RULING-1.c | Regression tests per earlier sibling (R1-F11, R2-F2, R3-F1, R4-F1) through the new path | fixed | existing sibling tests run through the new path: R1-F11 `an_unlisted_import_is_located_at_its_reference` (+2), R2-F2 `a_failure_inside_a_shared_type_is_located_in_the_library_for_every_importer` (+embedded), R3-F1 `an_unlisted_reference_repeated_in_prose_…` (+2), R4-F1 the `…after_a_sibling_description…` tests (+embedded, CLI); expectations moved from the argument to the declaration value (listed in Progress) |
+| RULING-1.d | Docs: `host-registration.md` "Where a refusal points" rule restated; error-type docs and simplified-schema skill/docs updated; implementation-log departure recorded | fixed | `host-registration.md` "Where a refusal points" restated (declaration that wrote it, in its file; file-level when unknown); simplified-schema `diagnostics.md`, `selecting-schema-files.md`; both skills; departure entry in `implementation-log.md` |
+| R5-F1 | (medium) Example refusals point to successful imports or the importing trigger | fixed | every child fixed; scoped runs and full `just test` in simplified-schema, darkmatter, claudine pass |
+| R5-F1.1 | Trigger payload (object, root union arm, composition): bad example after valid `$extends` → its own arm 46:37, installed and embedded | fixed | `host_registration_locations::an_example_beside_a_working_import_of_its_file_is_located_at_its_declaration` (object and root-union arm after `$extends`) and `embedded_registration::an_embedded_example_is_located_at_the_declaration_that_writes_it`; red (5,20) vs (6,19). Reproduced in fixtures, not in a published Claudine home |
+| R5-F1.2 | Registered YAML-kind payload: bad example below working `step[]` import → 22:35 | fixed | YAML-kind case of the same test (below a working import) |
+| R5-F1.3 | Namespace payload: bad example after a working import of the same path → 14:35, single refusal | fixed | namespace case of the same test; exactly one refusal asserted |
+| R5-F1.4 | Shared-library type used by two triggers: point at `shared.yaml` 31:39 and name each importing trigger | fixed | `an_inherited_example_is_located_in_the_library_that_wrote_it_for_every_importer`: library file and declaration, `imported by` each trigger; red: importer `gadget.yaml` (5,5) |
+| R5-F1.5 | CLI formatted/JSON and DMLS carry the corrected source; refusal and fallback selection preserved | fixed | CLI `an_example_refusal_is_located_at_the_declaration_that_writes_it_in_both_output_families` (JSON and formatted); DMLS `registered_host_editor_agreement` rows for the beside-import and inherited cases; both red before; refusals still contribute no definitions |
+| R5-F1.6 | Controls: sole bad example at its argument; unused listed example passes; unlisted/remote/escaping/bare-payload tests keep their results | fixed | `a_sole_bad_example_is_located_at_its_declaration_and_an_unused_listed_example_loads` (declaration per the ruling; red (6,35) vs (6,19)); unlisted, remote, escaping and bare-payload tests still refuse |
+| R5-F2 | (high) Registration diagnostics omit declared display names | fixed | one label rule `simplified_schema::member_envelope::declared_name` shared by trigger discovery, registration and Claudine; children fixed or clean |
+| R5-F2.1 | Registered trigger envelope/identification/payload refusals show the valid name with the path | fixed | `host_registration_labels::a_named_trigger_refusal_shows_its_label_beside_its_field` (match typo, `dm.host.identify_too_broad`, payload, file-backed example); red: `files[1]` with no label |
+| R5-F2.2 | Registered library refusals carry the library label; importer context names each importer by its label and path | fixed | `a_named_library_refusal_shows_its_label_and_each_importers` (own label, named and unnamed importer) |
+| R5-F2.3 | Checked trigger conflict (validate, compose, inspection, DMLS) names both triggers' labels beside their paths | fixed | `HostTriggerConflict` `first_name`/`second_name`; `host_trigger_merge::a_conflict_between_named_triggers_shows_both_labels` (red `(None, None)`), CLI `schema_triggers_names_conflicting_named_triggers_by_their_labels`, DMLS `a_conflict_between_named_triggers_names_both_labels`; code, paths and related locations unchanged |
+| R5-F2.4 | Embedded loader, JSON and formatted CLI, DMLS publications render the same label and path | fixed | embedded refusal `label` field; CLI `a_named_refused_trigger_shows_its_label_in_both_output_families`; DMLS `a_registration_warning_names_a_named_trigger_by_its_label` (range unchanged); each red with its half reverted |
+| R5-F2.5 | Controls: ordinary skipped-trigger discovery, successful registered trace, inventory, duplicate-name checks unchanged; path alone when no valid label | clean | existing discovery, registered trace, inventory and duplicate-name tests pass; unnamed conflicts assert no names; invalid `name` control shows the name problem with no label |
+| R5-F2.6 | Controls: manifest, YAML-kind and namespace errors and pre-verification failures keep entry/file reference only | clean | `namespace_and_unverified_refusals_carry_no_label` (namespace with a `name`; digest failure); manifest refusals never labeled |
+| R5-F2.7 | Claudine build inventory rejection names `inline-compose-schema` / `sequence-schema` beside the file paths | fixed | `inventory::tests::a_named_member_refusal_shows_its_label_beside_its_path` through the walk the build script runs (`a-trigger (inline-composition.yaml)`), unnamed and invalid-name controls; the real build script was not run against edited copies |
+| R5-F3 | (low) Same-host conflict warnings misstate YAML selection | fixed | R5-F3.1–.2 fixed |
+| R5-F3.1 | Warning text scopes "unused" to Markdown triggers; YAML kinds from both installations stay indexed; CLI and DMLS publish the new text | fixed | `HostClaim::diagnostics` text scopes the exclusion to Markdown and says YAML kinds stay available; both installations stay indexed; `registered_yaml_kinds::a_same_host_conflict_keeps_each_installation_s_own_yaml_kinds_and_says_so`; CLI and DMLS read the same `RegisteredHosts::diagnostics` |
+| R5-F3.2 | Guide "two manifests for one host" explains the distinction | fixed | `host-registration.md` "Two manifests for one host" Markdown/YAML split with the `other-sequence` example; selection note links to it |
+| R5-F4 | (low) The source position helper overstates its column convention | fixed | R5-F4.1 fixed |
+| R5-F4.1 | `config::load::line_column` comment scoped to what it returns; sweep sibling comments claiming every published column counts characters | fixed | `config::load::line_column` comment scoped to its return value with the `dm.schema.*` byte-column exception; sibling comments and skills checked clean |
 
 ### Progress
 
 - starting the work on 'RULING-1 + R5-F1 resolver provenance for reference refusals' at 17:06:29
+        - defect class: a registration refusal about a file reference was placed by searching the member's text for the reference's spelling, so any other occurrence of that spelling (a working import of the same file, the importing trigger, prose) could stand in for the declaration that wrote it; R1-F11, R2-F2, R3-F1, R4-F1 and R5-F1 are instances
+        - ruling carried out: provenance from the resolver, no text search
+                - simplified-schema: `site: Option<Box<SchemaReferenceSite>>` on `Unresolved`, `NoMatch`, `RemoteUnsupported`, `BundleBoundary`, `BareNameSiblingExists`, `InvalidExample`, `TriggerSchemaReferenced`; `SchemaError::reference_site()`; crate-private `written_at` fills it once (first read wins)
+                - recorded at first read: `ImportEngine::resolve_namespace` (every import, `$extends`, spread and arm, with the declaration path), `ExampleRehome::rehome` (an imported declaration's examples, in the library's file and path, before the path is normalized), `check_declared_types` (each `types` entry), `$schema` file references (`resolve_reference_in_context` callers: root, root-union arm, standalone arm)
+                - new `resolve/example_sites.rs::ExampleSites`: examples are judged from the lowered JSON, which keeps only the spelling, so the writer of each spelling is kept from expansion; a spelling two declarations wrote has no writer (`None`)
+                - `None` sites: `reference_arm_names`, the layer re-resolution in `schema/layer.rs`, slot-returned examples, and `TriggerSchemaReferenced` (raised from `referenced_files` after resolution, never on a registration path)
+                - `yaml_documents::reference_site` falls back to `error.reference_site()`; `declaration_segments` follows a path that already names its carrier (`types.<name>`) from the root
+                - darkmatter `locate.rs`: the seven variants go through `reference_site`, else file-level; `file_reference`, `reference_in`, `in_example`, `string_scalars` and their two unit tests deleted (they tested the deleted search)
+        - sweep (string search recovering a position)
+                - `darkmatter/lib/src/config/registration/` (`locate.rs`, `registration.rs`, `namespaces.rs`, `merge.rs`, `bundle.rs`, `manifest.rs`, `selection.rs`): no remaining search for a reference; `namespaces::prepare_one` keeps its structural `$schema` fallback for an unlocated namespace payload failure (a carrier, not a search)
+                - `simplified-schema/lib/src/yaml_documents/`: `declaration_segments`' `spelled` check (named-type variants only, now `None` for the seven); `marks.rs` duplicate-key and `load.rs` parser messages: parser positions, not references; clean
+                - `simplified-schema/lib/src/triggers/`: `envelope.rs` message cleanup and `trigger_error_span`: condition positions, not references; clean
+                - workspace match sites: `darkmatter/lib/src/markdown/compose/expression/error.rs`, `darkmatter/dmls/src/diagnostics/named_types.rs` (`target_span` still matches frontmatter import spans by spelling; it is Markdown frontmatter, not registration, and was left), `darkmatter/lib/tests/l1/schemas_source_projection.rs`; Claudine has no match on these variants
+        - tests added (red before the fix, on the old locator)
+                - `host_registration_locations::an_example_beside_a_working_import_of_its_file_is_located_at_its_declaration` (R5-F1.1–.3: trigger object, root-union arm after `$extends`, YAML kind, namespace single refusal); red: trigger object (5,20) vs (6,19); the later cases were not reached by the failing first case
+                - `host_registration_locations::an_inherited_example_is_located_in_the_library_that_wrote_it_for_every_importer` (R5-F1.4); red: gadget.yaml (5,5) vs library.yaml (6,23)
+                - `host_registration_locations::a_sole_bad_example_is_located_at_its_declaration_and_an_unused_listed_example_loads` (R5-F1.6); red: (6,35) vs (6,19)
+                - `embedded_registration::an_embedded_example_is_located_at_the_declaration_that_writes_it` (R5-F1.1 embedded); red: (5,20) vs (6,19)
+                - CLI `host_registration::an_example_refusal_is_located_at_the_declaration_that_writes_it_in_both_output_families` (R5-F1.5 JSON and formatted, `imported by` for both triggers); red: (5,20) vs (6,19)
+                - DMLS `registered_host_editor_agreement` rows `an_example_beside_a_working_import_of_its_file_is_warned_at_its_declaration` and `an_inherited_example_is_warned_in_the_library_that_wrote_it` (R5-F1.5); red: line 14 vs 15, inherited case in the importer
+                - simplified-schema `reference_error_provenance` (5 tests: import, union arm, inherited library example, two writers → `None`, declared type) and unit tests `example_sites::tests` (2), `declaration::tests::a_path_that_names_its_carrier_is_followed_from_the_root`; these test the new field, so they had no red state on the old code (they could not compile)
+        - sibling regression coverage through the new path
+                - R1-F11: `an_unlisted_import_is_located_at_its_reference`, `an_unused_unlisted_import_refuses_the_host_at_the_reference_in_every_member_kind`, `an_unused_remote_import_in_a_library_refuses_the_host_at_the_reference`
+                - R2-F2: `a_failure_inside_a_shared_type_is_located_in_the_library_for_every_importer`, `embedded_registration::an_embedded_failure_inside_an_arm_or_a_shared_type_is_located_where_it_is_written`
+                - R3-F1: `an_unlisted_reference_repeated_in_prose_is_located_at_the_reference_in_every_member_kind`, `a_shared_type_reference_repeated_in_prose_is_located_at_the_reference_for_every_importer`, `a_bare_payload_reference_repeated_in_prose_is_located_at_its_carrier`
+                - R4-F1: `an_unused_reference_after_a_sibling_description_is_located_at_the_reference_in_every_member_kind`, `a_used_reference_after_a_sibling_description_is_located_at_the_reference_in_every_payload`, `a_used_shared_reference_after_a_sibling_description_is_located_at_the_reference_for_every_importer`, `a_composition_operand_and_other_reference_failures_after_a_sibling_description_are_located_at_the_reference`, embedded `an_embedded_reference_after_a_sibling_description_is_located_at_the_reference`, CLI `an_unlisted_import_after_a_sibling_description_is_located_at_the_import`
+                - test names keep "at the reference" so the earlier ledger rows still resolve; their doc comments now say "the declaration that writes it"
+        - expectations moved from the argument to the start of the declaration's value (the ruling: the declaration is the answer; the resolver's site is a declaration path, not a span inside the type string)
+                - darkmatter l1 `host_registration_locations`: `an_unlisted_import_is_located_at_its_reference`, `an_unused_unlisted_import_refuses_the_host_at_the_reference_in_every_member_kind`, `an_unused_remote_import_in_a_library_refuses_the_host_at_the_reference`, `an_unused_unlisted_example_refuses_the_host_at_the_reference`, `a_failure_inside_a_shared_type_is_located_in_the_library_for_every_importer` (import and example cases; arm case unchanged), `an_unlisted_reference_repeated_in_prose_is_located_at_the_reference_in_every_member_kind`, `a_shared_type_reference_repeated_in_prose_is_located_at_the_reference_for_every_importer`, the three R4-F1 sibling-description tests, `a_composition_operand_and_other_reference_failures_after_a_sibling_description_are_located_at_the_reference` (`$extends` at its value), `an_example_ahead_of_its_own_description_is_located_at_the_example`, `a_refusal_after_non_ascii_text_keeps_its_character_column_and_line_text` (same character-count check, at the quoted value); new helper `declaration_of`
+                - darkmatter l1 `embedded_registration`: `an_embedded_unused_unlisted_reference_refuses_the_bundle_at_the_reference`, `an_embedded_failure_inside_an_arm_or_a_shared_type_is_located_where_it_is_written` (library import case), `an_embedded_reference_after_a_sibling_description_is_located_at_the_reference`
+                - CLI `an_unlisted_import_after_a_sibling_description_is_located_at_the_import` (8,27 → 8,19)
+                - DMLS `registered_host_views::a_registration_warning_is_published_in_each_clients_position_encoding` (character 70 → 54 for ASCII prose, both encodings)
+                - unchanged: `a_bare_payload_reference_repeated_in_prose_is_located_at_its_carrier` (the payload value is the reference), every arm and named-type case
+                - `schemas_source_projection.rs` pattern gained `..` only
+        - docs: `darkmatter/docs/topics/host-registration.md` "Where a refusal points" (rule paragraph, reference row, new library example) and "The files of a bundle"; `simplified-schema/docs/topics/diagnostics.md` (reference-site bullet), `selecting-schema-files.md`; `.claude/skills/darkmatter/SKILL.md` locate row; `.claude/skills/simplified-schema/SKILL.md` locate row; departure entry in `implementation-log.md`
+        - commands
+                - `cargo nextest run -p simplified-schema -E 'test(bundle) | test(example) | test(resolve) | test(error)'`: 402 passed
+                - `cargo nextest run -p darkmatter --test l1 -E 'test(registration) | test(embedded) | test(host_)'`: 335 passed
+                - `cargo nextest run -p darkmatter-cli --test l1 -E 'test(host_registration)'`: 25 passed
+                - `cargo nextest run -p darkmatter-lsp --test l1 -E 'test(registered_host)'`: 30 passed
+                - `cargo check -p claudine --all-targets`: clean; claudine `test(embedded_registration) | test(claudine_schemas_embedded)`: 421 passed
+                - extra scoped runs: simplified-schema `test(yaml) | test(kind) | test(namespace) | test(trigger) | test(declaration)` 419 passed; darkmatter l1 `test(yaml) | test(example) | test(named_type) | test(schemas_)` 717 passed; CLI `test(schema_validate) | test(yaml)` 286 passed; DMLS `test(yaml) | test(named_type) | test(example)` 120 passed
+                - `just lint` in `simplified-schema/` and `darkmatter/`: pass (one `collapsible_match` and one unused binding fixed on the way)
+                - no test above 5 s
+        - orchestrator follow-up (ruling: unknown provenance stays file-level, no guessed key)
+                - `registration/namespaces.rs` reported a namespace's reference failure with no recorded writer at its `$schema` key; it now does so only for a non-reference failure (`NotOneObject`, other resolution errors) and leaves a site-less reference failure file-level
+                - test `host_registration_locations::an_example_written_by_two_namespace_declarations_is_refused_without_a_position`; red before: `Some((5, 5))` vs `None`
+                - `host-registration.md` reference row and the implementation-log departure entry no longer describe a namespace `$schema` fallback for references
+                - `cargo nextest run -p darkmatter --test l1 -E 'test(host_registration_locations) | test(namespace)'`: 98 passed
+- work completed for 'RULING-1 + R5-F1 resolver provenance for reference refusals' at 17:45:22
+- starting the work on 'R5-F2 registration diagnostics omit declared display names' at 17:45:22
+        - defect class: optional display metadata (a member's valid `name`) was dropped when a registered trigger or types-only library became a diagnostic subject; the fix carries one label, `name (bundle path)`, from the verified member text through every subject site
+        - label rule (one helper): `simplified_schema::member_envelope::declared_name(text)` (lenient: valid kebab-case `name` on a `schema-trigger` or `$schema`-free `kind: schema`; never an invalid name, a YAML kind, or a namespace); `triggers/discovery.rs::declared_name` now delegates to it; Darkmatter's `registration::member_label` and Claudine's inventory walk call it
+        - sweep sites and dispositions
+                - member refusals (envelope, `dm.host.identify_too_broad`, payload, file-backed example, declared types, duplicate names): fixed in one place, `registration::related`, which now returns `Labeled { refusal, label }`; `Labeled::into_diagnostic` prints `at `files[1]` (`gadget-schema (schemas/gadget.yaml)`)`
+                - library refusals and importer context: fixed; `imported by `files[0]` (`widget-schema (schemas/widget.yaml)`)`, an unnamed importer keeps `(`schemas/gadget.yaml`)`
+                - embedded loader: fixed; new `SnapshotRefusal::label` beside `member` (message text unchanged)
+                - `dm.host.trigger_conflict`: fixed; `HostTriggerConflict::{first_name, second_name}` filled by `TriggerConflict::into_error(profile, …)` from matched triggers' admitted envelope names; `Display`, CLI `conflict_text`, `md schema triggers` data (`first_name`/`second_name`, schema file updated) and DMLS message all show `name (path)`; `related` paths and DMLS related locations unchanged
+                - CLI JSON/formatted warnings and DMLS publications: fixed by the message (no per-surface code)
+                - Claudine build inventory (R5-F2.7): fixed; `InventoryError::name`, Display `` `inline-compose-schema (inline-composition.yaml)`: … ``
+                - controls kept: manifest/bundle refusals before verification (no snapshot text, `Refused::one` carries no label), YAML kind and namespace members (`declared_name` returns `None`), ordinary discovery labels, successful registered trace, duplicate-name warnings
+                - design note: a `label` field on `Refusal` pushed it past clippy's `result_large_err` (128 bytes); the label rides a `Labeled` wrapper made only by `related`, so no refusal site changed
+        - files changed: `simplified-schema/lib/src/{member_envelope.rs, triggers/discovery.rs, errors.rs}`; `darkmatter/lib/src/config/registration.rs`, `registration/{bundle.rs, merge.rs}`, `markdown/schemas/mod.rs`, `markdown/output/command/data.rs`; `darkmatter/cli/src/commands/schema/triggers.rs`, `cli/schemas/output/schema-triggers.yaml`; `claudine/lib/src/composition/inventory/walk.rs`; docs `darkmatter/docs/topics/host-registration.md`, `darkmatter/docs/cli/schema.md`, `claudine/docs/topics/schemas.md`; skills `.claude/skills/darkmatter/SKILL.md`, `.claude/skills/simplified-schema/schema-documents.md`
+        - tests (red before the fix, observed)
+                - darkmatter l1 new `host_registration_labels.rs`: `a_named_trigger_refusal_shows_its_label_beside_its_field` (match typo, identification, payload, file-backed example; installed + embedded; red: "is not loaded at `files[1]`: the trigger is invalid: …"), `a_named_library_refusal_shows_its_label_and_each_importers` (red: "is not loaded at `files[2]`: imported by `files[1]` (`schemas/gadget.yaml`)"), controls `an_unnamed_or_invalidly_named_trigger_keeps_its_field_alone`, `namespace_and_unverified_refusals_carry_no_label` (green before and after)
+                - darkmatter l1 `host_trigger_merge::a_conflict_between_named_triggers_shows_both_labels` (red: names `(None, None)`); `Case::conflict` now asserts unnamed conflicts carry no names
+                - CLI `a_named_refused_trigger_shows_its_label_in_both_output_families`, `schema_triggers_names_conflicting_named_triggers_by_their_labels` (each red with its half of the fix reverted)
+                - DMLS `registered_host_views::a_registration_warning_names_a_named_trigger_by_its_label`, `registered_trigger_conflict::a_conflict_between_named_triggers_names_both_labels` (red with labels stubbed)
+                - claudine `inventory::tests::a_named_member_refusal_shows_its_label_beside_its_path` (red: "`inline-composition.yaml`: `review-typo` is not a field …")
+                - simplified-schema l1 `member_envelope::declared_name_reads_a_valid_label_leniently` (new helper's unit test)
+        - commands
+                - darkmatter l1 `test(registration) | test(embedded) | test(host_)`: 341 passed; `--lib test(registration)`: 26 passed
+                - CLI `test(host_registration) | test(schema_triggers) | test(output_commands)`: 248 passed
+                - DMLS `test(registered_host) | test(trigger_conflict) | test(registration)`: 51 passed
+                - simplified-schema `test(trigger) | test(member_envelope) | test(name)`: 355 passed
+                - claudine `test(inventory) | test(embedded) | test(registration)`: 503 passed (slowest 2.5 s); `test(shipped)` across the three crates: 344 passed
+                - `just lint` in `darkmatter/`: pass
+                - `just lint` in `claudine/` and `simplified-schema/`: pass
+                - rerun after the `Labeled` refactor: darkmatter l1 341, lib 26, CLI `test(host_registration) | test(schema_triggers)` 72, DMLS `test(registered_host) | test(trigger_conflict)` 33, claudine 503 — all passed; no test above 5 s
+- work completed for 'R5-F2 registration diagnostics omit declared display names' at 18:14:05
+- starting the work on 'R5-F3 same-host conflict warning misstates YAML selection' at 18:14:05
+- R5-F3 repair (orchestrator)
+        - defect class: a diagnostic's stated consequence is broader than what the selection code does with the same input (the Markdown-only exclusion described as total)
+        - sweep: the one message is built in `HostClaim::diagnostics` (`config/registration.rs`); `RegisteredHosts::diagnostics` forwards it to the CLI and DMLS (`dmls/src/overlay/hosts.rs`), so no second wording exists; `host-registration.md` stated it twice ("Two manifests for one host" and the host-selection table note); no skill or other doc repeats it
+        - fix: the warning now reads "…; neither's triggers apply to Markdown documents, while each one's YAML kinds stay available and a kind both define differently cannot be selected"; doc comment on `HostClaim::diagnostics`; the guide section explains the Markdown/YAML split with the `other-sequence` example and the selection note links to it; the decision to index both installations' kinds is kept (`RegisteredKinds::new` collapses identical definitions by `sameness`, refuses different ones as `Duplicate`)
+        - test `registered_yaml_kinds::a_same_host_conflict_keeps_each_installation_s_own_yaml_kinds_and_says_so`: two warnings without "neither is used"; `kind: roster` valid through the first installation; `kind: other-roster` judged by the second (missing `platforms`); the message assertion fails on the old text
+        - `cargo nextest run -p darkmatter --test l1 -E 'test(registered_yaml_kinds) | test(distinct_manifests_with_different_content_conflict)'`: 12 passed
+- work completed for 'R5-F3 same-host conflict warning misstates YAML selection' at 18:15:43
+- starting the work on 'R5-F4 source position helper overstates its column convention' at 18:15:43
+- R5-F4 repair (orchestrator)
+        - defect class: a helper's doc comment generalizes its own convention to every published record, contradicting a documented exception
+        - fix: `config::load::line_column` now documents what it returns (one-based, character column, BOM excluded) and names the `dm.schema.*` byte-column exception instead of claiming every published `line`/`column`
+        - sweep: `SourcePosition` ("a 1-based line and character column in a file that was read"), `AuthoredSpan` (`markdown/types.rs`), expression diagnostics and data-error comments, `reported_position`, skills `dmls.md`/`compose.md`/`expressions.md` each describe only their own record: clean; `docs/cli/data-contracts.md` `column` row already names the exception
+        - comment-only change; no test (no behavior changed)
+- work completed for 'R5-F4 source position helper overstates its column convention' at 18:16:03
+- phase gates (orchestrator, no subagent running), load average at start: 2.79, 3.48, 3.72
+        - `simplified-schema`: `just test` 2162 passed, 0 skipped; `just lint` clean
+        - `darkmatter`: `just test` 17786 passed, 10 skipped, "none at or above 5.0s"; `just lint` clean (zed-dmls wasm32 check included); `just check-tier-coverage darkmatter` 0 stranded
+        - `claudine` (consumer of the changed `SchemaError` variants and label helper): `just test` 12725 passed, 15 skipped, none at or above 5 s; `just lint` clean
+        - cross-OS check not run: the repairs change error provenance, message text and comments; no path handling, process, or `#[cfg]` code changed
+
+### Completion Report
+
+- **outcome: complete**; elapsed about 2 h 20 min (17:06:02 to 18:27 UTC)
+- parent findings: 5 total (ruling item 1 counted as its own high row) = 5 fixed + 0 already fixed + 0 blocked + 0 unresolved + 0 disputed
+        - review findings: R5-F1, R5-F2, R5-F3, R5-F4 fixed; ruling RULING-1 carried out
+- instance rows: RULING-1.a–.d fixed; R5-F1.1–.6 fixed; R5-F2.1–.4, .7 fixed, R5-F2.5–.6 clean (controls); R5-F3.1–.2 fixed; R5-F4.1 fixed
+- verified repairs:
+        - RULING-1 / R5-F1: SimplifiedSchema attaches the writing declaration for the tested examples and selection failures before normalization or inheritance. The registration locator uses it, and the text search is gone. `TriggerSchemaReferenced` has an unpopulated site, and the listed-target refusal paths described below still omit the declaration. Earlier reference positions moved from the argument to the declaration's value, as the ruling allows.
+        - R5-F2: a valid `name` is shown as `name (path)` in member and library refusals, importer context, `dm.host.trigger_conflict` (validate, compose, `md schema triggers`, DMLS), embedded output and Claudine's inventory failure; path alone otherwise
+        - R5-F3: the same-host conflict warning and guide scope the exclusion to Markdown and explain that both installations' YAML kinds stay indexed
+        - R5-F4: `line_column`'s comment describes only what it returns and names the schema-validation byte-column exception
+- not independently re-measured: the reviewer's coordinates in a published Claudine home (46:37, 22:35, 14:35, 31:39) and the Claudine build script against edited copies; the same shapes are reproduced in fixtures and through the build's walk function
+- open findings: none
+- changed files (this cycle):
+        - simplified-schema: `lib/src/{errors,example,reference,resolve,member_envelope}.rs`, `lib/src/resolve/{bundle,composition,graph,recursive,select,searched_tests,example_sites}.rs`, `lib/src/schema/{layer,source}.rs`, `lib/src/triggers/{assemble,discovery}.rs`, `lib/src/yaml_documents/{declaration,semantic}.rs`; tests `lib/tests/l1/{main,object_composition,resolution_unavailable,schema_file_selection,reference_error_provenance,member_envelope}.rs`; docs `docs/topics/{diagnostics,selecting-schema-files}.md`
+        - darkmatter lib: `src/config/load.rs`, `src/config/registration.rs`, `src/config/registration/{locate,namespaces,bundle,merge}.rs`, `src/markdown/compose/expression/error.rs`, `src/markdown/schemas/mod.rs`, `src/markdown/output/command/data.rs`; tests `tests/l1/{host_registration_locations,embedded_registration,schemas_source_projection,host_registration_labels,host_trigger_merge,registered_yaml_kinds,main}.rs`
+        - darkmatter cli: `src/commands/schema/triggers.rs`, `schemas/output/schema-triggers.yaml`, `tests/l1/host_registration.rs`
+        - dmls: `src/diagnostics/named_types.rs`, `tests/l1/{registered_host_editor_agreement,registered_host_views,registered_trigger_conflict}.rs`
+        - claudine: `lib/src/composition/inventory/{walk,tests}.rs`, `docs/topics/schemas.md`
+        - docs and skills: `darkmatter/docs/topics/host-registration.md`, `darkmatter/docs/cli/schema.md`, `.claude/skills/darkmatter/SKILL.md`, `.claude/skills/simplified-schema/{SKILL,schema-documents}.md`
+        - feature records: `implementation-log.md` (departure entry), `log.md`, `review-5.md` (metadata)
+- final verification commands: `just test` and `just lint` in `simplified-schema/`, `darkmatter/`, `claudine/`, and `just check-tier-coverage darkmatter`, all passing as recorded above; they cover every finding through the tests named in the ledger
+
+### Review 6 record correction — 2026-11-23
+
+The completion report said every covered reference variant recorded the
+writing declaration. The public `TriggerSchemaReferenced` constructor
+always sets `site: None`, including the Markdown and YAML `$schema` guard
+paths. Running `md schema validate --output json` on both document kinds
+with a reference to a local copy of Claudine's trigger reproduced those
+refusals. In a temporary publication, replacing the registered
+inline-composition payload with `$schema: ./composition.yaml` and
+refreshing its digest gave a trigger-payload-cycle warning with null line
+and column. DMLS published that warning at 0:0. Loading those bytes
+through the embedded API also returned a file-level warning. The example
+and reference selection regression cases still passed. [Review 6](review-6.md#r6-f2-high--refused-schema-targets-lose-the-declaration-that-names-them)
+records the remaining cases.
+
+## Implementation of Review Findings #6
+
+> **started at:** 2026-11-23T18:36:40+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-host-registration-v2/review-6.md'
+- this is iteration 6 of the review-to-implement cycle
+- the review's `implemented` flag was confirmed `false` before repairs started; the review has no `human-in-the-loop` item and no blocked finding
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R6-F1 | (high) Trigger narrowing moves rules between union arms | fixed | defect class: metadata compared as an unordered pool across a declaration's alternatives and element/list levels; `merge.rs` `rules_differ` now pairs each alternative of the narrower declaration with a covering alternative of the wider one (`Arm`: description, value/element rules, list rules, nested shape for equivalent types); every child fixed or clean; decision: an alternative the narrower declaration drops takes its rules with it (narrowing removes it from the type), an uncovered alternative conflicts |
+| R6-F1.1 | Strict narrowing between two object payloads with arm-swapped descriptions → refuse conflict on `review-model` | fixed | `host_trigger_merge::descriptions_swapped_between_alternatives_conflict_between_object_payloads`; red against the pooled comparison |
+| R6-F1.2 | Strict narrowing against a key shared by all arms of a root union (descriptions swapped; `no-coerce` moved to elements) → refuse both | fixed | `descriptions_swapped_between_alternatives_conflict_against_every_arm_of_a_root_union`, `a_rule_moved_from_the_scalar_to_the_list_elements_conflicts` (object and root-union payloads); red against the pooled comparison |
+| R6-F1.3 | Consumers: `md schema validate`, `md compose`, `md schema triggers`, DMLS return `dm.host.trigger_conflict` and suppress dependent features | fixed | CLI `host_registration::a_narrowing_that_moves_rules_between_alternatives_conflicts_on_every_route` (both .2 edits, all three commands exit 1 on `review-model`); DMLS `registered_trigger_conflict::a_narrowing_that_swaps_descriptions_between_alternatives_is_a_conflict` (conflict is the only diagnostic; schema judgment suppressed) |
+| R6-F1.4 | Deferred (template) assembly applies the same per-arm comparison; passive inspection keeps pending templates | fixed | the deferred branch of `registered_trigger_layers` calls the same `merge::check`; `a_template_resolving_to_swapped_descriptions_conflicts_once_resolved` (no session → `UnresolvedSlots`, trace has no conflict; with a session → conflict; arm-preserving template narrows) |
+| R6-F1.5 | Controls preserved: arm-preserving narrowing, equivalent declarations, scalar narrowing/disagreement, nested equivalent shapes, competing root alternatives, unmatched triggers | clean | existing `host_trigger_merge` tests pass (34 in module); new control `a_narrowing_that_keeps_each_description_on_its_alternative_wins` passes for object and root-union payloads; siblings fixed with tests: `element_and_list_rules_are_compared_at_their_own_level`, `an_element_default_is_not_the_property_default`, `a_nested_rule_changed_inside_an_equivalent_alternative_of_a_narrowing_conflicts`, `an_alternative_left_out_by_the_narrower_declaration_takes_its_rules_with_it`, `a_named_union_type_is_compared_by_its_alternatives` |
+| R6-F2 | (high) Refused schema targets lose the declaration that names them | fixed | defect class: a reference's writing site is dropped once a selected target is refused for its role or that refusal is reclassified; `SchemaError::refused_at` attaches the site at both successful-selection boundaries; `NotASchemaDocument`, `UnsupportedJsonDialect`, `ReferenceCycle`, `ReferenceDepthExceeded`, `TriggerPayloadCycle` carry `site`; new role reasons `TriggerEnvelope`, `RootUnionImport`, `ReferenceImport`; `trigger_schema_referenced(path, site)` replaces the site-less constructor; a malformed trigger target keeps its parse refusal (orchestrator follow-up); every child fixed or clean |
+| R6-F2.1 | Registered trigger's root reference and root-union file arm naming a trigger → anchored at the scalar/arm, refusal reason kept | fixed | `host_registration_locations::a_payload_naming_a_trigger_is_refused_as_a_cycle_at_the_declaration_that_names_it` (self and other trigger × scalar and second arm; cycle message kept), `an_extends_operand_naming_a_trigger_is_refused_at_the_operand` |
+| R6-F2.2 | Other ineligible whole-schema targets (`shared.yaml`, `formal-sequence-file.yaml`, `loop.yaml`) → anchored at the declaration, target and role in message | fixed | `a_member_of_another_role_named_as_a_document_schema_is_refused_at_the_declaration` (library, YAML kind, namespace × scalar and arm); simplified-schema `a_listed_file_refused_as_a_document_schema_carries_the_declaration_that_named_it` |
+| R6-F2.3 | Named-type selection (`step[]` import, namespace `count`, shared library `last_updated`) naming a trigger → at the import in the writing file, importer kept | fixed | `an_import_naming_a_trigger_is_refused_at_the_import_in_a_kind_and_a_namespace`, `a_shared_import_naming_a_trigger_is_refused_in_the_library_for_every_importer` (library position for its own check and both importers' cycle warnings, `imported by` kept); also fixed pre-existing: `refused_trigger_file` could not see through a `ReferencedSchema` box |
+| R6-F2.4 | Markdown and YAML document `$schema` refusals: `TriggerSchemaReferenced` carries the writing declaration | fixed | site asserted in `schemas::tests::document_schema_referencing_trigger_file_fails` (Markdown) and `yaml_document_selection::a_fallback_schema_naming_a_trigger_file_is_refused` (YAML); suggestion kept; site-less public constructor removed |
+| R6-F2.5 | Installed and embedded loaders, formatted/JSON CLI and DMLS report the same declaration | fixed | embedded `embedded_registration::an_embedded_target_refused_for_its_role_is_located_at_the_declaration_that_names_it`; CLI `a_target_refused_for_its_role_is_located_at_the_declaration_that_names_it_in_both_output_families` (JSON and formatted 4:10, 6:7, 4:10); DMLS rows `a_payload_naming_its_own_trigger_is_warned_at_the_reference`, `a_root_union_arm_naming_a_namespace_is_warned_at_the_arm` |
+| R6-F2.6 | Controls: original imports, unlisted/remote/escaping refs, YAML-kind scalar `$schema`, namespace mapping, parse locations, all-or-nothing | clean | `neighboring_role_and_parse_refusals_keep_their_own_positions` (YAML-kind and namespace scalar refused at the field by their envelope; broken target at its parse line; malformed trigger target at its parse line, red before the follow-up); unlisted/remote/escaping and `$extends` tests pass in the focused and full suites |
+
+### Progress
+
+- starting the work on 'R6-F1 trigger narrowing moves rules between union arms' at 18:37:02
+- R6-F1 repaired in `lib/src/config/registration/merge.rs` (`rules_differ`, new `arm_differs`, `arms`, `property_defaults`)
+        - defect class: metadata compared as an unordered pool across a declaration's union alternatives and across element/list levels, instead of at the alternative and level it governs
+        - sweep of sibling sites (every comparison the checked merge makes, plus every other consumer of `is_definition_subtype*` for host merging)
+                - descriptions pooled across alternatives: fixed (per alternative)
+                - constraints pooled across alternatives, and element (`string(…)[]`) pooled with list (`string[](…)`) rules: fixed (per alternative, each level apart)
+                - examples: fixed with constraints (an `example` is a constraint of its alternative)
+                - defaults pooled with element defaults: fixed; the property default is a scalar alternative's or a list's own default, an element default is an alternative rule
+                - nested objects/arrays inside an alternative of a narrowing: fixed; an equivalent covering alternative must also match structurally (`Same::types`)
+                - scalar union atoms (`string | number`) and references to named union types: opened into their alternatives, so their rules stay paired (a named union no longer hides its alternatives' rules)
+                - presence and null admission: clean; property-level by definition
+                - equivalent-type path (`Same`): clean; already compares atom by atom with constraints and array constraints apart, and nested shapes (pattern keys, root constraints, properties) structurally
+                - root-union alternatives (`View::declaration`, exact equality) and root rules (`has_root_rules`): clean
+                - raw JSON Schema declarations: clean (whole-schema equality plus requiredness)
+                - other consumers: none; `merge::check` has two callers (`RegisteredHostProfile::checked_layer`, `registered_trigger_layers`' deferred branch), and no other crate compares declarations for host merging
+        - decisions
+                - a narrower alternative agrees when some alternative of the wider declaration covering it has the same description and rules; an alternative the narrower declaration drops takes its rules with it (the pooled check refused this before)
+                - an alternative no single wider alternative covers conflicts ("narrows no single alternative"), conservative rather than guessing a pairing
+                - the reason names the narrower declaration's alternative (`at alternative N`) when it has several
+                - no cache identity bump: the layered identity is built from the pruned payloads' digests, and no shipped artifact runs the checked merge
+        - docs: `docs/topics/host-registration.md` ("When two triggers declare one property": per-alternative paragraph with example, reason list), module docs of `merge.rs` and `host_trigger_merge.rs`, darkmatter skill row
+        - tests added
+                - `lib/tests/l1/host_trigger_merge.rs`: `descriptions_swapped_between_alternatives_conflict_between_object_payloads` (.1), `descriptions_swapped_between_alternatives_conflict_against_every_arm_of_a_root_union`, `a_rule_moved_from_the_scalar_to_the_list_elements_conflicts` (.2), `a_template_resolving_to_swapped_descriptions_conflicts_once_resolved` (.4), `a_narrowing_that_keeps_each_description_on_its_alternative_wins` (.5 control), siblings `element_and_list_rules_are_compared_at_their_own_level`, `an_element_default_is_not_the_property_default`, `a_nested_rule_changed_inside_an_equivalent_alternative_of_a_narrowing_conflicts`, `an_alternative_left_out_by_the_narrower_declaration_takes_its_rules_with_it`, `a_named_union_type_is_compared_by_its_alternatives`
+                - `cli/tests/l1/host_registration.rs`: `a_narrowing_that_moves_rules_between_alternatives_conflicts_on_every_route` (validate, compose, triggers; both .2 edits)
+                - `dmls/tests/l1/registered_trigger_conflict.rs`: `a_narrowing_that_swaps_descriptions_between_alternatives_is_a_conflict` (conflict is the only diagnostic)
+                - every new conflict test was run against the old pooled comparison (temporarily restored) and failed there; the control passed under both
+        - commands
+                - `cargo nextest run -p darkmatter --test l1 -E 'test(host_trigger_merge) | test(trigger_conflict) | test(registered) | test(host_registration) | test(embedded_registration)'`: 200 passed
+                - `cargo nextest run -p darkmatter-cli -E 'test(host_registration) | test(registered)'`: 28 passed
+                - `cargo nextest run -p darkmatter-lsp -E 'test(registered) | test(host)'`: 90 passed
+                - `cargo nextest run -p claudine -E 'test(registration) | test(trigger) | test(host)'`: 333 passed
+                - `cargo clippy -p darkmatter -p darkmatter-cli -p darkmatter-lsp --all-targets -- -D warnings`: clean
+- work completed for 'R6-F1 trigger narrowing moves rules between union arms' at 18:52:52
+        - orchestrator check: `cargo nextest run -p darkmatter --test l1 -E 'test(host_trigger_merge)'` 34 passed; diff of `merge.rs` reviewed (per-alternative `Arm` pairing, `SecondNarrower` now compares in the right direction)
+- starting the work on 'R6-F2 refused schema targets lose the declaration that names them' at 18:52:52
+        - defect class: the resolver dropped a reference's writing site once a file was *selected* successfully but then refused for the role the declaration named it in (a document schema, a types library), and again when that refusal was reclassified into another error (`TriggerPayloadCycle`, `TriggerSchemaReferenced`, a library's `ReferencedSchema` wrapper); RULING-1 had covered only the selection failures
+        - approach: carry the site on the refusal itself, attached at the two successful-selection boundaries, never by searching text
+                - `SchemaError::{NotASchemaDocument, UnsupportedJsonDialect, ReferenceCycle, ReferenceDepthExceeded, TriggerPayloadCycle}` gain `site: Option<Box<SchemaReferenceSite>>`; `reference_site()` returns it
+                - crate-private `SchemaError::refused_at(target, site)` fills it only for a refusal of exactly `target` (so a delegated file's refusal keeps its own reader's site) and only for a role refusal (`NotSchemaReason::is_role()`: `TypesOnly`, `SelectedByKind`, `NamespaceCatalog`, and the new `TriggerEnvelope`, `RootUnionImport`, `ReferenceImport`), plus `UnsupportedJsonDialect`
+                - boundaries: `resolve_reference_in_context` (document/trigger `$schema` scalar, root-union file arm, delegating file's `$schema`, bare-name `$schema`, YAML `$schema`); `load_guarded_in_context` stamps `ReferenceCycle`/`ReferenceDepthExceeded` with the declaration that made the hop; `ImportEngine::resolve_namespace` around `load_named_types[_from]` (every `Name@file`, `$extends`, `...spread`, `check_declared_types` entry), wrapped by `written_in_import` into the library's `ReferencedSchema` like the selection failures; `resolve_embedded_namespace`; the embedded trigger bundle's string payload (`resolve_embedded_payload`: `TriggerPayloadCycle` and `prepare_embedded_schema_with_mode` refusals, `SchemaSourceId::Embedded`)
+                - `triggers::assemble::refused_trigger_file` now returns `RefusedTriggerFile { path, site }`; `payload_cycle` and the public `trigger_schema_referenced(path, site)` take the site (the site-less constructor is gone); `check_document_schema_not_trigger`/`check_payload_cycles` pass `None` explicitly (they see only the read paths)
+                - darkmatter `locate.rs`: `NotASchemaDocument`/`UnsupportedJsonDialect` → `reference_site` else the target file unlocated; `TriggerPayloadCycle`, `ReferenceCycle`, `ReferenceDepthExceeded` join the reference arm; `InvalidJsonSchema` stays unlocated at the target
+        - sweep (every select-then-load site and every wrapper/reclassification), dispositions
+                - `resolve_reference_in_context` load of a selected `$schema` target: fixed (`refused_at`)
+                - `load_guarded_in_context` cycle/depth frame refusal: fixed (site of the closing declaration)
+                - `load_schema_from_path_in_context` delegating `$schema: ./x.yaml`: already passed its root site; its target's refusal now keeps it (test `a_target_refused_behind_a_delegating_file_carries_the_delegating_declaration`)
+                - `ImportEngine::resolve_namespace` file load (`Name@file`, `$extends`, `...spread`, declared types): fixed; `resolve_embedded_namespace`: fixed
+                - `named_types_from_text_in` refusals: a trigger file was `NoSchemaProperty` and a root-union / whole-file-reference library a site-less `SchemaDocument`; now `NotASchemaDocument` with `TriggerEnvelope` / `RootUnionImport` / `ReferenceImport` so they carry the site (fixed)
+                - `classify_yaml_schema_text`: a trigger file with a payload was `SchemaDocument` "unsupported top-level key(s): kind, match" (no field to hold a site); now `NotASchemaDocument(TriggerEnvelope)` when `kind` names the envelope (`triggers::claims_trigger_envelope`; a null/non-string `kind` claims nothing, as before) (fixed)
+                - `resolve_file_payload` reclassification to `TriggerPayloadCycle`: fixed (keeps the site)
+                - `refused_trigger_file` through a `ReferencedSchema` wrapper: fixed; the boxed source is reached as `Box<SchemaError>`, whose `source()` skipped the refusal, so a library import naming a trigger was never reported as a cycle (pre-existing, found by `a_shared_import_naming_a_trigger_is_refused_in_the_library_for_every_importer`)
+                - `resolve_embedded_payload` (embedded trigger bundle, Claudine discovery): fixed
+                - Markdown document `$schema` (`markdown/schemas/mod.rs`) and YAML document `$schema` (`schemas/yaml_documents/mod.rs`) → `TriggerSchemaReferenced`: fixed (`trigger_schema_referenced(&refused.path, refused.site)`)
+                - `check_document_schema_not_trigger`, `check_payload_cycles` (paths only, no writer known): clean, `None` by construction and documented
+                - `example(file)`: clean; an example target is a value file, its failures are `InvalidExample`, already sited
+                - `ReferencedSchema` wrapping of content errors in `load_guarded_in_context` (`Grammar`, `Convert`, …): clean; they are the target's own content and keep their positions there
+                - `SchemaDocument` parse failure of a target: clean (control); reported at the target's parse position
+                - `NotASchemaDocument` content reasons (`NoSchemaProperty`, `NotAMapping`, `JsonMissingDialect`) and `InvalidJsonSchema`: decided no site; the file itself is defective, and `importers_of_a_library_of_unknown_kind_are_reported_in_the_library` (earlier ruling) requires importers to be reported in that file
+                - `schema/layer.rs` re-resolution, `schema/export.rs`, darkmatter `schema_files.rs`, `prepare_standalone_yaml_schema`'s own-envelope check: clean (no naming declaration; direct factories or a file judged as itself)
+                - `registration/namespaces.rs::is_reference_failure` fallback to `$schema`: clean; a sited refusal is located, a site-less role refusal is in another file so never falls back
+                - consumers of changed public items: `trigger_schema_referenced`/`refused_trigger_file` (darkmatter lib ×2), field patterns in dmls `schema_value_hover.rs` and darkmatter tests updated; claudine has no match (`cargo check -p claudine --all-targets` clean)
+        - tests added
+                - simplified-schema `reference_error_provenance`: `a_listed_file_refused_as_a_document_schema_carries_the_declaration_that_named_it` (types-only, yaml kind, namespace, trigger × scalar and second arm), `a_json_target_refused_for_its_dialect_carries_the_declaration_and_a_defective_one_does_not`, `a_target_refused_behind_a_delegating_file_carries_the_delegating_declaration`, `an_import_of_a_file_that_cannot_supply_types_carries_the_import_that_named_it` (direct and library-wrapped), `a_trigger_file_refusal_keeps_its_declaration_as_a_trigger_reference`, `a_reference_cycle_carries_the_declaration_that_closed_it`, `a_target_that_does_not_parse_keeps_its_own_position`, `a_composition_operand_naming_a_trigger_carries_the_operand_that_named_it` (`$extends`, spread); `schema_target_classification::a_trigger_file_is_not_a_schema_document`; site assertions in `assemble::tests::rejects_payload_*` and `resolve::tests::a_whole_file_reference_cannot_supply_a_cached_named_namespace`
+                - darkmatter l1 `host_registration_locations`: `a_payload_naming_a_trigger_is_refused_as_a_cycle_at_the_declaration_that_names_it` (R6-F2.1), `a_member_of_another_role_named_as_a_document_schema_is_refused_at_the_declaration` (R6-F2.2), `an_import_naming_a_trigger_is_refused_at_the_import_in_a_kind_and_a_namespace` and `a_shared_import_naming_a_trigger_is_refused_in_the_library_for_every_importer` (R6-F2.3), `an_extends_operand_naming_a_trigger_is_refused_at_the_operand`, `neighboring_role_and_parse_refusals_keep_their_own_positions` (R6-F2.6)
+                - darkmatter l1 `embedded_registration::an_embedded_target_refused_for_its_role_is_located_at_the_declaration_that_names_it` (R6-F2.5); `schemas_named_import_errors::a_schema_document_without_named_types_is_refused_at_the_import_that_names_it`; site assertions in `schema_embedded_trigger_bundles::a_payload_naming_a_trigger_is_skipped_inside_the_bundle`, `schemas::tests::document_schema_referencing_trigger_file_fails` and `yaml_document_selection::a_fallback_schema_naming_a_trigger_file_is_refused` (R6-F2.4)
+                - CLI `host_registration::a_target_refused_for_its_role_is_located_at_the_declaration_that_names_it_in_both_output_families` (JSON line/column and formatted `path:line:column:`; scalar 4:10, arm 6:7, library 4:10)
+                - DMLS `registered_host_editor_agreement` rows `a_payload_naming_its_own_trigger_is_warned_at_the_reference`, `a_root_union_arm_naming_a_namespace_is_warned_at_the_arm`
+                - red check: with `refused_at` and the cycle's site disabled, 5 of the 6 new darkmatter registration tests failed (the control passed)
+        - expectations changed (behavior change, not drift): `kind_envelopes::…a_trigger_payload_names_its_own_types…` (`NoSchemaProperty` → `TriggerEnvelope`, plus site), `yaml_schema_envelope::…kinded_data_and_triggers_stay_non_targets` (`SchemaDocument` unsupported keys → `TriggerEnvelope`), `schema_target_classification::a_mapping_without_schema_is_not_a_schema_document` (trigger row moved to its own test), `schemas_named_import_errors` (root-union and reference rows moved out of the `SchemaDocument` table)
+        - docs: `darkmatter/docs/topics/host-registration.md` ("Where a refusal points": rule paragraph, three new rows, a types-only-as-payload example); `simplified-schema/docs/topics/diagnostics.md` (not-a-target table rows, a new provenance bullet with example, error-model rows), `selecting-schema-files.md` (role refusal paragraph), `language/schema-documents.md` (flowchart, table, import rules); skills `darkmatter/SKILL.md`, `simplified-schema/SKILL.md` and `simplified-schema/schema-documents.md`; `///` docs on every changed variant, `refused_at`, `is_role`, `refused_trigger_file`, `RefusedTriggerFile`, `trigger_schema_referenced`, `check_document_schema_not_trigger`, `resolve_reference_in_context`, `load_guarded_in_context`, `classify_yaml_schema_text`, `resolve_embedded_namespace`, `locate.rs` module doc
+        - decisions
+                - new `NotSchemaReason` variants instead of a `site` on `SchemaDocument` (163 uses, and its span already means a position in the target): a role refusal is a valid file, so it is a `NotASchemaDocument` reason; `RootUnionImport`/`ReferenceImport` print "`x` cannot supply named imports: …" because the file is a valid document schema
+                - `InvalidJsonSchema` keeps no site (content defect); `UnsupportedJsonDialect` gets one (a valid schema of another dialect)
+                - the site is the declaration's value position, as the ruling allows and as the earlier reference tests assert
+        - commands
+                - `cargo nextest run -p simplified-schema -E 'test(provenance) | test(trigger) | test(select) | test(reference) | test(bundle) | test(schema_target) | test(named) | test(envelope) | test(error) | test(cycle) | test(import) | test(yaml) | test(kind) | test(namespace) | test(declaration) | test(example) | test(resolve) | test(json)'`: 1016 passed
+                - `cargo nextest run -p darkmatter -E 'test(host_registration_locations) | test(embedded_registration) | test(registered) | test(registration) | test(host_) | test(schema_file) | test(trigger) | test(named_import) | test(schema_target) | test(schemas_) | test(yaml) | test(reference) | test(cycle) | test(meta_schema) | test(extraction) | test(raw_schema) | test(frontmatter) | test(embedded)'`: 3824 passed
+                - `cargo nextest run -p darkmatter-cli -E 'test(host_registration) | test(schema) | test(registered) | test(trigger)'`: 698 passed
+                - `cargo nextest run -p darkmatter-lsp -E 'test(registered) | test(host) | test(schema) | test(trigger)'`: 471 passed
+                - `cargo check -p claudine --all-targets`: clean; `cargo nextest run -p claudine -E 'test(registration) | test(trigger) | test(host) | test(schemas_embedded) | test(inventory)'`: 667 passed
+                - `cargo nextest run -p simplified-schema -p darkmatter -p claudine -E 'test(shipped_artifact) | test(shipped)'`: 344 passed (no artifact regeneration needed)
+                - `just lint` in `simplified-schema/` and `darkmatter/`: pass; `cargo clippy -p simplified-schema -p darkmatter -p darkmatter-cli -p darkmatter-lsp --all-targets -- -D warnings`: clean
+                - every new test under 0.4 s
+- R6-F2 follow-up (orchestrator): the subagent left one sibling open — a target that claims the trigger envelope but does not parse was still reclassified into an unlocated payload cycle, dropping its parser position (review: "A file that fails to parse can keep its own parser position")
+        - fix: `triggers::assemble::refused_trigger_file` reclassifies only a role refusal (`NotASchemaDocument`); a `SchemaDocument` content/parse refusal propagates with its own position; `///` on `refused_trigger_file` and `RefusedTriggerFile::site` updated
+        - test: `host_registration_locations::neighboring_role_and_parse_refusals_keep_their_own_positions` gains the malformed-trigger case (every refusal in `broken.yaml` at the parser's line 6, no envelope wording); red with the old match arm restored, green with the fix
+        - `cargo nextest run -p simplified-schema -p darkmatter -p darkmatter-cli -p darkmatter-lsp -E 'test(trigger) | test(provenance) | test(host_registration) | test(embedded) | test(yaml_document) | test(schema_target)'`: 1485 passed
+- work completed for 'R6-F2 refused schema targets lose the declaration that names them' at 19:28:15
+- phase gates (orchestrator, no subagent running), load average at start: 7.21, 5.82, 5.37
+        - first `darkmatter` `just test` failed fast on `suggest_constraint_phase4::pure_sequence_is_a_whole_file_union_but_not_a_namespace`: an expectation the R6-F2 role reclassification changed (a root-union file imported by name is now `NotASchemaDocument(RootUnionImport)` with the import's site, not a site-less `SchemaDocument`); expectation updated to assert the reason and the site
+        - `simplified-schema`: `just test` 2581 + 2162 passed, none at or above 5.0 s; `just lint` clean
+        - `darkmatter`: `just test` 17809 passed, 10 skipped, "none at or above 5.0s"; `just lint` clean (zed-dmls wasm32 check included); `just check-tier-coverage darkmatter` 0 stranded
+        - `claudine` (consumer of the changed `SchemaError` variants and `trigger_schema_referenced`): `just test` 12725 passed, 15 skipped, none at or above 5.0 s; `just lint` clean
+        - cross-OS check not run: the repairs change declaration comparison, error provenance, messages and docs; no path handling, process, or `#[cfg]` code changed
+
+### Completion Report
+
+- **outcome: complete**; elapsed about 1 h 5 min (18:36:40 to 19:41 UTC)
+- parent findings: 2 total = 2 fixed + 0 already fixed + 0 blocked + 0 unresolved + 0 disputed
+- instance rows: R6-F1.1–.4 fixed, R6-F1.5 clean (controls, with five sibling tests fixed); R6-F2.1–.5 fixed, R6-F2.6 clean (controls)
+- verified repairs
+        - R6-F1: the checked merge compares descriptions, value or element rules, list rules, and nested shapes for equivalent types at the property alternatives it can pair. Presence, null admission and the property default stay whole-property. The same check serves static and deferred assembly, and the tested arm-swapped and level-moved cases produce `dm.host.trigger_conflict`. The comparison still refuses a list whose item types narrow a grouped union before it reaches their rule comparison. See the review 7 correction below.
+        - R6-F2: a listed target refused for its role, and every reclassification of that refusal (`TriggerPayloadCycle`, `TriggerSchemaReferenced`, a library's `ReferencedSchema` wrapper, cycle/depth refusals, `UnsupportedJsonDialect`), carries the declaration that named it; the locator projects it for installed and embedded loaders, CLI formatted/JSON output and DMLS; a target that fails to parse (trigger-claiming or not) keeps its own parser position
+- decisions recorded in the ledger (none needs the author): an alternative the narrower declaration drops takes its rules with it; an alternative no single wider alternative covers conflicts; role refusals are new `NotSchemaReason` variants instead of a site on `SchemaDocument`; content-defective targets carry no site so their importers stay reported in that file (earlier ruling)
+- open findings: none
+- changed files (this cycle)
+        - simplified-schema: `lib/src/errors.rs`, `lib/src/resolve.rs`, `lib/src/triggers/assemble.rs`, `lib/src/schema/{layer,export}.rs`; tests `lib/tests/l1/{reference_error_provenance,schema_target_classification,kind_envelopes,yaml_schema_envelope}.rs`; docs `docs/topics/{diagnostics,selecting-schema-files}.md`, `docs/topics/language/schema-documents.md`
+        - darkmatter lib: `src/config/registration/{merge,locate}.rs`, `src/markdown/schemas/{mod,schema_files}.rs`, `src/markdown/schemas/yaml_documents/mod.rs`; tests `tests/l1/{host_trigger_merge,host_registration_locations,embedded_registration,schemas_named_import_errors,schema_embedded_trigger_bundles,yaml_document_selection,suggest_constraint_phase4}.rs` plus field-pattern updates in other l1 files
+        - darkmatter cli: `tests/l1/host_registration.rs`
+        - dmls: `src/providers/frontmatter/schema_value_hover.rs`, `tests/l1/{registered_trigger_conflict,registered_host_editor_agreement}.rs`
+        - docs and skills: `darkmatter/docs/topics/host-registration.md`, `.claude/skills/darkmatter/SKILL.md`, `.claude/skills/simplified-schema/{SKILL,schema-documents}.md`
+        - feature records: `log.md`, `review-6.md` (metadata)
+- final verification commands: `just test` and `just lint` in `simplified-schema/`, `darkmatter/`, `claudine/`, and `just check-tier-coverage darkmatter`, all passing as recorded above; the focused commands per finding are in the Progress entries
+
+### Review 7 record correction — 2026-11-23
+
+The completion report described the comparison as covering every
+alternative of a narrowing. The rule check keeps a list of a union whole,
+while SimplifiedSchema's property subtype check expands its item
+alternatives. A temporary Claudine publication gave two matching triggers
+`(string | number)[]` and `string[]` for the same property. With a list of
+strings, validation, composition, trigger inspection, and DMLS reported
+a conflict. A control narrowed a union of separate whole-list types to
+`string[]` and prepared successfully. The iteration 6 repair cases still
+pass.
+[Review 7](review-7.md#r7-f1-high--valid-list-narrowing-fails-when-items-are-a-union).
+
+## Implementation of Review Findings #7
+
+> **started at:** 2026-11-23T19:47:53+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-host-registration-v2/review-7.md'
+- this is iteration 7 of the review-to-implement cycle 
+- the review's `implemented` flag was confirmed `false` before repairs started
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R7-F1 | Valid list narrowing fails when items are a union | fixed | every child .1–.9 verified, plus discovered siblings .10–.13 fixed; `merge.rs` `rules_differ`/`paired`/`arm_differs`/`arms` |
+| R7-F1.1 | Two object payloads, either order: `(string \| number)[]` vs `string[]` chooses `string[]` | fixed | `a_list_of_one_item_alternative_narrows_a_list_of_a_grouped_union`: both orders and forms; the kept declaration equals the narrow trigger's own lowered schema; `cargo nextest run -p darkmatter --test l1 -E 'test(host_trigger_merge)'` (45 passed) |
+| R7-F1.2 | Shared key in every arm of a root-union payload: uses `string[]` per arm, preserves other fields | fixed | same test, union forms; `a_root_union_keeps_its_other_fields_when_a_shared_list_narrows` (the union still requires an arm; `sections` arm accepted) |
+| R7-F1.3 | Grouped `(string \| number \| boolean)[]` → `(string \| number)[]`, and resolved named `ModelIds[]` → `string[]`, both payload forms | fixed | `grouped_and_named_item_unions_are_compared_by_their_item_alternatives` (stored `ModelIds` reached by reference; needed R7-F1.10/.11 for the union form) |
+| R7-F1.4 | `min(1)` on both lists; `no-coerce` on the string item in both lists: admitted, settings retained at their level | fixed | `list_and_item_rules_kept_at_their_own_level_narrow`: `min(1)` still rejects `[]`, `no-coerce` still rejects `[1]` |
+| R7-F1.5 | `min(1)` moved list→item, or `no-coerce` dropped from the retained item: still refused | fixed | `a_list_rule_moved_to_the_items_or_a_dropped_item_rule_conflicts`: both forms; the reason names the differing rule (no longer the missing-alternative reason) |
+| R7-F1.6 | Static cache and public consumers: validate, compose, triggers, DMLS use the successful layer | fixed | CLI `host_registration::a_list_narrowing_shared_by_a_root_union_prepares_on_every_route` (validate, compose, triggers exit 0; a bad item still fails validation); DMLS `registered_trigger_conflict::a_list_narrowing_shared_by_a_root_union_publishes_no_conflict` (no diagnostics; a bad item still judged); `-p darkmatter-cli -E 'test(host_registration)'` 30 passed, `-p darkmatter-lsp -E 'test(registered_)'` 43 passed |
+| R7-F1.7 | Deferred template assembly: narrowing succeeds after resolution; passive inspection unchanged | fixed | `a_template_supplying_either_side_of_a_list_narrowing_prepares_once_resolved`: either side as a constant template, object and union forms; passive trace stays pending with no conflict; after resolution it prepares and refuses the mixed list |
+| R7-F1.8 | Controls: identical lists, identical grouped lists, `string[] \| number[]` → `string[]`, scalar union → enum keep their results | clean | `equivalent_and_whole_list_controls_keep_their_results`, including the enum refusing a list as a value error; all 34 earlier checked-merge tests (R6-F1 moved element/list rules) still pass |
+| R7-F1.9 | Union of homogeneous lists plus boolean narrowed to `(string \| number)[]` stays refused, both payload forms | fixed (refusal kept) | `a_list_of_a_union_never_narrows_a_union_of_whole_lists` (both forms); library regression `a_narrowed_list_refuses_the_mixed_list_the_wider_trigger_accepts`: the wide trigger alone accepts `[claude, 1]`; the narrowed layer refuses `/review-model/1` |
+| R7-F1.10 | Discovered: a root-union payload loses the trigger's private `types` (unknown named type) | fixed | `simplified-schema` `resolve_root_union` takes `local_types`; unit test `triggers::assemble::tests::a_registered_root_union_payload_names_the_triggers_private_types` |
+| R7-F1.11 | Discovered: a shared key using a private type was read as defining the root union, because each arm stores the type under its own key | fixed | `View::declaration` compares arms structurally (`Same`); `object_items_and_list_aliases_narrow_by_their_item_alternatives` |
+| R7-F1.12 | Discovered: a plain use of a stored list definition (`Models` used twice) stayed one opaque alternative | fixed | `arms()` opens it as its list, with a recursion guard; same test |
+| R7-F1.13 | Discovered: `generated` written before or after `[]` (same lowered schema) conflicted | fixed | `generated` normalized onto the list alternative; `a_presence_marker_on_either_side_of_a_list_coalesces`; controls keep `file(eager)[]` vs `file[](eager)` and `generated` on different union arms refused, because both lower differently |
+| R7-F1.14 | Sweep: nested lists, object items, grouped constraint lists, `property_defaults`, root-union `merge::arms` | clean | a list of lists is rejected by the grammar; object and named-object items narrow (R7-F1.12 test); a grouped union takes no constraint list; element defaults are still excluded from the property default (`an_element_default_is_not_the_property_default` passes) |
+
+### Work
+
+- starting the work on 'R7-F1 valid list narrowing fails when items are a union' at 19:48:18
+        - defect class: a narrowing check compares a container's alternatives at a different level from the subtype relation that admitted it (list-of-union items stay whole, then an identity-only atom check looks for a covering alternative)
+        - delegated to one foreground rust-developer subagent; it reports log items back to the orchestrator
+- subagent (rust-developer) log items, reported back to the orchestrator; it finished at 20:04:30
+        - confirmed the cause: `arms()` kept a list whole, and `is_subtype_with_definitions` compares array atoms by identity. SimplifiedSchema's definition-level subtype turns `(A | B)[]` into `A[] | B[]`, so the .9 refusal has to come from the alternative check, not from that relation
+        - reworked `merge.rs`: `Arm` carries a list's item alternatives. A grouped `(a | b)[]`, a `U[]` for a stored union and a single item open the way scalar unions do. Two paired lists compare their description and list rules once, then each narrow item alternative is paired with a covering wide item, and their element rules are compared there. Presence, null admission and the property default stay whole-property. The winner's full declaration is still the output
+        - rejected alternative: using the definition-level subtype for the covering check would wrongly admit R7-F1.9
+        - found and fixed R7-F1.10: the root-union resolver (`simplified-schema/lib/src/resolve.rs` `resolve_root_union`) dropped a trigger's private `types`, unlike the object path, so a root-union payload naming `ModelIds` failed as an unknown named type
+        - found and fixed R7-F1.11: each union arm stores private types under its own keys, so a shared key using one was misread as defining the root union. `View::declaration` now compares arms structurally (`Same`)
+        - found and fixed R7-F1.12: a plain use of a stored definition whose body is a list stayed one opaque alternative and failed like R7-F1. It now opens as that list, with a recursion guard. A use with its own rules or description stays whole
+        - no revision bump: `MERGE_ALGORITHM_REVISION` covers SimplifiedSchema's merge, which is unchanged. The `resolve.rs` change only affects payloads that were refused before, and the shipped-artifact freshness tests pass for all three owners
+        - docs: `darkmatter/docs/topics/host-registration.md` (list-item narrowing and the new reason), `simplified-schema/docs/topics/language/schema-documents.md` (private types reach root-union arms), `.claude/skills/darkmatter/SKILL.md` (merge sentence)
+- orchestrator reconciliation at 20:05–20:12
+        - the subagent reported a remaining inconsistency it had not fixed: a marker compared at the element level on one side of `[]` and at the list level on the other. Probes (`file(eager)[]`/`file[](eager)`, `string(generated)[]`/`string[](generated)`, `string(generated) | number`/`string | number(generated)`, `U(eager)[]`/`U[](eager)`, `U(generated)[]`/`U[](generated)`) compared each pair's lowered property schema with the merge result
+                - R7-F1.13 (fixed): `string(generated)[]` and `string[](generated)` lower to the same schema, but the merge refused them with "their list constraints differ". `generated` is now normalized onto the list in `arms()`, compared per alternative in `Same::atoms` on either side of `[]`, and compared whole-property in `rules_differ`. Test: `a_presence_marker_on_either_side_of_a_list_coalesces` (object and root-union forms)
+                - clean: `file(eager)[]` vs `file[](eager)` lower to different schemas (an element-level file format versus a list-level marker), so the refusal is correct. `generated` on different union alternatives annotates a different alternative in the lowered schema, so that refusal stays too. `U(eager)[]`/`U[](eager)` already coalesced. The new test asserts all three
+        - host-registration docs gained one sentence on `generated` and `[]`
+        - scoped run: `cargo nextest run -p darkmatter -p darkmatter-cli -p darkmatter-lsp -E 'test(trigger) | test(registration) | test(merge) | test(registered_) | test(host_)'`: 1274 passed. `just lint` (darkmatter): exit 0
+- work completed for 'R7-F1 valid list narrowing fails when items are a union' at 20:12:30
+- phase gates (orchestrator, no subagent running), load average at start 16.64, 8.67, 6.13
+        - `simplified-schema`: `just test` 2582 + 2162 passed, "none at or above 5.0s"; `just lint` exit 0; `just check-tier-coverage simplified-schema` 0 stranded
+        - `darkmatter`: `just test` 17822 passed, 10 skipped, "none at or above 5.0s"; `just lint` exit 0 (zed-dmls wasm32 check included); `just check-tier-coverage darkmatter` 0 stranded
+        - `claudine` (consumer of the changed `resolve_root_union` and the trigger payload resolution): `just test` 12725 passed, 15 skipped, "none at or above 5.0s"; `just lint` exit 0
+        - cross-OS check not run: the repairs change declaration comparison and root-union type resolution. No path handling, process code, or `#[cfg]` code changed
+
+### Completion Report
+
+- **outcome: complete**; elapsed about 32 min (19:47:53 to 20:20 UTC)
+- parent findings: 1 total = 1 fixed + 0 already fixed + 0 blocked + 0 unresolved + 0 disputed
+- instance rows: R7-F1.1–.7 fixed, R7-F1.8 clean (controls), R7-F1.9 fixed (refusal kept and tested); discovered siblings R7-F1.10–.13 fixed, R7-F1.14 clean (sweep)
+- verified repairs
+        - R7-F1: when two lists are paired, the checked merge compares them at two levels. Their description and list rules are compared once. When both lists are opened, each narrower item alternative is paired with a covering wider item alternative and their element rules are compared. Plain uses of stored lists open, while a use-site description or constraint can keep a stored list opaque. A list of a union still never narrows a union of whole lists. Root-union payloads now keep a trigger's private types. Arm ownership recognizes matching stored definitions under different keys, while a stored list and its inline body can still be treated as different declarations. The `generated` marker belongs to its alternative whichever side of `[]` carries it
+- decisions (none needs the author): the covering check stays at the alternative level rather than using SimplifiedSchema's definition-level subtype, which would admit R7-F1.9. Marker placements that lower to different schemas (`file(eager)[]` vs `file[](eager)`, `generated` on different union arms) still conflict
+- open findings: none
+- changed files (this cycle)
+        - darkmatter lib: `src/config/registration/merge.rs`; tests `tests/l1/host_trigger_merge.rs`
+        - darkmatter cli: `tests/l1/host_registration.rs`
+        - dmls: `tests/l1/registered_trigger_conflict.rs`
+        - simplified-schema: `lib/src/resolve.rs`, `lib/src/schema/layer.rs`, `lib/src/triggers/assemble.rs` (unit test); docs `docs/topics/language/schema-documents.md`
+        - docs and skills: `darkmatter/docs/topics/host-registration.md`, `.claude/skills/darkmatter/SKILL.md`
+        - feature records: `log.md`, `review-7.md` (metadata)
+- final verification commands: the scoped runs per row in the ledger, plus `just test` and `just lint` in `simplified-schema/`, `darkmatter/` and `claudine/`, and `just check-tier-coverage` for darkmatter and simplified-schema. All passed, as recorded above
+
+### Review 8 record correction — 2026-11-23
+
+The iteration 7 completion report described item pairing for aliased lists
+and arm ownership across stored definitions without their limits. In a
+temporary publication, the plain alias narrowed successfully. With the same
+description on the alias use and on the narrower inline list, the CLI and
+DMLS both rejected the overlap. The CLI also rejected the same shared field
+written as inline schema in one root-union arm and as a stored alias in the
+other. The completion report now distinguishes the verified repair from
+these remaining cases. [Review 8](review-8.md#unblocked-findings).
+
+## Implementation of Review Findings #8
+
+> **started at:** 2026-11-23T20:25:40+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/darkmatter/features/2026-11-22-host-registration-v2/review-8.md'
+- this is iteration 8 of the review-to-implement cycle 
+- the review's `implemented` flag was confirmed `false` before repairs started
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R8-F1 | Storing a named type changes whether matching triggers can agree | fixed | every child .1–.9 verified; discovered siblings .10–.12 fixed, .13 clean; one resolved view (`resolved()`) shared by narrowing, equivalence, nested equality and root-union ownership in `merge.rs` |
+| R8-F1.1 | Strict narrowing: described stored wide alias vs equally described inline narrow list (both orders), and described narrow alias vs inline wide list: narrows, keeps the common description | fixed | `a_described_stored_list_narrows_like_its_inline_body`: stored wide vs inline narrow and stored narrow vs inline wide, three payload forms, both orders; the description is kept and a differing description still conflicts; `cargo nextest run -p darkmatter --test l1 -E 'test(host_trigger_merge)'` (54 passed) |
+| R8-F1.2 | `Models(min(1))` vs narrow list with `min(1)` coalesces with the narrowing; minimum in the alias definition still succeeds; missing minimum on the narrow side conflicts; `[]` still refused | fixed | `a_list_rule_at_a_stored_list_use_is_the_lists_rule`: `Models(min(1))` narrows, the minimum in the definition still works, a missing minimum conflicts ("list constraints differ"), and the merged layer rejects `[]` |
+| R8-F1.3 | Stored `Models` vs its exact inline list (both orders) coalesces, first bundle path is origin; single-use and two-alias controls still succeed | fixed | `a_stored_list_coalesces_with_its_exact_inline_body`: coalesces in both orders with origin `a.yaml`; single-use and two-alias controls pass |
+| R8-F1.4 | Named scalar union `Models` vs the written property union, and `Models[]` vs grouped list of the same choices, coalesce; narrowing controls kept | fixed | `a_stored_union_coalesces_with_the_same_written_alternatives`: both equal pairs coalesce and both narrowing controls still narrow |
+| R8-F1.5 | Nested `{ models: Models }` vs same object with inline list coalesces; reference chain and single-object item controls kept | fixed | `a_nested_stored_list_coalesces_with_its_inline_body`, plus the reference-chain and `Model[]` controls |
+| R8-F1.6 | Root-union arm ownership: same list inline in one arm and stored in another is shared, not alternative-defining (both file orders) | fixed | `a_root_union_shares_a_key_one_arm_stores_and_another_writes_inline`, both file orders; a bad item is still judged |
+| R8-F1.7 | Static cache, CLI (validate, compose, triggers, clean) and DMLS prepare one successful layer for the described-alias and equivalent-list probes | fixed | CLI `host_registration::a_stored_list_compared_with_its_inline_spelling_prepares_on_every_route`: validate, compose, triggers and `clean --output json` exit 0, and a bad item still fails. DMLS `registered_trigger_conflict::a_stored_list_compared_with_its_inline_spelling_publishes_no_conflict`. Scoped run over `-p darkmatter -p darkmatter-cli -p darkmatter-lsp`: 1285 passed |
+| R8-F1.8 | Deferred template supplying the described narrow list prepares once resolved; passive inspection stays passive (objects and both root-union placements) | fixed | `a_template_narrowing_a_described_stored_list_prepares_once_resolved`: object form and both root-union placements; the passive trace stays pending with no conflict |
+| R8-F1.9 | Controls: mixed list vs homogeneous lists stays refused; moved-rule, recursive equality and raw-declaration rules unchanged | clean | `a_stored_mixed_list_never_narrows_a_union_of_whole_lists` is still refused; all 45 earlier merge tests (moved-rule, recursive, raw) pass unchanged |
+| R8-F1.10 | Discovered: `rules_differ` read null admission and requiredness from a reference atom rather than its definition | fixed | resolution applies before those checks; covered by the .1–.6 tests |
+| R8-F1.11 | Discovered: `string(required) \| number` and `string \| number(required)` lower alike but compared unequal | fixed | `Same` compares `required` for the whole property, like `generated`; covered by the scoped merge suite |
+| R8-F1.12 | Discovered: dictionary values (`<string>: Models`) and tuple elements (`tuple([Pair, string])`) compared stored and inline spellings as different | fixed | reproduced first (failed with "equivalent types differ in a nested declaration"); `Resolver` resolves pattern values, tuple elements and spreads, `Same` compares them structurally; `a_stored_type_in_a_dictionary_value_or_tuple_element_coalesces_with_its_inline_body` |
+| R8-F1.13 | Sweep: function types, slots, recursive references, raw declarations | clean | `function(...)` cannot type a document value (`convert.rs` refuses it); slots resolve before comparison (.8); a recursive reference stays a reference and compares coinductively; raw declarations unchanged |
+
+### Work
+
+- starting the work on 'R8-F1 storing a named type changes whether matching triggers can agree' at 20:26:27
+        - defect class: a declaration comparison treats how a type is stored (a named reference with use-site rules versus its inline body) as part of the declaration, so each comparison traversal (strict narrowing, equivalence, nested equality, root-union ownership) opens a different subset of spellings
+        - sibling sites to sweep: `arms()` (`aliased_list`, `opening`), `Same::types` (reference vs inline), `View::declaration` (arm ownership), `relation`'s equivalence branch, `arm_differs`' nested check, `is_generated`/`property_defaults` over aliases
+        - delegated to one foreground rust-developer subagent; it reports log items back to the orchestrator
+- subagent (rust-developer) log items, reported back to the orchestrator; it finished at about 20:40
+        - added one resolved view, `resolved()` (`Resolver`/`expand` in `merge.rs`): every reference that is not recursive is expanded to its definition, with use-site description and rules at the level they lower to (a list alias's go on the list; otherwise they join the value's). `relation`, `rules_differ`, `arms`, `Same` and `View::declaration` all read it. The kept output is still the winner's declaration as written, with its origin
+        - removed `aliased_list` and `Same::types`' scalar-only reference-against-inline branch. A reference that remains is recursive, compared coinductively, and never equals an inline type
+        - found and fixed R8-F1.10: `rules_differ` read null admission and requiredness from a reference atom rather than its definition
+        - found and fixed R8-F1.11: `string(required) | number` and `string | number(required)` lower alike but compared unequal. `required` is now compared for the whole property in `Same`
+        - rejected alternatives: opening each spelling in each traversal (the recurrence pattern), and using the definition-level subtype for equality, which splits `(A | B)[]` and would admit the mixed list
+        - mutation check: with `resolved()` turned into the identity function, all new coalescing and narrowing tests, the iteration-7 alias test and the CLI and DMLS tests failed, and the mixed-list control passed. The subagent ran this diagnostic with `--no-fail-fast` on those filters only
+        - doc: new paragraph and example in `darkmatter/docs/topics/host-registration.md` ("When two triggers declare one property")
+- orchestrator reconciliation at 20:41–20:45
+        - the subagent noted that pattern keys and tuples were still compared as written. Both can hold a stored reference, so they belong to this defect class
+        - R8-F1.12 (fixed): reproduced first. `{ <string>: Models }` against the same dictionary with the list inline, and `tuple([Pair, string])` against `tuple([{ id: string }, string])`, failed with "their equivalent types differ in a nested declaration". `Resolver` now resolves dictionary values, tuple elements and tuple spreads. `Same` compares pattern keys pairwise and tuples by position. Test: `a_stored_type_in_a_dictionary_value_or_tuple_element_coalesces_with_its_inline_body`
+        - scoped runs: `-E 'test(host_trigger_merge)'` 54 passed; `-p darkmatter -p darkmatter-cli -p darkmatter-lsp -E 'test(trigger) | test(registration) | test(merge) | test(registered_) | test(host_)'` 1285 passed
