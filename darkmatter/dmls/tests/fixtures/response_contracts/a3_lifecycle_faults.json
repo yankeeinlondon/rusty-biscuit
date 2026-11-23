@@ -26,14 +26,14 @@
           "character": 6
         },
         "end": {
-          "line": 40,
-          "character": 0
+          "line": 39,
+          "character": 15
         }
       },
-      "severity": 1,
-      "code": "dm.schema.constraint",
+      "severity": 2,
+      "code": "dm.schema.unknown_key",
       "source": "darkmatter.schema",
-      "message": "{\"nope_verb\":\"x\"} is not valid under any of the schemas listed in the 'anyOf' keyword",
+      "message": "Additional properties are not allowed ('nope_verb' was unexpected)",
       "data": {
         "instance_path": "/initialize/1"
       }

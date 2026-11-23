@@ -118,6 +118,9 @@ pub enum Anchor {
     Item(usize),
     /// The value of field `name` in list item `n`.
     Field(usize, &'static str),
+    /// The key `name` itself in list item `n`: where an unknown key is
+    /// reported.
+    Key(usize, &'static str),
 }
 
 /// One expected baseline validation problem.
@@ -329,7 +332,7 @@ pub const DECLARATIONS: &[DeclarationCase] = &[
     both_reject(
         "extra_long_form_field",
         Declaration::List(&["{rule: \"ValidFor(3mo)\", action: archive, note: x}"]),
-        ITEM_0,
+        &[problem("/content_policy/0", "invalid", Anchor::Key(0, "note"))],
     ),
     both_reject("rule_number", Declaration::List(&["{rule: 5, action: archive}"]), RULE),
     both_reject(
@@ -477,6 +480,14 @@ impl Rendered {
                     .find(&needle)
                     .unwrap_or_else(|| panic!("item {index} has no `{needle}`"));
                 (line, column + (offset + needle.len()) as u32)
+            }
+            Anchor::Key(index, name) => {
+                let (line, column) = self.item_starts[index];
+                let needle = format!("{name}: ");
+                let offset = self.items[index]
+                    .find(&needle)
+                    .unwrap_or_else(|| panic!("item {index} has no `{needle}`"));
+                (line, column + offset as u32)
             }
         }
     }

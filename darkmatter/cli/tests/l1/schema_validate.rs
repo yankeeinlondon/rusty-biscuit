@@ -1544,7 +1544,8 @@ fn schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_typ
 }
 
 /// Every arm of an `initialize` stack item is a closed object or a bare verb,
-/// so an item naming an unknown verb matches no arm of the item union.
+/// so an item naming an unknown verb matches no arm of the item union, and
+/// the verb is reported by name as a key no arm declares.
 #[test]
 fn schema_validate_shipped_claudine_schema_rejects_an_unknown_lifecycle_verb() {
     let process = CliProcessFixture::new();
@@ -1558,7 +1559,7 @@ fn schema_validate_shipped_claudine_schema_rejects_an_unknown_lifecycle_verb() {
     let found = problems(&report);
     assert_eq!(found.len(), 1, "{report}");
     assert_eq!(found[0].0, "/initialize/0", "{report}");
-    assert!(found[0].1.contains("anyOf"), "{report}");
+    assert!(found[0].1.contains("'bogus' was unexpected"), "{report}");
 }
 
 #[test]

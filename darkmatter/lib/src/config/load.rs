@@ -894,6 +894,82 @@ pub(crate) fn observe_file(
     Observe { context, portable: &portable }.file(bytes, path, revision, scope)
 }
 
+/// Where `scope`'s file is: in the context's home or repository root;
+/// `None` when the context has no home or names no repository.
+pub(crate) fn working_path(context: &FileResolutionContext, scope: ConfigScope) -> Option<PathBuf> {
+    match scope {
+        ConfigScope::User => context.home_dir().map(|home| home.join(CONFIG_FILE_NAME)),
+        ConfigScope::Repository => context.repository_root().map(|root| root.join(CONFIG_FILE_NAME)),
+    }
+}
+
+/// The working-copy revision of `scope`'s file.
+pub(crate) const fn working_revision(scope: ConfigScope) -> ConfigRevision {
+    match scope {
+        ConfigScope::User => ConfigRevision::User,
+        ConfigScope::Repository => ConfigRevision::RepositoryWorktree,
+    }
+}
+
+/// Reads and judges the working copy of `scope`'s file, as
+/// [`inspect_working_file`] describes, keeping the bytes read (`None` when
+/// the file is absent).
+///
+/// ## Errors
+///
+/// As [`inspect_working_file`].
+pub(crate) fn read_working_file(
+    context: &FileResolutionContext,
+    scope: ConfigScope,
+) -> Result<(Option<Vec<u8>>, ConfigFile), ConfigError> {
+    let revision = working_revision(scope);
+    let path = working_path(context, scope).ok_or_else(|| match scope {
+        ConfigScope::User => ConfigError::unlocated(
+            ConfigErrorKind::Read,
+            &PathBuf::from("~").join(CONFIG_FILE_NAME),
+            revision,
+            "there is no home directory, so the user configuration cannot be read".into(),
+        ),
+        ConfigScope::Repository => ConfigError::unlocated(
+            ConfigErrorKind::Read,
+            &context.cwd().join(CONFIG_FILE_NAME),
+            revision,
+            format!("`{}` is not inside a repository, so there is no repository configuration", context.cwd().display()),
+        ),
+    })?;
+    let bytes = read_worktree(&path, revision)?;
+    let file = observe_file(context, bytes.as_deref(), &path, revision, scope)?;
+    Ok((bytes, file))
+}
+
+/// Judges the one working-copy configuration file of `scope` exactly as
+/// [`ConfigSnapshot::load`] judges it, passively: the user file
+/// `~/.darkmatter.yaml` of the context's home, or the repository's
+/// `{repo-root}/.darkmatter.yaml` as in the working copy, against that
+/// scope's schema and defaults.
+///
+/// It reads that one file and nothing else: no committed (`HEAD`) policy,
+/// no `permissions` reference followed (the setting is the reference as
+/// written), no installed registration, and it never writes: a missing file
+/// is not created and a legacy policy file is neither migrated nor deleted.
+///
+/// An absent file is a [`ConfigFile`] whose [`ConfigFile::is_present`] is
+/// `false`. A problem confined to one setting is inside the returned file:
+/// an invalid `permissions` value is [`ConfigFile::permissions`]'s error,
+/// an invalid `register` entry is one of
+/// [`ConfigFile::registration_findings`].
+///
+/// ## Errors
+///
+/// A file that fails as a whole ([`ConfigErrorKind::Syntax`],
+/// [`ConfigErrorKind::NotAMapping`], [`ConfigErrorKind::UnknownKey`]),
+/// located in its file; [`ConfigErrorKind::Read`] when it cannot be read, or
+/// when the context has no home (user scope) or names no repository
+/// (repository scope).
+pub fn inspect_working_file(context: &FileResolutionContext, scope: ConfigScope) -> Result<ConfigFile, ConfigError> {
+    read_working_file(context, scope).map(|(_, file)| file)
+}
+
 /// The repository-scope policy layer of one committed policy file at the
 /// absolute `path` inside `root` (`bytes`, `None` when the commit has no
 /// file there), judged as [`ConfigSnapshot::load`] judges `HEAD`: its inline
@@ -1244,10 +1320,17 @@ fn dependency(revision: ConfigRevision, path: &Path, bytes: Option<&[u8]>) -> Co
 
 /// The working-copy bytes at `path`, or `None` when nothing is there.
 fn read_worktree(path: &Path, revision: ConfigRevision) -> Result<Option<Vec<u8>>, ConfigError> {
+    read_working_bytes(path)
+        .map_err(|error| ConfigError::unlocated(ConfigErrorKind::Read, path, revision, format!("cannot be read: {error}")))
+}
+
+/// The working-copy bytes at `path`, or `None` when nothing is there; the
+/// I/O error kept for setup, which reports it as its own read failure.
+pub(crate) fn read_working_bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(ConfigError::unlocated(ConfigErrorKind::Read, path, revision, format!("cannot be read: {error}"))),
+        Err(error) => Err(error),
     }
 }
 

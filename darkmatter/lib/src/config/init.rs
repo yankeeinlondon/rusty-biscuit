@@ -27,6 +27,7 @@ use simplified_schema::yaml_documents::load_yaml_document;
 
 use super::load::{
     CONFIG_NOT_SAVED_CODE, ConfigError, ConfigRevision, check_permissions_text, follow_on_disk, observe_file,
+    read_working_bytes, working_path, working_revision,
 };
 use super::schema::{CONFIG_FILE_NAME, ConfigScope, contract, permissions_contract};
 use super::write::{
@@ -185,13 +186,10 @@ pub struct ConfigObservation {
 ///
 /// [`InitError::NoHome`] or [`InitError::NotARepository`].
 pub fn config_path(context: &FileResolutionContext, scope: ConfigScope) -> Result<PathBuf, InitError> {
-    match scope {
-        ConfigScope::User => context.home_dir().map(|home| home.join(CONFIG_FILE_NAME)).ok_or(InitError::NoHome),
-        ConfigScope::Repository => context
-            .repository_root()
-            .map(|root| root.join(CONFIG_FILE_NAME))
-            .ok_or_else(|| InitError::NotARepository { dir: context.cwd().to_path_buf() }),
-    }
+    working_path(context, scope).ok_or_else(|| match scope {
+        ConfigScope::User => InitError::NoHome,
+        ConfigScope::Repository => InitError::NotARepository { dir: context.cwd().to_path_buf() },
+    })
 }
 
 /// The `user` scope alone; see [`init`].
@@ -275,15 +273,13 @@ pub fn init(context: &FileResolutionContext, scopes: &[ConfigScope], options: In
 /// a mapping, an unknown key).
 pub fn observe(context: &FileResolutionContext, scope: ConfigScope) -> Result<ConfigObservation, InitError> {
     let path = config_path(context, scope)?;
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => Some(bytes),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+    // The same reader and judge as `load::inspect_working_file`, with the
+    // I/O error kept as setup's own read failure.
+    let bytes = match read_working_bytes(&path) {
+        Ok(bytes) => bytes,
         Err(source) => return Err(InitError::Read { path, source }),
     };
-    let revision = match scope {
-        ConfigScope::User => ConfigRevision::User,
-        ConfigScope::Repository => ConfigRevision::RepositoryWorktree,
-    };
+    let revision = working_revision(scope);
     let file = observe_file(context, bytes.as_deref(), &path, revision, scope).map_err(InitError::Invalid)?;
     let authored = match file.authored() {
         Some(Value::Object(map)) => Some(map.clone()),

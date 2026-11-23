@@ -230,7 +230,7 @@ fn lifecycle_defects_are_reported_at_their_event_and_key() {
     );
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(1), "{records:?}");
-    assert_record(&records, "shell-in-initialize-then", false, &[("/initialize/0/then/0", "\"shell\"")]);
+    assert_record(&records, "shell-in-initialize-then", false, &[("/initialize/0/then/0", "'shell' was unexpected")]);
     assert_record(&records, "misspelled-parameter", false, &[("/start/0/say", "txet")]);
     assert_record(&records, "long-form-in-root-dictionary", false, &[("/success/say", "text")]);
 }
@@ -277,7 +277,7 @@ fn single_action_dictionaries_validate_through_the_cli() {
         assert_record(&records, name, true, &[]);
     }
     assert_record(&records, "long-forms-in-loop-bundle", false, &[("/loop/ensure_file", "file")]);
-    assert_record(&records, "conditional-root-dictionary", false, &[("/start", "not valid under any of the schemas")]);
+    assert_record(&records, "conditional-root-dictionary", false, &[("/start", "'then' was unexpected")]);
 }
 
 /// A malformed `{{ … }}` span in a string operand is a positioned syntax
@@ -508,7 +508,7 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
     assert_eq!(code, Some(1), "{records:?}");
     assert_record(&records, "example-containers-kinds", true, &[]);
     assert_record(&records, "level3-valid", true, &[]);
-    assert_record(&records, "group-execution", false, &[("/sequence/0/group", "\"execution\"")]);
+    assert_record(&records, "group-execution", false, &[("/sequence/0/group", "'execution' was unexpected")]);
     assert_record(&records, "root-fail-fast", false, &[("/fail_fast", "null")]);
     assert_record(&records, "sequence-mapping", false, &[("/sequence", "tasks")]);
 }

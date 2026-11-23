@@ -815,10 +815,12 @@ mod set_paths {
 
     #[test]
     fn a_nested_edit_keeps_comments_and_spelling_in_the_shared_parent() {
-        let source = "---\nstyle:\n  # about the page\n  page: 'quoted'   # kept\n  width: 0x10\n---\n# Body\n\nkept\n";
+        // `margin` is a declared `style` setting: an undeclared key's own
+        // unknown-key problem would refuse the edit.
+        let source = "---\nstyle:\n  # about the page\n  page: 'quoted'   # kept\n  margin: 0x10\n---\n# Body\n\nkept\n";
         let fixture = with_document("paths-set-comments", source);
-        let saved = set_saved(&fixture, "style.width", "20");
-        assert_eq!(saved, source.replace("width: 0x10", "width: 20"));
+        let saved = set_saved(&fixture, "style.margin", "20");
+        assert_eq!(saved, source.replace("margin: 0x10", "margin: 20"));
     }
 
     #[test]

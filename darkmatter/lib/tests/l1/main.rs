@@ -42,6 +42,7 @@ mod expression_recovery_slots;
 mod compose_setters;
 mod config_fields;
 mod config_init;
+mod config_inspect_working_file;
 mod config_load;
 mod config_migration;
 mod config_migration_receipt;

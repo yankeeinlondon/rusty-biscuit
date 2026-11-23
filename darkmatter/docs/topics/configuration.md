@@ -297,6 +297,45 @@ flowchart TD
     S --> G["registrations(): valid entries and findings"]
 ```
 
+### Checking one file without loading
+
+A diagnostic tool (such as `claudine doctor`) that wants to know whether one
+configuration file is valid, without any side effect, calls
+`inspect_working_file`. It judges the user file, or the repository file as it
+is in the working copy, exactly as a load would, and returns that one
+`ConfigFile`:
+
+```rust
+use biscuit_file::FileResolutionContext;
+use darkmatter::config::load::inspect_working_file;
+use darkmatter::config::schema::ConfigScope;
+
+fn check(context: &FileResolutionContext) {
+    match inspect_working_file(context, ConfigScope::User) {
+        Ok(file) if !file.is_present() => println!("{} does not exist", file.path().display()),
+        Ok(file) => {
+            if let Err(error) = file.permissions() {
+                println!("invalid permissions: {error}");
+            }
+            for finding in file.registration_findings() {
+                println!("invalid register entry: {finding}");
+            }
+        }
+        // Not YAML, not a mapping, an unknown key, or unreadable.
+        Err(error) => println!("{error}"),
+    }
+}
+```
+
+- It reads that one file and nothing else: not the committed (`HEAD`) file,
+  not the target of a `permissions` reference (the setting is the reference
+  as written), and no installed registration.
+- It never writes: a missing file is not created, and a legacy policy file is
+  neither migrated nor deleted.
+- A context with no home (user scope) or no repository (repository scope) is
+  a `Read` error.
+- `md init` reads the file it edits through the same reader and judge.
+
 ## Errors
 
 Failures are attributed as narrowly as the file allows:

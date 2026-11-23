@@ -60,7 +60,8 @@ fn assert_matches_eager(api: &DarkmatterSchemas, md: &Markdown) -> ValidationRep
 fn several_problems_locate_as_the_eager_map_does() {
     let api = api("n: number\nm: \"{ a: number }\"\ntitle: string(required)\n");
     let report = assert_matches_eager(&api, &doc("---\nn: oops\nm:\n  a: x\n  b: 1\n---\n"));
-    assert_eq!(report.problems.len(), 3, "{:#?}", report.problems);
+    // `n`, `m/a`, the unknown `m/b` beside it, and the missing `title`.
+    assert_eq!(report.problems.len(), 4, "{:#?}", report.problems);
     assert!(
         report.problems.iter().all(|problem| problem.line.is_some()),
         "{:#?}",
@@ -211,7 +212,8 @@ mod counts {
         let api = api("n: number\nm: \"{ a: number }\"\ntitle: string(required)\n");
         let md = doc("---\nn: oops\nm:\n  a: x\n  b: 1\n---\n");
         let (report, builds) = position_builds(|| api.validate(&md).expect("validate"));
-        assert_eq!(report.problems.len(), 3, "{:#?}", report.problems);
+        // `n`, `m/a`, the unknown `m/b` beside it, and the missing `title`.
+        assert_eq!(report.problems.len(), 4, "{:#?}", report.problems);
         assert_eq!(builds, 1);
         let (phased, builds) = position_builds(|| {
             api.validate_for_phase(&md, SchemaPhase::Launch)
