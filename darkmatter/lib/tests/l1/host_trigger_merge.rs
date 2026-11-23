@@ -354,6 +354,8 @@ fn narrows(wide: &str, narrow: &str, accepted: &str, rejected: Option<&str>) {
             };
             let kept = review_model_schemas(&effective.json_schema);
             assert!(!kept.is_empty() && kept.iter().all(|schema| *schema == expected), "the narrow declaration is kept whole: {kept:#?}");
+            let winner = if files[0].1 == narrow { A } else { B };
+            assert_eq!(effective.origins.get("review-model").and_then(|origin| origin.source.clone()), Some(SchemaSourceId::File(case.path(winner))));
             assert_eq!(case.problems(), Vec::<String>::new(), "{narrow} accepts {accepted}");
             let Some(rejected) = rejected else { continue };
             let case = Case::new(&bundle, &document(&format!("prompt: hi\n{rejected}")));
@@ -377,6 +379,66 @@ fn a_list_of_one_item_alternative_narrows_a_list_of_a_grouped_union() {
         "review-model: [claude]\n",
         None,
     );
+}
+
+#[test]
+fn list_item_types_narrow_inside_each_covering_list() {
+    for wide in ["string[]", "(string | number)[]", "string[] | number[]"] {
+        narrows(
+            &trigger(&review_model(wide)),
+            &trigger(&review_model("enum(claude, codex)[]")),
+            "review-model: [claude]\n",
+            Some("review-model: [gemini]\n"),
+        );
+    }
+    narrows(
+        &trigger(&review_model("(string | number | boolean)[]")),
+        &trigger(&review_model("(enum(claude, codex) | number)[]")),
+        "review-model: [claude, 3]\n",
+        Some("review-model: [gemini, 3]\n"),
+    );
+    narrows(
+        &typed_trigger("    ModelIds: [string, number]\n", "    review-model: ModelIds[]\n    spare: ModelIds[]\n"),
+        &trigger(&review_model("enum(claude, codex)[]")),
+        "review-model: [codex]\n",
+        Some("review-model: [claude, 3]\n"),
+    );
+    narrows(
+        &stored("    Models: \"(string | number)[]\"\n", "Models"),
+        &stored("    Models: \"enum(claude, codex)[]\"\n", "Models"),
+        "review-model: [codex]\n",
+        Some("review-model: [gemini]\n"),
+    );
+}
+
+#[test]
+fn homogeneous_list_alternatives_narrow_a_mixed_list() {
+    narrows(
+        &trigger(&review_model("(string(no-coerce) | number)[]")),
+        &trigger(&review_model("string(no-coerce)[] | number[]")),
+        "review-model: [claude]\n",
+        Some("review-model: [claude, 3]\n"),
+    );
+}
+
+#[test]
+fn list_item_narrowing_requires_agreement_at_both_rule_levels() {
+    let wide = trigger(&review_model("(string(min(2)) | number)[](min(1)) -> model choices"));
+    narrows(
+        &wide,
+        &trigger(&review_model("alphanumeric(min(2))[](min(1)) -> model choices")),
+        "review-model: [claude]\n",
+        Some("review-model: [c]\n"),
+    );
+    for (ty, reason) in [
+        ("alphanumeric(min(3))[](min(1)) -> model choices", "element constraints differ"),
+        ("alphanumeric(min(2))[] -> model choices", "list constraints differ"),
+    ] {
+        let narrow = trigger(&review_model(ty));
+        for pair in [[(A, wide.as_str()), (B, narrow.as_str())], [(A, narrow.as_str()), (B, wide.as_str())]] {
+            conflicts_on_review_model(&bundle(&pair), reason);
+        }
+    }
 }
 
 #[test]
@@ -487,7 +549,7 @@ fn object_items_and_list_aliases_narrow_by_their_item_alternatives() {
 fn a_list_of_a_union_never_narrows_a_union_of_whole_lists() {
     let wide = "    review-model:\n        - \"string[]\"\n        - \"number[]\"\n        - boolean\n";
     for narrow in [review_model("(string | number)[]"), in_both_arms(&review_model("(string | number)[]"))] {
-        conflicts_on_review_model(&bundle(&[(A, &trigger(wide)), (B, &trigger(&narrow))]), "narrows no single alternative");
+        conflicts_on_review_model(&bundle(&[(A, &trigger(wide)), (B, &trigger(&narrow))]), "incomparable");
     }
 }
 
@@ -511,6 +573,8 @@ fn a_template_supplying_either_side_of_a_list_narrowing_prepares_once_resolved()
     let pairs = [
         (constant("(string(no-coerce) | number)[]"), review_model("string(no-coerce)[]")),
         (review_model("(string(no-coerce) | number)[]"), constant("string(no-coerce)[]")),
+        (constant("(string | number)[]"), review_model("enum(claude, codex)[]")),
+        (review_model("(string | number)[]"), constant("enum(claude, codex)[]")),
     ];
     for (wide, narrow) in pairs {
         for narrow in [narrow.clone(), in_both_arms(&narrow)] {
@@ -730,7 +794,204 @@ fn a_template_narrowing_a_described_stored_list_prepares_once_resolved() {
 fn a_stored_mixed_list_never_narrows_a_union_of_whole_lists() {
     let wide = "    review-model:\n        - \"string[]\"\n        - \"{ id: string }[]\"\n        - boolean\n";
     for narrow in [stored(MODELS, "Models"), form_of(&stored(MODELS, "Models"), in_both_arms)] {
-        conflicts_on_review_model(&bundle(&[(A, &trigger(wide)), (B, &narrow)]), "narrows no single alternative");
+        conflicts_on_review_model(&bundle(&[(A, &trigger(wide)), (B, &narrow)]), "incomparable");
+    }
+}
+
+// ── a recursive reference against its inline unfolding ──────────────────────
+
+/// `Node`, a recursive tree, as a private type.
+const NODE: &str = "    Node: \"{ name: string, children: Node[] }\"\n";
+/// `Node`'s body written inline: one unfolding of the reference.
+const TREE: &str = "{ name: string, children: Node[] }";
+/// A tree two levels deep, which every tree declaration accepts.
+const GOOD_TREE: &str = "{ name: root, children: [{ name: leaf, children: [{ name: deep }] }] }";
+/// [`GOOD_TREE`] with a list for the deepest child's name.
+const BAD_TREE: &str = "{ name: root, children: [{ name: leaf, children: [{ name: [1] }] }] }";
+
+/// `review-model: {value}` as frontmatter.
+fn tree_value(value: &str) -> String {
+    format!("review-model: {value}\n")
+}
+
+#[test]
+fn a_recursive_reference_coalesces_with_its_inline_unfolding() {
+    let (named, inline) = (typed_trigger(NODE, &review_model("Node")), typed_trigger(NODE, &review_model(TREE)));
+    coalesces(&named, &inline, &tree_value(GOOD_TREE), &tree_value(BAD_TREE));
+
+    let library = "kind: schema\ntypes:\n    Node: \"{ name: string, children: Node[] }\"\n";
+    let imported = trigger(&review_model("Node@./lib.yaml"));
+    let written = trigger(&review_model("{ name: string, children: Node[]@./lib.yaml }"));
+    let object: fn(&str) -> String = str::to_string;
+    for (a_form, b_form) in [(object, object), (in_both_arms as fn(&str) -> String, object), (object, in_both_arms)] {
+        let (a, b) = (form_of(&imported, a_form), form_of(&written, b_form));
+        for files in [[(A, a.as_str()), (B, b.as_str())], [(A, b.as_str()), (B, a.as_str())]] {
+            let bundle = bundle(&[files[0], files[1], ("schemas/lib.yaml", library)]);
+            let case = Case::new(&bundle, &document(&format!("prompt: hi\n{}", tree_value(GOOD_TREE))));
+            let Ok(Some(effective)) = case.schemas.effective_for(&case.markdown) else {
+                panic!("{} coalesces with {}: {:?}", files[0].1, files[1].1, case.schemas.effective_for(&case.markdown).err())
+            };
+            assert_eq!(case.problems(), Vec::<String>::new());
+            if a_form as usize == object as usize && b_form as usize == object as usize {
+                let origin = effective.origins.get("review-model").expect("an origin");
+                assert_eq!(origin.source, Some(SchemaSourceId::File(case.path(A))), "the first bundle path represents the class");
+            }
+            let case = Case::new(&bundle, &document(&format!("prompt: hi\n{}", tree_value(BAD_TREE))));
+            assert!(case.problems().iter().any(|path| path.starts_with("/review-model/children")), "{:?}", case.problems());
+        }
+    }
+}
+
+#[test]
+fn a_recursive_reference_and_its_inline_unfolding_narrow_and_pair_by_alternative() {
+    // `narrows`, except that each root-union arm stores `Node` under its
+    // own `$defs` key, so the kept declaration is compared with that key
+    // spelled as in the narrow trigger alone.
+    let (wide, narrow) = (typed_trigger(NODE, &review_model("Node | string")), typed_trigger(NODE, &review_model(TREE)));
+    let unkeyed = |schema: &serde_json::Value| {
+        let text = schema.to_string();
+        let mut out = String::new();
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("$defs/Node-") {
+            out.push_str(&rest[..at + "$defs/Node".len()]);
+            rest = rest[at + "$defs/Node-".len()..].trim_start_matches(|c: char| c.is_ascii_digit());
+        }
+        out + rest
+    };
+    let alone = Case::new(&bundle(&[(B, &narrow)]), &document("prompt: hi\n"));
+    let [expected] = review_model_schemas(&alone.effective().json_schema).try_into().expect("one declaration");
+    let object: fn(&str) -> String = str::to_string;
+    for (wide_form, narrow_form) in [(object, object), (in_both_arms as fn(&str) -> String, object), (object, in_both_arms)] {
+        let (wide, narrow) = (form_of(&wide, wide_form), form_of(&narrow, narrow_form));
+        for files in [[(A, wide.as_str()), (B, narrow.as_str())], [(A, narrow.as_str()), (B, wide.as_str())]] {
+            let case = Case::new(&bundle(&files), &document(&format!("prompt: hi\n{}", tree_value(GOOD_TREE))));
+            let Ok(Some(effective)) = case.schemas.effective_for(&case.markdown) else {
+                panic!("{wide} narrows to {narrow}: {:?}", case.schemas.effective_for(&case.markdown).err())
+            };
+            let kept = review_model_schemas(&effective.json_schema);
+            assert!(!kept.is_empty() && kept.iter().all(|schema| unkeyed(schema) == unkeyed(&expected)), "the inline tree is kept whole: {kept:#?}");
+            assert_eq!(case.problems(), Vec::<String>::new());
+            for refused in ["review-model: claude\n".to_string(), tree_value(BAD_TREE)] {
+                let case = Case::new(&bundle(&files), &document(&format!("prompt: hi\n{refused}")));
+                assert!(case.problems().iter().any(|path| path.starts_with("/review-model")), "{refused}: {:?}", case.problems());
+            }
+        }
+    }
+    coalesces(
+        &typed_trigger(NODE, &review_model("Node | string")),
+        &typed_trigger(NODE, &review_model(&format!("{TREE} | string"))),
+        &tree_value(GOOD_TREE),
+        &tree_value(BAD_TREE),
+    );
+}
+
+#[test]
+fn a_root_union_shares_a_recursive_key_one_arm_names_and_another_writes_inline() {
+    let union = typed_trigger(
+        NODE,
+        &format!(
+            "    - prompt: string(required)\n      sections: null\n      review-model: Node\n    - sections: object(required)\n      prompt: null\n      review-model: \"{TREE}\"\n"
+        ),
+    );
+    let object = typed_trigger(NODE, &review_model("Node"));
+    for files in [[(A, union.as_str()), (B, object.as_str())], [(A, object.as_str()), (B, union.as_str())]] {
+        let case = Case::new(&bundle(&files), &document(&format!("prompt: hi\n{}", tree_value(GOOD_TREE))));
+        let result = case.schemas.effective_for(&case.markdown);
+        assert!(matches!(result, Ok(Some(_))), "the key is shared: {:?}", result.err().map(|error| error.to_string()));
+        assert_eq!(case.problems(), Vec::<String>::new());
+        let case = Case::new(&bundle(&files), &document(&format!("sections: {{}}\n{}", tree_value(GOOD_TREE))));
+        assert_eq!(case.problems(), Vec::<String>::new(), "the sections arm stays");
+        let case = Case::new(&bundle(&files), &document(&tree_value(GOOD_TREE)));
+        assert!(!case.problems().is_empty(), "the union still requires one of its arms");
+        let case = Case::new(&bundle(&files), &document(&format!("prompt: hi\n{}", tree_value(BAD_TREE))));
+        assert!(case.problems().iter().any(|path| path.starts_with("/review-model")), "{:?}", case.problems());
+    }
+}
+
+#[test]
+fn a_recursive_reference_and_its_inline_unfolding_coalesce_at_every_nested_position() {
+    for (wrap, accepted, rejected) in [
+        (
+            "    review-model:\n        tree: \"{}\"\n",
+            format!("review-model:\n  tree: {GOOD_TREE}\n"),
+            format!("review-model:\n  tree: {BAD_TREE}\n"),
+        ),
+        (
+            "    review-model:\n        <string>: \"{}\"\n",
+            format!("review-model:\n  first: {GOOD_TREE}\n"),
+            format!("review-model:\n  first: {BAD_TREE}\n"),
+        ),
+        ("    review-model: \"tuple([{}, string])\"\n", format!("review-model: [{GOOD_TREE}, x]\n"), format!("review-model: [{BAD_TREE}, x]\n")),
+        ("    review-model: \"tuple([string, ...{}[]])\"\n", format!("review-model: [x, {GOOD_TREE}]\n"), format!("review-model: [x, {BAD_TREE}]\n")),
+        ("    review-model: \"{}[]\"\n", format!("review-model: [{GOOD_TREE}]\n"), format!("review-model: [{BAD_TREE}]\n")),
+    ] {
+        let named = typed_trigger(NODE, &wrap.replace("{}", "Node"));
+        let inline = typed_trigger(NODE, &wrap.replace("{}", TREE));
+        coalesces(&named, &inline, &accepted, &rejected);
+    }
+}
+
+#[test]
+fn recursive_declarations_that_differ_only_past_an_unfolding_conflict() {
+    let deeper = "{ name: string, children: { name: string(min(1)), children: Node[] }[] }";
+    conflicts_on_review_model(&bundle(&[(A, &typed_trigger(NODE, &review_model("Node"))), (B, &typed_trigger(NODE, &review_model(deeper)))]), "");
+    conflicts_on_review_model(&bundle(&[(A, &typed_trigger(NODE, &review_model(deeper))), (B, &typed_trigger(NODE, &review_model("Node")))]), "");
+
+    // Two named recursive types, the difference reachable only through
+    // each one's own reference.
+    let other = "    Other: \"{ name: string, children: { name: string(min(1)), children: Other[] }[] }\"\n";
+    let types = format!("{NODE}{other}");
+    let named = typed_trigger(&types, "    review-model: Node\n    spare: Other\n");
+    let differs = typed_trigger(&types, "    review-model: Other\n    spare: Node\n");
+    let case = Case::new(&bundle(&[(A, &named), (B, &differs)]), &document("prompt: hi\n"));
+    assert_eq!(case.conflict().0.as_deref(), Some("review-model"));
+}
+
+/// The recursive pair's checked layer is memoized like any other.
+#[test]
+fn a_recursive_pairs_static_result_is_memoized_per_matched_set() {
+    let bundle = bundle(&[(A, &typed_trigger(NODE, &review_model("Node"))), (B, &typed_trigger(NODE, &review_model(TREE)))]);
+    let case = Case::new(&bundle, &document(&tree_value(GOOD_TREE)));
+    let selected = case.schemas.registered_selection_for(&case.markdown);
+    let darkmatter::config::registration::HostSelection::Registered(profile) = &selected.selection else { panic!("acme") };
+    let first = profile.checked_layer(&selected.matched).expect("checked");
+    let again = profile.checked_layer(&selected.matched).expect("checked");
+    assert!(Arc::ptr_eq(&first, &again));
+}
+
+/// A constant template returning the inline unfolding of an imported tree
+/// prepares once resolved, and stays pending in the passive trace.
+#[test]
+fn a_template_returning_an_imported_trees_unfolding_prepares_once_resolved() {
+    use darkmatter::markdown::compose::DataRuntime;
+    use darkmatter::markdown::schemas::slots::SlotSession;
+    use darkmatter::markdown::schemas::slots::grants::{Grant, GrantDecision, GrantScope, GrantTarget};
+    let library = "kind: schema\ntypes:\n    Node: \"{ name: string, children: Node[] }\"\n";
+    let imported = trigger(&review_model("Node@./lib.yaml"));
+    let template = trigger(&review_model("{{ '{ name: string, children: Node[]@./lib.yaml }' }}"));
+    let forms = [
+        (imported.clone(), template.clone()),
+        (imported.clone(), form_of(&template, in_both_arms)),
+        (form_of(&imported, in_both_arms), template),
+    ];
+    for (imported, template) in forms {
+        for files in [[(A, imported.as_str()), (B, template.as_str())], [(A, template.as_str()), (B, imported.as_str())]] {
+            let bundle = bundle(&[files[0], files[1], ("schemas/lib.yaml", library)]);
+            for (value, refused) in [(GOOD_TREE, false), (BAD_TREE, true)] {
+                let case = Case::new(&bundle, &document(&format!("prompt: hi\n{}", tree_value(value))));
+                assert!(matches!(case.schemas.effective_for(&case.markdown), Err(SchemaError::UnresolvedSlots(_))), "passive without a session");
+                let trace = case.schemas.registered_trace(&case.markdown).expect("identified");
+                assert_eq!(trace.conflict, None, "{trace:#?}");
+                assert!(trace.triggers.iter().any(|entry| entry.matched && entry.pending), "{trace:#?}");
+                // The template's import reads the library, which this run approves.
+                let library = Grant { decision: GrantDecision::Allow, target: GrantTarget::File(case.path("schemas/lib.yaml")), scope: GrantScope::Once };
+                let session = SlotSession::new(DataRuntime::new()).with_run_grants([library]);
+                let schemas = case.schemas.clone().with_slot_session(Arc::new(session));
+                let effective = schemas.effective_for(&case.markdown).expect("the resolved template coalesces").expect("a schema");
+                let report = effective.validate(&darkmatter::markdown::schemas::frontmatter_as_json(&case.markdown));
+                assert_eq!(!report.problems.is_empty(), refused, "{} / {} / {value}: {:#?}", files[0].1, files[1].1, report.problems);
+            }
+        }
     }
 }
 
@@ -749,14 +1010,16 @@ fn conflicting_triggers_that_never_match_together_are_no_conflict() {
 
 #[test]
 fn a_static_result_is_memoized_per_matched_set() {
-    let case = Case::new(&bundle(&[(A, &trigger("    agent: string\n")), (B, &trigger("    agent: enum(x)\n"))]), &document(""));
+    let wide = trigger(&review_model("(string | number)[]"));
+    let narrow = trigger(&review_model("enum(claude, codex)[]"));
+    let case = Case::new(&bundle(&[(A, &wide), (B, &narrow)]), &document("review-model: [claude]\n"));
     let selected = case.schemas.registered_selection_for(&case.markdown);
     let darkmatter::config::registration::HostSelection::Registered(profile) = &selected.selection else { panic!("acme") };
     let first = profile.checked_layer(&selected.matched).expect("checked");
     let again = profile.checked_layer(&selected.matched).expect("checked");
     assert!(Arc::ptr_eq(&first, &again));
     let pruned = first.payloads.iter().find(|part| profile.triggers()[part.trigger].bundle_path == A).expect("a");
-    assert!(pruned.json_schema["properties"].get("agent").is_none(), "`a` lost `agent` to `b`");
+    assert!(pruned.json_schema["properties"].get("review-model").is_none(), "`a` lost `review-model` to `b`");
 }
 
 // ── root rules and root unions ──────────────────────────────────────────────

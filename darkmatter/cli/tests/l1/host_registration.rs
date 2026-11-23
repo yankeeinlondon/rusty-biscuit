@@ -814,6 +814,84 @@ fn a_stored_list_compared_with_its_inline_spelling_prepares_on_every_route() {
     }
 }
 
+/// A recursive named tree and the same tree written as one inline
+/// unfolding prepare on every route, and the layer still judges a child.
+#[test]
+fn a_recursive_reference_and_its_inline_unfolding_prepare_on_every_route() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let trigger = |ty: &str| {
+        format!(
+            "kind: schema-trigger\nmatch:\n    team: string(required)\ntypes:\n    Node: \"{{ name: string, children: Node[] }}\"\n$schema:\n    review-model: \"{ty}\"\n"
+        )
+    };
+    let bundle = acme().with_file("schemas/a.yaml", &trigger("Node")).with_file("schemas/b.yaml", &trigger("{ name: string, children: Node[] }"));
+    let fixture = registered_bundle("host-recursive-unfolding", &bundle, false);
+    let tree = |leaf: &str| format!("---\nteam: core\nprompt: Say hello\nreview-model: {{ name: root, children: [{{ name: {leaf} }}] }}\n---\n# Team\n");
+    fixture.write_file("cwd/team.md", &tree("leaf"));
+    fixture.write_file("cwd/bad.md", &tree("[1]"));
+    if !fixture.initialize_repository_at(fixture.cwd()) {
+        return;
+    }
+    let codes = |value: &Value, key: &str| -> Vec<String> {
+        value[key].as_array().into_iter().flatten().filter_map(|record| record["code"].as_str().map(str::to_owned)).collect()
+    };
+
+    let validate = run(&fixture, &["schema", "validate", "--output", "json", "team.md"]);
+    let value = data_value(&validate, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert_eq!(validate.status.code(), Some(0), "{value:#}");
+    let refused = run(&fixture, &["schema", "validate", "--output", "json", "bad.md"]);
+    let value = data_value(&refused, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert_eq!(refused.status.code(), Some(1), "the layer judges the child: {value:#}");
+    assert!(!codes(&value, "files").iter().any(|code| code == "dm.host.trigger_conflict"), "{value:#}");
+
+    let compose = run(&fixture, &["compose", "team.md", "--output", "json"]);
+    let value: Value = serde_json::from_slice(&compose.stdout).expect("one JSON value");
+    assert!(compose.status.success(), "{value:#}");
+    assert!(!codes(&value, "diagnostics").iter().any(|code| code == "dm.host.trigger_conflict"), "{value:#}");
+
+    let triggers = run(&fixture, &["schema", "triggers", "team.md", "--output", "json"]);
+    let value = data_value(&triggers, include_str!("../../schemas/output/schema-triggers.yaml"));
+    assert_eq!(triggers.status.code(), Some(0), "{value:#}");
+    assert_eq!(matched_registered(&value), ["a.yaml", "b.yaml"], "{value:#}");
+    assert!(value["registered"]["conflict"].is_null(), "{value:#}");
+
+    let clean = run(&fixture, &["clean", "team.md", "--output", "json"]);
+    let value = data_value(&clean, include_str!("../../schemas/output/clean.yaml"));
+    assert_eq!(clean.status.code(), Some(0), "{value:#}");
+    assert!(!value.to_string().contains("dm.host.trigger_conflict"), "{value:#}");
+}
+
+#[test]
+fn a_narrower_registered_list_item_type_prepares_on_every_route() {
+    let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+    let trigger = |ty: &str| format!("kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    review-model: \"{ty}\"\n");
+    let bundle = acme()
+        .with_file("schemas/a.yaml", &trigger("(string | number)[]"))
+        .with_file("schemas/b.yaml", &trigger("enum(claude, codex)[]"));
+    let fixture = registered_bundle("host-list-item-narrowing", &bundle, false);
+    fixture.write_file("cwd/team.md", "---\nteam: core\nreview-model: [claude]\n---\n# Team\n");
+    fixture.write_file("cwd/bad.md", "---\nteam: core\nreview-model: [gemini]\n---\n# Team\n");
+    if !fixture.initialize_repository_at(fixture.cwd()) {
+        return;
+    }
+    for args in [
+        &["schema", "validate", "team.md", "--output", "json"][..],
+        &["compose", "team.md", "--output", "json"],
+        &["schema", "triggers", "team.md", "--output", "json"],
+        &["clean", "team.md", "--output", "json"],
+    ] {
+        let output = run(&fixture, args);
+        let value: Value = serde_json::from_slice(&output.stdout).expect("one JSON value");
+        assert!(output.status.success(), "{args:?}: {value:#}");
+        assert!(!value.to_string().contains("dm.host.trigger_conflict"), "{args:?}: {value:#}");
+    }
+    let refused = run(&fixture, &["schema", "validate", "bad.md", "--output", "json"]);
+    let value = data_value(&refused, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert_eq!(refused.status.code(), Some(1), "{value:#}");
+    assert!(value.to_string().contains("/review-model/0"), "{value:#}");
+    assert!(!value.to_string().contains("dm.host.trigger_conflict"), "{value:#}");
+}
+
 #[test]
 fn schema_triggers_reports_compatible_registered_matches_as_success() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");

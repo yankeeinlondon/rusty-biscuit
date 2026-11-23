@@ -1045,16 +1045,19 @@ alternative per arm:
 # a.yaml
 review-model: "(string | number)[](min(1))"
 # b.yaml
-review-model: "string[](min(1))"
+review-model: "enum(claude, codex)[](min(1))"
 ```
 
-These narrow: a document gets `string[](min(1))`. Moving `min(1)` from the
-list to the items (`string(min(1))[]`), or keeping `no-coerce` on the
-string items in only one of the two lists, conflicts. A list whose items
-mix two types is not one of several lists of a single type, so
-`(string | number)[]` does not narrow a declaration that admits
-`string[]` or `number[]` separately: `[claude, 3]` fits the first and
-neither of the others, and the pair conflicts.
+The enum list wins because every enum value fits the string item
+alternative and the list minimum agrees. Moving `min(1)` from the list
+to the items, or giving the retained item different rules, conflicts.
+
+Coverage respects the boundary between a property's alternatives and a
+list's item alternatives. `string[] | number[]` narrows
+`(string | number)[]` because each homogeneous list fits the mixed list.
+The reverse direction fails because `[claude, 3]` needs both item types
+in one list. Adding a `boolean` property alternative to the homogeneous
+declaration makes the pair incomparable.
 
 A named type compares as the type it names, whether it was written inline
 or reached through a reference. This holds however the type is stored: a
@@ -1083,7 +1086,27 @@ root union, a key one arm writes inline and another arm writes through a
 named type is still the same key in every arm, not one that defines the
 union's alternatives. Two named types that refer to themselves are
 compared structure by structure, so the same recursive type under two names
-coalesces.
+coalesces. A recursive type also matches its body written out, however many
+levels deep the two spellings stop:
+
+```yaml
+# a.yaml and b.yaml both declare
+types:
+    Node: "{ name: string, children: Node[] }"
+# a.yaml
+$schema:
+    review-model: Node
+# b.yaml
+$schema:
+    review-model: "{ name: string, children: Node[] }"
+```
+
+These coalesce, at the top or nested in an object, dictionary value, tuple,
+or list, and a document's `review-model` children are still checked at
+every depth. `Node | string` narrows to the written-out tree alone. A rule
+that differs anywhere inside the tree, even one level below where either
+spelling repeats itself (`{ name: string, children: { name: string(min(1)),
+children: Node[] }[] }` against `Node`), conflicts.
 
 ```yaml
 # ./schemas/a.yaml                     # ./schemas/b.yaml

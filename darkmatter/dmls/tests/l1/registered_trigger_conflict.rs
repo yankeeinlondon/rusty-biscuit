@@ -175,3 +175,51 @@ fn a_stored_list_compared_with_its_inline_spelling_publishes_no_conflict() {
     }
     fixture.shutdown();
 }
+
+/// A recursive named tree and the same tree written as one inline
+/// unfolding publish no conflict, and the layer still judges a child.
+#[test]
+fn a_recursive_reference_and_its_inline_unfolding_publish_no_conflict() {
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".acme"]);
+    let trigger = |ty: &str| {
+        format!(
+            "kind: schema-trigger\nmatch:\n    team: string(required)\ntypes:\n    Node: \"{{ name: string, children: Node[] }}\"\n$schema:\n    review-model: \"{ty}\"\n"
+        )
+    };
+    bundle("number")
+        .with_member("schemas/a.yaml", &trigger("Node"))
+        .with_member("schemas/b.yaml", &trigger("{ name: string, children: Node[] }"))
+        .write_to(&root.join("home/.acme"));
+    let mut fixture = start(&workspace);
+
+    let tree = |leaf: &str| format!("---\nteam: core\nprompt: Say hello\nreview-model: {{ name: root, children: [{{ name: {leaf} }}] }}\n---\n# Team\n");
+    let (_, diagnostics) = open_text(&mut fixture, &workspace, "notes/team.md", &tree("leaf"));
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let (_, diagnostics) = open_text(&mut fixture, &workspace, "notes/bad.md", &tree("[1]"));
+    assert!(conflicts(&diagnostics).is_empty(), "{diagnostics:#?}");
+    assert!(!diagnostics.is_empty(), "the layer judges the child: {diagnostics:#?}");
+    fixture.shutdown();
+}
+
+#[test]
+fn a_narrower_registered_list_item_type_is_used_by_the_editor() {
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    repository(root, &[".acme"]);
+    let trigger = |ty: &str| format!("kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n    review-model: \"{ty}\"\n");
+    bundle("number")
+        .with_member("schemas/a.yaml", &trigger("(string | number)[]"))
+        .with_member("schemas/b.yaml", &trigger("enum(claude, codex)[]"))
+        .write_to(&root.join("home/.acme"));
+    let mut fixture = start(&workspace);
+
+    let document = |model: &str| format!("---\nteam: core\nreview-model: [{model}]\n---\n# Team\n");
+    let (_, diagnostics) = open_text(&mut fixture, &workspace, "notes/team.md", &document("claude"));
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let (_, diagnostics) = open_text(&mut fixture, &workspace, "notes/bad.md", &document("gemini"));
+    assert!(conflicts(&diagnostics).is_empty(), "{diagnostics:#?}");
+    assert!(!diagnostics.is_empty(), "the winning list checks the item");
+    fixture.shutdown();
+}

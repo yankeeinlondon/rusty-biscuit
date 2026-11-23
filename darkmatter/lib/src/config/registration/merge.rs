@@ -7,10 +7,10 @@
 //! stored named type compares as the definition it references, with its
 //! use site's description and rules (`resolved`). For each
 //! top-level property two or more payloads declare, every pair is compared:
-//! the underlying types by
-//! [`is_definition_subtype_with_definitions`] in both directions, and
-//! presence, null admission, and the property's default separately, then
-//! descriptions and every other constraint (examples included) at the
+//! the underlying types by coverage in both directions, using the same
+//! property and list item alternatives that pair descriptions and rules.
+//! Presence, null admission, and the property's default compare separately
+//! from descriptions and every other constraint (examples included) at the
 //! alternative and level they govern: each alternative of the narrower
 //! declaration against an alternative of the wider one that covers it, and
 //! two lists by their list rules, then item alternative by item
@@ -39,10 +39,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use simplified_schema::simplified::{DefKey, DefinitionTable};
 use simplified_schema::triggers::assemble::ResolvedPayload;
-use simplified_schema::{
-    Constraint, PropertyAtom, PropertyDef, SchemaError, SchemaShape, TypeExpr, is_definition_subtype_with_definitions,
-    is_subtype_with_definitions,
-};
+use simplified_schema::{Constraint, PropertyAtom, PropertyDef, SchemaError, SchemaShape, TypeExpr, is_subtype_with_definitions};
 
 /// The code of a conflict between two matched triggers of one host.
 pub const HOST_TRIGGER_CONFLICT_CODE: &str = "dm.host.trigger_conflict";
@@ -279,9 +276,8 @@ enum Relation {
     Conflict(String),
 }
 
-/// How `a` and `b` compare. The underlying types are compared as written;
-/// equivalence and every other rule are compared on their [`resolved`]
-/// forms, so how a named type is stored never decides the result.
+/// How `a` and `b` compare after resolving named types. Direction and
+/// rule pairing use the same coverage relation on these alternatives.
 fn relation(a: &Declaration<'_>, b: &Declaration<'_>, definitions: &DefinitionTable) -> Relation {
     let (a, b) = match (a, b) {
         (Declaration::Typed(a), Declaration::Typed(b)) => (*a, *b),
@@ -294,25 +290,26 @@ fn relation(a: &Declaration<'_>, b: &Declaration<'_>, definitions: &DefinitionTa
         }
         _ => return Relation::Conflict("a raw JSON Schema declaration coalesces only with an identical one".into()),
     };
-    let narrower = is_definition_subtype_with_definitions(a, b, definitions);
-    let wider = is_definition_subtype_with_definitions(b, a, definitions);
+    let (a, b) = (&resolved(a, definitions), &resolved(b, definitions));
+    let (a_arms, b_arms) = (arms(a, definitions), arms(b, definitions));
+    let narrower = covers_all(&b_arms, &a_arms, definitions);
+    let wider = covers_all(&a_arms, &b_arms, definitions);
     if !narrower && !wider {
         return Relation::Conflict("their types are incomparable".into());
     }
-    let (a, b) = (&resolved(a, definitions), &resolved(b, definitions));
     match (narrower, wider) {
         (true, true) => {
             if Same::new(definitions).definitions(a, b) {
                 Relation::Same
             } else {
                 Relation::Conflict(
-                    rules_differ(a, b, definitions)
+                    rules_differ(a, b, &a_arms, &b_arms, definitions)
                         .unwrap_or_else(|| "their equivalent types differ in a nested declaration".into()),
                 )
             }
         }
-        (true, false) => rules_differ(a, b, definitions).map_or(Relation::FirstNarrower, Relation::Conflict),
-        _ => rules_differ(b, a, definitions).map_or(Relation::SecondNarrower, Relation::Conflict),
+        (true, false) => rules_differ(a, b, &a_arms, &b_arms, definitions).map_or(Relation::FirstNarrower, Relation::Conflict),
+        _ => rules_differ(b, a, &b_arms, &a_arms, definitions).map_or(Relation::SecondNarrower, Relation::Conflict),
     }
 }
 
@@ -455,7 +452,13 @@ fn expand(usage: &PropertyAtom, body: &PropertyDef) -> Option<PropertyAtom> {
 /// its rules with it. An alternative no single alternative of `wide` covers
 /// has no counterpart to agree with, so it conflicts: a list mixing strings
 /// and numbers is no single one of a string list and a number list.
-fn rules_differ(narrow: &PropertyDef, wide: &PropertyDef, definitions: &DefinitionTable) -> Option<String> {
+fn rules_differ(
+    narrow: &PropertyDef,
+    wide: &PropertyDef,
+    narrow_arms: &[Arm<'_>],
+    wide_arms: &[Arm<'_>],
+    definitions: &DefinitionTable,
+) -> Option<String> {
     if narrow.is_required() != wide.is_required() {
         return Some("one is required and the other is not".into());
     }
@@ -465,13 +468,12 @@ fn rules_differ(narrow: &PropertyDef, wide: &PropertyDef, definitions: &Definiti
     if is_generated(narrow) != is_generated(wide) {
         return Some("one is generated and the other is not".into());
     }
-    let (narrow_arms, wide_arms) = (arms(narrow, definitions), arms(wide, definitions));
-    if !same_set(&property_defaults(&narrow_arms), &property_defaults(&wide_arms)) {
+    if !same_set(&property_defaults(narrow_arms), &property_defaults(wide_arms)) {
         return Some("their defaults differ".into());
     }
     let many = narrow_arms.len() > 1;
     for (index, arm) in narrow_arms.iter().enumerate() {
-        let reason = match paired(arm, &wide_arms, definitions) {
+        let reason = match paired(arm, wide_arms, definitions) {
             Ok(()) => continue,
             Err(Pairing::Uncovered(None)) => {
                 return Some(format!("alternative {} narrows no single alternative of the other declaration", index + 1));
@@ -506,16 +508,20 @@ fn paired(narrow: &Arm<'_>, wide: &[Arm<'_>], definitions: &DefinitionTable) -> 
     Err(first.unwrap_or(Pairing::Uncovered(None)))
 }
 
-/// Whether the alternative `wide` accepts every value of `narrow`: by the
-/// atom subtype relation, or, for two lists, every item alternative of
-/// `narrow` covered by one of `wide`'s.
+/// Each narrow alternative must fit a single wide alternative. In
+/// particular, several homogeneous lists cannot cover one mixed list.
+fn covers_all(wide: &[Arm<'_>], narrow: &[Arm<'_>], definitions: &DefinitionTable) -> bool {
+    narrow.iter().all(|arm| wide.iter().any(|other| covers(other, arm, definitions)))
+}
+
+/// Type coverage before comparing rules. Lists keep item alternatives
+/// inside the list so property-level coverage never distributes over them.
 fn covers(wide: &Arm<'_>, narrow: &Arm<'_>, definitions: &DefinitionTable) -> bool {
-    if is_subtype_with_definitions(&narrow.atom, &wide.atom, definitions) {
-        return true;
+    if narrow.atom.is_array && wide.atom.is_array {
+        covers_all(&wide.items, &narrow.items, definitions)
+    } else {
+        is_subtype_with_definitions(&narrow.atom, &wide.atom, definitions)
     }
-    narrow.atom.is_array
-        && wide.atom.is_array
-        && narrow.items.iter().all(|item| wide.items.iter().any(|other| covers(other, item, definitions)))
 }
 
 /// How two alternatives, `narrow` covered by `wide`, disagree: their
@@ -735,23 +741,62 @@ fn matched_all<T>(a: &[T], b: &[T], mut same: impl FnMut(&T, &T) -> bool) -> boo
 /// Structural identity of [`resolved`] declarations, independent of union-arm
 /// order and of which side of `[]` carries a presence marker. A remaining
 /// reference is recursive: it equals another reference whose resolved
-/// definition is the same, coinductively over the pairs being compared,
-/// and never an inline type.
+/// definition is the same, and an inline type that equals its unfolding
+/// (`Node` and `{ name: string, children: Node[] }`), so the depth at which
+/// [`resolved`] stopped expanding either side never decides the result.
+/// Both are coinductive over the operands being compared: a pair met again
+/// while it is still being compared is assumed equal, and every first
+/// visit compares its rules.
 struct Same<'t> {
     definitions: &'t DefinitionTable,
     in_progress: Vec<(DefKey, DefKey)>,
+    /// The alternative lists being compared through an unfolded reference.
+    unfolding: Vec<(Vec<PropertyAtom>, Vec<PropertyAtom>)>,
 }
 
 impl<'t> Same<'t> {
     fn new(definitions: &'t DefinitionTable) -> Self {
-        Self { definitions, in_progress: Vec::new() }
+        Self { definitions, in_progress: Vec::new(), unfolding: Vec::new() }
+    }
+
+    /// Whether the alternatives `a` and `b` pair one to one, as written or
+    /// with their references unfolded.
+    fn alternatives(&mut self, a: &[PropertyAtom], b: &[PropertyAtom]) -> bool {
+        matched_all(a, b, |x, y| self.atoms(x, y)) || (a.iter().chain(b).any(is_reference) && self.unfolded(a, b))
+    }
+
+    /// Whether `a` and `b` pair one to one once each reference among them
+    /// is replaced by the alternatives it [`resolved`] to, with its use
+    /// site's rules (`expand`); `false` when none opens.
+    fn unfolded(&mut self, a: &[PropertyAtom], b: &[PropertyAtom]) -> bool {
+        let pair = (a.to_vec(), b.to_vec());
+        if self.unfolding.contains(&pair) {
+            return true;
+        }
+        let definitions = self.definitions;
+        let unfold = |atoms: &[PropertyAtom]| -> Vec<PropertyAtom> {
+            atoms
+                .iter()
+                .flat_map(|atom| {
+                    if is_reference(atom) { Resolver { definitions, open: Vec::new() }.atom(atom) } else { vec![atom.clone()] }
+                })
+                .collect()
+        };
+        let (x, y) = (unfold(a), unfold(b));
+        if x == a && y == b {
+            return false;
+        }
+        self.unfolding.push(pair);
+        let same = matched_all(&x, &y, |p, q| self.atoms(p, q));
+        self.unfolding.pop();
+        same
     }
 
     /// `required` belongs to the whole property, as in [`rules_differ`].
     fn definitions(&mut self, a: &PropertyDef, b: &PropertyDef) -> bool {
         a.is_required() == b.is_required()
             && is_generated(a) == is_generated(b)
-            && matched_all(atoms(a), atoms(b), |x, y| self.atoms(x, y))
+            && self.alternatives(atoms(a), atoms(b))
     }
 
     /// `generated` marks an alternative whichever side of `[]` carries it.
@@ -792,19 +837,40 @@ impl<'t> Same<'t> {
                 self.in_progress.pop();
                 same
             }
+            // The rules beside these types were compared by the caller, so
+            // each side is unfolded bare.
+            (TypeExpr::Ref(_), other) => self.unfolded(&[bare(a)], &bare_alternatives(other)),
+            (other, TypeExpr::Ref(_)) => self.unfolded(&bare_alternatives(other), &[bare(b)]),
             (TypeExpr::InlineObject(x), TypeExpr::InlineObject(y)) => self.shapes(x, y),
-            (TypeExpr::Union(x), TypeExpr::Union(y)) => matched_all(x, y, |p, q| self.atoms(p, q)),
+            (TypeExpr::Union(x), TypeExpr::Union(y)) => self.alternatives(x, y),
             (TypeExpr::Tuple(x), TypeExpr::Tuple(y)) => {
                 x.elements.len() == y.elements.len()
                     && x.elements.iter().zip(&y.elements).all(|(p, q)| p.optional == q.optional && self.definitions(&p.def, &q.def))
                     && match (&x.spread, &y.spread) {
                         (None, None) => true,
-                        (Some(p), Some(q)) => self.atoms(p, q),
+                        (Some(p), Some(q)) => self.alternatives(std::slice::from_ref(p), std::slice::from_ref(q)),
                         _ => false,
                     }
             }
             _ => a == b,
         }
+    }
+}
+
+fn is_reference(atom: &PropertyAtom) -> bool {
+    matches!(atom.ty, TypeExpr::Ref(_))
+}
+
+/// `ty` as a scalar atom with no description or rules.
+fn bare(ty: &TypeExpr) -> PropertyAtom {
+    PropertyAtom { ty: ty.clone(), is_array: false, constraints: Vec::new(), array_constraints: Vec::new(), description: None }
+}
+
+/// The bare alternatives `ty` stands for: a union's arms, otherwise itself.
+fn bare_alternatives(ty: &TypeExpr) -> Vec<PropertyAtom> {
+    match ty {
+        TypeExpr::Union(arms) => arms.clone(),
+        ty => vec![bare(ty)],
     }
 }
 
