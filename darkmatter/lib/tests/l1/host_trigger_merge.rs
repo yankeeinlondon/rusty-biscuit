@@ -21,15 +21,14 @@ use simplified_schema::{SchemaError, SchemaOriginKind, SchemaSourceId};
 const HOST: &str = "../host/darkmatter-host.yaml";
 
 /// A trigger matching every document with a `team` string, declaring
-/// `payload` (an indented `$schema` body) and the private `types` table, if
-/// any.
+/// `payload` (an indented `$schema` body).
 fn trigger(payload: &str) -> String {
     format!("kind: schema-trigger\nmatch:\n    team: string(required)\n$schema:\n{payload}")
 }
 
-/// The `acme` bundle plus `triggers` (bundle path, text) and `libraries`.
-fn bundle(triggers: &[(&str, &str)]) -> Bundle {
-    triggers.iter().fold(Bundle::acme(), |bundle, (path, text)| bundle.with_file(path, text))
+/// The `acme` bundle plus `files` (bundle path, text).
+fn bundle(files: &[(&str, &str)]) -> Bundle {
+    files.iter().fold(Bundle::acme(), |bundle, (path, text)| bundle.with_file(path, text))
 }
 
 /// A fixture with `bundle` installed under `host/` and `document` written

@@ -336,7 +336,8 @@ fn schema_validate_refuses_a_kind_two_registered_hosts_define_differently() {
 
     assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stdout));
     let value = data_value(&output, include_str!("../../schemas/output/schema-validate.yaml"));
-    let text = value["files"][0].to_string();
+    // Separator-neutral: a Windows path is serialized with `\\`.
+    let text = value["files"][0].to_string().replace("\\\\", "/");
     assert!(text.contains("roster"), "{value:#}");
     assert!(text.contains(".acme/schemas/roster.yaml") && text.contains(".beta/schemas/roster.yaml"), "both definitions are named: {value:#}");
 }
@@ -359,7 +360,8 @@ fn two_matched_triggers_that_disagree_are_one_coded_conflict_naming_both() {
     let record = &value["files"][0];
     assert_eq!(record["code"], "dm.host.trigger_conflict", "{value:#}");
     let related: Vec<&str> = record["related"].as_array().expect("related triggers").iter().filter_map(Value::as_str).collect();
-    assert!(related.len() == 2 && related[0].ends_with("schemas/a.yaml") && related[1].ends_with("schemas/b.yaml"), "{value:#}");
+    let ends = |index: usize, tail: &str| related.get(index).is_some_and(|path| std::path::Path::new(path).ends_with(tail));
+    assert!(related.len() == 2 && ends(0, "schemas/a.yaml") && ends(1, "schemas/b.yaml"), "{value:#}");
     assert_ne!(validate.status.code(), Some(0), "{value:#}");
 
     let compose = run(&fixture, &["compose", "team.md", "--output", "json"]);

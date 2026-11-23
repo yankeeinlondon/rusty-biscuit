@@ -128,7 +128,7 @@ fn a_local_definition_claiming_the_kind_wins_over_the_registered_one() {
 
     let validation = validated(validate(&fixture, &hosts, "team.yaml", "kind: roster\nplatforms: 3\n"));
     assert!(validation.report.valid, "the local definition judges: {:#?}", validation.report.problems);
-    assert_eq!(validation.definition, fixture.path("work/schemas/roster.yaml").display().to_string());
+    assert_eq!(std::path::Path::new(&validation.definition), fixture.path("work/schemas/roster.yaml"));
 }
 
 #[test]
