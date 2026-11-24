@@ -81,7 +81,7 @@ decisions-for-review:
     - |-
         A missing `~/.darkmatter.yaml` is an `error` under `config` with the remedy `claudine setup`, the same as a missing `~/.claudine/config.yaml`. The spec only says "missing required user configuration". Normal Darkmatter startup creates the file, but doctor never does, and the registration repair needs it. The alternative is `warn` or `info` for the Darkmatter file. Reversing it changes one severity in `doctor/config.rs::darkmatter_findings` and one test.
     - |-
-        Doctor never shows a raw validator message, because those messages can quote authored values. An invalid value is shown by its kind and location ("has an invalid value at `/tts` (line 2, column 6)"). A pointer segment is shown only if the scope's schema declares that name somewhere, or if it is a list index; any other segment shows as `*`, so a messenger route's name is hidden. A semantic failure names its setting only when the message starts with a plain setting path. The remedy tells the user that any other `claudine` command prints the full message. The alternative is to show filtered messages, which keeps more detail but needs a per-message allowlist that can drift. Reversing it means changing the wording helpers in `doctor/config.rs`.
+        Doctor never shows a raw validator message, because those messages can quote authored values. An invalid value is shown by its kind and location ("has an invalid value at `/tts` (line 2, column 6)"). A pointer segment is shown only if the scope's schema declares that name somewhere, or if it is a list index; any other segment shows as `*`, so a messenger route's name is hidden. A semantic failure names its setting only when the message starts with a plain setting path. The remedy says that any other `claudine` command prints the full message. Commands that bypass configuration, including `claudine registrations`, do not print it or convert a legacy file. The alternative is to show filtered messages, which keeps more detail but needs a per-message allowlist that can drift. Reversing it means changing the wording helpers in `doctor/config.rs`.
     - |-
         `repo-config` reports a repository file that exists but is invalid or unreadable as `ok` ("present; its problems are reported under `config`"). The spec says the row reports whether the file exists, so its own check passes, and the errors are already counted once under `config`. The alternative is `warn`, which would count the same problem in two rows. Reversing it changes one arm of `check_repo_config`.
     - |-
@@ -97,7 +97,7 @@ decisions-for-review:
     - |-
         `file-read: []` (an empty list) is accepted by both scopes, so doctor treats it as valid. The plan expected it to be refused. I tested what the schema does and listed it with the valid cases; the scope-refusal case uses an invalid glob instead. If an empty list should be refused, the change goes in the permissions schema, not in doctor.
     - |-
-        A changed registration manifest is judged by Darkmatter's manifest admission (`bundle::admit_manifest`) plus checks that the host is `claudine`, every member path is one Claudine publishes, and every member's bytes match their digest. The plan asked for Darkmatter's full v2 loader (`load_entries`). An existing Claudine guard test forbids calling the installed-bundle loaders anywhere in Claudine's source, so using the loader would have meant loosening that guard. The difference: the full loader also prepares the schema payloads, so it would also catch a manifest whose files are digest-correct but whose schemas fail to prepare; that cannot happen for files Claudine itself published. To switch: allow `load_entries` in `composition/registration/inspect.rs` in `cli/tests/l1/registrations_command.rs` and replace `inspect.rs::manifest_load` (about 15 lines, no test changes).
+        A changed registration manifest is judged by Darkmatter's manifest admission (`bundle::admit_manifest`) plus checks that the host is `claudine`, every member path is portable and inside the managed directory, and every member's bytes match their digest. The member paths are not compared with the current compiled inventory. The plan asked for Darkmatter's full v2 loader (`load_entries`). An existing Claudine guard test forbids calling the installed-bundle loaders anywhere in Claudine's source, so using the loader would have meant loosening that guard. The difference: the full loader also prepares the schema payloads, so it would also catch a manifest whose files are digest-correct but whose schemas fail to prepare; a registration modified after publication can have this shape. A digest-correct bundle can also fail a cross-artifact catalog check.
     - |-
         The registration repair refuses to start when the user `~/.darkmatter.yaml` has any invalid `register` entry, including another host's. The plan says the repair needs a valid `register` field. The alternative is to require only that `register` is a list and let Darkmatter's writer refuse an invalid result; that would repair more homes but edits a file Darkmatter already reports as invalid. Reversing it changes `registration/inspect.rs::entry_precondition` and one test.
     - |-
@@ -647,7 +647,11 @@ probe is existence-only by design.
 - the permissions writer's local symlink check was replaced by the
   publisher's shared no-follow guard, `registration::config_target_blockers`
   (now `pub(crate)`), for both destinations and their `LOCK_SUFFIX`
-  sidecars.
+  sidecars. At this phase it checked only final components. The review 1
+  repair extended the write-path check to ancestors below the scope root.
+  The writer also checks that a proposed reference remains in scope. The
+  report does not yet apply that reference check to an edit that only writes
+  Darkmatter's file.
 - regression test:
   `lib/tests/l1/installed_registration.rs::installed_registration_setup_holds_the_publisher_lock_through_the_handoff`:
   a publisher started from inside setup's Claudine write (between the
@@ -702,7 +706,7 @@ Windows and WSL2.
 | Rule 10: extras, legacy paths, equivalent entry, missing entry, other hosts kept, blocked entry check | `extras_are_removable_warnings_and_the_fix_removes_only_them`, `the_retired_layout_is_a_warning_and_the_fix_removes_it_after_moving_the_entry`, `an_equivalent_spelling_of_the_entry_passes`, `a_missing_entry_is_a_fixable_error_and_other_hosts_entries_survive_the_fix`, `a_missing_or_invalid_user_file_blocks_the_repair_and_nothing_is_written`, `a_current_tree_with_a_missing_user_file_reports_the_entry_as_blocked` |
 | Rule 11: order, idempotence, extras deepest first, failed publish withholds the edit, failed register write keeps tree and legacy paths, retry converges, concurrency, obstructions | `composition::registration::repair::tests::*` (9), `doctor::registration::tests::{a_second_fix_changes_nothing, obstructions::*}` |
 | Rule 11 / Setup Integration: one publisher lock through setup | `installed_registration::installed_registration_setup_holds_the_publisher_lock_through_the_handoff`; existing setup migration, conflict, failed-publication, and link-refusal tests unchanged and green |
-| Rule 12: references in every spelling, third-party, broken, prerequisites, aliases, conflicts, Claudine-side reference, scoped mapping | `doctor::permissions::tests::{a_reference_to_claudine_passes_in_every_spelling, a_valid_third_party_reference_is_information, every_broken_reference_is_an_error_without_a_repair, a_missing_prerequisite_skips_its_scope_with_information, a_missing_home_skips_the_user_scope, a_repository_without_its_claudine_file_skips_only_that_scope, a_repository_that_is_the_home_is_assessed_once, a_repository_darkmatter_file_aliasing_the_user_one_skips_the_repository_scope, different_inline_blocks_conflict_and_nothing_is_written, a_claudine_side_reference_is_manual_in_every_darkmatter_state, a_mapping_that_fails_the_scoped_rules_is_manual, the_doctor_planner_*}` |
+| Rule 12: equivalent reference spellings, third-party and broken references with a valid Claudine counterpart, prerequisite skips, aliases, conflicts, Claudine-side reference, scoped mapping | `doctor::permissions::tests::{a_reference_to_claudine_passes_in_every_spelling, a_valid_third_party_reference_is_information, every_broken_reference_is_an_error_without_a_repair, a_missing_prerequisite_skips_its_scope_with_information, a_missing_home_skips_the_user_scope, a_repository_without_its_claudine_file_skips_only_that_scope, a_repository_that_is_the_home_is_assessed_once, a_repository_darkmatter_file_aliasing_the_user_one_skips_the_repository_scope, different_inline_blocks_conflict_and_nothing_is_written, a_claudine_side_reference_is_manual_in_every_darkmatter_state, a_mapping_that_fails_the_scoped_rules_is_manual, the_doctor_planner_*}` |
 | Rule 13: omitted / null / equal / transfer writes, comments kept, no-op rerun, interrupted transfer + retry, source-byte race, linked destination | `an_omitted_setting_is_repaired_with_the_default_block_and_the_reference`, `a_null_setting_reuses_claudines_mapping_and_writes_only_the_reference`, `an_effectively_equal_block_is_repaired_by_writing_only_the_reference`, `a_transfer_preserves_every_other_setting_and_comment_and_converges`, `an_interrupted_transfer_keeps_the_inline_block_and_a_retry_completes_it`, `a_file_changed_between_plan_and_commit_is_refused_without_an_overwrite`, `a_linked_destination_or_lock_sidecar_is_manual_and_nothing_is_written`, `the_repository_scope_is_repaired_with_its_relative_reference` |
 | Rule 4: redaction | `doctor::registration::tests::rows_never_show_an_authored_reference`, `doctor::permissions::tests::no_reference_or_block_value_reaches_the_report` |
 | Darkmatter writer and referenced-mapping check | `darkmatter::l1 config_init::{replace_manifest_registration_existing_*, check_referenced_permissions_needs_a_valid_mapping_of_the_scope}` |
@@ -748,9 +752,9 @@ exists; Phase 4 still adds the clap command, dispatch, and rendering.
   automatic selection tries first.
 - Severities follow the spec table. When the user configuration is not
   usable, the row is `info` ("speech settings could not be determined").
-  Every row ends with the note that detection checks only local
-  prerequisites. A disabled row also says that lifecycle `say` can still
-  speak.
+  Rows with usable user settings end with a note that detection checks
+  only local prerequisites. A disabled row also says that lifecycle
+  `say` can still speak.
 - The unrecognized name is never shown. Provider names come from a fixed
   table in `tts.rs`.
 - No engine is built, and nothing is prewarmed, synthesized, or played.
@@ -938,9 +942,11 @@ registry order (Phase 3), so wiring meant the CLI adapter only.
 
 - Help (`doctor --help` with no configuration, plus the grouped overview)
   and usage (`--repair` → 2, empty stdout).
-- Healthy home inside a repository: seven rows, exit 0, home tree unchanged.
-  This is the one spawned case that keeps the real Windows shell probes;
-  it tolerates `ok`/`warn` on `path`.
+- Healthy home inside a repository: seven rows and exit 0. The test checks
+  that the home tree outside `AppData` is unchanged. This is the one spawned
+  case that keeps the real Windows shell probes and accepts `ok` or `warn`
+  on `path`. The first Windows run found a cache write under the excluded
+  directory.
 - Warnings only (format 1 leftover) → exit 0. The JSON shape is checked
   (exactly five keys, types, single-line summary, id order). The five file
   rows equal the in-process `claudine::doctor::run` rows for the same home.
@@ -1321,3 +1327,56 @@ pre-existing warning printed (`err` undeclared in
   the CLI only renders those rows (`warnings_alone_exit_zero_and_both_formats_show_the_library_rows`
   proves the CLI rows equal the library rows).
 - No spec departures in this phase. Skipped or pre-existing failures: none.
+
+### Review verification (2026-11-24)
+
+- The manifest decision above originally described membership as restricted
+  to files Claudine publishes. In a temporary home, I added a valid
+  `local.yaml` schema library and its digest to the published manifest.
+  `claudine doctor --json` treated the changed manifest as loadable and the
+  file as an extra. The check verifies portable paths and matching bytes,
+  independently of the compiled inventory. I also confirmed that a
+  published schema with invalid YAML and an updated digest receives a
+  Doctor warning while `md schema validate` reports the host was refused.
+- I clarified the no-follow guard's scope in the setup integration notes.
+  `claudine doctor --fix --json` refused linked config files and writer
+  sidecars. With a linked `.claudine` parent, it edited the shared target
+  in both user and repository scope. The repository run replaced the
+  inline block and then failed verification of the new reference.
+- At review 1, the healthy-home test excluded `AppData` from its
+  comparison. The recorded first native Windows run observed a PowerShell
+  cache write there. The later repair removed the exclusion.
+- The configuration remedy's universal wording is documented above as
+  printed. In separate temporary homes, `claudine registrations` exited 0,
+  printed no error for invalid user YAML, and neither converted nor
+  removed legacy user JSON when YAML was absent.
+
+### Review 2 verification (2026-11-24)
+
+- The speech implementation notes previously said every speech row ended with
+  the local detection caveat. A direct `claudine doctor --json` run with an
+  unusable user configuration instead reported that speech settings could
+  not be determined and returned before the caveat.
+- The prior review note described the old healthy-home `AppData` filter in
+  the present tense. Claudine's current healthy-home test compares the
+  whole fixture tree. I checked its assertion and ran the test on Linux.
+  The repair log records the native Windows run that exercised the
+  PowerShell isolation.
+
+
+### Review 3 verification (2026-11-24)
+
+- The setup integration note described the original final-component
+  check as current. In temporary user and repository scopes, Doctor
+  refused a linked parent before writing when transferring a block.
+  With equivalent existing blocks, the report still offered a
+  reference-only edit through an out-of-scope target. The writer refused
+  it before saving. The note now records both boundaries.
+- The permissions coverage entry did not identify the counterpart
+  prerequisite. In a temporary repository with a healthy user
+  installation, `permissions: ./policy.yaml` and no optional Claudine
+  override, Doctor exited 0 in both formats when the target was missing.
+  `md compose doc.md --output json` on a shell document reported a
+  located reference error. A present and valid Claudine counterpart made
+  Doctor report the missing policy. The coverage entry now describes the
+  fixtures the tests actually exercise.
