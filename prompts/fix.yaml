@@ -1,0 +1,35 @@
+kind: sequence
+$schema:
+    spec: file(required;eager;match(**/*.md)) -> the specification file that we ground the review/fix cycle
+    plan: file(required)
+    implementation-log: file(required)
+    implemented: boolean(required)
+    ready: boolean(required;default(false)) -> whether the implementation of the specification is seen as "production ready"
+description: |-
+    A sequence which brings a specification -- _which has not been implemented_ -- through the review/fix lifecycle until we reach a "production ready" state.
+
+    This sequence will leverage the following tasks to achieve it's outcome:
+
+    1. `.fix/cycle.yaml`
+        - this is the primary loop where we _review_ and then _fix_
+        - this process of _reviewing_ and then _fixing_ will loop for up to
+          five times before finally stopping if production readiness can't be
+          achieved in those
+    2. `.fix/handler.md`
+plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
+implementation-log: "{{ spec ? dirname(spec) + '/implementation-log.md'  : null }}"
+implemented: "{{ frontmatter(spec, 'implemented') ? true : false }}"
+ready: "{{ frontmatter(spec, 'ready') ? true : false }}"
+
+initialize:
+    - when: "!implemented"
+      then:
+          - message: "💥 the spec `{{parent_dir(spec)}}` entered into the review/fix cycle but the spec was **not** marked as implemented!"
+          - error: "The spec `{{parent_dir(spec)}}` is not marked as implemented! This spec **must** be implemented to start the review/fix cycle!"
+    - when: "ready"
+      then:
+          - message: |-
+                🤷 the `{{parent_dir(spec)}}` spec entered the review/fix cycle already being marked as **production ready**. This spec will be considered completed.
+          - info: |-
+                The `{{parent_dir(spec)}}` spec entered the review/fix cycle but it is already marked as **production ready**. If you had intended for a full review/fix cycle then set the `ready` property on {{ link(spec,relative(spec)) }} to `false` and rerun this prompt.
+          - stop
