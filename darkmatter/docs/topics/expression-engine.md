@@ -94,7 +94,7 @@ Darkmatter declares its built-in expressions in `darkmatter/schemas/partials/fun
 
 The scope boundary is strict:
 
-- **Declaration**: Simplified Schema validates the catalog envelope and type syntax strictly; Darkmatter validates callable semantics (required categories, overload agreement, local-only helpers, no built-in or cross-catalog name collisions, eager compilation) identically in `md schema validate`, DMLS, and host registration. Neither catalog kind allows `when` — lifecycle event availability stays in the host's [lifecycle artifact](./lifecycle/host-artifact.md).
+- **Declaration.** Simplified Schema validates the catalog envelope and type syntax. `md schema validate`, DMLS, and host registration share Darkmatter's callable checks for categories, overload agreement, local helpers, and reserved built-in expression names. Host registration also checks names and aliases across the catalogs in the bundle. Neither catalog kind allows `when`. Lifecycle event availability stays in the host's [lifecycle artifact](./lifecycle/host-artifact.md).
 - **Selected-document analysis**: Only documents matched by the registered host's triggers see its functions in DMLS and `md compose` passive checks. Unselected documents and other hosts see none of them.
 - **Host-only evaluation**: `md compose` never runs host handlers; a call that reaches evaluation fails with `host function <name>() requires the host runtime`. Only the host's own Rust process executes the bound handler. Hosts cannot register `mutation-schema` catalogs (`host-defined actions are not supported`).
 

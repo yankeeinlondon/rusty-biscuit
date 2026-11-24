@@ -446,8 +446,11 @@ exports no `$schema`:
 
 | Kind | What its callables are |
 |---|---|
-| `expression-schema` | value-producing expression functions, such as `kebab_case(name)` |
+| `expression-schema` | value-producing expression functions, such as `project_slug(name)` |
 | `mutation-schema` | signature-backed lifecycle actions, such as `set_frontmatter` |
+
+In this expression catalog, `Label` is a private helper type used by the
+first overload of `project_slug`. Both overloads belong to the `Text` category.
 
 ```yaml
 kind: expression-schema
@@ -455,8 +458,8 @@ description: Text helpers.
 categories:
     - Text -> Transform text.
 types:
-    Label: string(min(1))   # a private helper, usable in signatures only
-    kebab_case:
+    Label: string(min(1))
+    project_slug:
         - |-
             function(
                 parameters(x: Label);
