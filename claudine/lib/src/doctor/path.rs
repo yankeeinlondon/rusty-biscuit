@@ -36,8 +36,7 @@ fn native_shell_lookups(working_dir: &Path) -> Vec<(InstalledShell, ShellLookup)
 
     // `test-fixtures` only: a CLI test of another row names this variable so
     // its child starts none of the host's real shells, which cost seconds per
-    // run and write PowerShell's own startup cache under the fixture home.
-    // Every probe outcome is tested through `assess`.
+    // run. Every probe outcome is tested through `assess`.
     #[cfg(feature = "test-fixtures")]
     {
         const TEST_SKIP_SHELL_PROBES_ENV: &str = "CLAUDINE_TEST_DOCTOR_SKIP_SHELL_PROBES";

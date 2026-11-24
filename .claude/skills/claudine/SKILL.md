@@ -90,7 +90,10 @@ one-key mappings in the file (`- bash: { command: … }`,
 the `actions` and `configurations` fields turn them into the internally tagged
 `HookAction`/`MessengerProviderConfig`, which keep their tagged serialization
 everywhere else. A flat (`type:`/`provider:`) entry is refused by `load.rs`
-with its keyed spelling, and `json_conversion` rewrites it (`wire::upgrade_flat`). Errors are
+with its keyed spelling; the document's other problems come from judging its
+`wire::upgrade_flat` view, mapped back to the keys the file wrote
+(`FlatEntry::authored`), so a typo inside a flat entry is still a located
+`UnknownKey`. `json_conversion` rewrites flat entries with the same function. Errors are
 `ClaudineError::ConfigInvalid`/`ConfigConversion` with file:line:column and
 JSON pointer; each `ConfigProblem` carries a `ConfigProblemKind`
 (`UnknownKey`, whose pointer names the key and whose position is the key
@@ -135,7 +138,8 @@ on an existing config passes a no-op write); the service refuses a missing home 
 repository before calling it, records Claudine's pre-existing `permissions`,
 then moves an inline `~/.darkmatter.yaml` block into Claudine's file (only
 when Claudine had none or a semantically equal one, compared through
-`darkmatter::config::init::effective_permissions`) and rewrites
+`darkmatter::config::init::effective_permissions`; `null` on either side
+is no block, as both loaders read it, so setup never copies `null`) and rewrites
 `.darkmatter.yaml` to `~/.claudine/config.yaml` (`./.claudine/config.yaml`
 at repository scope) in one two-target transaction with the Darkmatter file
 `published_last`. Differing blocks are `SetupError::Conflict`; a reference
@@ -156,8 +160,12 @@ in place of any spelling of the retired `~/.claudine/darkmatter-host.yaml`
 that succeeded, `registration::remove_legacy_registration` deletes exactly
 the retired manifest and `~/.claudine/darkmatter-host/` after a no-follow
 preflight of the whole tree (a link is `CleanupError::Obstructed`, nothing
-removed). `ClaudineSetup.{registration, cleanup}` carry both results; the
-CLI reports them in `init_wizard.rs::write_with_darkmatter_setup`. Tests:
+removed). `ClaudineSetup.{registration, cleanup}` carry both results (a
+partial cleanup is `CleanupFailure { removed, error }`, outermost removed
+entries only; a failed publish is `SetupError::Publish { error, changes }`;
+every removal of `composition/registration/` goes through
+`registration.rs::remove_entry`, whose `#[cfg(test)]` seam
+`fail_removals` makes chosen paths fail on every OS); a name that is not the inventory's spelling is matched to an inventory path by `registration.rs::one_entry` (no-follow file identity plus a listing check), never by string, in the extras scan, the publisher's retirement and empty-folder removal, and the digest-mismatch lookup, so a case-only alias on APFS/NTFS is the member, not an extra; the CLI reports them in `init_wizard.rs::write_with_darkmatter_setup`. Tests:
 `lib/tests/l1/installed_registration.rs` (migration section). User docs:
 [Schemas → published host registration](topics/schemas.md#the-published-host-registration).
 `setup_claudine` holds the publisher lock for the whole sequence
@@ -169,17 +177,56 @@ plan_permissions_handoff(context, scope, HandoffMode::{Setup, Doctor}, …)`
 and `commit_permissions_handoff`; setup mode keeps setup's create-and-complete
 behavior through `init::setup_change`, doctor mode edits only `permissions`
 of existing valid files against their observed bytes (Claudine's block
-judged also by `darkmatter::config::init::check_referenced_permissions`).
+judged also by `darkmatter::config::init::check_referenced_permissions`;
+`doctor/permissions.rs::assess` makes an edit of a `.darkmatter.yaml`
+whose `ConfigFile::registration_findings()` is non-empty manual, since the
+writer's whole-file check refuses it, and a plan failing
+`HandoffPlan::reference_in_scope` manual, the same rule the committer checks
+again before its transaction, and a plan whose `HandoffPlan::layout_obstacle`
+is `Some` manual, both files unchanged).
+Repair eligibility also follows the format-preserving editor's layout
+rules, never schema validity alone: `TargetChange::edit_refusal` (Darkmatter)
+dry-runs a planned change's edits on the bytes it expects, and
+`registration/inspect.rs::edit_layout` maps a refusal other than parse or
+path to `EditLayout::{Root, Setting}`; registration uses
+`inspect::entry_layout` (`init::replace_manifest_refusal`, planned before
+publication with a missing manifest identified by location) as
+`EntryPrecondition::Layout` in both doctor's check and the repair's
+`editable`, so an inline `register` list or root the edit reaches makes the
+whole repair manual and nothing is published. An inline collection the
+planned edit does not reach is no obstacle. Tests:
+`doctor/{registration,permissions}_tests.rs` (`layout_cases!`).
+A broken reference target is never the handoff's to report alone:
+`doctor/config.rs::observe` follows every valid working-copy `permissions`
+reference through `darkmatter::config::init::observe` whatever state the
+scope's Claudine file is in (`DarkmatterState::Valid(file, Some(BrokenReference))`),
+`config` reports it located by `ConfigFile::permissions_position`, and the
+handoff's `ManualReason::BrokenReference` finding keeps its `error` but
+refers to `config` (tests: `doctor/config_tests.rs::broken_target_cases!`).
 Doctor's registration repair is `composition/registration/repair.rs::
-repair_registration` (requires a valid existing user `.darkmatter.yaml`;
-preflight with the no-follow guard, publish, delete extras deepest first,
+repair_registration` (requires a valid existing user `.darkmatter.yaml`
+whose entry edit the editor can make in place; preflight with the no-follow guard, publish, delete extras deepest first,
 verify, `init::replace_manifest_registration_existing`, verify, then legacy
 cleanup, all under one `Publisher`), with read-only inspection in
 `registration/inspect.rs` (`inspect_installation`; `config_target_blockers`
 is the no-follow guard both doctor writers use for a destination and its
 `LOCK_SUFFIX` sidecar). Claudine source may not call Darkmatter's
-installed-bundle loaders (`registrations_command.rs` guard), so a changed
-manifest is judged with `bundle::admit_manifest` plus digest checks.
+installed-bundle loaders (`registrations_command.rs` guard), so
+`inspect_installation` only compares bytes and doctor then calls
+`Installation::judge_manifest(home, context)`: it locates the members with
+Darkmatter's installed-member resolution (`bundle::admit_installed_manifest`,
+confined to the bundle folder, so `../darkmatter/schemas/x.yaml` is the member
+`schemas/x.yaml` and `../x.yaml` is refused, as the loader does), sets
+`ExpectedFile::digest_mismatch` (a changed member's note alleges a digest
+mismatch only then) from those locations, and for a changed manifest reads
+the bundle itself without following links and hands the bytes to
+`bundle::verify_read` then `registration::load_verified`, the loader's own
+digest checks and preparation (byte integrity alone never counts as loading).
+Repair never judges: it verifies by byte equality with the inventory.
+Retirement (`previous_member_paths`) keeps the stricter lexical
+`bundle::admit_manifest`, so an old manifest spelled any other way retires
+nothing. Tests: `doctor/registration_tests.rs`
+(`publish_with_edited_member`, `member_spelling_cases!`).
 Doctor's two host rows never build an engine or run `claudine`:
 `doctor/tts.rs::assess(user_config, candidates)` reads enablement and the
 provider through `bridge_tts_settings` and judges biscuit-speaks' detected

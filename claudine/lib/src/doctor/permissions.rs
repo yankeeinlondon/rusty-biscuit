@@ -12,13 +12,20 @@
 
 use std::path::{Path, PathBuf};
 
+use biscuit_file::canonicalize_simplified;
+
 use darkmatter::config::init::{self as dm_init, BlockState, InitError, effective_permissions};
+use darkmatter::config::load::ConfigFile;
 use darkmatter::config::write::ConfigWriteError;
 
-use super::config::{ClaudineState, ConfigObservations, DarkmatterState, ObservedFile, io_kind};
+use super::config::{
+    ClaudineState, ConfigObservations, DarkmatterState, MD_FULL_MESSAGE, ObservedFile, SemanticProblem, io_kind,
+    superseded_note,
+};
 use super::report::display_path;
 use super::{CheckOutcome, Finding, Pass, RepairOutcome, Scope, Severity};
-use crate::composition::registration::config_target_blockers;
+use super::registration::{blocker_text, layout_problem, layout_remedy};
+use crate::composition::registration::BlockerProblem;
 use crate::config::schema::ConfigScope;
 use crate::config::setup::{
     ClaudineSide, ConflictKind, HandoffCommitError, HandoffMode, HandoffPlan, HandoffRefusal, ManualReason,
@@ -26,7 +33,11 @@ use crate::config::setup::{
     same_file,
 };
 
-const FIX: &str = "run `claudine doctor --fix`, or `claudine setup`";
+/// The remedy of a repairable handoff in either scope. `claudine setup`
+/// performs the user handoff too, but only after publishing the host
+/// registration, so a publisher obstruction stops it first; doctor's repair
+/// does not depend on publication.
+const FIX: &str = "run `claudine doctor --fix`";
 
 /// Added to every repository-scope finding that was assessed.
 const REPOSITORY_POLICY: &str = "this describes the handoff on disk; what a repository is granted still depends on Darkmatter's user, committed, and working-copy policy";
@@ -42,19 +53,24 @@ pub(crate) fn check_permissions(pass: &Pass<'_>) -> CheckOutcome {
     outcome
 }
 
+/// Each scope's handoff is independent: a failure in one is recorded with its
+/// scope and the other scope is still repaired. Within one scope the two
+/// writes stay ordered, so a failure there stops that scope's handoff.
 pub(crate) fn repair_permissions(pass: &Pass<'_>) -> RepairOutcome {
     let mut changes = Vec::new();
-    for scope in [Scope::User, Scope::Repository] {
+    let mut failures = Vec::new();
+    for (scope, label) in [(Scope::User, "user"), (Scope::Repository, "repository")] {
         let Some(Assessment::Repairable { plan, .. }) = assess(pass, scope) else { continue };
         match commit(pass, *plan) {
             Ok(made) => changes.extend(made),
             Err((made, reason)) => {
                 changes.extend(made);
-                return RepairOutcome { changes, failure: Some(reason) };
+                failures.push(format!("{label} scope: {reason}"));
             }
         }
     }
-    RepairOutcome { changes, failure: None }
+    let failure = (!failures.is_empty()).then(|| failures.join("; "));
+    RepairOutcome { changes, failure }
 }
 
 /// One scope's handoff, as the check and the repair both see it.
@@ -104,7 +120,10 @@ fn assess(pass: &Pass<'_>, scope: Scope) -> Option<Assessment> {
 
     let plan = match plan_permissions_handoff(context, config_scope, HandoffMode::Doctor, claudine, &observation) {
         Ok(plan) => plan,
-        Err(refusal) => return settled(refused(refusal, label, &claudine_shown, at_darkmatter, at_claudine)),
+        Err(refusal) => {
+            let superseded = if scope == Scope::Repository { None } else { observed.superseded_user_problem() };
+            return settled(refused(refusal, label, &claudine_shown, superseded, at_darkmatter, at_claudine));
+        }
     };
     if !(plan.edits_claudine() || plan.edits_darkmatter()) {
         return settled(match plan.permissions {
@@ -116,19 +135,45 @@ fn assess(pass: &Pass<'_>, scope: Scope) -> Option<Assessment> {
             _ => at_darkmatter(Severity::Ok, format!("the {label} `permissions` refers to Claudine's configuration")),
         });
     }
-    if let Some(link) = obstruction(&plan) {
-        return settled(
-            Finding::new(Severity::Error, scope, "is a symbolic link, which the repair does not write through")
-                .at(&link)
-                .remedy("hand `permissions` over by hand, or replace the link with the file, then run `claudine doctor --fix`"),
-        );
-    }
-
     let summary = match &observation.permissions {
         BlockState::Inline(serde_json::Value::Null) => format!("the {label} `permissions` is null instead of referring to Claudine's configuration"),
         BlockState::Inline(_) => format!("the {label} `permissions` is an inline block that Claudine's configuration should hold"),
         _ => format!("the {label} `.darkmatter.yaml` does not set `permissions` to Claudine's configuration"),
     };
+    // Darkmatter's writer judges the whole edited file, so a `register`
+    // problem the edit leaves in place refuses it on every attempt.
+    if darkmatter_file(observed, scope).is_some_and(|file| !file.registration_findings().is_empty()) {
+        return settled(
+            at_darkmatter(Severity::Error, summary)
+                .note("the repair cannot edit this file while its `register` setting is invalid, which is reported under `config`")
+                .remedy(format!("correct the `register` setting, then {FIX}")),
+        );
+    }
+    if let Some(blocker) = plan.obstruction() {
+        let remedy = match blocker.problem {
+            BlockerProblem::Unreadable { .. } => "make it readable, then run `claudine doctor`",
+            _ => "hand `permissions` over by hand, or replace it with a real folder or file, then run `claudine doctor --fix`",
+        };
+        return settled(Finding::new(Severity::Error, scope, blocker_text(blocker.problem)).at(&blocker.path).remedy(remedy));
+    }
+    // The writer refuses a reference whose target leaves the scope, which a
+    // linked Claudine file or folder can do even when only Darkmatter's file
+    // is edited.
+    if !plan.reference_in_scope() {
+        return settled(out_of_scope(scope, &claudine_path, at_darkmatter(Severity::Error, summary)));
+    }
+
+    // The editor keeps every authored byte, so it refuses an edit that has
+    // to walk into a flow collection; both files stay as they are.
+    if let Some((path, layout)) = plan.layout_obstacle() {
+        let shown = display_path(path);
+        return settled(
+            at_darkmatter(Severity::Error, summary)
+                .note(layout_problem(layout, &shown))
+                .remedy(layout_remedy(layout, &shown)),
+        );
+    }
+
     let what = if plan.edits_claudine() {
         format!("the repair writes the block into {claudine_shown}, then refers to it")
     } else {
@@ -166,7 +211,7 @@ fn prerequisites(observed: &ConfigObservations, scope: Scope, label: &str) -> Re
     })
     .map_err(|(path, why)| skipped(path, why))?;
     let darkmatter_path = file_ready(darkmatter, |state| match state {
-        DarkmatterState::Valid(_) => None,
+        DarkmatterState::Valid(..) => None,
         DarkmatterState::Unavailable => Some("its location cannot be determined"),
         DarkmatterState::Missing => Some("this `.darkmatter.yaml` does not exist"),
         DarkmatterState::AliasOfUser => Some(ALIAS),
@@ -174,6 +219,18 @@ fn prerequisites(observed: &ConfigObservations, scope: Scope, label: &str) -> Re
     })
     .map_err(|(path, why)| skipped(path, why))?;
     Ok((claudine_path, darkmatter_path))
+}
+
+/// The scope's Darkmatter file as `config` observed it, when it was valid.
+fn darkmatter_file(observed: &ConfigObservations, scope: Scope) -> Option<&ConfigFile> {
+    let file = match scope {
+        Scope::Repository => observed.darkmatter_repo.as_ref()?,
+        Scope::General | Scope::User => &observed.darkmatter_user,
+    };
+    match &file.state {
+        DarkmatterState::Valid(file, _) => Some(file),
+        _ => None,
+    }
 }
 
 const ALIAS: &str = "this file is the user file, already assessed in the user scope";
@@ -195,14 +252,15 @@ fn refused(
     refusal: HandoffRefusal,
     label: &str,
     claudine_shown: &str,
+    superseded: Option<&SemanticProblem>,
     at_darkmatter: impl Fn(Severity, String) -> Finding,
     at_claudine: impl Fn(Severity, String) -> Finding,
 ) -> Finding {
-    let correct = "correct it, then run `claudine doctor` again; `md` prints the full message for this file";
+    let correct = "correct it, then run `claudine doctor` again";
     match refusal {
         HandoffRefusal::Darkmatter(_) => at_darkmatter(Severity::Error, format!("the {label} `permissions` is invalid"))
             .note("it is also reported under `config`")
-            .remedy(correct),
+            .remedy(format!("{correct}; {MD_FULL_MESSAGE}")),
         HandoffRefusal::Conflict { kind: ConflictKind::DifferentBlocks, .. } => at_darkmatter(
             Severity::Error,
             format!("the {label} `permissions` block differs from the one in Claudine's configuration"),
@@ -225,7 +283,10 @@ fn refused(
                 Severity::Error,
                 format!("the {label} `permissions` refers to {names}, which does not supply a valid `permissions` mapping"),
             )
-            .remedy("correct the reference or the file it names; `md` prints the full message, and `md init --inline` replaces the reference with a block")
+            // `config` judges every reference target, whether or not this
+            // scope's pair is complete, and carries the location and remedy.
+            .note("the reference is reported under `config`")
+            .remedy("correct it as `config` describes, then run `claudine doctor` again")
         }
         HandoffRefusal::Manual(ManualReason::DarkmatterMissing) => {
             at_darkmatter(Severity::Info, format!("{label} scope skipped: this `.darkmatter.yaml` does not exist"))
@@ -233,34 +294,46 @@ fn refused(
         HandoffRefusal::Manual(ManualReason::ClaudineUnusable) => {
             at_claudine(Severity::Error, "its `permissions` setting cannot be handed to Darkmatter".into()).remedy(correct)
         }
-        HandoffRefusal::Manual(ManualReason::ClaudineInvalid) => at_claudine(
-            Severity::Error,
-            "breaks a configuration rule, so the `permissions` handoff cannot edit it".into(),
-        )
-        .note("the rule is reported under `config`")
-        .remedy("correct it, then run `claudine doctor --fix`"),
+        HandoffRefusal::Manual(ManualReason::ClaudineInvalid) => {
+            let finding = at_claudine(
+                Severity::Error,
+                "breaks a configuration rule, so the `permissions` handoff cannot edit it".into(),
+            );
+            match superseded {
+                // `config` judges the merged configuration, which the
+                // repository's overrides repair; the handoff edits this file
+                // alone.
+                Some(problem) => finding.note(superseded_note(problem)),
+                None => finding.note("the rule is reported under `config`"),
+            }
+            .remedy("correct it, then run `claudine doctor --fix`")
+        }
         HandoffRefusal::Manual(ManualReason::UnusableMapping) => at_claudine(
             Severity::Error,
             format!("the `permissions` mapping it would supply fails Darkmatter's checks for the {label} scope"),
         )
-        .remedy(format!("correct the mapping (`md` prints the full message once it is in use), then run `{FIX}`")),
+        .remedy(format!("correct its `permissions` mapping for the {label} scope, then {FIX}")),
     }
 }
 
-/// The first file the plan writes, or its lock sidecar, that the writer
-/// must not touch: a symbolic link or reparse point it would follow, or
-/// something other than a regular file. The publisher's no-follow guard
-/// ([`config_target_blockers`]) decides, as it does for the registration
-/// repair's edit.
-fn obstruction(plan: &HandoffPlan) -> Option<PathBuf> {
-    let mut targets = Vec::new();
-    if plan.edits_claudine() {
-        targets.push(&plan.claudine_config);
-    }
-    if plan.edits_darkmatter() {
-        targets.push(&plan.darkmatter_config);
-    }
-    targets.into_iter().find_map(|target| config_target_blockers(target).into_iter().next().map(|blocker| blocker.path))
+/// The finding for a plan whose reference would leave its scope: it names
+/// where Claudine's file resolves to and how to bring it back inside.
+fn out_of_scope(scope: Scope, claudine: &Path, finding: Finding) -> Finding {
+    let replace = format!("replace the link with the file it names, then {FIX}");
+    let (root, remedy) = match scope {
+        // Darkmatter's repository policy refuses such a reference too, so
+        // writing it by hand is no alternative there.
+        Scope::Repository => ("the repository", replace),
+        Scope::General | Scope::User => (
+            "your home",
+            format!("{replace}; or set this file's `permissions` to refer to Claudine's configuration yourself"),
+        ),
+    };
+    let resolved = match canonicalize_simplified(claudine) {
+        Ok(target) => format!("{} resolves to {}, outside {root}", display_path(claudine), display_path(&target)),
+        Err(_) => format!("{} cannot be resolved inside {root}", display_path(claudine)),
+    };
+    finding.note(format!("{resolved}; the repair refers only to a file inside its scope")).remedy(remedy)
 }
 
 /// Commits one scope's plan and verifies it: the changes made, or those
@@ -269,9 +342,6 @@ fn commit(pass: &Pass<'_>, plan: HandoffPlan) -> Result<Vec<String>, (Vec<String
     let Ok(context) = pass.environment().context() else {
         return Err((Vec::new(), "the launch directory's file-resolution context could not be built".into()));
     };
-    if let Some(link) = obstruction(&plan) {
-        return Err((Vec::new(), format!("{} is a symbolic link; nothing was saved", display_path(&link))));
-    }
     let (claudine, darkmatter) = (plan.claudine_config.clone(), plan.darkmatter_config.clone());
     let (scope, expected) = (darkmatter_scope_of(plan.scope()), plan.block.clone());
     // The writer reports resolved paths; the report names the files as found.
@@ -320,6 +390,12 @@ fn failure(
     let nothing = "nothing was saved";
     let reason = match error {
         HandoffCommitError::Claudine(_) => "the edited Claudine configuration would be invalid; nothing was saved".to_string(),
+        HandoffCommitError::Obstructed(blocker) => {
+            format!("{} {}; nothing was saved", display_path(&blocker.path), blocker_text(blocker.problem))
+        }
+        HandoffCommitError::ReferenceOutOfScope => {
+            "the reference would not name Claudine's configuration inside its scope; nothing was saved".to_string()
+        }
         HandoffCommitError::UnusableTarget => {
             "the edited Claudine configuration would not supply a usable `permissions` mapping; nothing was saved".to_string()
         }

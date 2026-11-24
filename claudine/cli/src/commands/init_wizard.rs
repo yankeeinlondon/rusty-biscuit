@@ -333,7 +333,16 @@ pub(crate) fn write_with_darkmatter_setup(
                         ));
                     }
                 }
-                Some(Err(error)) => log::warn(&format!("  The retired host registration was not removed: {error}")),
+                Some(Err(failure)) => {
+                    for path in &failure.removed {
+                        log::message(&format!(
+                            "  Removed `{}` of the retired host registration",
+                            biscuit_file::to_portable_string(path)
+                        ));
+                    }
+                    let state = if failure.removed.is_empty() { "was not removed" } else { "was only partly removed" };
+                    log::warn(&format!("  The retired host registration {state}: {}", failure.error));
+                }
                 None => {}
             }
             Ok(claudine_config)
@@ -347,7 +356,14 @@ pub(crate) fn write_with_darkmatter_setup(
             log::warn("  There is no home directory, so Darkmatter's `~/.darkmatter.yaml` was not set up");
             Ok(path)
         }
-        Err(SetupError::Publish(error)) => Err(error.into()),
+        Err(SetupError::Publish { error, changes }) => {
+            if let Some(home) = context.home_dir() {
+                for change in changes.describe(home) {
+                    log::message(&format!("  Before the failure, the publish {change}"));
+                }
+            }
+            Err(error.into())
+        }
         Err(error) => {
             log::warn(&format!("  Darkmatter permissions were not set up: {error}"));
             Ok(claudine::config::setup::claudine_config_path(&context, scope)?)

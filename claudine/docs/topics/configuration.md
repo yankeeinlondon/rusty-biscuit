@@ -73,8 +73,8 @@ repository its files too, with these same rules, but never stops at the
 first problem and never writes: a missing file is not created and a legacy
 `config.json` is not converted. Unknown keys are listed, with their line and
 column, under its `stray-config-keys` row. It shows where each problem is and
-what kind it is, never the value; any other `claudine` command prints the
-full message.
+what kind it is, never the value; each remedy names a command that prints
+the full message ([where the full message is printed](../cli/doctor.md#where-the-full-message-is-printed)).
 
 ## Defaults and inheritance
 
@@ -181,6 +181,33 @@ actions:
 … at /actions/session_start/0: an action is now written as a mapping keyed by its kind, not with `type:`; write `{ bash: { command: "./notify.sh" } }`
 ```
 
+The rest of a flat entry is still judged as its keyed form would be, and
+reported beside the migration message at the key the file wrote: a
+misspelled setting (`timout: 5` beside `command:`) is an unknown key at
+`/actions/session_start/0/timout`, on the misspelled key's own line, and a
+wrong-typed one (`timeout_ms: soon`) is an invalid value at
+`/actions/session_start/0/timeout_ms`. The keyed spelling the message gives
+copies every field as written, a misspelled one included, so correct those
+too.
+
+The rules that judge the whole file are checked beside a flat entry too, so
+one load names every edit the file needs. Writing both `preferred_agent` and
+`favorite_agent` is reported at `/favorite_agent`, and an exit expression
+that writes both `pattern` and `patterns`, or neither, at its own entry
+(`/exit_expressions/0`, or `/exit_expressions/rules/0` in the layered
+form), whatever form the actions and routes take and whatever else the
+schema refuses:
+
+```yaml
+exit_expressions:
+  - pattern: STOP         # /exit_expressions/0: write `pattern` or `patterns`, not both
+    patterns: [HALT]
+actions:
+  session_start:
+    - type: bash          # /actions/session_start/0: the keyed spelling
+      command: ./notify.sh
+```
+
 Replace each flagged entry with the spelling the message gives. Kinds are
 written in snake_case (`discord_webhook`, `slack_webhook`), and the message
 already converts a hyphenated `provider: slack-webhook`. Only the file
@@ -277,16 +304,19 @@ table gives it a `permissions` block:
 
 | `~/.darkmatter.yaml` before setup | What setup does |
 |---|---|
-| missing, or without `permissions` | writes the reference above (and any other missing Darkmatter setting at its default); Claudine's file gets the default block if it has none |
+| missing, or without `permissions` (`permissions: null` counts as without) | writes the reference above (and any other missing Darkmatter setting at its default); Claudine's file gets the default block if it has none |
 | an inline `permissions` block | copies the block into `~/.claudine/config.yaml`, then replaces it in `.darkmatter.yaml` with the reference |
 | an inline block, and Claudine's file already has a different one | changes neither block and warns, naming both files; the inline block stays in force until you keep one of them |
-| a reference to `~/.claudine/config.yaml` | nothing |
+| a reference to `~/.claudine/config.yaml` | nothing, except that Claudine's file gets the default block if it has none |
 | a reference to another file | nothing; Claudine does not take over another program's block |
 
 Both files are written in one locked transaction, Claudine's first: if the
 second write fails, `.darkmatter.yaml` still holds its original block, and
 the next setup finishes the move. Comments and every other setting in both
-files are kept, and running setup again changes nothing. Repository setup
+files are kept, and running setup again changes nothing. A `null`
+`permissions` in either file is read as no block, as both programs' loaders
+read it: setup never copies `null`, and a Claudine file holding `null` gets
+the default block. Repository setup
 does the same with `{repo-root}/.darkmatter.yaml` and
 `{repo-root}/.claudine/config.yaml` (referenced as `./.claudine/config.yaml`),
 and fails before writing anything outside a repository. With no home
@@ -299,8 +329,14 @@ for a repository whose two files both exist, in its
 as setup when Darkmatter's file has no `permissions` or an inline block
 Claudine can take over, with the same order and the same guarantee that a
 failed second write leaves the original block in force. Unlike setup, it
-edits only existing, valid files, never writes through a symbolic link, and
-never resolves a conflict: two different blocks stay an error until you
+edits only existing, valid files (a `.darkmatter.yaml` whose `register`
+setting is invalid is left for you to correct, since Darkmatter's writer
+would refuse the edited file, and a scope whose edit would reach an inline
+root mapping, which Darkmatter's format-preserving editor cannot change in
+place, is left for you to rewrite in block form), never writes through a
+symbolic link, never
+writes a reference to a Claudine file that a link places outside its scope
+(your home, or the repository), and never resolves a conflict: two different blocks stay an error until you
 keep one. See [`claudine doctor` → Permissions repair](../cli/doctor.md#permissions-repair).
 
 The same steps are available to Rust callers as

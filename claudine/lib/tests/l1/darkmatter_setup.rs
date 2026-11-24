@@ -164,6 +164,37 @@ fn setup_repeated_changes_nothing_and_keeps_authored_values() {
 }
 
 #[test]
+fn setup_hands_off_an_aliased_user_file_as_the_user_file() {
+    // The user file seen from a repository: through a linked repository
+    // `.darkmatter.yaml`, or with the home as the repository root. Its new
+    // `~/.claudine/config.yaml` reference is a user reference, which a
+    // repository file could not hold.
+    let mut layouts = vec!["home"];
+    if cfg!(unix) {
+        layouts.push("linked");
+    }
+    for layout in layouts {
+        let fixture = Fixture::new();
+        let inline = "# mine\npermissions:\n  file-read:\n    - ~/notes/*.md\nregister: []\n";
+        fixture.write(&fixture.darkmatter(), inline);
+        let root = if layout == "home" { fixture.home() } else { fixture.root.join("repo") };
+        #[cfg(unix)]
+        if layout == "linked" {
+            std::os::unix::fs::symlink(fixture.darkmatter(), root.join(".darkmatter.yaml")).unwrap();
+        }
+        let context =
+            FileResolutionContext::from_snapshot(root.clone(), Some(fixture.home()), HashMap::new()).with_repository_root(&root);
+
+        let setup = setup_with_darkmatter(&context, ConfigScope::User, write_default)
+            .unwrap_or_else(|error| panic!("{layout}: {error}"));
+
+        assert_eq!(setup.permissions, PermissionsHandoff::Transferred, "{layout}");
+        assert_eq!(document(&fixture.darkmatter())["permissions"], "~/.claudine/config.yaml", "{layout}");
+        assert_eq!(document(&fixture.claudine())["permissions"], json!({ "file-read": ["~/notes/*.md"] }), "{layout}");
+    }
+}
+
+#[test]
 fn setup_conflicting_blocks_write_neither_permissions() {
     let fixture = Fixture::new();
     fixture.write(&fixture.darkmatter(), CUSTOM);
@@ -296,4 +327,48 @@ fn setup_without_a_home_writes_nothing() {
 
     assert!(matches!(error, SetupError::NoHome), "{error}");
     assert_eq!(fixture.files(), before);
+}
+
+/// `permissions: null` is no authored block to Darkmatter's loader (the
+/// schema default stands in for it) and to Claudine's, so setup hands it off
+/// as an omitted setting: only the reference is written, Claudine's file
+/// keeps its own block or gets the default one, and `null` is never copied.
+macro_rules! null_handoff_cases {
+    ($($name:ident: darkmatter $darkmatter:expr, claudine $claudine:expr => $handoff:expr, $block:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            let fixture = Fixture::new();
+            fixture.write(&fixture.darkmatter(), $darkmatter);
+            if let Some(claudine) = $claudine {
+                fixture.write(&fixture.claudine(), claudine);
+            }
+
+            let setup = fixture.setup().unwrap_or_else(|error| panic!("{error}"));
+
+            assert_eq!(setup.permissions, $handoff);
+            assert_eq!(document(&fixture.darkmatter())["permissions"], "~/.claudine/config.yaml");
+            let block: Value = $block;
+            assert_eq!(document(&fixture.claudine())["permissions"], block, "never `null`");
+            validate_claudine(&fixture.claudine());
+            assert_eq!(fixture.policy_block(), (fixture.claudine(), block), "the reference resolves to the block");
+        }
+    )*};
+}
+
+null_handoff_cases! {
+    setup_null_darkmatter_permissions_with_no_claudine_block_gets_the_default:
+        darkmatter "permissions: null\n", claudine None::<&str>
+        => PermissionsHandoff::Referenced, default_permissions(DarkmatterScope::User);
+    setup_null_darkmatter_permissions_keeps_claudines_block:
+        darkmatter "permissions: null\n", claudine Some("permissions:\n  network: allow\n")
+        => PermissionsHandoff::Referenced, json!({ "network": "allow" });
+    setup_null_claudine_permissions_with_omitted_darkmatter_gets_the_default:
+        darkmatter "register: []\n", claudine Some("permissions: null\n")
+        => PermissionsHandoff::Referenced, default_permissions(DarkmatterScope::User);
+    setup_null_claudine_permissions_takes_the_inline_block:
+        darkmatter "permissions:\n  network: allow\n", claudine Some("permissions: null\n")
+        => PermissionsHandoff::Transferred, json!({ "network": "allow" });
+    setup_null_on_both_sides_gets_the_default:
+        darkmatter "permissions: null\n", claudine Some("permissions: null\n")
+        => PermissionsHandoff::Referenced, default_permissions(DarkmatterScope::User);
 }

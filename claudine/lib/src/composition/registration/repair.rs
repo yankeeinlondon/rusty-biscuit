@@ -5,7 +5,10 @@
 //! Unlike a plain [`publish`](super::publish), the repair removes every
 //! entry of the output root the inventory does not have. It starts only
 //! when the user `.darkmatter.yaml` exists with a valid `register` setting
-//! and nothing in its whole set (lock, tree, extras, the configuration file
+//! whose needed entry edit Darkmatter's format-preserving editor can make in
+//! place (an inline `register: [...]` list or root mapping it would have to
+//! edit makes the whole repair manual, so nothing is published first), and
+//! nothing in its whole set (lock, tree, extras, the configuration file
 //! and its writer's lock sidecar, the retired layout) is a link, a special
 //! file, or unreadable; the same examination runs again under the lock and
 //! each target is examined again just before it is changed.
@@ -14,7 +17,6 @@
 //! both verify, so a failure at any step leaves the old registration usable
 //! and the next repair converges.
 
-use std::fs;
 use std::io;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -25,10 +27,13 @@ use darkmatter::config::init::{self as dm_init, InitAction, InitError};
 use darkmatter::config::load::{ConfigErrorKind, inspect_working_file};
 use darkmatter::config::schema::ConfigScope as DarkmatterScope;
 
-use super::inspect::{Blocker, BlockerProblem, EntryPrecondition, config_target_blockers, entry_precondition, entry_registered, inspect_installation};
+use super::inspect::{
+    Blocker, BlockerProblem, EntryPrecondition, config_target_blockers, entry_layout, entry_precondition, entry_registered,
+    inspect_installation,
+};
 use super::{
     CleanupError, Entry, LOCK_DEADLINE, Layout, MANIFEST_REFERENCE, PublishChanges, PublishError, PublishStep,
-    Publisher, RegistrationInventory, access_log, entry_at, legacy_manifest_path,
+    Publisher, RegistrationInventory, access_log, entry_at, legacy_manifest_path, remove_entry,
 };
 
 /// What [`repair_registration`] did: every change in the order made, and
@@ -154,6 +159,10 @@ fn run(
     published.map_err(publish_failure)?;
 
     remove_extras(home, &config, inventory, operations)?;
+    // Byte equality with the inventory is the verification, so no changed
+    // manifest is left to judge: Claudine's inventory is the bundle
+    // `claudine_hosts` verifies and prepares in every process, and the
+    // installed-registration tests load its published copy from disk.
     let installation = inspect_installation(home, Some(&config), inventory);
     if !installation.is_current() {
         let path = installation
@@ -168,7 +177,7 @@ fn run(
     }
 
     stop(RepairStep::BeforeRegister, observer)?;
-    if let Some(blocker) = config_target_blockers(&config).into_iter().next() {
+    if let Some(blocker) = config_target_blockers(home, &config).into_iter().next() {
         return Err(RepairFailure::Blocked(blocker));
     }
     let report = dm_init::replace_manifest_registration_existing(
@@ -189,9 +198,12 @@ fn run(
     }
 
     stop(RepairStep::BeforeLegacyCleanup, observer)?;
-    let cleanup = publisher.finalize_legacy().map_err(RepairFailure::Legacy)?;
-    operations.extend(cleanup.removed.into_iter().map(RepairOperation::Removed));
-    Ok(())
+    let (removed, failure) = match publisher.finalize_legacy() {
+        Ok(cleanup) => (cleanup.removed, None),
+        Err(failure) => (failure.removed, Some(failure.error)),
+    };
+    operations.extend(removed.into_iter().map(RepairOperation::Removed));
+    failure.map_or(Ok(()), |error| Err(RepairFailure::Legacy(error)))
 }
 
 fn stop(step: RepairStep, observer: &mut dyn FnMut(&RepairStep) -> ControlFlow<()>) -> Result<(), RepairFailure> {
@@ -202,10 +214,11 @@ fn stop(step: RepairStep, observer: &mut dyn FnMut(&RepairStep) -> ControlFlow<(
 }
 
 /// Refuses unless the user `.darkmatter.yaml` exists with a `register`
-/// setting the writer can edit.
+/// setting the writer can edit, and the entry edit the repair needs (if
+/// any) is one the format-preserving editor can make in place.
 fn editable(context: &FileResolutionContext) -> Result<(), RepairFailure> {
     match inspect_working_file(context, DarkmatterScope::User) {
-        Ok(file) => entry_precondition(&file).map_err(RepairFailure::Precondition),
+        Ok(file) => entry_precondition(&file).and_then(|()| entry_layout(context)).map_err(RepairFailure::Precondition),
         Err(error) if error.kind() == ConfigErrorKind::Read => {
             Err(RepairFailure::Precondition(EntryPrecondition::Unreadable))
         }
@@ -227,6 +240,7 @@ fn record_publish(publisher: &Publisher, changes: &PublishChanges, operations: &
     operations.extend(changes.removed_temps.iter().cloned().map(RepairOperation::Removed));
     operations.extend(changes.written.iter().map(|path| RepairOperation::Replaced(layout.destination(path))));
     operations.extend(changes.retired.iter().map(|path| RepairOperation::Removed(layout.destination(path))));
+    operations.extend(changes.removed_folders.iter().map(|path| RepairOperation::Removed(layout.destination(path))));
 }
 
 /// Removes every extra entry of the output root, children before their
@@ -246,8 +260,8 @@ fn remove_extras(
         let entry = entry_at(&path).map_err(|error| RepairFailure::Remove { path: path.clone(), kind: kind_of(&error) })?;
         let removed = match entry {
             Entry::Absent => continue,
-            Entry::File if !extra.directory => fs::remove_file(&path),
-            Entry::Directory if extra.directory => fs::remove_dir(&path),
+            Entry::File if !extra.directory => remove_entry(&path, false),
+            Entry::Directory if extra.directory => remove_entry(&path, true),
             Entry::Obstruction(obstruction) => {
                 return Err(RepairFailure::Blocked(Blocker { path, problem: BlockerProblem::Link(obstruction) }));
             }

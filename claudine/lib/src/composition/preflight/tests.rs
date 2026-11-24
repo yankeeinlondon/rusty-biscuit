@@ -1182,6 +1182,7 @@ fn a_failed_save_keeps_the_runs_approval() {
 fn a_template_rule_approves_a_resolved_site_by_shape_and_an_exact_rule_wins() {
     let md: Markdown = "---\nword: hello\n---\n::shell git --version {{ word }}\n".into();
     let shape = TemplateShape::parse_rule("git --version {{ string }}").unwrap();
+    let request = request(ComposeOptions::new());
     for (rules, exact, template) in [
         (&["template git --version {{ string }}"][..], false, true),
         (&["exact git --version hello", "template git --version {{ string }}"][..], true, false),
@@ -1189,8 +1190,7 @@ fn a_template_rule_approves_a_resolved_site_by_shape_and_an_exact_rule_wins() {
     ] {
         let dir = tempfile::TempDir::new().unwrap();
         let options = template_options_with(&dir, rules, None);
-        let result =
-            resolve_shell_approvals(Some(&md), Some(&request(ComposeOptions::new())), &options, None, None).unwrap();
+        let result = resolve_shell_approvals(Some(&md), Some(&request), &options, None, None).unwrap();
         assert_eq!(result.approved_commands.contains_exact("git --version hello"), exact, "{rules:?}");
         assert_eq!(result.approved_commands.contains_template(&shape), template, "{rules:?}");
     }
@@ -1245,17 +1245,21 @@ fn a_late_document_site_without_an_approval_fails_pre_flight_naming_it() {
 
 const RESOLVED_SITE: &str = "---\nword: hello\n---\n::shell git --version {{ word }}\n";
 
-fn resolve_site(dir: &tempfile::TempDir, handler: Option<Arc<dyn ShellApprovalHandler>>) -> (
-    ShellApprovalOptions,
-    Result<PreFlightResult, CompositionError>,
-) {
+/// Resolves [`RESOLVED_SITE`] with `dir` as the user's home. `request` does
+/// not depend on `dir`, so a test builds it once and shares it across its
+/// rows and passes: each build loads the passive configuration again.
+fn resolve_site(
+    dir: &tempfile::TempDir,
+    request: &ComposeRequest,
+    handler: Option<Arc<dyn ShellApprovalHandler>>,
+) -> (ShellApprovalOptions, Result<PreFlightResult, CompositionError>) {
     let md: Markdown = RESOLVED_SITE.into();
     let options = ShellApprovalOptions {
         permissions: user_permissions(dir.path(), &[]),
         approval_handler: handler,
         ..Default::default()
     };
-    let result = resolve_shell_approvals(Some(&md), Some(&request(ComposeOptions::new())), &options, None, None);
+    let result = resolve_shell_approvals(Some(&md), Some(request), &options, None, None);
     (options, result)
 }
 
@@ -1270,11 +1274,12 @@ fn each_choice_at_a_resolved_site_saves_its_row() {
         (ShellApprovalDecision::AllowOnce, &[], true, false),
         (ShellApprovalDecision::Deny, &[], false, false),
     ];
+    let compose_request = request(ComposeOptions::new());
     for (decision, saved, by_bytes, by_shape) in cases {
         let dir = tempfile::TempDir::new().unwrap();
         let handler = recording(decision.clone());
 
-        let (_, result) = resolve_site(&dir, Some(handler.clone()));
+        let (_, result) = resolve_site(&dir, &compose_request, Some(handler.clone()));
 
         let requests = handler.requests.lock().unwrap();
         assert_eq!(requests.len(), 1, "{decision:?}: one prompt for the site");
@@ -1334,32 +1339,71 @@ fn each_choice_at_a_template_site_saves_its_row() {
     }
 }
 
-#[test]
-fn a_saved_choice_answers_the_next_run_without_a_prompt_and_is_not_written_twice() {
-    for decision in [
-        ShellApprovalDecision::AllowExactPersist,
-        ShellApprovalDecision::AllowTemplatePersist,
-        ShellApprovalDecision::AllowCommandPersist,
-    ] {
-        let dir = tempfile::TempDir::new().unwrap();
-        let (_, first) = resolve_site(&dir, Some(recording(decision.clone())));
-        let first = first.unwrap().approved_commands;
-        let saved = saved_rules(dir.path());
+/// One test per saving choice, so nextest runs them in parallel. Each
+/// builds its request once for the first run and both reruns.
+macro_rules! saved_choice_tests {
+    ($($name:ident => $decision:ident),+ $(,)?) => {
+        mod a_saved_choice_answers_the_next_run_without_a_prompt_and_is_not_written_twice {
+            use super::*;
 
-        for _ in 0..2 {
-            let silent = recording(ShellApprovalDecision::Deny);
-            let (_, again) = resolve_site(&dir, Some(silent.clone()));
-            let again = again.unwrap();
-            assert!(silent.requests.lock().unwrap().is_empty(), "{decision:?}: no prompt");
-            assert_eq!(again.user_approved, 0, "{decision:?}");
-            assert_eq!(again.approved_commands, first, "{decision:?}: the same mode");
-            assert_eq!(saved_rules(dir.path()), saved, "{decision:?}");
+            /// Every decision with a test below, for the coverage guard.
+            pub(super) const TESTED: &[ShellApprovalDecision] = &[$(ShellApprovalDecision::$decision),+];
+
+            $(
+                #[test]
+                fn $name() {
+                    answers_the_next_run_without_a_prompt(ShellApprovalDecision::$decision);
+                }
+            )+
         }
+    };
+}
+
+saved_choice_tests! {
+    exact => AllowExactPersist,
+    template => AllowTemplatePersist,
+    command => AllowCommandPersist,
+}
+
+fn answers_the_next_run_without_a_prompt(decision: ShellApprovalDecision) {
+    let request = request(ComposeOptions::new());
+    let dir = tempfile::TempDir::new().unwrap();
+    let (_, first) = resolve_site(&dir, &request, Some(recording(decision.clone())));
+    let first = first.unwrap().approved_commands;
+    let saved = saved_rules(dir.path());
+
+    for _ in 0..2 {
+        let silent = recording(ShellApprovalDecision::Deny);
+        let (_, again) = resolve_site(&dir, &request, Some(silent.clone()));
+        let again = again.unwrap();
+        assert!(silent.requests.lock().unwrap().is_empty(), "{decision:?}: no prompt");
+        assert_eq!(again.user_approved, 0, "{decision:?}");
+        assert_eq!(again.approved_commands, first, "{decision:?}: the same mode");
+        assert_eq!(saved_rules(dir.path()), saved, "{decision:?}");
     }
 }
 
 #[test]
+fn every_saving_choice_has_a_saved_choice_test() {
+    use ShellApprovalDecision::*;
+    // The match is exhaustive, so a new decision does not compile until it is
+    // classified here and listed in `every`.
+    let saves = |decision: &ShellApprovalDecision| match decision {
+        AllowExactPersist | AllowTemplatePersist | AllowCommandPersist => true,
+        AllowOnce | Deny => false,
+    };
+    let every = [AllowExactPersist, AllowCommandPersist, AllowTemplatePersist, AllowOnce, Deny];
+    let saving: Vec<_> = every.iter().filter(|decision| saves(decision)).collect();
+    let tested = a_saved_choice_answers_the_next_run_without_a_prompt_and_is_not_written_twice::TESTED;
+    for decision in &saving {
+        assert_eq!(tested.iter().filter(|row| row == decision).count(), 1, "{decision:?}: exactly one test");
+    }
+    assert_eq!(tested.len(), saving.len(), "only saving choices: {tested:?}");
+}
+
+#[test]
 fn a_failed_save_at_a_resolved_site_still_approves_the_run() {
+    let request = request(ComposeOptions::new());
     for decision in [
         ShellApprovalDecision::AllowExactPersist,
         ShellApprovalDecision::AllowTemplatePersist,
@@ -1371,7 +1415,7 @@ fn a_failed_save_at_a_resolved_site_still_approves_the_run() {
             decision: decision.clone(),
         });
 
-        let (_, result) = resolve_site(&dir, Some(handler));
+        let (_, result) = resolve_site(&dir, &request, Some(handler));
 
         assert!(result.is_ok(), "{decision:?}: {result:?}");
     }
@@ -1411,7 +1455,7 @@ fn invalid_permissions_fail_pre_flight_with_the_configuration_error() {
 fn a_resolved_site_without_a_handler_is_not_prompted_and_fails_naming_its_bytes() {
     let dir = tempfile::TempDir::new().unwrap();
 
-    let (_, result) = resolve_site(&dir, None);
+    let (_, result) = resolve_site(&dir, &request(ComposeOptions::new()), None);
 
     match result {
         Err(CompositionError::ShellApprovalUnavailable { command, failure, .. }) => {

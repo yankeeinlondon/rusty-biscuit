@@ -36,8 +36,8 @@ claudine doctor
 
 # A brand-new home that was never set up.
 claudine doctor
-# → exit status 1; the `config` row says "is missing" with the remedy
-#   "run `claudine setup`"
+# → exit status 1; the `config` row says "is missing" with a remedy that
+#   starts "run `claudine setup`"
 
 # Fix what can be fixed automatically, then show the result.
 claudine doctor --fix
@@ -60,14 +60,17 @@ A run without `--fix`:
 - never runs `claudine`: the `path` row only looks the name up.
 
 On native Windows the `path` row starts each installed shell once (see
-[`path`](#path-executable-path)). Doctor writes nothing itself, but
-PowerShell refreshes its own startup cache under `%LOCALAPPDATA%` whenever
-it starts, as it does for any other program that runs it.
+[`path`](#path-executable-path)). Those shells leave your profile alone
+too. PowerShell writes a startup cache every time it starts, even without
+a profile, so doctor gives each PowerShell probe a private folder in the
+system temporary directory as its profile and cache location. The folder
+is deleted when the probe ends.
 
 The report never shows a configuration value, the contents of a
 `permissions` block, a credential, or file contents. A problem is named by
-its file, its location, and what kind of problem it is. Any other
-`claudine` command prints the full message for a configuration error.
+its file, its location, and what kind of problem it is. Each remedy names a
+command that prints the full message (see
+[where the full message is printed](#where-the-full-message-is-printed)).
 
 ## Exit status
 
@@ -178,9 +181,9 @@ same defaults and rules a normal command uses:
 
 | File | Required |
 | --- | --- |
-| `~/.claudine/config.yaml` | Yes: missing is an `error`, remedy `claudine setup`. |
+| `~/.claudine/config.yaml` | Yes: missing is an `error`, remedy `claudine setup`. Setup writes the file only after it publishes the host registration, so if publication stops, correct what setup names and run it again. |
 | `~/.darkmatter.yaml` | Yes: missing is an `error`, remedy `claudine setup`. |
-| `{repo-root}/.claudine/config.yaml` | No; checked when it exists. |
+| `{repo-root}/.claudine/config.yaml` | No; checked when it exists. A legacy `config.json` in its place is a `warn`. |
 | `{repo-root}/.darkmatter.yaml` | No; checked when it exists. |
 
 The repository files are checked only when you run doctor inside a
@@ -189,9 +192,136 @@ your user configuration (for example, when your home is the repository), it
 is checked once, as a user file. If no home directory can be found, the
 `config` row says so, and the checks that do not need a home still run.
 
-A legacy `~/.claudine/config.json` with no `config.yaml` beside it is
-reported with its remedy (any ordinary `claudine` command converts it, or
-run `claudine setup`). Doctor leaves it in place.
+A legacy `config.json` with no `config.yaml` beside it is reported and left
+in place; doctor never converts it, with or without `--fix`. Which command
+converts it depends on where it is:
+
+| Legacy file | Severity | Command that converts it |
+| --- | --- | --- |
+| `~/.claudine/config.json` | `error` (the user file is required) | `claudine setup` |
+| `{repo-root}/.claudine/config.json` | `warn` (the repository file is optional) | `claudine claude` with a prompt, run inside the repository; it converts the file before Claude Code starts. `claudine setup`, listing commands, an interactive `claudine claude` with no prompt, and a `--dry-run` leave it as it is. |
+
+```sh
+cd my-repo   # holds .claudine/config.json and no .claudine/config.yaml
+claudine doctor
+# • [warn] Configuration files (config): is not present; a legacy `config.json` beside it has not been converted
+#     - Remedy: `claudine claude` with a prompt, run inside the repository, converts it before the provider starts
+claudine claude "hi"
+# → .claudine/config.yaml is written and config.json is kept as config.json.bak
+```
+
+When the repository is your home, its legacy file is your user legacy file
+and is reported once, as the user's.
+
+#### A `permissions` reference whose file is broken
+
+When a `.darkmatter.yaml` sets `permissions` to a file reference, `config`
+follows it the way `md` does and checks the file it names. A reference
+that cannot be used is an `error` in `config`, whatever state Claudine's
+file for that scope is in: missing, invalid, or the same file as your user
+configuration. A repository that has a `.darkmatter.yaml` and no
+`.claudine/config.yaml` is checked too, even though the
+`darkmatter-permissions` row skips that scope.
+
+```yaml
+# {repo-root}/.darkmatter.yaml, with no {repo-root}/policy.yaml
+permissions: ./policy.yaml
+# config: {repo-root}/.darkmatter.yaml: has a `permissions` reference to a file that does not exist (line 1, column 14)
+```
+
+The reference is broken when the file it names:
+
+- does not exist;
+- is not valid YAML, or is not a mapping;
+- has no `permissions`, or a `permissions` that is `null`, a scalar, or
+  another reference (references do not chain);
+- holds a `permissions` mapping that Darkmatter's rules for the scope
+  refuse;
+- or, for a repository reference, lies outside the repository, including
+  through a link. Darkmatter's user policy follows a link out of your home,
+  so a user reference through one passes.
+
+When the file it names is that scope's Claudine configuration, the finding
+says so, beside that file's own finding:
+
+```text
+/home/me/.claudine/config.yaml: is missing
+/home/me/.darkmatter.yaml: has a `permissions` reference to Claudine's configuration, which does not exist (line 1, column 14)
+```
+
+The finding names the `.darkmatter.yaml` and the line and column where it
+writes `permissions`, never the reference or the file it names, since both
+spell what you wrote. A reference that is itself invalid (an empty string,
+a number, a boolean) is reported once, as an invalid value; nothing is
+followed. Doctor repairs neither: correct the reference or the file it
+names. For your user file the remedy adds that `md init --inline` replaces
+the reference with a block; that command rewrites only your user file, so
+a repository reference is corrected by hand. Doctor checks the working
+copy only; the committed (`HEAD`) policy is not read.
+
+#### Where the full message is printed
+
+Doctor names a problem without quoting your values. To see the full
+message, run the command its remedy names. A remedy names a command only
+for a problem that command reports in that file; otherwise it says what to
+correct. Not every command reads every file: `claudine --help`, shell
+completion, and `claudine registrations` read no configuration, and
+`claudine doctor` reads the files only to diagnose them, so it never stops
+on one. `claudine setup` and listing commands such as `claudine actions`
+read only your user file, and only a provider launch stops on an error in
+the repository file (not every provider: `claudine goose` launches without
+reading it). The remedies therefore name these commands:
+
+| Problem in | Command that prints it |
+| --- | --- |
+| `~/.claudine/config.yaml` | `claudine actions` (or `claudine setup`) stops with the located error and exits 1. A mapper's regular expression is the exception: no load compiles it, so `claudine actions` lists the action and exits 0, and the remedy names the setting to correct, such as `actions.before_tool[0].call.mapper.pattern`. |
+| `{repo-root}/.claudine/config.yaml` | `claudine claude` run inside the repository stops with the located error before Claude Code starts. `claudine setup` and `claudine actions` do not read this file, and neither does a `--dry-run`. With a prompt, the same launch converts a legacy `config.json` there, or stops with the reason it cannot. |
+| a `.darkmatter.yaml` | `md compose` of a document that runs a shell command. Any `md compose` stops on a file that does not load; a `permissions` problem appears only when a shell command needs the policy. `md render` reports neither. An invalid `register` setting stops no compose, so its remedy says to correct `register` at the reported position. |
+
+For example, with an unclosed list in your user file:
+
+```sh
+claudine doctor
+# • [error] Configuration files (config): is not one valid YAML mapping (line 2, column 1)
+#     - /home/me/.claudine/config.yaml: is not one valid YAML mapping (line 2, column 1)
+#     - Remedy: correct it; `claudine actions` prints the full message
+claudine actions
+# invalid configuration: /home/me/.claudine/config.yaml:2:1: not valid YAML: …
+```
+
+#### Which file a rule names
+
+Besides the schema, doctor applies the rules a normal load applies to
+the settings themselves (a selected messenger route must exist, a sound
+name must be known, a regular expression must compile). Inside a
+repository it judges your user file with the repository's overrides
+merged on top, as a launch there does, and names the file that sets the
+value that broke the rule:
+
+| Setting | The file named |
+| --- | --- |
+| An event's actions (a mapper's regular expression) | The repository file when it lists that event, because it replaces the event's whole action list; otherwise your user file. |
+| `exit_expressions` | The repository file when it declares them, because its declaration replaces yours; otherwise your user file. |
+| The selected messenger route | When the repository's `active_messenger` selects a route your user file does not define, both: the repository's `active_messenger`, and the `messenger.configurations` of your user file it selects from. Otherwise your user file. |
+| `protect`, `default_sounds`, and the route definitions | Always your user file; a repository cannot set them. |
+
+```yaml
+# ~/.claudine/config.yaml: before_tool's mapper does not compile
+# {repo-root}/.claudine/config.yaml: replaces before_tool, adds a broken after_tool
+actions:
+  before_tool: [ … valid … ]
+  after_tool:  [ … broken mapper … ]
+# config: {repo-root}/.claudine/config.yaml: the mapper of action 0 of `after_tool` is not a valid regular expression
+```
+
+When the repository replaces a setting your user file gets wrong, the
+merged configuration is valid and `config` reports nothing for it. The
+rows that read your user file alone, `tts` and the user scope of
+`darkmatter-permissions`, then explain the problem themselves.
+
+A rule broken in the merged configuration and named under the repository
+file is reported by no other command (a launch falls back to the
+defaults), so its remedy names none.
 
 See [Configuration](../topics/configuration.md) for the files and their
 settings.
@@ -206,6 +336,25 @@ also reports the file as invalid but leaves the keys to this row. When a
 file cannot be parsed at all, this row says which file could not be
 inspected.
 
+An action or messenger route still written in the earlier flat form
+(`- type: bash` beside `command:`) is an invalid value in `config`, not a
+stray key: its `type:` or `provider:` tag is never listed here. A misspelled
+setting inside such an entry is listed here all the same, at the line and
+column where the file writes it, so one run shows both edits:
+
+```yaml
+actions:
+  session_start:
+    - type: bash          # config: has an invalid value at `/actions/session_start/0` (line 3, column 7)
+      command: ./notify.sh
+      timout: 5           # stray-config-keys: unknown key `timout` in `/actions/session_start/0` (line 5, column 7)
+```
+
+The rules that judge the whole file, such as writing both
+`preferred_agent` and `favorite_agent` or an exit expression with both or
+neither of `pattern` and `patterns`, are reported in `config` beside a flat
+entry's invalid value as well, each at its own line and column.
+
 ```text
 • [error] Unknown configuration keys (stray-config-keys): unknown key `tts` at the top level (line 1, column 1)
     - /home/me/.claudine/config.yaml: no unknown keys
@@ -216,8 +365,11 @@ inspected.
 ### `repo-config`: repository configuration
 
 Inside a repository, reports whether `.claudine/config.yaml` exists there.
-An absent file, and a run outside a repository, are `info`. A repository
-file that exists is `ok` here; its problems are reported under `config`.
+An absent file, and a run outside a repository, are `info`. A legacy
+`.claudine/config.json` with no `config.yaml` is also `info` here, reported
+as awaiting conversion rather than absent; `config` carries its warning and
+remedy. A repository file that exists is `ok` here; its problems are
+reported under `config`.
 
 ### `registration`: Darkmatter host registration
 
@@ -233,13 +385,46 @@ with what this `claudine` binary would publish:
 | Finding | Severity |
 | --- | --- |
 | The registration folder, the manifest, or a published file is missing | `error` |
-| A published file differs from what this binary publishes (Darkmatter refuses to load the registration until it is republished) | `warn` |
-| The manifest differs, but Darkmatter still accepts it as Claudine's registration | `warn` |
-| The manifest differs and Darkmatter refuses it as Claudine's registration | `error` |
+| A published file differs from what this binary publishes | `warn` |
+| The manifest differs, but Darkmatter still loads the bundle it lists as Claudine's registration | `warn` |
+| The manifest differs and Darkmatter refuses the bundle it lists as Claudine's registration | `error` |
 | An extra file in the registration folder | `warn` |
 | No `register` entry in `~/.darkmatter.yaml` names Claudine's manifest | `error` |
 | `~/.claudine/darkmatter-host.yaml` or `~/.claudine/darkmatter-host/` (the retired format 1 registration) still exists | `warn` |
 | A path doctor would repair is a symbolic link or junction | `error`, repaired by hand |
+| The `register` edit the repair needs reaches an inline list or root mapping | the finding's own severity, repaired by hand (see [Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)) |
+
+A changed published file is explained by what the installed manifest says
+about it:
+
+- **The manifest is unchanged.** The file no longer matches the digest the
+  manifest lists for it, and the finding says so: Darkmatter refuses a
+  member whose bytes do not match their digest, so the registration is not
+  loaded until it is republished.
+- **The manifest was changed too**, for example after editing a schema and
+  updating its digest by hand. Doctor then does not stop at the digests: it
+  prepares the whole bundle the manifest lists exactly as Darkmatter does
+  when it loads a `register` entry, so every schema must parse and every
+  generated artifact (such as `globals.lifecycle.json`) must still agree
+  with the schemas it was built from. If that succeeds, the manifest is a
+  `warn` and each edited file only deviates from the shipped bytes. If
+  Darkmatter would refuse the bundle, the manifest is an `error` that names
+  the file Darkmatter's first refusal is in.
+
+For example, a comment added to `schemas/action.yaml` with its digest
+updated still loads (`warn`), while the same comment in
+`schemas/group.yaml` does not: `group.yaml` declares one of Claudine's
+globals, and the published lifecycle artifact was built from the original
+file (`error`).
+
+Doctor finds the files a changed manifest lists the way Darkmatter does:
+from the manifest's folder, and never outside it. A manifest that spells
+`./schemas/action.yaml` as `../darkmatter/schemas/action.yaml` (leaving the
+folder and coming straight back) still names the same file, so with its
+digest key spelled the same way it is a `warn`, and an edited file under
+either spelling is reported as disagreeing with its digest. A spelling that
+ends outside the folder, such as `../schemas/action.yaml`, is refused by
+Darkmatter, so the manifest is an `error`.
 
 Any spelling of the entry that names the same file passes. Entries for
 other hosts are never changed.
@@ -256,15 +441,71 @@ permissions: ~/.claudine/config.yaml
 
 Doctor checks the user scope, and inside a repository also the repository
 scope when both of its files exist. A scope without one of its files is
-skipped, as `info`.
+skipped, as `info`; a broken reference there is still an `error` under
+`config`.
 
 | What Darkmatter's file has | Severity | Repair |
 | --- | --- | --- |
 | A reference to Claudine's file (any spelling that resolves to it) | `ok` | — |
 | A reference to another valid file | `info` | — |
-| A broken or invalid reference | `error` | By hand |
-| No `permissions`, or an inline block Claudine can take over | `error` | `--fix` |
+| A broken or invalid reference | `error`, explained under `config` | By hand |
+| No `permissions` (or `null`), or an inline block Claudine can take over | `error` | `--fix` |
+| The same, in a file whose `register` setting is invalid | `error` | By hand: correct `register` first |
+| The same, where Claudine's file is reached through a link that leaves the scope | `error` | By hand: replace the link |
+| The same, where the edit reaches an inline root mapping of either file | `error` | By hand: rewrite that root in block form (see [Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)) |
 | An inline block that differs from Claudine's own `permissions` | `error` | By hand: choose which to keep |
+
+`permissions: null` means the same as leaving `permissions` out: Darkmatter
+uses its default policy. The repair writes only the reference, and gives
+Claudine's file the default block when it has none; `null` is never copied.
+
+Darkmatter's writer checks the whole edited file, so a `register` setting
+that is not a list of manifest references (`register: 3`, or a list with a
+non-text entry) would make every attempt fail. Doctor therefore offers no
+repair for that scope until `register` is corrected; the `config` row names
+the position. An omitted, `null`, or empty `register` does not block it. A
+scope whose `permissions` already refers to Claudine's file needs no edit,
+so a `register` problem does not change its `ok`.
+
+The reference the repair writes must name Claudine's file inside its scope:
+your home for the user scope, the repository for the repository scope. When
+`config.yaml`, or the `.claudine` folder holding it, is a link into a
+dotfiles checkout elsewhere, the repair cannot write that reference, even
+when Claudine's file already holds the block and only Darkmatter's file
+would change. The row then names where the file resolves to:
+
+```text
+/home/me/.claudine/config.yaml resolves to /srv/dotfiles/claudine/config.yaml, outside your home; the repair refers only to a file inside its scope
+```
+
+Replace the link with the file it names and run `--fix`. For the user scope
+you can instead write the reference yourself, since Darkmatter's user policy
+follows it; Darkmatter refuses a repository reference that leaves the
+repository. A link whose target stays inside the scope does not block a
+repair that writes only the reference.
+
+The remedy is `--fix` in both scopes. `claudine setup` performs the same
+user handoff, but only after it publishes Claudine's host registration, so a
+link anywhere on the publisher's path (the `~/.claudine` or
+`~/.claudine/registrations` folder, the publisher's lock file, the
+registration folder, its manifest, or a member it would replace or retire)
+stops setup before the handoff, even when the `registration` row is `ok`.
+The repair here does not depend on publication: in that home `--fix` still
+writes the reference. A link on a path the registration itself uses (either
+folder, the registration folder, its manifest, or a member it would replace
+or retire) stays an `error` in the `registration` row afterward. A linked
+publisher lock beside a healthy registration is the exception: the
+`registration` row stays `ok` before and after the handoff, and only setup
+stops on it, so check that path yourself when setup refuses and Doctor
+shows no registration problem.
+Setup never touches a repository's files.
+A broken reference is located and explained in the `config` row (see
+[A `permissions` reference whose file is broken](#a-permissions-reference-whose-file-is-broken));
+this row keeps its `error` and refers to it rather than repeating it.
+
+The handoff edits your user file on its own, so a user file that breaks a
+configuration rule blocks the user scope even when a repository override
+keeps `config` clear; the row then names the setting that blocks it.
 
 A repository's scope describes the files on disk. The grants a command
 actually gets in a repository still combine Darkmatter's user, committed,
@@ -275,10 +516,17 @@ and working-copy policy; see Darkmatter's
 
 Reads the `tts` setting of your user configuration. When the configuration
 cannot be read or is invalid, the row is `info`: "speech settings could not
-be determined".
+be determined". If `config` is clear because the repository's overrides
+replace the setting your user file breaks, this row names that setting
+itself (see [Which file a rule names](#which-file-a-rule-names)).
 
 - With automatic selection, the row names the best-rated available
-  provider and, when it differs, the provider Claudine tries first.
+  provider and, when it differs, the provider Claudine tries first. The
+  severity follows the best-rated provider, but speech runs the first one
+  that works, so the row says "uses" only when they are the same. With
+  `TTS_PROVIDER=espeak` and Piper installed, for example, the row reads
+  "the best available speech provider is Piper (good quality); hook speech
+  tries eSpeak NG first".
 - With `tts.provider` set to a provider Claudine knows, only that provider
   is checked, because speech never falls back to another one.
 - An unknown `tts.provider` is at least a `warn`, and the automatic
@@ -310,7 +558,9 @@ different `PATH` when it starts:
 
 Each probe runs without the shell's startup files
 (`-NoProfile`, `--norc --noprofile`), with no window, and is stopped after
-2 seconds. A shell that is not installed is not mentioned. For each shell
+2 seconds. A PowerShell probe also keeps its startup and module caches in a
+temporary folder that is deleted afterwards, so nothing under your profile
+changes. Every probe sees the same `PATH` that doctor itself inherited. A shell that is not installed is not mentioned. For each shell
 that is, the row says which of these happened:
 
 | Outcome | Severity |
@@ -344,11 +594,79 @@ other repair, and findings in other rows do not block a repair.
 
 Running `--fix` again after it succeeded changes nothing.
 
+### Files the repairs cannot edit in place
+
+Both repairs edit YAML with Darkmatter's format-preserving editor, which
+keeps every comment, quote, and blank line by changing only the text of the
+values it edits. It cannot add, replace, or remove something *inside* an
+inline (flow) collection, written on one line in `[…]` or `{…}`, or inside
+a value that carries an anchor (`&name`), alias (`*name`), or tag (`!tag`).
+YAML means the same thing in either layout, but only the block layout can
+be edited in place.
+
+Before it offers a repair, doctor applies the exact edits the repair would
+make to the file as it read it, without writing anything. When the editor
+would refuse one, the row is not fixable: it names the file and the part
+of it to change, without quoting any value, and tells you to rewrite that
+part in block form. For example, Claudine's entry cannot be appended to
+this list:
+
+```yaml
+# ~/.darkmatter.yaml, which doctor cannot edit
+register: [~/.acme/manifest.yaml]
+```
+
+```text
+• [error] Darkmatter host registration (registration): no `register` entry names Claudine's manifest
+    - /home/me/.darkmatter.yaml: no `register` entry names Claudine's manifest
+    - Remedy: rewrite the `register` list of `~/.darkmatter.yaml` in block form, one `key: value` or `- item` per line, without a `{…}` or `[…]` collection, anchor, alias, or tag, then run `claudine doctor --fix`
+```
+
+Rewritten in block form, the same list is repaired:
+
+```yaml
+# ~/.darkmatter.yaml, which doctor can edit
+register:
+  - ~/.acme/manifest.yaml
+```
+
+Only an edit that actually reaches the inline part counts, so these are
+still repaired:
+
+- an inline list that already names Claudine's manifest, when the repair
+  only removes the retired files (the list is left byte for byte);
+- an omitted, `null`, or empty `register: []` in a block root, which the
+  repair replaces whole;
+- an inline value that the repair moves or replaces whole, such as
+  `permissions: {network: deny}` in a block root;
+- an empty inline root `{}`, which receives its first key;
+- a Claudine file with an inline root whose `permissions` already equals
+  Darkmatter's block, when the repair only writes the reference into
+  Darkmatter's file.
+
+What a refusal holds back depends on the repair:
+
+- **Registration.** The whole repair becomes manual, because the retired
+  files are removed only after the entry is in place. Nothing is published,
+  replaced, or removed until the file is rewritten. A root mapping written
+  inline (`{register: [], …}`) blocks the repair even with an empty list.
+- **Permissions handoff.** Only that scope becomes manual, and neither of
+  its files changes. The other scope is still handed off. A transfer into an
+  inline Claudine root (`{canonical_provider: claude}`), or a reference
+  written into an inline Darkmatter root, is refused this way.
+
+The repairs keep the writer's own checks too: a file rewritten inline
+between the inspection and the write is refused by the writer, and nothing
+is saved. `claudine setup` stages the same edits and reports the writer's
+error, which names the line, column, and setting.
+
 ### Registration repair
 
-The repair needs a valid existing `~/.darkmatter.yaml`. When the file is
-missing or invalid, the row says so and suggests `claudine setup` or fixing
-the file first.
+The repair needs a valid existing `~/.darkmatter.yaml` whose `register`
+edit the editor can make in place. When the file is missing or invalid, the
+row says so and suggests `claudine setup` or fixing the file first; when the
+edit would reach an inline list or root mapping, it names that part (see
+[Files the repairs cannot edit in place](#files-the-repairs-cannot-edit-in-place)).
 
 ```mermaid
 flowchart LR
@@ -363,12 +681,29 @@ flowchart LR
 - Publishing uses the same publisher as `claudine setup`. It may overwrite
   changed files and delete extra files inside
   `~/.claudine/registrations/darkmatter/`, and nowhere else.
+- An entry is extra only when no published path reaches it. On a volume
+  that ignores letter case (macOS and Windows by default), a file or folder
+  whose name differs from the published one only in case, such as
+  `schemas/Action.yaml` after a backup restore, is the published file: it is
+  checked byte for byte and never deleted. On a case-sensitive volume
+  (Linux) it is a different file, so the repair publishes
+  `schemas/action.yaml` and removes `schemas/Action.yaml`.
 - The `register` entry is written with Darkmatter's locked writer, keeping
   your comments, other settings, and other hosts' entries.
 - The retired `~/.claudine/darkmatter-host.yaml` and
   `~/.claudine/darkmatter-host/` are removed only after the entry is in
   place. If anything before that fails, they stay, so a retry or an older
-  Claudine still works.
+  Claudine still works. If removing them fails partway (a read-only
+  `~/.claudine` lets the folder's contents go but not the folder), the
+  row's `Already changed:` lines name each entry already removed, a removed
+  folder standing for everything in it, and the next `--fix` removes and
+  reports only what is left:
+
+  ```text
+  Repair failed: could not remove /home/me/.claudine/darkmatter-host (permission denied)
+  Already changed: updated the `register` entry in /home/me/.darkmatter.yaml
+  Already changed: removed /home/me/.claudine/darkmatter-host/0123abcd
+  ```
 - No step follows a symbolic link or junction. A link in the way is
   reported, and you remove it yourself.
 - Another `claudine setup` or `doctor --fix` running at the same time
@@ -387,11 +722,31 @@ can take over, the repair does what `claudine setup` does:
 
 Both edited files are validated before either is replaced, and comments
 and other settings are kept. If the second write fails, Darkmatter's
-original block stays in force. The repair edits only existing, valid files:
+original block stays in force. The repair edits only existing, valid files
+(a `.darkmatter.yaml` with an invalid `register` setting is not offered for
+repair, because the writer would refuse it):
 it never runs setup, converts a legacy configuration, or writes through a
-symbolic link. A conflicting block is never merged; the row tells you to
-choose one. See
+symbolic link or junction. That covers each file, the lock file the writer
+takes beside it, and every folder between the file and its scope's root
+(your home, or the repository root): when the repair would write
+Claudine's file through a linked `~/.claudine` or `<repo>/.claudine`, the
+row names the link and neither file changes. A
+conflicting block is never merged; the row tells you to choose one. See
 [Configuration → Darkmatter's permissions](../topics/configuration.md#darkmatters-permissions).
+
+Inside a repository the user and repository handoffs are independent. When
+one fails, for example because another writer holds `~/.darkmatter.yaml`'s
+lock, that scope keeps its inline block and the other scope is still handed
+off in the same run. The row is an `error` whose reason names the failed
+scope, and it lists the other scope's writes as `Already changed:`:
+
+```text
+Repair failed: user scope: another writer held the lock /home/me/.darkmatter.yaml.darkmatter-lock; nothing was saved
+Already changed: /home/me/repo/.claudine/config.yaml: set `permissions`
+Already changed: /home/me/repo/.darkmatter.yaml: set `permissions`
+```
+
+Running `--fix` again once the lock is free hands off the remaining scope.
 
 ## See also
 

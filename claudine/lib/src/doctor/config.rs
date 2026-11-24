@@ -5,8 +5,12 @@
 //! inside a repository, `{repo-root}/.claudine/config.yaml` and
 //! `{repo-root}/.darkmatter.yaml` with the readers and scope schemas normal
 //! loads use, but passively: no legacy `config.json` is opened or
-//! converted, no default file is created, no committed policy is selected,
-//! and no `permissions` reference is followed. The typed configuration
+//! converted, no default file is created, and no committed policy is
+//! selected. A `.darkmatter.yaml` whose `permissions` is a reference has its
+//! target judged by Darkmatter's passive working-copy resolver
+//! ([`darkmatter::config::init::observe`]), whatever state the scope's
+//! Claudine file is in, so a broken target is a `config` error even where
+//! the `permissions` handoff is skipped. The typed configuration
 //! goes through the same merge and semantic checks as a normal load
 //! (`dispatch::loader::load_claudine_config_with_notices`) plus the runtime
 //! compiler's passive mapper check.
@@ -18,7 +22,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use darkmatter::config::load::{ConfigError, ConfigErrorKind, ConfigFile, inspect_working_file};
+use darkmatter::config::init::{self as dm_init, BlockState};
+use darkmatter::config::load::{ConfigError, ConfigErrorKind, ConfigFile, PermissionsSetting, inspect_working_file};
 use darkmatter::config::schema::ConfigScope as DarkmatterScope;
 use serde_json::Value;
 
@@ -29,8 +34,10 @@ use crate::config::load::{ConfigDocument, ConfigProblem, ConfigProblemKind, read
 use crate::config::merge::merge_repo_override;
 use crate::config::schema::{ConfigScope, contract};
 use crate::config::setup::same_file;
+use crate::config::claudine_config::ValidatedSetting;
 use crate::config::{ClaudineConfig, RepoOverrideConfig};
 use crate::error::ClaudineError;
+use crate::events::AgenticEvent;
 
 /// What the doctor knows about the configuration, read once per pass.
 #[derive(Debug)]
@@ -46,7 +53,9 @@ pub(crate) struct ConfigObservations {
     /// `None` outside a repository.
     pub(crate) darkmatter_repo: Option<ObservedFile<DarkmatterState>>,
     /// The user file alone, typed and judged by every semantic rule; what
-    /// speech settings and the permissions handoff read.
+    /// speech settings and the permissions handoff read. Its problem is
+    /// not in `config` when the repository overrides replace the setting
+    /// ([`Self::superseded_user_problem`]).
     pub(crate) user_config: Result<ClaudineConfig, Unusable>,
     /// The user file with the repository overrides merged on top, judged
     /// again; the user file alone when there are no usable overrides.
@@ -80,7 +89,9 @@ pub(crate) enum Unreadable {
 pub(crate) enum ClaudineState {
     /// Its scope cannot be located (no home).
     Unavailable,
-    /// Nothing is there; `legacy` when a `config.json` sits beside it.
+    /// Nothing is there; `legacy` when a `config.json` sits beside it (a
+    /// repository at the home leaves the user's legacy file to the user
+    /// scope).
     Missing { legacy: bool },
     /// The repository file is the user file; it is judged once, as a user
     /// file.
@@ -102,8 +113,31 @@ pub(crate) enum DarkmatterState {
     /// A failure of the whole file.
     Invalid(ConfigError),
     /// A readable file; its `permissions` and `register` findings are
-    /// inside.
-    Valid(Box<ConfigFile>),
+    /// inside, and, for a valid `permissions` reference, why its target
+    /// cannot be used.
+    Valid(Box<ConfigFile>, Option<BrokenReference>),
+}
+
+/// A `permissions` reference whose target does not supply a policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BrokenReference {
+    pub(crate) target: BrokenTarget,
+    /// Whether it names the scope's own Claudine configuration, whose
+    /// problems `config` reports beside it.
+    pub(crate) names_claudine: bool,
+}
+
+/// Why a syntactically valid `permissions` reference does not supply a
+/// policy, as Darkmatter's working-copy resolver found it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BrokenTarget {
+    /// It cannot be followed to a file inside its scope (a repository
+    /// reference leaving the repository, through a link or otherwise).
+    Unresolved,
+    /// It names no existing file.
+    Missing,
+    /// The file it names does not supply a valid `permissions` mapping.
+    Unusable,
 }
 
 /// Why no typed configuration is available.
@@ -121,11 +155,10 @@ pub(crate) enum Unusable {
 pub(crate) enum SemanticProblem {
     /// The typed reader refused the judged document.
     Typed,
-    /// [`ClaudineConfig::validate`] refused it, naming the setting when it
-    /// can be named safely.
-    Rule { setting: Option<String> },
+    /// [`ClaudineConfig::validate`] refused this setting first.
+    Rule { setting: ValidatedSetting },
     /// The runtime compiler would refuse this action's mapper.
-    Mapper { event: String, index: usize },
+    Mapper { event: AgenticEvent, index: usize },
 }
 
 /// Reads the four working files for `environment`.
@@ -139,9 +172,11 @@ pub(crate) fn observe(environment: &Environment) -> ConfigObservations {
     let claudine_repo = repository.map(|root| {
         observe_claudine(ConfigScope::file_under(root), ConfigScope::Repository, claudine_user.path.as_deref())
     });
-    let darkmatter_user = observe_darkmatter(environment, DarkmatterScope::User, None);
-    let darkmatter_repo = repository
-        .map(|_| observe_darkmatter(environment, DarkmatterScope::Repository, darkmatter_user.path.as_deref()));
+    let darkmatter_user = observe_darkmatter(environment, DarkmatterScope::User, None, claudine_user.path.as_deref());
+    let darkmatter_repo = repository.map(|_| {
+        let claudine = claudine_repo.as_ref().and_then(|repo| repo.path.as_deref());
+        observe_darkmatter(environment, DarkmatterScope::Repository, darkmatter_user.path.as_deref(), claudine)
+    });
 
     let (user_config, effective_config, semantic) = typed(&claudine_user, claudine_repo.as_ref());
     ConfigObservations {
@@ -182,8 +217,9 @@ fn observe_claudine(path: PathBuf, scope: ConfigScope, user: Option<&Path>) -> O
     let state = match presence(&path) {
         Err(unreadable) => ClaudineState::Unreadable(unreadable),
         Ok(false) => {
-            let legacy = scope == ConfigScope::User
-                && std::fs::symlink_metadata(path.with_file_name(LEGACY_FILE_NAME)).is_ok();
+            let legacy_path = path.with_file_name(LEGACY_FILE_NAME);
+            let legacy = std::fs::symlink_metadata(&legacy_path).is_ok()
+                && !user.is_some_and(|user| same_file(&legacy_path, &user.with_file_name(LEGACY_FILE_NAME)));
             ClaudineState::Missing { legacy }
         }
         Ok(true) if user.is_some_and(|user| same_file(&path, user)) => ClaudineState::AliasOfUser,
@@ -202,6 +238,7 @@ fn observe_darkmatter(
     environment: &Environment,
     scope: DarkmatterScope,
     user: Option<&Path>,
+    claudine: Option<&Path>,
 ) -> ObservedFile<DarkmatterState> {
     let Ok(context) = environment.context() else {
         return ObservedFile { path: None, state: DarkmatterState::Unavailable };
@@ -214,7 +251,10 @@ fn observe_darkmatter(
         Ok(false) => DarkmatterState::Missing,
         Ok(true) if user.is_some_and(|user| same_file(&path, user)) => DarkmatterState::AliasOfUser,
         Ok(true) => match inspect_working_file(context, scope) {
-            Ok(file) if file.is_present() => DarkmatterState::Valid(Box::new(file)),
+            Ok(file) if file.is_present() => {
+                let broken = broken_reference(context, scope, &file, claudine);
+                DarkmatterState::Valid(Box::new(file), broken)
+            }
             Ok(_) => DarkmatterState::Missing,
             Err(error) if error.kind() == ConfigErrorKind::Read => {
                 DarkmatterState::Unreadable(Unreadable::Io(std::io::ErrorKind::Other))
@@ -225,11 +265,41 @@ fn observe_darkmatter(
     ObservedFile { path: Some(path), state }
 }
 
+/// Follows `file`'s `permissions` reference as `md` does, passively:
+/// `None` when it is not a reference or its target supplies a valid block.
+fn broken_reference(
+    context: &biscuit_file::FileResolutionContext,
+    scope: DarkmatterScope,
+    file: &ConfigFile,
+    claudine: Option<&Path>,
+) -> Option<BrokenReference> {
+    if !matches!(file.permissions(), Ok(PermissionsSetting::Reference(_))) {
+        return None;
+    }
+    let BlockState::Reference { block: Err(_), target, .. } = dm_init::observe(context, scope).ok()?.permissions else {
+        return None;
+    };
+    let names_claudine = target.as_deref().zip(claudine).is_some_and(|(target, claudine)| same_file(target, claudine));
+    let target = match target {
+        None => BrokenTarget::Unresolved,
+        Some(target) if !target.is_file() => BrokenTarget::Missing,
+        Some(_) => BrokenTarget::Unusable,
+    };
+    Some(BrokenReference { target, names_claudine })
+}
+
 type Typed = (Result<ClaudineConfig, Unusable>, Result<ClaudineConfig, Unusable>, Vec<Finding>);
 
 /// The user configuration alone and merged with the repository overrides,
 /// each judged as a normal load judges it, and the `config` findings of
 /// their semantic failures.
+///
+/// A merged failure is reported under the file that authors the failing
+/// setting's effective value ([`source_of`]). A user-only failure the
+/// overrides replace is left out of `config`, because the merged
+/// configuration does not have it; one they do not replace is reported
+/// under the user file even when the merged check stopped at another
+/// setting first.
 fn typed(user: &ObservedFile<ClaudineState>, repo: Option<&ObservedFile<ClaudineState>>) -> Typed {
     let ClaudineState::Valid(document) = &user.state else {
         return (Err(Unusable::FileUnavailable), Err(Unusable::FileUnavailable), Vec::new());
@@ -250,17 +320,24 @@ fn typed(user: &ObservedFile<ClaudineState>, repo: Option<&ObservedFile<Claudine
     let mut findings = Vec::new();
     let effective = match (typed_user, overrides) {
         (Ok(mut merged), Some((repo_path, Ok(overrides)))) => {
+            let has_messenger = merged.messenger.is_some();
             merge_repo_override(&mut merged, &overrides);
+            let source = |problem: &SemanticProblem| source_of(problem, &overrides, has_messenger);
             judged(merged).map_err(|problem| {
-                findings.push(match &user_only {
-                    // The user file breaks the rule on its own.
-                    Err(_) => semantic_finding(&problem, Scope::User, user_path),
-                    // Only the merged pair does.
-                    Ok(_) => semantic_finding(&problem, Scope::Repository, &repo_path).note(format!(
-                        "the rule is broken only when these overrides are merged onto {}",
+                findings.push(match source(&problem) {
+                    Source::User => semantic_finding(&problem, Scope::User, user_path),
+                    Source::Repository => semantic_finding(&problem, Scope::Repository, &repo_path),
+                    Source::Both => semantic_finding(&problem, Scope::Repository, &repo_path).note(format!(
+                        "the route it selects must be defined in `messenger.configurations` of {}",
                         super::report::display_path(user_path)
                     )),
                 });
+                if let Err(Unusable::Semantic(own)) = &user_only
+                    && *own != problem
+                    && source(own) == Source::User
+                {
+                    findings.push(semantic_finding(own, Scope::User, user_path));
+                }
                 Unusable::Semantic(problem)
             })
         }
@@ -277,53 +354,125 @@ fn typed(user: &ObservedFile<ClaudineState>, repo: Option<&ObservedFile<Claudine
     (user_only, effective, findings)
 }
 
+/// Which file authors the effective value of the setting `problem` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    User,
+    Repository,
+    /// A repository `active_messenger` selecting from the user's routes.
+    Both,
+}
+
+/// Follows [`merge_repo_override`]: the repository replaces an event's
+/// whole action list, the whole `exit_expressions` declaration, and the
+/// route selection (only when the user file has a `messenger` block);
+/// Protect, default sounds, and route definitions are user-only.
+fn source_of(problem: &SemanticProblem, overrides: &RepoOverrideConfig, user_has_messenger: bool) -> Source {
+    match problem {
+        SemanticProblem::Mapper { event, .. } if overrides.actions.contains_key(event) => Source::Repository,
+        SemanticProblem::Rule { setting: ValidatedSetting::ExitExpressions } if overrides.exit_expressions.is_some() => {
+            Source::Repository
+        }
+        SemanticProblem::Rule { setting: ValidatedSetting::MessengerSelection }
+            if overrides.active_messenger.is_some() && user_has_messenger =>
+        {
+            Source::Both
+        }
+        _ => Source::User,
+    }
+}
+
 /// `config` after the semantic checks of a normal load and the runtime
 /// compiler's mapper check.
 fn judged(config: ClaudineConfig) -> Result<ClaudineConfig, SemanticProblem> {
-    if let Err(error) = config.validate() {
-        let setting = match &error {
-            ClaudineError::ConfigValidation(message) => named_setting(message),
-            _ => None,
-        };
+    if let Err((setting, _)) = config.validate_settings() {
         return Err(SemanticProblem::Rule { setting });
     }
     if let Some((event, index)) = crate::dispatch::loader::refused_action_mappers(&config).into_iter().next() {
-        return Err(SemanticProblem::Mapper { event: event.to_string(), index });
+        return Err(SemanticProblem::Mapper { event, index });
     }
     Ok(config)
 }
 
-/// The setting a validation message leads with (`default_sounds.success:
-/// …`), when it is written as a plain setting path; the rest of the message
-/// can quote the value and is never kept.
-fn named_setting(message: &str) -> Option<String> {
-    let (lead, _) = message.split_once(':')?;
-    let plain = !lead.is_empty()
-        && lead.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-'));
-    if !plain {
-        return None;
+/// The setting's name as `scope`'s file writes it.
+fn setting_name(setting: ValidatedSetting, scope: Scope) -> String {
+    match setting {
+        ValidatedSetting::Protect => "protect".into(),
+        ValidatedSetting::MessengerSelection if scope == Scope::Repository => "active_messenger".into(),
+        ValidatedSetting::MessengerSelection => "messenger.active_config".into(),
+        ValidatedSetting::MessengerRoutes => "messenger.configurations".into(),
+        ValidatedSetting::DefaultSound(name) => format!("default_sounds.{name}"),
+        ValidatedSetting::ExitExpressions => "exit_expressions".into(),
     }
-    let declared = declared_names(ConfigScope::User);
-    Some(
-        lead.split('.')
-            .map(|segment| if declared.contains(segment) { segment } else { "*" })
-            .collect::<Vec<_>>()
-            .join("."),
-    )
 }
 
-fn semantic_finding(problem: &SemanticProblem, scope: Scope, path: &Path) -> Finding {
-    let summary = match problem {
+/// One line naming the failed setting of `scope`'s file, never its value.
+fn describe(problem: &SemanticProblem, scope: Scope) -> String {
+    match problem {
         SemanticProblem::Typed => "the settings cannot be read as Claudine's configuration".to_string(),
-        SemanticProblem::Rule { setting: Some(setting) } => format!("the setting `{setting}` breaks a configuration rule"),
-        SemanticProblem::Rule { setting: None } => "a setting breaks a configuration rule".to_string(),
+        SemanticProblem::Rule { setting } => {
+            format!("the setting `{}` breaks a configuration rule", setting_name(*setting, scope))
+        }
         SemanticProblem::Mapper { event, index } => {
             format!("the mapper of action {index} of `{event}` is not a valid regular expression")
         }
+    }
+}
+
+fn semantic_finding(problem: &SemanticProblem, scope: Scope, path: &Path) -> Finding {
+    // A repository finding is a rule the merged configuration breaks, which
+    // no command reports (a launch falls back to the defaults), or a typing
+    // failure a schema-valid file almost never has; neither earns a command.
+    let remedy = match (scope, problem) {
+        (Scope::Repository, _) => "correct the setting".to_string(),
+        (_, SemanticProblem::Mapper { event, index }) => mapper_remedy(*event, *index, None),
+        (Scope::General | Scope::User, _) => format!("correct the setting; {USER_FULL_MESSAGE}"),
     };
-    Finding::new(Severity::Error, scope, summary)
-        .at(path)
-        .remedy("correct the setting; any other `claudine` command prints the full message")
+    Finding::new(Severity::Error, scope, describe(problem, scope)).at(path).remedy(remedy)
+}
+
+/// The correction for a refused mapper, naming the setting by its path in
+/// the file (only a `call` action has a mapper, and only a regular
+/// expression can fail to compile). No command names it: a load checks the
+/// rules of [`ClaudineConfig::validate`] but not mappers, so `claudine
+/// actions` lists the action and exits 0.
+fn mapper_remedy(event: AgenticEvent, index: usize, file: Option<&str>) -> String {
+    let within = file.map(|file| format!(" in {file}")).unwrap_or_default();
+    format!("correct `actions.{event}[{index}].call.mapper.pattern`{within} so it is a valid regular expression")
+}
+
+impl ConfigObservations {
+    /// The user file's own semantic problem when `config` does not report
+    /// it, because the repository overrides replace that setting; the rows
+    /// that read the user file alone explain it themselves.
+    pub(crate) fn superseded_user_problem(&self) -> Option<&SemanticProblem> {
+        match &self.user_config {
+            Err(Unusable::Semantic(problem)) if !self.semantic.iter().any(|finding| finding.scope == Scope::User) => {
+                Some(problem)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The note a user-only row gives for [`ConfigObservations::superseded_user_problem`].
+pub(crate) fn superseded_note(problem: &SemanticProblem) -> String {
+    format!(
+        "in the user file alone, {}; the repository configuration replaces that setting, so `config` reports no problem",
+        describe(problem, Scope::User)
+    )
+}
+
+/// The remedy for [`superseded_note`]: `claudine actions` reads the user
+/// file alone, so it reports the rule even though the repository replaces
+/// the setting, but it never compiles a mapper.
+pub(crate) fn superseded_remedy(problem: &SemanticProblem) -> String {
+    match problem {
+        SemanticProblem::Mapper { event, index } => mapper_remedy(*event, *index, Some("`~/.claudine/config.yaml`")),
+        SemanticProblem::Typed | SemanticProblem::Rule { .. } => {
+            format!("correct the setting in `~/.claudine/config.yaml`; {USER_FULL_MESSAGE}")
+        }
+    }
 }
 
 // ==========================================================================
@@ -363,6 +512,14 @@ fn claudine_findings(file: &ObservedFile<ClaudineState>, scope: Scope, outcome: 
     let Some(path) = file.path.as_deref() else { return };
     let finding = match &file.state {
         ClaudineState::Unavailable => return,
+        ClaudineState::Missing { legacy: true } if scope == Scope::Repository => Finding::new(
+            Severity::Warn,
+            scope,
+            "is not present; a legacy `config.json` beside it has not been converted",
+        )
+        .at(path)
+        .note("doctor leaves the legacy file as it is")
+        .remedy(REPOSITORY_LEGACY_REMEDY),
         ClaudineState::Missing { legacy: true } => Finding::new(
             Severity::Error,
             scope,
@@ -370,9 +527,11 @@ fn claudine_findings(file: &ObservedFile<ClaudineState>, scope: Scope, outcome: 
         )
         .at(path)
         .note("doctor leaves the legacy file as it is")
-        .remedy("run any other `claudine` command, which converts it, or run `claudine setup`"),
+        .remedy("run `claudine setup`, which converts it"),
+        // Setup writes the file only after publishing the host registration,
+        // and nothing else creates it, so the remedy names that step.
         ClaudineState::Missing { legacy: false } if scope == Scope::User => {
-            Finding::new(Severity::Error, scope, "is missing").at(path).remedy("run `claudine setup`")
+            Finding::new(Severity::Error, scope, "is missing").at(path).remedy(MISSING_USER_REMEDY)
         }
         ClaudineState::Missing { .. } => Finding::new(Severity::Ok, scope, "not present (optional)").at(path),
         ClaudineState::AliasOfUser => {
@@ -407,9 +566,11 @@ fn claudine_problem_finding(problem: &ConfigProblem, config_scope: ConfigScope, 
         _ if problem.pointer.is_empty() => format!("cannot be read as configuration{at}"),
         _ => format!("has an invalid value at `{}`{at}", redacted_pointer(&problem.pointer, config_scope)),
     };
-    Finding::new(Severity::Error, scope, summary)
-        .at(path)
-        .remedy("correct it; any other `claudine` command prints the full message")
+    let full_message = match scope {
+        Scope::Repository => REPOSITORY_FULL_MESSAGE,
+        Scope::General | Scope::User => USER_FULL_MESSAGE,
+    };
+    Finding::new(Severity::Error, scope, summary).at(path).remedy(format!("correct it; {full_message}"))
 }
 
 fn darkmatter_findings(file: &ObservedFile<DarkmatterState>, scope: Scope, outcome: &mut CheckOutcome) {
@@ -429,7 +590,7 @@ fn darkmatter_findings(file: &ObservedFile<DarkmatterState>, scope: Scope, outco
                 outcome.push(darkmatter_problem_finding(error.kind(), problem, scope, path));
             }
         }
-        DarkmatterState::Valid(file) => {
+        DarkmatterState::Valid(file, broken) => {
             let mut clean = true;
             if let Err(error) = file.permissions() {
                 clean = false;
@@ -440,6 +601,10 @@ fn darkmatter_findings(file: &ObservedFile<DarkmatterState>, scope: Scope, outco
                     }
                     outcome.push(finding);
                 }
+            }
+            if let Some(broken) = broken {
+                clean = false;
+                outcome.push(broken_target_finding(*broken, file, scope, path));
             }
             for error in file.registration_findings() {
                 clean = false;
@@ -483,10 +648,55 @@ fn darkmatter_problem_finding(
             format!("has an invalid value at `{shown}`{at}")
         }
     };
+    let remedy = match kind {
+        // `md` loads `register` only to find host registrations, so no
+        // compose reports it; the summary already locates it.
+        _ if segments.first().is_some_and(|segment| segment == "register") => REGISTER_REMEDY.to_string(),
+        ConfigErrorKind::Syntax
+        | ConfigErrorKind::NotAMapping
+        | ConfigErrorKind::UnknownKey
+        | ConfigErrorKind::InvalidSetting
+        | ConfigErrorKind::InvalidReference => format!("correct it; {MD_FULL_MESSAGE}"),
+        _ => "correct it, then run `claudine doctor` again".to_string(),
+    };
+    Finding::new(Severity::Error, scope, summary).at(path).remedy(remedy)
+}
+
+/// The finding for a reference whose target is unusable. It names the
+/// declaring file and where the reference is written, never the reference
+/// or the target's path, which spells it. The `darkmatter-permissions` row
+/// refers to this finding rather than repeating it.
+fn broken_target_finding(broken: BrokenReference, file: &ConfigFile, scope: Scope, path: &Path) -> Finding {
+    let position = file.permissions_position();
+    let at = location(position.map(|at| at.line), position.map(|at| at.column));
+    let to = if broken.names_claudine { "to Claudine's configuration, which" } else { "to a file that" };
+    let summary = match (broken.target, scope) {
+        (BrokenTarget::Unresolved, Scope::Repository) => {
+            format!("has a `permissions` reference that does not lead to a file inside the repository{at}")
+        }
+        (BrokenTarget::Unresolved, _) => format!("has a `permissions` reference that cannot be resolved{at}"),
+        (BrokenTarget::Missing, _) => format!("has a `permissions` reference {to} does not exist{at}"),
+        (BrokenTarget::Unusable, _) => {
+            format!("has a `permissions` reference {to} does not supply a valid `permissions` mapping{at}")
+        }
+    };
+    // `md init --inline` writes only the user file, so it cannot repair a
+    // repository reference.
+    let remedy = match scope {
+        Scope::Repository => "correct the reference or the file it names, then run `claudine doctor` again".to_string(),
+        Scope::General | Scope::User => format!(
+            "correct the reference or the file it names ({MD_FULL_MESSAGE}); `md init --inline` replaces the reference with a block"
+        ),
+    };
     Finding::new(Severity::Error, scope, summary)
         .at(path)
-        .remedy("correct it; `md` prints the full message for this file")
+        .note("Darkmatter refuses its permissions policy until the reference supplies a valid mapping")
+        .remedy(remedy)
 }
+
+/// The correction for an invalid `register` setting or entry.
+const REGISTER_REMEDY: &str =
+    "correct the `register` setting at that position: it is a list of manifest references; then run `claudine doctor` again";
 
 fn unreadable_finding(unreadable: Unreadable, scope: Scope, path: &Path) -> Finding {
     let summary = match unreadable {
@@ -523,7 +733,12 @@ pub(crate) fn check_repo_config(pass: &Pass<'_>) -> CheckOutcome {
     };
     let Some(path) = repo.path.as_deref() else { return outcome };
     let finding = match &repo.state {
-        ClaudineState::Missing { .. } | ClaudineState::Unavailable => {
+        ClaudineState::Missing { legacy: true } => Finding::new(
+            Severity::Info,
+            Scope::Repository,
+            "no YAML configuration; a legacy `config.json` awaits conversion, reported under `config`",
+        ),
+        ClaudineState::Missing { legacy: false } | ClaudineState::Unavailable => {
             Finding::new(Severity::Info, Scope::Repository, "no repository configuration (it is optional)")
         }
         ClaudineState::AliasOfUser => {
@@ -610,6 +825,38 @@ fn stray_finding(problem: &ConfigProblem, config_scope: ConfigScope, scope: Scop
 // ==========================================================================
 // Shared wording
 // ==========================================================================
+
+// A remedy names one command confirmed to report the problem's category in
+// its scope, never "any command"; where none does, it says what to correct.
+// Help, completion, and `registrations` read no configuration, and `doctor`
+// reads the files only to diagnose them; `setup` and every command that
+// needs configuration read only the user file, and check its rules but not
+// its mappers; only a provider launch stops on a repository file's error,
+// and a dry run does not. The same holds for converting a repository's
+// legacy `config.json`: only a launch with a prompt converts it (`setup`
+// does not, nor does an interactive launch or a dry run).
+// `cli/tests/l1/doctor.rs` runs the Claudine commands named here.
+
+/// Where a user-file problem is printed in full.
+const USER_FULL_MESSAGE: &str = "`claudine actions` prints the full message";
+
+/// Where a repository-file problem is printed in full; the launch stops
+/// before the provider starts. Not every wrapper reads the file (`goose`
+/// launches without it), so this names one that does.
+const REPOSITORY_FULL_MESSAGE: &str = "`claudine claude` run inside the repository stops with the full message";
+
+/// The remedy of a missing user Claudine file.
+const MISSING_USER_REMEDY: &str = "run `claudine setup`, which writes it after publishing the host registration; if publication stops, correct what setup names, then run it again";
+
+/// The command that converts a repository's legacy `config.json`.
+const REPOSITORY_LEGACY_REMEDY: &str =
+    "`claudine claude` with a prompt, run inside the repository, converts it before the provider starts";
+
+/// Where `md` prints a Darkmatter configuration error in full: a load
+/// problem stops every `md compose`, a `permissions` problem only one that
+/// needs the policy for a shell command, and `md render` reports neither.
+/// A `register` problem is never printed by a compose.
+pub(crate) const MD_FULL_MESSAGE: &str = "`md compose` of a document that runs a shell command prints the full message";
 
 const fn config_scope_of(scope: Scope) -> ConfigScope {
     match scope {

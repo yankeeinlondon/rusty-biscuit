@@ -1,5 +1,6 @@
-//! The `tts` check: which speech provider hook speech would use, judged by
-//! local availability and base quality.
+//! The `tts` check: the best-rated speech provider hook speech can reach,
+//! judged by local availability and base quality, and the provider runtime
+//! tries first when that differs.
 //!
 //! Enablement and the configured provider come from the validated user
 //! configuration through `dispatch::loader::bridge_tts_settings`, as hook
@@ -11,16 +12,15 @@
 
 use biscuit_speaks::{CloudTtsProvider, HostTtsProvider, TtsProvider, VoiceQuality};
 
-use super::config::Unusable;
+use super::config::{ConfigObservations, superseded_note, superseded_remedy};
 use super::report::{Finding, Scope};
 use super::{CheckOutcome, Pass, Severity};
-use crate::config::ClaudineConfig;
 use crate::dispatch::loader::bridge_tts_settings;
 
 /// The registry callback: the user configuration of this pass against the
 /// providers detected on this host.
 pub(crate) fn check_tts(pass: &Pass<'_>) -> CheckOutcome {
-    assess(&pass.config().user_config, biscuit_speaks::get_available_providers())
+    assess(pass.config(), biscuit_speaks::get_available_providers())
 }
 
 /// What the settings ask for.
@@ -36,14 +36,24 @@ enum Selection {
     Unrecognized,
 }
 
-/// The finding for `user_config` when `available` are the detected
-/// providers, in runtime order.
-pub(super) fn assess(user_config: &Result<ClaudineConfig, Unusable>, available: &[TtsProvider]) -> CheckOutcome {
-    let Ok(config) = user_config else {
-        return CheckOutcome::from(vec![
-            Finding::new(Severity::Info, Scope::User, "speech settings could not be determined")
-                .note("the user configuration is not usable; the config row says why"),
-        ]);
+/// The finding for the observed user configuration when `available` are
+/// the detected providers, in runtime order.
+pub(super) fn assess(observed: &ConfigObservations, available: &[TtsProvider]) -> CheckOutcome {
+    let Ok(config) = &observed.user_config else {
+        let undetermined = Finding::new(Severity::Info, Scope::User, "speech settings could not be determined");
+        let finding = match observed.superseded_user_problem() {
+            // `config` is clear: the merged configuration does not have the
+            // problem that keeps speech from reading the user file.
+            Some(problem) => {
+                let finding = undetermined.note(superseded_note(problem)).remedy(superseded_remedy(problem));
+                match &observed.claudine_user.path {
+                    Some(path) => finding.at(path),
+                    None => finding,
+                }
+            }
+            None => undetermined.note("the user configuration is not usable; the config row says why"),
+        };
+        return CheckOutcome::from(vec![finding]);
     };
     let selection = match bridge_tts_settings(config).tts {
         None => Selection::Disabled,
@@ -69,12 +79,21 @@ pub(super) fn assess(user_config: &Result<ClaudineConfig, Unusable>, available: 
     };
     let enabled = selection != Selection::Disabled;
     let best = highest_rated(&candidates);
-    let ok_summary = match (selection, best) {
-        (Selection::Disabled, Some(best)) => {
+    // Runtime tries `candidates` in order; the best-rated one is only what
+    // runs when it is also first.
+    let tried_first = candidates.first().copied().filter(|first| Some(*first) != best);
+    let ok_summary = match (selection, best, tried_first) {
+        (Selection::Disabled, Some(best), _) => {
             format!("hook speech is off; {} is available to lifecycle `say` ({} quality)", name_of(best), quality_name(best))
         }
-        (_, Some(best)) => format!("hook speech uses {} ({} quality)", name_of(best), quality_name(best)),
-        (_, None) => String::new(),
+        (_, Some(best), Some(first)) => format!(
+            "the best available speech provider is {} ({} quality); hook speech tries {} first",
+            name_of(best),
+            quality_name(best),
+            name_of(first)
+        ),
+        (_, Some(best), None) => format!("hook speech uses {} ({} quality)", name_of(best), quality_name(best)),
+        (_, None, _) => String::new(),
     };
 
     match best {
@@ -103,11 +122,11 @@ pub(super) fn assess(user_config: &Result<ClaudineConfig, Unusable>, available: 
                         .remedy("install a higher-quality provider such as Kokoro, Echogarden, or Piper"),
                 }
             };
-            if let Some(first) = candidates.first().filter(|first| **first != best) {
+            if let Some(first) = tried_first {
                 finding = finding.note(format!(
                     "automatic selection tries {} ({} quality) first",
-                    name_of(*first),
-                    quality_name(*first)
+                    name_of(first),
+                    quality_name(first)
                 ));
             }
             findings.push(finding);

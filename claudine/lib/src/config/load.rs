@@ -219,20 +219,34 @@ fn project(
             format!("the configuration {what}; write `{{}}` for one that keeps every default"),
         )]);
     };
-    let flat = flat_entry_problems(document, problem);
-    let defaults = match contract(scope).validate_strict(document) {
-        Ok(success) if flat.is_empty() => success.defaults,
-        Ok(_) => return Err(flat),
-        Err(failure) => {
-            // A flat action or route fails every keyed arm; its migration
-            // message replaces what the union reports about it.
-            let mut problems = failure_problems(&failure, problem);
-            problems.retain(|found| !flat.iter().any(|entry| is_at_or_below(&found.pointer, &entry.pointer)));
-            problems.extend(flat);
-            return Err(problems);
+    let flat = super::wire::flat_entries(document);
+    // The document-level rules below are judged whatever the schema or the
+    // entries' form says, so one diagnosis never hides another: correcting
+    // the reported problems must not reveal a further one.
+    let (defaults, mut problems) = if flat.is_empty() {
+        match contract(scope).validate_strict(document) {
+            Ok(success) => (Some(success.defaults), Vec::new()),
+            Err(failure) => (None, failure_problems(&failure, problem)),
         }
+    } else {
+        // A flat action or route fails every keyed arm, so the document is
+        // judged in its keyed view instead: the migration message is the
+        // entry's one diagnosis of its form, and whatever else is wrong in
+        // it (a misspelled setting, a wrong type) is still reported, at the
+        // key the file wrote.
+        let mut keyed = document.clone();
+        super::wire::upgrade_flat(&mut keyed);
+        let authored = |segments: &[String], kind: ConfigProblemKind, message: String| {
+            let segments = flat.iter().find_map(|entry| entry.authored(segments)).unwrap_or_else(|| segments.to_vec());
+            problem(&segments, kind, message)
+        };
+        let mut problems = match contract(scope).validate_strict(&keyed) {
+            Ok(_) => Vec::new(),
+            Err(failure) => failure_problems(&failure, &authored),
+        };
+        problems.extend(flat.into_iter().map(|entry| problem(&entry.segments, ConfigProblemKind::InvalidSetting, entry.message)));
+        (None, problems)
     };
-    let mut problems = Vec::new();
     if map.contains_key("preferred_agent") && map.contains_key("favorite_agent") {
         problems.push(problem(
             &["favorite_agent".to_string()],
@@ -241,9 +255,9 @@ fn project(
         ));
     }
     exit_expression_problems(map.get("exit_expressions"), problem, &mut problems);
-    if !problems.is_empty() {
+    let Some(defaults) = defaults.filter(|_| problems.is_empty()) else {
         return Err(problems);
-    }
+    };
 
     let mut effective = document.clone();
     for default in &defaults {
@@ -261,20 +275,6 @@ fn project(
         }
     }
     Ok((effective, defaults))
-}
-
-/// A migration problem for every action or route still written in the flat
-/// form (`type: bash`, `provider: discord`), with its keyed spelling.
-fn flat_entry_problems(document: &Value, problem: &Problem<'_>) -> Vec<ConfigProblem> {
-    super::wire::flat_entries(document)
-        .into_iter()
-        .map(|(segments, message)| problem(&segments, ConfigProblemKind::InvalidSetting, message))
-        .collect()
-}
-
-/// Whether JSON pointer `pointer` is `parent` or inside it.
-fn is_at_or_below(pointer: &str, parent: &str) -> bool {
-    pointer.strip_prefix(parent).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// An exit-expression entry writes exactly one of `pattern` and `patterns`,

@@ -40,7 +40,9 @@
 //!   entries the previous manifest listed and the inventory no longer has
 //!   are removed, only when Darkmatter's format 2 admission
 //!   (`bundle::admit_manifest`) accepts that manifest as Claudine's (any
-//!   refusal removes nothing; old member bytes need not match); regular
+//!   refusal removes nothing; old member bytes need not match), except one
+//!   that reaches a current member's directory entry (an old spelling that
+//!   differs only in case, on a case-insensitive volume); regular
 //!   files named with [`TEMP_PREFIX`] in a publisher directory (leftovers
 //!   of an interrupted replacement) are removed. The manifest is replaced last, and only when its bytes differ.
 //! - **Unknown files are kept.** Anything else in the output root is not
@@ -62,11 +64,11 @@
 //! of two publishes. The next publish converges on the embedded bytes.
 
 use std::collections::BTreeSet;
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs;
 use std::io;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::config::atomic::{REGISTRATION_TEMP_PREFIX, atomic_write_registration};
 
@@ -196,6 +198,9 @@ pub struct PublishChanges {
     pub retired: Vec<String>,
     /// Leftover temporary files removed.
     pub removed_temps: Vec<PathBuf>,
+    /// Folders of retired paths that no member needs, removed once they
+    /// were empty, by published path (`schemas/old`), deepest first.
+    pub removed_folders: Vec<String>,
 }
 
 impl PublishChanges {
@@ -205,8 +210,25 @@ impl PublishChanges {
         self.written.iter().any(|path| path == MANIFEST_FILE)
     }
 
-    fn is_empty(&self) -> bool {
-        self.written.is_empty() && self.retired.is_empty() && self.removed_temps.is_empty()
+    /// Each change under `home`, in the order [`PublishChanges`]'s fields
+    /// list them, as `wrote <path>` or `removed <path>`.
+    #[must_use]
+    pub fn describe(&self, home: &Path) -> Vec<String> {
+        let layout = Layout::new(home);
+        let removed = |path: &Path| format!("removed {}", path.display());
+        let mut lines: Vec<String> = self.removed_temps.iter().map(|path| removed(path)).collect();
+        lines.extend(self.written.iter().map(|path| format!("wrote {}", layout.destination(path).display())));
+        lines.extend(self.retired.iter().chain(&self.removed_folders).map(|path| removed(&layout.destination(path))));
+        lines
+    }
+
+    /// Whether nothing changed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.written.is_empty()
+            && self.retired.is_empty()
+            && self.removed_temps.is_empty()
+            && self.removed_folders.is_empty()
     }
 }
 
@@ -228,9 +250,10 @@ impl std::fmt::Display for Obstruction {
     }
 }
 
-/// Why [`publish`] stopped. Members may have been replaced before the
-/// failure, but the manifest was not: the previous manifest is intact, and
-/// the next publish converges.
+/// Why [`publish`] stopped. Members may have been replaced, and retired
+/// entries or leftover temporary files removed, before the failure
+/// ([`publish_recording`] keeps the list), but the manifest was not: the
+/// previous manifest is intact, and the next publish converges.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PublishError {
@@ -243,7 +266,7 @@ pub enum PublishError {
         reason: String,
     },
     /// A link stands where the publisher would traverse, write, or remove.
-    #[error("`{}` is {obstruction}; the publisher never follows or replaces one, so nothing was published. Remove it and publish again", .path.display())]
+    #[error("`{}` is {obstruction}; the publisher never follows or replaces one, so the publish stopped before it. Remove it and publish again", .path.display())]
     Obstructed {
         #[allow(missing_docs)]
         path: PathBuf,
@@ -251,13 +274,13 @@ pub enum PublishError {
         obstruction: Obstruction,
     },
     /// Something other than a directory stands where a directory belongs.
-    #[error("`{}` is not a directory, so nothing was published", .path.display())]
+    #[error("`{}` is not a directory, so the publish stopped before it", .path.display())]
     NotADirectory {
         #[allow(missing_docs)]
         path: PathBuf,
     },
     /// Something other than a regular file stands where a file is written.
-    #[error("`{}` is not a regular file, so nothing was published", .path.display())]
+    #[error("`{}` is not a regular file, so the publish stopped before it", .path.display())]
     NotAFile {
         #[allow(missing_docs)]
         path: PathBuf,
@@ -336,7 +359,21 @@ pub struct PublishHooks<'a> {
 /// is written), a lock held past [`LOCK_DEADLINE`], or a failed file-system
 /// operation. The previous manifest stays in place in every case.
 pub fn publish(home: &Path, inventory: &RegistrationInventory) -> Result<PublishOutcome, PublishError> {
-    Publisher::acquire(home, inventory)?.publish(inventory)
+    publish_recording(home, inventory, &mut PublishChanges::default())
+}
+
+/// [`publish`], recording each change in `changes` as it is made, so a
+/// caller still knows what changed when the publish fails partway.
+///
+/// ## Errors
+///
+/// As [`publish`].
+pub fn publish_recording(
+    home: &Path,
+    inventory: &RegistrationInventory,
+    changes: &mut PublishChanges,
+) -> Result<PublishOutcome, PublishError> {
+    Publisher::acquire(home, inventory)?.publish_recording(inventory, changes)
 }
 
 /// [`publish`] with a lock deadline and an observer, for tests that hold
@@ -352,7 +389,11 @@ pub fn publish_with(
     inventory: &RegistrationInventory,
     hooks: PublishHooks<'_>,
 ) -> Result<PublishOutcome, PublishError> {
-    Publisher::acquire_with(home, inventory, hooks.lock_deadline)?.publish_observed(inventory, hooks.observer)
+    Publisher::acquire_with(home, inventory, hooks.lock_deadline)?.publish_observed(
+        inventory,
+        hooks.observer,
+        &mut PublishChanges::default(),
+    )
 }
 
 /// The publisher lock, held, with the layout it guards: every operation a
@@ -401,18 +442,24 @@ impl Publisher {
         &self.layout.home
     }
 
-    /// Publishes `inventory` under the held lock, as [`publish`] describes.
-    pub(crate) fn publish(&self, inventory: &RegistrationInventory) -> Result<PublishOutcome, PublishError> {
-        self.publish_observed(inventory, &mut |_: &PublishStep| ControlFlow::Continue(()))
+    /// Publishes `inventory` under the held lock, as [`publish_recording`]
+    /// describes: `changes` lists what changed even when the publish fails.
+    pub(crate) fn publish_recording(
+        &self,
+        inventory: &RegistrationInventory,
+        changes: &mut PublishChanges,
+    ) -> Result<PublishOutcome, PublishError> {
+        self.publish_observed(inventory, &mut |_: &PublishStep| ControlFlow::Continue(()), changes)
     }
 
     fn publish_observed(
         &self,
         inventory: &RegistrationInventory,
         observer: &mut dyn FnMut(&PublishStep) -> ControlFlow<()>,
+        changes: &mut PublishChanges,
     ) -> Result<PublishOutcome, PublishError> {
-        let mut changes = PublishChanges::default();
-        let manifest = self.publish_into(inventory, observer, &mut changes)?;
+        let manifest = self.publish_into(inventory, observer, changes)?;
+        let changes = changes.clone();
         if changes.is_empty() {
             tracing::debug!(manifest = %manifest.display(), "the host registration is current");
             Ok(PublishOutcome::Current { manifest })
@@ -441,7 +488,7 @@ impl Publisher {
         stop(PublishStep::Locked)?;
 
         for directory in &plan.directories {
-            changes.removed_temps.extend(remove_temps(directory)?);
+            remove_temps(directory, &mut changes.removed_temps)?;
         }
         for file in inventory.members() {
             let destination = layout.destination(file.path());
@@ -462,13 +509,13 @@ impl Publisher {
                 continue;
             }
             access_log::note("remove", &destination);
-            match fs::remove_file(&destination) {
+            match remove_entry(&destination, false) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(io_error("remove", &destination)(error)),
             }
-            remove_empty_parents(layout, path, inventory);
             changes.retired.push(path.clone());
+            remove_empty_parents(layout, path, inventory, &mut changes.removed_folders);
             stop(PublishStep::Retired(path.clone()))?;
         }
         stop(PublishStep::BeforeManifest)?;
@@ -485,7 +532,7 @@ impl Publisher {
     /// Removes the retired format 1 registration
     /// ([`remove_legacy_registration`]) while the lock is held. Call it only
     /// once the user `register` entry names the new manifest.
-    pub(crate) fn finalize_legacy(&self) -> Result<LegacyCleanup, CleanupError> {
+    pub(crate) fn finalize_legacy(&self) -> Result<LegacyCleanup, CleanupFailure> {
         remove_legacy_registration(&self.layout.home)
     }
 }
@@ -501,135 +548,7 @@ fn holds(path: &Path, bytes: &[u8]) -> Result<bool, PublishError> {
     }
 }
 
-/// Removes every regular file named with [`TEMP_PREFIX`] directly in
-/// `directory`, when it exists.
-fn remove_temps(directory: &Path) -> Result<Vec<PathBuf>, PublishError> {
-    access_log::note("list", directory);
-    let entries = match fs::read_dir(directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(io_error("list", directory)(error)),
-    };
-    let mut removed = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(io_error("list", directory))?;
-        if !entry.file_name().to_string_lossy().starts_with(TEMP_PREFIX) {
-            continue;
-        }
-        let path = entry.path();
-        if entry_at(&path)? != Entry::File {
-            continue;
-        }
-        access_log::note("remove", &path);
-        match fs::remove_file(&path) {
-            Ok(()) => removed.push(path),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(io_error("remove", &path)(error)),
-        }
-    }
-    Ok(removed)
-}
-
-/// Removes the folders of the retired `path` that no member needs and that
-/// are now empty; a folder that still holds anything stays.
-fn remove_empty_parents(layout: &Layout, path: &str, inventory: &RegistrationInventory) {
-    let mut folder = path;
-    while let Some((parent, _)) = folder.rsplit_once('/') {
-        let prefix = format!("{parent}/");
-        if inventory.files().iter().any(|file| file.path().starts_with(&prefix)) {
-            return;
-        }
-        let destination = layout.destination(parent);
-        access_log::note("remove", &destination);
-        if fs::remove_dir(&destination).is_err() {
-            return;
-        }
-        folder = parent;
-    }
-}
-
-/// A held publisher lock, released when dropped. The lock file stays.
-struct PublisherLock {
-    _file: File,
-}
-
-fn acquire_lock(lock: &Path, deadline: Duration) -> Result<PublisherLock, PublishError> {
-    access_log::note("lock", lock);
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(lock)
-        .map_err(io_error("open the lock", lock))?;
-    let started = Instant::now();
-    loop {
-        match file.try_lock() {
-            Ok(()) => return Ok(PublisherLock { _file: file }),
-            Err(TryLockError::WouldBlock) => {
-                let waited = started.elapsed();
-                if waited >= deadline {
-                    return Err(PublishError::LockTimeout { lock: lock.to_path_buf(), waited });
-                }
-                std::thread::sleep(LOCK_BACKOFF.min(deadline - waited));
-            }
-            Err(TryLockError::Error(source)) => {
-                return Err(PublishError::Io { action: "lock", path: lock.to_path_buf(), source });
-            }
-        }
-    }
-}
-
 // ── preflight ───────────────────────────────────────────────────────────────
-
-/// What a path holds, read without following links.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Entry {
-    Absent,
-    File,
-    Directory,
-    Obstruction(Obstruction),
-    /// A socket, device, or anything else.
-    Other,
-}
-
-/// Classifies an entry from its no-follow file type and its Windows file
-/// attributes (`0` elsewhere). A symbolic link wins over the reparse bit it
-/// also carries on Windows; a junction carries only the bit.
-fn obstruction_of(is_symlink: bool, attributes: u32) -> Option<Obstruction> {
-    if is_symlink {
-        Some(Obstruction::SymbolicLink)
-    } else if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        Some(Obstruction::ReparsePoint)
-    } else {
-        None
-    }
-}
-
-#[cfg(windows)]
-fn attributes(metadata: &fs::Metadata) -> u32 {
-    std::os::windows::fs::MetadataExt::file_attributes(metadata)
-}
-
-#[cfg(not(windows))]
-const fn attributes(_: &fs::Metadata) -> u32 {
-    0
-}
-
-fn entry_at(path: &Path) -> Result<Entry, PublishError> {
-    access_log::note("inspect", path);
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Entry::Absent),
-        Err(error) => return Err(io_error("inspect", path)(error)),
-    };
-    Ok(match obstruction_of(metadata.file_type().is_symlink(), attributes(&metadata)) {
-        Some(obstruction) => Entry::Obstruction(obstruction),
-        None if metadata.is_dir() => Entry::Directory,
-        None if metadata.is_file() => Entry::File,
-        None => Entry::Other,
-    })
-}
 
 /// The publisher's paths under one home.
 struct Layout {
@@ -714,7 +633,22 @@ impl Layout {
             }
             // A folder or anything else that is not a regular file is not
             // the publisher's: it is left for doctor to report.
-            if self.route(&Self::output_names(&path))? == Entry::File {
+            if self.route(&Self::output_names(&path))? != Entry::File {
+                continue;
+            }
+            // On a case-insensitive volume an old spelling can reach a
+            // current member's entry; removing it would remove the member.
+            let destination = self.destination(&path);
+            let mut current = false;
+            for member in &known {
+                if self.route(&Self::output_names(member))? == Entry::File
+                    && one_entry(&destination, &self.destination(member))?
+                {
+                    current = true;
+                    break;
+                }
+            }
+            if !current {
                 retired.push(path);
             }
         }
@@ -787,15 +721,26 @@ fn previous_member_paths(path: &Path, bytes: &[u8]) -> Option<Vec<String>> {
 }
 
 mod access_log;
+mod entries;
 mod inspect;
 mod legacy;
+mod lock;
+mod removal;
 mod repair;
 
+use entries::{Entry, entry_at, one_entry};
+#[cfg(test)]
+use entries::obstruction_of;
+use lock::{PublisherLock, acquire_lock};
+use removal::{remove_empty_parents, remove_entry, remove_temps};
+#[cfg(test)]
+pub(crate) use removal::fail_removals;
+
 pub(crate) use inspect::{
-    Blocker, BlockerProblem, EntryPrecondition, ExpectedState, Installation, ManifestLoad,
-    config_target_blockers, entry_precondition, entry_registered, inspect_installation,
+    Blocker, BlockerProblem, EditLayout, EntryPrecondition, ExpectedState, Installation, ManifestLoad,
+    config_target_blockers, edit_layout, entry_layout, entry_precondition, entry_registered, inspect_installation,
 };
-pub use legacy::{CleanupError, LegacyCleanup, remove_legacy_registration};
+pub use legacy::{CleanupError, CleanupFailure, LegacyCleanup, remove_legacy_registration};
 pub(crate) use repair::{EditFailure, RepairFailure, RepairOperation, repair_registration};
 
 #[cfg(test)]

@@ -12,10 +12,11 @@ use std::sync::Arc;
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use claudine::composition::registration::{
-    CleanupError, FileKind, LEGACY_MANIFEST_REFERENCE, MANIFEST_REFERENCE, Obstruction, PublishOutcome, PublishedFile,
-    PublishError, PublishHooks, RegistrationInventory, legacy_manifest_path, legacy_revisions_dir, manifest_path,
-    output_root, publish, publish_with,
+    FileKind, LEGACY_MANIFEST_REFERENCE, MANIFEST_REFERENCE, PublishOutcome, PublishedFile, PublishError, PublishHooks,
+    RegistrationInventory, legacy_manifest_path, legacy_revisions_dir, manifest_path, output_root, publish, publish_with,
 };
+#[cfg(unix)]
+use claudine::composition::registration::{CleanupError, Obstruction};
 use claudine::composition::{TriggerFindings, pre_validate_schema, resolve_composition_source_in_context};
 use claudine::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
 use claudine::config::persist::{SaveOutcome, initialize_config};
@@ -291,7 +292,7 @@ fn installed_registration_failed_publication_writes_no_configuration() {
 
     let error = fixture.setup().unwrap_err();
 
-    assert!(matches!(error, SetupError::Publish(_)), "{error}");
+    assert!(matches!(error, SetupError::Publish { .. }), "{error}");
     assert!(!fixture.claudine().exists(), "Claudine's configuration is not written");
     assert!(!fixture.darkmatter().exists(), "Darkmatter's configuration is not written");
     assert!(!manifest_path(&fixture.home()).exists(), "no manifest is published");
@@ -741,6 +742,30 @@ fn installed_registration_setup_migrates_a_legacy_home_and_removes_the_retired_f
     assert_eq!(again.cleanup.unwrap().unwrap().removed, Vec::<PathBuf>::new());
 }
 
+/// R4-F2.c3: setup stages the same registration edit as doctor's repair. An
+/// inline `register` list it must append to is refused by the editor with a
+/// located error naming the list, the retired layout is kept, and the block
+/// form of the same list registers (the migration test above).
+#[test]
+fn installed_registration_setup_reports_an_inline_register_list_and_keeps_the_retired_layout() {
+    let fixture = Fixture::new();
+    with_legacy_registration(&fixture);
+    fixture.write(&fixture.darkmatter(), &format!("register: [~/hosts/mine.yaml, {LEGACY_MANIFEST_REFERENCE}]\n"));
+
+    let setup = fixture.setup().unwrap();
+
+    let error = setup.registration.unwrap_err();
+    let InitError::Write(darkmatter::config::write::ConfigWriteError::UnsupportedEdit { path, source }) = &error else {
+        panic!("{error:?}")
+    };
+    assert_eq!(*path, fixture.darkmatter());
+    assert_eq!(source.kind, darkmatter::yaml_edit::YamlEditErrorKind::FlowCollection);
+    assert!(error.to_string().contains("a flow collection at `register`"), "{error}");
+    assert!(setup.cleanup.is_none(), "nothing is cleaned up before the entry is written");
+    assert!(legacy_manifest_path(&fixture.home()).exists() && legacy_revisions_dir(&fixture.home()).exists());
+    assert_eq!(register_list(&fixture), json!(["~/hosts/mine.yaml", LEGACY_MANIFEST_REFERENCE]));
+}
+
 #[test]
 fn installed_registration_setup_replaces_a_legacy_entry_whose_manifest_is_gone() {
     let fixture = Fixture::new();
@@ -803,6 +828,67 @@ fn installed_registration_permissions_conflict_keeps_both_blocks_and_still_regis
     assert_eq!(register_list(&fixture), json!([MANIFEST_REFERENCE]));
 }
 
+/// Where setup runs relative to the user file: a separate repository with
+/// no `.darkmatter.yaml` (control), one whose `.darkmatter.yaml` links to
+/// the user file, or the home itself as the repository root.
+#[derive(Debug, Clone, Copy)]
+enum Launch {
+    SeparateRepository,
+    #[cfg(unix)]
+    LinkedRepositoryFile,
+    HomeIsRepository,
+}
+
+fn launches() -> Vec<Launch> {
+    let mut launches = vec![Launch::SeparateRepository, Launch::HomeIsRepository];
+    #[cfg(unix)]
+    launches.push(Launch::LinkedRepositoryFile);
+    launches
+}
+
+impl Fixture {
+    /// A context launched in the repository `launch` lays out.
+    fn launched(&self, launch: Launch) -> FileResolutionContext {
+        let root = match launch {
+            Launch::SeparateRepository => self.repo(),
+            #[cfg(unix)]
+            Launch::LinkedRepositoryFile => {
+                std::os::unix::fs::symlink(self.darkmatter(), self.repo().join(".darkmatter.yaml")).unwrap();
+                self.repo()
+            }
+            Launch::HomeIsRepository => self.home(),
+        };
+        FileResolutionContext::from_snapshot(root.clone(), Some(self.home()), HashMap::new()).with_repository_root(&root)
+    }
+}
+
+#[test]
+fn installed_registration_registers_in_an_aliased_user_file_despite_a_permissions_conflict() {
+    // A user-only grant (a home reference no repository file may hold) and
+    // a policy both scopes accept.
+    let user_only = "permissions:\n    file-read:\n        - ~/notes/*.md\n";
+    let shared = "permissions:\n    network: deny\n";
+    for launch in launches() {
+        for policy in [user_only, shared] {
+            let case = format!("{launch:?}, {policy:?}");
+            let fixture = Fixture::new();
+            fixture.write(&fixture.home().join(".other/manifest.yaml"), "kind: darkmatter-host\n");
+            let before = format!("register:\n    # the other host\n    - ~/.other/manifest.yaml\n{policy}");
+            fixture.write(&fixture.darkmatter(), &before);
+            fixture.write(&fixture.claudine(), "permissions:\n    file-read:\n        - ~/elsewhere/*.txt\n");
+            let context = fixture.launched(launch);
+
+            let setup = setup_claudine(&context, ConfigScope::User, write_default).unwrap();
+
+            assert!(matches!(setup.darkmatter, Err(SetupError::Conflict { .. })), "{case}: {:?}", setup.darkmatter);
+            let registration = setup.registration.unwrap_or_else(|error| panic!("{case}: {error}"));
+            assert_eq!(registration.action, InitAction::Updated, "{case}");
+            let expected = format!("register:\n    # the other host\n    - ~/.other/manifest.yaml\n    - {MANIFEST_REFERENCE}\n{policy}");
+            assert_eq!(std::fs::read_to_string(fixture.darkmatter()).unwrap(), expected, "{case}");
+        }
+    }
+}
+
 #[test]
 fn installed_registration_third_party_permissions_reference_is_kept_and_the_manifest_registered() {
     let fixture = Fixture::new();
@@ -845,7 +931,7 @@ fn installed_registration_failed_publication_leaves_a_legacy_home_untouched() {
 
     let error = fixture.setup().unwrap_err();
 
-    assert!(matches!(error, SetupError::Publish(_)), "{error}");
+    assert!(matches!(error, SetupError::Publish { .. }), "{error}");
     assert_eq!(fixture.files(), before, "byte for byte");
 }
 
@@ -923,7 +1009,9 @@ fn installed_registration_cleanup_refuses_a_link_in_the_retired_tree_and_leaves_
     let setup = fixture.setup().unwrap();
 
     assert_eq!(register_list(&fixture), json!(["~/hosts/mine.yaml", MANIFEST_REFERENCE, "~/hosts/gone.yaml"]));
-    let error = setup.cleanup.expect("cleanup ran").unwrap_err();
+    let failure = setup.cleanup.expect("cleanup ran").unwrap_err();
+    assert!(failure.removed.is_empty(), "{failure}");
+    let error = failure.error;
     assert!(
         matches!(&error, CleanupError::Obstructed { path, obstruction: Obstruction::SymbolicLink } if *path == link),
         "{error}"

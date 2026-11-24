@@ -13,7 +13,7 @@ use clap::Args;
 use color_eyre::eyre::{Report, Result, eyre};
 use serde::Serialize;
 
-use claudine::composition::registration::{PublishedFile, RegistrationInventory, publish};
+use claudine::composition::registration::{PublishChanges, PublishedFile, RegistrationInventory, publish_recording};
 
 use crate::{log, request};
 
@@ -65,7 +65,18 @@ pub fn run(args: &RegistrationsArgs) -> Result<()> {
             let home = request::snapshot()
                 .home()
                 .ok_or_else(|| eyre!("no home directory is known, so the registration cannot be published"))?;
-            publish(home, inventory).map_err(Report::new)?;
+            let mut changes = PublishChanges::default();
+            publish_recording(home, inventory, &mut changes).map_err(|error| {
+                let report = Report::new(error);
+                if changes.is_empty() {
+                    report
+                } else {
+                    report.wrap_err(format!(
+                        "the registration was only partly published; already changed: {}",
+                        changes.describe(home).join(", ")
+                    ))
+                }
+            })?;
             print_json(&listing(inventory))
         }
         Some(path) => {

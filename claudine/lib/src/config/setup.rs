@@ -50,7 +50,8 @@ use simplified_schema::yaml_documents::load_yaml_document;
 use super::persist::{PropertyPath, SaveOutcome, YamlEdit, validate_config_text};
 use super::schema::{CONFIG_DIR, CONFIG_FILE_NAME, ConfigScope};
 use crate::composition::registration::{
-    self, CleanupError, LegacyCleanup, PublishError, PublishOutcome, Publisher, RegistrationInventory,
+    self, Blocker, BlockerProblem, CleanupFailure, EditLayout, LegacyCleanup, PublishChanges, PublishError, PublishOutcome, Publisher,
+    RegistrationInventory,
 };
 use crate::error::ClaudineError;
 
@@ -120,10 +121,17 @@ pub enum SetupError {
     /// Claudine's own write failed.
     #[error(transparent)]
     Claudine(ClaudineError),
-    /// Claudine's host registration could not be published; nothing else
-    /// was written.
-    #[error(transparent)]
-    Publish(PublishError),
+    /// Claudine's host registration could not be published; nothing but
+    /// `changes` was written.
+    #[error("{error}")]
+    Publish {
+        #[allow(missing_docs)]
+        #[source]
+        error: PublishError,
+        /// What the publish changed before it stopped; empty when it
+        /// changed nothing.
+        changes: Box<PublishChanges>,
+    },
 }
 
 /// What [`setup_claudine`] did, step by step.
@@ -140,8 +148,9 @@ pub struct ClaudineSetup {
     pub registration: Result<RegisterReport, InitError>,
     /// The removal of the retired registration
     /// ([`registration::remove_legacy_registration`]); `None` when the
-    /// `register` entry could not be written, so nothing was removed.
-    pub cleanup: Option<Result<LegacyCleanup, CleanupError>>,
+    /// `register` entry could not be written, so nothing was removed. A
+    /// failure lists what it removed before it stopped.
+    pub cleanup: Option<Result<LegacyCleanup, CleanupFailure>>,
 }
 
 /// The whole of Claudine's setup with Darkmatter, in order, all under the
@@ -162,8 +171,8 @@ pub struct ClaudineSetup {
 ///
 /// - [`SetupError::NoHome`] or [`SetupError::NotARepository`] before
 ///   anything is written;
-/// - [`SetupError::Publish`] when the registration cannot be published; nothing
-///   else is written;
+/// - [`SetupError::Publish`] when the registration cannot be published;
+///   nothing but the publish's own listed changes is written;
 /// - [`SetupError::Claudine`] when Claudine's own write fails.
 pub fn setup_claudine(
     context: &FileResolutionContext,
@@ -177,8 +186,12 @@ pub fn setup_claudine(
     // other publisher (doctor's repair, `claudine registrations publish`)
     // runs between the publish and the cleanup. Configuration locks are
     // taken after it, one transaction at a time.
-    let publisher = Publisher::acquire(&home, inventory).map_err(SetupError::Publish)?;
-    let publication = publisher.publish(inventory).map_err(SetupError::Publish)?;
+    let publisher = Publisher::acquire(&home, inventory)
+        .map_err(|error| SetupError::Publish { error, changes: Box::default() })?;
+    let mut changes = PublishChanges::default();
+    let publication = publisher
+        .publish_recording(inventory, &mut changes)
+        .map_err(|error| SetupError::Publish { error, changes: Box::new(changes) })?;
     let darkmatter = match setup_with_darkmatter(context, scope, write_claudine) {
         Err(SetupError::Claudine(error)) => return Err(SetupError::Claudine(error)),
         other => other,
@@ -254,6 +267,9 @@ pub fn setup_with_darkmatter(
         HandoffCommitError::Claudine(error) => SetupError::Claudine(error),
         HandoffCommitError::Darkmatter(error) => SetupError::Darkmatter(*error),
         HandoffCommitError::UnusableTarget => unreachable!("setup does not judge Claudine's file as a reference target"),
+        HandoffCommitError::Obstructed(_) | HandoffCommitError::ReferenceOutOfScope => {
+            unreachable!("setup does not run doctor's no-follow checks")
+        }
     })?;
 
     Ok(DarkmatterSetup { claudine_config, claudine_saved, darkmatter_config, darkmatter_action, permissions })
@@ -291,6 +307,9 @@ pub(crate) struct HandoffPlan {
     scope: ConfigScope,
     pub(crate) claudine_config: PathBuf,
     pub(crate) darkmatter_config: PathBuf,
+    /// The scope's trusted root (the home, or the repository root) that both
+    /// files lie below; `None` when the context names none.
+    root: Option<PathBuf>,
     claudine_change: Option<TargetChange>,
     darkmatter_change: Option<TargetChange>,
     pub(crate) darkmatter_action: InitAction,
@@ -314,6 +333,63 @@ impl HandoffPlan {
     /// Whether `.darkmatter.yaml` is edited (or created).
     pub(crate) const fn edits_darkmatter(&self) -> bool {
         self.darkmatter_change.is_some()
+    }
+
+    /// The first file the plan edits whose authored layout stops
+    /// Darkmatter's format-preserving editor from making the planned edit in
+    /// place, with the part that stops it: a dry run of each change against
+    /// the bytes the plan observed, Claudine's file first
+    /// ([`registration::edit_layout`]). Only an edit that reaches the layout
+    /// counts, so an inline root the plan leaves alone, or an empty `{}`
+    /// root that receives its first key, is no obstacle.
+    ///
+    /// Doctor's assessment applies this rule; the committer's transaction
+    /// stages every candidate before it replaces any file, so a refusal there
+    /// still changes neither.
+    pub(crate) fn layout_obstacle(&self) -> Option<(&Path, EditLayout)> {
+        let changes = [(&self.claudine_change, &self.claudine_config), (&self.darkmatter_change, &self.darkmatter_config)];
+        changes.into_iter().find_map(|(change, path)| {
+            registration::edit_layout(change.as_ref()?, "permissions").map(|layout| (path.as_path(), layout))
+        })
+    }
+
+    /// The first file the plan edits, or its lock sidecar, that the writer
+    /// must not touch: a symbolic link, junction, or other reparse point at
+    /// it or at any folder between it and the scope root, or something other
+    /// than a regular file ([`registration::config_target_blockers`]).
+    pub(crate) fn obstruction(&self) -> Option<Blocker> {
+        let targets = [
+            self.edits_claudine().then_some(&self.claudine_config),
+            self.edits_darkmatter().then_some(&self.darkmatter_config),
+        ];
+        let root = self.root.as_deref();
+        targets.into_iter().flatten().find_map(|target| match root {
+            Some(root) => registration::config_target_blockers(root, target).into_iter().next(),
+            None => Some(Blocker {
+                path: target.clone(),
+                problem: BlockerProblem::Unreadable { operation: "inspect", kind: std::io::ErrorKind::NotFound },
+            }),
+        })
+    }
+
+    /// Whether the reference the plan writes resolves, from the scope root,
+    /// to the file it hands the block to, and that file lies inside the
+    /// root once links are resolved (the repository scope refuses a target
+    /// outside the repository). Holds trivially when no reference is written.
+    ///
+    /// Doctor's assessment and [`commit_permissions_handoff`] both apply this
+    /// rule, so a plan it refuses is never reported as repairable.
+    pub(crate) fn reference_in_scope(&self) -> bool {
+        if !self.edits_darkmatter() {
+            return true;
+        }
+        let Some(root) = self.root.as_deref() else { return false };
+        let resolved = root.join(CONFIG_DIR).join(CONFIG_FILE_NAME);
+        let inside = match (canonicalize_simplified(root), canonicalize_simplified(&self.claudine_config)) {
+            (Ok(root), Ok(target)) => target.starts_with(root),
+            _ => false,
+        };
+        inside && same_file(&resolved, &self.claudine_config)
     }
 }
 
@@ -366,7 +442,7 @@ pub(crate) enum ManualReason {
 /// | `.darkmatter.yaml` | Setup | Doctor |
 /// | --- | --- | --- |
 /// | missing | created with the reference | [`ManualReason::DarkmatterMissing`] |
-/// | omitted (doctor: or `null`) | reference; Claudine gets the default block when it has none | the same, reusing a Claudine mapping; a Claudine reference is a conflict |
+/// | omitted or `null` | reference; Claudine gets the default block when it has none | the same, reusing a Claudine mapping; a Claudine reference is a conflict |
 /// | inline block | moved unless it differs from Claudine's earlier block | moved unless Claudine already holds an effectively equal one; a different block or a Claudine reference is a conflict |
 /// | reference to Claudine's file | left; Claudine gets the default block when it has none | passes when it resolves to a mapping, else [`ManualReason::BrokenReference`] |
 /// | other reference | left | passes (third party) when it resolves, else broken |
@@ -412,9 +488,14 @@ pub(crate) fn plan_permissions_handoff(
         (Some(_), false) => InitAction::Created,
         (Some(_), true) => InitAction::Updated,
     };
+    let root = match scope {
+        ConfigScope::User => context.home_dir(),
+        ConfigScope::Repository => context.repository_root(),
+    };
     Ok(HandoffPlan {
         mode,
         scope,
+        root: root.map(Path::to_path_buf),
         claudine_config: claudine.path,
         darkmatter_config: observation.path.clone(),
         claudine_change,
@@ -443,7 +524,9 @@ fn decide_for_setup(
     observation: &ConfigObservation,
 ) -> Result<Decision, HandoffRefusal> {
     let darkmatter_scope = darkmatter_scope_of(scope);
-    let block_now = claudine.document.get("permissions");
+    // Omitted and `null` are the same to both loaders: no authored block.
+    let block_now = claudine.document.get("permissions").filter(|block| !block.is_null());
+    let block_before = claudine.block_before.as_ref().filter(|block| !block.is_null());
     let decision = |claudine_block, refer, permissions| Decision { claudine_block, refer, permissions, block: None };
     Ok(match &observation.permissions {
         BlockState::Invalid(error) => {
@@ -457,8 +540,12 @@ fn decide_for_setup(
                 decision(None, false, PermissionsHandoff::ThirdParty { reference: written.clone() })
             }
         }
+        BlockState::MissingFile | BlockState::Omitted | BlockState::Inline(Value::Null) => {
+            let block = block_now.is_none().then(|| default_permissions(darkmatter_scope));
+            decision(block, true, PermissionsHandoff::Referenced)
+        }
         BlockState::Inline(block) => {
-            if let Some(before) = &claudine.block_before
+            if let Some(before) = block_before
                 && effective_permissions(darkmatter_scope, before) != effective_permissions(darkmatter_scope, block)
             {
                 return Err(HandoffRefusal::Conflict {
@@ -468,10 +555,6 @@ fn decide_for_setup(
             }
             let moved = (block_now != Some(block)).then(|| block.clone());
             decision(moved, true, PermissionsHandoff::Transferred)
-        }
-        BlockState::MissingFile | BlockState::Omitted => {
-            let block = block_now.is_none().then(|| default_permissions(darkmatter_scope));
-            decision(block, true, PermissionsHandoff::Referenced)
         }
     })
 }
@@ -557,6 +640,13 @@ pub(crate) enum HandoffCommitError {
     /// Doctor only: Claudine's edited `permissions` would not be a usable
     /// reference target.
     UnusableTarget,
+    /// Doctor only: a file the plan edits, its lock sidecar, or a folder
+    /// on the way to either from the scope root is a link or not a regular
+    /// file ([`HandoffPlan::obstruction`]); nothing was opened.
+    Obstructed(Blocker),
+    /// Doctor only: the reference would not resolve to Claudine's file
+    /// inside the scope root; nothing was opened.
+    ReferenceOutOfScope,
     /// Darkmatter's candidate was refused, or the transaction failed.
     Darkmatter(Box<InitError>),
 }
@@ -567,13 +657,25 @@ pub(crate) enum HandoffCommitError {
 ///
 /// Claudine's candidate is judged by its own validation (and in doctor mode
 /// as a reference target of the scope too); Darkmatter's by
-/// [`dm_init::check_config_text`], of the plan's own scope in doctor mode
-/// (even when the home is the repository root), and of the scope
-/// [`dm_init::commit_checked`] infers in setup mode.
+/// [`dm_init::check_config_text`] of the plan's own scope in both modes,
+/// even when the home is the repository root or the repository's file links
+/// to the user file.
+///
+/// In doctor mode nothing is opened unless, immediately before the
+/// transaction, [`HandoffPlan::obstruction`] finds nothing in the way and
+/// the reference resolves to Claudine's file inside the scope.
 pub(crate) fn commit_permissions_handoff(
     context: &FileResolutionContext,
     plan: HandoffPlan,
 ) -> Result<CommitOutcome, HandoffCommitError> {
+    if plan.mode == HandoffMode::Doctor {
+        if let Some(blocker) = plan.obstruction() {
+            return Err(HandoffCommitError::Obstructed(blocker));
+        }
+        if !plan.reference_in_scope() {
+            return Err(HandoffCommitError::ReferenceOutOfScope);
+        }
+    }
     let write = |error| HandoffCommitError::Darkmatter(Box::new(InitError::Write(error)));
     let mut transaction = ConfigTransaction::new();
     if let Some(change) = plan.claudine_change {
@@ -584,11 +686,11 @@ pub(crate) fn commit_permissions_handoff(
     }
     let darkmatter_scope = darkmatter_scope_of(plan.scope);
     let claudine_identity = identity(&plan.claudine_config);
-    let darkmatter_identity = identity(&plan.darkmatter_config);
     // A refusal of Claudine's candidate is reported as Claudine's own typed
     // error; the transaction's refusal only carries text.
     let refused: RefCell<Option<HandoffCommitError>> = RefCell::new(None);
-    let committed = dm_init::commit_checked(transaction, context, &|candidate| {
+    let scopes = [(plan.darkmatter_config.as_path(), darkmatter_scope)];
+    let committed = dm_init::commit_checked(transaction, context, &scopes, &|candidate| {
         let target = identity(candidate.target);
         if target == claudine_identity {
             let refuse = |error| {
@@ -606,8 +708,7 @@ pub(crate) fn commit_permissions_handoff(
                 });
             return Some(verdict);
         }
-        (plan.mode == HandoffMode::Doctor && target == darkmatter_identity)
-            .then(|| dm_init::check_config_text(candidate.candidate, candidate.target, darkmatter_scope, context))
+        None
     });
     committed.map_err(|error| refused.into_inner().unwrap_or_else(|| HandoffCommitError::Darkmatter(Box::new(error))))
 }
@@ -646,4 +747,95 @@ fn identity(path: &Path) -> PathIdentity {
 /// path as written when it cannot be canonicalized).
 pub(crate) fn same_file(left: &Path, right: &Path) -> bool {
     identity(left) == identity(right)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use biscuit_file::{FileResolutionContext, canonicalize_simplified};
+
+    use super::super::persist::initialize_config;
+    use super::*;
+    use crate::composition::registration::{
+        CleanupError, TEMP_PREFIX, fail_removals, legacy_manifest_path, legacy_revisions_dir,
+    };
+    use crate::config::claudine_config::ClaudineConfig;
+
+    struct Home {
+        _dir: tempfile::TempDir,
+        home: PathBuf,
+        context: FileResolutionContext,
+    }
+
+    impl Home {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let home = canonicalize_simplified(dir.path()).unwrap().join("home");
+            std::fs::create_dir_all(home.join(".claudine")).unwrap();
+            let context = FileResolutionContext::from_snapshot(home.clone(), Some(home.clone()), HashMap::new());
+            Self { _dir: dir, home, context }
+        }
+
+        fn setup(&self) -> Result<ClaudineSetup, SetupError> {
+            setup_claudine(&self.context, ConfigScope::User, |path| {
+                initialize_config(path, ConfigScope::User, &ClaudineConfig::default(), &ClaudineConfig::default())
+            })
+        }
+    }
+
+    #[test]
+    fn a_publish_that_fails_partway_reports_what_it_already_changed() {
+        let home = Home::new();
+        let first = home.setup().unwrap();
+        let root = first.publication.manifest().parent().unwrap().to_path_buf();
+        for name in ["a", "b"] {
+            std::fs::write(root.join(format!("{TEMP_PREFIX}{name}")), "partial").unwrap();
+        }
+        // The publish lists the folder in this order too.
+        let listed: Vec<PathBuf> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.file_name().unwrap().to_string_lossy().starts_with(TEMP_PREFIX))
+            .collect();
+
+        let error = {
+            let _fail = fail_removals([listed[1].clone()]);
+            home.setup().unwrap_err()
+        };
+
+        let SetupError::Publish { error: PublishError::Io { path, .. }, changes } = error else {
+            panic!("{error:?}");
+        };
+        assert_eq!(path, listed[1]);
+        assert_eq!(changes.removed_temps, [listed[0].clone()]);
+        assert_eq!(changes.describe(&home.home), [format!("removed {}", listed[0].display())]);
+        assert!(!listed[0].exists() && listed[1].is_file());
+    }
+
+    #[test]
+    fn a_retired_layout_cleanup_that_fails_partway_reports_what_it_already_removed() {
+        let home = Home::new();
+        std::fs::write(home.home.join(".darkmatter.yaml"), "register:\n    - ~/.claudine/darkmatter-host.yaml\n").unwrap();
+        std::fs::write(legacy_manifest_path(&home.home), "kind: darkmatter-host\n").unwrap();
+        let revisions = legacy_revisions_dir(&home.home);
+        std::fs::create_dir_all(revisions.join("r1/schemas")).unwrap();
+        std::fs::write(revisions.join("r1/schemas/a.yaml"), "kind: schema\n").unwrap();
+
+        let setup = {
+            let _fail = fail_removals([revisions.clone()]);
+            home.setup().unwrap()
+        };
+
+        let failure = setup.cleanup.expect("the cleanup ran").unwrap_err();
+        assert!(matches!(&failure.error, CleanupError::Io { path, .. } if *path == revisions), "{failure}");
+        assert_eq!(failure.removed, [revisions.join("r1")]);
+        assert!(failure.to_string().contains("already removed"), "{failure}");
+
+        let again = home.setup().unwrap();
+
+        let cleanup = again.cleanup.expect("the cleanup ran").unwrap();
+        assert_eq!(cleanup.removed, [revisions, legacy_manifest_path(&home.home)]);
+    }
 }

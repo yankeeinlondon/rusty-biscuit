@@ -131,6 +131,45 @@ fn setup_removes_the_retired_files_and_leaves_a_repository_entry_to_its_owner() 
     assert!(read(&home.join(".darkmatter.yaml")).contains(MANIFEST_REFERENCE));
 }
 
+/// A writable retired tree below a read-only `.claudine`: its entries go,
+/// its root and the retired manifest cannot, and setup says what went.
+#[cfg(unix)]
+#[test]
+fn setup_reports_a_partly_removed_retired_registration() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = configured("setup-migrate-partial");
+    let home = fixture.home().to_path_buf();
+    let (success, _, stderr) = claudine(&fixture, &["setup"]);
+    assert!(success, "the first setup failed:\n{stderr}");
+    let revisions = legacy_revisions_dir(&home);
+    write(&legacy_manifest_path(&home), "kind: darkmatter-host\nformat_version: 1\n");
+    write(&revisions.join("0123abcd/globals.yaml"), "kind: schema\n");
+    let claudine_dir = home.join(".claudine");
+    let set_mode = |mode| std::fs::set_permissions(&claudine_dir, std::fs::Permissions::from_mode(mode)).unwrap();
+    set_mode(0o555);
+    // A superuser ignores the mode.
+    if std::fs::write(claudine_dir.join("probe"), "").is_ok() {
+        set_mode(0o755);
+        eprintln!("skipped: the folder mode does not stop this user");
+        return;
+    }
+
+    let (success, _, stderr) = claudine(&fixture, &["setup"]);
+
+    set_mode(0o755);
+    assert!(success, "a cleanup failure is a warning:\n{stderr}");
+    let inner = biscuit_file::to_portable_string(&revisions.join("0123abcd"));
+    assert!(stderr.contains(&format!("Removed `{inner}` of the retired host registration")), "{stderr}");
+    assert!(stderr.contains("The retired host registration was only partly removed"), "{stderr}");
+    assert!(!revisions.join("0123abcd").exists() && revisions.is_dir() && legacy_manifest_path(&home).is_file());
+
+    let (success, _, stderr) = claudine(&fixture, &["setup"]);
+
+    assert!(success, "{stderr}");
+    assert!(!stderr.contains(&inner), "only what was left is removed:\n{stderr}");
+    assert!(!revisions.exists() && !legacy_manifest_path(&home).exists(), "{stderr}");
+}
+
 #[test]
 fn setup_without_a_configuration_writes_the_defaults_without_asking() {
     let fixture = CliProcessFixture::named("setup-first-run");

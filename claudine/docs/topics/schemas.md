@@ -1652,6 +1652,11 @@ flowchart LR
   after an interrupted one still cleans up). If it is malformed in any way,
   for example an empty `version`, a bad digest, or one entry with a path
   outside the folder, nothing is removed.
+- On a volume that ignores letter case (macOS and Windows by default), an
+  old spelling that reaches a current file is that file, not a retired one:
+  a previous manifest listing `schemas/Action.yaml` never removes the
+  current `schemas/action.yaml`. On a case-sensitive volume (Linux) the two
+  names are two files, and the old one is removed.
 - Publishing what is already installed writes nothing.
 - A symbolic link or a junction anywhere on the way stops the publish before
   anything is written; the link and its target are left alone.
@@ -1662,7 +1667,8 @@ flowchart LR
   headless, and [`claudine setup`](../cli/setup.md), which you can run at any
   time) does four things in order:
   1. publishes the registration; if that fails, setup stops with an error and
-     writes nothing else;
+     writes nothing else, listing any registration file the publish had
+     already written or removed;
   2. writes Claudine's configuration and completes the `permissions`
      handshake with `.darkmatter.yaml` of the same scope;
   3. puts `~/.claudine/registrations/darkmatter/manifest.yaml` in the
@@ -1698,7 +1704,9 @@ flowchart LR
   skipped, so the next setup finishes both. Step 4 removes nothing else
   under `~/.claudine`: if a symbolic link or junction stands anywhere in the
   old files, it removes nothing, follows nothing, and warns; delete them
-  yourself.
+  yourself. If a removal fails partway (a read-only `~/.claudine`, for
+  example, keeps the folder after its contents are gone), the warning lists
+  every entry already removed, and the next setup removes only the rest.
 - **`claudine registrations publish`.** The hidden
   [`registrations`](../cli/registrations.md) command publishes on request,
   and Claudine's `just install` runs it with the binary it just built, so an

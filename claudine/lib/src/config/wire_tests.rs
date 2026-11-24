@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
+use crate::config::load::ConfigProblemKind;
 use crate::config::messaging_block::ClaudineMessengerConfig;
 use crate::config::tts::TtsValue;
 use crate::error::ClaudineError;
@@ -241,6 +242,33 @@ fn a_flat_action_or_route_is_refused_with_its_keyed_spelling() {
         "/actions/session_end/0",
     );
     assert!(found[0].1.contains("`{ report: {} }`"), "{found:?}");
+}
+
+#[test]
+fn a_flat_entry_keeps_its_other_problems_beside_the_migration_message() {
+    let kinds = |result: Result<ClaudineConfig, ClaudineError>| match result {
+        Err(ClaudineError::ConfigInvalid { problems }) => {
+            let mut found: Vec<(String, ConfigProblemKind)> = problems.into_iter().map(|problem| (problem.pointer, problem.kind)).collect();
+            found.sort_by(|left, right| left.0.cmp(&right.0));
+            found
+        }
+        other => panic!("expected ConfigInvalid, got {other:?}"),
+    };
+    let entry = "/actions/session_start/0".to_string();
+    assert_eq!(
+        kinds(user(with_action(json!({ "type": "bash", "command": "echo", "timout": 5 })))),
+        vec![(entry.clone(), ConfigProblemKind::InvalidSetting), (format!("{entry}/timout"), ConfigProblemKind::UnknownKey)],
+        "the typo is named at the key written, and the tag is not stray"
+    );
+    assert_eq!(
+        kinds(user(with_action(json!({ "type": "call", "command": "c", "timeout_ms": "soon" })))),
+        vec![(entry.clone(), ConfigProblemKind::InvalidSetting), (format!("{entry}/timeout_ms"), ConfigProblemKind::InvalidSetting)],
+    );
+    let route = "/messenger/configurations/alerts".to_string();
+    assert_eq!(
+        kinds(user(with_route(json!({ "provider": "slack", "channel_id": "C1", "timout": 5 })))),
+        vec![(route.clone(), ConfigProblemKind::InvalidSetting), (format!("{route}/timout"), ConfigProblemKind::UnknownKey)],
+    );
 }
 
 #[test]

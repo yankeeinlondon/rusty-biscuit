@@ -4,15 +4,19 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{CLAUDINE_DIR, Entry, Obstruction, PublishError, access_log, entry_at, legacy_manifest_path, legacy_revisions_dir};
+use super::{
+    CLAUDINE_DIR, Entry, Obstruction, PublishError, access_log, entry_at, legacy_manifest_path, legacy_revisions_dir,
+    remove_entry,
+};
 
-/// Why [`remove_legacy_registration`] removed nothing.
+/// Why [`remove_legacy_registration`] stopped; [`CleanupFailure`] pairs it
+/// with what was removed before.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CleanupError {
     /// A link stands in the retired registration; it and its target are
     /// left alone.
-    #[error("`{}` is {obstruction}; the retired registration is never followed through one, so nothing was removed. Remove it, then delete `~/.claudine/darkmatter-host.yaml` and `~/.claudine/darkmatter-host/` yourself", .path.display())]
+    #[error("`{}` is {obstruction}; the retired registration is never followed through one, so it was left in place. Remove it, then delete `~/.claudine/darkmatter-host.yaml` and `~/.claudine/darkmatter-host/` yourself", .path.display())]
     Obstructed {
         #[allow(missing_docs)]
         path: PathBuf,
@@ -21,7 +25,7 @@ pub enum CleanupError {
     },
     /// Something other than a regular file or a directory stands where the
     /// retired registration was written.
-    #[error("`{}` is not what the retired publisher wrote, so nothing was removed", .path.display())]
+    #[error("`{}` is not what the retired publisher wrote, so it was left in place", .path.display())]
     Unexpected {
         #[allow(missing_docs)]
         path: PathBuf,
@@ -39,12 +43,36 @@ pub enum CleanupError {
     },
 }
 
-/// What [`remove_legacy_registration`] removed: the retired manifest and the
-/// revision tree's root, when each existed. Empty when nothing was left.
+/// What [`remove_legacy_registration`] removed: the revision tree's root
+/// and the retired manifest, when each was there to remove. Empty when
+/// nothing was left.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LegacyCleanup {
     #[allow(missing_docs)]
     pub removed: Vec<PathBuf>,
+}
+
+/// A [`remove_legacy_registration`] that stopped partway.
+#[derive(Debug, thiserror::Error)]
+#[error("{error}{}", already_removed(.removed))]
+pub struct CleanupFailure {
+    /// What was removed before the failure, each entry once: a removed
+    /// folder stands for everything that was in it, so a revision tree whose
+    /// root could not be removed is listed by the entries removed from it.
+    /// Empty when nothing was removed.
+    pub removed: Vec<PathBuf>,
+    #[allow(missing_docs)]
+    #[source]
+    pub error: CleanupError,
+}
+
+fn already_removed(removed: &[PathBuf]) -> String {
+    if removed.is_empty() {
+        "; nothing was removed".to_string()
+    } else {
+        let paths: Vec<String> = removed.iter().map(|path| format!("`{}`", path.display())).collect();
+        format!("; already removed: {}", paths.join(", "))
+    }
 }
 
 /// Removes the retired format 1 registration: exactly
@@ -57,15 +85,32 @@ pub struct LegacyCleanup {
 /// entry again just before it is removed. A symbolic link, a junction, or
 /// another reparse point anywhere is [`CleanupError::Obstructed`]: nothing
 /// (or, for one created during the cleanup, nothing more) is removed, and
-/// nothing is followed.
+/// nothing is followed. The next cleanup removes only what is left.
 ///
 /// ## Errors
 ///
-/// [`CleanupError`]; on an obstruction or an unexpected entry nothing was
-/// removed.
-pub fn remove_legacy_registration(home: &Path) -> Result<LegacyCleanup, CleanupError> {
+/// [`CleanupFailure`]: why the cleanup stopped and what it removed first.
+/// An obstruction or unexpected entry found before anything is removed
+/// leaves everything in place.
+pub fn remove_legacy_registration(home: &Path) -> Result<LegacyCleanup, CleanupFailure> {
+    let mut removed = Vec::new();
+    let result = remove_into(home, &mut removed);
+    // Children are removed before their folder, so a folder's descendants
+    // precede it; only the outermost removed entries are reported.
+    let outermost: Vec<PathBuf> = removed
+        .iter()
+        .filter(|path| !removed.iter().any(|other| other != *path && path.starts_with(other)))
+        .cloned()
+        .collect();
+    match result {
+        Ok(()) => Ok(LegacyCleanup { removed: outermost }),
+        Err(error) => Err(CleanupFailure { removed: outermost, error }),
+    }
+}
+
+/// The removal itself, appending each entry to `removed` as it is removed.
+fn remove_into(home: &Path, removed: &mut Vec<PathBuf>) -> Result<(), CleanupError> {
     let plan = legacy_plan(home)?;
-    let mut cleanup = LegacyCleanup::default();
     for (path, is_directory) in &plan.tree {
         match entry_at(path) {
             Ok(Entry::Obstruction(obstruction)) => return Err(CleanupError::Obstructed { path: path.clone(), obstruction }),
@@ -73,16 +118,12 @@ pub fn remove_legacy_registration(home: &Path) -> Result<LegacyCleanup, CleanupE
             _ => {}
         }
         access_log::note("remove", path);
-        let removed = if *is_directory { fs::remove_dir(path) } else { fs::remove_file(path) };
-        match removed {
-            Ok(()) => {}
+        match remove_entry(path, *is_directory) {
+            Ok(()) => removed.push(path.clone()),
             // Another cleanup got there first.
             Err(source) if source.kind() == io::ErrorKind::NotFound => {}
             Err(source) => return Err(CleanupError::Io { action: "remove", path: path.clone(), source }),
         }
-    }
-    if !plan.tree.is_empty() {
-        cleanup.removed.push(legacy_revisions_dir(home));
     }
     if let Some(manifest) = plan.manifest {
         match entry_at(&manifest) {
@@ -91,13 +132,13 @@ pub fn remove_legacy_registration(home: &Path) -> Result<LegacyCleanup, CleanupE
             _ => {}
         }
         access_log::note("remove", &manifest);
-        match fs::remove_file(&manifest) {
-            Ok(()) => cleanup.removed.push(manifest),
+        match remove_entry(&manifest, false) {
+            Ok(()) => removed.push(manifest),
             Err(source) if source.kind() == io::ErrorKind::NotFound => {}
             Err(source) => return Err(CleanupError::Io { action: "remove", path: manifest, source }),
         }
     }
-    Ok(cleanup)
+    Ok(())
 }
 
 /// What [`remove_legacy_registration`] would remove, found by its no-follow

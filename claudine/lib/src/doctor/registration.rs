@@ -2,17 +2,21 @@
 //! `darkmatter-host` registration under `~/.claudine/registrations/` and the
 //! user `register` entry that names it.
 //!
-//! The check compares every published file with the inventory compiled
-//! into this binary by the BLAKE3 hash of its exact bytes, lists entries of
-//! the output root the inventory does not have and the retired format 1
-//! layout, and looks for a user `register` entry naming the manifest by
-//! Darkmatter's manifest identity, so any spelling of the same file passes.
+//! The check compares every published file's exact bytes with the inventory
+//! compiled into this binary, judges a changed manifest by whether
+//! Darkmatter loads the whole bundle it lists, lists entries of the output
+//! root the inventory does not have and the retired format 1 layout, and
+//! looks for a user `register` entry naming the manifest by Darkmatter's
+//! manifest identity, so any spelling of the same file passes.
 //! Other hosts' entries and repository `register` entries are not its
 //! concern. Nothing is followed through a link and nothing is written.
 //!
 //! A finding is fixable exactly when [`repair_registration`] would address
 //! it: the user `.darkmatter.yaml` is valid with a valid `register` setting,
-//! and nothing in the repair's set is a link, a special file, or unreadable.
+//! the entry edit the repair needs (if any) is one Darkmatter's
+//! format-preserving editor can make in place, as a dry run of that edit
+//! decides, and nothing in the repair's set is a link, a special file, or
+//! unreadable.
 
 use std::io;
 use std::path::Path;
@@ -20,7 +24,7 @@ use std::path::Path;
 use super::config::{DarkmatterState, ObservedFile, Unreadable, io_kind};
 use super::{CheckOutcome, Environment, Finding, Pass, RepairOutcome, Scope, Severity};
 use crate::composition::registration::{
-    self as publisher, Blocker, BlockerProblem, CleanupError, EditFailure, EntryPrecondition, ExpectedState, Installation,
+    self as publisher, Blocker, BlockerProblem, CleanupError, EditFailure, EditLayout, EntryPrecondition, ExpectedState, Installation,
     ManifestLoad, PublishError, RegistrationInventory, RepairFailure, RepairOperation,
 };
 
@@ -36,7 +40,11 @@ pub(crate) fn check_registration(pass: &Pass<'_>) -> CheckOutcome {
         )]);
     };
     let darkmatter = &pass.config().darkmatter_user;
-    let installation = publisher::inspect_installation(home, darkmatter.path.as_deref(), RegistrationInventory::claudine());
+    let mut installation =
+        publisher::inspect_installation(home, darkmatter.path.as_deref(), RegistrationInventory::claudine());
+    if let Ok(context) = environment.context() {
+        installation.judge_manifest(home, context);
+    }
     let precondition = precondition(environment, darkmatter);
 
     let mut outcome = CheckOutcome::new("the registration is published and registered");
@@ -84,7 +92,9 @@ fn precondition(environment: &Environment, darkmatter: &ObservedFile<DarkmatterS
         return Err(EntryPrecondition::NoContext);
     }
     match &darkmatter.state {
-        DarkmatterState::Valid(file) => publisher::entry_precondition(file),
+        DarkmatterState::Valid(file, _) => publisher::entry_precondition(file).and_then(|()| {
+            environment.context().map_or(Ok(()), publisher::entry_layout)
+        }),
         DarkmatterState::Missing => Err(EntryPrecondition::Missing),
         DarkmatterState::Unreadable(_) => Err(EntryPrecondition::Unreadable),
         DarkmatterState::Invalid(_) => Err(EntryPrecondition::Invalid),
@@ -105,24 +115,38 @@ fn disk_findings(installation: &Installation) -> Vec<Finding> {
         for file in &installation.files {
             let finding = match (file.state, file.manifest) {
                 (ExpectedState::Missing, _) => Finding::new(Severity::Error, Scope::User, "is missing"),
-                (ExpectedState::Changed, false) => Finding::new(
-                    Severity::Warn,
-                    Scope::User,
-                    "differs from the file this Claudine publishes",
-                )
-                .note("Darkmatter's format 2 loader refuses a member whose bytes do not match the manifest's digest, so the host is not loaded until it is republished"),
-                (ExpectedState::Changed, true) => match installation.manifest_load {
+                (ExpectedState::Changed, false) => {
+                    let finding = Finding::new(Severity::Warn, Scope::User, "differs from the file this Claudine publishes");
+                    if file.digest_mismatch {
+                        finding.note("its bytes do not match the manifest's digest, which Darkmatter's format 2 loader refuses, so the host is not loaded until it is republished")
+                    } else {
+                        finding
+                    }
+                }
+                (ExpectedState::Changed, true) => match &installation.manifest_load {
                     Some(ManifestLoad::Loads) => Finding::new(
                         Severity::Warn,
                         Scope::User,
                         "the manifest differs from the one this Claudine publishes",
                     )
-                    .note("Darkmatter still accepts it as Claudine's registration"),
-                    _ => Finding::new(
-                        Severity::Error,
+                    .note("Darkmatter still loads the bundle it lists as Claudine's registration"),
+                    Some(ManifestLoad::Refused { at }) => {
+                        let finding = Finding::new(
+                            Severity::Error,
+                            Scope::User,
+                            "the manifest differs from the one this Claudine publishes and Darkmatter refuses the bundle it lists as Claudine's registration",
+                        );
+                        match at {
+                            Some(at) => finding.note(format!("Darkmatter's first refusal is in {}", at.display())),
+                            None => finding,
+                        }
+                    }
+                    None => Finding::new(
+                        Severity::Warn,
                         Scope::User,
-                        "the manifest differs from the one this Claudine publishes and Darkmatter refuses it as Claudine's registration",
-                    ),
+                        "the manifest differs from the one this Claudine publishes",
+                    )
+                    .note("whether Darkmatter loads it is judged once `claudine doctor` runs from a readable directory"),
                 },
                 _ => continue,
             };
@@ -162,7 +186,7 @@ fn entry_findings(
         Some(path) => finding.at(path),
         None => finding,
     };
-    let (Ok(context), DarkmatterState::Valid(file)) = (environment.context(), &darkmatter.state) else {
+    let (Ok(context), DarkmatterState::Valid(file, _)) = (environment.context(), &darkmatter.state) else {
         let reason = match &darkmatter.state {
             DarkmatterState::Missing => "the file does not exist",
             DarkmatterState::Unreadable(Unreadable::DanglingLink) => "the file is a symbolic link to nothing",
@@ -200,26 +224,51 @@ fn entry_findings(
     }
 }
 
-fn precondition_text(blocked: EntryPrecondition) -> &'static str {
-    match blocked {
+fn precondition_text(blocked: EntryPrecondition) -> String {
+    let text = match blocked {
+        EntryPrecondition::Layout(layout) => return layout_problem(layout, "`~/.darkmatter.yaml`"),
         EntryPrecondition::NoContext => "the user Darkmatter configuration cannot be located",
         EntryPrecondition::Missing => "`~/.darkmatter.yaml` does not exist",
         EntryPrecondition::Unreadable => "`~/.darkmatter.yaml` cannot be read",
         EntryPrecondition::Invalid => "`~/.darkmatter.yaml` is invalid",
         EntryPrecondition::RegisterInvalid => "the `register` setting of `~/.darkmatter.yaml` is invalid",
         EntryPrecondition::PermissionsInvalid => "the `permissions` setting of `~/.darkmatter.yaml` is invalid",
-    }
+    };
+    text.to_string()
 }
 
-fn precondition_remedy(blocked: EntryPrecondition) -> &'static str {
+fn precondition_remedy(blocked: EntryPrecondition) -> String {
     match blocked {
-        EntryPrecondition::Missing => "run `claudine setup`, which creates it, then run `claudine doctor --fix`",
-        EntryPrecondition::NoContext => "run `claudine doctor` again from a readable directory",
-        _ => "correct the file (see the `config` row), then run `claudine doctor --fix`",
+        EntryPrecondition::Missing => "run `claudine setup`, which creates it, then run `claudine doctor --fix`".to_string(),
+        EntryPrecondition::NoContext => "run `claudine doctor` again from a readable directory".to_string(),
+        EntryPrecondition::Layout(layout) => layout_remedy(layout, "`~/.darkmatter.yaml`"),
+        _ => "correct the file (see the `config` row), then run `claudine doctor --fix`".to_string(),
     }
 }
 
-fn blocker_text(problem: BlockerProblem) -> String {
+/// Why Darkmatter's editor cannot make a planned edit to `file`, naming the
+/// setting but never its value.
+pub(super) fn layout_problem(layout: EditLayout, file: &str) -> String {
+    let what = match layout {
+        EditLayout::Root => format!("the root mapping of {file}"),
+        EditLayout::Setting(setting) => format!("the `{setting}` setting of {file}"),
+    };
+    format!("{what} is not written in block form, so Darkmatter's format-preserving editor cannot change it in place")
+}
+
+/// How to bring `file`'s layout within the editor's reach.
+pub(super) fn layout_remedy(layout: EditLayout, file: &str) -> String {
+    let what = match layout {
+        EditLayout::Root => format!("the root mapping of {file}"),
+        EditLayout::Setting("register") => format!("the `register` list of {file}"),
+        EditLayout::Setting(setting) => format!("the `{setting}` setting of {file}"),
+    };
+    format!(
+        "rewrite {what} in block form, one `key: value` or `- item` per line, without a `{{…}}` or `[…]` collection, anchor, alias, or tag, then run `claudine doctor --fix`"
+    )
+}
+
+pub(super) fn blocker_text(problem: BlockerProblem) -> String {
     match problem {
         BlockerProblem::Link(obstruction) => format!("is {obstruction}, which doctor never follows or replaces"),
         BlockerProblem::NotADirectory => "is not a folder".to_string(),
@@ -251,7 +300,7 @@ pub(crate) fn repair_registration(pass: &Pass<'_>) -> RepairOutcome {
     let Ok(context) = pass.environment().context() else {
         return RepairOutcome {
             changes: Vec::new(),
-            failure: Some(precondition_text(EntryPrecondition::NoContext).to_string()),
+            failure: Some(precondition_text(EntryPrecondition::NoContext)),
         };
     };
     let repair = publisher::repair_registration(context, RegistrationInventory::claudine());

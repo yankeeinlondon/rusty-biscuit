@@ -32,7 +32,8 @@ is kept. Setup runs four steps, in order:
 
 1. installs the registration under `~/.claudine/registrations/darkmatter/`
    (unchanged files are not rewritten); if this fails, it stops with an error
-   and changes no configuration;
+   and changes no configuration, after listing any registration file it had
+   already written or removed (`Before the failure, the publish wrote …`);
 2. completes the `permissions` handshake between `~/.claudine/config.yaml`
    and `~/.darkmatter.yaml`. Two different blocks are a warning, and both are
    left as they are;
@@ -40,7 +41,11 @@ is kept. Setup runs four steps, in order:
    `register` list of `~/.darkmatter.yaml`, in place of any entry naming
    `~/.claudine/darkmatter-host.yaml`, even when that file is already gone;
 4. removes `~/.claudine/darkmatter-host.yaml` and the
-   `~/.claudine/darkmatter-host/` folder.
+   `~/.claudine/darkmatter-host/` folder. If that stops partway (say
+   `~/.claudine` is read-only, so the folder's contents can go but the
+   folder cannot), setup warns that the old registration was only partly
+   removed and lists each entry it did remove; a removed folder stands for
+   everything in it. The next `claudine setup` removes only what is left.
 
 ```yaml
 # ~/.darkmatter.yaml before

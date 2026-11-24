@@ -132,7 +132,13 @@ reader sees either the old set or the new one. When the installation is
 already current it writes nothing (every file keeps its modification time)
 and still prints the list. It refuses to write through a symbolic link or
 junction, or over something that is not a directory where one belongs; the
-error names the path, and nothing is written.
+error names the path. Such a link is almost always found before anything is
+written. If a publish stops partway (a link appeared during it, or a file
+could not be written or removed), the error lists every file it already
+wrote or removed, for example
+`the registration was only partly published; already changed: removed ~/.claudine/registrations/darkmatter/.claudine-tmp-…`.
+The manifest is written last, so the old one still stands, and publishing
+again finishes the job.
 
 Publishing never edits `~/.darkmatter.yaml`. The `register` entry that
 points `md` and DMLS at the manifest is added by Claudine's first-run setup.

@@ -467,22 +467,49 @@ impl ClaudineConfig {
     ///
     /// Returns [`ClaudineError::ConfigValidation`] if any check fails.
     pub fn validate(&self) -> Result<()> {
-        self.protect.validate()?;
+        self.validate_settings().map_err(|(_, error)| *error)
+    }
+
+    /// [`Self::validate`], also naming the setting whose check failed first.
+    pub(crate) fn validate_settings(&self) -> std::result::Result<(), (ValidatedSetting, Box<ClaudineError>)> {
+        let tagged = |setting| move |error| (setting, Box::new(error));
+        self.protect.validate().map_err(tagged(ValidatedSetting::Protect))?;
 
         if let Some(messenger) = &self.messenger {
-            messenger.validate()?;
+            messenger.validate_selection().map_err(tagged(ValidatedSetting::MessengerSelection))?;
+            messenger.validate_routes().map_err(tagged(ValidatedSetting::MessengerRoutes))?;
         }
 
-        validate_sound_name("default_sounds.success", &self.default_sounds.success)?;
-        validate_sound_name("default_sounds.attention", &self.default_sounds.attention)?;
-        validate_sound_name("default_sounds.error", &self.default_sounds.error)?;
+        for (name, sound) in [
+            ("success", &self.default_sounds.success),
+            ("attention", &self.default_sounds.attention),
+            ("error", &self.default_sounds.error),
+        ] {
+            validate_sound_name(&format!("default_sounds.{name}"), sound)
+                .map_err(tagged(ValidatedSetting::DefaultSound(name)))?;
+        }
 
         if let Some(exit_expressions) = &self.exit_expressions {
-            validate_exit_expressions(exit_expressions.rules())?;
+            validate_exit_expressions(exit_expressions.rules()).map_err(tagged(ValidatedSetting::ExitExpressions))?;
         }
 
         Ok(())
     }
+}
+
+/// The setting a [`ClaudineConfig::validate_settings`] check judges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ValidatedSetting {
+    Protect,
+    /// `messenger.active_config`, which a repository's `active_messenger`
+    /// replaces.
+    MessengerSelection,
+    /// The route definitions in `messenger.configurations`.
+    MessengerRoutes,
+    /// `default_sounds.<name>`.
+    DefaultSound(&'static str),
+    /// `exit_expressions`, which a repository declaration replaces whole.
+    ExitExpressions,
 }
 
 /// Validate a sound effect name using `playa::SoundEffect::from_name`.

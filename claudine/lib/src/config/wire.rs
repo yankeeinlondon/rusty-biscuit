@@ -166,19 +166,46 @@ fn flow(value: &Value) -> String {
     }
 }
 
-/// Every flat action and route in a configuration document, as
-/// `(JSON pointer segments, migration message)`.
+/// One action or route still written in the flat form.
+pub(crate) struct FlatEntry {
+    /// The JSON pointer segments of the entry.
+    pub(crate) segments: Vec<String>,
+    /// Its kind's key, which the keyed view ([`upgrade_flat`]) nests the
+    /// entry's settings under.
+    pub(crate) kind: &'static str,
+    /// The migration message, with the keyed spelling.
+    pub(crate) message: String,
+}
+
+impl FlatEntry {
+    /// The authored path of `keyed`, a path in the document after
+    /// [`upgrade_flat`]: inside this entry, the kind segment the keyed view
+    /// adds is dropped, so a setting maps back to the key the file wrote.
+    pub(crate) fn authored(&self, keyed: &[String]) -> Option<Vec<String>> {
+        let rest = keyed.strip_prefix(self.segments.as_slice())?;
+        let mut authored = self.segments.clone();
+        match rest.split_first() {
+            Some((kind, settings)) if kind == self.kind => authored.extend_from_slice(settings),
+            _ => authored.extend_from_slice(rest),
+        }
+        Some(authored)
+    }
+}
+
+/// Every flat action and route in a configuration document.
 ///
 /// A flat entry is a mapping whose `type` (action) or `provider` (route)
 /// names a known kind, the spelling configuration files used before actions
 /// and routes were keyed.
-pub(crate) fn flat_entries(document: &Value) -> Vec<(Vec<String>, String)> {
+pub(crate) fn flat_entries(document: &Value) -> Vec<FlatEntry> {
     let mut found = Vec::new();
     visit_entries(document, &mut |segments, family, entry| {
         if let Value::Object(entry) = entry
+            && let Some(Value::String(tag)) = entry.get(family.tag)
+            && let Some(kind) = family.kind_of(tag)
             && let Some(message) = family.keyed_example(entry)
         {
-            found.push((segments.to_vec(), message));
+            found.push(FlatEntry { segments: segments.to_vec(), kind, message });
         }
     });
     found
