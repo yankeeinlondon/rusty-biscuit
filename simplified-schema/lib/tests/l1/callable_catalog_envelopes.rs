@@ -125,6 +125,38 @@ fn the_catalog_definitions_ship_as_kind_definitions() {
     }
 }
 
+/// `allowed_keys()` is written beside the definitions; every tagged
+/// envelope's list is exactly its definition's keys (every arm's, for a root
+/// union), so the two cannot drift.
+#[test]
+fn allowed_keys_match_each_shipped_definition() {
+    for (envelope, definition) in [
+        (StandaloneSchemaEnvelope::Tagged, simplified_schema::envelope::SCHEMA_DEFINITION_PATH),
+        (StandaloneSchemaEnvelope::YamlSchema, simplified_schema::envelope::YAML_SCHEMA_DEFINITION_PATH),
+        (StandaloneSchemaEnvelope::NamespaceSchema, simplified_schema::envelope::NAMESPACE_SCHEMA_DEFINITION_PATH),
+        (StandaloneSchemaEnvelope::ExpressionSchema, EXPRESSION_SCHEMA_DEFINITION_PATH),
+        (StandaloneSchemaEnvelope::MutationSchema, MUTATION_SCHEMA_DEFINITION_PATH),
+    ] {
+        let text = ENVELOPE_DEFINITIONS.iter().find(|document| document.path == definition).expect("shipped").text;
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).expect("definition YAML");
+        let arms = match &value["$schema"] {
+            serde_yaml_ng::Value::Sequence(arms) => arms.clone(),
+            arm => vec![arm.clone()],
+        };
+        let mut declared: Vec<String> = arms
+            .iter()
+            .flat_map(|arm| arm.as_mapping().expect("an object arm").keys().filter_map(|key| key.as_str().map(str::to_string)))
+            .filter(|key| key != "$constraints")
+            .collect();
+        declared.sort();
+        declared.dedup();
+        let mut allowed: Vec<String> = envelope.allowed_keys().iter().map(|key| (*key).to_string()).collect();
+        allowed.sort();
+        assert_eq!(allowed, declared, "{definition}");
+        assert!(allowed.iter().all(|key| envelope.admits_top_level_key(key)), "{definition}");
+    }
+}
+
 // ── The authored-shape matrix (expression catalog) ─────────────────────────
 
 #[test]
