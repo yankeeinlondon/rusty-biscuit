@@ -1,0 +1,74 @@
+# The sequence document's step and container types, applied by
+# sequence-document.yaml to a document's `sequence:` list and by
+# formal-sequence-file.yaml to a `kind: sequence` YAML file's. Hand-maintained;
+# see claudine/docs/topics/schemas.md.
+#
+# `task` and `group` are recursive: a task's inline `sequence:` items and a
+# group's `tasks:` legs reference them again, so containers are typed at every
+# depth and the resolver stores each once as a definition. Every container
+# event is typed with the same family as the document's event of that name:
+# `initialize` with `initialize-stack`, `cancelled` with `cancelled-stack`, and
+# the others with `stack`. The task parser accepts unlimited nesting, and the
+# schema adds no container-depth limit; each event stack starts its own
+# conditional-depth count, which the lifecycle parser checks.
+#
+# A task object is open: an undeclared key is authored step data, read as
+# `seq.<key>`. `$schema`, `$state`, and `template` are an inline sequence's own
+# declarations; the task parser refuses them on any other task. A group object is closed, so `execution` (removed) and a
+# misspelled key such as `max_paralel` are schema errors.
+kind: schema
+name: sequence-schema
+description: the step and container types of a sequence; nothing is exported through `$schema`
+types:
+    steps:
+        - "step[] -> an inline list of steps"
+        - "string(no-coerce) -> a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`; a number or boolean is not one"
+    step:
+        - "string -> shorthand for `{ name: <string> }`"
+        - number
+        - boolean
+        - task
+    task:
+        name: "string(not-empty) -> the step or leg name"
+        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
+        with: "object -> a prompt task's frontmatter values for the document it runs"
+        prompt: "string(no-coerce) -> the prompt file reference"
+        shell: "unknown -> a shell command; the task parser checks its form"
+        side_effect: "unknown -> a side effect; the task parser checks its arguments"
+        task: "unknown -> a referenced task; the task parser checks its form"
+        sequence: "steps -> a nested sequence"
+        group:
+            - group
+            - "string(no-coerce) -> a group file reference"
+        operation: "string -> the task operation"
+        flow: "string -> the task flow"
+        timeout: "string -> the per-command shell timeout, such as 45s"
+        loop: "loop@./lifecycle-events.yaml -> an inline sequence's loop, beside `sequence:`"
+        $schema: "schema -> an inline sequence's check of the values it sees at its turn, judged before its `initialize`; beside `sequence:`"
+        $state: "schema -> the schema each of this inline sequence's own steps' normalized state must satisfy; beside `sequence:`"
+        template: "object -> defaults merged into every item of this inline sequence's own list; beside `sequence:`"
+        initialize: "initialize-stack@./lifecycle-events.yaml -> actions run before the container starts; shell-free"
+        start: "stack@./lifecycle-events.yaml -> actions run when the container starts"
+        blocked: "stack@./lifecycle-events.yaml -> actions run when the container is blocked"
+        success: "stack@./lifecycle-events.yaml -> actions run after the container succeeds"
+        failure: "stack@./lifecycle-events.yaml -> actions run after the container fails"
+        cancelled: "cancelled-stack@./lifecycle-events.yaml -> opt into cancellation; actions run when cancelled"
+        finalize: "stack@./lifecycle-events.yaml -> actions run last, whatever the outcome"
+        "<string>": "unknown -> authored step data, read as `seq.<key>`; the task parser rejects reserved keys"
+    group:
+        name: "string(not-empty) -> the container name"
+        tasks: "task[](required; min(1)) -> named legs; the task parser checks unique names"
+        variables: "object -> bindings scoped to this group, read as `group.<variable>`"
+        description: "string -> the container summary"
+        operation: "string -> default operation for prompt legs"
+        flow: "string -> default flow for prompt legs"
+        fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
+        max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
+        loop: "loop@./lifecycle-events.yaml -> the group's loop, beside `tasks:`"
+        initialize: "initialize-stack@./lifecycle-events.yaml -> actions run before the group starts; shell-free"
+        start: "stack@./lifecycle-events.yaml -> actions run when the group starts"
+        blocked: "stack@./lifecycle-events.yaml -> actions run when the group is blocked"
+        success: "stack@./lifecycle-events.yaml -> actions run after the group succeeds"
+        failure: "stack@./lifecycle-events.yaml -> actions run after the group fails"
+        cancelled: "cancelled-stack@./lifecycle-events.yaml -> opt into cancellation; actions run when cancelled"
+        finalize: "stack@./lifecycle-events.yaml -> actions run last, whatever the outcome"

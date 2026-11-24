@@ -1,0 +1,49 @@
+# Claudine's catalog for an inline composition: a document whose
+# frontmatter holds the prompt (`prompt`) or its sections (`sections`) for
+# `claudine inline-compose`. Hand-maintained; see
+# claudine/docs/topics/schemas.md.
+#
+# It selects a document that writes `kind: inline-compose` or sets `prompt` or
+# `sections` to a non-null value, unless the document is a sequence
+# (`kind: sequence` or a non-null `sequence`). Each presence test is matched
+# once per non-null YAML type, so a value of the wrong type still selects
+# this schema and the payload then rejects it. composition.yaml excludes
+# exactly these documents.
+#
+# The payload is a root union of two arms, each extending shared.yaml's
+# `common-attributes`: one requires a non-null `prompt`, the other a non-null
+# `sections`, and each admits only `null` for the other key. A document
+# writing both, or `kind: inline-compose` with neither, matches no arm. No
+# other Claudine trigger selected beside this one declares `prompt` or
+# `sections`. Sections are only validated: running them is not built yet.
+kind: schema-trigger
+name: inline-compose-schema
+description: detects an inline-compose prompt and provides additional schema properties
+match:
+    all:
+        - group:
+              - kind: literal(inline-compose; required)
+              - sections: string(required)
+              - sections: number(required)
+              - sections: boolean(required)
+              - sections: object(required)
+              - sections: "unknown[](required)"
+              - prompt: string(required)
+              - prompt: number(required)
+              - prompt: boolean(required)
+              - prompt: object(required)
+              - prompt: "unknown[](required)"
+        - none:
+              - sequence: string(required)
+              - sequence: number(required)
+              - sequence: boolean(required)
+              - sequence: object(required)
+              - sequence: "unknown[](required)"
+              - kind: literal(sequence; required)
+$schema:
+    - $extends: common-attributes@./shared.yaml
+      prompt: "prompt(required)@./document.yaml"
+      sections: "null -> an inline composition with a `prompt` has no `sections`"
+    - $extends: common-attributes@./shared.yaml
+      prompt: "null -> an inline composition with `sections` has no `prompt`"
+      sections: "sections(required)@./document.yaml"

@@ -1,0 +1,17 @@
+# Claudine's `group` global: the settled legs and variables of a group that
+# its events read. Hand-maintained; see claudine/docs/topics/schemas.md.
+# Which events may read it is Claudine's binding catalog, not this file.
+kind: namespace-schema
+namespace: group
+description: "The current group: how each leg settled and the group's own variables."
+$schema:
+    legs:
+        "<string>":
+            name: "string -> The leg's name."
+            outcome: "enum(succeeded, failed, cancelled, skipped) -> How the leg settled."
+            output: "unknown -> The leg's result, including partial output on failure; null when never admitted."
+            err: "unknown -> The leg's structured error or cancellation cause; null for success or skip."
+    succeeded: "string[] -> The names of the legs that succeeded, in declaration order."
+    failed: "string[] -> The names of the legs that failed, in declaration order."
+    cancelled: "string[] -> The names of the legs that were cancelled, in declaration order."
+    "<string>": "unknown -> An authored group variable, read as `group.<variable>`."

@@ -1,0 +1,345 @@
+# Claudine's configuration files: the user file `~/.claudine/config.yaml`
+# (`user-config`) and the repository file `{repo-root}/.claudine/config.yaml`
+# (`repository-config`).
+#
+# This document is the one authority for their shape and defaults. Claudine
+# validates both files against it before reading them, and every default the
+# user file relies on comes from here, and a default fills a setting that is
+# absent or `null` alike. A repository setting is an override: an absent or
+# `null` one inherits the user's value, so the repository types declare no
+# defaults and nothing is inserted into a repository file.
+#
+# `permissions` is Darkmatter's block, imported and never declared again here.
+#
+# A parent default is judged whole, without its children's defaults, so a
+# mapping default spells out each child default; a test keeps them equal.
+kind: schema
+description: Claudine's user and repository configuration files.
+types:
+    provider: "enum(claude, codex, gemini, goose, kimi_code, open_code, qwen_code, kilo, pi, antigravity) -> An agentic CLI Claudine wraps."
+    gender: "enum(male, female) -> A voice gender."
+
+    # ---------------------------------------------------------------- tts
+    voice-selection:
+        - "string -> One voice name."
+        - "gendered-voices -> A voice for each gender; `gender` chooses between them."
+    gendered-voices:
+        male: "string(required) -> The voice used when `gender` is `male`."
+        female: "string(required) -> The voice used when `gender` is `female`."
+    tts-settings:
+        provider: "string(not-empty) -> The TTS engine (`say`, `espeak`, `elevenlabs`, ...). Absent auto-detects one, as `tts: true` does."
+        voice: "voice-selection -> The voice, or a voice per gender. A `speak` action's own `voice` wins."
+        gender: "gender(required; default(female)) -> Which voice of a gendered pair to use. A `speak` action's own `gender` wins."
+        prewarm: "boolean(default(true)) -> Whether lifecycle speech is synthesized ahead of time into the audio cache."
+
+    # ---------------------------------------------------------- messenger
+    # A route is a one-key mapping: the key names the provider and holds that
+    # provider's settings (`{ discord: { channel_id: "…" } }`). Each
+    # provider's defaults live under its own key, so no two arms of
+    # `messenger-route` default the same property.
+    discord-route:
+        channel_id: "string(required) -> The Discord channel to post to."
+        bot_token_env: "string(required; default(DISCORD_BOT_TOKEN)) -> The environment variable holding the bot token."
+        $constraints: { closed: true }
+    slack-route:
+        channel_id: "string(required) -> The Slack channel to post to."
+        bot_token_env: "string(required; default(SLACK_BOT_TOKEN)) -> The environment variable holding the bot token."
+        $constraints: { closed: true }
+    signal-route:
+        recipient: "string(required) -> The recipient phone number or group ID."
+        rpc_url_env: "string(required; default(SIGNAL_RPC_URL)) -> The environment variable holding the RPC URL."
+        account_env: "string(required; default(SIGNAL_ACCOUNT)) -> The environment variable holding the account."
+        $constraints: { closed: true }
+    whatsapp-route:
+        recipient: "string(required) -> The recipient phone number."
+        access_token_env: "string(required; default(WHATSAPP_ACCESS_TOKEN)) -> The environment variable holding the access token."
+        phone_number_id_env: "string(required; default(WHATSAPP_PHONE_NUMBER_ID)) -> The environment variable holding the phone number ID."
+        $constraints: { closed: true }
+    discord-webhook-route:
+        webhook_url: "string -> The webhook URL; absent reads it from `webhook_url_env`."
+        webhook_url_env: "string(required; default(DISCORD_WEBHOOK_URL)) -> The environment variable holding the webhook URL."
+        $constraints: { closed: true }
+    slack-webhook-route:
+        webhook_url: "string -> The webhook URL; absent reads it from `webhook_url_env`."
+        webhook_url_env: "string(required; default(SLACK_WEBHOOK_URL)) -> The environment variable holding the webhook URL."
+        $constraints: { closed: true }
+    discord-route-entry:
+        discord: "discord-route(required) -> A Discord bot."
+        $constraints: { closed: true }
+    slack-route-entry:
+        slack: "slack-route(required) -> A Slack bot."
+        $constraints: { closed: true }
+    signal-route-entry:
+        signal: "signal-route(required) -> A Signal account."
+        $constraints: { closed: true }
+    whatsapp-route-entry:
+        whatsapp: "whatsapp-route(required) -> A WhatsApp Business account."
+        $constraints: { closed: true }
+    discord-webhook-route-entry:
+        discord_webhook: "discord-webhook-route(required) -> A Discord webhook."
+        $constraints: { closed: true }
+    slack-webhook-route-entry:
+        slack_webhook: "slack-webhook-route(required) -> A Slack webhook."
+        $constraints: { closed: true }
+    messenger-route:
+        - "discord-route-entry -> A Discord bot."
+        - "slack-route-entry -> A Slack bot."
+        - "signal-route-entry -> A Signal account."
+        - "whatsapp-route-entry -> A WhatsApp Business account."
+        - "discord-webhook-route-entry -> A Discord webhook."
+        - "slack-webhook-route-entry -> A Slack webhook."
+    messenger-routes:
+        "<string>": "messenger-route -> A named messaging route."
+    messenger-settings:
+        active_config: "string -> The name of the route `message` actions send to; it must name one of `configurations`."
+        configurations: "messenger-routes(required; default({})) -> The named messaging routes."
+
+    # ------------------------------------------------------------ protect
+    rule-group-settings:
+        enabled: "boolean(required) -> Whether the group's rules run."
+        allow_paths: "string[](required; default([])) -> Paths the group never blocks; only `filesystem_destruction` and `sensitive_paths` accept them."
+    rule-group:
+        - "boolean -> Whether the group's rules run."
+        - "rule-group-settings -> Whether the group's rules run, and paths they never block."
+    protect-rules:
+        filesystem_destruction: rule-group
+        disk_manipulation: rule-group
+        remote_execution: rule-group
+        git_destructive: rule-group
+        system_sabotage: rule-group
+        network_sabotage: rule-group
+        container_cloud: rule-group
+        database_nukes: rule-group
+        obfuscated_execution: rule-group
+        prompt_injection: rule-group
+        credential_exfiltration: rule-group
+        sensitive_paths: rule-group
+    custom-pattern:
+        name: "string(required) -> The pattern's name in reports."
+        pattern: "string(required) -> A regular expression; a match is blocked."
+        surface: "enum(bash_command, write_path, mcp_response; required; default(bash_command)) -> What the pattern is checked against; `write_path` is not supported."
+    protect-settings:
+        enabled: "boolean(required; default(true)) -> Whether Protect runs at all."
+        rules: "protect-rules(required; default({})) -> Turns built-in rule groups on or off; a group not listed is on."
+        custom_patterns: "custom-pattern[](required; default([])) -> Your own patterns to block."
+
+    # ------------------------------------------------------------ actions
+    mapper-json-field:
+        type: "literal(json_field; required)"
+        field: "string(required) -> The dot-separated path of the decision in the JSON output."
+    mapper-json-object:
+        type: "literal(json_object; required)"
+    mapper-exit-code:
+        type: "literal(exit_code; required)"
+    mapper-regex:
+        type: "literal(regex; required)"
+        pattern: "string(required) -> A regular expression with named groups, matched against each output line."
+    mapper:
+        - "mapper-json-field -> Read one field of the JSON output as the decision."
+        - "mapper-json-object -> Use the whole JSON output as the response."
+        - "mapper-exit-code -> Exit code 0 allows, 2 denies, anything else decides nothing."
+        - "mapper-regex -> Map output lines to response fields with named groups."
+    report-handler:
+        format: "enum(text, json, compact; required) -> The report line's format."
+        template: "string -> A template for the report line."
+        include_metadata: "boolean(required; default(false)) -> Whether the event's metadata is included."
+    # An action is a one-key mapping: the key names the action and holds its
+    # settings (`{ bash: { command: "…" } }`). Each action's defaults live
+    # under its own key, so no two arms of `action` default the same property.
+    sound-effect-action:
+        effect: "string(required) -> The sound effect's name."
+        volume: "number(required; default(1.0)) -> Playback volume, 0.0 to 1.0."
+        speed: "number(required; default(1.0)) -> Playback speed multiplier."
+        when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
+    speak-action:
+        message: "string(required) -> The message template to speak."
+        voice: "string -> The voice for this action."
+        gender: "gender -> The voice gender for this action."
+        when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
+    bash-action:
+        command: "string(required) -> The shell command, run without waiting for it."
+        params: "string(required; default(\"\")) -> Template parameters appended to the command."
+        when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
+    call-action:
+        command: "string(required) -> The command, run and waited for."
+        args: "string[] -> Its arguments."
+        timeout_ms: "number(integer; min(0)) -> How long to wait, in milliseconds."
+        mapper: "mapper -> How its output becomes a hook response."
+        when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
+    report-action:
+        handler: "report-handler -> How the report is written."
+        when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
+    message-action:
+        message: "string(required) -> The message to send to the active messenger route."
+        image: "string -> An image to attach."
+        when: "string -> A condition; the action runs only when it holds."
+        $constraints: { closed: true }
+    sound-effect-action-entry:
+        sound_effect: "sound-effect-action(required) -> Play a sound effect."
+        $constraints: { closed: true }
+    speak-action-entry:
+        speak: "speak-action(required) -> Speak a message."
+        $constraints: { closed: true }
+    bash-action-entry:
+        bash: "bash-action(required) -> Run a shell command in the background."
+        $constraints: { closed: true }
+    call-action-entry:
+        call: "call-action(required) -> Run a command and use its output as the hook's response."
+        $constraints: { closed: true }
+    report-action-entry:
+        report: "report-action(required) -> Report the event."
+        $constraints: { closed: true }
+    message-action-entry:
+        message: "message-action(required) -> Send a message."
+        $constraints: { closed: true }
+    action:
+        - "sound-effect-action-entry -> Play a sound effect."
+        - "speak-action-entry -> Speak a message."
+        - "bash-action-entry -> Run a shell command in the background."
+        - "call-action-entry -> Run a command and use its output as the hook's response."
+        - "report-action-entry -> Report the event."
+        - "message-action-entry -> Send a message."
+    # One optional entry per event; an event not listed has no actions.
+    event-actions:
+        session_start: "action[](not-empty) -> The actions run, in order, on `session_start`."
+        session_end: "action[](not-empty) -> The actions run, in order, on `session_end`."
+        before_prompt: "action[](not-empty) -> The actions run, in order, on `before_prompt`."
+        before_tool: "action[](not-empty) -> The actions run, in order, on `before_tool`."
+        after_tool: "action[](not-empty) -> The actions run, in order, on `after_tool`."
+        tool_error: "action[](not-empty) -> The actions run, in order, on `tool_error`."
+        permission_request: "action[](not-empty) -> The actions run, in order, on `permission_request`."
+        turn_complete: "action[](not-empty) -> The actions run, in order, on `turn_complete`."
+        turn_error: "action[](not-empty) -> The actions run, in order, on `turn_error`."
+        subagent_start: "action[](not-empty) -> The actions run, in order, on `subagent_start`."
+        subagent_stop: "action[](not-empty) -> The actions run, in order, on `subagent_stop`."
+        before_model: "action[](not-empty) -> The actions run, in order, on `before_model`."
+        after_model: "action[](not-empty) -> The actions run, in order, on `after_model`."
+        before_compact: "action[](not-empty) -> The actions run, in order, on `before_compact`."
+        notification: "action[](not-empty) -> The actions run, in order, on `notification`."
+        human_in_the_loop: "action[](not-empty) -> The actions run, in order, on `human_in_the_loop`."
+    event-matchers:
+        session_start: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `session_start` must match."
+        session_end: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `session_end` must match."
+        before_prompt: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_prompt` must match."
+        before_tool: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_tool` must match."
+        after_tool: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `after_tool` must match."
+        tool_error: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `tool_error` must match."
+        permission_request: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `permission_request` must match."
+        turn_complete: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `turn_complete` must match."
+        turn_error: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `turn_error` must match."
+        subagent_start: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `subagent_start` must match."
+        subagent_stop: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `subagent_stop` must match."
+        before_model: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_model` must match."
+        after_model: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `after_model` must match."
+        before_compact: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `before_compact` must match."
+        notification: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `notification` must match."
+        human_in_the_loop: "string(not-empty) -> The condition (`tool_name == 'Bash'`) or regular expression (`Bash|Edit`) `human_in_the_loop` must match."
+
+    # ------------------------------------------------------------- models
+    model-entry:
+        id: "string(required) -> The model identifier passed to the provider."
+        catalog_id: "string -> The models-catalog identity this model joins (`anthropic/claude-opus@4.8`)."
+    model-value:
+        - "string -> A model identifier."
+        - "model-entry -> A model identifier with its catalog identity."
+    model-override-settings:
+        mode: "enum(add, replace; required; default(add)) -> Whether `values` add to the fetched catalog or replace it."
+        values: "model-value[](required; default([])) -> The models."
+    model-override:
+        - "string[] -> Models added to the fetched catalog."
+        - "model-override-settings -> Models that add to or replace the fetched catalog."
+    model-overrides:
+        claude: "model-override -> The `claude` catalog override."
+        codex: "model-override -> The `codex` catalog override."
+        gemini: "model-override -> The `gemini` catalog override."
+        goose: "model-override -> The `goose` catalog override."
+        kimi_code: "model-override -> The `kimi_code` catalog override."
+        open_code: "model-override -> The `open_code` catalog override."
+        qwen_code: "model-override -> The `qwen_code` catalog override."
+        kilo: "model-override -> The `kilo` catalog override."
+        pi: "model-override -> The `pi` catalog override."
+        antigravity: "model-override -> The `antigravity` catalog override."
+
+    # ------------------------------------------------------------- sounds
+    default-sounds:
+        success: "string -> The sound played when a session or turn completes."
+        attention: "string -> The sound played when the agent needs you."
+        error: "string -> The sound played when Protect blocks an action."
+
+    # ---------------------------------------------------- runaway guards
+    exit-expression:
+        pattern: "string -> One pattern; write exactly one of `pattern` and `patterns`."
+        patterns: "string[] -> Several patterns sharing this entry's settings."
+        kind: "enum(literal, regex; required; default(literal)) -> Whether the patterns are literal text or regular expressions."
+        ignore_case: "boolean(required; default(false)) -> Whether a literal pattern ignores case."
+        scope: "string -> The agent (`opencode`) or agent and model (`opencode/kimi-k2`) the entry applies to; absent applies to every run."
+    exit-expressions-layer:
+        mode: "enum(merge, override; required; default(override)) -> Whether these rules add to the lower layer's or replace them."
+        rules: "exit-expression[](required; default([])) -> The rules."
+    exit-expressions:
+        - "exit-expression[] -> Rules, combined with the layer's default mode."
+        - "exit-expressions-layer -> Rules with an explicit combine mode."
+    repetition-guard:
+        enabled: "boolean(required; default(true)) -> Whether the repetition guard runs."
+        max_repeats: "number(integer; min(0); required; default(30)) -> Full cycles allowed before the run is stopped."
+        max_cycle_length: "number(integer; min(0); required; default(16)) -> The longest repeating block, in lines, the guard recognizes."
+    volume-guard:
+        enabled: "boolean(required; default(true)) -> Whether the volume guard runs."
+        max_lines: "number(integer; min(0); required; default(50000)) -> Lines allowed per turn."
+        max_bytes: "number(integer; min(0); required; default(33554432)) -> Bytes allowed per turn (32 MiB)."
+    guard-settings:
+        repetition: 'repetition-guard(required; default({"enabled": true, "max_repeats": 30, "max_cycle_length": 16})) -> The repetition guard.'
+        volume: 'volume-guard(required; default({"enabled": true, "max_lines": 50000, "max_bytes": 33554432})) -> The volume guard.'
+
+    # ----------------------------------------------------------- steering
+    # The user's `enabled` defaults to `true`; a repository's value, when it
+    # sets one, still wins over the user's.
+    user-automatic-steering:
+        enabled: "boolean(default(true)) -> Whether automatic repetition help is on."
+    user-steering:
+        automatic: "user-automatic-steering(required; default({})) -> Automatic repetition help."
+    repository-automatic-steering:
+        enabled: "boolean -> Whether automatic repetition help is on; absent or `null` inherits the user's setting."
+    repository-steering:
+        automatic: "repository-automatic-steering(not-empty) -> Automatic repetition help."
+
+    # ------------------------------------------------------------- files
+    user-config:
+        tts:
+            - "boolean(required; default(false)) -> `true` turns `speak` actions on with an auto-detected voice; `false` turns them off."
+            - "tts-settings -> Turns `speak` actions on with these settings."
+        messenger: "messenger-settings -> Named messaging routes and the active one."
+        logging: "boolean(required; default(true)) -> Whether every dispatched hook event is appended to `~/.claudine/logs/`."
+        protect:
+            - "boolean(required; default(true)) -> Turns Protect, the deny-pattern guard, on or off with every built-in group."
+            - "protect-settings -> Protect with per-group switches and your own patterns."
+        actions: "event-actions(required; default({})) -> The actions run for each event."
+        matchers: "event-matchers(required; default({})) -> A condition each event must match before its actions run."
+        preferred_agent: "provider -> The agent `compose`, `inline-compose`, and `sequence` use when the document does not choose one."
+        favorite_agent: "provider -> The former name of `preferred_agent`; write only one of them."
+        canonical_provider: "provider -> The canonical provider for linked skills, commands, and agents."
+        models: "model-overrides(required; default({})) -> Per-provider additions to, or replacements of, the model catalog."
+        default_sounds: "default-sounds(required; default({})) -> Sounds played for common outcomes."
+        prompt_for_missing: "boolean(required; default(true)) -> Whether composition prompts for missing required properties."
+        harvest_unmatched: "boolean(required; default(false)) -> Whether unmatched error and warning output is collected under `~/.claudine/harvest/`."
+        exit_expressions: "exit-expressions -> Output that stops a run."
+        guard_settings: 'guard-settings(required; default({"repetition": {"enabled": true, "max_repeats": 30, "max_cycle_length": 16}, "volume": {"enabled": true, "max_lines": 50000, "max_bytes": 33554432}})) -> Thresholds of the repetition and volume guards.'
+        steering: 'user-steering(required; default({"automatic": {}})) -> Steering settings.'
+        permissions: 'user-permissions(required; default({"file-read": ["./*.txt", "./*.text", "./*.md", "./*.csv", "./*.tsv", "./*.json", "./*.json5", "./*.yaml", "./*.yml", "./*.toml"], "shell-commands": [], "network": "deny"}))@darkmatter:config | permissions-reference@darkmatter:config -> The permissions block, or a reference to another file that holds it.'
+        $constraints: { closed: true }
+
+    repository-config:
+        canonical_provider: "provider -> The canonical provider for this repository; absent inherits the user's."
+        actions: "event-actions(not-empty) -> Actions for this repository; each event listed replaces the user's actions for it."
+        matchers: "event-matchers(not-empty) -> Matchers for this repository; each event listed replaces the user's matcher for it."
+        active_messenger: "string -> The messenger route for this repository; absent or `null` inherits the user's `messenger.active_config`."
+        exit_expressions: "exit-expressions -> Output that stops a run in this repository; the list form replaces the user's rules."
+        guard_settings: "guard-settings -> Guard thresholds for this repository, replacing the user's whole setting."
+        steering: "repository-steering(not-empty) -> Steering settings for this repository; absent or `null` inherits."
+        permissions: 'repository-permissions(required; default({"file-read": ["&**/*.txt", "&**/*.text", "&**/*.md", "&**/*.csv", "&**/*.tsv", "&**/*.json", "&**/*.json5", "&**/*.yaml", "&**/*.yml", "&**/*.toml"], "shell-commands": [], "network": "deny"}))@darkmatter:config | permissions-reference@darkmatter:config -> The permissions block, or a reference to another file that holds it.'
+        $constraints: { closed: true }
