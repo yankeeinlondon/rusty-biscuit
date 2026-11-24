@@ -123,7 +123,7 @@ const EXCEPTIONS: &[Exception] = &[
         "Darkmatter's global catalog, registered explicitly",
     ),
     // simplified-schema/schemas: the shipped `kind: yaml-schema` definitions
-    // (the three envelope definitions and the trigger definition). The
+    // (the five envelope definitions and the trigger definition). The
     // library's corpus admits them; here Darkmatter's resolver must refuse
     // each as a `$schema` target, since a definition is selected by `kind`.
     exception(
@@ -149,6 +149,18 @@ const EXCEPTIONS: &[Exception] = &[
         "yaml-schema.yaml",
         Class::YamlSchemaDefinition,
         "the definition of `kind: yaml-schema` documents, applied by `kind`",
+    ),
+    exception(
+        "simplified-schema/schemas",
+        "expression-schema.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: expression-schema` callable catalogs, applied by `kind`",
+    ),
+    exception(
+        "simplified-schema/schemas",
+        "mutation-schema.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: mutation-schema` callable catalogs, applied by `kind`",
     ),
     exception(
         "darkmatter/schemas",

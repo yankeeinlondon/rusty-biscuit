@@ -132,15 +132,20 @@ fn validated(result: Result<YamlOutcome, SchemaError>) -> darkmatter::markdown::
 // ── Shipped definitions ────────────────────────────────────────────────────
 
 #[test]
-fn the_shipped_registry_claims_the_four_envelope_kinds() {
+fn the_shipped_registry_claims_every_shipped_envelope_kind() {
     let registry = darkmatter::markdown::schemas::shipped_kind_registry();
     let claimed: Vec<&str> = registry.claims().map(|(kind, _)| kind).collect();
-    assert_eq!(claimed, ["namespace-schema", "schema", "schema-trigger", "yaml-schema"]);
+    assert_eq!(
+        claimed,
+        ["expression-schema", "mutation-schema", "namespace-schema", "schema", "schema-trigger", "yaml-schema"]
+    );
     for (kind, path) in [
         ("schema", "simplified-schema/schemas/schema.yaml"),
         ("yaml-schema", "simplified-schema/schemas/yaml-schema.yaml"),
         ("schema-trigger", "simplified-schema/schemas/schema-trigger.yaml"),
         ("namespace-schema", "simplified-schema/schemas/namespace-schema.yaml"),
+        ("expression-schema", "simplified-schema/schemas/expression-schema.yaml"),
+        ("mutation-schema", "simplified-schema/schemas/mutation-schema.yaml"),
     ] {
         assert_eq!(healthy_source(&registry, kind), DefinitionSource::Shipped(path));
     }
@@ -152,12 +157,47 @@ fn the_shipped_registry_claims_the_four_envelope_kinds() {
             PathBuf::from("simplified-schema/schemas/yaml-schema.yaml"),
             PathBuf::from("simplified-schema/schemas/schema-trigger.yaml"),
             PathBuf::from("simplified-schema/schemas/namespace-schema.yaml"),
+            PathBuf::from("simplified-schema/schemas/expression-schema.yaml"),
+            PathBuf::from("simplified-schema/schemas/mutation-schema.yaml"),
         ]
     );
 }
 
+/// A callable catalog opened as a whole YAML document is judged by its
+/// shipped kind definition, strictly, then by the syntax-only kind check;
+/// the definition's refusal and the check's finding are both located.
+#[test]
+fn a_callable_catalog_validates_against_its_shipped_kind_definition() {
+    const CATALOG: &str = "kind: expression-schema\ncategories: [Text]\ntypes:\n  pad: \"function(parameters(x: string); returns(string); category(Text))\"\n";
+    let schemas = DarkmatterSchemas::new(Fixture::new().context(&std::env::temp_dir().join("x.yaml"), &[]))
+        .with_kind_registry(darkmatter::markdown::schemas::shipped_kind_registry());
+    let valid = validated(schemas.validate_yaml_document(CATALOG, Path::new("text.yaml")));
+    assert_eq!(valid.route, Route::Kind("expression-schema".into()));
+    assert_eq!(valid.definition, "built-in simplified-schema/schemas/expression-schema.yaml");
+    assert!(valid.report.valid, "{:?}", valid.report.problems);
+
+    let mutation = CATALOG.replace("expression-schema", "mutation-schema");
+    let valid = validated(schemas.validate_yaml_document(&mutation, Path::new("actions.yaml")));
+    assert_eq!(valid.route, Route::Kind("mutation-schema".into()));
+    assert!(valid.report.valid, "{:?}", valid.report.problems);
+
+    // Strict shape: a number description is refused, never converted.
+    let numbered = CATALOG.replace("categories:", "description: 5\ncategories:");
+    let refused = validated(schemas.validate_yaml_document(&numbered, Path::new("text.yaml")));
+    assert!(!refused.report.valid);
+    assert!(refused.report.problems.iter().any(|problem| problem.path == "/description"), "{:?}", refused.report.problems);
+
+    // An undeclared category is the kind check's finding, at its line.
+    let undeclared = CATALOG.replace("category(Text)", "category(Math)");
+    let checked = validated(schemas.validate_yaml_document(&undeclared, Path::new("text.yaml")));
+    assert!(!checked.report.valid);
+    let problem = checked.report.problems.first().expect("a finding");
+    assert!(problem.message.contains("Math"), "{problem:?}");
+    assert_eq!(problem.line, Some(4), "{problem:?}");
+}
+
 /// Each shipped file, as compiled in, validates against the shipped
-/// registry: all four through `yaml-schema.yaml`, which therefore validates
+/// registry: all six through `yaml-schema.yaml`, which therefore validates
 /// itself.
 #[test]
 fn each_shipped_definition_validates_against_the_shipped_yaml_schema_definition() {
@@ -173,6 +213,14 @@ fn each_shipped_definition_validates_against_the_shipped_yaml_schema_definition(
         (
             "simplified-schema/schemas/namespace-schema.yaml",
             include_str!("../../../../simplified-schema/schemas/namespace-schema.yaml"),
+        ),
+        (
+            "simplified-schema/schemas/expression-schema.yaml",
+            include_str!("../../../../simplified-schema/schemas/expression-schema.yaml"),
+        ),
+        (
+            "simplified-schema/schemas/mutation-schema.yaml",
+            include_str!("../../../../simplified-schema/schemas/mutation-schema.yaml"),
         ),
     ] {
         let validation = validated(schemas.validate_yaml_document(text, Path::new(path)));
