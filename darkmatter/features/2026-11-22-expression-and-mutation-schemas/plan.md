@@ -42,11 +42,11 @@ Start from the completed host registration v2 and Claudine doctor implementation
 
 10. **Regenerate from source and measure no spike.** Bump the affected preparation revisions relative to the prerequisite tree and regenerate in dependency order. Keep the two built-in YAML files in place and use the current recipes. The exact generated `lifecycle.yaml` bytes and the descriptors' signatures, aliases, examples, and binding behavior are regression oracles. The spec asks for no latency threshold or new runtime measurement. Read-only traces exposed the open choices and the tests can verify the load-once invariant directly.
 
-- [ ] **Prerequisite baseline**
+- [x] **Prerequisite baseline**
   - Own the baseline evidence entry in `implementation-log.md`. Use existing v2 and doctor fixtures to verify the fixed-path publisher, manifest loader, doctor repair, and DMLS reload pass focused L1. Record the starting Git tree and capture pre-change bytes of `darkmatter/schemas/partials/lifecycle.yaml`, the generated expression table, and `darkmatter/docs/functions/`. Record their paths and byte hashes in the implementation log so later sessions can compare against the baseline. Use the existing expression and registry parity tests as the descriptor and dispatch baseline. Read this evidence before regenerating anything.
   - Use version 2 as the migration fixture. Freeze the prerequisite publisher's emitted manifest and exact installed member bytes as the v2 test fixture. Use it only for version refusal, fixed-path migration, and preservation of unrelated config. The v2 completion is an entry dependency for the feature, that must already be present at the start of Phase 1.
 
-- [ ] **Envelope definitions**
+- [x] **Envelope definitions**
   - Own Simplified Schema's `schemas/`, `lib/src/{envelope.rs,simplified/standalone.rs,shipped/registry.rs,yaml_documents/semantic.rs,yaml_documents/load.rs,yaml_documents/marks.rs,resolve.rs,errors.rs}` and associated tests. Implement Rules 2, 3, and the shared diagnostic representation from Rules 5 and 6. Add the new variants through all exhaustive matches and generated record admission. Keep the bootstrap independent of old shipped bytes.
   - Walk the YAML loader and common authored-shape matrix below through the public admission/validation result. Prove a normal types library still supports imports, and well-formed and malformed callable envelopes cannot be selected or imported. Update Simplified Schema's language index and unions topic to explain private callable type scope.
 
