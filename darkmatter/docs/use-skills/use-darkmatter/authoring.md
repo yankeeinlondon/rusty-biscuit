@@ -35,10 +35,10 @@ To check a construct before relying on it, write a small document and run
 ---
 $schema:                       # optional SimplifiedSchema (or a file: $schema: ./schemas/post.yaml)
   title: string(required)
-  audience: enum(internal, public)
+  audience: enum(internal, general public)
   people: "{ name: string, active: boolean }[]"
 title: Guide
-audience: public
+audience: general public
 people:
   - { name: ann, active: true }
   - { name: bob, active: false }
@@ -60,6 +60,8 @@ version: "$(git describe --tags)"   # top-level $(…) shell expansion (needs ap
   `T[]`, tuples, unions `a | b`, `unknown`/`any`, `null`, `alphanumeric`,
   `yaml`/`json`/`expression`/`shell`, modifiers like `required`, `min(0)`, and
   `suggest(…)`, and descriptions written as `-> text`.
+- Bare `enum(…)` members and `suggest(…)` candidates keep interior spaces.
+  Quote a value to keep leading or trailing spaces or include a comma.
 
 ### Required, `null`, and defaults
 

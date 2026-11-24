@@ -4,7 +4,9 @@ Schemas make frontmatter completion, hover, and diagnostics specific to
 your documents. DMLS reads the same schema files as `md`, using the same
 library, so the editor and `md schema validate` always agree. Schemas are
 written in **SimplifiedSchema**, the compact type language:
-`title: string(required)`, `tags: string[]`, `status: enum(draft, published)`.
+`title: string(required)`, `tags: string[]`, `status: enum(draft, in review)`.
+`suggest(...)` and `enum(...)` each offer a bare multiword value like
+`in review` as a single completion.
 Run `md schema about` for the full vocabulary.
 
 All the examples below were checked with `md schema validate` in a scratch

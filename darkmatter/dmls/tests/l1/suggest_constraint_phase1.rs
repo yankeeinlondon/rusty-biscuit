@@ -242,6 +242,40 @@ fn suggest_phase1_completion_positions() {
 }
 
 #[test]
+fn unquoted_multiword_suggestion_completes_as_one_value() {
+    let text = concat!(
+        "---\n$schema:\n",
+        "  license: string(suggest(MIT, BSD, \"Apache 2.0\", \"GPL v2\", GPL v3, MPL, OSI Approved, AGPL))\n",
+        "license: GPL v3\n---\n",
+    );
+    let workspace = LspWorkspace::new();
+    let path = workspace.path().join("license.md");
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
+    open(&fixture, uri.as_str(), "markdown", text);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        !diagnostics.iter().any(|diagnostic| diagnostic["source"] == json!("darkmatter.schema")),
+        "{diagnostics:?}"
+    );
+    let items = completion(&mut fixture, uri.as_str(), 3, 15);
+    assert_eq!(labels(&items), ["GPL v3"]);
+    assert_eq!(items[0]["textEdit"]["newText"], json!("\"GPL v3\""));
+    assert_eq!(
+        items[0]["textEdit"]["range"],
+        json!({
+            "start": { "line": 3, "character": 9 },
+            "end": { "line": 3, "character": 15 }
+        })
+    );
+    fixture.shutdown();
+}
+
+#[test]
 fn suggest_phase1_union_selection_and_raw_schema_exclusion() {
     let workspace = LspWorkspace::new();
     let union_path = workspace.path().join("unions.md");

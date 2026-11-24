@@ -87,6 +87,7 @@ fn suggest_phase1_cardinality_is_per_complete_property_definition() {
 fn suggest_phase1_duplicates_are_rejected_at_the_later_argument() {
     for (expression, later) in [
         ("string(suggest(12, \"12\"))", "\"12\""),
+        ("string(suggest(blue gray, 'blue gray'))", "'blue gray'"),
         ("number(suggest(3, \"3\"))", "\"3\""),
         ("number(suggest(3, 003))", "003"),
         ("number(suggest(3, 3.0))", "3.0"),
@@ -100,7 +101,7 @@ fn suggest_phase1_duplicates_are_rejected_at_the_later_argument() {
 
 #[test]
 fn suggest_phase1_conversion_preserves_string_interpretation_and_order() {
-    let schema = schema_json("value: string(suggest(Orange, 12, true, null, 'blue gray'))\n")
+    let schema = schema_json("value: string(suggest(Orange, 12, true, null, blue gray))\n")
         .expect("suggestion schema converts");
     assert_eq!(
         schema["properties"]["value"]["anyOf"][1]["x-darkmatter-suggest"],
@@ -119,12 +120,12 @@ fn suggest_phase1_conversion_preserves_string_interpretation_and_order() {
 #[test]
 fn suggest_phase1_invalid_decimal_syntax_is_metadata() {
     let schema = schema_json(
-        "value: number(suggest(1e3, +1, .5, 5., many, ' 1 ', 003.500))\n",
+        "value: number(suggest(1e3, +1, .5, 5., many, 1 2, ' 1 ', 003.500))\n",
     )
     .expect("invalid candidate metadata does not prevent conversion");
     assert_eq!(
         schema["properties"]["value"]["anyOf"][1]["x-darkmatter-suggest"],
-        json!(["1e3", "+1", ".5", "5.", "many", " 1 ", 3.5])
+        json!(["1e3", "+1", ".5", "5.", "many", "1 2", " 1 ", 3.5])
     );
 }
 
@@ -231,8 +232,13 @@ fn suggest_phase1_candidate_constraints_target_scalar_or_array_items() {
 
 #[test]
 fn suggest_phase1_metadata_does_not_restrict_document_values() {
-    let document: Markdown = "---\n$schema:\n  color: string(suggest(red, green))\ncolor: purple\n---\n"
-        .into();
+    let document: Markdown = concat!(
+        "---\n$schema:\n",
+        "  color: string(suggest(red, blue gray))\n",
+        "  finish: enum(glossy, matte blue; required)\n",
+        "color: purple\nfinish: matte blue\n---\n",
+    )
+    .into();
     let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&document)
         .expect("suggestion metadata builds a validator");

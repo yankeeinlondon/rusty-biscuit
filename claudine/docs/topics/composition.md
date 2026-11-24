@@ -822,8 +822,8 @@ A composition error rooted in a prompt file's YAML frontmatter appends a
 **focused excerpt** of that frontmatter: only the lines the error involves,
 each with 3 lines of context above and below, plus the header lines that
 enclose it (a `$schema:` parent, or the `- …` line that opens a union arm).
-Lines keep their real source numbers, the involved lines are highlighted, and a
-`⋮` line marks each gap between non-adjacent regions.
+The selected lines share one YAML panel. Its gutter shows the original source
+numbers and uses a `⋮` row for each gap. The involved lines are highlighted.
 
 For example, `claudine compose prompts/clarify.md spec=fix` fails on the
 caller input `/spec`. `spec` is not a frontmatter key; it is declared in the
@@ -870,7 +870,7 @@ flowchart TD
     L -->|yes| W[±3 lines + enclosing headers, merged into regions]
     W --> U{anchors / aliases and regions miss a line?}
     U -->|yes| X
-    U -->|no| R[one YAML CodeBlock per region, joined by ⋮]
+    U -->|no| R[one YAML panel with a ⋮ row for each gap]
     R --> T{stderr is a TTY?}
     T -->|no| H[withheld]
     T -->|yes| A[appended after the diagnostic]
@@ -879,8 +879,8 @@ flowchart TD
 The excerpt is **TTY-gated**: it is rendered only when stderr is a TTY, and
 withheld in piped / `NO_COLOR` / CI output so frontmatter is never exposed into
 logs — unless `FORCE_COLOR=1` overrides the gate. At `ColorDepth::None`,
-`report_block_error` strips escapes for every variant, and `CodeBlock` draws a
-plain fence without line numbers. Capture happens at the render boundary —
+`report_block_error` strips escapes for every variant, and `CodeBlock` draws
+one plain fence containing the selected lines and gap markers. Capture happens at the render boundary —
 after all control-flow handling — so the wrapper never interferes with
 upstream decisions; the CLI error walker (`output::error_walker`) renders the
 deepest typed diagnostic and appends the excerpt after it
@@ -890,8 +890,8 @@ deepest typed diagnostic and appends the excerpt after it
 resolves the error's property paths to source lines, and `biscuit-terminal`'s
 `SourceContext::focused_line_regions` selects the windows and enclosing headers
 (the width is the constant `EXCERPT_CONTEXT_LINES`, with no configuration
-surface). Each region renders as a Darkmatter `CodeBlock` numbered from its
-first source line (`CodeBlock::with_start_line`).
+surface). Darkmatter's `CodeBlock::render_terminal_excerpt` renders the
+selected regions together.
 `CompositionError::enrich_frontmatter(source, stderr_is_tty)` wraps a
 frontmatter-rooted error in the transparent
 `CompositionError::WithFrontmatter { inner, excerpt }` variant at the render

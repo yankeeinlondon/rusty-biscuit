@@ -69,6 +69,13 @@ can start them elsewhere with `with_start_line(n)` (for example, an excerpt of
 lines 12–14 of a file); its `highlight` ranges then use those same absolute
 line numbers. There is no info-string key for this.
 
+Use `CodeBlock::render_terminal_excerpt` for several locations from one
+source file. Pass each region's first source line number and its text in
+source order. For example, regions `[(19, "initialize:"), (35, "  - when: ready")]`
+share one panel and one gutter. A `⋮` row marks the gap between lines 19 and
+35. With color disabled, both regions and the marker appear inside one
+plain fence.
+
 These superpower will be evident not when you _compose_ a document -- because in those situations the info block just remains text -- but when you are _rendering_ a document the semantic meaning of the info block comes into bloom.
 
 ### Rendered Languages

@@ -62,9 +62,12 @@
 //! arr_constraints  := constraint ( ";" constraint )*
 //! constraint       := IDENT
 //!                   | IDENT "(" arglist ")"
+//!                   | "suggest" "(" list_element ( "," list_element )* ")"
 //!                   | "category" "(" name ")"      (name: raw text up to `)`)
 //! arglist          := arg ( "," arg )*
 //! arg              := NUMBER | BARE_WORD | SQUOTED | DQUOTED
+//! list_element     := bare_text | SQUOTED | DQUOTED | slot
+//! bare_text        := <bare word characters and interior ASCII whitespace>
 //! slot             := "{{" expression "}}"
 //!                     (a complete `enum`/`suggest` element, the whole
 //!                      argument of `literal`, `default`, `min`, `max`,
@@ -330,17 +333,24 @@ impl<'a> Lexer<'a> {
     /// description arrow), where the `-` terminates the word.
     pub(super) fn read_word(&mut self) -> (String, Range<usize>) {
         let start = self.pos;
-        while let Some(b) = self.peek_byte() {
-            if matches!(b, b',' | b';' | b'(' | b')' | b'\'' | b'"') || b.is_ascii_whitespace() {
+        self.pos = self.bare_word_end(false);
+        (self.src[start..self.pos].to_string(), start..self.pos)
+    }
+
+    fn bare_word_end(&self, allow_whitespace: bool) -> usize {
+        let mut end = self.pos;
+        while let Some(&b) = self.bytes.get(end) {
+            if matches!(b, b',' | b';' | b'(' | b')' | b'\'' | b'"')
+                || (!allow_whitespace && b.is_ascii_whitespace())
+            {
                 break;
             }
-            if b == b'-' && self.bytes.get(self.pos + 1).copied() == Some(b'>') {
+            if b == b'-' && self.bytes.get(end + 1).copied() == Some(b'>') {
                 break;
             }
-            self.pos += 1;
+            end += 1;
         }
-        let lex = self.src[start..self.pos].to_string();
-        (lex, start..self.pos)
+        end
     }
 
     /// Read an identifier (`[a-z][a-z0-9-]*`). Used in the type-name and
@@ -574,6 +584,12 @@ enum LexMode {
     ConstraintList,
     /// Inside an arglist — recognise numbers, bare words, and quoted strings.
     ArgList,
+}
+
+enum ArgumentList {
+    Words,
+    WholeArgumentSlot,
+    ListElements,
 }
 
 /// What a constraint list belongs to, which decides how its keywords read.
@@ -932,6 +948,26 @@ impl<'a> Parser<'a> {
                 })
             }
         }
+    }
+
+    /// Reads a single `enum` member or `suggest` candidate up to the next
+    /// delimiter. A token that is numeric on its own keeps its usual spelling
+    /// rules, but a number followed by more text is part of a bare string.
+    fn next_list_element(&mut self) -> Result<Token, SchemaError> {
+        let token = self.next_token(LexMode::ArgList)?;
+        if matches!(token.tok, Tok::Word(_) | Tok::Number(_)) {
+            let end = self.lex.bare_word_end(true);
+            let start = token.span.start;
+            let text = self.src[start..end].trim_ascii_end();
+            if start + text.len() > token.span.end {
+                self.lex.pos = start + text.len();
+                return Ok(Token {
+                    tok: Tok::Word(text.to_string()),
+                    span: start..self.lex.pos,
+                });
+            }
+        }
+        Ok(token)
     }
 
     fn parse_definition(&mut self) -> Result<PropertyDef, SchemaError> {
@@ -2449,12 +2485,6 @@ impl<'a> Parser<'a> {
         owner: ListOwner,
         is_array_level: bool,
     ) -> Result<Vec<Constraint>, SchemaError> {
-        // Special-case enum: the first ident inside the list may be either
-        // the start of a positional members list or a constraint keyword
-        // followed by `(...)`. We always parse a sequence of `member` items
-        // separated by `,` until we either hit `;` (constraint separator), `)`
-        // (end of list), or a `(` immediately following an ident (constraint
-        // call).
         let mut constraints = Vec::new();
         // Peek to see if this is empty: `()`.
         self.lex.skip_ws();
@@ -2621,7 +2651,7 @@ impl<'a> Parser<'a> {
     /// the elements come back in authored order for [`members_constraint`].
     fn parse_enum_members(&mut self) -> Result<(Vec<DynamicElement>, Vec<Constraint>), SchemaError> {
         let mut members = Vec::new();
-        let mut tail = Vec::new();
+        let tail = Vec::new();
 
         loop {
             self.lex.skip_ws();
@@ -2642,67 +2672,8 @@ impl<'a> Parser<'a> {
                     _ => return Ok((members, tail)),
                 }
             }
-            // Look ahead: if the next token is an ident immediately followed
-            // by `(`, treat it as a constraint call (e.g. `default(draft)`).
-            // Otherwise it's a positional member.
-            let saved = self.lex.pos;
-            let tok = self.next_token(LexMode::ArgList)?;
-            // Determine whether this token is a constraint call.
-            let ident_name: Option<&str> = match &tok.tok {
-                Tok::Ident(s) => Some(s.as_str()),
-                _ => None,
-            };
-            let is_constraint_call = if let Some(name) = ident_name {
-                let lookahead_pos = self.lex.pos;
-                self.lex.skip_ws();
-                let next_byte = self.lex.peek_byte();
-                self.lex.pos = lookahead_pos;
-                next_byte == Some(b'(') || name == "required"
-            } else {
-                false
-            };
-
-            if is_constraint_call {
-                // Rewind and let the standard constraint parser handle it.
-                self.lex.pos = saved;
-                let constraint =
-                    self.parse_one_constraint(ListOwner::Type(SimplifiedType::Enum), false)?;
-                tail.push(constraint);
-                self.lex.skip_ws();
-                match self.lex.peek_byte() {
-                    Some(b';') => {
-                        self.lex.pos += 1;
-                        // After we've moved into "tail" mode, all subsequent
-                        // constraints are parsed normally.
-                        return Ok((
-                            members,
-                            self.parse_remaining_constraints(
-                                ListOwner::Type(SimplifiedType::Enum),
-                                tail,
-                            )?,
-                        ));
-                    }
-                    Some(b')') => return Ok((members, tail)),
-                    Some(other) => {
-                        let span = self.lex.pos..self.lex.pos + 1;
-                        return self.err(
-                            format!(
-                                "expected `;` or `)` after constraint, found `{}`",
-                                other as char
-                            ),
-                            span,
-                        );
-                    }
-                    None => {
-                        let span = self.lex.pos..self.lex.pos;
-                        return self.err("unterminated constraint list (missing `)`)", span);
-                    }
-                }
-            }
-
-            // Positional member
+            let tok = self.next_list_element()?;
             let member = match tok.tok {
-                Tok::Ident(s) => s,
                 Tok::Word(s) => {
                     if let Err(NumberTextError::Admission(reason)) = admit_number_spelling(&s) {
                         return self.err(format!("enum member `{s}` {reason}"), tok.span);
@@ -3003,7 +2974,7 @@ impl<'a> Parser<'a> {
                     }
                     return Ok(Constraint::Default(value));
                 }
-                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
+                let args = self.parse_arglist_with(ArgumentList::WholeArgumentSlot)?;
                 self.expect(Tok::RParen)?;
                 if let Some(slot) = self.whole_argument_slot(&args)? {
                     if owner == ListOwner::Type(SimplifiedType::Null) && !is_array_level {
@@ -3038,7 +3009,7 @@ impl<'a> Parser<'a> {
             }
             ("min", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
+                let args = self.parse_arglist_with(ArgumentList::WholeArgumentSlot)?;
                 self.expect(Tok::RParen)?;
                 if let Some(slot) = self.whole_argument_slot(&args)? {
                     return Ok(Constraint::TemplateConstraint {
@@ -3066,7 +3037,7 @@ impl<'a> Parser<'a> {
             }
             ("max", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
+                let args = self.parse_arglist_with(ArgumentList::WholeArgumentSlot)?;
                 self.expect(Tok::RParen)?;
                 if let Some(slot) = self.whole_argument_slot(&args)? {
                     return Ok(Constraint::TemplateConstraint {
@@ -3094,7 +3065,7 @@ impl<'a> Parser<'a> {
             }
             ("pattern", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
+                let args = self.parse_arglist_with(ArgumentList::WholeArgumentSlot)?;
                 self.expect(Tok::RParen)?;
                 if let Some(slot) = self.whole_argument_slot(&args)? {
                     return Ok(Constraint::TemplateConstraint {
@@ -3113,7 +3084,7 @@ impl<'a> Parser<'a> {
             }
             ("suggest", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist_with(Some(SLOT_COMPLETE_ELEMENT))?;
+                let args = self.parse_arglist_with(ArgumentList::ListElements)?;
                 self.expect(Tok::RParen)?;
                 if args.is_empty() {
                     return self.err(
@@ -3381,13 +3352,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_arglist(&mut self) -> Result<Vec<Arg>, SchemaError> {
-        self.parse_arglist_with(None)
+        self.parse_arglist_with(ArgumentList::Words)
     }
 
-    /// Reads an argument list. With `slots`, an argument that opens with
-    /// `{{` is a slot ([`Arg::slot`]), and `slots` is the error for text
-    /// that follows it before the next `,` or `)`.
-    fn parse_arglist_with(&mut self, slots: Option<&'static str>) -> Result<Vec<Arg>, SchemaError> {
+    fn parse_arglist_with(&mut self, style: ArgumentList) -> Result<Vec<Arg>, SchemaError> {
+        let slot_message = match style {
+            ArgumentList::Words => None,
+            ArgumentList::WholeArgumentSlot => Some(SLOT_WHOLE_ARGUMENT),
+            ArgumentList::ListElements => Some(SLOT_COMPLETE_ELEMENT),
+        };
         let mut args = Vec::new();
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b')') {
@@ -3395,7 +3368,7 @@ impl<'a> Parser<'a> {
         }
         loop {
             self.lex.skip_ws();
-            if let Some(message) = slots
+            if let Some(message) = slot_message
                 && let Some(slot) = self.read_element_slot(message)?
             {
                 args.push(Arg {
@@ -3411,7 +3384,10 @@ impl<'a> Parser<'a> {
                 }
                 return Ok(args);
             }
-            let tok = self.next_token(LexMode::ArgList)?;
+            let tok = match style {
+                ArgumentList::ListElements => self.next_list_element()?,
+                _ => self.next_token(LexMode::ArgList)?,
+            };
             let arg = match tok.tok {
                 Tok::Number(n) => Arg {
                     lex: self.src[tok.span.clone()].to_string(),
@@ -4746,14 +4722,12 @@ mod tests {
 
     #[test]
     fn parses_enum_members() {
-        let atom = parse("enum(red, green, blue)");
+        let atom = parse("enum(  red  wine \t, 12 year, 003  , blue)");
         assert_eq!(
             atom.constraints,
-            vec![Constraint::Members(vec![
-                "red".into(),
-                "green".into(),
-                "blue".into()
-            ])]
+            vec![Constraint::Members(
+                ["red  wine", "12 year", "3", "blue"].map(String::from).into()
+            )]
         );
     }
 
@@ -4772,11 +4746,48 @@ mod tests {
 
     #[test]
     fn parses_enum_with_quoted_members() {
-        let atom = parse("enum('a, b', 'c; d')");
+        let atom = parse(r#"enum( ' a, b ', "c; (d)")"#);
         assert_eq!(
             atom.constraints,
-            vec![Constraint::Members(vec!["a, b".into(), "c; d".into()])]
+            vec![Constraint::Members(vec![" a, b ".into(), "c; (d)".into()])]
         );
+    }
+
+    #[test]
+    fn suggestion_list_preserves_each_value_and_its_source_span() {
+        let source = r#"string(suggest(  GPL v3  , "Apache 2.0", OSI  Approved, ' padded '))"#;
+        let atom = parse(source);
+        let [Constraint::Suggest(candidates)] = atom.constraints.as_slice() else {
+            panic!("expected a suggestion list");
+        };
+        let actual: Vec<_> = candidates
+            .iter()
+            .map(|candidate| (candidate.decoded.as_str(), &source[candidate.span.clone()]))
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                ("GPL v3", "GPL v3"),
+                ("Apache 2.0", r#""Apache 2.0""#),
+                ("OSI  Approved", "OSI  Approved"),
+                (" padded ", "' padded '"),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_elements_still_require_delimiters_after_quotes_and_slots() {
+        for source in [
+            "string(suggest(first, , second))",
+            "string(suggest('first' second))",
+            "string(suggest({{ first }} second))",
+            "enum(first, , second)",
+            "enum('first' second)",
+            "enum({{ first }} second)",
+            "string(pattern(first second))",
+        ] {
+            assert!(matches!(parse_err(source), SchemaError::Grammar { .. }), "{source}");
+        }
     }
 
     #[test]

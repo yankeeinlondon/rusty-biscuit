@@ -142,6 +142,46 @@ impl CodeBlock {
         self
     }
 
+    /// Renders selected source regions as one terminal code block.
+    ///
+    /// Pass regions in source order as pairs of a 1-based first line number
+    /// and the text of that region. A final newline can terminate an empty
+    /// last line. Omitted lines appear as one gap row per discontinuity.
+    /// Highlight ranges in `meta` use original source line numbers.
+    pub fn render_terminal_excerpt<'a>(
+        language: impl Into<String>,
+        regions: impl IntoIterator<Item = (usize, &'a str)>,
+        mut meta: CodeBlockMeta,
+        term: &Terminal,
+    ) -> String {
+        let mut code = String::new();
+        let mut source_lines = Vec::new();
+        let mut previous_line: Option<usize> = None;
+        for (start, text) in regions {
+            for (offset, line) in text.lines().enumerate() {
+                let number = start + offset;
+                if previous_line.is_some_and(|previous| number > previous.saturating_add(1)) {
+                    code.push_str("⋮\n");
+                    source_lines.push(None);
+                }
+                code.push_str(line);
+                code.push('\n');
+                source_lines.push(Some(number));
+                previous_line = Some(number);
+            }
+        }
+
+        meta.line_numbering = true;
+        let block = Self::new(code).with_fence_language(language).with_meta(meta);
+        let mut node = block.code_node();
+        node.attrs.set_hint(
+            crate::markdown::render_tree::code_renderer::CODE_HINTS,
+            crate::markdown::render_tree::code_renderer::SOURCE_LINES_HINT,
+            serde_json::json!(source_lines),
+        );
+        block.render_terminal_tree(RenderNode::root(vec![node]), term)
+    }
+
     /// Sets the theme override used for this block. When `None` (the
     /// default), the block resolves themes through the page context
     /// (terminal mode or `DarkmatterPage` policy).
@@ -304,6 +344,26 @@ impl CodeBlock {
         };
         parse_code_info(&info).map_err(|e| CodeBlockError::InvalidDirective(e.to_string()))
     }
+
+    #[allow(deprecated)]
+    fn render_terminal_tree(&self, node: RenderNode, term: &Terminal) -> String {
+        let opts =
+            TerminalRenderOptions::new(term, RenderStrictness::Warn).with_code_renderer(Rc::new(
+                TerminalCodeRenderer::for_terminal(term, CodeBlockMode::default())
+                    .with_theme_override(self.theme),
+            ));
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "CodeBlock",
+                    error = %error,
+                    "render_terminal_node failed; emitting plain fallback"
+                );
+                format!("\n{}\n", self.code())
+            }
+        }
+    }
 }
 
 impl TreeRenderable for CodeBlock {
@@ -326,25 +386,8 @@ impl TerminalRenderable for CodeBlock {
     /// so a [`CodeBlock::yaml(...)]` produces output byte-for-byte equal
     /// to a Markdown ` ```yaml ` fence for the same code, language, and
     /// metadata.
-    #[allow(deprecated)]
     fn render(&self, term: &Terminal) -> String {
-        let node = <Self as TreeRenderable>::render_tree(self);
-        let opts =
-            TerminalRenderOptions::new(term, RenderStrictness::Warn).with_code_renderer(Rc::new(
-                TerminalCodeRenderer::for_terminal(term, CodeBlockMode::default())
-                    .with_theme_override(self.theme),
-            ));
-        match render_terminal_node(&node, &opts) {
-            Ok(rendered) => rendered.output,
-            Err(error) => {
-                tracing::error!(
-                    component = "CodeBlock",
-                    error = %error,
-                    "render_terminal_node failed; emitting plain fallback"
-                );
-                format!("\n{}\n", self.code())
-            }
-        }
+        self.render_terminal_tree(<Self as TreeRenderable>::render_tree(self), term)
     }
 
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
@@ -449,6 +492,7 @@ pub(crate) fn render_code_block_for_terminal(
         meta,
         color_mode,
         width,
+        None,
         None,
     )?;
     let header = if meta.title.is_some() {
@@ -985,6 +1029,44 @@ mod tests {
         assert_eq!(numbered.len(), 3, "{plain:?}");
         assert!(numbered[0].trim_start().starts_with("12 │ a: 1"), "{plain:?}");
         assert!(numbered[2].trim_start().starts_with("14 │ c: 3"), "{plain:?}");
+    }
+
+    #[test]
+    fn sparse_excerpt_has_one_panel_with_a_shared_gutter() {
+        use biscuit_terminal::discovery::detection::ColorDepth;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let regions = [(8, "root:\n"), (99, "  key: value\n\n"), (140, "tail: value")];
+        let mut meta = CodeBlockMeta::default();
+        meta.highlight.add_line(99);
+        let styled = CodeBlock::render_terminal_excerpt(
+            "yaml", regions, meta.clone(), &Terminal::new_optimistic(80),
+        );
+        let plain = strip_escape_codes(styled.as_str());
+        let rows: Vec<_> = plain.lines().collect();
+        assert_eq!(rows.iter().filter(|row| row.trim() == "yaml").count(), 1, "{plain}");
+        let first = rows.iter().position(|row| row.starts_with("  8 │ root:")).unwrap();
+        assert_eq!(
+            rows[first..first + 6].iter().map(|row| row.trim_end()).collect::<Vec<_>>(),
+            [
+                "  8 │ root:",
+                "    ⋮",
+                " 99 │   key: value",
+                "100 │",
+                "    ⋮",
+                "140 │ tail: value",
+            ]
+        );
+        let background = |index| {
+            styled.lines().nth(index).unwrap().split('m').nth(1).unwrap()
+        };
+        assert_eq!(background(first), background(first + 1));
+        assert_eq!(background(first), background(first + 4));
+        assert_ne!(background(first), background(first + 2));
+
+        let term = Terminal::builder().width(80).color_depth(ColorDepth::None).build();
+        let plain = CodeBlock::render_terminal_excerpt("yaml", regions, meta, &term);
+        assert_eq!(plain.trim(), "```yaml\nroot:\n⋮\n  key: value\n\n⋮\ntail: value\n```");
     }
 
     #[test]

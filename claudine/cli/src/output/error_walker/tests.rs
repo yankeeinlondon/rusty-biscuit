@@ -158,16 +158,20 @@ fn renders_transclusion_cycle_chain() {
     assert!(plain.contains("cycle detected"), "got:\n{plain}");
 }
 
-const LEAK_DOC: &str =
-    "---\nreview_file: computed.md\nsuccess:\n    message: \"{{ ok ? 'at {{area}}' : 'x' }}\"\n---\nbody\n";
+const LEAK_DOC: &str = concat!(
+    "---\nreview_file: computed.md\nsuccess:\n",
+    "    - info: omitted\n    - info: omitted\n",
+    "    - info: before\n    - info: before\n    - info: before\n",
+    "    - message: \"{{ ok ? 'at {{area}}' : 'x' }}\"\n---\nbody\n",
+);
 
 fn leak_with_frontmatter(stderr_is_tty: bool) -> CompositionError {
-    let excerpt = FrontmatterExcerpt::capture(LEAK_DOC, "success.message", stderr_is_tty)
+    let excerpt = FrontmatterExcerpt::capture(LEAK_DOC, "success[5].message", stderr_is_tty)
         .expect("frontmatter block");
     CompositionError::WithFrontmatter {
         inner: Box::new(CompositionError::LifecycleNestedSpanInLiteral {
             source_path: PathBuf::from("review.md"),
-            property: "success.message".to_string(),
+            property: "success[5].message".to_string(),
             literal: "'at {{area}}'".to_string(),
             nested: "{{area}}".to_string(),
             suggestion: None,
@@ -183,9 +187,14 @@ fn appends_frontmatter_yaml_block_for_lifecycle_leak_on_tty() {
     let plain = strip_escape_codes(&rendered);
     // The primary diagnostic still renders from the inner leak error.
     assert!(plain.contains("nested interpolation inside a string literal"), "got:\n{plain}");
-    // The frontmatter block is appended, showing the offending YAML lines.
-    assert!(plain.contains("review_file"), "yaml block missing:\n{plain}");
-    assert!(plain.contains("success:"), "yaml block missing:\n{plain}");
+    let rows: Vec<_> = plain.lines().map(str::trim).collect();
+    assert_eq!(rows.iter().filter(|&&row| row == "yaml").count(), 1, "{plain}");
+    assert!(
+        rows.windows(3).any(|rows| rows == ["3 │ success:", "⋮", "6 │     - info: before"]),
+        "{plain}"
+    );
+    assert!(rows.iter().any(|row| row.starts_with("9 │     - message:")), "{plain}");
+    assert!(!plain.contains("- info: omitted"), "{plain}");
 }
 
 #[test]
@@ -195,7 +204,7 @@ fn withholds_frontmatter_yaml_block_when_not_tty() {
     let plain = strip_escape_codes(&rendered);
     assert!(plain.contains("nested interpolation inside a string literal"), "got:\n{plain}");
     // Non-TTY output must not expose the frontmatter body.
-    assert!(!plain.contains("review_file"), "yaml leaked to non-tty:\n{plain}");
+    assert!(!plain.contains("- info: before"), "yaml leaked to non-tty:\n{plain}");
 }
 
 #[test]
