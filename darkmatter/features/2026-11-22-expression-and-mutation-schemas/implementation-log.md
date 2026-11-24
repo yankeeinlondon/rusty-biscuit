@@ -101,7 +101,8 @@ message-to-agent: |-
   - `RegistrationInventory::claudine()` builds and verifies through `RegistrationInventory::from_embedded_sources` (empty companion table; `claudine/registration/` remains YAML-only, no host expression catalog or `.facts.json` companion shipped by Claudine).
   - `FileKind` exposes `manifest`, `schema-trigger`, `schema`, `yaml-schema`, `namespace-schema`, `expression-schema`, `mutation-schema`, `expression-facts`, and `lifecycle`; `claudine registrations` formats all of them with 16-digit XXH64 fingerprints.
   - `claudine doctor` routes inspection through the v3 inventory including `expression-facts` (missing companion = `error`, modified companion = `warn` with format 3 digest note, unsupported manifest version such as format 2 = `error` with update-and-republish remedy) and `claudine doctor --fix` / `claudine setup` upgrade the frozen v2 install in place to v3, writing `manifest.yaml` last and preserving equivalent/unrelated `register` entries and comments.
-  - Claudine docs updated in Phase 4 (`claudine/docs/topics/schemas.md`, `claudine/docs/cli/doctor.md`, `claudine/docs/cli/registrations.md`, `claudine/docs/topics/configuration.md`) and `.claude/skills/claudine/SKILL.md`. Phase 5 owns the remaining language/host/publisher docs, caller skills (`just publish-skills` in `darkmatter/` and `claudine/`), regenerated expression docs and lifecycle schema parity against the Phase 1 baseline hashes, and final full-area `just test` + `just lint` validation across `simplified-schema/`, `darkmatter/`, and `claudine/`.
+  - The inventory constructor rejects a supplied YAML member or facts companion using the reserved generated name `manifest.yaml` in any ASCII case. The published Claudine inventory still uses the same compiled sources and lifecycle artifact.
+  - Phase 5 owns the remaining language, host, and publisher guidance, caller skill publication, generator parity against the Phase 1 baselines, and final full-area tests and lint across Simplified Schema, Darkmatter, and Claudine.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
     - darkmatter/lib/src/markdown/compose/expression/catalog/checks.rs
@@ -718,3 +719,56 @@ Failure outside this change: `test-toolkit::real_kache_config_selector::real_kac
 - Scope (`scripts/ci/affected_scope.py` on Phase 4 files): `source_packages` = `["claudine", "claudine-cli"]`, `reverse_dependencies` = `["claudine-contract"]`, `change_class` = `"package"`.
 - Code-smell grep across changed Phase 4 files (`registration.rs`, `inspect.rs`, `published.rs`, `doctor/registration.rs`, `commands/registrations.rs`): no `#[serde(default)]`, no ambiguous `Option<T>`, no `filter_map(.. as_str())`, and no `.ok()` on load-bearing validation (`classify_yaml_source`'s fallback `.ok()` only assigns a display kind before Darkmatter's strict `profile_of_with` rejects the bundle).
 - Cross-OS: all path handling uses `Layout::destination` / `native_path` / `biscuit_file::canonicalize_simplified`, and no OS-specific or `#[cfg(windows)]` logic changed; CI covers Windows/macOS/WSL2.
+
+### Follow-up verification
+
+- Confirmed both Phase 4 tasks were already checked off in commit `ede1dbe8d`. That commit also included a Cargo sweep documentation edit unrelated to either task.
+- The L1 regression `host_publication::companion_inventory::companion_inventory_refuses_sources_using_the_reserved_manifest_name` first failed because a facts companion supplied as `manifest.yaml` disappeared before verification. The same fixture now checks case variants and YAML members, asserts a diagnostic naming the supplied file, and checks that the isolated home was untouched. This is an F1 input-validation test at the public inventory API. The existing publication round trip witnesses the cross-crate filesystem boundary at F2 through Darkmatter's installed reader. The setup and doctor tests use the frozen shipped v2 bundle and the normal entry points to exercise two successive upgrade reads.
+- In `claudine/`, `BISCUIT_TEST_NARROW='package(claudine-contract) | test(registration) | test(host_publication) | test(host_catalog) | test(setup) | test(doctor)' just test` passed 594 tests with none at or above 5 seconds, including the new regression at 0.026 seconds. The filter excluded 12,492 tests outside this slice. Passing a second `-E` instead combined its matches with the entire L1 selection, so that invocation was canceled and replaced with the intersected filter.
+- In `darkmatter/`, `just test` passed 18,001 tests with none at or above 5 seconds. The ten existing skips were the six DMLS alias and scalar projection cases, three opt-in timing measurements, and `resolve_alias_ll`, which requires a login-shell alias.
+- In `darkmatter/`, `just lint` passed, including the Zed WASM extension check.
+- In `claudine/`, `just lint` passed, including all nine transport checks with none at or above 5 seconds and the lifecycle documentation guard. `just check-tier-coverage darkmatter claudine` found zero stranded tests. The new test is in Claudine's declared `l1` binary and ran under the default L1 filter.
+- `just test claudine-contract` ran separately after the area checks. All 48 tests passed with no skips and none at or above 5 seconds. The Claudine CLI tests that exercise registration listing, setup, and doctor ran in the scoped area invocation.
+- The prescribed working-tree scope calculation reported `packages` = `["claudine", "test-toolkit", "darkmatter", "darkmatter-cli"]` and `change_class` = `"package"`. It identified `claudine` as the only source package and `claudine-cli` and `claudine-contract` as its reverse dependencies. The worktree also contains Phase 5 documentation and other pre-existing edits. The inventory fix compares a portable name in memory before publication and adds no OS-specific I/O. No new parser, deserializer, or configuration field was introduced by the follow-up.
+
+## Phase 5
+
+### Wave 3 — Language, host, and publisher guidance
+
+- **Language guidance**:
+  - Updated `simplified-schema/README.md`, `simplified-schema/docs/topics/language/schema-documents.md`, `docs/kind-documents.md`, `schemas/kind.yaml`, and `.claude/skills/simplified-schema/SKILL.md`.
+  - Documented the separation between Simplified Schema's strict envelope admission / syntax-only kind checks and Darkmatter's callable semantic checks, added a compact example with a private helper type (`Label`), category (`Text`), and two-arm overload (`kebab_case`), updated the envelope admission diagram and definition ownership table to all six definitions, and added `expression-schema` and `mutation-schema` to `schemas/kind.yaml` and `docs/kind-documents.md`.
+- **Host guidance**:
+  - Updated `darkmatter/README.md`, `darkmatter/docs/topics/host-functions.md`, `darkmatter/docs/topics/host-registration.md`, `darkmatter/docs/topics/lifecycle/host-artifact.md`, `darkmatter/docs/topics/expression-engine.md`, `.claude/skills/darkmatter/SKILL.md`, `darkmatter/docs/use-skills/use-darkmatter/{authoring,cli}.md`, and `darkmatter/docs/use-skills/use-dmls/{SKILL,schemas}.md`.
+  - Documented both `expression-schema` and `mutation-schema`, the format 3 `files`/`digests` manifest with derived `.facts.json` companions, the Rust host binding generating `facts_artifact()`, the scope boundary (`declaration → selected-document analysis → host-only evaluation`), the `when` disallowance (keeping lifecycle scope in `globals.lifecycle.json`), and the in-place v2→v3 upgrade workflow (`claudine doctor`, `claudine doctor --fix`, `claudine setup`).
+  - Left `darkmatter/docs/topics/darkmatter-expressions.md`'s generated table and `darkmatter/docs/functions/` to the regeneration step.
+- **Publisher guidance**:
+  - Updated `claudine/README.md` and `claudine/docs/use-skills/use-claudine/{SKILL,cli,config,library}.md` covering format 3 publication, in-place v1/v2→v3 upgrades via `claudine setup` and `claudine doctor --fix`, `claudine registrations` typed kinds and 16-digit XXH64 hashes, and missing/modified companion severity and repair behavior.
+
+### Generated parity & caller skill publication
+
+- Ran `(cd darkmatter && just regen-expr-doc && just regen-lifecycle-schema)` followed by `just shipped-schemas` twice from the repository root, and `just shipped-schemas --check` in `simplified-schema/`, `darkmatter/`, and `claudine/`.
+- Both `just shipped-schemas` runs reported `every shipped artifact is current`, and all three `--check` commands exited 0.
+- Baseline hash comparisons (Git blob ids via `git hash-object`):
+
+  | Path | Phase 1 baseline | Phase 5 regenerated | Status |
+  |---|---|---|---|
+  | `darkmatter/schemas/partials/lifecycle.yaml` | `1f5c316e92f4d4485c4e0ce3cf63c560b265d622` | `1f5c316e92f4d4485c4e0ce3cf63c560b265d622` | byte-identical (`cmp` exit 0) |
+  | `darkmatter/docs/functions/load-data.md` | `347c89bdd4e7b2b1a0e97c373d630e008ff94c23` | `347c89bdd4e7b2b1a0e97c373d630e008ff94c23` | byte-identical |
+  | `darkmatter/docs/functions/try.md` | `0a9948cda176f8fdf9aa233507e74b65d48f8591` | `0a9948cda176f8fdf9aa233507e74b65d48f8591` | byte-identical |
+  | `darkmatter/docs/topics/darkmatter-expressions.md` | `4c7e8e02e0357bf59fe3dd2dd575ff6ceea04aad` | `61c493b2325bb844ab04544a9413b9c185b4c911` | generated table byte-identical; only Phase 2 prose above `<!-- BEGIN GENERATED FUNCTION TABLE -->` changed |
+  | `simplified-schema/lib/generated/shipped.json` | — | `a0e0ff6bfd36d634f038a48c61be71822ecb8cee` | stable across repeat `just shipped-schemas` |
+  | `darkmatter/lib/generated/shipped.json` | — | `5075787cca0394bf607aa8b0b79624922eeab1d3` | stable across repeat `just shipped-schemas` |
+  | `claudine/lib/generated/shipped.json` | — | `788931c8cc3e18004c331dc5fa4b6f1262f3da1f` | stable across repeat `just shipped-schemas` |
+  | `claudine/lib/generated/globals.lifecycle.json` | — | `dd33686acdc3584ec59903bd361b9f96f348c360` | stable across repeat `just shipped-schemas` |
+
+- Published caller skills with `(cd darkmatter && just publish-skills)` (`use-darkmatter`, `use-dmls`) and `(cd claudine && just publish-skills)` (`use-claudine`), all succeeding under `--deny all`. Inspected `~/.claude/skills/{use-darkmatter,use-dmls,use-claudine}/` to verify all examples and `{{ }}` template literals composed cleanly with no stray triple braces.
+
+### Representative CLI findings
+
+- Valid built-in catalogs (`md schema validate darkmatter/schemas/partials/functions.yaml darkmatter/schemas/partials/mutations.yaml --output plain`, exit 0):
+  - `✔ the document darkmatter/schemas/partials/functions.yaml has a schema definition and is valid based on its definition built-in simplified-schema/schemas/expression-schema.yaml.`
+  - `✔ the document darkmatter/schemas/partials/mutations.yaml has a schema definition and is valid based on its definition built-in simplified-schema/schemas/mutation-schema.yaml.`
+- Failing authored catalog reusing built-in `min` (`md schema validate <tmp>.yaml --output json`, exit 1):
+  - `code: "dm.schema.callable_catalog"`, `line: 5`, `column: 5`, `span: { start: 81, end: 84 }`, `message: "invalid callable catalog …: \`types.min\` reuses the name of the built-in function \`min\`"`, with `related[0]` pointing at `darkmatter/schemas/partials/functions.yaml` (`span: { start: 7377, end: 7380 }`, `"the built-in function \`min\` is declared here"`).
+- DMLS and `claudine doctor --fix` / `claudine setup` v2→v3 upgrade and companion repair outputs are verified end-to-end by `darkmatter-lsp::yaml_document_catalog_editor`, `darkmatter-lsp::host_catalog_reload`, `claudine::doctor::registration::tests`, `claudine::installed_registration`, and `claudine-cli::doctor` in the final gates below.
