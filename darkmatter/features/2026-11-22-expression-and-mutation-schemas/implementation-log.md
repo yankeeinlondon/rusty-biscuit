@@ -96,13 +96,8 @@ decisions-for-review:
       Phase 3: `SnapshotRefusal::legacy_format: bool` became `unsupported_format: Option<i128>` (the refused version), because "legacy" no longer fits a future version 4 and doctor (Phase 4) needs the number for its remedy. `i128` holds any integer YAML can spell (negative or above `i64::MAX`). Alternative: keep the bool. Redo cost: trivial.
     - |-
       Phase 3: Claudine was touched before Phase 4, minimally, so the monorepo keeps compiling and Claudine's published registration stays loadable by the new reader: its manifest encoder writes `format_version: 3` without `functions`, and `FileKind` gained an `ExpressionSchema` arm (needed by an exhaustive match on the shared `MemberKind`). The full inventory work (companions, `expression-facts`, doctor upgrade) stays in Phase 4. Alternative: leave Claudine broken until Phase 4. Redo cost: none.
-message-to-agent: |-
-  Phase 4 landed: Claudine's format 3 inventory encoder, companion input table, hidden `claudine registrations` kinds (`expression-schema`, `mutation-schema`, `expression-facts`), and `claudine doctor` v2→v3 upgrade and companion inspection/repair are complete and verified. What Phase 5 can build on:
-  - `RegistrationInventory::claudine()` builds and verifies through `RegistrationInventory::from_embedded_sources` (empty companion table; `claudine/registration/` remains YAML-only, no host expression catalog or `.facts.json` companion shipped by Claudine).
-  - `FileKind` exposes `manifest`, `schema-trigger`, `schema`, `yaml-schema`, `namespace-schema`, `expression-schema`, `mutation-schema`, `expression-facts`, and `lifecycle`; `claudine registrations` formats all of them with 16-digit XXH64 fingerprints.
-  - `claudine doctor` routes inspection through the v3 inventory including `expression-facts` (missing companion = `error`, modified companion = `warn` with format 3 digest note, unsupported manifest version such as format 2 = `error` with update-and-republish remedy) and `claudine doctor --fix` / `claudine setup` upgrade the frozen v2 install in place to v3, writing `manifest.yaml` last and preserving equivalent/unrelated `register` entries and comments.
-  - The inventory constructor rejects a supplied YAML member or facts companion using the reserved generated name `manifest.yaml` in any ASCII case. The published Claudine inventory still uses the same compiled sources and lifecycle artifact.
-  - Phase 5 owns the remaining language, host, and publisher guidance, caller skill publication, generator parity against the Phase 1 baselines, and final full-area tests and lint across Simplified Schema, Darkmatter, and Claudine.
+    - |-
+      I kept the language guide's two-overload example usable with the shipped loader. Its original helper declaration had an inline YAML comment that triggered a source-span error, and its callable reused the built-in name kebab_case. The sample now explains the helper in prose and uses the distinct name project_slug. Fixing inline-comment projection would let examples keep that style, but would require changing the shared loader and adding a regression test. To take that option, fix projection and rerun the original sample with a distinct callable name.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
     - darkmatter/lib/src/markdown/compose/expression/catalog/checks.rs
@@ -249,6 +244,206 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+    - claudine/lib/src/composition/registration/published.rs
+    - claudine/lib/src/composition/schema/shipped.rs
+    - schemas/kind.yaml
+docs_updated_during_phase_5:
+    - claudine/README.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/use-skills/use-claudine/SKILL.md
+    - claudine/docs/use-skills/use-claudine/cli.md
+    - claudine/docs/use-skills/use-claudine/config.md
+    - claudine/docs/use-skills/use-claudine/library.md
+    - darkmatter/README.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/topics/host-functions.md
+    - darkmatter/docs/topics/host-registration.md
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+    - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+    - darkmatter/docs/use-skills/use-darkmatter/cli.md
+    - darkmatter/docs/use-skills/use-dmls/SKILL.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
+    - docs/kind-documents.md
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/language/schema-documents.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/simplified-schema/SKILL.md
+    - claudine/docs/use-skills/use-claudine/SKILL.md
+    - claudine/docs/use-skills/use-claudine/cli.md
+    - claudine/docs/use-skills/use-claudine/config.md
+    - claudine/docs/use-skills/use-claudine/library.md
+    - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+    - darkmatter/docs/use-skills/use-darkmatter/cli.md
+    - darkmatter/docs/use-skills/use-dmls/SKILL.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
+source-code:
+    - claudine/cli/src/commands/registrations.rs
+    - claudine/cli/tests/l1/doctor.rs
+    - claudine/lib/generated/shipped.json
+    - claudine/lib/src/composition/registration.rs
+    - claudine/lib/src/composition/registration/inspect.rs
+    - claudine/lib/src/composition/registration/published.rs
+    - claudine/lib/src/composition/schema/shipped.rs
+    - claudine/lib/src/doctor/registration.rs
+    - claudine/lib/src/doctor/registration_tests.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - claudine/lib/tests/l1/host_publication.rs
+    - claudine/lib/tests/l1/installed_registration.rs
+    - claudine/lib/tests/l1/registration_inventory.rs
+    - darkmatter/cli/schemas/output/schema-validate.yaml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/compose_foreign_documents.rs
+    - darkmatter/cli/tests/l1/compose_host_scope.rs
+    - darkmatter/cli/tests/l1/host_registration.rs
+    - darkmatter/cli/tests/l1/host_runtime_scope.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_yaml.rs
+    - darkmatter/dmls/benches/pipeline_work_a3.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/yaml_document.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/overlay/yaml_contract.rs
+    - darkmatter/dmls/src/overlay/yaml_document.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_host.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+    - darkmatter/dmls/tests/l1/host_catalog_reload.rs
+    - darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+    - darkmatter/dmls/tests/l1/lifecycle_host_profile.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs
+    - darkmatter/dmls/tests/l1/yaml_document_catalog_editor.rs
+    - darkmatter/dmls/tests/l1/yaml_document_editor.rs
+    - darkmatter/dmls/tests/l1/yaml_document_session.rs
+    - darkmatter/lib/generated/shipped.json
+    - darkmatter/lib/src/config/registration.rs
+    - darkmatter/lib/src/config/registration/bundle.rs
+    - darkmatter/lib/src/config/registration/locate.rs
+    - darkmatter/lib/src/config/registration/manifest.rs
+    - darkmatter/lib/src/config/registration/selection.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/checks.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/schema_files.rs
+    - darkmatter/lib/src/markdown/schemas/shipped.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+    - darkmatter/lib/tests/fixtures/host_functions/project.facts.json
+    - darkmatter/lib/tests/fixtures/host_functions/project.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/globals.lifecycle.json
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/manifest.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/action.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/claudine-config.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/composition.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/content-policy.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/document.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/formal-sequence-file.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/group.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/inline-composition.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/lifecycle-events.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/linking.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/loop.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/seq.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/sequence-document.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/sequence.yaml
+    - darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/shared.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-context-variables.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/schemas/partials/context-variables.yaml
+    - darkmatter/lib/tests/host_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/callable_catalog_validation.rs
+    - darkmatter/lib/tests/l1/collection_analysis.rs
+    - darkmatter/lib/tests/l1/global_catalog.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/host_namespaces.rs
+    - darkmatter/lib/tests/l1/host_registration.rs
+    - darkmatter/lib/tests/l1/host_registration_companions.rs
+    - darkmatter/lib/tests/l1/host_registration_locations.rs
+    - darkmatter/lib/tests/l1/host_registration_snapshot.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/member_check.rs
+    - darkmatter/lib/tests/l1/recent_commits_shared_type.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/yaml_kind_registry.rs
+    - darkmatter/schemas/darkmatter-host.yaml
+    - darkmatter/schemas/partials/context-variables.yaml
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/schemas/partials/mutations.yaml
+    - schemas/kind.yaml
+    - simplified-schema/lib/generated/shipped.json
+    - simplified-schema/lib/src/envelope.rs
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/member_envelope.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/schema/export.rs
+    - simplified-schema/lib/src/schema/layer.rs
+    - simplified-schema/lib/src/shipped/registry.rs
+    - simplified-schema/lib/src/simplified/standalone.rs
+    - simplified-schema/lib/src/triggers/finding.rs
+    - simplified-schema/lib/src/yaml_documents/load.rs
+    - simplified-schema/lib/src/yaml_documents/marks.rs
+    - simplified-schema/lib/src/yaml_documents/mod.rs
+    - simplified-schema/lib/src/yaml_documents/semantic.rs
+    - simplified-schema/lib/tests/l1/callable_catalog_envelopes.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/member_envelope.rs
+    - simplified-schema/lib/tests/l1/shipped_artifacts.rs
+    - simplified-schema/lib/tests/l1/shipped_corpus.rs
+    - simplified-schema/schemas/expression-schema.yaml
+    - simplified-schema/schemas/mutation-schema.yaml
+documentation:
+    - claudine/README.md
+    - claudine/docs/cli/doctor.md
+    - claudine/docs/cli/registrations.md
+    - claudine/docs/topics/configuration.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/use-skills/use-claudine/SKILL.md
+    - claudine/docs/use-skills/use-claudine/cli.md
+    - claudine/docs/use-skills/use-claudine/config.md
+    - claudine/docs/use-skills/use-claudine/library.md
+    - darkmatter/README.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/topics/host-functions.md
+    - darkmatter/docs/topics/host-registration.md
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/use-skills/use-darkmatter/authoring.md
+    - darkmatter/docs/use-skills/use-darkmatter/cli.md
+    - darkmatter/docs/use-skills/use-dmls/SKILL.md
+    - darkmatter/docs/use-skills/use-dmls/schemas.md
+    - docs/kind-documents.md
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - simplified-schema/docs/topics/language/index.md
+    - simplified-schema/docs/topics/language/objects-and-named-types.md
+    - simplified-schema/docs/topics/language/schema-documents.md
+    - simplified-schema/docs/topics/language/unions.md
+completed-phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-11-22-expression-and-mutation-schemas (5 phases)
@@ -772,3 +967,39 @@ Failure outside this change: `test-toolkit::real_kache_config_selector::real_kac
 - Failing authored catalog reusing built-in `min` (`md schema validate <tmp>.yaml --output json`, exit 1):
   - `code: "dm.schema.callable_catalog"`, `line: 5`, `column: 5`, `span: { start: 81, end: 84 }`, `message: "invalid callable catalog …: \`types.min\` reuses the name of the built-in function \`min\`"`, with `related[0]` pointing at `darkmatter/schemas/partials/functions.yaml` (`span: { start: 7377, end: 7380 }`, `"the built-in function \`min\` is declared here"`).
 - DMLS and `claudine doctor --fix` / `claudine setup` v2→v3 upgrade and companion repair outputs are verified end-to-end by `darkmatter-lsp::yaml_document_catalog_editor`, `darkmatter-lsp::host_catalog_reload`, `claudine::doctor::registration::tests`, `claudine::installed_registration`, and `claudine-cli::doctor` in the final gates below.
+
+### Final checkpoint
+
+- The starting commit already contained the Wave 3 guidance, the parity and publication records above, and four checked-off tasks. The final validation task remained open.
+- Rechecked the entire generated functions directory with `diff -qr`, the lifecycle partial with `cmp`, and the marked expression function table with `diff` on its generated region. All matched the frozen Phase 1 copies byte for byte. Comparing the two built-in catalog sources to the baseline commit showed only their `kind` lines changed.
+- Ran the actual YAML snippets from both guides with the repository-built `target/debug/md schema validate … --output plain`. The original language example failed source-span projection because the helper had an inline comment. With the comment removed it was rejected at the reserved `kebab_case` name and identified the built-in declaration. The corrected `project_slug` example kept the helper, category, and two overloads and passed. Both host-function guide snippets and both shipped catalogs passed the same command.
+- Corrected the expression engine guide to distinguish single-catalog callable validation from bundle-wide collision checking. The cross-catalog diagnostic is exercised by `host_catalog_reload::a_cross_catalog_name_collision_points_at_the_earlier_declaration`. The documentation check added no test cases. The original documentation failure and corrected example were verified through the normal CLI (L1, F2).
+
+| Requirement | Existing verification |
+|---|---|
+| Strict envelope, private helpers, category and overload validation | Simplified Schema `callable_catalog_envelopes` and Darkmatter `callable_catalog_validation`, plus CLI `schema_validate_yaml` and DMLS `yaml_document_catalog_editor` (L1, F1/F2). |
+| Expression descriptor, alias and registration parity | Darkmatter `catalog::tests::typed_signatures_render_parameters_returns_and_fallibility`, `registration_tests::catalog_and_runtime_bindings_have_bidirectional_canonical_parity`, `calls_resolve_aliases_and_case`, and `each_registration_compiles_its_catalog_overloads` (L1, F1). |
+| Lifecycle runtime and generated parity, including overload dispatch, short and long forms, deferred operands, `no_error`, and event gating | Darkmatter `lifecycle_schema_generation`, `lifecycle_schema_parity`, `lifecycle_generated_operands`, `lifecycle_operand_validation`, `lifecycle_event_binding`, and `lifecycle_boundary` (L1, F1/F2). |
+| Shipped artifact provenance and fallback | Each area's `just shipped-schemas --check`, Simplified Schema `shipped_artifacts`, Darkmatter `shipped_schema_corpus`, and Claudine `claudine_schemas_embedded` (L1, F1/F2). |
+| Selected documents, companion reload, host-runtime refusal | Darkmatter CLI `host_runtime_scope` and DMLS `host_catalog_reload` (L1, F2). The editor withdraws a host after companion removal or digest mismatch and restores it when the verified bytes return. |
+| Format 2 repair and repeat reads, inventory kinds and fingerprints | Claudine CLI `doctor::doctor_fix_upgrades_frozen_v2_registration_in_place_and_repeats_as_noop`, library `installed_registration_setup_upgrades_frozen_v2_in_place_and_repeats_as_noop` and `companion_fixture_missing_companion_errors_modified_warns_and_repair_restores_agreement`, and `callable_and_companion_kinds_format_with_xxh64_fingerprints` (L1, F1/F2). |
+| Repository kind schema accepts the two new literals | `target/debug/md schema validate … --output plain` over temporary Markdown documents referencing `schemas/kind.yaml`: both catalog kinds passed and `unsupported-catalog` produced a located enum error (L1, F2). |
+
+### Fresh generation regression
+
+- Claudine's full L1 stopped after 7,333 of 13,070 selected tests. The existing provenance test `shipped_artifacts::generation_consults_no_artifact_but_the_lower_registries_for_namespaces_and_kinds` failed in 1.403 s and reproduced in isolation in 1.293 s. It observed three artifact decodes and accepts, including Claudine's own artifact. The generator reached the cached runtime payload callback while building the inventory.
+- The existing provenance test is the regression oracle at the fresh-generation entry point (L1, F1). Existing `shipped_artifacts` deterministic generation, stale-input refusals, and accepted/fallback artifact checks cover its resulting bytes (L1, F1/F2). The publication, setup, and doctor tests continue to exercise verification and persistence through the standard inventory (L1, F2).
+- Separated the shared inventory encoder from runtime verification in `RegistrationInventory`. Fresh generation uses the compiled inventory's exact bytes, verifies their snapshot, and prepares trigger payloads directly. Runtime setup and publication still verify the inventory through Darkmatter with the shipped payload callback. Caller-supplied YAML and companions still go through full verified bundle preparation.
+- `BISCUIT_TEST_NARROW='binary_id(claudine::l1) & (test(shipped_artifacts::) | test(host_publication::) | test(installed_registration::))' just test` passed 95 tests, with no slow tests. The failing provenance test passed in 1.082 s. The filter excluded 1,233 tests from the selected binary and omitted the other binaries.
+
+### Linux completion gates
+
+- Simplified Schema `just test` passed 2,615 default-feature tests and 2,191 minimal-feature tests. The recipe invokes `just test-minimal` itself. There were zero skips and none reached five seconds. `just lint` passed both feature configurations.
+- Darkmatter `just test` passed 18,001 tests with none at or above five seconds. The ten existing skips cover six DMLS alias and scalar projection cases, three opt-in performance measurements, and a test that requires an `ll` login-shell alias. `just lint` passed, including the Zed WASM build.
+- After the provenance fix, Claudine `just test` passed all 13,070 selected tests with none at or above five seconds. Its 16 existing skips cover opt-in performance measurements and a subprocess fixture. The CLI's frozen-bundle check reported the format 2 registration as a fixable error with the update-and-republish remedy, then reported `ok` after `doctor --fix`. The final `Repaired: wrote …` line named `manifest.yaml`. Darkmatter loaded the repaired registration and a second repair left its bytes unchanged.
+- `just check-tier-coverage simplified-schema darkmatter claudine` found no stranded tests. The phase added no Rust test targets, parsers, file-format readers, or OS-specific code. Terminal, browser, and real-resource tiers were outside the phase's portable L1 checks.
+- Post-fix Claudine `just lint` passed, including the nine transport checks and the lifecycle documentation guard. The scope calculator's Darkmatter documentation filter reran ten tests with none at or above five seconds. `BISCUIT_ARCHIVE_GUARD_PLAN=<resolved plan> just archive-path-guard` in `tools/test-toolkit/` passed both scoped checks.
+- After the fix, two more root `just shipped-schemas` runs each passed `cmp` against the pre-run copies of all four generated artifacts in the table above. `just shipped-schemas --check` passed in all three areas. No generated file required a byte change.
+- Republished `use-darkmatter`, `use-dmls`, and `use-claudine` with `just publish-skills` in the two owning areas. The published examples preserve the format 3 companion guidance and the intentional fenced triple-brace literal alongside its double-brace result. Claudine's separate research-summary step reported the existing undeclared `err` warning in the plugins summary and skipped the ungenerated steering summary. Caller skill publication succeeded.
+- The serial dependent checks passed. `just test-cli` filtered to registration listing, the frozen format 2 doctor upgrade, and setup ran 19 tests with 5,382 outside the filter. `just test-contract` ran all 48 tests. Neither run had a test at or above five seconds.
+- The required root scope command, `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`, reported `packages: [claudine, test-toolkit, darkmatter, darkmatter-cli]`, `source_packages: [claudine]`, `reverse_dependencies: [claudine-cli, claudine-contract]`, and `change_class: package`. No required gate was skipped. Two untracked schemas, `schemas/review-fix-cycle.yaml` and `schemas/specificaiton.yaml`, appeared independently during verification and are outside the phase inventory.
