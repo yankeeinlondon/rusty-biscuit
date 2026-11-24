@@ -1443,7 +1443,9 @@ just shipped-schemas
 It regenerates Simplified Schema's, Darkmatter's, and Claudine's artifacts in
 that order, because Claudine's is built over the other two, and Claudine's
 lifecycle artifact `claudine/lib/generated/globals.lifecycle.json` with them.
-Every candidate is checked before any file is replaced. Inside `claudine/`,
+Fresh generation verifies the compiled inventory and prepares trigger payloads
+from its source files. The resulting artifact can then serve those payloads
+at runtime. Every candidate is checked before any file is replaced. Inside `claudine/`,
 `just shipped-schemas` rewrites only Claudine's artifact and `just
 shipped-schemas --check` only reports whether it is current; both stop and
 name the root command when either lower artifact is out of date. If you

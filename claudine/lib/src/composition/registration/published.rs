@@ -133,23 +133,37 @@ pub struct RegistrationInventory {
 
 impl RegistrationInventory {
     /// The inventory compiled into this binary
-    /// ([`crate::composition::inventory`]), built once per process.
+    /// ([`crate::composition::inventory`]), verified once per process.
     #[must_use]
     pub fn claudine() -> &'static Self {
+        static VERIFIED: OnceLock<()> = OnceLock::new();
+        let inventory = Self::compiled_claudine();
+        VERIFIED.get_or_init(|| {
+            crate::composition::schema::bundle::profile_of_with(
+                inventory,
+                &crate::composition::schema::shipped::registered_payload,
+            )
+            .unwrap_or_else(|refusals| panic!("Claudine's compiled registration inventory must verify: {refusals:#?}"));
+        });
+        inventory
+    }
+
+    /// The encoded inventory for fresh generation, which prepares directly
+    /// from its sources and cannot consult Claudine's runtime payload cache.
+    pub(crate) fn compiled_claudine() -> &'static Self {
         static INVENTORY: OnceLock<RegistrationInventory> = OnceLock::new();
         INVENTORY.get_or_init(|| {
             let sources = inventory::members()
                 .iter()
                 .map(|member| (Cow::Owned(member.bundle_path()), Cow::Borrowed(member.bytes())));
             let companions: [(Cow<'static, str>, Cow<'static, [u8]>); 0] = [];
-            Self::from_embedded_sources_with(
+            Self::encode_embedded_sources(
                 env!("CARGO_PKG_VERSION"),
                 sources,
                 Cow::Borrowed(inventory::LIFECYCLE_ARTIFACT),
                 companions,
-                &crate::composition::schema::shipped::registered_payload,
             )
-            .unwrap_or_else(|refusals| panic!("Claudine's compiled registration inventory must verify: {refusals:#?}"))
+            .unwrap_or_else(|refusals| panic!("Claudine's compiled registration inventory must encode: {refusals:#?}"))
         })
     }
 
@@ -178,15 +192,16 @@ impl RegistrationInventory {
         S: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
         C: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
     {
-        Self::from_embedded_sources_with(version, yaml_sources, lifecycle, companions, &|_| None)
+        let inventory = Self::encode_embedded_sources(version, yaml_sources, lifecycle, companions)?;
+        crate::composition::schema::bundle::profile_of(&inventory)?;
+        Ok(inventory)
     }
 
-    fn from_embedded_sources_with<S, C>(
+    fn encode_embedded_sources<S, C>(
         version: impl Into<String>,
         yaml_sources: S,
         lifecycle: impl Into<Cow<'static, [u8]>>,
         companions: C,
-        prepared: &dyn Fn(&str) -> Option<simplified_schema::triggers::assemble::ResolvedPayload>,
     ) -> Result<Self, Vec<SnapshotRefusal>>
     where
         S: IntoIterator<Item = (Cow<'static, str>, Cow<'static, [u8]>)>,
@@ -224,9 +239,7 @@ impl RegistrationInventory {
                 candidates: Vec::new(),
             }]);
         }
-        let inventory = Self::from_members(version, files);
-        crate::composition::schema::bundle::profile_of_with(&inventory, prepared)?;
-        Ok(inventory)
+        Ok(Self::from_members(version, files))
     }
 
     /// An inventory of `members` (anything but the manifest, which is

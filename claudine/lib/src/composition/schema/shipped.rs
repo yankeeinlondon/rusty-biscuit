@@ -504,7 +504,7 @@ pub fn prepare_payload(_lower: &FreshLower) -> Result<ClaudinePayload, String> {
 /// advisory (which the record does not keep), or names a file outside the
 /// embedded bundle.
 pub fn prepare_registered() -> Result<Vec<RegisteredTriggerRecord>, String> {
-    let snapshot = super::bundle::snapshot_of(crate::composition::registration::RegistrationInventory::claudine())
+    let snapshot = super::bundle::snapshot_of(crate::composition::registration::RegistrationInventory::compiled_claudine())
         .map_err(|refusal| format!("the compiled registration does not verify: {}", refusal.message))?;
     let owned = darkmatter::config::registration::md_owned_names();
     inventory::members_of(MemberKind::Trigger)

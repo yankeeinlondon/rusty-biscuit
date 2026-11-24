@@ -152,11 +152,15 @@ feature). A first claudine run in a fixture with no Claudine config therefore
 rewrites `~/.darkmatter.yaml` to the reference; read saved rules from
 `~/.claudine/config.yaml` there. The full setup order is
 `config/setup.rs::setup_claudine`: `composition::registration::publish` the
-fixed format 3 tree (built and verified via `RegistrationInventory::from_embedded_sources`,
-which classifies `expression-schema`, `mutation-schema`, and derived `expression-facts`
-companions and validates through Darkmatter's shared embedded bundle preparation; failure aborts setup, nothing written), then this
-handshake, then `darkmatter::config::init::replace_manifest_registration`
-puts `registration::MANIFEST_REFERENCE` in the user `~/.darkmatter.yaml`
+fixed format 3 tree using `RegistrationInventory::claudine`, which verifies the
+compiled inventory through Darkmatter's embedded bundle preparation.
+`RegistrationInventory::from_embedded_sources` uses the same encoder and
+verifies supplied YAML and facts companions. Fresh generation takes the
+encoded inventory through `compiled_claudine` and verifies the snapshot
+before preparing trigger payloads from source, without consulting Claudine's
+runtime payload cache. A successful publish is followed by the permissions
+handshake and then `darkmatter::config::init::replace_manifest_registration`.
+That edit puts `registration::MANIFEST_REFERENCE` in the user `~/.darkmatter.yaml`
 in place of any spelling of the retired `~/.claudine/darkmatter-host.yaml`
 (even after a handshake `Conflict`; failure is a warning), then, only after
 that succeeded, `registration::remove_legacy_registration` deletes exactly
