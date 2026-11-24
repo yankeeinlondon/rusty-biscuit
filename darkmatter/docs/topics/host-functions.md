@@ -46,7 +46,40 @@ types:
 ```
 
 A host catalog cannot use file-form examples (`example(./x.yaml)`); inline
-`example(call => result)` entries are fine.
+`example(call => result)` entries are fine. Neither `expression-schema` nor
+`mutation-schema` allows a `when` key: lifecycle event availability and
+allowed actions remain in the host's [lifecycle artifact](./lifecycle/host-artifact.md).
+
+Darkmatter itself also uses `kind: mutation-schema` for its built-in
+signature-backed lifecycle actions (`darkmatter/schemas/partials/mutations.yaml`),
+which share the same envelope and catalog checks (except `narrows(...)` is
+refused on mutations):
+
+```yaml
+kind: mutation-schema
+categories:
+    - Files -> Update a Markdown file.
+types:
+    set_frontmatter: |-
+        function(
+            parameters(file: string, prop: string, value: unknown | null);
+            returns(unknown | null);
+            category(Files);
+            fallible;
+        ) -> Sets a frontmatter property and returns its prior value, or null.
+```
+
+Hosts cannot register `mutation-schema` catalogs: a host registration listing
+one is refused with `host-defined actions are not supported`.
+
+The scope boundary from authoring to execution stays explicit:
+
+```mermaid
+flowchart LR
+    D["expression-schema +<br/>derived .facts.json"] -->|"registered in<br/>format 3 manifest"| A["Selected-document analysis<br/>(DMLS & md compose pre-checks)"]
+    A -->|"call reaches evaluation<br/>in md compose"| E["Refused:<br/>requires the host runtime"]
+    D -->|"same catalog bound in Rust<br/>via HostFunctions::builder"| H["Host-only evaluation<br/>(eager binding & return check)"]
+```
 
 `HostFunctionCatalog::load` refuses a catalog, with the failing declaration's
 location and, for a conflict, the other declaration's location, when:

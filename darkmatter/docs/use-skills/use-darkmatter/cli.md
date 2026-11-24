@@ -40,7 +40,7 @@ removes the alias and registers completion:
 | `md hash FILE\|DIR` | Markdown-aware hashes; `--save` stores them, `--diff` reports drift | `terminal` |
 | `md graph FILE [--validate]` | dependency (transclusion/reference) graph | `terminal` |
 | `md validate refs FILE` | broken links, images, transclusions, CSS imports | `terminal` |
-| `md schema validate FILE…` | frontmatter (or a whole YAML file) against its schema | `terminal` |
+| `md schema validate FILE…` | frontmatter (or a whole YAML file, including `expression-schema` and `mutation-schema` callable catalogs) against its schema | `terminal` |
 | `md schema detect FILE…` | infer a schema from documents (`--output json-schema` too) | `terminal` |
 | `md schema triggers FILE` | which schema triggers apply and why | `terminal` |
 | `md schema about` | SimplifiedSchema language reference | `terminal` |

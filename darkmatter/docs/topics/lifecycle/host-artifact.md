@@ -56,14 +56,21 @@ flowchart LR
 ```yaml
 # ~/.acme/registration/manifest.yaml
 kind: darkmatter-host
-format_version: 2
+format_version: 3
 host: acme
 # …
 files:
     - ./schemas/run.yaml           # kind: namespace-schema
+    - ./functions/project.yaml     # kind: expression-schema (optional; companion derived)
 lifecycle: ./globals.lifecycle.json
-# digests: one per member
+# digests: one per listed member, lifecycle, and derived .facts.json companion
 ```
+
+Lifecycle scope — event names, allowed actions, and which globals each event
+sees — lives exclusively in this artifact. Callable catalogs
+(`expression-schema` and `mutation-schema`) disallow `when` and never add
+lifecycle action keys or alter event availability; host-defined actions are
+not supported in host registrations.
 
 The loader holds the artifact to the rules [below](#reading-it), and two
 more: the artifact's recorded host must equal the manifest's `host`, and a

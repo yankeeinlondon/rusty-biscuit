@@ -165,8 +165,8 @@ resolves the scope type (`config::schema::resolve_host_config_type`; Claudine's
 schema is `include_str!`'d, never the claudine crate) and
 `DarkmatterSchemas::prepare_configuration_contract` makes a
 `Route::Configuration` contract whose `kind`/`$schema` are data.
-Ownership: the `simplified-schema` crate owns all three shipped definitions
-(`simplified-schema/schemas/{schema,yaml-schema,schema-trigger}.yaml`),
+Ownership: the `simplified-schema` crate owns all six shipped definitions
+(`simplified-schema/schemas/{schema,yaml-schema,schema-trigger,namespace-schema,expression-schema,mutation-schema}.yaml`),
 envelope admission, triggers (`simplified_schema::triggers`), schema roots
 (`roots`), `EmbeddedSchemaBundle` (`embedded`), and the YAML loader,
 `KindRegistry`, selection, and kind checks (`yaml_documents`); edit those

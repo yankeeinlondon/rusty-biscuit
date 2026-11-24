@@ -237,16 +237,25 @@ judged, and nothing of it is used, so documents the host would have typed are
 analyzed as `md` documents until it is repaired.
 
 The repair is the host's, not Darkmatter's: update the host program and
-rerun its setup, which republishes its bundle in the current format. For
-Claudine that is `claudine setup`, which publishes the format 3 bundle,
-replaces an old `~/.claudine/darkmatter-host.yaml` entry in
-`~/.darkmatter.yaml` with the new manifest, and then removes the old files.
-It asks nothing, keeps every other setting, and changes nothing when run
-again (see [`claudine setup`](../../../claudine/docs/cli/setup.md)). Setup
-never edits a repository's configuration: once it has removed an old
-manifest, a repository entry that still names it is reported at the
-repository's `.darkmatter.yaml` as naming no existing file, for its owners to
-remove.
+rerun its setup or repair command, which republishes its bundle in the
+current format. For Claudine, upgrading an older format 1 or format 2
+installation works in place:
+
+```sh
+claudine doctor          # reports unsupported format version (e.g. format 2)
+claudine doctor --fix    # or `claudine setup`: republishes format 3 in place, manifest last
+```
+
+`claudine setup` publishes the format 3 bundle at
+`~/.claudine/registrations/darkmatter/manifest.yaml`, replaces an old
+`~/.claudine/darkmatter-host.yaml` entry in `~/.darkmatter.yaml` if one
+exists, preserves unrelated `register` entries and comments, and then removes
+retired files. It asks nothing and changes nothing when run again (see
+[`claudine setup`](../../../claudine/docs/cli/setup.md) and
+[`claudine doctor`](../../../claudine/docs/cli/doctor.md)). Setup never edits
+a repository's configuration: once it has removed an old manifest, a
+repository entry that still names it is reported at the repository's
+`.darkmatter.yaml` as naming no existing file, for its owners to remove.
 
 **Member paths** are written so that one manifest works on macOS, Linux, and
 Windows alike:

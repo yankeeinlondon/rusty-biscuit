@@ -116,6 +116,9 @@ $schema:
 | `kind: schema` | `$schema` and/or `types`, `description`, `categories` | a `$schema` target if it has `$schema`; otherwise a **type library** for imports |
 | `kind: schema-trigger` | **only** `kind`, `match`, `$schema`, and optionally `name`, `description`, `types` (local to the trigger) | applies automatically to matching Markdown documents; never named in `$schema` |
 | `kind: yaml-schema` | `kind`, `$schema` (required), `types`, `description`, `categories` | applies automatically to **YAML files** whose `kind` it claims |
+| `kind: namespace-schema` | `kind`, `namespace` (required), `$schema` (required), `description`, `types` | declares one host expression global in a host registration; never a `$schema` target or import source |
+| `kind: expression-schema` | `kind`, `categories` (required), `types` (required), `description` | declares expression functions (with private local helpers); checked by `md schema validate` and DMLS (`dm.schema.callable_catalog`); never a `$schema` target or import source; disallows `when` |
+| `kind: mutation-schema` | `kind`, `categories` (required), `types` (required), `description` | declares Darkmatter's built-in signature-backed lifecycle actions; checked like `expression-schema` (refusing `narrows(...)` and `when`); refused in host registrations |
 | `.json` | a Draft 2020-12 JSON Schema | a `$schema` target. It validates, but adds no completion or hover |
 
 Any other top-level key is a malformed-envelope error.
@@ -356,9 +359,11 @@ verbs (`start:`, `success:`, `say`, …).
 - **Don't copy Claudine's files into a schema root.** A copied trigger is an
   ordinary trigger layered on top of Claudine's, not a replacement, and a
   copied lifecycle artifact supplies nothing.
-- **`dm.host.registration` saying "format 1"** means an older Claudine
-  install (`~/.claudine/darkmatter-host.yaml`). Run `claudine setup`: it
-  publishes the current files and rewrites the `register` entry.
+- **`dm.host.registration` saying "unsupported host registration format version"**
+  (format 1 or format 2) means an older Claudine install. Update Claudine and
+  run `claudine setup` or `claudine doctor --fix`: it republishes the format 3
+  bundle in place (manifest last) and rewrites any legacy `~/.claudine/darkmatter-host.yaml`
+  entry in `~/.darkmatter.yaml`.
 - **After an upgrade or a new setup**, DMLS waits until the published files
   have been quiet for about 300 ms, keeps showing the previous results
   meanwhile, then reloads. No restart is needed, and a warning the new files

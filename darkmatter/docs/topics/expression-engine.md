@@ -87,3 +87,15 @@ outer document property do not narrow a shadowing callback local. `fm.name`
 continues to denote that document property. Evaluation inherits the request's
 context, permissions, and shared iteration counter; failures keep each original
 index/key and the underlying typed cause.
+
+## Extending Expressions with Host Catalogs
+
+Darkmatter declares its built-in expressions in `darkmatter/schemas/partials/functions.yaml` (`kind: expression-schema`) and its signature-backed lifecycle actions in `darkmatter/schemas/partials/mutations.yaml` (`kind: mutation-schema`). A host that embeds Darkmatter can declare its own expression functions in a `kind: expression-schema` catalog, bind their eager Rust handlers with `HostFunctions::builder`, generate the catalog's deterministic `.facts.json` companion (`functions.facts_artifact()`), and publish both through a format 3 [host registration](./host-registration.md).
+
+The scope boundary is strict:
+
+- **Declaration**: Simplified Schema validates the catalog envelope and type syntax strictly; Darkmatter validates callable semantics (required categories, overload agreement, local-only helpers, no built-in or cross-catalog name collisions, eager compilation) identically in `md schema validate`, DMLS, and host registration. Neither catalog kind allows `when` — lifecycle event availability stays in the host's [lifecycle artifact](./lifecycle/host-artifact.md).
+- **Selected-document analysis**: Only documents matched by the registered host's triggers see its functions in DMLS and `md compose` passive checks. Unselected documents and other hosts see none of them.
+- **Host-only evaluation**: `md compose` never runs host handlers; a call that reaches evaluation fails with `host function <name>() requires the host runtime`. Only the host's own Rust process executes the bound handler. Hosts cannot register `mutation-schema` catalogs (`host-defined actions are not supported`).
+
+See [Host Expression Functions](./host-functions.md) for the full catalog format, Rust binding example, and facts companion rules.
