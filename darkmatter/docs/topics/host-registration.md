@@ -82,6 +82,20 @@ register:
     - ~/.acme/registration/manifest.yaml       # Acme
 ```
 
+An explicit repair that must never create a configuration file (Claudine's
+`doctor --fix`, for example) calls
+`darkmatter::config::init::replace_manifest_registration_existing` with the
+same arguments. It makes the same edit, but refuses a missing file (a read
+error of kind `NotFound`) and edits only while the file still holds the bytes
+it read; a file another program changed in the meantime is refused, never
+overwritten:
+
+```rust
+// ~/.darkmatter.yaml missing: Err(InitError::Read { .. }), nothing created
+// ~/.darkmatter.yaml present: the same entries as replace_manifest_registration
+replace_manifest_registration_existing(&context, ConfigScope::User, "~/.acme/registration/manifest.yaml", &old)?;
+```
+
 ## The manifest
 
 The host writes the manifest and every file it lists; you never edit them by

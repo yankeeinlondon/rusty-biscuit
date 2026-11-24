@@ -336,6 +336,17 @@ fn check(context: &FileResolutionContext) {
   a `Read` error.
 - `md init` reads the file it edits through the same reader and judge.
 
+A program that is about to point a `permissions` reference at its own file
+(Claudine's setup and `doctor --fix` do this) can first check that the file's
+block would be accepted as the target of that reference, with
+`darkmatter::config::init::check_referenced_permissions(text, path, scope,
+context)`. It reads nothing from disk: `text` is the file's would-be
+contents. It passes when `permissions` is a mapping the loader accepts for
+`scope` (`{}` included, which means the scope's defaults), and fails when the
+block is missing, `null`, itself a reference, or holds an invalid entry. Its
+error message can quote the file's values, so show it only to the file's
+owner.
+
 ## Errors
 
 Failures are attributed as narrowly as the file allows:

@@ -580,6 +580,58 @@ pub fn replace_manifest_registration(
     Ok(report)
 }
 
+/// [`replace_manifest_registration`] for an explicit repair that never
+/// creates a configuration file: the file of `scope` must already exist and
+/// be valid, and the edit is made only while it still holds the bytes
+/// observed here (a concurrent edit is [`ConfigWriteError::Changed`], never
+/// overwritten). Setup, which may create the file, uses
+/// [`replace_manifest_registration`].
+///
+/// ## Errors
+///
+/// As [`replace_manifest_registration`], plus [`InitError::Read`] with
+/// [`std::io::ErrorKind::NotFound`] when the file does not exist; nothing was
+/// changed.
+pub fn replace_manifest_registration_existing(
+    context: &FileResolutionContext,
+    scope: ConfigScope,
+    reference: &str,
+    old_path: &Path,
+) -> Result<RegisterReport, InitError> {
+    let observation = observe(context, scope)?;
+    if observation.bytes.is_none() {
+        return Err(InitError::Read {
+            path: observation.path,
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "the configuration file does not exist"),
+        });
+    }
+    let (change, report) = replace_manifest_change(&observation, context, reference, old_path)?;
+    if let Some(change) = change {
+        let mut transaction = ConfigTransaction::new();
+        transaction.add(change).map_err(InitError::Write)?;
+        commit_checked(transaction, context, &|_| None)?;
+    }
+    Ok(report)
+}
+
+/// Judges the `permissions` mapping of another program's configuration text
+/// (`text`, the file at `path`) as the target of a `scope` reference would be
+/// judged when the policy loads: the mapping must exist and pass the
+/// loader's own checks for `scope`. Nothing is read or written.
+///
+/// ## Errors
+///
+/// The first problem, as a message naming its pointer. The message can
+/// quote authored values.
+pub fn check_referenced_permissions(
+    text: &str,
+    path: &Path,
+    scope: ConfigScope,
+    context: &FileResolutionContext,
+) -> Result<(), String> {
+    referenced_block_text(context, path, text, scope).map(|_| ())
+}
+
 /// The change [`replace_manifest_registration`] makes to `observation`'s
 /// file (`None` when nothing would change) and the report it returns once
 /// that change is committed. An existing file is edited in place and must
@@ -695,6 +747,10 @@ fn top_level_defaults(scope: ConfigScope) -> Vec<(String, Value)> {
 /// passes the same checks the policy applies.
 fn referenced_block(context: &FileResolutionContext, target: &Path, bytes: &[u8], scope: ConfigScope) -> Result<Value, String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "which is not valid UTF-8".to_string())?;
+    referenced_block_text(context, target, text, scope)
+}
+
+fn referenced_block_text(context: &FileResolutionContext, target: &Path, text: &str, scope: ConfigScope) -> Result<Value, String> {
     check_permissions_text(text, target, scope, false, context)?;
     let loaded = load_yaml_document(text, target).map_err(|error| error.to_string())?;
     loaded.json.get("permissions").cloned().ok_or_else(|| "which has no `permissions` mapping".to_string())

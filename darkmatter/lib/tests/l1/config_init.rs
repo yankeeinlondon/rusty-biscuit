@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::config::init::{
-    InitAction, InitError, InitOptions, default_permissions, init, init_repository, init_user, register_manifest,
-    replace_manifest_registration,
+    InitAction, InitError, InitOptions, check_referenced_permissions, default_permissions, init, init_repository,
+    init_user, register_manifest, replace_manifest_registration, replace_manifest_registration_existing,
 };
 use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot, PermissionsSetting};
 use darkmatter::config::schema::{CONFIG_FILE_NAME, ConfigScope};
@@ -545,4 +545,66 @@ fn replace_manifest_registration_refuses_a_file_changed_since_it_was_read() {
 
     assert!(matches!(error, InitError::Write(ConfigWriteError::Changed { .. })), "{error}");
     assert_eq!(std::fs::read_to_string(fixture.user_file()).unwrap(), concurrent);
+}
+
+// ── replace_manifest_registration_existing ──────────────────────────────────
+
+fn replace_existing(fixture: &Fixture) -> Result<darkmatter::config::init::RegisterReport, InitError> {
+    replace_manifest_registration_existing(&fixture.context(), ConfigScope::User, NEW_REFERENCE, &old_manifest(fixture))
+}
+
+#[test]
+fn replace_manifest_registration_existing_never_creates_the_file() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    let error = replace_existing(&fixture).unwrap_err();
+    assert!(
+        matches!(&error, InitError::Read { path, source } if *path == fixture.user_file() && source.kind() == std::io::ErrorKind::NotFound),
+        "{error:?}"
+    );
+    assert!(!fixture.user_file().exists());
+}
+
+#[test]
+fn replace_manifest_registration_existing_edits_in_place_and_converges() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    fixture.write("home/.other/darkmatter-host.yaml", "kind: darkmatter-host\n");
+    let original = "# mine\nregister:\n    - ~/.other/darkmatter-host.yaml # kept\n    - ~/.acme/darkmatter-host.yaml\n";
+    fixture.write("home/.darkmatter.yaml", original);
+
+    let report = replace_existing(&fixture).unwrap();
+    assert_eq!(report.action, InitAction::Updated);
+    assert_eq!(report.replaced, vec!["~/.acme/darkmatter-host.yaml".to_string()]);
+    let expected = original.replace("~/.acme/darkmatter-host.yaml", NEW_REFERENCE);
+    assert_eq!(std::fs::read_to_string(fixture.user_file()).unwrap(), expected);
+
+    let again = replace_existing(&fixture).unwrap();
+    assert_eq!(again.action, InitAction::Unchanged);
+    assert_eq!(std::fs::read_to_string(fixture.user_file()).unwrap(), expected);
+}
+
+#[test]
+fn replace_manifest_registration_existing_refuses_an_invalid_register_and_writes_nothing() {
+    let fixture = Fixture::new();
+    with_new_manifest(&fixture);
+    let original = "register: 7\n";
+    fixture.write("home/.darkmatter.yaml", original);
+    assert!(matches!(replace_existing(&fixture), Err(InitError::Invalid(_))));
+    assert_eq!(std::fs::read_to_string(fixture.user_file()).unwrap(), original);
+}
+
+// ── check_referenced_permissions ────────────────────────────────────────────
+
+#[test]
+fn check_referenced_permissions_needs_a_valid_mapping_of_the_scope() {
+    let fixture = Fixture::new();
+    let path = fixture.home().join(".acme/config.yaml");
+    let context = fixture.context();
+    let check = |text: &str| check_referenced_permissions(text, &path, ConfigScope::User, &context);
+    assert_eq!(check("other: 1\npermissions: {}\n"), Ok(()));
+    assert_eq!(check("permissions:\n    network: deny\n"), Ok(()));
+    for invalid in ["other: 1\n", "permissions: null\n", "permissions: ~/.elsewhere.yaml\n", "permissions:\n    network: 7\n"] {
+        assert!(check(invalid).is_err(), "{invalid:?}");
+    }
 }
