@@ -139,7 +139,12 @@ classifier is `parse_standalone_schema_document`; it recognizes an informal
 `$schema` document (optional `types`, `description`, `categories`), a `kind: schema`
 document with `$schema` and/or `types`, or a `kind: yaml-schema` (a YAML
 document kind, never a `$schema` target or import source: `SelectedByKind`),
-and admits each against the library's compiled envelope definitions. A `$schema` target must export
+and admits each against the library's compiled envelope definitions. The two
+callable catalogs (`kind: expression-schema`, `kind: mutation-schema`;
+`StandaloneSchemaEnvelope::is_callable_catalog`) are admitted strictly, are
+never a `$schema` target, import source, or `schema_files.rs` resolution
+(`NotSchemaReason::CallableCatalog`), and report callable failures as
+`SchemaError::CallableCatalog { path, message, span, related }`. A `$schema` target must export
 `$schema` (YAML) or be a JSON object declaring Draft 2020-12; anything else is
 `NotASchemaDocument`/`UnsupportedJsonDialect`/`InvalidJsonSchema`, while a
 `types`-only file still serves `Name@file` imports. A loader refusal of a
