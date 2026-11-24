@@ -3,6 +3,9 @@ implementation_1: "2026-11-24T02:16:10+00:00"
 implementation_2: "2026-11-24T05:27:48+00:00"
 implementation_3: "2026-11-24T07:26:50+00:00"
 implementation_4: "2026-11-24T08:43:46+00:00"
+implementation_5: "2026-11-24T11:09:40+00:00"
+implementation_6: "2026-11-24T12:20:21+00:00"
+implementation_7: "2026-11-24T13:45:25+00:00"
 ---
 
 # Claudine Doctor log
@@ -837,3 +840,325 @@ The Windows runs were filtered to the affected tests. They are targeted evidence
   give the final measurements. The earlier results stay in the progress
   history. Both final package logs still report zero tests at or above
   five seconds.
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-11-24T11:09:40+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/claudine/features/2026-11-22-claudine-doctor/review-5.md'
+- this is iteration 5 of the review-to-implement cycle
+- the review's `implemented` flag was confirmed `false` before repairs started
+- findings are handled serially, one subagent per finding; each subagent reports log items back to the orchestrator, which records them below
+- the review's recurrence list (R5-F1 as a sibling of R1-F2 and R4-F2; R5-F3 as a reporting sibling of R4-F2; R5-F4 as a documentation sibling of R1-F4; R5-F2 from the R4-F3 timing repair) is the minimum sweep scope
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R5-F1 | Doctor misses a retired registration entry after its files are gone | fixed | all children verified; one rule `darkmatter::config::registration::entry_names_location`, used by the writer (`init.rs::plan_replacement`), Doctor's check (`inspect::retired_entries` → `doctor/registration.rs`), and post-write verification (`repair.rs`, `RepairFailure::RetiredEntryKept`); layout precheck reused |
+| R5-F1.1 | Block list with current + retired entry, old manifest removed, `~/`, `./`, bare spellings: warn, fixable, removal verified, other entries kept | fixed | `doctor::registration::tests::a_retired_entry_beside_the_current_one_is_removed_after_its_files_are_gone` (`~/`, `./`, bare): `warn`, fixable, located by line/column with no authored value; fix keeps comment and other host; second fix no-op; failed before with `(Ok, false)`. CLI `doctor::a_retired_register_entry_is_fixed_and_a_second_fix_changes_nothing`: Darkmatter's `RegisteredHosts` diagnostic gone after fix, second `--fix` changes nothing |
+| R5-F1.2 | Inline list with the same pair, with and without the old manifest: leftover recognized in both; layout stays manual with block-list remedy | fixed | `a_retired_entry_in_an_inline_list_is_reported_with_the_block_form_remedy` (old manifest absent and present): `warn`, manual, block-form remedy, `--fix` changes no file; failed before the fix |
+| R5-F1.c1 | Existing retirement paths (old manifest present; only retired entry) still converge, write-before-cleanup order kept | clean | new `a_retired_entry_and_its_manifest_are_both_reported_and_the_entry_goes_first`; existing `the_retired_layout_is_a_warning_and_the_fix_removes_it_after_moving_the_entry`, `the_same_entry_edit_in_block_form_is_repaired::*`, `installed_registration_setup_replaces_a_legacy_entry_whose_manifest_is_gone` pass |
+| R5-F1.c2 | Setup and Doctor repair triggered by another finding remove the retired entry and keep third-party entry; hidden publication leaves the list alone | clean | `a_repair_started_by_a_missing_member_also_removes_a_retired_entry`; `installed_registration_setup_removes_a_retired_entry_beside_the_current_one_after_its_files_are_gone`; `registrations_command::registrations_publish_leaves_a_retired_register_entry_alone` (bytes unchanged) |
+| R5-F1.c3 | Current-only / duplicate-current work; repository-file retired entry left alone by the user repair | clean | `a_repeated_current_entry_or_a_retired_entry_in_a_repository_file_is_healthy` (duplicate current `ok`; repository-only retired entry `ok`, `--fix` no-op, file unchanged); `an_equivalent_spelling_of_the_entry_passes` passes |
+| R5-F2 | Darkmatter's faster test scans skip tracked symbolic links | fixed | all children verified; one rule `git_prefilter::CleanTracked::skips(key, FileType)`: skip only when the walk's no-follow type is a regular file and Git lists a regular-mode `H` entry; the path set is private |
+| R5-F2.1 | Old-baseline source guard reports a tracked `.rs` link whose target has the old path | fixed | `global_catalog` old-baseline guard passes `entry.file_type()`, so a `.rs` link is always read; `the_old_embedded_baseline_is_deleted_and_never_included` 0.049–0.053 s |
+| R5-F2.2 | Shipped Markdown inline-schema parse tests submit a tracked linked document | fixed | `shipped_schema_corpus::typed_files_below` + `skips`: a linked document reaches the parser; seven inline-schema groups pass (0.035–0.319 s) |
+| R5-F2.3 | Shipped Markdown named-type resolution tests resolve a tracked linked document | fixed | same collector feeds named-type resolution with the link's own path; seven groups pass (0.033–0.308 s) |
+| R5-F2.c1 | Current-root migration guard keeps its no-follow walk policy and regular-file detections | clean | `scoped_files` still admits only no-follow regular files; `the_git_prefilter_never_skips_a_file_link` asserts the guard scan reports only `tracked.rs` with two offending links present; guard 0.28 s |
+| R5-F2.c2 | Shared Git selection: regular-file skips kept; tracked link and working-copy link replacing a regular file are read | fixed | `the_git_prefilter_skips_only_clean_tracked_files_without_a_needle` still skips only the clean file; `the_git_prefilter_never_skips_a_file_link` asserts a tracked link and a link replacing a tracked file are not skipped |
+| R5-F3 | Doctor gives the wrong reason for some YAML edit refusals | fixed | all children verified; one shared reason in `doctor/registration.rs::layout_problem` (root: exact inline-root reason; setting: inline collection or anchor, alias, or tag), used by permissions, missing-entry, and retired-entry findings; old text absent from source |
+| R5-F3.1 | Anchored/tagged block `permissions` mapping, user and repo scope, equal and uncopied policies: accurate reason | fixed | 8 new `permissions_tests` `layout_cases!` (`&policy`/`!!map`, user and repository scope, equal and uncopied): accurate reason, no value, `--fix` unchanged, writer refuses the same plan |
+| R5-F3.2 | Anchored/aliased registration entry with a layout explanation: accurate reason | fixed | 4 new registration layout cases (anchored list append; anchored, aliased, tagged retired entry) and `a_decorated_retired_entry_is_reported_with_an_accurate_layout_reason` |
+| R5-F3.3 | Guide's "only the block layout" sentence matches what the editor accepts | fixed | guide "Files the repairs cannot edit in place" now says only a plain block value without anchor, alias, or tag is edited in place; table rows, "Registration repair", and `configuration.md` match |
+| R5-F4 | The guide and caller skill promise a completely write-free PowerShell probe | fixed | all children verified; sweep of `claudine/docs`, README, repo skill, and `sniff/docs` finds no remaining unqualified Doctor-inspection write promise |
+| R5-F4.1 | Command guide's inspection promise states the temporary-directory exception beside it | fixed | `docs/cli/doctor.md` "What an inspection never does": preserved files named, native Windows PowerShell temporary-folder exception beside the promise |
+| R5-F4.2 | Caller skill uses the same wording and is republished | fixed | `use-claudine/cli.md` carries the same wording; `just publish-skills` published `use-claudine`; installed copy line 117 has it and no "writes nothing" |
+| R5-F1.x1 | Discovered: writer and report must agree on which entries are retired | fixed | darkmatter `config_init::entry_names_location_matches_the_entries_the_writer_removes`: four spellings, old file absent and present; other host and new reference don't match; writer removes exactly the matched entry |
+| R5-F2.x1 | Discovered: a tracked link checked out as a plain file (`core.symlinks` off) was skippable | fixed | helper requires index mode `100644`/`100755`; asserted in `the_git_prefilter_never_skips_a_file_link` |
+| R5-F4.x1 | Discovered: README "inspect; changes nothing" | fixed | now "changes none of your files" |
+| R5-F4.x2 | Discovered: `schemas.md` registration row "it changes nothing" | fixed | scoped to "none of these files" |
+| R5-F4.x3 | Discovered: repo skill `cli-commands.md` "writes only under `--fix`" | fixed | now "writes no user file without `--fix`", naming the self-deleting PowerShell probe folder |
+
+### Progress
+
+- starting the work on 'R5-F1 Doctor misses a retired registration entry after its files are gone' at 11:10:07
+        - defect class: a retired reference is recognized only while its target exists, so detection, repair selection, and verification disagree with Darkmatter's writer and runtime about a leftover entry
+        - discovery: Darkmatter's writer already removed a retired entry whose file was missing (location match), but Doctor only asked whether some entry named the current manifest
+        - decision: rejected "healthy when the writer plans no edit" (the writer also rewrites equivalent current spellings and dedupes repeated current entries, which would break "equivalent spellings pass" and R5-F1.c3); rejected reimplementing the match in Claudine; Darkmatter now exposes `registration::entry_names_location`, which `init.rs::plan_replacement` itself uses, so writer, report, and verification share one rule
+        - decision: the retired-entry finding is a `warn` located by file and entry position (line, column), never the authored value; it passes through the existing precondition and `entry_layout`, so a block list is fixable and an inline list stays manual with the block-form remedy
+        - repair verification now checks both entry conditions (current present, retired absent; new `RepairFailure::RetiredEntryKept`) before legacy cleanup; setup unchanged beyond sharing the writer rule; hidden publish pinned to leave the list alone
+        - red: 3 of 6 new library tests failed before the fix with `(Ok, false)`
+        - focused: claudine `doctor::|registration` 345 passed (slowest 1.708 s); claudine-cli doctor + registrations_command 37 passed; darkmatter config_init/init/registration 231 passed; `just lint` clean in both areas
+        - docs: doctor guide, `schemas.md`, darkmatter `host-registration.md`, caller skill source `use-claudine/cli.md`, claudine and darkmatter repo skills; publication deferred to the orchestrator's single `just publish-skills` run after R5-F4
+- work completed for 'R5-F1 Doctor misses a retired registration entry after its files are gone' at 11:21:37
+- starting the work on 'R5-F2 Darkmatter's faster test scans skip tracked symbolic links' at 11:21:37
+        - defect class: a scan skips a path on a negative answer from a search with a different file policy (Git's working-tree grep never reads through links; the scans do)
+        - discovery: Git's grep skips index entries that are not regular files and working copies that lstat reports as non-regular, so its silence about a tracked link or a type-changed file says nothing about the target
+        - decision: the rule lives once in the shared helper, `CleanTracked::skips(key, FileType)`, with the type taken from the caller's no-follow directory entry; the path set is private so every scan goes through it. Rejected: per-candidate `symlink_metadata` in the helper (about 0.5 ms per file on Windows per the os skill, roughly undoing R4-F3), a copy of the rule in each walk, and `git diff-files --diff-filter=T` (extra process, misses links checked out as plain files)
+        - discovered R5-F2.x1: a tracked link checked out as a plain file (`core.symlinks` off) was skippable; the helper now also requires index mode `100644`/`100755`
+        - drift fixed: the helper's doc claimed scans that follow links read their files; scan docblocks now say only regular files are skipped
+        - new test `current_root_migration_guard::the_git_prefilter_never_skips_a_file_link` (tracked link, link replacing a tracked file, clean and needle controls, guard's no-follow scan); the guard's own allowlist count moved 24 → 26 for the fixture's two needles
+        - focused: darkmatter scan filter 120/120 passed twice (1.627 s, 1.539 s wall); scan tests 0.03–0.32 s; `just lint` clean
+- work completed for 'R5-F2 Darkmatter's faster test scans skip tracked symbolic links' at 11:27:01
+- starting the work on 'R5-F3 Doctor gives the wrong reason for some YAML edit refusals' at 11:27:01
+        - defect class: a refusal explanation names one cause (flow layout) for a refusal with several causes (flow collection, anchor, alias, tag)
+        - discovery: Darkmatter refuses at the root only for an inline root, so `EditLayout::Root` keeps its exact "written inline" reason; a setting refusal may be a flow collection, anchor, alias, tag, `UnsupportedForm`, or `WouldChangeUnnamed`, and `EditLayout` does not keep which
+        - decision: one shared setting reason ("cannot change the `{setting}` setting of {file} in place, because the edit reaches an inline collection or a value with an anchor, alias, or tag") in `doctor/registration.rs::layout_problem`, used by the permissions handoff, the missing-entry finding, and the R5-F1 retired-entry finding; rejected carrying the refusal kind through `EditLayout` (new type for a wording fix the review said a shared sentence settles)
+        - a layout-blocked retired entry that is the only repairable finding shows only its remedy (which already names anchors, aliases, and tags); the reason appears with the "automatic repair is unavailable" line, the review's scenario; both cases tested
+        - tests: 8 new permissions `layout_cases!` (anchored and tagged, both scopes, equal and uncopied); 4 new registration layout cases (anchored list append, anchored/aliased/tagged retired entry); `a_decorated_retired_entry_is_reported_with_an_accurate_layout_reason`; each asserts the old text is absent and no value is quoted
+        - drift fixed: `permissions.rs` comment, guide's "only the block layout" sentence, two guide table rows, the "Registration repair" paragraph, and `configuration.md`; the caller skill makes no layout claim
+        - focused: claudine `doctor::|registration` 358 passed (slowest 1.08 s); claudine-cli doctor 23 passed; `just lint` clean
+- work completed for 'R5-F3 Doctor gives the wrong reason for some YAML edit refusals' at 11:33:00
+- starting the work on 'R5-F4 The guide and caller skill promise a completely write-free PowerShell probe' at 11:33:00
+        - defect class: an absolute "writes nothing" promise with a known exception stated elsewhere
+        - Sniff creates a private `sniff-shell-probe-*` folder in the system temporary directory before each native Windows PowerShell probe (`USERPROFILE`, `LOCALAPPDATA`, `APPDATA` point there), removes it when the probe returns, and starts no shell if it cannot be created; `sniff/docs/topics/windows-shells.md` already said so
+        - the guide and caller skill now promise that Claudine and Darkmatter configuration, the published registration, and the home or user profile are never written, created, converted, or deleted, with the temporary-folder exception beside the promise; the caller skill mirrors the wording (transcluding would pull the whole section and guide-only anchors)
+        - sweep fixed siblings R5-F4.x1 (README "changes nothing"), R5-F4.x2 (`schemas.md` "it changes nothing", now scoped to the registration files), R5-F4.x3 (repo skill `cli-commands.md` "writes only under `--fix`")
+        - `just publish-skills` succeeded (`published use-claudine`); the installed `cli.md` has the new wording and no "writes nothing"; the only warning is an unrelated undeclared `err` in `claudine/docs/research/summary/plugins.md`
+- work completed for 'R5-F4 The guide and caller skill promise a completely write-free PowerShell probe' at 11:35:30
+- phase verification started after all four repairs landed, with no subagent running
+        - claudine `just test`: 13,059 passed, 16 skipped, none at or above 5 s
+        - darkmatter `just test`: 17,909 passed, 10 skipped, none at or above 5 s
+        - `just lint` in claudine and darkmatter: exit 0; `just check-tier-coverage claudine` and `darkmatter`: 0 stranded
+        - `just cross-check claudine --os windows`: 7,239 passed, 6 skipped, none at or above 5 s
+        - `just cross-check darkmatter --os windows`, first run: 12,991 tests passed their assertions and six `base_schema_end_to_end` tests breached the L1 timing gate at 5.009–5.872 s. These tests and their code paths were unchanged this cycle.
+                - targeted module run (`just cross-check darkmatter --os windows base_schema_end_to_end`): nextest scheduled the 19 cases together. All passed and the longest took 3.643 s.
+                - a pure string-parse test (`nested_mapping_object_matches_inline_object_literal_json_schema`) took 4.789 s in that window. Review 4's final Windows run took 2.3–3.1 s for the six. A host stall could explain the result. The first run recorded no host load measurement.
+                - second package run: 12,991 passed, 66 skipped, none at or above 5 s (the six: 3.497–4.665 s). The trivial parse test took 3.8 s. This run meets the timing gate.
+- phase verification completed at 12:09:36
+
+### Completion Report
+
+- **outcome: complete.** Started 11:09:40 UTC, finished 12:10 UTC, about 1 h elapsed
+- parent findings: total 4 = fixed 4 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+        - instance rows: 19 required child rows (15 fixed, 4 clean); 6 discovered rows (all fixed: R5-F1.x1, R5-F2.x1, R5-F4.x1–x3). Discovered rows are not counted as parents
+- verified repairs
+        - R5-F1: Darkmatter's writer, Doctor's registration check, and the repair's post-write verification share `darkmatter::config::registration::entry_names_location`, which matches the retired manifest in every spelling whether or not the file exists. A retired entry is now a located `warn`, fixable in block form and manual in inline form, and is verified gone before legacy cleanup
+        - R5-F2: Darkmatter's Git prefilter skips only clean entries that are regular files both in the walk's no-follow view and in the index, so tracked links, links replacing tracked files, and links checked out as plain files are always read
+        - R5-F3: one accurate layout reason (inline collection, anchor, alias, or tag) for every Doctor finding that the editor cannot change in place, plus an exact inline-root reason; the guide and `configuration.md` match the editor
+        - R5-F4: the guide and caller skill promise what an inspection never touches and state the native Windows PowerShell temporary-folder exception beside it; three sibling claims fixed; caller skill republished
+- open findings: none
+- decisions recorded in the progress notes; none met the worth-the-author's-time test, so `human-review` is unchanged
+- the subagents used no `--no-fail-fast`; no performance measurement was deferred
+- changed files this cycle
+        - darkmatter library: `lib/src/config/registration.rs` (R5-F1 `entry_names_location`), `lib/src/config/init.rs` (R5-F1)
+        - darkmatter tests: `lib/tests/l1/config_init.rs` (R5-F1.x1), `lib/tests/git_prefilter/mod.rs`, `lib/tests/l1/current_root_migration_guard.rs`, `lib/tests/l1/global_catalog.rs`, `lib/tests/l1/shipped_schema_corpus.rs` (R5-F2)
+        - claudine library: `lib/src/composition/registration.rs`, `lib/src/composition/registration/inspect.rs`, `lib/src/composition/registration/repair.rs`, `lib/src/doctor/config.rs` (R5-F1), `lib/src/doctor/registration.rs` (R5-F1, R5-F3), `lib/src/doctor/permissions.rs` (R5-F3)
+        - claudine tests: `lib/src/doctor/registration_tests.rs` (R5-F1, R5-F3), `lib/src/doctor/permissions_tests.rs` (R5-F3), `lib/tests/l1/installed_registration.rs`, `cli/tests/l1/doctor.rs`, `cli/tests/l1/registrations_command.rs` (R5-F1)
+        - docs and skills: `claudine/docs/cli/doctor.md` (R5-F1, R5-F3, R5-F4), `claudine/docs/topics/schemas.md` (R5-F1, R5-F4), `claudine/docs/topics/configuration.md` (R5-F3), `claudine/docs/use-skills/use-claudine/cli.md` (R5-F1, R5-F4; published), `claudine/README.md` (R5-F4), `darkmatter/docs/topics/host-registration.md` (R5-F1), `.claude/skills/claudine/SKILL.md` (R5-F1), `.claude/skills/claudine/cli-commands.md` (R5-F4), `.claude/skills/darkmatter/SKILL.md` (R5-F1), `.claude/skills/os/windows.md` (R5-F2)
+- final verification (after the last change)
+        - claudine `just test`: 13,059 passed, none at or above 5 s (R5-F1, R5-F3)
+        - darkmatter `just test`: 17,909 passed, none at or above 5 s (R5-F1.x1, R5-F2)
+        - `just lint` claudine and darkmatter: exit 0; tier coverage: 0 stranded in both
+        - `just cross-check claudine --os windows`: 7,239 passed, none at or above 5 s (cross-OS check of R5-F1/R5-F3 path identity)
+        - `just cross-check darkmatter --os windows`: 12,991 passed and zero reached 5 s on the second package run (R5-F2 link handling, R5-F1 `location_identity`). Six tests failed the L1 timing gate in the first run.
+        - `just publish-skills` (claudine): `use-claudine` published with the R5-F4 wording (R5-F4.2)
+
+### Review 6 verification (2026-11-24)
+
+The timing summary called the 19-test rerun an isolated measurement and
+described the first package run's slowdown as a confirmed host stall. The
+nextest logs show one filtered module run and two full package runs. The
+first full run records six tests at or above five seconds, and the second
+records zero. The first run has no contemporaneous load measurement. The
+verification section above now states both results and distinguishes the
+module rerun from one-at-a-time measurements. [First package run](/tmp/r5-win-dm.log:13096) ·
+[Module run](/tmp/r5-win-dm-bse.log:100) · [Second package run](/tmp/r5-win-dm-2.log:13095)
+
+I then selected the six cases and ran Nextest with one test thread on the
+same native Windows checkout (`40267b46e38fb1ad9947a0b1bb266192cd917ccc`).
+All six passed in 0.262–0.781 s. The host reported 12 logical processors
+and 5% CPU load before the command. This measures the individual tests
+under the native runner. The original package run's load remains unknown.
+[Serial Windows run](/tmp/doctor-r6-win-serial.log:640)
+
+## Implementation of Review Findings #6
+
+> **started at:** 2026-11-24T12:20:21+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/claudine/features/2026-11-22-claudine-doctor/review-6.md'
+- this is iteration 6 of the review-to-implement cycle
+- the review's `implemented` flag was confirmed `false` before repairs started
+- findings are handled serially, one subagent per finding; each subagent reports log items back to the orchestrator, which records them below
+- the review's recurrence list (R6-F1 as a sibling of R4-F3; R6-F4 as a missed sibling of R5-F4 and R1-F4) is the minimum sweep scope
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R6-F1 | Six Darkmatter schema tests exceeded the native Windows L1 time limit | fixed | all children verified; the union test uses an owned temporary directory, and the documentation test shares one repository context capture, the redundant canonical serialization is gone from production registration loading, and a full native Windows package run with host load recorded has zero tests at or above 5 s |
+| R6-F1.1 | Claudine catalog resolution: same assertions, at most 5 s in a package run | fixed | assertions unchanged; Linux 0.605 → 0.466–0.544 s (shared production saving); native Windows package run (`/tmp/r6-win-dm.log`, Windows CPU samples in /tmp/r6-win-load.log): 3.029 s |
+| R6-F1.2 | Claudine loop controls with lifecycle concerns: valid, at most 5 s | fixed | assertions unchanged; Linux 0.549 → ≤0.544 s; native Windows package run (`/tmp/r6-win-dm.log`, Windows CPU samples in /tmp/r6-win-load.log): 2.711 s |
+| R6-F1.3 | Claudine typed lifecycle stack: valid, at most 5 s | fixed | assertions unchanged; Linux 0.532 → ≤0.544 s; native Windows package run (`/tmp/r6-win-dm.log`, Windows CPU samples in /tmp/r6-win-load.log): 2.871 s |
+| R6-F1.4 | Claudine malformed lifecycle stack: refused, at most 5 s | fixed | refusal assertion unchanged; Linux 0.597 → ≤0.544 s; native Windows package run (`/tmp/r6-win-dm.log`, Windows CPU samples in /tmp/r6-win-load.log): 3.255 s |
+| R6-F1.5 | Union of scalar and mapping types: valid, at most 5 s (temp-dir context) | fixed | owned `tempfile::tempdir()` context; native Windows package run (`/tmp/r6-win-dm.log`, Windows CPU samples in /tmp/r6-win-load.log): 3.035 s (filtered 2.920 → 1.616 s) |
+| R6-F1.6 | Schema documentation and library parity: same schema, at most 5 s (one shared catalog snapshot) | fixed | one shared `context_at(catalog_dir)`, real catalog paths kept; Linux 0.248 → 0.185 s; native Windows package run (`/tmp/r6-win-dm.log`, Windows CPU samples in /tmp/r6-win-load.log): 2.620 s |
+| R6-F1.c1 | Rest of the baseline module, including the pure parser control, keeps coverage within budget | clean | rest of the module unchanged in coverage; pure parser control 2.084 s on Windows package run; new `claudine_registration_load_does_fixed_work` pins one load's work |
+| R6-F1.c2 | Source scan, Markdown schema scan, current-root guard keep scan policy and timing | clean | scan policy untouched; `current_root_migration_guard`, `global_catalog` old-baseline guard, `shipped_schema_corpus` max 2.695 s in the Windows package run; Linux run none at or above 5 s |
+| R6-F1.c3 | Claudine package and Linux Darkmatter package keep zero tests at or above 5 s | clean | claudine Linux `just test` 13,060 none ≥5 s; claudine Windows package 7,240 none ≥5 s; darkmatter Linux 17,913 none ≥5 s |
+| R6-F1.x1 | Discovered: `check_declarations` memo key canonically serialized every lowered document (9 per load, 3 × ~550 KB), uncounted | fixed | `simplified-schema/lib/src/defaults.rs` keys the in-process memo by a streamed written-order XXH64 (`written_digest`); `fixture.hosts` 341 → 318 ms median on Linux; simplified-schema `just test` 2,592 passed |
+| R6-F2 | Darkmatter registration warnings name the wrong list entry | fixed | all children verified; one rule: the shared formatter `Labeled::into_diagnostic` prints `entry.index + 1`, and every human-facing entry number in Darkmatter registration warnings goes through it; a second instance in Doctor (R6-F2.x1) fixed |
+| R6-F2.1 | Entry-resolution warning: retired missing path in positions 1 and 2, equivalent spelling → 1, 2, 2 | fixed | `host_registration_locations::a_refused_entry_is_numbered_by_its_position_and_not_by_its_spelling`: before "entry 0", "entry 1", "entry 1"; after 1, 2, 2 with positions (2,5), (3,5), (3,5) unchanged and `entry.index` = number − 1 |
+| R6-F2.2 | Configuration scope and general local-entry warning: user position 2 → 2, repository position 1 → 1 | fixed | `a_refused_entry_is_numbered_within_the_configuration_that_lists_it`: user position 2 → 2 at (3,5); repository position 1 → 1 at (2,5) in `work/.darkmatter.yaml`; failed before with 1 |
+| R6-F2.3 | Manifest and member refusal warnings: 2, 1, 1 with failure locations retained | fixed | `a_manifest_or_member_refusal_names_its_declaring_entry`: format 1 manifest at position 2 → 2 (still located in that manifest, line 2); broken current manifest at 1 → 1 with its line; missing member at 1 → 1, member locations equal to a load without configuration |
+| R6-F2.c1 | Claudine Doctor keeps its correct ordinals and repair decisions | clean | Doctor already printed `index + 1`; `claudine --lib doctor::` 265 passed, CLI doctor 23 passed |
+| R6-F2.c2 | Structured `Registration.index`, writer edit paths, and host-conflict formatter unchanged | clean | `Registration.index` unchanged (asserted), writer edit paths and `config_init`/`config_load` tests (56) pass; the conflict warning keeps its wording and gains the 1-based prefix through the shared formatter; JSON diagnostic has no separate index field, only its message changes |
+| R6-F2.x1 | Discovered: Doctor's "the mapper of action N of `event`" printed the zero-based offset | fixed | now `index + 1`; fix hint path `actions.event[i]` stays zero-based; `config_tests::a_refused_mapper_is_numbered_by_its_position_in_the_event` failed first ("action 1" for `[1]`), now "action 2"; three `config_tests` assertions, one `tts_tests` assertion, and the `doctor.md` example updated |
+| R6-F3 | The registration guides overpromise which comments and entries repair keeps | fixed | all children verified; every passage describing the `register` entry edit now says the first matching entry (current or retired, any spelling) is kept and rewritten with its line comment, later matches go with their line comments, and other hosts and other comments stay |
+| R6-F3.1 | Doctor guide layout and repair sections describe reuse of the first matching entry and removal of later ones with their inline comments | fixed | `claudine/docs/cli/doctor.md`: registration example, "Files the repairs cannot edit in place", and "Registration repair" describe first-kept / later-removed and scope the comment promise to what lies outside removed values |
+| R6-F3.2 | Claudine setup (configuration) and schema topics scoped the same way | fixed | `claudine/docs/topics/configuration.md` "Darkmatter's permissions" and `claudine/docs/topics/schemas.md` "When Claudine publishes and registers" step 3 carry the same rule |
+| R6-F3.3 | Darkmatter host registration topic and writer documentation scoped the same way | fixed | `darkmatter/docs/topics/host-registration.md` "Registering a host" and `replace_manifest_registration` `///` docs in `darkmatter/lib/src/config/init.rs`; behavior confirmed against `plan_replacement` and an `md rm` probe on the shared editor; `cargo check -p darkmatter --lib` passes |
+| R6-F3.c1 | Caller skill makes no promise that duplicates or their inline comments survive | clean | `use-claudine/cli.md` L171–179 and `config.md` L215–222, `darkmatter/docs/use-skills/*`, and both repo skills promise nothing about duplicates or their comments; no republish needed |
+| R6-F4 | Doctor's public library documentation omits the PowerShell scratch directory | fixed | single required child verified; sibling sweep clean |
+| R6-F4.1 | `claudine::doctor` module docs name the temporary-directory exception and the files left alone | fixed | `claudine/lib/src/doctor/mod.rs:5-12` names the configuration, registration, and home/user-profile files left alone and the native Windows PowerShell temporary-folder exception, matching the guide; `cargo check -p claudine --lib` passes |
+
+### Progress
+
+- starting the work on 'R6-F1 Six Darkmatter schema tests exceeded the native Windows L1 time limit' at 12:20:51
+- starting the work on 'R6-F3 The registration guides overpromise which comments and entries repair keeps' at 12:21:30 (run in parallel with R6-F4 while R6-F1 measured; disjoint files, documentation only)
+        - defect class: a preservation promise stated for the whole file where the edit deliberately removes duplicate matching entries and their comments
+        - verified in `init.rs::plan_replacement`: the first string entry naming the current or retired manifest (by file identity, any spelling, file present or gone) is kept and rewritten in place with `YamlEdit::Set` (its line comment stays); every later match is a `YamlEdit::Remove` (its line comment goes); an own-line comment above a removed entry stays (Darkmatter `yaml-editing.md`, confirmed with an `md rm` scratch probe); with no match the reference is appended
+        - fixed `doctor.md` (three sections), `configuration.md`, `schemas.md`, `host-registration.md`, and the `replace_manifest_registration` doc comment
+        - siblings left unchanged because they describe other writers whose claims hold: permissions handoff (`doctor.md` "Permissions repair", `configuration.md` L315, `setup.rs` L19), Claudine's own config writers (`configuration.md` L357), `md init` and approval save (`darkmatter/docs/topics/configuration.md` L122, L744), append-only `register_manifest` (`host-registration.md` L52)
+        - caller and repo skills clean; no `just publish-skills` needed
+- work completed for 'R6-F3 The registration guides overpromise which comments and entries repair keeps' at 12:25:10
+- starting the work on 'R6-F4 Doctor's public library documentation omits the PowerShell scratch directory' at 12:21:30
+        - defect class: an absolute write-free promise about inspection with a known temporary-directory exception stated elsewhere
+        - fixed the `claudine::doctor` module doc; it now matches the guide's "What an inspection never does" and Sniff's own description (`windows_shells.rs:130-134`)
+        - sweep clean (each claim correctly scoped): doctor `registration.rs:14`, `config.rs:7/10/16/268`, `composition/registration/inspect.rs:1/5`, `composition/registration.rs:54`, `path.rs:1-10`, `DoctorRow`/`run` docs, CLI `commands/doctor.rs:6-8`, `main.rs:542-545`, repo skill `cli-commands.md:26` and `SKILL.md:217`; Sniff code and docs agree
+- work completed for 'R6-F4 Doctor's public library documentation omits the PowerShell scratch directory' at 12:22:40
+        - defect class: L1 tests repeat repository discovery or bundle preparation per case, so their cost multiplies under package concurrency
+        - first pass (subagent): R6-F1.5 now owns a `tempfile::tempdir()` context instead of `cwd_context()` (Linux 0.016 → 0.021 s; Windows filtered 2.920 → 1.616 s); R6-F1.6 shares one `context_at(catalog_dir)` between both readers, keeping real catalog paths and literal `manifest_dir!()`/`include_str!` reads (Linux 0.248 → 0.185 s; Windows filtered 3.643 → 2.341 s)
+        - drift fixed: the `BASE_API` comment claimed it captured the process directory's repository; `cwd_context()` runs no discovery
+        - the pure parser control does no I/O (0.013 s on Linux) yet took 4.789 s in the failing Windows package run and 1.624 s in a filtered cross-check: per-process start and scheduling under package concurrency dominate on Windows
+        - R6-F1.1–.4: the fixture lives in a temp dir and runs no repository discovery; of ~0.5 s per case on Linux, `fixture.hosts(...)` (production registration loading) costs 340–360 ms; one fixture run, including one-time function-registry initialization, does 28 validator compiles, 2 payload compile checks, and 58 counted canonical JSON serializations, and gdb sampling puts about a third of the time in `biscuit_hash::json::canonical_json`
+        - rejected: a `OnceLock`/`thread_local` fixture (nextest runs one process per test, so nothing is shared); merging the four cases (one slower test); a test-profile `opt-level` for `biscuit-hash` in the root `Cargo.toml` (a global CI path that schedules the whole workspace, and it hides production cost instead of removing it)
+        - sibling sweep: 360 tests in 15 related L1 modules (`host_*`, `embedded_registration`, `foreign_document_compose`, `registered_yaml_kinds`, `shipped_schema_corpus`, `config_widening`, `kind_semantic_checks`, `schema_phase_validation`, `lifecycle_generated_operands`), max 1.264 s on Linux; no other test captures a checkout context more than once
+        - next: remove the redundant production work in registration loading (second subagent, after R6-F2)
+- starting the work on 'R6-F2 Darkmatter registration warnings name the wrong list entry' at 12:33:51
+        - defect class: an internal zero-based list offset shown to a person as a numbered configuration item
+        - red first: the three new `host_registration_locations` tests failed with the zero-based text before the fix
+        - fix: `darkmatter/lib/src/config/registration.rs` `Labeled::into_diagnostic` prints `entry.index + 1`; `Registration.index` doc in `load.rs` now says it is the zero-based offset and warnings show the 1-based number
+        - decision: the JSON diagnostic copies message, code, file, line, and column and has no index field, so only its message changes; rejected adding a one-based structured field (no reader, 17 output schemas)
+        - kept zero-based on purpose (paths and pointers, not numbered items): `load.rs` `entry_path` (`/register/2`), `migration_receipt.rs` `/sources/{i}/…`, manifest field labels (`files[2]`); already correct: Doctor's retired-entry message and Darkmatter `merge.rs` "alternative {}"; DMLS forwards the message and builds its range separately (no change)
+        - discovered and fixed R6-F2.x1 in `doctor/config.rs` (mapper message)
+        - docs: `host-registration.md` example now "entry 1" with a sentence on counting from 1; an already-broken closing code fence there fixed; `doctor.md` mapper example updated
+        - focused: darkmatter l1 registration/host 354 passed, lib `config::registration` 6, `config_init|config_load` 56, `darkmatter-lsp` registration 57, `darkmatter-cli` host_registration 33; claudine lib `doctor::` 265, CLI doctor 23; `just lint` exit 0 in both areas; nothing at or above 5 s
+- work completed for 'R6-F2 Darkmatter registration warnings name the wrong list entry' at 12:45:37
+- resuming 'R6-F1' for R6-F1.1–.4 (production registration preparation cost) at 12:45:37
+        - profiled one Claudine registration load with work counters and gdb samples: the brief's 58 canonical serializations and 28 compiles include 54 and 6 from the fixture's process-once function-registry build; one load does 22 compiles, 4 counted canonical serializations, 2 payload compile checks, and 2 merge checks
+        - redundant production work found: `simplified-schema/lib/src/defaults.rs::check_declarations` keyed its in-process "already accepted" memo by `biscuit_hash::xx_hash_json`, a full key-sorted copy of each lowered document, 9 times per load (3 of them ~550 KB trigger payloads, about 13 ms each), never counted; for `composition` the compile check then serialized the identical value again
+        - fix: the memo key is now `written_digest`, an XXH64 streamed over the schema's JSON in written key order (about 3.5 ms per large payload); the memo only skips a repeat check of an already accepted document, so results are unchanged; validator-cache identity (`SchemaDigest::canonical`) and every digest check untouched
+        - kept, each needed: payload compile checks (29 and 31 ms), the payload digests validation reuses, the merge check (~15 ms), type checks of the `action`/`lifecycle-events`/`shared` libraries (18–22 ms each; removing the overlap needs a cross-call cache, rejected)
+        - `fixture.hosts` on Linux: 333–359 ms → 310–343 ms; the four cases 0.497–0.576 s → 0.466–0.544 s
+        - new L1 test `claudine_registration_load_does_fixed_work` (gated on `work-counters`, which darkmatter's CI features enable) pins 2 payload compile checks, 2 merge checks, 4 canonical serializations, 22 compiles per load; the simplified-schema repo skill's `defaults.md` claimed the memo used the canonical hash and now says otherwise
+        - Windows filtered module run (`just cross-check darkmatter --os windows base_schema_end_to_end`): 20/20 passed, the four cases 3.193–4.300 s; tests that take 12–25 ms on Linux took 3.6–4.1 s there, so per-process start and contention dominate the Windows figure
+        - rejected: switching `claudine_api` from `with_baseline(darkmatter_base_schema())` to production's `with_darkmatter_baseline_json_schema()` (about 40 ms per case; changes which baseline form the test checks)
+        - focused: darkmatter l1 filter 457 (work-counters) and 456 passed; lib filter 423; simplified-schema `just test` 2592 + 2172 passed; claudine lib filter 209, l1 filter 481 (slowest 2.5 s); `just lint` clean in simplified-schema and darkmatter
+        - the package-run invariant is confirmed by the orchestrator's full native Windows package run with host load recorded (below)
+- work completed for 'R6-F1 Six Darkmatter schema tests exceeded the native Windows L1 time limit' at 13:36:43
+- phase verification started after all repairs landed, with no subagent running
+        - darkmatter `just test`: 17,913 passed, none at or above 5 s (Linux load 2.2 before)
+        - claudine `just test`: 13,060 passed, none at or above 5 s (host load rose to 20 during the run; nothing slow)
+        - simplified-schema `just test`: 2,592 passed, none at or above 5 s
+        - `just lint` in darkmatter, claudine, simplified-schema: exit 0; `just check-tier-coverage` for all three: 0 stranded
+        - `just cross-check darkmatter --os windows`: 12,995 passed, 66 skipped, none at or above 5 s; slowest test 4.209 s; the six R6-F1 cases 2.620–3.255 s. Windows CPU sampled every ~28 s over SSH: 5% before, 56% during archive extraction, and 39–100% during the tests (`/tmp/r6-win-load.log`)
+        - `just cross-check claudine --os windows`: 7,240 passed, 6 skipped, none at or above 5 s; Windows CPU 7–100% during the run (`/tmp/r6-win-load-cl.log`)
+        - both cross-checks tested this worktree's uncommitted tree, so they publish no CI observation
+- phase verification completed at 13:36:43
+
+### Completion Report
+
+- **outcome: complete.** Started 12:20:21 UTC, finished about 13:38 UTC, about 1 h 18 min elapsed
+- parent findings: total 4 = fixed 4 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+        - instance rows: 21 required child rows (15 fixed, 6 clean); 2 discovered rows (R6-F1.x1, R6-F2.x1), both fixed and not counted as parents
+- verified repairs
+        - R6-F1: the union test owns a temporary context and the documentation test captures the catalog folder once; Simplified Schema's declaration-check memo no longer builds a key-sorted copy of every lowered document, which every registered-host load paid; a full native Windows package run with load recorded has zero tests at or above 5 s and the six cases at 2.6–3.3 s
+        - R6-F2: Darkmatter's shared registration-warning formatter prints the 1-based `register` entry; structured index, edit paths, codes, and locations unchanged; Doctor's mapper message had the same defect and is fixed
+        - R6-F3: every guide passage on the `register` edit says the first matching entry is kept and later matches go with their line comments, and scopes the preservation promise to other entries and comments
+        - R6-F4: the `claudine::doctor` module documentation names the files an inspection leaves alone and the native Windows PowerShell temporary-folder exception
+- open findings: none
+- decisions are recorded in the progress notes (no `OnceLock` fixture, no root `Cargo.toml` opt-level, no structured one-based JSON field, baseline form left as is); none met the worth-the-author's-time test, so `human-review` is unchanged
+- no performance measurement was deferred
+- changed files this cycle
+        - simplified-schema: `lib/src/defaults.rs` (R6-F1.x1); `.claude/skills/simplified-schema/defaults.md` (R6-F1 drift)
+        - darkmatter: `lib/src/config/registration.rs`, `lib/src/config/load.rs` (R6-F2); `lib/src/config/init.rs` doc comment (R6-F3); `lib/tests/l1/base_schema_end_to_end.rs` (R6-F1); `lib/tests/l1/host_registration_locations.rs`, `lib/tests/l1/host_registration.rs` (R6-F2); `docs/topics/host-registration.md` (R6-F2, R6-F3)
+        - claudine: `lib/src/doctor/mod.rs` (R6-F4); `lib/src/doctor/config.rs`, `lib/src/doctor/config_tests.rs`, `lib/src/doctor/tts_tests.rs` (R6-F2.x1); `docs/cli/doctor.md` (R6-F2.x1, R6-F3); `docs/topics/configuration.md`, `docs/topics/schemas.md` (R6-F3)
+- final verification (after the last change)
+        - darkmatter `just test` 17,913 passed, none ≥5 s (R6-F1, R6-F2)
+        - claudine `just test` 13,060 passed, none ≥5 s (R6-F2.x1, R6-F1.c3)
+        - simplified-schema `just test` 2,592 passed, none ≥5 s (R6-F1.x1)
+        - `just lint` and `just check-tier-coverage` in all three areas: clean, 0 stranded
+        - `just cross-check darkmatter --os windows`: 12,995 passed, none ≥5 s, Windows CPU recorded (R6-F1)
+        - `just cross-check claudine --os windows`: 7,240 passed, none ≥5 s (R6-F1.c3, R6-F2 cross-OS)
+
+### Review 7 verification (2026-11-24)
+
+- The timing ledger attributed repository discovery to both the union and
+  documentation tests. The old union test used `cwd_context()`, which
+  anchored to the process directory without repository discovery. The new
+  test owns a temporary directory. The documentation test reduces two
+  repository context captures to one. I compared the test diff and the body
+  of `cwd_context()` and reran the baseline module.
+- The progress note attributed 28 compiles and 58 counted canonical
+  serializations to one registration load. Those totals include one-time
+  function-registry initialization. The narrower counter window around
+  `fixture.hosts(...)` reports 22 compiles and four counted canonical
+  serializations. I checked the snapshot boundaries and passed the
+  work-counter test in the L1 baseline run.
+- The Darkmatter Windows timing note gave 56–100% CPU for the package run.
+  The 56% sample came during extraction. The samples during test execution
+  range from 39% to 100%, including the 39% sample near test 11,966.
+  I checked the load log against the package output. All six case durations
+  and the zero-slow-test result agree with the package log.
+
+## Implementation of Review Findings #7
+
+> **started at:** 2026-11-24T13:45:25+00:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/home/build/wt/rusty-biscuit/fix-biscuit-terminal/claudine/features/2026-11-22-claudine-doctor/review-7.md'
+- this is iteration 7 of the review-to-implement cycle
+- the review's `implemented` flag was confirmed `false` before repairs started
+- the single finding is a contained change to the doctor library (`path.rs` and its tests), so the orchestrator repaired it directly and did not use a subagent; no parallel work ran
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R7-F1 | A Windows shell warning hides the invoking process's successful PATH lookup | fixed | every child row below is fixed or clean; the class sweep found one carrier site (`path::assess`) |
+| R7-F1.1 | Current hit + another shell's miss: keep the shell warnings and show the hit and resolved path | fixed | `path_tests.rs::shell_findings_follow_path_order_and_a_current_miss_still_leads` (current hit + Git Bash miss + Cygwin timeout: row `warn`, detail lines are the hit, then each shell); `both_report_formats_carry_the_current_hit_beside_shell_warnings` (a `.cmd` hit path) |
+| R7-F1.2 | Current hit + another shell's probe failure: keep the hit beside the failure | fixed | `both_report_formats_carry_the_current_hit_beside_shell_warnings` pairs the hit with a PowerShell `SpawnFailed`; `every_shell_warning_keeps_the_current_hit_for_every_shell_kind` covers every probe failure |
+| R7-F1.3 | Every warning variant (missing, timed out, spawn failed, nonzero exit, terminated) keeps the hit at its own severity and remedy | fixed | `each_shell_outcome_is_distinct_and_never_more_than_a_warning` now asserts the hit leads the detail for all six answers, with unchanged severity and remedy and the warning as summary; `every_shell_warning_keeps_the_current_hit_for_every_shell_kind` crosses the five warning answers with all five `ShellKind`s (PowerShell 7, Windows PowerShell, Git Bash, MSYS2, Cygwin) |
+| R7-F1.4 | Human and JSON reports carry the hit and the warnings in the one `path` row | fixed | JSON is `serde_json` over the same `DoctorRow` (`cli/src/commands/doctor.rs::run`), and the human renderer lists `row.detail` lines; `both_report_formats_carry_the_current_hit_beside_shell_warnings` serializes the row and finds the hit and both shell findings in `detail`; the seven-row contract is unchanged |
+| R7-F1.c1 | All lookups succeed or no alternate shell: row stays `ok` with the path visible | fixed | `a_found_executable_passes_and_names_where_it_is`: row `ok`, summary names the path, and the detail now carries the same line (the shell `Found` findings were already listed this way); the CLI healthy-home case (`cli/tests/l1/doctor.rs`) still passes |
+| R7-F1.c2 | Current miss with shell results: row stays `error`, the miss and shell findings and remedies are kept | clean | `a_miss_in_this_process_is_an_error_with_a_remedy` and `shell_findings_follow_path_order_and_a_current_miss_still_leads` (first half): row `error`, the miss leads, shell findings and remedies kept, unchanged |
+| R7-F1.c3 | Other consumers of the summary/detail projection keep their independent observations | clean | sweep of every `CheckOutcome::new`/`ok_summary` writer: `tts` already pushes its `ok_summary` as an `Ok` finding; the `repo-config` ok summaries accompany an `Ok` finding that carries the same observation; `config`, `registration`, `darkmatter-permissions`, and `stray-config-keys` ok summaries are claims about the whole row that stop applying once a problem exists (what the review requires). The 267 doctor library tests pass |
+
+### Work on R7-F1
+
+- starting the work on 'R7-F1 current-process hit hidden by a shell warning' at 13:46:10
+    - defect class: an observation the contract requires is stored only in a row's success summary, so a more severe finding in the same row replaces the summary and the observation disappears from both report formats
+    - sweep: every writer of `CheckOutcome::new` and `ok_summary` in `lib/src/doctor/` (`config.rs` ×3 checks, `registration.rs`, `permissions.rs`, `tts.rs`, `path.rs`); only `path.rs` kept a required observation (the found path) solely in the success summary; the others are recorded in R7-F1.c3
+    - repair: `path::assess` now records the current-process result as a finding in both cases (`ok` with the found path, or the existing `error` with its remedy), and uses that finding's text as the success summary. The row's ordering (general findings without a path first) puts it at the head of the detail. The `error` for a miss and the `warn` severities and remedies of the shell answers are unchanged
+    - tests: extended the mixed-outcome L1 tests in `lib/src/doctor/path_tests.rs` and added `every_shell_warning_keeps_the_current_hit_for_every_shell_kind` and `both_report_formats_carry_the_current_hit_beside_shell_warnings`
+    - docs: `claudine/docs/cli/doctor.md` updated: the human-report example shows the `path` detail line, and the `path` section states that the first detail line is always the invoking process's result, with a Windows example. The repo and caller skills describe nothing this changes
+    - Windows cross-check not run: the change is OS-independent row construction, and the shell answers are injected in L1 on every OS. The native probes remain the reviewer's verification path
+- work completed for 'R7-F1 current-process hit hidden by a shell warning' at 13:58:40
+
+### Completion Report
+
+- outcome: **complete**; elapsed about 15 minutes (13:45:25 to about 14:00 UTC)
+- parent findings: total 1 = fixed 1 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0
+- instance rows: R7-F1.1–.4 and R7-F1.c1 fixed; R7-F1.c2 and R7-F1.c3 clean
+- open findings: none
+- changed files:
+        - `claudine/lib/src/doctor/path.rs` (R7-F1)
+        - `claudine/lib/src/doctor/path_tests.rs` (R7-F1.1–.4, .c1, .c2)
+        - `claudine/docs/cli/doctor.md` (R7-F1 documentation)
+- verification:
+        - `cargo nextest run -p claudine --lib --features test-fixtures -E 'test(/doctor::/)'`: 267 passed
+        - `just test` in `claudine/`: 13062 passed, 16 skipped, none at or above 5.0 s (`/tmp/r7impl-test.log`; load average 2.45 at start)
+        - `just lint` in `claudine/`: exit 0 (`/tmp/r7impl-lint.log`)
+        - `just check-tier-coverage claudine` (repository root): 0 stranded
+

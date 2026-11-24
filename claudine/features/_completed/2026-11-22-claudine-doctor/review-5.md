@@ -14,10 +14,13 @@ reviewed-by: codex/gpt-6.2-sol
 recurrence: true
 created: "2026-11-24T10:29:00+00:00"
 spec: 2026-11-22-claudine-doctor/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-11-22-claudine-doctor/spec.md`"
 feature: 2026-11-22-claudine-doctor/review-5.md
 previous: 2026-11-22-claudine-doctor/review-4.md
+next: 2026-11-22-claudine-doctor/review-6.md
+log: /home/build/wt/rusty-biscuit/fix-biscuit-terminal/claudine/features/2026-11-22-claudine-doctor/log.md
+implemented-by: claude/opus
 ---
 
 # Claudine Doctor review 5
