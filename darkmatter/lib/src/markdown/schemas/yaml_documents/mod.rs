@@ -42,6 +42,10 @@ use simplified_schema::{SchemaError, ValidationProblem};
 use super::embedded::SHIPPED_SOURCES;
 use super::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
 
+/// The diagnostic code of a [`SchemaError::CallableCatalog`] failure, as
+/// `md schema validate` and the editor report it.
+pub const CALLABLE_CATALOG_CODE: &str = "dm.schema.callable_catalog";
+
 /// Darkmatter's [`KindHost`]: its shipped sources and the shipped
 /// definitions its accepted artifact recorded (or, when the artifact or its
 /// section was refused, the definitions prepared from text). Every registry
@@ -218,6 +222,13 @@ impl DarkmatterSchemas {
         let (route, definition, effective) = match selection {
             Selection::NoSchema => return Ok(None),
             Selection::Kind { kind, definition } => {
+                // A callable catalog's semantics are judged by the catalog
+                // reader before its kind contract; a document the shared
+                // reader refuses (shape, grammar) is left to that contract,
+                // which locates the same refusal.
+                if let Err(error @ SchemaError::CallableCatalog { .. }) = self.validate_callable_catalog(document) {
+                    return Err(error);
+                }
                 let effective = EffectiveSchema::for_yaml_document(definition.resolved().clone(), base_dir, self)?;
                 if let DefinitionSource::Registered(source) = definition.source() {
                     registered = Some(source.clone());
@@ -273,6 +284,67 @@ impl DarkmatterSchemas {
 }
 
 impl DarkmatterSchemas {
+    /// Judges `document` as a callable catalog when its `kind` is
+    /// `expression-schema` or `mutation-schema`, with the one catalog reader
+    /// registration uses; `Ok` for every other document. Passive: nothing is
+    /// resolved, read, or evaluated.
+    ///
+    /// The built-in catalogs (`darkmatter/schemas/partials/functions.yaml`
+    /// and `mutations.yaml`, matched by path identity: that relative path, or
+    /// the same path under this instance's captured repository root) admit
+    /// their own names and read their compiled-in file-form examples. Every
+    /// other catalog is judged as a host would author it: no file-form
+    /// examples, and an expression callable may not reuse a built-in
+    /// function's canonical name or alias.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::CallableCatalog`] for a failed callable check, located
+    /// in `document`'s text; the shared reader's refusal (shape, grammar, a
+    /// duplicate overload) as the reader reports it.
+    pub fn validate_callable_catalog(&self, document: &LoadedYamlDocument) -> Result<(), SchemaError> {
+        use crate::markdown::compose::expression::catalog::{self as catalog, CatalogError};
+        use simplified_schema::simplified::StandaloneSchemaEnvelope;
+
+        let envelope = match document.loaded().value.get("kind").and_then(serde_yaml_ng::Value::as_str) {
+            Some("expression-schema") => StandaloneSchemaEnvelope::ExpressionSchema,
+            Some("mutation-schema") => StandaloneSchemaEnvelope::MutationSchema,
+            _ => return Ok(()),
+        };
+        let (path, source) = (document.path(), document.text());
+        let result = match (self.builtin_catalog(path), envelope) {
+            (Some(BuiltInCatalog::Functions), StandaloneSchemaEnvelope::ExpressionSchema) => {
+                catalog::load_catalog(source, path, envelope, catalog::EXAMPLE_FILES)
+            }
+            (Some(BuiltInCatalog::Mutations), StandaloneSchemaEnvelope::MutationSchema) => {
+                catalog::load_catalog(source, path, envelope, &[])
+            }
+            _ => catalog::load_authored_catalog(source, path, envelope),
+        };
+        result.map(drop).map_err(CatalogError::into_schema_error)
+    }
+
+    /// Which built-in catalog `path` is, by path identity: the catalog's
+    /// repository-relative path itself, or that path under the captured
+    /// repository root. A file name alone never matches.
+    fn builtin_catalog(&self, path: &Path) -> Option<BuiltInCatalog> {
+        use biscuit_file::{PathIdentity, canonicalize_simplified};
+        let context = &self.file_resolution_context;
+        let identity = |path: &Path| PathIdentity::new(&canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf()));
+        let absolute = if path.is_absolute() { path.to_path_buf() } else { context.cwd().join(path) };
+        let target = identity(&absolute);
+        [
+            (crate::markdown::compose::expression::catalog::CATALOG_PATH, BuiltInCatalog::Functions),
+            (crate::effects::types::MUTATIONS_PATH, BuiltInCatalog::Mutations),
+        ]
+        .into_iter()
+        .find(|(relative, _)| {
+            PathIdentity::new(path) == PathIdentity::new(Path::new(relative))
+                || context.repository_root().is_some_and(|root| identity(&root.join(relative)) == target)
+        })
+        .map(|(_, catalog)| catalog)
+    }
+
     /// Prepares `resolved`, the configuration schema the caller selected for
     /// the YAML document at `path` by its location, as that document's
     /// contract ([`Route::Configuration`]). `definition` names the schema in
@@ -305,6 +377,13 @@ impl DarkmatterSchemas {
             context: context.clone(),
         })
     }
+}
+
+/// A built-in callable catalog, by source identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuiltInCatalog {
+    Functions,
+    Mutations,
 }
 
 /// The schema a whole YAML document selected, prepared and compiled

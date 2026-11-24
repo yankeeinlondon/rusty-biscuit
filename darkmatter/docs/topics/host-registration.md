@@ -10,10 +10,10 @@ running the host.
 This page covers:
 
 - [registering a host](#registering-a-host) in `.darkmatter.yaml`,
-- [the manifest format](#the-manifest), format 2, which lists every file of
+- [the manifest format](#the-manifest), format 3, which lists every file of
   the host's bundle with its digest,
 - [the files a bundle holds](#the-files-of-a-bundle): triggers, YAML kinds,
-  namespaces, and type libraries,
+  namespaces, type libraries, and expression catalogs,
 - [which documents belong to the host](#which-documents-belong-to-the-host),
 - [how a registration loads](#how-a-registration-loads), from Rust,
 - [which host a document belongs to](#selecting-a-documents-host),
@@ -161,50 +161,48 @@ while the host is publishing a new one.
 ```yaml
 # ~/.acme/registration/manifest.yaml (written by the acme program)
 kind: darkmatter-host
-format_version: 2
+format_version: 3
 host: acme
 version: "1.2.0"
 files:
     - ./schemas/widget.yaml
     - ./schemas/library.yaml
     - ./schemas/run.yaml
+    - ./functions/project.yaml          # a `kind: expression-schema` catalog
 lifecycle: ./globals.lifecycle.json
-functions:
-    - catalog: ./functions/catalog.yaml
-      facts: ./functions/facts.json
 digests:
     ./schemas/widget.yaml: "<64 lowercase hex digits>"
     ./schemas/library.yaml: "<64 lowercase hex digits>"
     ./schemas/run.yaml: "<64 lowercase hex digits>"
+    ./functions/project.yaml: "<64 lowercase hex digits>"
+    ./functions/project.facts.json: "<64 lowercase hex digits>"   # the catalog's companion, never in `files`
     ./globals.lifecycle.json: "<64 lowercase hex digits>"
-    ./functions/catalog.yaml: "<64 lowercase hex digits>"
-    ./functions/facts.json: "<64 lowercase hex digits>"
 ```
 
 | Field | What it holds |
 | --- | --- |
 | `kind` | always `darkmatter-host` |
-| `format_version` | the integer `2` (not `"2"`, not `2.0`) |
+| `format_version` | the integer `3` (not `"3"`, not `3.0`) |
 | `host` | the host's identifier, a nonempty string; its lifecycle artifact must record the same name |
 | `version` | the host release that wrote the manifest, a nonempty string |
-| `files` | the bundle's schema files ([below](#the-files-of-a-bundle)); their order has no effect; may be `[]` |
+| `files` | the bundle's schema files and expression catalogs ([below](#the-files-of-a-bundle)); their order has no effect; may be `[]` |
 | `lifecycle` | the host's [lifecycle artifact](./lifecycle/host-artifact.md); always required |
-| `functions` | function catalogs, each a closed `{catalog, facts}` pair; write `functions: []` for none |
-| `digests` | one entry per member entry above, keyed by the reference exactly as written |
+| `digests` | one entry per `files` item and for `lifecycle`, keyed by the reference exactly as written, plus one for each expression catalog's [facts companion](#expression-catalogs-and-their-facts-companions), keyed by its derived spelling |
 
-Every field is required, no other field is allowed, and `files: null` or
-`functions: null` is refused: write `[]`. A member without a digest, or a
-digest for no member, refuses the manifest at that entry. A digest is the
-BLAKE3 hash of the file's bytes as 64 lowercase hexadecimal digits
-(`biscuit_hash::blake3_hash_bytes`); `ABC…` or a short digest is refused.
+These seven fields are all required and no other field is allowed: `files:
+null` is refused (write `[]`), and so is a `functions` field, which format 3
+does not have. A member without a digest, or a digest for no member, refuses
+the manifest at that entry. A digest is the BLAKE3 hash of the file's bytes
+as 64 lowercase hexadecimal digits (`biscuit_hash::blake3_hash_bytes`);
+`ABC…` or a short digest is refused.
 
-Claudine's published manifest has the same shape. It has no function
-catalogs, so it writes `functions: []`:
+Claudine's published manifest has the same shape. It has no expression
+catalogs, so its `digests` list only its `files` and its lifecycle artifact:
 
 ```yaml
 # ~/.claudine/registrations/darkmatter/manifest.yaml (written by claudine; do not edit)
 kind: darkmatter-host
-format_version: 2
+format_version: 3
 host: claudine
 version: "0.1.0"
 files:
@@ -213,7 +211,6 @@ files:
     - "./schemas/loop.yaml"
     # … every other file of the bundle
 lifecycle: "./globals.lifecycle.json"
-functions: []
 digests:
     "./schemas/composition.yaml": "<64 lowercase hex digits>"
     # … one entry per member, the lifecycle artifact included
@@ -223,29 +220,33 @@ The schema of the envelope ships with Darkmatter
 (`darkmatter/schemas/darkmatter-host.yaml`) and is importable as
 `darkmatter-host@darkmatter:host`.
 
-**An older manifest is refused, not guessed at.** A format 1 manifest (one
-with `format_version: 1`, or with the removed `identify`, `triggers`, or
-`globals` fields) is refused with one `dm.host.registration` warning at its
-`format_version` that asks you to rerun the host's setup or update the host.
-Nothing else about it is judged, and nothing of it is used, so documents the
-host would have typed are analyzed as `md` documents until it is repaired.
-For an older Claudine install the warning reads:
+**A manifest of another format is refused, not guessed at.** Darkmatter
+reads `format_version` before it checks anything else. Any other integer
+(1, 2, or a later version) refuses the manifest with one
+`dm.host.registration` warning at its `format_version`:
 
 ```text
-this is a format 1 `darkmatter-host` manifest, which this Darkmatter no longer reads; format 2 lists every file of the host's bundle with its digest: run `claudine setup`, or update `claudine`, to publish a format 2 manifest
+unsupported host registration format version 2; update Darkmatter and the host tool, then republish the registration
 ```
 
-The repair is the host's, not Darkmatter's: running `claudine setup`
-publishes the format 2 bundle, replaces the old
-`~/.claudine/darkmatter-host.yaml` entry in `~/.darkmatter.yaml` with the
-new manifest, and then removes the old files. It asks nothing, keeps every
-other setting, and changes nothing when run again (see
-[`claudine setup`](../../../claudine/docs/cli/setup.md)). A manifest that names no `host`
-gets the same warning, ending "rerun the host program's setup, or update it,
-to publish a format 2 manifest". The same warning appears for an old entry
-in a repository's configuration, which setup never edits: once setup has
-removed the old manifest, that entry is reported at the repository's
-`.darkmatter.yaml` as naming no existing file, for its owners to remove.
+A manifest without `format_version` that writes one of the removed format 1
+fields (`identify`, `triggers`, or `globals`) is format 1 and gets the same
+warning at that field. A `format_version` that is not an integer (`"3"`,
+`3.0`) is an ordinary shape error. Nothing else about a refused manifest is
+judged, and nothing of it is used, so documents the host would have typed are
+analyzed as `md` documents until it is repaired.
+
+The repair is the host's, not Darkmatter's: update the host program and
+rerun its setup, which republishes its bundle in the current format. For
+Claudine that is `claudine setup`, which publishes the format 3 bundle,
+replaces an old `~/.claudine/darkmatter-host.yaml` entry in
+`~/.darkmatter.yaml` with the new manifest, and then removes the old files.
+It asks nothing, keeps every other setting, and changes nothing when run
+again (see [`claudine setup`](../../../claudine/docs/cli/setup.md)). Setup
+never edits a repository's configuration: once it has removed an old
+manifest, a repository entry that still names it is reported at the
+repository's `.darkmatter.yaml` as naming no existing file, for its owners to
+remove.
 
 **Member paths** are written so that one manifest works on macOS, Linux, and
 Windows alike:
@@ -262,19 +263,64 @@ Windows alike:
 
 After `.` and `..` are applied, each member is known by its path from the
 bundle root (`schemas/a.yaml`). Two entries naming the same file
-(`./a.yaml` and `./x/../a.yaml`, or a function's `facts` equal to its
-`catalog`) are refused, and so are names that differ only in letter case
-(`./Schemas/a.yaml` beside `./schemas/b.yaml`), because a case-insensitive
-file system would merge them. A symbolic link, or on Windows a junction or
-other reparse point, anywhere between the bundle root and a member is
-refused; it is never followed.
+(`./a.yaml` and `./x/../a.yaml`) are refused, and so are names that differ
+only in letter case (`./Schemas/a.yaml` beside `./schemas/b.yaml`), because a
+case-insensitive file system would merge them. The same checks apply to a
+derived facts companion as to a listed member. A symbolic link, or on
+Windows a junction or other reparse point, anywhere between the bundle root
+and a member is refused; it is never followed.
+
+### Expression catalogs and their facts companions
+
+An expression catalog (a `kind: expression-schema` file, see
+[Host Expression Functions](./host-functions.md)) declares functions the
+host's documents call. The editor needs a second file to check those calls:
+the catalog's **facts companion**, a JSON file the host generates from its
+Rust registration. The manifest lists only the catalog in `files`; the
+companion's name is derived from the catalog's, and the companion is
+digest-checked like every other member.
+
+The derivation replaces the catalog's last extension, `.yaml` or `.yml`,
+with `.facts.json`, and keeps the directory and every earlier dot exactly
+as written:
+
+| `files` item | `digests` key of its companion |
+| --- | --- |
+| `./functions/project.yaml` | `./functions/project.facts.json` |
+| `./functions/project.yml` | `./functions/project.facts.json` |
+| `./functions/acme.v2.yaml` | `./functions/acme.v2.facts.json` |
+| `../registration/project.yaml` | `../registration/project.facts.json` |
+
+Because the companion is implied, the manifest must agree with it:
+
+- **The companion has a digest.** A catalog whose companion has no `digests`
+  entry refuses the manifest at the catalog's `files` entry, naming the
+  expected key:
+
+  ```text
+  `./functions/project.yaml` is an expression catalog, so `digests` must list its facts companion `./functions/project.facts.json`
+  ```
+
+- **The companion is never listed.** A `files` item that is also a catalog's
+  companion, or two catalogs that derive the same companion
+  (`./functions/project.yaml` beside `./functions/project.yml`), refuse the
+  manifest at the catalog's entry.
+- **The catalog's name can name a companion.** A catalog whose file name
+  does not end in lowercase `.yaml` or `.yml` is refused at its entry.
+- **`digests` holds exactly the members.** Its keys must be the `files`
+  items, `lifecycle`, and the companions those catalogs derive, nothing
+  more. Any other key is refused at `digests.<key>`.
+
+A companion that is missing, or whose bytes do not match its digest, is
+refused like any other member, at its catalog's `files` entry.
 
 ### Reading a bundle
 
 `config::registration::bundle::load_snapshot(manifest, context)` reads a
 manifest and its members into a `VerifiedSnapshot`, or refuses it with a
 `SnapshotRefusal` (code `dm.host.registration`, located in the manifest at
-the failing field). It parses no member; the snapshot holds each member's
+the failing field; `unsupported_format` holds the version of a manifest in
+another format). It parses no member; the snapshot holds each member's
 verified bytes for the code that does. [`load_registrations`](#how-a-registration-loads)
 calls it for every entry; call it yourself only to inspect a bundle.
 
@@ -291,16 +337,35 @@ fn show(manifest: &Path, context: &FileResolutionContext) {
 }
 ```
 
-Each file is read once and hashed once. When a member is missing or does
-not match its digest, the host may be in the middle of publishing (it
-replaces members first and the manifest last), so the reader reads the
-manifest once more:
+A bundle is verified in a fixed order, so a companion is only looked for
+once its catalog is known to be one, and only verified bytes decide that:
 
 ```mermaid
 flowchart TD
-    A[read manifest] --> B{valid format 2?}
+    M[read the manifest] --> V{format_version is 3?}
+    V -- no --> U[refuse: unsupported format version]
+    V -- yes --> C{closed format 3 shape?}
+    C -- no --> R[refuse]
+    C -- yes --> E[verify each files item and<br/>lifecycle against its digest]
+    E --> K[classify each files item by its kind]
+    K --> D[derive each expression catalog's<br/>.facts.json companion]
+    D --> X{digests keys are exactly<br/>the members and companions?}
+    X -- no --> R
+    X -- yes --> F[verify each companion's bytes]
+    F --> S[VerifiedSnapshot]
+    S --> P[prepare the profile:<br/>load_registrations, load_verified]
+```
+
+Each file is read once and hashed once. When a member or companion is
+missing or does not match its digest, the host may be in the middle of
+publishing (it replaces members first and the manifest last), so the reader
+reads the manifest once more:
+
+```mermaid
+flowchart TD
+    A[read manifest] --> B{valid format 3?}
     B -- no --> R[refuse]
-    B -- yes --> C[read and hash every member]
+    B -- yes --> C[read and hash every member<br/>and companion, in the order above]
     C --> D{all present and matching?}
     D -- yes --> S[VerifiedSnapshot]
     D -- no --> E[read manifest again]
@@ -318,22 +383,30 @@ problems (a bad path, a symbolic link, an unreadable file) refuse at once.
 
 What a snapshot records:
 
-- `files()` in authored order and `sorted_files()`, `lifecycle()`,
-  `functions()`: each a `BundleMember` with its manifest field
-  (`functions[0].facts`), the reference as written, its bundle-relative
-  path, and the line and column of its entry in the manifest.
-- `bytes()`: the verified bytes of every member, by bundle-relative path.
+- `files()` in authored order and `sorted_files()`, `lifecycle()`: each a
+  `BundleMember` with its manifest field (`files[3]`), the reference as
+  written, its bundle-relative path, and the line and column of its entry
+  in the manifest.
+- `companions()`: each expression catalog as a `BundleCompanion { catalog,
+  facts }`, in `files` order. The `facts` member's reference is the derived
+  spelling, and its field and position are its catalog's `files` entry.
+  `members()` iterates every member: the `files` items, `lifecycle`, then
+  the companions.
+- `bytes()`: the verified bytes of every member, companions included, by
+  bundle-relative path.
 - `revision()`: a digest of the host, version, format, sorted file paths,
-  lifecycle path, function pairs (sorted by catalog, then facts), and every
-  member's digest. Reordering `files`, reformatting the manifest, or
+  lifecycle path, each catalog's companion (sorted by catalog path), and
+  every member's digest. Reordering `files`, reformatting the manifest, or
   copying the bundle to another directory keeps it; changing any member
   byte changes it.
 - `manifest_hash()`: the digest of the manifest's own bytes, which does
   change with layout and comments.
 - `dependencies()` and `candidates()`: every file read (with the hash of
   its latest read) and every location looked at, from both attempts when
-  the reader retried. A refusal carries the same two lists, so a caller can
-  watch for a missing member to appear.
+  the reader retried. Every companion the manifest could imply is looked at
+  before any member is read, so it is a candidate even when the load stops
+  at another member. A refusal carries the same two lists, so a caller can
+  watch for a missing member or companion to appear.
 
 ### Admitting a manifest without reading its members
 
@@ -343,9 +416,19 @@ it is replacing listed, even when some of those files no longer match it
 `config::registration::bundle::admit_manifest(manifest, bytes)` judges the
 manifest's bytes by the same rules as `load_snapshot` (the closed envelope,
 the digest map, a single YAML document, and every member path) and returns
-an `AdmittedManifest` with `host()`, `version()`, and `members()`, or the
-same located `SnapshotRefusal`. It reads and probes no member, so the
-digests it lists are what the manifest claims, not what the files hold.
+an `AdmittedManifest` with `host()`, `version()`, `format_version()`, and
+`members()`, or the same located `SnapshotRefusal`. It reads and probes no
+member, so the digests it lists are what the manifest claims, not what the
+files hold. Without reading a member it cannot tell which `files` items are
+catalogs, so its companions are the `digests` keys that are the companion
+spelling of a `files` item.
+
+So that a publisher can retire what it published before, `admit_manifest`
+also admits a well-formed format 2 manifest; its `members()` then include
+each of the old `functions` pairs' `catalog` and `facts`. A format 2
+manifest that is malformed in any way is refused and so grants no cleanup.
+Nothing `admit_manifest` admits is loaded: a format 2 manifest only names
+the files it listed.
 
 Member paths are judged from their spelling alone: `.` and `..` are applied
 to the text, so `../host/schemas/b.yaml`, which `load_snapshot` follows out
@@ -372,8 +455,9 @@ context)` instead. It applies the same rules but resolves each member the
 way `load_snapshot` does: from the manifest's folder, and confined to it.
 For a bundle installed in `host/`, `../host/schemas/b.yaml` is admitted as
 `schemas/b.yaml`, and `../schemas/b.yaml`, which ends outside `host/`, is
-refused. It reads no member and checks no link, so the caller still decides
-how each `members()` entry is read. `claudine doctor` uses it this way before
+refused. It admits a format 3 manifest only, since an installed manifest of
+any other format is one the loader refuses. It reads no member and checks no
+link, so the caller still decides how each `members()` entry is read. `claudine doctor` uses it this way before
 reading the bundle without following links.
 
 ```rust
@@ -399,8 +483,9 @@ digest and still disagree with the schemas it was built from. Two
 functions give the same answer the loader gives:
 
 1. `config::registration::bundle::verify_read(manifest, bytes, context,
-   members)` takes the manifest's bytes and every member's bytes, keyed by
-   bundle path (`schemas/action.yaml`). It applies `load_snapshot`'s
+   members)` takes the manifest's bytes and every member's bytes, each
+   catalog's facts companion included, keyed by bundle path
+   (`schemas/action.yaml`). It applies `load_snapshot`'s
    admission, member resolution, and digest checks to them and returns a
    `VerifiedSnapshot` or the same located `SnapshotRefusal`. It reads and
    probes nothing, so the caller is responsible for how the bytes were
@@ -409,8 +494,9 @@ functions give the same answer the loader gives:
 2. `config::registration::load_verified(snapshot, context, owned)` prepares
    that snapshot exactly as a `register` entry's snapshot is prepared:
    every member classified and prepared, every declared type checked, the
-   catalog built, and the lifecycle and function artifacts checked against
-   it. It returns the `RegisteredHostProfile` or every refusal.
+   namespace catalog built, the lifecycle artifact checked against it, and
+   each expression catalog loaded with its facts companion. It returns the
+   `RegisteredHostProfile` or every refusal.
 
 ```rust
 use std::collections::BTreeMap;
@@ -438,9 +524,13 @@ Each `files` member is classified by its own `kind`:
 | `yaml-schema` | defines a YAML document kind, such as `kind: sequence` |
 | `namespace-schema` | declares one of the host's expression globals |
 | `schema` with a nonempty `types` table and no `$schema` | a library of reusable types the other files import |
+| `expression-schema` | declares functions the host's documents call, read with its [facts companion](#expression-catalogs-and-their-facts-companions) (see [Expression catalogs](#expression-catalogs)) |
 
 Any other kind, a `kind: schema` file that declares `$schema`, or a library
-with an empty `types` table refuses the registration at that member.
+with an empty `types` table refuses the registration at that member. A
+`kind: mutation-schema` file is refused at its `kind` with
+`host-defined actions are not supported`: a host can add functions to
+expressions, never lifecycle actions.
 
 **Each kind's top level is closed.** Before a file is prepared, its envelope
 is checked against the keys its kind allows, each with a value of the right
@@ -453,6 +543,7 @@ when it builds, so a file the build accepts is one registration accepts:
 | `yaml-schema` | `kind`, `description`, `categories`, `$schema`, `types` | `$schema` is a required mapping |
 | `namespace-schema` | `kind`, `namespace`, `description`, `$schema`, `types` | `namespace` is a required string; `$schema` a required mapping, `{}` allowed |
 | `schema` (types-only) | `kind`, `name`, `description`, `categories`, `$schema`, `types` | `types` is a required nonempty mapping; `$schema` absent or `null` |
+| `expression-schema` | `kind`, `description`, `categories`, `types` | `categories` is a required nonempty list and `types` a required nonempty mapping; `description` may be left out or empty, but not `null` |
 
 An optional field may be left out. Written as `null`, a `name`, a trigger's
 or namespace's `description`, and a trigger's or namespace's `types` are
@@ -570,6 +661,60 @@ generates its artifact with the same two functions. Editing a namespace file,
 or a library one imports, without regenerating the artifact refuses the host
 as stale. See [the lifecycle artifact](./lifecycle/host-artifact.md).
 
+### Expression catalogs
+
+An expression catalog lets a passive reader check calls to the host's own
+functions. Its format, the facts companion's fields, and the checks a
+catalog must pass are described in
+[Host Expression Functions](./host-functions.md); this section covers what
+registering one does.
+
+```yaml
+# ./functions/project.yaml (files[3]); its companion is ./functions/project.facts.json
+kind: expression-schema
+categories:
+    - Project -> Ask about the files and names of the project.
+types:
+    is_project_file: |-
+        function(
+            parameters(value: unknown | null);
+            returns(boolean);
+            narrows(value: file; true-implies);
+            category(Project);
+        ) -> Returns true when the value is text naming a Markdown file of the project.
+```
+
+- **Loaded once, from verified bytes.** Each catalog is read with
+  `HostFunctionCatalog::load` and its facts with
+  `HostFunctions::analysis_only_at`, once per installed revision. A catalog
+  that does not load, or a function whose facts are incomplete, refuses the
+  whole registration.
+- **Analysis only.** A registered function has a signature and facts but no
+  implementation. It is visible only while a document selected for that
+  host is analyzed: completion, binding diagnostics, and `md compose`'s
+  static call checks. A call that reaches evaluation fails with
+  `host function is_project_file() requires the host runtime`. Only the
+  host program itself, with its own Rust handlers, runs the function.
+- **One namespace per host.** Canonical names and the aliases in each
+  companion are compared without letter case across all of one host's
+  catalogs, in bundle-path order. A later claim is refused at its
+  declaration (the catalog's `types` key, or the alias in the companion),
+  and the earlier claim is attached as a related location:
+
+  ```yaml
+  # ./functions/project.yaml          # ./functions/tools.yaml
+  types:                              types:
+      is_project_file: …                  Is_Project_File: …   # refused: project.yaml claims it
+  ```
+
+  Another host may publish the same name or alias; each host's functions
+  are entered only for its own documents.
+- **Signatures only.** A catalog grants no permission, adds no lifecycle
+  action key, and changes no event; `when` is not available in a catalog.
+- **Registration is the only way in.** A catalog sitting in a schema root is
+  an ordinary YAML file you can validate and edit; it is never a
+  registration, and nothing discovers it there.
+
 ## Which documents belong to the host
 
 A host's schemas apply only to documents one of its triggers matches. There
@@ -621,12 +766,12 @@ flowchart TD
     R -- no --> W[dm.host.registration warning]
     R -- yes --> D{same canonical manifest<br/>already loaded?}
     D -- yes --> J[add the entry to that profile]
-    D -- no --> V{format 2, every member<br/>matches its digest?}
+    D -- no --> V{format 3, every member and<br/>companion matches its digest?}
     V -- no --> W
     V -- yes --> K[classify and prepare every file<br/>from the verified bytes]
     K --> I{every trigger admitted?}
     I -- no --> T[dm.host.identify_too_broad warning]
-    I -- yes --> A{triggers, YAML kinds, namespaces,<br/>lifecycle, functions all load?<br/>host matches lifecycle?}
+    I -- yes --> A{triggers, YAML kinds, namespaces,<br/>lifecycle, expression catalogs all load?<br/>no name claimed twice?<br/>host matches lifecycle?}
     A -- no --> W
     A -- yes --> P[publish RegisteredHostProfile]
 ```
@@ -660,13 +805,13 @@ The rules a load follows:
 
 - **All or nothing.** A profile is published only when every member loads:
   each trigger and its payload, each YAML kind definition, each library, the
-  namespace catalog, the lifecycle artifact, and each function catalog with
-  its facts. Otherwise the entry produces one or more warnings and nothing
-  of it is used: no partial globals, functions, lifecycle events, trigger
-  payloads, or YAML kinds.
+  namespace catalog, the lifecycle artifact, and each expression catalog with
+  its facts companion. Otherwise the entry produces one or more warnings and
+  nothing of it is used: no partial globals, functions, lifecycle events,
+  trigger payloads, or YAML kinds.
 - **Strict artifacts.** The lifecycle artifact must record the hash of the
-  namespace catalog it was generated for, and each facts artifact the hash
-  of its function catalog. A stale artifact, a missing one, a format 1
+  namespace catalog it was generated for, and each facts companion the hash
+  of its expression catalog. A stale artifact, a missing one, a format 1
   lifecycle artifact, an artifact that binds a root (an event's
   declaration or a host global) that neither Darkmatter nor a namespace
   declares, or a function whose facts are incomplete refuses the
@@ -675,7 +820,8 @@ The rules a load follows:
   artifact records.
 - **What to watch.** A profile's `dependencies()` lists every file read with
   the hash of its bytes, and `candidates()` every location looked at,
-  including a path a member referred to that is not listed. A refused entry
+  including a path a member referred to that is not listed and each
+  catalog's companion, present or not. A refused entry
   leaves the same locations in `LoadedRegistrations::watches`, so a caller
   (DMLS) sees a missing or broken file being repaired.
 - **One manifest, one load.** Entries that resolve to the same canonical
@@ -684,8 +830,10 @@ The rules a load follows:
 - **A content revision.** `revision()` is the snapshot's: two installs of one
   release have the same revision wherever they live, and in whatever order
   they list `files`; any member byte changes it.
-- **Bundle order never matters.** `triggers()` and `yaml_kinds()` are in
-  bundle-path order, whatever the order of `files`.
+- **Bundle order never matters.** `triggers()`, `yaml_kinds()`, and
+  `functions()` (one `HostFunctionSet` per catalog, with its `bundle_path`,
+  catalog and facts files, and analysis-only `functions`) are in bundle-path
+  order, whatever the order of `files`.
 
 A [`register` entry that is itself invalid](./configuration.md#errors) (not a
 file reference, or a URL) is already reported by the configuration snapshot
@@ -719,11 +867,15 @@ Markdown, and each copy's YAML kinds stay available.
 Every diagnostic but `dm.host.foreign_document` (a notice, below) and
 `dm.host.trigger_conflict` (an error, below) is a warning. It names the entry (the declaring file and
 its index in `register`), the failing manifest field when one failed
-(`lifecycle`, `files[1]`, `functions[0].facts`), and the file, line, and
-column of the problem when known: the configuration file, at the entry, when
-the manifest cannot be found, the manifest for its own shape or a member that
-is missing or does not match its digest, and the member file for a member
-that does not load.
+(`lifecycle`, `files[1]`; a facts companion is reported under its catalog's
+`files` entry), and the file, line, and column of the problem when known:
+the configuration file, at the entry, when the manifest cannot be found, the
+manifest for its own shape or a member that is missing or does not match its
+digest, and the member file for a member that does not load. When the problem
+involves a second place (the earlier claim of a function name, or the
+built-in a catalog name reuses), `RegistrationDiagnostic::related` lists it
+with its own file, line, and column, and DMLS attaches it as related
+information.
 
 A member is shown by its display label when it has one. A trigger or
 types-only library that declares a valid `name` is written `name (path)`
@@ -781,8 +933,13 @@ warning is about the whole file.
 | a broken declaration in a file another member imports | the declaration, in the imported file; the message names the importer |
 | a file another member imports that does not load at all (not valid YAML, no or an unknown `kind`) | the imported file, at the parser's position when the YAML does not parse; the message names the importer |
 | a member that is not UTF-8 text | its entry in the manifest |
+| a manifest of another format version | its `format_version`, or the format 1 field a manifest without one writes |
+| an expression catalog whose companion has no digest, is also listed in `files`, or is shared with another catalog | the catalog's `files` entry in the manifest; the message names the expected companion |
+| a `digests` key that names no member and no derived companion | that key in the manifest (`digests.<key>`) |
+| a `kind: mutation-schema` member | its `kind` |
 | a lifecycle or facts artifact field the reader refuses (a stale `catalog_hash`, a wrong type, an unknown field, a `host_globals` name the catalog lacks) | that field in the JSON; a missing field at the object that lacks it; text that is not JSON at the parser's position |
-| a function catalog signature that does not load | the rejected token in the catalog |
+| an expression catalog that does not load | the rejected token in the catalog; a conflict's other declaration (a built-in's, for a reused built-in name) is a related location |
+| a function name or alias another catalog of the same host already claims | the later claim: the catalog's `types` key, or the alias in its companion; the earlier claim is a related location |
 | a manifest `host` that differs from the lifecycle artifact's, or two manifests claiming one host | the manifest's `host` |
 
 For example, a library a trigger imports declares an unknown type:
@@ -877,7 +1034,7 @@ also report the selection warnings of the documents they judge.
 
 | Code | When |
 | --- | --- |
-| `dm.host.registration` | a manifest or member is missing, invalid, or remote; a member does not match its digest; a member has an unsupported `kind` or imports outside the bundle; a namespace is reserved or declared twice; two files share a `name`; a format 1 manifest is read; an artifact is refused; the host name differs from the lifecycle artifact's; or two manifests claim one host with different content (reported for each run, and again for a document such a host identifies) |
+| `dm.host.registration` | a manifest or member is missing, invalid, or remote; a member does not match its digest; a member has an unsupported `kind` or imports outside the bundle; a namespace is reserved or declared twice; two files share a `name`; a manifest of another format version is read; an expression catalog's companion is missing, has no digest, or describes incomplete functions; a `kind: mutation-schema` member is listed; two of a host's catalogs claim one function name or alias; an artifact is refused; the host name differs from the lifecycle artifact's; or two manifests claim one host with different content (reported for each run, and again for a document such a host identifies) |
 | `dm.host.identify_too_broad` | a registered trigger could match on keys `md` owns alone |
 | `dm.host.ambiguous` | two or more hosts' triggers match the same document; it is analyzed as an `md` document |
 | `dm.host.trigger_conflict` | an error on the document: two of the host's triggers that match it declare a property, or the root rules, in ways that cannot be layered as one (see [When two triggers declare one property](#when-two-triggers-declare-one-property)); it names the host, the property or "the root rules", and both trigger files, each with its display name when it declares one |
@@ -996,7 +1153,7 @@ use darkmatter::config::registration::{load_embedded, md_owned_names};
 // `manifest` and each member's bytes are compiled into the host binary.
 let members: BTreeMap<String, Arc<[u8]>> = BTreeMap::from([
     ("schemas/widget.yaml".to_string(), Arc::from(&WIDGET[..])),
-    // …every member the manifest lists
+    // …every member the manifest lists, and each expression catalog's companion
 ]);
 let snapshot = VerifiedSnapshot::from_embedded("acme", "manifest.yaml", MANIFEST, &members)?;
 // `prepared` may serve a payload the host prepared ahead of time, by bundle
@@ -1004,10 +1161,11 @@ let snapshot = VerifiedSnapshot::from_embedded("acme", "manifest.yaml", MANIFEST
 let profile = load_embedded(snapshot, md_owned_names(), &|_path| None)?;
 ```
 
-- **Nothing is read from disk.** `from_embedded` checks every listed member
-  against its manifest digest from the supplied bytes, under a virtual root
-  `<acme>`. A missing member or a digest mismatch refuses it, as for an
-  installed bundle. The profile's `dependencies()` and `candidates()` are
+- **Nothing is read from disk.** `from_embedded` verifies the supplied bytes
+  in the same order as an installed bundle (members, then derived
+  companions, then the exact `digests` set), under a virtual root `<acme>`.
+  A missing member or a digest mismatch refuses it, as for an installed
+  bundle. The profile's `dependencies()` and `candidates()` are
   empty.
 - **Embedded identity.** Each trigger's origin is
   `TriggerSource::Embedded { bundle: "acme", name: "schemas/widget.yaml" }`
@@ -1372,9 +1530,14 @@ flowchart TD
   reading one, in a shared event, the frontmatter, or the body, fails as any
   unavailable global does, with the reason `dm.host.runtime_only`. `md` never
   makes up a value.
-- **Host functions.** The host's functions are known for typing, so a call is
-  checked against its signature, but they have no implementation in `md`: a
-  call that is evaluated fails.
+- **Host functions.** The functions of the host's
+  [expression catalogs](#expression-catalogs) are entered for this document
+  only, so a call is checked against its signature and its static problems
+  are reported, but they have no implementation in `md`: a call that is
+  evaluated fails with `host function <name>() requires the host runtime`.
+  A document the root transcludes sees the root's host functions, whichever
+  thread composes it. A document `md` owns, or one another host identifies,
+  does not see them.
 - **The notice.** One `dm.host.foreign_document` notice per run names the host
   and its command: on stderr for a formatted output, in `diagnostics` for a
   data output, whose stderr stays empty. Only the root document decides it:
@@ -1405,8 +1568,10 @@ the one host [selection](#selecting-a-documents-host) chooses for it, and
 every editor feature reads that same choice: schema validation (with the
 registered host's triggers [layered](#layering) in), completion and hover of
 the host's globals, the host's lifecycle stacks (its events, renames, and
-verbs), and the typing of calls to the host's functions. No feature looks
-for host catalogs or registrations on its own.
+verbs), and the completion, typing, and binding diagnostics of calls to the
+functions of the host's [expression catalogs](#expression-catalogs). No
+feature looks for host catalogs or registrations on its own, so a document
+that selects no host, or another host, is offered none of them.
 
 For the Claudine-shaped `relay` host registered in `~/.darkmatter.yaml`, a
 document anywhere (inside the host's package area or not) that writes
@@ -1478,8 +1643,9 @@ DMLS watches everything a registration is loaded from, wherever it lives:
 
 - both configuration files, `~/.darkmatter.yaml` and
   `<repo-root>/.darkmatter.yaml`, whether or not they exist;
-- every manifest and member, YAML and JSON alike, every unlisted path a
-  member refers to, and the folders they are in, so a member that is missing
+- every manifest and member, YAML and JSON alike, each expression
+  catalog's derived facts companion, every unlisted path a member refers
+  to, and the folders they are in, so a member or companion that is missing
   is seen when it is created;
 - the place a `register` entry points at when no manifest is there yet;
 - the repository's `HEAD` and the branch it names, because the repository

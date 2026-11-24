@@ -163,6 +163,7 @@ mod host_registration;
 mod host_registration_snapshot;
 mod host_registration_locations;
 mod host_registration_labels;
+mod host_registration_companions;
 mod host_selection;
 mod foreign_document_compose;
 #[cfg(feature = "effects-instrumentation")]
@@ -359,6 +360,7 @@ mod test_layout;
 mod transcluded_shell_failure;
 mod tree_features_characterization;
 mod kind_semantic_checks;
+mod callable_catalog_validation;
 mod trigger_discovery_recovery;
 mod yaml_document_loading;
 mod yaml_document_selection;

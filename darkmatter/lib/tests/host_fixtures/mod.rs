@@ -1,4 +1,4 @@
-//! A temporary home, working directory, and valid format 2 `darkmatter-host`
+//! A temporary home, working directory, and valid format 3 `darkmatter-host`
 //! bundle (the `acme` host, or the Claudine-shaped `relay` host) for
 //! registration and selection tests. Nothing is read from the process or the
 //! repository.
@@ -80,7 +80,7 @@ $schema:
 ";
 
 pub const FUNCTIONS: &str = "\
-kind: schema
+kind: expression-schema
 categories:
     - Acme -> Ask the acme host.
 types:
@@ -246,8 +246,9 @@ pub fn relay_lifecycle_artifact() -> String {
     lifecycle_artifact(&options, &[], &catalog_hash_of(&namespaces))
 }
 
-/// A format 2 bundle: its manifest's fields and its members' texts, by
-/// bundle-relative path.
+/// A format 3 bundle: its manifest's fields and its members' texts, by
+/// bundle-relative path. An expression catalog is a `files` member; its
+/// facts companion is a member the manifest digests but does not list.
 #[derive(Debug, Clone)]
 pub struct Bundle {
     pub host: String,
@@ -255,15 +256,21 @@ pub struct Bundle {
     /// The `files` members, in authored order.
     pub files: Vec<String>,
     pub lifecycle: String,
-    /// The `functions` pairs (catalog, facts).
-    pub functions: Vec<(String, String)>,
     /// Every member's text, by bundle-relative path.
     pub members: BTreeMap<String, String>,
 }
 
+/// The facts companion of the expression catalog at bundle path `catalog`:
+/// its last `.yaml`/`.yml` extension replaced by `.facts.json`.
+pub fn companion_of(catalog: &str) -> String {
+    let stem = catalog.strip_suffix(".yaml").or_else(|| catalog.strip_suffix(".yml")).expect("a YAML catalog");
+    format!("{stem}.facts.json")
+}
+
 impl Bundle {
     /// The valid `acme` bundle: two triggers sharing a library, the `run`
-    /// namespace, a lifecycle artifact, and one function pair.
+    /// namespace, a lifecycle artifact, and one expression catalog with its
+    /// companion.
     pub fn acme() -> Self {
         Self::acme_named("acme")
     }
@@ -288,11 +295,16 @@ impl Bundle {
         Self {
             host: host.to_string(),
             version: "1.2.0".to_string(),
-            files: ["schemas/widget.yaml", "schemas/gadget.yaml", "schemas/library.yaml", "schemas/run.yaml"]
-                .map(str::to_string)
-                .to_vec(),
+            files: [
+                "schemas/widget.yaml",
+                "schemas/gadget.yaml",
+                "schemas/library.yaml",
+                "schemas/run.yaml",
+                "schemas/functions.yaml",
+            ]
+            .map(str::to_string)
+            .to_vec(),
             lifecycle: "schemas/globals.lifecycle.json".to_string(),
-            functions: vec![("schemas/functions.yaml".to_string(), "schemas/functions.facts.json".to_string())],
             members,
         }
     }
@@ -308,9 +320,8 @@ impl Bundle {
         Self {
             host: "relay".to_string(),
             version: "0.3.0".to_string(),
-            files: vec!["schemas/relay.yaml".to_string(), "schemas/seq.yaml".to_string()],
+            files: vec!["schemas/relay.yaml".to_string(), "schemas/seq.yaml".to_string(), "schemas/functions.yaml".to_string()],
             lifecycle: "schemas/globals.lifecycle.json".to_string(),
-            functions: vec![("schemas/functions.yaml".to_string(), "schemas/functions.facts.json".to_string())],
             members,
         }
     }
@@ -340,15 +351,23 @@ impl Bundle {
         self
     }
 
-    /// Every member path the manifest lists: `files`, the lifecycle
-    /// artifact, then each function pair.
+    /// The `files` members that are expression catalogs.
+    pub fn catalogs(&self) -> Vec<String> {
+        self.files
+            .iter()
+            .filter(|path| {
+                self.members.get(*path).is_some_and(|text| text.lines().any(|line| line.trim() == "kind: expression-schema"))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Every member path the manifest digests: `files`, the lifecycle
+    /// artifact, then each catalog's companion.
     pub fn listed(&self) -> Vec<String> {
         let mut listed = self.files.clone();
         listed.push(self.lifecycle.clone());
-        for (catalog, facts) in &self.functions {
-            listed.push(catalog.clone());
-            listed.push(facts.clone());
-        }
+        listed.extend(self.catalogs().iter().map(|catalog| companion_of(catalog)));
         listed
     }
 
@@ -385,7 +404,7 @@ impl Bundle {
 /// need not match the members.
 pub fn manifest_text(bundle: &Bundle, digests: &BTreeMap<String, String>) -> String {
     let mut text = format!(
-        "kind: darkmatter-host\nformat_version: 2\nhost: {}\nversion: {}\nfiles:\n",
+        "kind: darkmatter-host\nformat_version: 3\nhost: {}\nversion: {}\nfiles:\n",
         bundle.host, bundle.version
     );
     if bundle.files.is_empty() {
@@ -395,14 +414,6 @@ pub fn manifest_text(bundle: &Bundle, digests: &BTreeMap<String, String>) -> Str
         text.push_str(&format!("    - ./{file}\n"));
     }
     text.push_str(&format!("lifecycle: ./{}\n", bundle.lifecycle));
-    if bundle.functions.is_empty() {
-        text.push_str("functions: []\n");
-    } else {
-        text.push_str("functions:\n");
-        for (catalog, facts) in &bundle.functions {
-            text.push_str(&format!("    - catalog: ./{catalog}\n      facts: ./{facts}\n"));
-        }
-    }
     text.push_str("digests:\n");
     for (path, digest) in digests {
         text.push_str(&format!("    ./{path}: \"{digest}\"\n"));

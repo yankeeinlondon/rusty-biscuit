@@ -40,7 +40,6 @@ fn repository(process: &CliProcessFixture, bundle: &[(&str, &str)], documents: &
         version: "0.0.1".to_string(),
         files: Vec::new(),
         lifecycle: "schemas/globals.lifecycle.json".to_string(),
-        functions: Vec::new(),
         members: Default::default(),
     };
     for (name, text) in bundle {

@@ -10,7 +10,7 @@
 //! graph, provider registry) persists across loops, as in a running server.
 //! The document is typed by Claudine's trigger files from the frozen bundle
 //! in `darkmatter/lib/benches/fixtures/claudine-schemas/`, and its events
-//! and globals are Claudine's through an explicitly registered format 2 host
+//! and globals are Claudine's through an explicitly registered format 3 host
 //! bundle built from the frozen lifecycle artifact and host catalog (the L1
 //! tests' `claudine_host` fixture), so every loop analyzes a registered
 //! host's document.

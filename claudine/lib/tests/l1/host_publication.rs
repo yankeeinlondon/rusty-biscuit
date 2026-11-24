@@ -393,7 +393,7 @@ fn host_publication_removes_nothing_an_invalid_or_escaping_manifest_names() {
         .replace("files:\n", "files:\n    - \"./../outside.yaml\"\n")
         .replace("digests:\n", &format!("digests:\n    \"./../outside.yaml\": \"{}\"\n", "0".repeat(64)));
 
-    for previous in [escaping, text.replace("format_version: 2", "format_version: 1").replace("files:\n", "files:\n    - ./schemas/stale.yaml\n")] {
+    for previous in [escaping, text.replace("format_version: 3", "format_version: 1").replace("files:\n", "files:\n    - ./schemas/stale.yaml\n")] {
         std::fs::write(&manifest, previous).unwrap();
 
         let outcome = publish(&home.home(), inventory).unwrap();
@@ -582,7 +582,7 @@ fn host_publication_a_previous_manifest_that_fails_admission_retires_nothing() {
         ("version null", Box::new(|t| replace_line(&t, "version:", "version: null"))),
         ("version numeric", Box::new(|t| replace_line(&t, "version:", "version: 7"))),
         ("version omitted", Box::new(|t| replace_line(&t, "version:", ""))),
-        ("format_version wrong", Box::new(|t| replace_line(&t, "format_version:", "format_version: 3"))),
+        ("format_version wrong", Box::new(|t| replace_line(&t, "format_version:", "format_version: 4"))),
         ("digests null", Box::new(|t| format!("{}digests: null\n", t.split("digests:\n").next().unwrap()))),
         ("digest key absent", Box::new(|t| replace_line(&t, RETIRED_DIGEST_KEY, ""))),
         ("digest value null", Box::new(|t| replace_line(&t, RETIRED_DIGEST_KEY, &format!("{RETIRED_DIGEST_KEY} null")))),

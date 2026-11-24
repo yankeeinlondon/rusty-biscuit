@@ -279,9 +279,11 @@ pub fn run_compose(
         let shared = darkmatter::lifecycle::md_host::shared_event_keys(profile.lifecycle().registry());
         request.report_host_diagnostics(&[profile.foreign_document_notice(&lifecycle_source, &shared)]);
     }
-    // The host's functions are declared for this thread's analysis and
-    // typing only: an analysis-only set has no handler, so a call fails when
-    // evaluated, as any failing function does.
+    // The selected host's functions are declared for analysis and typing
+    // only, for the rest of this request (reference check, call check,
+    // lifecycle, and composition; transcluded children inherit them): an
+    // analysis-only set has no handler, so a call fails when evaluated with
+    // `host function <name>() requires the host runtime`.
     let _host_functions: Vec<_> = foreign
         .iter()
         .flat_map(|profile| profile.functions().iter().map(|set| set.functions.enter()))

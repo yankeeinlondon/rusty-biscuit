@@ -470,8 +470,14 @@ fn tail(text: &str, from: &str, to: &str) -> String {
 fn context_block(texts: &Texts, name: &str, member: impl Fn(&str) -> String) -> String {
     let partial = &texts.0[3];
     let body = &partial[partial.find("    context:\n").expect("context type") + "    context:\n".len()..];
-    let members: String =
-        body.lines().filter(|line| !line.trim().is_empty()).map(|line| format!("{}\n", member(line))).collect();
+    // Inlined in the catalog, the partial's local `recent-commits` helper is
+    // named by its file.
+    let members: String = body
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.replacen("recent-commits(generated; required) ->", "recent-commits(generated; required)@./partials/context-variables.yaml ->", 1))
+        .map(|line| format!("{}\n", member(&line)))
+        .collect();
     format!("    {name}:\n{members}")
 }
 

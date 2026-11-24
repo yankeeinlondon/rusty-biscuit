@@ -1,4 +1,4 @@
-//! `darkmatter::config::registration`: loading format 2 `darkmatter-host`
+//! `darkmatter::config::registration`: loading format 3 `darkmatter-host`
 //! bundles into passive host profiles. Each case makes one edit to the valid
 //! `acme` bundle: the classification of every `files` member by its own
 //! `kind`, the all-or-nothing refusals of each member, registration-wide
@@ -51,14 +51,18 @@ fn refused_at(loaded: &LoadedRegistrations, file: &Path, member: &str) -> Regist
 }
 
 /// The fixture with the `acme` bundle plus the extra `files` member
-/// `schemas/extra.yaml` (`files[4]`) holding `text`.
+/// `schemas/extra.yaml` (`files[5]`, after the expression catalog) holding `text`.
 fn with_extra(text: &str) -> Fixture {
     let fixture = Fixture::new();
     fixture.install_bundle("host", &Bundle::acme().with_file("schemas/extra.yaml", text));
     fixture
 }
 
-const EXTRA_MEMBER: &str = "files[4]";
+const EXTRA_MEMBER: &str = "files[5]";
+
+/// The `acme` bundle's expression catalog entry, which its facts companion
+/// is reported under.
+const CATALOG_MEMBER: &str = "files[4]";
 
 /// Every bundle-relative member path of the `acme` bundle, manifest first.
 fn acme_paths() -> Vec<String> {
@@ -130,16 +134,14 @@ fn a_loaded_profile_watches_its_manifest_and_every_member() {
     }
 }
 
-/// `files: []` and `functions: []` are legal empty inventories: a host with
-/// no namespaces has an empty catalog, and its artifact records that
-/// catalog's hash.
+/// `files: []` is a legal empty inventory: a host with no namespaces has an
+/// empty catalog, and its artifact records that catalog's hash.
 #[test]
-fn a_host_with_no_files_and_no_functions_loads() {
+fn a_host_with_no_files_loads() {
     let fixture = Fixture::new();
     let lifecycle = "schemas/globals.lifecycle.json".to_string();
     let bundle = Bundle {
         files: Vec::new(),
-        functions: Vec::new(),
         members: [(lifecycle.clone(), lifecycle_artifact_declaring("acme", &[], &catalog_hash_of(&[])))].into(),
         lifecycle,
         ..Bundle::acme()
@@ -180,8 +182,53 @@ fn a_format_1_manifest_is_refused_with_the_upgrade_warning_and_watched() {
     let diagnostic = refused(&loaded);
     assert_eq!((diagnostic.code, &diagnostic.file), (HOST_REGISTRATION_CODE, &fixture.manifest()));
     assert_eq!(diagnostic.line, Some(2), "at `format_version`: {diagnostic:#?}");
-    assert!(diagnostic.message.contains("format 2") && diagnostic.message.contains("`acme setup`"), "{}", diagnostic.message);
+    assert!(
+        diagnostic.message.ends_with(
+            "unsupported host registration format version 1; update Darkmatter and the host tool, then republish the registration"
+        ),
+        "{}",
+        diagnostic.message
+    );
     assert_eq!(loaded.watches, [fixture.manifest()]);
+}
+
+/// The frozen format 2 manifest Claudine last wrote, installed where Claudine
+/// installs it (`~/.claudine/registrations/darkmatter/`), is refused at its
+/// `format_version` with the upgrade instruction, and stays watched.
+#[test]
+fn the_frozen_format_2_install_is_refused_with_its_version_and_watched() {
+    let frozen = biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_registration_v2/darkmatter");
+    let fixture = Fixture::new();
+    let installed = "home/.claudine/registrations/darkmatter";
+    let mut pending = vec![frozen.clone()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let relative = path.strip_prefix(&frozen).unwrap().to_string_lossy().replace('\\', "/");
+                fixture.write(&format!("{installed}/{relative}"), &std::fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+    let manifest = fixture.path(&format!("{installed}/manifest.yaml"));
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    let line = text.lines().position(|line| line.starts_with("format_version:")).unwrap() + 1;
+
+    let loaded = fixture.load_references(&["../home/.claudine/registrations/darkmatter/manifest.yaml"]);
+
+    let diagnostic = refused(&loaded);
+    assert_eq!((diagnostic.code, &diagnostic.file), (HOST_REGISTRATION_CODE, &manifest));
+    assert_eq!((diagnostic.line, diagnostic.column), (Some(line), Some("format_version: ".len() + 1)), "{diagnostic:#?}");
+    assert!(
+        diagnostic.message.ends_with(
+            "unsupported host registration format version 2; update Darkmatter and the host tool, then republish the registration"
+        ),
+        "{}",
+        diagnostic.message
+    );
+    assert!(loaded.watches.contains(&manifest), "{:#?}", loaded.watches);
 }
 
 #[test]
@@ -436,7 +483,8 @@ fn a_bad_or_stale_facts_artifact_refuses_the_registration() {
     for facts in ["{}", "not json", &facts_artifact().replace("\"catalog_hash\": \"", "\"catalog_hash\": \"0")] {
         let fixture = Fixture::new();
         fixture.write_member("host", "schemas/functions.facts.json", facts);
-        refused_at(&fixture.load(), &fixture.path("host/schemas/functions.facts.json"), "functions[0].facts");
+        let diagnostic = refused_at(&fixture.load(), &fixture.path("host/schemas/functions.facts.json"), CATALOG_MEMBER);
+        assert!(!diagnostic.message.contains("imported by"), "a companion is its catalog's entry: {}", diagnostic.message);
     }
 }
 

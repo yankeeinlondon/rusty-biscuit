@@ -3,9 +3,14 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Value, json};
 
 use super::*;
+
+/// [`load_catalog`] of an expression catalog at `path`.
+fn load(source: &str, path: impl AsRef<Path>, example_files: &[(&str, &str)]) -> Result<FunctionCatalog, CatalogError> {
+    load_catalog(source, path.as_ref(), StandaloneSchemaEnvelope::ExpressionSchema, example_files)
+}
 use crate::markdown::compose::expression::{EvaluationLookup, ResolutionContext, evaluate, parse};
 
-const FIXTURE: &str = r#"kind: schema
+const FIXTURE: &str = r#"kind: expression-schema
 categories:
     - Math -> Numbers.
     - Logical
@@ -49,7 +54,7 @@ types:
 "#;
 
 fn fixture() -> FunctionCatalog {
-    load_catalog(FIXTURE, "fixture.yaml", EXAMPLE_FILES).expect("the fixture loads")
+    load(FIXTURE, "fixture.yaml", EXAMPLE_FILES).expect("the fixture loads")
 }
 
 fn by_signature<'a>(catalog: &'a FunctionCatalog, signature: &str) -> &'a ExpressionFunctionDescriptor {
@@ -63,15 +68,16 @@ fn by_signature<'a>(catalog: &'a FunctionCatalog, signature: &str) -> &'a Expres
 #[test]
 fn a_document_without_categories_does_not_load() {
     let source = FIXTURE.replace("categories:\n    - Math -> Numbers.\n    - Logical\n", "");
-    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
-    assert!(matches!(error, CatalogError::Invalid { .. }), "{error:?}");
+    let error = load(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
+    // The kind's definition requires the list; the shared reader refuses it.
+    assert!(matches!(error, CatalogError::Schema(_)), "{error:?}");
     assert!(error.to_string().contains("categories"), "{error}");
 }
 
 #[test]
 fn an_unlisted_category_is_the_standalone_parsers_error() {
     let source = FIXTURE.replacen("category(Math);", "category(Geometry);", 1);
-    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
+    let error = load(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
     assert!(matches!(error, CatalogError::Schema(_)), "{error:?}");
     assert!(error.to_string().contains("Geometry"), "{error}");
 }
@@ -87,36 +93,41 @@ fn semantically_duplicate_overloads_fail_catalog_load() {
         "            function(parameters(y: ip-like); returns(string); category(Logical)) -> Two.",
         1,
     );
-    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
+    let error = load(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
     assert!(matches!(error, CatalogError::Schema(_)), "{error:?}");
     assert!(error.to_string().contains("the same binding contract"), "{error}");
 }
 
-/// Ruling R5: the catalog loader, unlike a general schema file, requires
-/// `kind: schema` and never reads a null entry as the `null` type.
+/// Ruling R5: the catalog reader requires the expected callable kind; a
+/// general schema, another kind, or the other callable kind is refused.
 #[test]
 fn a_missing_null_or_wrong_kind_does_not_load() {
-    for kind in ["", "kind: null\n", "kind: ~\n", "kind: \"\"\n", "kind: trigger\n", "kind: 5\n"] {
-        let source = FIXTURE.replacen("kind: schema\n", kind, 1);
-        let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
-        assert!(error.to_string().contains("kind: schema"), "{kind:?}: {error}");
+    for kind in ["", "kind: null\n", "kind: ~\n", "kind: \"\"\n", "kind: trigger\n", "kind: 5\n", "kind: schema\n", "kind: mutation-schema\n"] {
+        let source = FIXTURE.replacen("kind: expression-schema\n", kind, 1);
+        let error = load(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
+        assert!(error.to_string().contains("kind: expression-schema") || matches!(error, CatalogError::Schema(_)), "{kind:?}: {error}");
     }
-    let duplicate = FIXTURE.replacen("kind: schema\n", "kind: schema\nkind: schema\n", 1);
-    let trailing = format!("{FIXTURE}---\nkind: schema\n");
+    let duplicate = FIXTURE.replacen("kind: expression-schema\n", "kind: expression-schema\nkind: expression-schema\n", 1);
+    let trailing = format!("{FIXTURE}---\nkind: expression-schema\n");
     let garbage = format!("{FIXTURE}  ] not yaml\n");
     for source in [duplicate, trailing, garbage] {
-        assert!(load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).is_err(), "{source}");
+        assert!(load(&source, "fixture.yaml", EXAMPLE_FILES).is_err(), "{source}");
     }
 }
 
+/// A bare null `types` entry is refused by the shared reader, located at
+/// the entry; a quoted `"null"` helper is the null type.
 #[test]
 fn an_entry_written_as_null_does_not_load() {
     for value in [" null", " ~", ""] {
         let source = FIXTURE.replacen("    ip-like: string\n", &format!("    ip-like: string\n    round_down:{value}\n"), 1);
-        let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
-        assert!(matches!(error, CatalogError::Invalid { .. }), "{value:?}: {error:?}");
-        assert!(error.to_string().contains("`types.round_down` is null, not a function signature"), "{value:?}: {error}");
+        let error = load(&source, "fixture.yaml", EXAMPLE_FILES).unwrap_err();
+        assert!(matches!(error, CatalogError::Schema(_)), "{value:?}: {error:?}");
+        assert!(error.to_string().contains("round_down"), "{value:?}: {error}");
     }
+    let quoted = FIXTURE.replacen("    ip-like: string\n", "    ip-like: string\n    nothing: \"null\"\n", 1);
+    let catalog = load(&quoted, "fixture.yaml", EXAMPLE_FILES).expect("a quoted null helper is the null type");
+    assert!(catalog.named_type("nothing").is_some());
 }
 
 #[test]
@@ -225,8 +236,8 @@ fn examples_keep_their_authored_text_and_files_are_embedded() {
     };
     assert_eq!((&**path, &**invocation, &**returns), ("function-examples/as_tsv.yaml", r#"as_tsv(["a", "b", "c"])"#, "a\tb\tc"));
 
-    let error = load_catalog(FIXTURE, "fixture.yaml", &[]).unwrap_err();
-    assert!(error.to_string().contains("is not embedded"), "{error}");
+    let error = load(FIXTURE, "fixture.yaml", &[]).unwrap_err();
+    assert!(error.to_string().contains("is not one of this catalog's embedded examples"), "{error}");
 }
 
 /// `Described::example` is a view of the first inline call example: a
@@ -238,7 +249,7 @@ fn the_described_example_is_a_view_of_the_first_inline_call() {
     use crate::effects::EFFECT_DESCRIPTORS;
     use crate::markdown::compose::expression::semantics::OPERATOR_DESCRIPTORS;
 
-    const SOURCE: &str = r#"kind: schema
+    const SOURCE: &str = r#"kind: expression-schema
 categories:
     - Text
 types:
@@ -269,7 +280,7 @@ types:
     bare: |-
         function(parameters(x: string); returns(string); category(Text)) -> Bare.
 "#;
-    let catalog = load_catalog(SOURCE, "fixture.yaml", EXAMPLE_FILES).expect("the fixture loads");
+    let catalog = load(SOURCE, "fixture.yaml", EXAMPLE_FILES).expect("the fixture loads");
 
     let shown = by_signature(&catalog, "shown(text)").example().expect("an inline example");
     assert_eq!((shown.invocation, shown.result), (r#"shown("a")"#, r#""a""#));
@@ -313,7 +324,7 @@ types:
 fn a_loaded_catalog_outlives_the_text_it_was_loaded_from() {
     let source = FIXTURE.to_string();
     let path = "fixture.yaml".to_string();
-    let catalog = load_catalog(&source, &path, EXAMPLE_FILES).expect("the fixture loads");
+    let catalog = load(&source, &path, EXAMPLE_FILES).expect("the fixture loads");
     drop((source, path));
 
     let min = by_signature(&catalog, "min(a, b)");
@@ -750,7 +761,7 @@ fn with_narrows(first: &str, second: Option<&str>) -> String {
 /// since the schema grammar applies the declaration rules.
 #[test]
 fn overloads_must_agree_on_the_declared_fact() {
-    let load = |source: &str| load_catalog(source, "fixture.yaml", EXAMPLE_FILES);
+    let load = |source: &str| load(source, "fixture.yaml", EXAMPLE_FILES);
     load(&with_narrows("narrows(x: string; true-iff)", Some("narrows(x: string; true-iff)"))).expect("control: same fact");
     for (cell, source) in [
         ("absent on the second", with_narrows("narrows(x: string; true-iff)", None)),
@@ -772,7 +783,7 @@ fn equivalent_target_spellings_agree() {
         "narrows(x: string(min(1); max(5)); true-implies)",
         Some("narrows(x: string(max(5); min(1)); true-implies)"),
     );
-    load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect("equivalent spellings agree");
+    load(&source, "fixture.yaml", EXAMPLE_FILES).expect("equivalent spellings agree");
 }
 
 /// A clause naming a parameter only the later overload declares is not
@@ -780,14 +791,14 @@ fn equivalent_target_spellings_agree() {
 #[test]
 fn a_clause_naming_a_parameter_the_overload_omits_fails_the_load() {
     let source = with_narrows("narrows(x: string; true-iff)", Some("narrows(y: string; true-implies)"));
-    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect_err("y is not declared");
+    let error = load(&source, "fixture.yaml", EXAMPLE_FILES).expect_err("y is not declared");
     assert!(error.to_string().contains("does not declare") || error.to_string().contains("different"), "{error}");
     let only_later = FIXTURE.replacen(
         "function(parameters(x: number, y: number); returns(boolean); category(Logical)) -> Two.",
         "function(parameters(x: number, y: number); returns(boolean); narrows(y: number; true-implies); category(Logical)) -> Two.",
         1,
     );
-    let error = load_catalog(&only_later, "fixture.yaml", EXAMPLE_FILES).expect_err("only the later overload declares");
+    let error = load(&only_later, "fixture.yaml", EXAMPLE_FILES).expect_err("only the later overload declares");
     assert!(error.to_string().contains("`is_string`"), "{error}");
 }
 
@@ -796,7 +807,7 @@ fn a_clause_naming_a_parameter_the_overload_omits_fails_the_load() {
 fn duplicate_binding_contracts_stay_duplicates_despite_differing_clauses() {
     let source = with_narrows("narrows(x: string; true-iff)", Some("narrows(x; false-implies)"))
         .replacen("parameters(x: number, y: number)", "parameters(x: string)", 1);
-    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect_err("same contract");
+    let error = load(&source, "fixture.yaml", EXAMPLE_FILES).expect_err("same contract");
     assert!(error.to_string().contains("the same binding contract"), "{error}");
 }
 
@@ -808,8 +819,8 @@ fn callback_example_arrows_preserve_nested_calls_patterns_and_quoted_text() {
         (r#"map({z: "=>", a: "->"}, {key, value} => value)"#, json!(["=>", "->"])),
         ("map([[1, 2]], xs => filter(xs, n -> n > 1))", json!([[2]])),
     ] {
-        let source = format!("kind: schema\ncategories: [Collection]\ntypes:\n  demo: |-\n    function(parameters(void); returns(unknown); category(Collection); example({call} => {expected}))\n");
-        let catalog = load_catalog(&source, "callback-example.yaml", &[]).unwrap();
+        let source = format!("kind: expression-schema\ncategories: [Collection]\ntypes:\n  demo: |-\n    function(parameters(void); returns(unknown); category(Collection); example({call} => {expected}))\n");
+        let catalog = load(&source, "callback-example.yaml", &[]).unwrap();
         let FunctionExample::Call { call: parsed, expected: parsed_expected, result, .. } = &catalog.descriptors[0].examples[0] else {
             panic!("an inline example");
         };
@@ -822,8 +833,8 @@ fn callback_example_arrows_preserve_nested_calls_patterns_and_quoted_text() {
         ("filter([1, 2, 3], n => n > 1) => n", "must be a literal"),
         ("filter([1, 2, 3], n => n > 1) =>", "must be a literal"),
     ] {
-        let source = format!("kind: schema\ncategories: [Collection]\ntypes:\n  demo: |-\n    function(parameters(void); returns(unknown); category(Collection); example({example}))\n");
-        let error = load_catalog(&source, "callback-example.yaml", &[]).unwrap_err().to_string();
+        let source = format!("kind: expression-schema\ncategories: [Collection]\ntypes:\n  demo: |-\n    function(parameters(void); returns(unknown); category(Collection); example({example}))\n");
+        let error = load(&source, "callback-example.yaml", &[]).unwrap_err().to_string();
         assert!(error.contains("callback-example.yaml"), "{error}");
         assert!(error.contains(reason), "{example}: {error}");
     }
@@ -832,7 +843,7 @@ fn callback_example_arrows_preserve_nested_calls_patterns_and_quoted_text() {
 #[test]
 fn shipped_callback_examples_passively_parse_through_the_catalog() {
     let source = include_str!("../../../../../../schemas/partials/functions.yaml");
-    let catalog = load_catalog(source, CATALOG_PATH, EXAMPLE_FILES).unwrap();
+    let catalog = load(source, CATALOG_PATH, EXAMPLE_FILES).unwrap();
     for name in ["map", "filter"] {
         let descriptors = catalog.descriptors_for(name);
         assert_eq!(descriptors.len(), 1, "{name}");
@@ -949,4 +960,223 @@ fn load_data_options_bind_through_the_shared_binder() {
             other => panic!("{options} binds and is applied: {other:?}"),
         }
     }
+}
+
+// ── callable checks and their locations ─────────────────────────────────────
+
+/// A small authored expression catalog: one helper, two callables.
+const AUTHORED: &str = r#"kind: expression-schema
+categories:
+    - Text -> Transform text.
+types:
+    label: string(not-empty)
+    shout: |-
+        function(
+            parameters(x: label);
+            returns(string);
+            category(Text);
+        ) -> Shouts.
+    whisper:
+        - |-
+            function(parameters(x: string); returns(string); category(Text)) -> One.
+        - |-
+            function(parameters(x: string, y: number); returns(string)) -> Two.
+"#;
+
+fn authored(source: &str) -> Result<FunctionCatalog, CatalogError> {
+    load_authored_catalog(source, Path::new("host/text.yaml"), StandaloneSchemaEnvelope::ExpressionSchema)
+}
+
+/// The failure's message, primary text, and related texts, as written.
+fn located(source: &str, error: &CatalogError) -> (String, Option<String>, Vec<Option<String>>) {
+    let CatalogError::Invalid { message, span, related, .. } = error else {
+        panic!("a callable failure: {error:?}");
+    };
+    let text = |span: &Option<std::ops::Range<usize>>| span.clone().map(|span| source[span].to_string());
+    (message.clone(), text(span), related.iter().map(|related| text(&related.span)).collect())
+}
+
+#[test]
+fn the_authored_control_loads_with_an_inherited_category_and_no_aliases() {
+    let catalog = authored(AUTHORED).expect("the control loads");
+    let names: Vec<&str> = catalog.descriptors.iter().map(|descriptor| &*descriptor.name).collect();
+    assert_eq!(names, ["shout", "whisper", "whisper"]);
+    assert!(catalog.descriptors.iter().all(|descriptor| &*descriptor.category == "Text" && descriptor.aliases.is_empty()));
+    assert_eq!(catalog.named_type_names().collect::<Vec<_>>(), ["label"]);
+}
+
+#[test]
+fn a_types_table_of_helpers_only_is_not_a_catalog() {
+    let source = "kind: expression-schema\ncategories: [Text]\ntypes:\n    label: string\n    other: number\n";
+    let error = authored(source).unwrap_err();
+    let (message, span, _) = located(source, &error);
+    assert!(message.contains("declares no callable"), "{message}");
+    assert!(span.is_some_and(|text| text.contains("label: string")), "{error:?}");
+}
+
+#[test]
+fn a_callable_mixed_with_an_ordinary_type_is_located_at_the_ordinary_arm() {
+    let source = AUTHORED.replace(
+        "            function(parameters(x: string, y: number); returns(string)) -> Two.",
+        "            string",
+    );
+    let error = authored(&source).unwrap_err();
+    let (message, span, _) = located(&source, &error);
+    assert!(message.contains("mixes `function(...)` options"), "{message}");
+    // A sequence item's range includes its block-scalar indicator.
+    assert!(span.as_deref().is_some_and(|text| text.trim_end().ends_with("string") && !text.contains("function")), "{error:?}");
+}
+
+#[test]
+fn a_callable_without_any_category_is_located_at_its_key() {
+    let source = AUTHORED.replace("category(Text) -> One.", "category(Text)) -> One.").replace(
+        "            function(parameters(x: string); returns(string); category(Text)) -> One.",
+        "            function(parameters(x: string); returns(string)) -> One.",
+    );
+    let error = authored(&source).unwrap_err();
+    let (message, span, _) = located(&source, &error);
+    assert!(message.contains("`types.whisper` has no `category(...)`"), "{message}");
+    assert_eq!(span.as_deref(), Some("whisper"), "{error:?}");
+}
+
+#[test]
+fn overloads_naming_different_categories_point_at_both() {
+    let source = AUTHORED
+        .replace("    - Text -> Transform text.\n", "    - Text -> Transform text.\n    - Other\n")
+        .replace("returns(string)) -> Two.", "returns(string); category(Other)) -> Two.");
+    let error = authored(&source).unwrap_err();
+    let (message, span, related) = located(&source, &error);
+    assert!(message.contains("different categories (`Text`, `Other`)"), "{message}");
+    assert!(span.is_some_and(|text| text.contains("category(Other)")), "{error:?}");
+    assert!(matches!(related.as_slice(), [Some(text)] if text.contains("category(Text)) -> One.")), "{related:?}");
+}
+
+#[test]
+fn names_matching_without_ascii_case_are_one_callable() {
+    let source = AUTHORED.replace("    whisper:\n", "    Shout:\n");
+    let error = authored(&source).unwrap_err();
+    let (message, span, related) = located(&source, &error);
+    assert!(message.contains("`types.Shout` and `types.shout` name the same callable"), "{message}");
+    assert_eq!(span.as_deref(), Some("Shout"));
+    assert_eq!(related, [Some("shout".to_string())]);
+}
+
+#[test]
+fn helper_references_stay_inside_the_catalog_and_resolve_no_slot() {
+    let cases = [
+        ("parameters(x: label)", "parameters(x: label@./other.yaml)", "references `label@./other.yaml`", Some("./other.yaml")),
+        ("parameters(x: label)", "parameters(x: missing)", "references `missing`, which this catalog does not declare", Some("missing")),
+        ("parameters(x: label)", "parameters(x: whisper)", "uses the callable `whisper` as a type", Some("whisper")),
+        ("    label: string(not-empty)\n", "    label: string(not-empty)\n    unused: nowhere@./x.yaml\n", "`types.unused` references", None),
+        ("    label: string(not-empty)\n", "    label: \"{{ fm.kind }}\"\n", "template slot", Some("label")),
+    ];
+    for (from, to, expected, at) in cases {
+        let source = AUTHORED.replacen(from, to, 1);
+        let error = authored(&source).unwrap_err();
+        let (message, span, _) = located(&source, &error);
+        assert!(message.contains(expected), "{to}: {message}");
+        if let Some(at) = at {
+            assert_eq!(span.as_deref(), Some(at), "{to}: {error:?}");
+        }
+    }
+    // A helper may refer to itself through a container: grammar-valid local
+    // recursion is admitted.
+    let recursive = AUTHORED.replacen("    label: string(not-empty)\n", "    label: string(not-empty)\n    tree: \"{ name: string, kids: tree[] }\"\n", 1);
+    authored(&recursive).expect("a recursive helper loads");
+}
+
+#[test]
+fn a_mutation_declares_no_narrowing_even_in_a_nested_signature() {
+    let mutation = |signature: &str| {
+        format!("kind: mutation-schema\ncategories: [State]\ntypes:\n    put: |-\n        {signature}\n")
+    };
+    let control = mutation("function(parameters(key: string); returns(boolean); category(State))");
+    load_catalog(&control, Path::new("m.yaml"), StandaloneSchemaEnvelope::MutationSchema, &[]).expect("the control loads");
+    for signature in [
+        "function(parameters(key: unknown | null); returns(boolean); narrows(key: string; true-implies); category(State))",
+        "function(parameters(check: function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-implies))); returns(boolean); category(State))",
+    ] {
+        let source = mutation(signature);
+        let error = load_catalog(&source, Path::new("m.yaml"), StandaloneSchemaEnvelope::MutationSchema, &[]).unwrap_err();
+        let (message, span, _) = located(&source, &error);
+        assert!(message.contains("a mutation declares no `narrows(...)`"), "{message}");
+        assert!(span.is_some_and(|text| text.contains("narrows(")), "{error:?}");
+    }
+}
+
+#[test]
+fn an_authored_expression_catalog_reuses_no_built_in_name_or_alias() {
+    for (name, expected) in [("min", "the built-in function `min`"), ("IsString", "an alias of the built-in function `is_string`")] {
+        let name = if name == "IsString" { "IsNull" } else { name };
+        let source = AUTHORED.replacen("    shout:", &format!("    {name}:"), 1);
+        let error = authored(&source).unwrap_err();
+        let CatalogError::Invalid { message, span, related, .. } = &error else { panic!("{error:?}") };
+        let expected = if name == "IsNull" { "an alias of the built-in function `is_null`" } else { expected };
+        assert!(message.contains(expected), "{message}");
+        assert_eq!(span.clone().map(|span| &source[span]), Some(name));
+        let [related] = related.as_slice() else { panic!("{error:?}") };
+        assert_eq!(related.file, Path::new(CATALOG_PATH));
+        let canonical = if name == "IsNull" { "is_null" } else { "min" };
+        assert_eq!(related.span.clone().map(|span| &CATALOG_SOURCE[span]), Some(canonical));
+    }
+    // The built-in reader admits its own names.
+    load_catalog(&AUTHORED.replacen("    shout:", "    min:", 1), Path::new("x.yaml"), StandaloneSchemaEnvelope::ExpressionSchema, &[])
+        .expect("a built-in read does not check reserved names");
+}
+
+#[test]
+fn an_authored_callable_compiles_for_eager_evaluation() {
+    let source = AUTHORED.replacen(
+        "parameters(x: label);",
+        "parameters(x: label, each: function(parameters(v: string); returns(string)));",
+        1,
+    );
+    let error = authored(&source).unwrap_err();
+    let (message, span, _) = located(&source, &error);
+    assert!(message.contains("takes or returns a function value"), "{message}");
+    assert!(span.is_some_and(|text| text.contains("each: function(")), "{error:?}");
+}
+
+#[test]
+fn an_authored_catalog_has_no_file_form_examples() {
+    let source = AUTHORED.replacen("category(Text);\n        ) -> Shouts.", "category(Text);\n            example(./function-examples/as_tsv.yaml);\n        ) -> Shouts.", 1);
+    let error = authored(&source).unwrap_err();
+    let (message, span, _) = located(&source, &error);
+    assert!(message.contains("is not one of this catalog's embedded examples"), "{message}");
+    assert!(span.is_some_and(|text| text.contains("example(./function-examples/as_tsv.yaml)")), "{error:?}");
+}
+
+#[test]
+fn a_duplicate_overload_pair_is_refused_by_the_parser_naming_both_overloads() {
+    let source = AUTHORED.replacen("parameters(x: string, y: number)", "parameters(z: string)", 1);
+    let error = authored(&source).unwrap_err();
+    // The standalone parser refuses one binding contract twice before the
+    // reader runs; its message names both overloads by position.
+    assert!(matches!(error, CatalogError::Schema(_)), "{error:?}");
+    assert!(error.to_string().contains("overloads 1 and 2 have the same binding contract"), "{error}");
+}
+
+#[test]
+fn only_the_built_in_expression_catalog_projects_registered_aliases() {
+    let builtin = expression_function_catalog_from_sources();
+    assert_eq!(&*builtin.descriptors_for("is_null")[0].aliases, [Box::from("isnull")]);
+    let mutations = load_catalog(
+        crate::effects::types::MUTATIONS_SOURCE,
+        Path::new(crate::effects::types::MUTATIONS_PATH),
+        StandaloneSchemaEnvelope::MutationSchema,
+        &[],
+    )
+    .expect("the mutation catalog loads");
+    assert!(mutations.descriptors.iter().all(|descriptor| descriptor.aliases.is_empty()));
+}
+
+/// The reader's spans are byte ranges of the whole document, so the editor
+/// and the CLI place them without adjustment (a non-ASCII character before
+/// the failure included).
+#[test]
+fn spans_are_document_byte_ranges_after_non_ascii_text() {
+    let source = AUTHORED.replace("    - Text -> Transform text.", "    - Text -> Transform téxt — ok.").replace("    whisper:\n", "    SHOUT:\n");
+    let error = authored(&source).unwrap_err();
+    let (_, span, related) = located(&source, &error);
+    assert_eq!((span.as_deref(), related), (Some("SHOUT"), vec![Some("shout".to_string())]));
 }

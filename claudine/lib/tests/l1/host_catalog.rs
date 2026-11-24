@@ -172,7 +172,11 @@ fn claudine_ships_no_host_function_catalog_and_no_facts_artifact() {
             artifacts.push(name);
         } else if name.ends_with(".yaml") || name.ends_with(".yml") {
             let text = std::fs::read_to_string(&path).expect("a schema file is text");
-            if darkmatter::markdown::schemas::catalog::is_host_function_catalog(&text) {
+            if serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text)
+                .ok()
+                .and_then(|value| value.get("kind")?.as_str().map(|kind| kind == "expression-schema"))
+                .unwrap_or(false)
+            {
                 catalogs.push(name);
             }
         }

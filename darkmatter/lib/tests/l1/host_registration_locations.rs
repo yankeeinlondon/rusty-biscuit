@@ -180,7 +180,7 @@ fn a_yaml_kind_importing_a_malformed_library_is_located_in_the_library() {
         &Bundle::acme().with_file("schemas/part.yaml", kind).with_member("schemas/library.yaml", &library),
     );
     let all = refusals(&fixture.load());
-    let from_kind = all.iter().find(|diagnostic| diagnostic.message.contains("imported by `files[4]`")).expect("the kind's refusal");
+    let from_kind = all.iter().find(|diagnostic| diagnostic.message.contains("imported by `files[5]`")).expect("the kind's refusal");
     let expected = Some(position_of(&library, "\"numbr"));
     assert_eq!(site(from_kind), (fixture.path("host/schemas/library.yaml").as_path(), Some("files[2]"), expected));
 }
@@ -356,7 +356,7 @@ fn a_bad_facts_artifact_is_located_at_the_field_its_reader_judged() {
         let fixture = Fixture::new();
         fixture.write_member("host", "schemas/functions.facts.json", facts);
         let diagnostic = refused(&fixture.load());
-        assert_eq!(diagnostic.member.as_deref(), Some("functions[0].facts"), "{facts}");
+        assert_eq!(diagnostic.member.as_deref(), Some("files[4]"), "{facts}");
         let expected = match needle {
             "1" => position_of(facts, "\"lazy\": 1").0,
             other => position_of(facts, other).0,
@@ -371,7 +371,7 @@ fn a_function_catalog_signature_failure_is_located_at_the_signature() {
     let text = FUNCTIONS.replace("parameters(name: string)", "parameters(name: string(min(abc)))");
     fixture.write_member("host", "schemas/functions.yaml", &text);
     let diagnostic = refused(&fixture.load());
-    assert_eq!(diagnostic.member.as_deref(), Some("functions[0].catalog"), "{diagnostic:#?}");
+    assert_eq!(diagnostic.member.as_deref(), Some("files[4]"), "{diagnostic:#?}");
     assert_eq!(diagnostic.line, Some(position_of(&text, "min(abc)").0), "{diagnostic:#?}");
 }
 
@@ -412,7 +412,7 @@ fn an_omitted_required_member_field_is_located_at_its_mapping() {
         ("namespace without namespace", "schemas/run.yaml", "files[3]", omitting(RUN_NAMESPACE, "namespace"), None),
         ("namespace without $schema", "schemas/run.yaml", "files[3]", omitting(RUN_NAMESPACE, "$schema"), None),
         ("member without kind", "schemas/run.yaml", "files[3]", omitting(RUN_NAMESPACE, "kind"), None),
-        ("yaml-schema without $schema", "schemas/part.yaml", "files[4]", omitting(yaml_kind, "$schema"), Some(())),
+        ("yaml-schema without $schema", "schemas/part.yaml", "files[5]", omitting(yaml_kind, "$schema"), Some(())),
     ];
     for (case, path, member, text, listed_as_new) in cases {
         let fixture = Fixture::new();
@@ -528,12 +528,12 @@ const PART_KIND: &str = "kind: yaml-schema\n$schema:\n    kind: literal(part; re
 
 /// Each member kind of the `acme` bundle with `declaration` added to its
 /// `types` table, as (case, member path, member field, edited text). The
-/// YAML kind is an added member, `files[4]`.
+/// YAML kind is an added member, `files[5]`.
 fn with_unused(declaration: &str) -> [(&'static str, &'static str, &'static str, String); 4] {
     [
         ("library", "schemas/library.yaml", "files[2]", format!("{LIBRARY}{declaration}")),
         ("trigger", "schemas/gadget.yaml", "files[1]", format!("{GADGET_TRIGGER}types:\n{declaration}")),
-        ("yaml kind", "schemas/part.yaml", "files[4]", format!("{PART_KIND}types:\n{declaration}")),
+        ("yaml kind", "schemas/part.yaml", "files[5]", format!("{PART_KIND}types:\n{declaration}")),
         ("namespace", "schemas/run.yaml", "files[3]", format!("{RUN_NAMESPACE}types:\n{declaration}")),
     ]
 }
@@ -750,7 +750,7 @@ fn a_yaml_kind_failure_keeps_its_precise_position() {
         fixture.install_bundle("host", &Bundle::acme().with_file("schemas/part.yaml", &text));
         let diagnostic = refused(&fixture.load());
         let expected = Some(position_of(&text, needle));
-        assert_eq!(site(&diagnostic), (fixture.path("host/schemas/part.yaml").as_path(), Some("files[4]"), expected), "{case}: {diagnostic:#?}");
+        assert_eq!(site(&diagnostic), (fixture.path("host/schemas/part.yaml").as_path(), Some("files[5]"), expected), "{case}: {diagnostic:#?}");
     }
 }
 
@@ -853,7 +853,7 @@ fn a_yaml_kind_claim_that_names_no_kind_is_located_at_its_declaration() {
         fixture.install_bundle("host", &Bundle::acme().with_file("schemas/part.yaml", &text));
         let diagnostic = refused(&fixture.load());
         let expected = Some(position_of(&text, needle));
-        assert_eq!(site(&diagnostic), (fixture.path("host/schemas/part.yaml").as_path(), Some("files[4]"), expected), "{case}: {diagnostic:#?}");
+        assert_eq!(site(&diagnostic), (fixture.path("host/schemas/part.yaml").as_path(), Some("files[5]"), expected), "{case}: {diagnostic:#?}");
     }
 }
 
@@ -911,7 +911,7 @@ fn a_used_reference_after_a_sibling_description_is_located_at_the_reference_in_e
                 "files[1]",
                 format!("kind: schema-trigger\nmatch:\n    gadget: string(required)\n$schema:\n{arm}      gadget: string\n    - gadget: string\n"),
             ),
-            ("yaml kind", "schemas/part.yaml", "files[4]", format!("{PART_KIND}{declarations}")),
+            ("yaml kind", "schemas/part.yaml", "files[5]", format!("{PART_KIND}{declarations}")),
             ("namespace", "schemas/run.yaml", "files[3]", format!("{RUN_NAMESPACE}{declarations}")),
         ];
         for (case, path, field, text) in cases {
@@ -1065,7 +1065,7 @@ pub(crate) fn example_beside_an_import() -> [(&'static str, &'static str, &'stat
                 "kind: schema-trigger\nmatch:\n    gadget: string(required)\n$schema:\n    - $extends: widget@./library.yaml\n      gadget: string\n    - $extends: widget@./library.yaml\n      gadget: string\n      review-entry: {BAD_EXAMPLE}\n"
             ),
         ),
-        ("yaml kind", "schemas/part.yaml", "files[4]", format!("{PART_KIND}    gadget: gadget@./library.yaml\n    review-entry: {BAD_EXAMPLE}\n")),
+        ("yaml kind", "schemas/part.yaml", "files[5]", format!("{PART_KIND}    gadget: gadget@./library.yaml\n    review-entry: {BAD_EXAMPLE}\n")),
         ("namespace", "schemas/run.yaml", "files[3]", format!("{RUN_NAMESPACE}    label: gadget@./library.yaml\n    review-entry: {BAD_EXAMPLE}\n")),
     ]
 }
@@ -1236,7 +1236,7 @@ fn an_import_naming_a_trigger_is_refused_at_the_import_in_a_kind_and_a_namespace
     let kind = format!("{PART_KIND}    step: \"step[]@./widget.yaml\"\n");
     let namespace = RUN_NAMESPACE.replace("count: \"number -> The pass.\"", "count: count@./widget.yaml");
     for (case, path, field, text, reference) in [
-        ("yaml kind", "schemas/part.yaml", "files[4]", kind, "\"step[]@./widget.yaml\""),
+        ("yaml kind", "schemas/part.yaml", "files[5]", kind, "\"step[]@./widget.yaml\""),
         ("namespace", "schemas/run.yaml", "files[3]", namespace, "count@./widget.yaml"),
     ] {
         let fixture = Fixture::new();
@@ -1285,7 +1285,7 @@ fn a_shared_import_naming_a_trigger_is_refused_in_the_library_for_every_importer
 fn neighboring_role_and_parse_refusals_keep_their_own_positions() {
     let kind = PART_KIND.replace("$schema:\n    kind: literal(part; required)\n    name: string\n", "$schema: ./library.yaml\n");
     let namespace = RUN_NAMESPACE.replace("$schema:\n    count: \"number -> The pass.\"\n", "$schema: ./library.yaml\n");
-    for (case, path, field, text) in [("yaml kind", "schemas/part.yaml", "files[4]", kind), ("namespace", "schemas/run.yaml", "files[3]", namespace)] {
+    for (case, path, field, text) in [("yaml kind", "schemas/part.yaml", "files[5]", kind), ("namespace", "schemas/run.yaml", "files[3]", namespace)] {
         let fixture = Fixture::new();
         fixture.install_bundle("host", &republished(path, &text));
         let all = refusals(&fixture.load());

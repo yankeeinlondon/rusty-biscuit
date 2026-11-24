@@ -990,12 +990,13 @@ fn installed_registration_user_setup_never_rewrites_a_repository_entry() {
         let request = ComposeRequest::prepare(ComposeOptions::new(), &snapshot).expect("a request");
         RegisteredHosts::load(request.config_snapshot(), request.resolution_context()).diagnostics()
     };
-    // Before setup, the passive reader refuses the format 1 manifest and
-    // names the command that replaces the user's entry.
+    // Before setup, the passive reader refuses the format 1 manifest with the
+    // unsupported-version upgrade instruction.
     let before = diagnostics();
     assert!(
         before.iter().any(|diagnostic| diagnostic.file == legacy_manifest_path(&fixture.home())
-            && diagnostic.message.contains("run `claudine setup`")),
+            && diagnostic.message.contains("unsupported host registration format version 1")
+            && diagnostic.message.contains("republish the registration")),
         "{before:#?}"
     );
 

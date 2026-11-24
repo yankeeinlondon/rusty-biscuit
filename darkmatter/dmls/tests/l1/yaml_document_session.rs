@@ -36,19 +36,19 @@ fn write(path: &Path, text: &str) {
 
 /// A minimal repository Git discovery accepts, without running `git`, so the
 /// folder is the tree root and `schemas/` a schema root.
-fn init_repository(root: &Path) {
+pub(crate) fn init_repository(root: &Path) {
     std::fs::create_dir_all(root.join(".git/objects")).unwrap();
     std::fs::create_dir_all(root.join(".git/refs/heads")).unwrap();
     write(&root.join(".git/HEAD"), "ref: refs/heads/main\n");
     write(&root.join(".git/config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n");
 }
 
-fn uri(path: &Path) -> String {
+pub(crate) fn uri(path: &Path) -> String {
     url::Url::from_file_path(path).unwrap().to_string()
 }
 
 /// A client that watches files, with `folders` as its workspace folders.
-fn watched_params(folders: &[&Path]) -> Value {
+pub(crate) fn watched_params(folders: &[&Path]) -> Value {
     let folders: Vec<Value> = folders
         .iter()
         .map(|folder| json!({ "uri": url::Url::from_directory_path(folder).unwrap().as_str(), "name": "w" }))
@@ -64,14 +64,14 @@ fn watched_params(folders: &[&Path]) -> Value {
     })
 }
 
-fn open(fixture: &LspFixture<'_>, uri: &str, text: &str) {
+pub(crate) fn open(fixture: &LspFixture<'_>, uri: &str, text: &str) {
     fixture.notify(
         "textDocument/didOpen",
         json!({ "textDocument": { "uri": uri, "languageId": "yaml", "version": 1, "text": text } }),
     );
 }
 
-fn edit(fixture: &LspFixture<'_>, uri: &str, version: i32, text: &str) {
+pub(crate) fn edit(fixture: &LspFixture<'_>, uri: &str, version: i32, text: &str) {
     fixture.notify(
         "textDocument/didChange",
         json!({ "textDocument": { "uri": uri, "version": version }, "contentChanges": [{ "text": text }] }),
@@ -88,7 +88,7 @@ fn changed(fixture: &LspFixture<'_>, events: &[(&Path, u8)]) {
 
 /// The diagnostics last published for `uri` once the server is idle; the
 /// earlier publications still buffered are dropped.
-fn latest_diagnostics(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
+pub(crate) fn latest_diagnostics(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
     fixture.flush_server();
     // The buffered take returns the latest publication first.
     let latest = fixture.wait_for_diagnostics_params(uri);
@@ -106,7 +106,7 @@ fn schema_codes(diagnostics: &[Value]) -> Vec<String> {
         .collect()
 }
 
-fn completion_labels(fixture: &mut LspFixture<'_>, uri: &str, line: u32) -> Vec<String> {
+pub(crate) fn completion_labels(fixture: &mut LspFixture<'_>, uri: &str, line: u32) -> Vec<String> {
     let response = fixture.request(
         "textDocument/completion",
         json!({ "textDocument": { "uri": uri }, "position": { "line": line, "character": 0 } }),
@@ -117,7 +117,7 @@ fn completion_labels(fixture: &mut LspFixture<'_>, uri: &str, line: u32) -> Vec<
     items.as_array().cloned().unwrap_or_default().iter().filter_map(|item| item["label"].as_str().map(str::to_string)).collect()
 }
 
-fn hover(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32) -> String {
+pub(crate) fn hover(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32) -> String {
     let response = fixture.request(
         "textDocument/hover",
         json!({ "textDocument": { "uri": uri }, "position": { "line": line, "character": character } }),

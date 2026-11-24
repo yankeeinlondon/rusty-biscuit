@@ -3,15 +3,22 @@
 //! ([`YamlDocumentOverlay`]).
 //!
 //! - A document that does not load gets one located parse error and nothing
-//!   else: no schema is judged. It is the loader's `dm.frontmatter.yaml_parse`,
-//!   unless a schema envelope claims the text and reports the failure itself
-//!   (under its own `dm.schema.*` code).
+//!   else: no schema is judged. It is the loader's `dm.frontmatter.yaml_parse`
+//!   (a repeated key ranged at the repetition, its first spelling as related
+//!   information), unless a schema envelope claims the text and reports the
+//!   failure itself (under its own `dm.schema.*` code).
 //! - A `kind` that cannot select a definition (claimed twice, reserved by a
 //!   failed definition, or unavailable) is one `dm.schema.prepare` error on
 //!   the `kind` value, with the definitions involved as related information.
 //!   A root `$schema` that does not resolve is ranged and related exactly as
 //!   in Markdown frontmatter: on the `$schema` value, with a failure inside a
 //!   referenced definition as related information in that file.
+//! - A callable catalog (`kind: expression-schema` / `mutation-schema`) whose
+//!   callable semantics fail is one `dm.schema.callable_catalog` error per
+//!   failure, ranged where the library located it, with each location the
+//!   failure involves (an earlier declaration, a built-in function) as
+//!   related information. The kind keeps its claim: no root `$schema`
+//!   fallback is judged.
 //! - Each problem of the selected schema's report is coded and ranged as a
 //!   frontmatter problem is (a missing key ranges its parent mapping, an
 //!   unknown key the key, a value problem the value), except that a missing
@@ -40,8 +47,12 @@
 //!   `schema-trigger` kind check located on the offending node) is the only
 //!   verdict.
 
-use darkmatter::markdown::schemas::ValidationReport;
+use std::sync::Arc;
+
+use darkmatter::markdown::schemas::{CALLABLE_CATALOG_CODE, ValidationReport};
 use lsp_types::{Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range};
+use simplified_schema::errors::CatalogRelated;
+use simplified_schema::yaml_documents::duplicate_key;
 use simplified_schema::{KindSelectionCause, SchemaError, ValidationProblemCode};
 
 use crate::diagnostics::codes::{code, source};
@@ -51,6 +62,7 @@ use crate::diagnostics::frontmatter::{
 };
 use crate::overlay::{SuggestionState, YamlDocumentOutcome, YamlDocumentOverlay};
 use crate::providers::DocumentContext;
+use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
 
 /// Appends the diagnostics of the YAML document in `ctx` to `out`.
@@ -66,6 +78,9 @@ pub(crate) fn diagnostics(ctx: &DocumentContext, yaml: &YamlDocumentOverlay, out
         YamlDocumentOutcome::Unvalidated | YamlDocumentOutcome::Pending | YamlDocumentOutcome::NoSchema => {}
         YamlDocumentOutcome::Failed(error) => match &**error {
             SchemaError::KindSelection { cause, .. } => out.push(selection_diagnostic(ctx, error, cause)),
+            SchemaError::CallableCatalog { message, span, related, .. } => {
+                out.push(catalog_diagnostic(ctx, yaml, message, span.clone(), related));
+            }
             _ => schema_prepare_diagnostic(ctx, overlay.ast.as_deref(), error, out),
         },
         YamlDocumentOutcome::Validated(validation) => {
@@ -123,14 +138,70 @@ fn envelope_error(suggestions: &SuggestionState) -> bool {
     matches!(suggestions, SuggestionState::Standalone { error: Some(_), .. } | SuggestionState::TriggerError(_))
 }
 
-/// The loader's error, ranged at the position it names.
+/// The loader's error, ranged at the position it names. A repeated key is
+/// ranged at the repetition, with its first spelling as related information.
 fn load_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Diagnostic {
     let (message, span) = match error {
         SchemaError::SchemaDocument { message, span, .. } => (message.clone(), span.clone()),
         other => (other.to_string(), None),
     };
-    let range = span.and_then(|span| ctx.source_map.byte_range_to_lsp(span)).unwrap_or_default();
-    diagnostic(range, DiagnosticSeverity::ERROR, source::FRONTMATTER, code::FM_YAML_PARSE, message)
+    let range = span.clone().and_then(|span| ctx.source_map.byte_range_to_lsp(span)).unwrap_or_default();
+    let mut out = diagnostic(range, DiagnosticSeverity::ERROR, source::FRONTMATTER, code::FM_YAML_PARSE, message);
+    // Only the repetition the loader ranged: the same text may fail to load
+    // for another reason before any key repeats.
+    if let Some(duplicate) = duplicate_key(ctx.text)
+        && span.is_some_and(|span| span.start == duplicate.repeated)
+        && let Some(first) = ctx.source_map.byte_range_to_lsp(duplicate.first..duplicate.first)
+    {
+        out.related_information = Some(vec![DiagnosticRelatedInformation {
+            location: Location::new(ctx.uri.clone(), first),
+            message: "the key is first written here".to_string(),
+        }]);
+    }
+    out
+}
+
+/// A callable catalog's failed callable check, ranged where the library
+/// located it (else on the `kind` value), with each related location: in
+/// this document, or in another file whose text the preparation captured.
+fn catalog_diagnostic(
+    ctx: &DocumentContext,
+    yaml: &YamlDocumentOverlay,
+    message: &str,
+    span: Option<std::ops::Range<usize>>,
+    related: &[CatalogRelated],
+) -> Diagnostic {
+    let range = span
+        .and_then(|span| ctx.source_map.byte_range_to_lsp(span))
+        .or_else(|| {
+            let entry = ctx.overlay?.ast.as_deref()?.entry_by_pointer("/kind")?;
+            ctx.source_map.byte_range_to_lsp(entry.value_span.clone())
+        })
+        .unwrap_or_default();
+    let mut out = diagnostic(range, DiagnosticSeverity::ERROR, source::SCHEMA, CALLABLE_CATALOG_CODE, message.to_string());
+    let related: Vec<DiagnosticRelatedInformation> = related
+        .iter()
+        .filter_map(|entry| {
+            let (uri, range) = if entry.file == ctx.path {
+                let range = entry.span.clone().and_then(|span| ctx.source_map.byte_range_to_lsp(span));
+                (ctx.uri.clone(), range)
+            } else {
+                let uri = file_path_to_uri(&entry.file)?;
+                let text = yaml.catalog_sources.get(&entry.file)?;
+                let map = SourceMap::new(uri.clone(), 0, ctx.source_map.encoding(), Arc::clone(text));
+                let range = entry.span.clone().and_then(|span| map.byte_range_to_lsp(span));
+                (uri, range)
+            };
+            Some(DiagnosticRelatedInformation {
+                location: Location::new(uri, range.unwrap_or_default()),
+                message: entry.message.clone(),
+            })
+        })
+        .collect();
+    if !related.is_empty() {
+        out.related_information = Some(related);
+    }
+    out
 }
 
 /// A `kind` that cannot select a definition, on the `kind` value, with each

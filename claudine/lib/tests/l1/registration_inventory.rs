@@ -51,11 +51,11 @@ impl Installed {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, text).unwrap();
         }
-        let mut manifest = String::from("kind: darkmatter-host\nformat_version: 2\nhost: claudine\nversion: \"0.1.0\"\nfiles:\n");
+        let mut manifest = String::from("kind: darkmatter-host\nformat_version: 3\nhost: claudine\nversion: \"0.1.0\"\nfiles:\n");
         for name in members.keys().filter(|path| path.starts_with("schemas/")) {
             manifest.push_str(&format!("    - ./{name}\n"));
         }
-        manifest.push_str(&format!("lifecycle: ./{LIFECYCLE}\nfunctions: []\ndigests:\n"));
+        manifest.push_str(&format!("lifecycle: ./{LIFECYCLE}\ndigests:\n"));
         for (path, text) in &members {
             manifest.push_str(&format!("    ./{path}: \"{}\"\n", member_digest(text.as_bytes())));
         }

@@ -174,8 +174,8 @@ fn file_failures(error: &SchemaError) -> FileFailures {
     Arc::new(out)
 }
 
-/// A whole YAML document claiming `kind: schema` or `kind: yaml-schema`,
-/// read as a standalone schema document from the copy the selected
+/// A whole YAML document claiming `kind: schema`, `kind: yaml-schema`, or a
+/// callable catalog kind, read as a standalone schema document from the copy the selected
 /// definition accepted (the loaded document while none has judged it), never
 /// admitted against the compiled envelope again: that definition, which a
 /// checkout may have edited, alone decides its shape. `Ok(None)` for any other
@@ -735,7 +735,8 @@ impl OverlayState {
     ///
     /// `yaml` is the judgment of a whole YAML document. Such a document is
     /// a schema document only by its claimed `kind` (`schema`, `yaml-schema`,
-    /// or a `schema-trigger` in a `schemas/` folder), and the definition
+    /// a callable catalog's `expression-schema` / `mutation-schema`, or a
+    /// `schema-trigger` in a `schemas/` folder), and the definition
     /// that kind selected is the only judge of its shape: the document is
     /// read without the compiled envelope's admission
     /// ([`selected_standalone_document`]), and a trigger envelope's strict
@@ -828,6 +829,11 @@ impl OverlayState {
         // claim keeps the last-good semantic model alive through malformed
         // edits; the current parse result always owns diagnostics.
         let claim = schema::standalone_envelope_claim(text);
+        // A callable catalog that does not load keeps the loader's located
+        // error (a repeated key with its first spelling), not the envelope's
+        // coarser one for the same text.
+        let reports_own_error = !(claim.is_some_and(StandaloneSchemaEnvelope::is_callable_catalog)
+            && yaml.is_some_and(|yaml| matches!(yaml.overlay.outcome, YamlDocumentOutcome::LoadFailed(_))));
         let parsed = match yaml {
             Some(yaml) => {
                 if !claim.is_some_and(|envelope| envelope != StandaloneSchemaEnvelope::Pure) {
@@ -921,7 +927,7 @@ impl OverlayState {
                     suggestions: SuggestionState::Standalone {
                         envelope,
                         problems: Vec::new(),
-                        error: Some(Arc::clone(&error)),
+                        error: reports_own_error.then(|| Arc::clone(&error)),
                     },
                     schema_authoring: SchemaAuthoringState::Standalone {
                         envelope,

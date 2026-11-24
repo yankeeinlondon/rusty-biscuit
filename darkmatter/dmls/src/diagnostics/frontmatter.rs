@@ -202,7 +202,30 @@ pub(crate) fn registration_diagnostic(
     encoding: PositionEncoding,
 ) -> Diagnostic {
     let range = registration_range(found, encoding).unwrap_or_else(zero_range);
-    diagnostic(range, registration_severity(found), source::SCHEMA, found.code, found.message.clone())
+    let mut out = diagnostic(range, registration_severity(found), source::SCHEMA, found.code, found.message.clone());
+    out.related_information = registration_related(found, encoding);
+    out
+}
+
+/// A registration warning's secondary locations (the earlier declaration a
+/// name or alias collides with, the built-in a catalog name reuses), each
+/// positioned like the primary range; one whose file has no URI is dropped.
+fn registration_related(
+    found: &darkmatter::config::registration::RegistrationDiagnostic,
+    encoding: PositionEncoding,
+) -> Option<Vec<DiagnosticRelatedInformation>> {
+    let related: Vec<DiagnosticRelatedInformation> = found
+        .related
+        .iter()
+        .filter_map(|related| {
+            let range = position_range(related.line, related.line_prefix.as_deref(), encoding).unwrap_or_else(zero_range);
+            Some(DiagnosticRelatedInformation {
+                location: Location { uri: file_path_to_uri(&related.file)?, range },
+                message: related.message.clone(),
+            })
+        })
+        .collect();
+    (!related.is_empty()).then_some(related)
 }
 
 /// The zero-width range at a registration warning's position in the file
@@ -213,8 +236,12 @@ fn registration_range(
     found: &darkmatter::config::registration::RegistrationDiagnostic,
     encoding: PositionEncoding,
 ) -> Option<Range> {
-    let line = u32::try_from(found.line?.saturating_sub(1)).unwrap_or(u32::MAX);
-    let start = Position::new(line, found.line_prefix.as_deref().map_or(0, |prefix| encoding.units(prefix)));
+    position_range(found.line, found.line_prefix.as_deref(), encoding)
+}
+
+fn position_range(line: Option<usize>, line_prefix: Option<&str>, encoding: PositionEncoding) -> Option<Range> {
+    let line = u32::try_from(line?.saturating_sub(1)).unwrap_or(u32::MAX);
+    let start = Position::new(line, line_prefix.map_or(0, |prefix| encoding.units(prefix)));
     Some(Range { start, end: start })
 }
 
@@ -245,7 +272,9 @@ fn host_diagnostics(
             (false, Some(line)) => format!("{} ({}:{line})", found.message, found.file.display()),
             (false, None) => format!("{} ({})", found.message, found.file.display()),
         };
-        out.push(diagnostic(range, severity, source::SCHEMA, found.code, message));
+        let mut published = diagnostic(range, severity, source::SCHEMA, found.code, message);
+        published.related_information = registration_related(found, ctx.source_map.encoding());
+        out.push(published);
     }
     let Some(ast) = ast else {
         return;

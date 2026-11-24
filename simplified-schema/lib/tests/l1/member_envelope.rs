@@ -5,12 +5,13 @@
 //!
 //! Boundary: the crate's public API in-process; no files are read.
 
-use simplified_schema::member_envelope::{MemberKind, admit_member_text, declared_name};
+use simplified_schema::member_envelope::{MUTATION_REFUSAL, MemberKind, admit_member_text, declared_name};
 
 const TRIGGER: &str = "kind: schema-trigger\nmatch:\n    prompt: string(required)\n";
 const YAML_SCHEMA: &str = "kind: yaml-schema\n$schema:\n    kind: literal(thing; required)\n";
 const NAMESPACE: &str = "kind: namespace-schema\nnamespace: seq\n$schema: {}\n";
 const LIBRARY: &str = "kind: schema\ntypes:\n    id: string\n";
+const CATALOG: &str = "kind: expression-schema\ncategories:\n    - Acme\ntypes:\n    acme_label: \"function(parameters(name: string); returns(string); category(Acme))\"\n";
 
 /// `base` with `line` appended.
 fn with(base: &str, line: &str) -> String {
@@ -58,6 +59,7 @@ fn controls_of_every_kind_are_admitted_with_their_labels() {
         (YAML_SCHEMA, MemberKind::YamlSchema),
         (NAMESPACE, MemberKind::Namespace),
         (LIBRARY, MemberKind::Library),
+        (CATALOG, MemberKind::ExpressionSchema),
     ] {
         let admitted = admit_member_text(text).unwrap_or_else(|refusal| panic!("{text:?}: {refusal:?}"));
         assert_eq!((admitted.kind, admitted.name), (kind, None), "{text:?}");
@@ -201,6 +203,7 @@ fn the_closed_key_sets_are_the_definitions_keys() {
         (MemberKind::YamlSchema, include_str!("../../../schemas/yaml-schema.yaml"), None),
         (MemberKind::Namespace, include_str!("../../../schemas/namespace-schema.yaml"), None),
         (MemberKind::Library, include_str!("../../../schemas/schema.yaml"), Some(1)),
+        (MemberKind::ExpressionSchema, include_str!("../../../schemas/expression-schema.yaml"), None),
     ] {
         let mut keys: Vec<String> = kind.keys().iter().map(|key| (*key).to_string()).collect();
         keys.sort();
@@ -226,4 +229,30 @@ fn declared_name_reads_a_valid_label_leniently() {
     ] {
         assert_eq!(declared_name(&text).as_deref(), expected, "{case}");
     }
+}
+
+/// An expression catalog is a member; its envelope's `categories` and
+/// `types` are required and non-empty, its `description` optional (empty
+/// allowed, `null` refused). A mutation catalog is refused on its `kind`,
+/// whatever else it holds: a host declares no actions.
+#[test]
+fn an_expression_catalog_is_a_member_and_a_mutation_catalog_is_refused_on_its_kind() {
+    assert!(refused_absent(&without(CATALOG, "categories"), "categories").contains("non-empty `categories`"));
+    refused_at(&CATALOG.replace("categories:\n    - Acme\n", "categories:\n"), "categories");
+    refused_at(&CATALOG.replace("categories:\n    - Acme\n", "categories: []\n"), "categories");
+    refused_at(&CATALOG.replace("categories:\n    - Acme\n", "categories: Acme\n"), "categories");
+    refused_at(&CATALOG.replace("    - Acme\n", "    - Acme\n    - 5\n"), "categories");
+    refused_absent(&without(CATALOG, "types"), "types");
+    refused_at(&with(&without(CATALOG, "types"), "types: {}"), "types");
+    refused_at(&with(CATALOG, "$schema: {}"), "$schema");
+    refused_at(&with(CATALOG, "when: true"), "when");
+    admit_member_text(&with(CATALOG, "description: \"\"")).expect("an empty description");
+    assert!(refused_at(&with(CATALOG, "description:"), "description").contains("must not be null"));
+
+    let mutation = CATALOG.replace("expression-schema", "mutation-schema");
+    let refusal = admit_member_text(&mutation).expect_err("a mutation catalog");
+    assert_eq!((refusal.kind, refusal.field.as_deref(), refusal.message.as_str()), (None, Some("kind"), MUTATION_REFUSAL));
+    assert_eq!(MUTATION_REFUSAL, "host-defined actions are not supported");
+    // Refused on its kind even when the rest is not a catalog.
+    assert_eq!(refused_at("kind: mutation-schema\nextra: 1\n", "kind"), MUTATION_REFUSAL);
 }

@@ -103,7 +103,7 @@ pub use rewrite::NormalizationOutcome;
 use simplified::{
     DefKey, Definition, DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, to_json_schema_with_definitions,
 };
-pub use yaml_documents::{Route, YamlContract, YamlOutcome, YamlValidation, kind_host, shipped_kind_registry};
+pub use yaml_documents::{CALLABLE_CATALOG_CODE, Route, YamlContract, YamlOutcome, YamlValidation, kind_host, shipped_kind_registry};
 pub use triggers::{scan, scan_with_embedded};
 
 /// Darkmatter's reserved shipped namespace (`Name@darkmatter:<stem>`) over

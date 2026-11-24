@@ -539,9 +539,13 @@ impl Markdown {
         // maps inside each markdown transclusion's cache-key construction.
         let state_identity = crate::markdown::compose::cache::hashing::PhaseStateIdentity::capture(state);
         let runtime_mutex = std::sync::Mutex::new(runtime);
+        // Host function scope is thread-local; a child resolved on a worker
+        // inherits the caller's view, as one composed inline would.
+        let host_sets = crate::markdown::compose::expression::host::ScopedSets::capture();
         let results = prepared
             .into_par_iter()
             .map(|item| {
+                let _host_sets = host_sets.install();
                 // The anchor is taken before `item` is consumed: a resolution
                 // error carries no span, and without one a tolerated failure
                 // can only be skipped — which leaves the authored directive

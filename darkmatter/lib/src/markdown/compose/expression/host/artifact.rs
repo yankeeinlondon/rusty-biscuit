@@ -32,11 +32,12 @@
 //! }
 //! ```
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
+use super::super::functions::is_builtin_name;
 use super::{FunctionState, HostFunction, HostFunctionCatalog, HostFunctionError, HostFunctions, validate_names};
 use simplified_schema::coercion::ValueKind;
 use crate::markdown::compose::expression::call_binding::{
@@ -130,40 +131,64 @@ impl HostFunctions {
         facts_path: &Path,
         artifact: FactsArtifact<'_>,
     ) -> Result<Self, HostFunctionError> {
-        let names = catalog.function_names();
-        validate_names(names.iter().map(|name| (*name, &[][..])))?;
-        let path = facts_path;
-        let whole = |reason: String| -> Vec<HostFunction> {
-            names.iter().map(|name| incomplete(name, reason.clone())).collect()
-        };
-        let functions = match read_entries(&catalog, &names, artifact, path) {
-            Err(reason) => whole(reason),
-            Ok(entries) => {
-                let functions: Vec<HostFunction> = names
-                    .iter()
-                    .map(|name| match entries.get(*name) {
-                        None => incomplete(name, "the facts artifact has no entry for it".to_string()),
-                        Some(entry) => match rebuild(&catalog, name, entry) {
-                            Ok((aliases, registration)) => HostFunction {
-                                canonical: (*name).to_string(),
-                                aliases,
-                                state: FunctionState::Complete {
-                                    registration: Box::new(registration),
-                                    handler: None,
-                                },
-                            },
-                            Err(reason) => incomplete(name, format!("its facts artifact entry {reason}")),
-                        },
-                    })
-                    .collect();
-                match validate_names(functions.iter().map(|function| (function.canonical.as_str(), function.aliases.as_slice()))) {
-                    Ok(()) => functions,
-                    Err(error) => whole(format!("the facts artifact `{}` is invalid: {error}", path.display())),
-                }
-            }
-        };
-        Ok(Self::new(catalog, functions))
+        analysis_only_sited(catalog, facts_path, artifact).map(|(functions, _)| functions)
     }
+}
+
+/// [`HostFunctions::analysis_only_at`] plus where in the artifact each
+/// incomplete function's reason is, by canonical name, as the reader judged
+/// it (never recovered from the reason's text). A function the map does not
+/// name is incomplete for the file as a whole (absent or unreadable), which
+/// has no position inside it.
+pub(crate) fn analysis_only_sited(
+    catalog: HostFunctionCatalog,
+    facts_path: &Path,
+    artifact: FactsArtifact<'_>,
+) -> Result<(HostFunctions, HashMap<String, ReasonSite>), HostFunctionError> {
+    let names = catalog.function_names();
+    validate_names(names.iter().map(|name| (*name, &[][..])))?;
+    let file = format!("the facts artifact `{}`", facts_path.display());
+    let mut sites = HashMap::new();
+    let mut fail = |name: &str, fault: Fault| {
+        if let Some(site) = fault.site {
+            sites.insert(name.to_string(), site);
+        }
+        incomplete(name, fault.reason)
+    };
+    let functions: Vec<HostFunction> = match read_entries(&catalog, &names, artifact) {
+        Err(fault) => {
+            let fault = fault.prefixed(&file);
+            names.iter().map(|name| fail(name, fault.clone())).collect()
+        }
+        Ok(entries) => names
+            .iter()
+            .map(|name| match entries.get(*name) {
+                None => fail(name, Pointer::root().join("functions").fault("the facts artifact has no entry for it")),
+                Some(entry) => match rebuild(&catalog, name, entry) {
+                    Ok((aliases, registration)) => HostFunction {
+                        canonical: (*name).to_string(),
+                        aliases,
+                        state: FunctionState::Complete {
+                            registration: Box::new(registration),
+                            handler: None,
+                        },
+                    },
+                    Err(fault) => fail(name, fault.prefixed("its facts artifact entry")),
+                },
+            })
+            .collect(),
+    };
+    let named = functions.iter().map(|function| (function.canonical.as_str(), function.aliases.as_slice()));
+    let functions = match validate_names(named) {
+        Ok(()) => functions,
+        Err(error) => {
+            let reason = format!("{file} is invalid: {error}");
+            let site = refused_name_site(&functions);
+            sites = names.iter().map(|name| ((*name).to_string(), site.clone())).collect();
+            names.iter().map(|name| incomplete(name, reason.clone())).collect()
+        }
+    };
+    Ok((HostFunctions::new(catalog, functions), sites))
 }
 
 fn incomplete(name: &str, reason: String) -> HostFunction {
@@ -172,6 +197,26 @@ fn incomplete(name: &str, reason: String) -> HostFunction {
         aliases: Vec::new(),
         state: FunctionState::Incomplete { reason },
     }
+}
+
+/// Where the name [`validate_names`] refuses in `functions` is: the first
+/// canonical name or alias, in the order it checks them, that a built-in or
+/// an earlier name already claims (compared lowercased, as dispatch resolves
+/// them). The artifact root when none is.
+fn refused_name_site(functions: &[HostFunction]) -> ReasonSite {
+    let mut seen = HashSet::new();
+    for function in functions {
+        let entry = Pointer::root().join("functions").join(&function.canonical);
+        let names = std::iter::once((entry.clone(), &function.canonical))
+            .chain(function.aliases.iter().enumerate().map(|(index, alias)| (entry.join("aliases").join(index), alias)));
+        for (at, name) in names {
+            let lower = name.to_ascii_lowercase();
+            if is_builtin_name(&lower) || !seen.insert(lower) {
+                return at.site();
+            }
+        }
+    }
+    Pointer::root().site()
 }
 
 // ── writer ──────────────────────────────────────────────────────────────────
@@ -253,49 +298,133 @@ pub(crate) fn sorted(value: Value) -> Value {
 
 // ── reader ──────────────────────────────────────────────────────────────────
 
+/// Why the reader distrusts an artifact or an entry, and where in the
+/// artifact: `None` for a file that has no text to point into.
+#[derive(Debug, Clone)]
+struct Fault {
+    reason: String,
+    site: Option<ReasonSite>,
+}
+
+impl Fault {
+    /// The reason completed by the sentence's subject (`the facts artifact
+    /// `…``, `its facts artifact entry`).
+    fn prefixed(self, subject: &str) -> Self {
+        Self { reason: format!("{subject} {}", self.reason), ..self }
+    }
+}
+
+/// A JSON pointer into the artifact, as its segments.
+#[derive(Debug, Clone, Default)]
+struct Pointer(Vec<String>);
+
+impl Pointer {
+    fn root() -> Self {
+        Self::default()
+    }
+
+    fn join(&self, segment: impl ToString) -> Self {
+        let mut segments = self.0.clone();
+        segments.push(segment.to_string());
+        Self(segments)
+    }
+
+    fn site(&self) -> ReasonSite {
+        ReasonSite::Field(self.0.clone())
+    }
+
+    fn fault(&self, reason: impl Into<String>) -> Fault {
+        Fault { reason: reason.into(), site: Some(self.site()) }
+    }
+}
+
+/// The field `key` of `object` (at `at`) by [`required`], or by
+/// [`required_in`] for the nested object `owner`: an absent field is a
+/// fault at `object`, a `null` one at the field.
+fn need<'v>(object: &'v Map<String, Value>, key: &str, owner: Option<&str>, at: &Pointer) -> Result<&'v Value, Fault> {
+    let read = match owner {
+        None => required(object, key),
+        Some(owner) => required_in(object, key, owner),
+    };
+    read.map_err(|reason| if object.contains_key(key) { at.join(key) } else { at.clone() }.fault(reason))
+}
+
+/// [`nullable`] for the field `key` of `object` (at `at`); absence is a
+/// fault at `object`.
+fn maybe<'v>(object: &'v Map<String, Value>, key: &str, at: &Pointer) -> Result<Option<&'v Value>, Fault> {
+    nullable(object, key).map_err(|reason| at.fault(reason))
+}
+
+/// [`reject_unknown`] for `object` (at `at`), the fault at the unknown
+/// field and its reason completed by `owner` (`` `facts[0]` ``) when given.
+fn known(object: &Map<String, Value>, fields: &[&str], owner: Option<&str>, at: &Pointer) -> Result<(), Fault> {
+    let Err(reason) = reject_unknown(object, fields) else {
+        return Ok(());
+    };
+    let unknown = object.keys().find(|key| !fields.contains(&key.as_str()));
+    let site = unknown.map_or_else(|| at.clone(), |key| at.join(key));
+    Err(site.fault(match owner {
+        Some(owner) => format!("`{owner}` {reason}"),
+        None => reason,
+    }))
+}
+
+/// The strict parser's refusal, at its own line and byte column.
+fn parsed(text: &str) -> Result<Value, Fault> {
+    crate::strict_json::parse(text).map_err(|error| {
+        let (crate::strict_json::StrictJsonError::Invalid(cause) | crate::strict_json::StrictJsonError::Trailing(cause)) = &error;
+        // `serde_json` reports line 0 only for an error that has no position.
+        let site = (cause.line() > 0).then(|| ReasonSite::Position(cause.line(), cause.column()));
+        Fault { reason: error.to_string(), site }
+    })
+}
+
 /// The artifact's `functions` map, after every whole-file check; `Err` is
-/// the reason every function is incomplete.
+/// why every function is incomplete, its reason completing a sentence about
+/// the file.
 fn read_entries(
     catalog: &HostFunctionCatalog,
     names: &[&str],
     artifact: FactsArtifact<'_>,
-    path: &Path,
-) -> Result<Map<String, Value>, String> {
-    let file = format!("the facts artifact `{}`", path.display());
+) -> Result<Map<String, Value>, Fault> {
+    let unplaced = |reason: String| Fault { reason, site: None };
     let text = match artifact {
         FactsArtifact::Text(text) => text,
-        FactsArtifact::Absent => return Err(format!("{file} is absent")),
-        FactsArtifact::Unreadable(error) => return Err(format!("{file} cannot be read: {error}")),
+        FactsArtifact::Absent => return Err(unplaced("is absent".to_string())),
+        FactsArtifact::Unreadable(error) => return Err(unplaced(format!("cannot be read: {error}"))),
     };
-    let root = parse_strict(text).map_err(|error| format!("{file} {error}"))?;
+    let root_at = Pointer::root();
+    let root = parsed(text)?;
     let Value::Object(root) = root else {
-        return Err(format!("{file} is {} instead of an object", describe(&root)));
+        return Err(root_at.fault(format!("is {} instead of an object", describe(&root))));
     };
-    reject_unknown(&root, TOP_FIELDS).map_err(|error| format!("{file} {error}"))?;
-    let version = required(&root, "format_version").map_err(|error| format!("{file} {error}"))?;
+    known(&root, TOP_FIELDS, None, &root_at)?;
+    let version = need(&root, "format_version", None, &root_at)?;
+    let version_at = root_at.join("format_version");
     match version.as_u64() {
         Some(FACTS_ARTIFACT_FORMAT_VERSION) => {}
         Some(other) => {
-            return Err(format!(
-                "{file} has unknown `format_version` {other}; this reader understands {FACTS_ARTIFACT_FORMAT_VERSION}"
-            ));
+            return Err(version_at.fault(format!(
+                "has unknown `format_version` {other}; this reader understands {FACTS_ARTIFACT_FORMAT_VERSION}"
+            )));
         }
-        None => return Err(format!("{file} has `format_version` {} instead of an integer", describe(version))),
+        None => return Err(version_at.fault(format!("has `format_version` {} instead of an integer", describe(version)))),
     }
-    let hash = string(required(&root, "catalog_hash").map_err(|error| format!("{file} {error}"))?, "catalog_hash")
-        .map_err(|error| format!("{file} {error}"))?;
+    let hash_at = root_at.join("catalog_hash");
+    let hash = string(need(&root, "catalog_hash", None, &root_at)?, "catalog_hash").map_err(|reason| hash_at.fault(reason))?;
     if hash != catalog.version() {
-        return Err(format!(
-            "{file} records catalog hash `{hash}`, but the loaded catalog's hash is `{}`; regenerate the artifact",
+        return Err(hash_at.fault(format!(
+            "records catalog hash `{hash}`, but the loaded catalog's hash is `{}`; regenerate the artifact",
             catalog.version()
-        ));
+        )));
     }
-    let functions = required(&root, "functions").map_err(|error| format!("{file} {error}"))?;
+    let functions_at = root_at.join("functions");
+    let functions = need(&root, "functions", None, &root_at)?;
     let Value::Object(functions) = functions else {
-        return Err(format!("{file} has `functions` {} instead of an object", describe(functions)));
+        return Err(functions_at.fault(format!("has `functions` {} instead of an object", describe(functions))));
     };
     if let Some(stray) = functions.keys().find(|key| !names.contains(&key.as_str())) {
-        return Err(format!("{file} has an entry for `{stray}`, which the catalog does not declare"));
+        return Err(functions_at.join(stray).fault(format!("has an entry for `{stray}`, which the catalog does not declare")));
     }
     Ok(functions.clone())
 }
@@ -306,72 +435,91 @@ fn rebuild(
     catalog: &HostFunctionCatalog,
     name: &str,
     entry: &Value,
-) -> Result<(Vec<String>, FunctionRegistration), String> {
+) -> Result<(Vec<String>, FunctionRegistration), Fault> {
+    let at = Pointer::root().join("functions").join(name);
     let Value::Object(entry) = entry else {
-        return Err(format!("is {} instead of an object", describe(entry)));
+        return Err(at.fault(format!("is {} instead of an object", describe(entry))));
     };
-    reject_unknown(entry, FUNCTION_FIELDS)?;
+    known(entry, FUNCTION_FIELDS, None, &at)?;
 
-    let aliases = array(required(entry, "aliases")?, "aliases")?
+    let aliases_at = at.join("aliases");
+    let aliases = array(need(entry, "aliases", None, &at)?, "aliases")
+        .map_err(|reason| aliases_at.fault(reason))?
         .iter()
         .enumerate()
-        .map(|(index, alias)| string(alias, &format!("aliases[{index}]")).map(str::to_string))
+        .map(|(index, alias)| {
+            string(alias, &format!("aliases[{index}]")).map(str::to_string).map_err(|reason| aliases_at.join(index).fault(reason))
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let facts = array(required(entry, "facts")?, "facts")?;
+    let facts_at = at.join("facts");
+    let facts = array(need(entry, "facts", None, &at)?, "facts").map_err(|reason| facts_at.fault(reason))?;
     let mut parsed_facts = Vec::with_capacity(facts.len());
     for (index, fact) in facts.iter().enumerate() {
-        parsed_facts.push(parse_fact(fact, &format!("facts[{index}]"))?);
+        parsed_facts.push(parse_fact(fact, &format!("facts[{index}]"), &facts_at.join(index))?);
     }
     if parsed_facts.len() > 1 {
-        return Err(format!("lists {} facts; a function registers at most one", parsed_facts.len()));
+        return Err(facts_at.fault(format!("lists {} facts; a function registers at most one", parsed_facts.len())));
     }
 
-    let lazy = required(entry, "lazy")?;
-    match lazy {
+    let lazy_at = at.join("lazy");
+    match need(entry, "lazy", None, &at)? {
         Value::Bool(false) => {}
-        Value::Bool(true) => return Err("has `lazy: true`; host functions are evaluated eagerly".to_string()),
-        other => return Err(format!("has `lazy` {} instead of a boolean", describe(other))),
+        Value::Bool(true) => return Err(lazy_at.fault("has `lazy: true`; host functions are evaluated eagerly")),
+        other => return Err(lazy_at.fault(format!("has `lazy` {} instead of a boolean", describe(other)))),
     }
 
-    let recovery = match nullable(entry, "conversion_recovery")? {
+    let recovery_at = at.join("conversion_recovery");
+    let recovery = match maybe(entry, "conversion_recovery", &at)? {
         None => None,
         Some(value) => {
-            let object = object(value, "conversion_recovery")?;
-            reject_unknown(object, RECOVERY_FIELDS).map_err(|error| format!("`conversion_recovery` {error}"))?;
-            let subject = string(required_in(object, "subject", "conversion_recovery")?, "conversion_recovery.subject")?;
-            let fallback =
-                string(required_in(object, "fallback", "conversion_recovery")?, "conversion_recovery.fallback")?;
+            let object = object(value, "conversion_recovery").map_err(|reason| recovery_at.fault(reason))?;
+            known(object, RECOVERY_FIELDS, Some("conversion_recovery"), &recovery_at)?;
+            let subject = string(need(object, "subject", Some("conversion_recovery"), &recovery_at)?, "conversion_recovery.subject")
+                .map_err(|reason| recovery_at.join("subject").fault(reason))?;
+            let fallback = string(need(object, "fallback", Some("conversion_recovery"), &recovery_at)?, "conversion_recovery.fallback")
+                .map_err(|reason| recovery_at.join("fallback").fault(reason))?;
             Some((subject.to_string(), fallback.to_string()))
         }
     };
 
-    let exclusions = array(required(entry, "source_exclusions")?, "source_exclusions")?;
+    let exclusions_at = at.join("source_exclusions");
+    let exclusions =
+        array(need(entry, "source_exclusions", None, &at)?, "source_exclusions").map_err(|reason| exclusions_at.fault(reason))?;
     let mut parsed_exclusions = Vec::with_capacity(exclusions.len());
     for (index, exclusion) in exclusions.iter().enumerate() {
         let field = format!("source_exclusions[{index}]");
-        let object = object(exclusion, &field)?;
-        reject_unknown(object, EXCLUSION_FIELDS).map_err(|error| format!("`{field}` {error}"))?;
-        let parameter = string(required_in(object, "parameter", &field)?, &format!("{field}.parameter"))?;
+        let exclusion_at = exclusions_at.join(index);
+        let object = object(exclusion, &field).map_err(|reason| exclusion_at.fault(reason))?;
+        known(object, EXCLUSION_FIELDS, Some(&field), &exclusion_at)?;
+        let parameter = string(need(object, "parameter", Some(&field), &exclusion_at)?, &format!("{field}.parameter"))
+            .map_err(|reason| exclusion_at.join("parameter").fault(reason))?;
         let kinds_field = format!("{field}.kinds");
-        let kinds = array(required_in(object, "kinds", &field)?, &kinds_field)?
+        let kinds_at = exclusion_at.join("kinds");
+        let kinds = array(need(object, "kinds", Some(&field), &exclusion_at)?, &kinds_field)
+            .map_err(|reason| kinds_at.fault(reason))?
             .iter()
             .enumerate()
-            .map(|(kind_index, kind)| value_kind(kind, &format!("{kinds_field}[{kind_index}]")))
+            .map(|(kind_index, kind)| {
+                value_kind(kind, &format!("{kinds_field}[{kind_index}]")).map_err(|reason| kinds_at.join(kind_index).fault(reason))
+            })
             .collect::<Result<Vec<_>, _>>()?;
         if kinds.is_empty() {
-            return Err(format!("has an empty `{kinds_field}`; an exclusion names at least one kind"));
+            return Err(kinds_at.fault(format!("has an empty `{kinds_field}`; an exclusion names at least one kind")));
         }
         parsed_exclusions.push((parameter.to_string(), kinds));
     }
 
-    let malformed = match nullable(entry, "malformed_reference")? {
+    let reference_at = at.join("malformed_reference");
+    let malformed = match maybe(entry, "malformed_reference", &at)? {
         None => None,
         Some(value) => {
-            let object = object(value, "malformed_reference")?;
-            reject_unknown(object, REFERENCE_FIELDS).map_err(|error| format!("`malformed_reference` {error}"))?;
-            let parameter = string(required_in(object, "parameter", "malformed_reference")?, "malformed_reference.parameter")?;
-            let position = position(required_in(object, "position", "malformed_reference")?, "malformed_reference.position")?;
+            let object = object(value, "malformed_reference").map_err(|reason| reference_at.fault(reason))?;
+            known(object, REFERENCE_FIELDS, Some("malformed_reference"), &reference_at)?;
+            let parameter = string(need(object, "parameter", Some("malformed_reference"), &reference_at)?, "malformed_reference.parameter")
+                .map_err(|reason| reference_at.join("parameter").fault(reason))?;
+            let position = position(need(object, "position", Some("malformed_reference"), &reference_at)?, "malformed_reference.position")
+                .map_err(|reason| reference_at.join("position").fault(reason))?;
             Some((parameter.to_string(), position))
         }
     };
@@ -387,47 +535,49 @@ fn rebuild(
     if let Some((parameter, _)) = &malformed {
         builder = builder.false_for_malformed_reference(parameter.clone());
     }
-    let registration = catalog.build(builder).map_err(|error| format!("does not register: {error}"))?;
+    // The registry judges the entry's facts together, so the refusal is the
+    // entry's.
+    let registration = catalog.build(builder).map_err(|error| at.fault(format!("does not register: {error}")))?;
 
     match (parsed_facts.first(), registration.narrowing_fact()) {
         (None, Some(built)) => {
-            return Err(format!(
+            return Err(facts_at.fault(format!(
                 "records no fact, but the catalog declares one for `{}`",
                 built.parameter()
-            ));
+            )));
         }
         (Some(fact), None) => {
-            return Err(format!(
+            return Err(facts_at.fault(format!(
                 "records a fact for `{}`, but the catalog declares none",
                 fact.parameter
-            ));
+            )));
         }
         _ => {}
     }
     if let (Some(fact), Some(built)) = (parsed_facts.first(), registration.narrowing_fact())
         && fact.position != built.index()
     {
-        return Err(format!(
+        return Err(facts_at.join(0).join("position").fault(format!(
             "records `facts[0].position` {}, but `{}` is at position {} in the catalog",
             fact.position,
             fact.parameter,
             built.index()
-        ));
+        )));
     }
     if let (Some(fact), Some(built)) = (parsed_facts.first(), registration.narrowing_fact())
         && (fact.parameter != built.parameter() || fact.kind != built.kind() || fact.ty != *built.fact_type())
     {
-        return Err(format!(
+        return Err(facts_at.fault(format!(
             "records a fact that differs from the one the catalog declares for `{}`",
             built.parameter()
-        ));
+        )));
     }
     if let (Some((parameter, recorded)), Some(built)) = (&malformed, registration.malformed_reference_parameter())
         && *recorded != built
     {
-        return Err(format!(
+        return Err(reference_at.join("position").fault(format!(
             "records `malformed_reference.position` {recorded}, but `{parameter}` is at position {built} in the catalog"
-        ));
+        )));
     }
     Ok((aliases, registration))
 }
@@ -439,22 +589,26 @@ struct ParsedFact {
     ty: FactType,
 }
 
-fn parse_fact(value: &Value, field: &str) -> Result<ParsedFact, String> {
-    let object = object(value, field)?;
-    reject_unknown(object, FACT_FIELDS).map_err(|error| format!("`{field}` {error}"))?;
-    let parameter = string(required_in(object, "parameter", field)?, &format!("{field}.parameter"))?;
-    let position = position(required_in(object, "position", field)?, &format!("{field}.position"))?;
-    let kind = match string(required_in(object, "kind", field)?, &format!("{field}.kind"))? {
+/// The fact `value`, named `field` (`facts[0]`) in reasons and found at `at`.
+fn parse_fact(value: &Value, field: &str, at: &Pointer) -> Result<ParsedFact, Fault> {
+    let object = object(value, field).map_err(|reason| at.fault(reason))?;
+    known(object, FACT_FIELDS, Some(field), at)?;
+    let read = |key: &str| need(object, key, Some(field), at);
+    let parameter =
+        string(read("parameter")?, &format!("{field}.parameter")).map_err(|reason| at.join("parameter").fault(reason))?;
+    let position = position(read("position")?, &format!("{field}.position")).map_err(|reason| at.join("position").fault(reason))?;
+    let kind_at = at.join("kind");
+    let kind = match string(read("kind")?, &format!("{field}.kind")).map_err(|reason| kind_at.fault(reason))? {
         "true_implies" => FactKind::TrueImplies,
         "true_iff" => FactKind::TrueIff,
         "false_implies" => FactKind::FalseImplies,
         other => {
-            return Err(format!(
+            return Err(kind_at.fault(format!(
                 "has `{field}.kind` `{other}`; expected `true_implies`, `true_iff`, or `false_implies`"
-            ));
+            )));
         }
     };
-    let ty = match string(required_in(object, "type", field)?, &format!("{field}.type"))? {
+    let ty = match string(read("type")?, &format!("{field}.type")).map_err(|reason| at.join("type").fault(reason))? {
         NON_NULL_FACT_TYPE => FactType::NonNull,
         text => FactType::Type(text.to_string().into()),
     };
@@ -560,9 +714,9 @@ fn position(value: &Value, field: &str) -> Result<usize, String> {
 
 // ── where a reason points ───────────────────────────────────────────────────
 
-/// What a reader reason (the facts artifact's here, the lifecycle
-/// artifact's in [`crate::lifecycle::host_profile`], both written with the
-/// helpers above) is about in the artifact's text.
+/// What an artifact reader's refusal is about in the artifact's text: the
+/// facts reader records it as it judges, the lifecycle reader
+/// ([`crate::lifecycle::host_profile`]) through [`reason_site`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ReasonSite {
     /// The value at these JSON pointer segments; an absent field is reported
@@ -572,11 +726,11 @@ pub(crate) enum ReasonSite {
     Position(usize, usize),
 }
 
-/// Where `reason`, a reason of one of the strict artifact readers without
-/// its leading file phrase, is about: the inverse of the field-naming forms
-/// the readers write (`has no `x` field`, `has `events[0].name` a number
-/// instead of a string`, `records catalog hash …`). `None` for a reason
-/// naming no field (a registration the registry refuses).
+/// Where `reason`, a reason of the lifecycle artifact reader without its
+/// leading file phrase, is about: the inverse of the field-naming forms it
+/// writes with the helpers above (`has no `x` field`, `has `events[0].name`
+/// a number instead of a string`, `records catalog hash …`). `None` for a
+/// reason naming no field (a registration the registry refuses).
 pub(crate) fn reason_site(reason: &str) -> Option<ReasonSite> {
     if reason.starts_with("is not valid JSON") || reason.starts_with("has content after its JSON value") {
         // `serde_json` ends its message with ` at line L column C`.
@@ -597,10 +751,6 @@ pub(crate) fn reason_site(reason: &str) -> Option<ReasonSite> {
         field(ticked.last()?)
     } else if reason.starts_with("lists Darkmatter event") || reason.starts_with("does not list every Darkmatter event") {
         field("events")
-    } else if reason.starts_with("has an entry for") {
-        ReasonSite::Field(vec!["functions".to_string(), first?.to_string()])
-    } else if reason.starts_with("lists ") || reason.starts_with("records no fact") || reason.starts_with("records a fact") {
-        field("facts")
     } else if reason.starts_with("has unknown field") {
         field(first?)
     } else if let Some(owner) = reason.strip_prefix('`').and_then(|rest| rest.split_once("` has unknown field `")) {
@@ -609,7 +759,7 @@ pub(crate) fn reason_site(reason: &str) -> Option<ReasonSite> {
         let mut segments = field_segments(first?);
         segments.pop();
         ReasonSite::Field(segments)
-    } else if reason.starts_with("has `") || reason.starts_with("has unknown `") || reason.starts_with("has an empty `") || reason.starts_with("records `") {
+    } else if reason.starts_with("has `") || reason.starts_with("has unknown `") {
         field(first?.split(':').next().unwrap_or_default())
     } else {
         return None;
@@ -633,30 +783,11 @@ fn field_segments(field: &str) -> Vec<String> {
     segments
 }
 
-/// Where a facts artifact reason about catalog function `function` (one of
-/// [`HostFunctions::incomplete_functions`]) is about in the facts artifact
-/// read at `path`: a whole-file reason at its field, an entry reason under
-/// `functions.<function>`, and a missing entry at `functions`.
-pub(crate) fn facts_reason_site(function: &str, reason: &str, path: &Path) -> Option<ReasonSite> {
-    let file = format!("the facts artifact `{}` ", path.display());
-    if let Some(reason) = reason.strip_prefix(&file) {
-        return reason_site(reason);
-    }
-    if let Some(reason) = reason.strip_prefix("its facts artifact entry ") {
-        let entry = vec!["functions".to_string(), function.to_string()];
-        return Some(match reason_site(reason) {
-            Some(ReasonSite::Field(segments)) => ReasonSite::Field([entry, segments].concat()),
-            _ => ReasonSite::Field(entry),
-        });
-    }
-    (reason == "the facts artifact has no entry for it").then(|| ReasonSite::Field(vec!["functions".to_string()]))
-}
-
 // ── strict JSON ─────────────────────────────────────────────────────────────
 
 /// Parses `text` as one JSON value, rejecting a duplicate object key
 /// (`serde_json` keeps the last) and anything after the value. `Err`
-/// completes a sentence naming the artifact ("the facts artifact `…` …").
+/// completes a sentence naming the artifact ("the lifecycle artifact `…` …").
 pub(crate) fn parse_strict(text: &str) -> Result<Value, String> {
     crate::strict_json::parse(text).map_err(|error| error.to_string())
 }
@@ -687,27 +818,81 @@ mod tests {
             ("gives Darkmatter event `composed` a position or role at `events[3]`", field(&["events", "3"])),
             ("lists Darkmatter event `composed` twice", field(&["events"])),
             ("does not list every Darkmatter event", field(&["events"])),
-            ("has an entry for `stray`, which the catalog does not declare", field(&["functions", "stray"])),
-            ("has `lazy: true`; host functions are evaluated eagerly", field(&["lazy"])),
-            ("has an empty `source_exclusions[0].kinds`; an exclusion names at least one kind", field(&["source_exclusions", "0", "kinds"])),
-            ("lists 2 facts; a function registers at most one", field(&["facts"])),
-            ("records no fact, but the catalog declares one for `value`", field(&["facts"])),
-            ("records `facts[0].position` 1, but `value` is at position 0 in the catalog", field(&["facts", "0", "position"])),
             ("records a registration the registry refuses: boom", None),
         ] {
             assert_eq!(reason_site(reason), expected, "{reason}");
         }
     }
 
+    const CATALOG: &str = "kind: expression-schema\ncategories:\n  - Project\ntypes:\n  pick: |-\n    function(parameters(value: unknown); returns(boolean); category(Project))\n";
+
+    fn catalog() -> HostFunctionCatalog {
+        HostFunctionCatalog::load(CATALOG, "host/functions.yaml").expect("the catalog loads")
+    }
+
+    /// The artifact the host's registration writes for [`CATALOG`].
+    fn written() -> String {
+        let handler: super::super::HostHandler = std::sync::Arc::new(|_| Ok(json!(true)));
+        HostFunctions::builder(catalog()).function("pick", &[], |registration| registration, handler).build().unwrap().facts_artifact()
+    }
+
+    /// The one incomplete function's reason and its site, for `artifact`.
+    fn judged(artifact: FactsArtifact<'_>) -> (String, Option<ReasonSite>) {
+        let (functions, sites) = analysis_only_sited(catalog(), Path::new("f.json"), artifact).expect("the catalog's names are valid");
+        let [(name, reason)] = functions.incomplete_functions()[..] else { panic!("`pick` is incomplete") };
+        (reason.to_string(), sites.get(name).cloned())
+    }
+
+    fn field(segments: &[&str]) -> Option<ReasonSite> {
+        Some(ReasonSite::Field(segments.iter().map(|segment| (*segment).to_string()).collect()))
+    }
+
     #[test]
-    fn a_facts_reason_is_placed_in_the_whole_file_or_under_its_function() {
-        let path = Path::new("f.json");
-        let field = |segments: &[&str]| Some(ReasonSite::Field(segments.iter().map(|segment| (*segment).to_string()).collect()));
-        assert_eq!(facts_reason_site("a", "the facts artifact `f.json` has no `catalog_hash` field", path), field(&[]));
-        assert_eq!(facts_reason_site("a", "its facts artifact entry has `lazy` 1 instead of a boolean", path), field(&["functions", "a", "lazy"]));
-        assert_eq!(facts_reason_site("a", "its facts artifact entry does not register: boom", path), field(&["functions", "a"]));
-        assert_eq!(facts_reason_site("a", "the facts artifact has no entry for it", path), field(&["functions"]));
-        assert_eq!(facts_reason_site("a", "something else", path), None);
+    fn the_reader_records_where_each_refusal_is_as_it_judges() {
+        let written = written();
+        let edited = |from: &str, to: &str| {
+            assert!(written.contains(from), "{from}");
+            written.replacen(from, to, 1)
+        };
+        for (text, expected, reason) in [
+            ("{\n".to_string(), Some(ReasonSite::Position(2, 0)), "the facts artifact `f.json` is not valid JSON"),
+            ("{} {}".to_string(), Some(ReasonSite::Position(1, 4)), "the facts artifact `f.json` has content after"),
+            ("{\"a\": {\"b\": 1, \"b\": 1}}".to_string(), Some(ReasonSite::Position(1, 18)), "the facts artifact `f.json` is not valid JSON: duplicate key `b`"),
+            ("[]".to_string(), field(&[]), "the facts artifact `f.json` is an array instead of an object"),
+            (edited("\"catalog_hash\"", "\"stray\": 1, \"catalog_hash\""), field(&["stray"]), "has unknown field `stray`"),
+            (edited("\"format_version\": 1", "\"format_version\": 2"), field(&["format_version"]), "has unknown `format_version` 2"),
+            (edited("\"catalog_hash\": \"", "\"catalog_hash\": \"0"), field(&["catalog_hash"]), "records catalog hash"),
+            (edited("\"functions\": {", "\"functions\": {\"stray\": {},"), field(&["functions", "stray"]), "has an entry for `stray`"),
+            (edited("\"lazy\": false", "\"lazy\": 1"), field(&["functions", "pick", "lazy"]), "its facts artifact entry has `lazy` a number instead of a boolean"),
+            (edited("\"conversion_recovery\": null,", ""), field(&["functions", "pick"]), "has no `conversion_recovery` field (write `null` for none)"),
+            (edited("\"aliases\": []", "\"aliases\": [1]"), field(&["functions", "pick", "aliases", "0"]), "has `aliases[0]` a number instead of a string"),
+            (edited("\"aliases\": []", "\"aliases\": [\"MIN\"]"), field(&["functions", "pick", "aliases", "0"]), "the facts artifact `f.json` is invalid"),
+            (
+                edited("\"source_exclusions\": []", "\"source_exclusions\": [{\"kinds\": [], \"parameter\": \"value\"}]"),
+                field(&["functions", "pick", "source_exclusions", "0", "kinds"]),
+                "has an empty `source_exclusions[0].kinds`",
+            ),
+            (
+                edited("\"facts\": []", "\"facts\": [{\"kind\": \"true_implies\", \"parameter\": \"value\", \"position\": 0, \"type\": \"string\"}]"),
+                field(&["functions", "pick", "facts"]),
+                "records a fact for `value`, but the catalog declares none",
+            ),
+        ] {
+            let (judged_reason, site) = judged(FactsArtifact::Text(&text));
+            assert_eq!(site, expected, "{text}: {judged_reason}");
+            assert!(judged_reason.contains(reason), "{text}: {judged_reason}");
+        }
+        assert_eq!(judged(FactsArtifact::Absent), ("the facts artifact `f.json` is absent".to_string(), None), "a file-level reason");
+        assert_eq!(judged(FactsArtifact::Unreadable("boom")).1, None);
+    }
+
+    #[test]
+    fn an_artifact_with_no_entry_for_a_function_is_refused_at_its_functions() {
+        let text = format!("{{\"catalog_hash\": \"{}\", \"format_version\": 1, \"functions\": {{}}}}", catalog().version());
+        assert_eq!(judged(FactsArtifact::Text(&text)), ("the facts artifact has no entry for it".to_string(), field(&["functions"])));
+        let complete = written();
+        let (functions, sites) = analysis_only_sited(catalog(), Path::new("f.json"), FactsArtifact::Text(&complete)).unwrap();
+        assert!(functions.incomplete_functions().is_empty() && sites.is_empty());
     }
 
     #[test]

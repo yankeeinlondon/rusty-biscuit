@@ -1,4 +1,4 @@
-kind: schema
+kind: mutation-schema
 categories:
     - State Mutation -> Change the in-memory runtime state map; nothing on disk or on the network is touched.
     - Frontmatter Mutations -> Change a Markdown document's frontmatter on disk, inside the mutation root.

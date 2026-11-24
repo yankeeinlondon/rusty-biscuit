@@ -281,6 +281,7 @@ a host manifest, or runs anything. See
 | The root `$schema` does not resolve, or names a definition that fails | `dm.schema.prepare` (or the declaration's own code) on the `$schema` value; a failure inside the referenced file is related information in that file |
 | The document does not meet its schema | the frontmatter codes, ranged the same way: a missing key on its parent mapping, an undeclared key on the key, a type or constraint failure on the value. A missing required key and an undeclared key are **errors** in either strict mode or not, since no compose step can supply or strip them |
 | A Darkmatter kind's own checks (`schema`, `schema-trigger`, `yaml-schema`) | `dm.schema.kind_check` errors, located where the library located them (for a trigger, on the bad `$path` glob) |
+| A callable catalog (`kind: expression-schema` or `kind: mutation-schema`) whose callables fail the catalog reader (a folded-name collision, a reused built-in name, a missing or disagreeing category, `narrows(...)` in a mutation; a duplicate overload is a type-definition error at the later overload) | one `dm.schema.callable_catalog` error per failure at the failing declaration, with the conflicting declaration as related information; the file stays claimed by its kind and never falls back to a root `$schema`. The editor and `md schema validate` run the same reader, so both report the same errors |
 
 Each problem is published once, and the selected definition is the only
 judge of the file's shape. In a `kind: schema` or `kind: yaml-schema` file,

@@ -1008,11 +1008,13 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                 );
             }
             Class::FunctionCatalog => {
+                // A callable catalog is private: never a document schema, and
+                // none of its entries (helpers included) is an import source.
                 let error = resolve_schema_with_roots(&reference, dir, &[], &context)
                     .expect_err(&format!("{label} must never apply as a document schema"));
                 assert!(
-                    matches!(error, SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }),
-                    "{label} must be refused as a `types`-only document: {error}"
+                    matches!(error, SchemaError::NotASchemaDocument { reason: NotSchemaReason::CallableCatalog, .. }),
+                    "{label} must be refused as a callable catalog: {error}"
                 );
                 let types = yaml_key(&document, "types")
                     .and_then(YamlValue::as_mapping)
@@ -1029,9 +1031,9 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                         artifact.path.file_name().and_then(|file| file.to_str()).expect("UTF-8 file name")
                     ))
                     .expect("YAML");
-                    let resolved = resolve_yaml_schema(&import, dir, &context)
-                        .unwrap_or_else(|error| panic!("{label} `{name}` must import: {error}"));
-                    assert_lowered(&resolved, &format!("{label} `{name}`"));
+                    let error = resolve_yaml_schema(&import, dir, &context)
+                        .expect_err(&format!("{label} `{name}` is a private helper"));
+                    assert!(error.to_string().contains("callable catalog"), "{label} `{name}`: {error}");
                     inline_bodies += 1;
                 }
             }

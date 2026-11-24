@@ -180,7 +180,7 @@ fn host_only_stacks_and_host_functions_never_run() {
     let value = envelope(&output, include_str!("../../schemas/output/compose.yaml"));
     let text = value["diagnostics"].to_string();
     assert!(
-        text.contains("acme_label() has no implementation in this process"),
+        text.contains("host function acme_label() requires the host runtime"),
         "the host function is typed but has no handler: {value:#}"
     );
     assert!(lifecycle_lines(&value).is_empty(), "no host stack ran: {value:#}");

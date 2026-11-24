@@ -2,29 +2,38 @@
 //! into passive host profiles.
 //!
 //! A `register` entry of `.darkmatter.yaml` names a **host manifest**
-//! (`kind: darkmatter-host`, format 2, [`manifest`]), one file a host program
+//! (`kind: darkmatter-host`, format 3, [`manifest`]), one file a host program
 //! publishes that lists every file of its bundle with its BLAKE3 digest:
-//! schema triggers, YAML kind definitions, namespace schemas, and type
-//! libraries under `files`, its lifecycle artifact, and its function
-//! catalogs. [`load_registrations`] turns each entry into a
-//! [`RegisteredHostProfile`], or into warnings when anything about it is
-//! unusable:
+//! schema triggers, YAML kind definitions, namespace schemas, type
+//! libraries, and expression catalogs under `files`, and its lifecycle
+//! artifact; each expression catalog's facts companion is derived from the
+//! catalog's name and digested too. [`load_registrations`] turns each entry
+//! into a [`RegisteredHostProfile`], or into warnings when anything about it
+//! is unusable:
 //!
-//! - [`bundle::load_snapshot`] validates the manifest against the shipped
-//!   closed envelope, then reads every member once and checks its digest; a
-//!   format 1 manifest is refused with an upgrade warning;
+//! - [`bundle::load_snapshot`] checks the manifest's format version and
+//!   validates it against the shipped closed envelope, then reads every
+//!   member once and checks its digest; a manifest of any other format is
+//!   refused with an update-and-republish warning;
 //! - every member is classified by its own `kind` and prepared from the
 //!   verified bytes alone ([`simplified_schema::resolve::bundle`]): an import
 //!   outside the listed members, an escape, or a remote reference is refused;
 //! - the namespace files form the host's global catalog ([`namespaces`]),
 //!   which the lifecycle artifact must be versioned against;
+//! - each expression catalog loads with the authored catalog reader and its
+//!   verified companion into an analysis-only function set; every function
+//!   must be complete, and no canonical name or alias may be claimed by two
+//!   of the host's catalogs (a `kind: mutation-schema` file is refused:
+//!   hosts define no actions);
 //! - a profile is published only when all of it loads: no partial globals,
 //!   functions, lifecycle events, trigger payloads, or YAML kinds are ever
 //!   exposed.
 //!
 //! Registration is passive: it writes nothing, fetches nothing, prompts for
 //! nothing, installs no function handler, and runs no command. A profile is
-//! analysis data, never runtime authority.
+//! analysis data, never runtime authority: its function sets are entered
+//! only for a document selected for its host, and a call that reaches
+//! evaluation fails because only the host process holds the handler.
 //!
 //! Which host a document belongs to is [`select`]ed over [`RegisteredHosts`]
 //! (built on [`agreement`]): a host one of whose triggers matches the
@@ -33,6 +42,11 @@
 //! [`DarkmatterSchemas::with_registered_hosts`](crate::markdown::schemas::DarkmatterSchemas::with_registered_hosts).
 //!
 //! User-facing guide: `darkmatter/docs/topics/host-registration.md`.
+
+// A refusal is a located message plus its related locations, built once
+// per refused member and never on a hot path; boxing every `Err` would only
+// add noise at each construction site.
+#![allow(clippy::result_large_err)]
 
 pub mod bundle;
 mod locate;
@@ -58,17 +72,17 @@ use simplified_schema::triggers::{
 };
 use simplified_schema::yaml_documents::{RegisteredDefinition, RegisteredSource};
 
-use self::bundle::{BundleFunctionPair, BundleMember, VerifiedSnapshot};
+use self::bundle::{BundleCompanion, BundleMember, VerifiedSnapshot};
 use self::namespaces::{NamespaceMember, PreparedCatalog};
 use super::load::{ConfigSnapshot, Registration, SourcePosition, line_column};
 use crate::lifecycle::host_profile::{self, HostLifecycleProfile};
 use crate::markdown::compose::expression::host::FactsArtifact;
-use crate::markdown::compose::expression::host::artifact::facts_reason_site;
+use crate::markdown::compose::expression::host::artifact::analysis_only_sited;
 use crate::markdown::compose::expression::{
-    Availability, BindingView, HostFunctions, HostGlobals, RuntimeBinding, ScopeId, Severity, UnavailabilityReason,
-    is_reserved_namespace,
+    Availability, BindingView, HostFunctionCatalog, HostFunctions, HostGlobals, RuntimeBinding, ScopeId, Severity,
+    UnavailabilityReason, is_reserved_namespace,
 };
-use crate::markdown::schemas::catalog::{DARKMATTER_GLOBALS, GlobalCatalog, host_function_set_at};
+use crate::markdown::schemas::catalog::{DARKMATTER_GLOBALS, GlobalCatalog};
 
 /// A `register` entry failed to load (a missing or invalid manifest or
 /// member, a refused lifecycle or facts artifact, a host mismatch), or two
@@ -116,9 +130,30 @@ pub struct RegistrationDiagnostic {
     pub line_prefix: Option<String>,
     /// The `register` entry refused.
     pub entry: Registration,
-    /// The manifest field of the failing member (`lifecycle`, `files[1]`,
-    /// `functions[0].facts`); `None` when the manifest itself failed.
+    /// The manifest field of the failing member (`lifecycle`, `files[1]`;
+    /// a facts companion's is its catalog's `files` entry); `None` when the
+    /// manifest itself failed.
     pub member: Option<String>,
+    /// Other locations the problem involves: the earlier declaration a
+    /// conflicting name or alias collides with, or the built-in a catalog
+    /// name reuses.
+    pub related: Vec<RegistrationRelated>,
+}
+
+/// A secondary location of a [`RegistrationDiagnostic`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistrationRelated {
+    /// What the location is, as an editor labels it.
+    pub message: String,
+    #[allow(missing_docs)]
+    pub file: PathBuf,
+    /// 1-based line in [`Self::file`], when known.
+    pub line: Option<usize>,
+    /// 1-based character column, when [`Self::line`] is known.
+    pub column: Option<usize>,
+    /// The line's text before [`Self::column`], when [`Self::line`] is
+    /// known.
+    pub line_prefix: Option<String>,
 }
 
 /// One file a profile read, with the BLAKE3 hash of the bytes read.
@@ -189,12 +224,15 @@ impl RegisteredTrigger {
     }
 }
 
-/// One `functions` pair: the analysis-only set its catalog and facts give.
+/// One `kind: expression-schema` member: the analysis-only set its catalog
+/// and derived facts companion give.
 #[derive(Debug, Clone)]
 pub struct HostFunctionSet {
+    /// The catalog's bundle-relative path (`schemas/project.yaml`).
+    pub bundle_path: String,
     /// The function catalog file.
     pub catalog: PathBuf,
-    /// The facts artifact file.
+    /// The facts companion file.
     pub facts: PathBuf,
     /// Every function complete; no handler is installed.
     pub functions: HostFunctions,
@@ -340,7 +378,8 @@ impl RegisteredHostProfile {
         &self.lifecycle
     }
 
-    /// The `functions` sets, in manifest order.
+    /// The expression catalogs' analysis-only sets, in bundle-path order.
+    /// No two share a canonical name or alias (case-insensitively).
     #[must_use]
     pub fn functions(&self) -> &[HostFunctionSet] {
         &self.functions
@@ -444,6 +483,7 @@ impl RegisteredHostProfile {
                 at: None,
             }),
             member: None,
+            related: Vec::new(),
         }
     }
 }
@@ -609,6 +649,7 @@ impl HostClaim {
                     file: claim.manifest.path.clone(),
                     at: claim.snapshot.host_position().cloned(),
                     member: None,
+                    related: Vec::new(),
                     message: format!(
                         "claims host `{host}`, which {} also claims with different content; neither's triggers apply to Markdown documents, while each one's YAML kinds stay available and a kind both define differently cannot be selected",
                         others.join(", ")
@@ -654,6 +695,7 @@ struct Refusal {
     at: Option<SourcePosition>,
     member: Option<String>,
     message: String,
+    related: Vec<RegistrationRelated>,
 }
 
 impl Refusal {
@@ -694,6 +736,7 @@ impl Labeled {
             line_prefix: refusal.at.map(|at| at.line_prefix),
             entry: entry.clone(),
             member: refusal.member,
+            related: refusal.related,
         }
     }
 }
@@ -712,6 +755,7 @@ fn locate_manifest(entry: &Registration, context: &FileResolutionContext) -> Res
         at: entry.at.clone(),
         member: None,
         message,
+        related: Vec::new(),
     };
     let path = resolve_local(&entry.reference, &anchored_at(context, &entry.declared_in)).map_err(refuse)?;
     canonicalize_simplified(&path).map_err(|error| refuse(format!("the manifest `{}` cannot be resolved: {error}", path.display())))
@@ -819,8 +863,7 @@ impl Refused {
     }
 }
 
-/// A manifest field written from segments: `files[1]`,
-/// `functions[0].facts`.
+/// A manifest field written from segments: `files[1]`, `digests.<key>`.
 fn field(segments: &[&str]) -> String {
     let mut text = String::new();
     for segment in segments {
@@ -847,6 +890,7 @@ fn load_manifest(path: &Path, context: &FileResolutionContext, owned: &BTreeSet<
             file: refusal.file,
             member: refusal.member,
             message: refusal.message,
+            related: Vec::new(),
         };
         Refused::one(refusal, dedup(watches))
     })?;
@@ -857,7 +901,7 @@ fn load_manifest(path: &Path, context: &FileResolutionContext, owned: &BTreeSet<
 /// exactly as [`load_registrations`] prepares a `register` entry's verified
 /// snapshot: every member classified and prepared, every declared type
 /// checked, and the catalog and every artifact (the lifecycle profile, each
-/// function pair) checked against the members. A diagnostic that has
+/// expression catalog's companion) checked against the members. A diagnostic that has
 /// already read the bundle ([`bundle::verify_read`]) learns whether
 /// Darkmatter would load it without loading it through a `register` entry.
 ///
@@ -876,7 +920,7 @@ pub fn load_verified(
 ) -> Result<RegisteredHostProfile, Vec<bundle::SnapshotRefusal>> {
     let as_refusal = |Labeled { refusal, label }: Labeled| bundle::SnapshotRefusal {
         label,
-        ..bundle::SnapshotRefusal::of(refusal, false, Vec::new(), Vec::new())
+        ..bundle::SnapshotRefusal::of(refusal, None, Vec::new(), Vec::new())
     };
     if snapshot.embedded_bundle().is_some() {
         let refusal = Refusal {
@@ -885,6 +929,7 @@ pub fn load_verified(
             at: None,
             member: None,
             message: "the snapshot is embedded; load it with `load_embedded`".to_string(),
+            related: Vec::new(),
         };
         return Err(vec![as_refusal(Labeled { refusal, label: None })]);
     }
@@ -917,7 +962,7 @@ pub fn load_embedded(
 ) -> Result<RegisteredHostProfile, Vec<bundle::SnapshotRefusal>> {
     let as_refusal = |Labeled { refusal, label }: Labeled| bundle::SnapshotRefusal {
         label,
-        ..bundle::SnapshotRefusal::of(refusal, false, Vec::new(), Vec::new())
+        ..bundle::SnapshotRefusal::of(refusal, None, Vec::new(), Vec::new())
     };
     if snapshot.embedded_bundle().is_none() {
         let refusal = Refusal {
@@ -926,6 +971,7 @@ pub fn load_embedded(
             at: None,
             member: None,
             message: "the snapshot was read from disk; load it through its `register` entry".to_string(),
+            related: Vec::new(),
         };
         return Err(vec![as_refusal(Labeled { refusal, label: None })]);
     }
@@ -1074,6 +1120,7 @@ fn prepare_members(
                 at: None,
                 member: None,
                 message: error.to_string(),
+                related: Vec::new(),
             });
             return members;
         }
@@ -1083,6 +1130,7 @@ fn prepare_members(
     // catalog would lack it, so no lifecycle artifact is checked against it.
     let mut catalog_incomplete = false;
     let mut labels: Vec<Label> = Vec::new();
+    let mut catalogs: Vec<&BundleMember> = Vec::new();
     let texts = |location: &Path| verified_text(snapshot, location);
     let mut files: Vec<&BundleMember> = snapshot.files().iter().collect();
     files.sort_by(|left, right| left.path.cmp(&right.path));
@@ -1093,6 +1141,7 @@ fn prepare_members(
             at,
             member: Some(member.field.clone()),
             message,
+            related: Vec::new(),
         };
         let Some(text) = member_text(snapshot, member) else {
             // Reported at its manifest entry ([`related`]). Its kind is
@@ -1151,6 +1200,7 @@ fn prepare_members(
                 }
             }
             Ok(MemberKind::Namespace) => namespaces.push(member.path.as_str()),
+            Ok(MemberKind::ExpressionSchema) => catalogs.push(member),
             Ok(MemberKind::Library) => match library(text, &member.location) {
                 Ok(name) => {
                     if let Some(name) = name {
@@ -1197,6 +1247,7 @@ fn prepare_members(
             file: refusal.location,
             at: refusal.at,
             message: refusal.message,
+            related: Vec::new(),
         })),
     }
     if let Some(catalog) = &members.catalog {
@@ -1205,13 +1256,115 @@ fn prepare_members(
             Err(refusal) => members.refusals.push(refusal),
         }
     }
-    for pair in snapshot.functions() {
+    let mut sets: Vec<(HostFunctionSet, &BundleCompanion)> = Vec::new();
+    for catalog in catalogs {
+        let Some(pair) = snapshot.companions().iter().find(|pair| pair.catalog.path == catalog.path) else {
+            // The snapshot derives a companion for every catalog it classified.
+            members.refusals.push(Refusal {
+                code: HOST_REGISTRATION_CODE,
+                file: snapshot.manifest().to_path_buf(),
+                at: catalog.at.clone(),
+                member: Some(catalog.field.clone()),
+                message: format!("`{}` has no verified facts companion", catalog.reference),
+                related: Vec::new(),
+            });
+            continue;
+        };
         match load_functions(snapshot, pair) {
-            Ok(set) => members.functions.push(set),
+            Ok(set) => sets.push((set, pair)),
             Err(refusal) => members.refusals.push(refusal),
         }
     }
+    members.refusals.extend(name_collisions(snapshot, &sets));
+    members.functions = sets.into_iter().map(|(set, _)| set).collect();
     members
+}
+
+/// One name a host's catalogs claim: a canonical name, or an alias its facts
+/// companion records, and where it is written.
+struct Claim<'a> {
+    folded: String,
+    spelled: String,
+    alias_of: Option<String>,
+    pair: &'a BundleCompanion,
+    file: PathBuf,
+    at: Option<SourcePosition>,
+}
+
+/// Every canonical name and alias claimed by two of the host's catalogs,
+/// compared case-insensitively over the catalogs in bundle-path order: each
+/// later claimant is refused at its declaration (a catalog key, or an alias
+/// in its companion), with the earliest claim as a related location. A name
+/// repeated inside one catalog is that catalog's own failure, judged when it
+/// loads; another host's catalogs are never compared.
+fn name_collisions(snapshot: &VerifiedSnapshot, sets: &[(HostFunctionSet, &BundleCompanion)]) -> Vec<Refusal> {
+    let mut claims: Vec<Claim<'_>> = Vec::new();
+    for (set, pair) in sets {
+        let catalog_text = member_text(snapshot, &pair.catalog).unwrap_or_default();
+        let facts_text = member_text(snapshot, &pair.facts).unwrap_or_default();
+        let types = simplified_schema::yaml_documents::load_yaml_document(catalog_text, &pair.catalog.location).ok();
+        for name in set.functions.function_names() {
+            let at = types.as_ref().and_then(|loaded| {
+                loaded
+                    .byte_range(&simplified_schema::yaml_documents::locating_problem(&["types".to_string(), name.to_string()]))
+                    .map(|range| line_column(catalog_text, range.start))
+            });
+            claims.push(Claim {
+                folded: name.to_ascii_lowercase(),
+                spelled: name.to_string(),
+                alias_of: None,
+                pair,
+                file: pair.catalog.location.clone(),
+                at,
+            });
+            for (index, alias) in set.functions.aliases(name).unwrap_or_default().iter().enumerate() {
+                let pointer = locate::artifact_pointer(&["functions".to_string(), name.to_string(), "aliases".to_string(), index.to_string()]);
+                let at = biscuit_file::data_locations::locate_json(facts_text, &pointer).map(|offset| line_column(facts_text, offset));
+                claims.push(Claim {
+                    folded: alias.to_ascii_lowercase(),
+                    spelled: alias.clone(),
+                    alias_of: Some(name.to_string()),
+                    pair,
+                    file: pair.facts.location.clone(),
+                    at,
+                });
+            }
+        }
+    }
+    let describe = |claim: &Claim<'_>| match &claim.alias_of {
+        Some(function) => format!("alias `{}` of `{function}` in `{}`", claim.spelled, claim.pair.facts.path),
+        None => format!("function `{}` in `{}`", claim.spelled, claim.pair.catalog.path),
+    };
+    let mut refusals = Vec::new();
+    for (index, claim) in claims.iter().enumerate() {
+        let Some(first) = claims[..index]
+            .iter()
+            .find(|earlier| earlier.folded == claim.folded && !std::ptr::eq(earlier.pair, claim.pair))
+        else {
+            continue;
+        };
+        refusals.push(Refusal {
+            code: HOST_REGISTRATION_CODE,
+            file: claim.file.clone(),
+            at: claim.at.clone(),
+            member: Some(claim.pair.catalog.field.clone()),
+            message: format!(
+                "the {} claims the name `{}`, which the {} already claims; a host's expression catalogs share one \
+                 namespace, compared without letter case",
+                describe(claim),
+                claim.folded,
+                describe(first)
+            ),
+            related: vec![RegistrationRelated {
+                message: format!("the earlier {}", describe(first)),
+                file: first.file.clone(),
+                line: first.at.as_ref().map(|at| at.line),
+                column: first.at.as_ref().map(|at| at.column),
+                line_prefix: first.at.as_ref().map(|at| at.line_prefix.clone()),
+            }],
+        });
+    }
+    refusals
 }
 
 /// The bundle boundary applied to every declaration in `member`'s `types`
@@ -1240,18 +1393,15 @@ fn declared_types(
             at: site.at,
             member: Some(member.field.clone()),
             message: format!("a declared type does not resolve: {error}"),
+            related: Vec::new(),
         }
     })
 }
 
-/// Every member the manifest lists: `files`, the lifecycle artifact, then
-/// each function pair.
+/// Every member: `files`, the lifecycle artifact, then each catalog's facts
+/// companion.
 fn listed(snapshot: &VerifiedSnapshot) -> impl Iterator<Item = &BundleMember> {
-    snapshot
-        .files()
-        .iter()
-        .chain(std::iter::once(snapshot.lifecycle()))
-        .chain(snapshot.functions().iter().flat_map(|pair| [&pair.catalog, &pair.facts]))
+    snapshot.members()
 }
 
 /// The verified text of the member read from `location`.
@@ -1261,7 +1411,8 @@ fn verified_text<'a>(snapshot: &'a VerifiedSnapshot, location: &Path) -> Option<
 
 /// `refusal` reported where its problem is: a problem located in another
 /// member (a library a trigger imports) is that member's refusal, and its
-/// message names the member that imported it. An unlocated problem in a
+/// message names the member that imported it (a facts companion is its
+/// catalog's entry, never an import of it). An unlocated problem in a
 /// member that is not text is reported at that member's manifest entry.
 /// The member the refusal is reported under, and an importer it names,
 /// are shown by their display labels when they declare one
@@ -1273,7 +1424,9 @@ fn related(snapshot: &VerifiedSnapshot, refusal: Refusal) -> Labeled {
     let Some(failed) = listed(snapshot).find(|member| member.location == refusal.file) else {
         return Labeled { refusal, label: member_label(snapshot, importer) };
     };
-    let refusal = if importer.location == failed.location {
+    // A facts companion shares its catalog's `files` entry: a problem in it
+    // is that entry's own, not one the catalog imported.
+    let refusal = if importer.field == failed.field {
         refusal
     } else {
         let named = member_label(snapshot, importer).unwrap_or_else(|| importer.path.clone());
@@ -1386,6 +1539,7 @@ fn duplicate_labels(labels: &[Label]) -> Vec<Refusal> {
                 at: label.at.clone(),
                 member: Some(label.member.clone()),
                 message: format!("the name `{}` is also declared by {}; names are unique within a registration", label.name, others.join(", ")),
+                related: Vec::new(),
             })
         })
         .collect()
@@ -1400,6 +1554,7 @@ fn load_lifecycle(snapshot: &VerifiedSnapshot, catalog: &PreparedCatalog) -> Res
         at: None,
         member: Some(member.field.clone()),
         message,
+        related: Vec::new(),
     };
     let artifact = match member_text(snapshot, member) {
         Some(text) => FactsArtifact::Text(text),
@@ -1408,7 +1563,7 @@ fn load_lifecycle(snapshot: &VerifiedSnapshot, catalog: &PreparedCatalog) -> Res
     let lifecycle =
         HostLifecycleProfile::from_artifact_located(Arc::clone(&catalog.catalog), &catalog.hash, &member.location, artifact)
             .map_err(|(message, site)| Refusal {
-                at: member_text(snapshot, member).and_then(|text| locate::artifact(text, &member.location, site.as_ref())),
+                at: member_text(snapshot, member).and_then(|text| locate::artifact(text, site.as_ref())),
                 ..refuse(message)
             })?;
     // The reader checks a root's syntax and reserved names, and `host_globals`
@@ -1444,41 +1599,69 @@ fn load_lifecycle(snapshot: &VerifiedSnapshot, catalog: &PreparedCatalog) -> Res
                 snapshot.host(),
                 member.location.display()
             ),
+            related: Vec::new(),
         });
     }
     Ok((member.location.clone(), lifecycle))
 }
 
-/// One `functions` pair's analysis-only set, from verified bytes.
-fn load_functions(snapshot: &VerifiedSnapshot, pair: &BundleFunctionPair) -> Result<HostFunctionSet, Refusal> {
+/// One expression catalog's analysis-only set, from verified bytes: the
+/// catalog read by the authored catalog reader, its facts from the derived
+/// companion, every function complete.
+fn load_functions(snapshot: &VerifiedSnapshot, pair: &BundleCompanion) -> Result<HostFunctionSet, Refusal> {
     let refuse = |member: &BundleMember, message: String| Refusal {
         code: HOST_REGISTRATION_CODE,
         file: member.location.clone(),
         at: None,
         member: Some(member.field.clone()),
         message,
+        related: Vec::new(),
     };
     let text = member_text(snapshot, &pair.catalog)
-        .ok_or_else(|| refuse(&pair.catalog, "the function catalog is not UTF-8 text".to_string()))?;
-    let facts = snapshot.member_bytes(&pair.facts.path).map(|bytes| bytes.to_vec()).ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "the facts artifact is not a verified member")
-    });
-    let set = host_function_set_at(&pair.catalog.location, text, &pair.facts.location, facts).map_err(|error| Refusal {
-        at: error.span.as_ref().map(|span| line_column(text, span.start)),
-        ..refuse(&pair.catalog, error.message)
+        .ok_or_else(|| refuse(&pair.catalog, "the expression catalog is not UTF-8 text".to_string()))?;
+    let catalog = HostFunctionCatalog::load(text, &pair.catalog.location).map_err(|error| Refusal {
+        at: error.span().map(|span| line_column(text, span.start)),
+        related: error.related().iter().map(|related| catalog_related(snapshot, related)).collect(),
+        ..refuse(&pair.catalog, format!("the expression catalog does not load: {error}"))
     })?;
+    let artifact = match member_text(snapshot, &pair.facts) {
+        Some(facts) => FactsArtifact::Text(facts),
+        None => FactsArtifact::Unreadable("the file is not UTF-8 text"),
+    };
+    let (set, sites) = analysis_only_sited(catalog, &pair.facts.location, artifact)
+        .map_err(|error| refuse(&pair.catalog, error.to_string()))?;
     let incomplete = set.incomplete_functions();
-    if let Some((function, reason)) = incomplete.first() {
+    if let Some((function, _)) = incomplete.first() {
         let reasons: Vec<String> = incomplete.iter().map(|(name, reason)| format!("`{name}`: {reason}")).collect();
-        // Reported at the first incomplete function's problem.
-        let site = facts_reason_site(function, reason, &pair.facts.location);
+        // Reported where the reader judged the first incomplete function.
         return Err(Refusal {
             at: member_text(snapshot, &pair.facts)
-                .and_then(|facts| locate::artifact(facts, &pair.facts.location, site.as_ref())),
+                .and_then(|facts| locate::artifact(facts, sites.get(*function))),
             ..refuse(&pair.facts, format!("its functions are incomplete: {}", reasons.join("; ")))
         });
     }
-    Ok(HostFunctionSet { catalog: pair.catalog.location.clone(), facts: pair.facts.location.clone(), functions: set })
+    Ok(HostFunctionSet {
+        bundle_path: pair.catalog.path.clone(),
+        catalog: pair.catalog.location.clone(),
+        facts: pair.facts.location.clone(),
+        functions: set,
+    })
+}
+
+/// A catalog failure's related location, positioned when its file is a
+/// verified member (a built-in catalog's identity has no text here).
+fn catalog_related(snapshot: &VerifiedSnapshot, related: &simplified_schema::errors::CatalogRelated) -> RegistrationRelated {
+    let at = related
+        .span
+        .as_ref()
+        .and_then(|span| verified_text(snapshot, &related.file).map(|text| line_column(text, span.start)));
+    RegistrationRelated {
+        message: related.message.clone(),
+        file: related.file.clone(),
+        line: at.as_ref().map(|at| at.line),
+        column: at.as_ref().map(|at| at.column),
+        line_prefix: at.map(|at| at.line_prefix),
+    }
 }
 
 /// The registered trigger `member`, read from `texts` (which serve every
@@ -1502,6 +1685,7 @@ fn load_trigger(
         at,
         member: Some(member.field.clone()),
         message,
+        related: Vec::new(),
     };
     let text: Arc<str> = Arc::from(text);
     let envelope: TriggerEnvelope = match parse_trigger_envelope_from_str(&text) {
@@ -1560,7 +1744,7 @@ mod tests {
     fn fields_name_list_items_by_index() {
         assert_eq!(field(&["lifecycle"]), "lifecycle");
         assert_eq!(field(&["files", "1"]), "files[1]");
-        assert_eq!(field(&["functions", "0", "facts"]), "functions[0].facts");
+        assert_eq!(field(&["digests", "./a.yaml"]), "digests../a.yaml");
     }
 
     #[test]

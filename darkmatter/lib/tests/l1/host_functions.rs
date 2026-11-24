@@ -108,13 +108,15 @@ fn registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluati
     assert_eq!(error(alias), HostFunctionError::DuplicateName { name: "IPF".into() });
     let builtin_alias = base(&["isstring"]).function("project_label", &[], |r| r, label.clone()).build();
     assert_eq!(error(builtin_alias), HostFunctionError::BuiltinCollision { name: "isstring".into() });
-    let builtin = HostFunctionCatalog::load(
-        "kind: schema\ncategories:\n  - Math\ntypes:\n  min: |-\n    function(parameters(a: number); returns(number); category(Math))\n",
-        "min.yaml",
-    )
-    .expect("loads");
-    let builtin = HostFunctions::builder(builtin).function("min", &[], |r| r, handler.clone()).build();
-    assert_eq!(error(builtin), HostFunctionError::BuiltinCollision { name: "min".into() });
+    // A catalog that reuses a built-in canonical name is refused when it
+    // loads, before any builder exists, at its key with the built-in related.
+    let min_catalog =
+        "kind: expression-schema\ncategories:\n  - Math\ntypes:\n  min: |-\n    function(parameters(a: number); returns(number); category(Math))\n";
+    let builtin = HostFunctionCatalog::load(min_catalog, "min.yaml").expect_err("`min` is a built-in name");
+    assert!(builtin.to_string().contains("reuses the name of the built-in function `min`"), "{builtin}");
+    assert_eq!(builtin.span().map(|span| &min_catalog[span.clone()]), Some("min"));
+    let [related] = builtin.related() else { panic!("the built-in declaration: {builtin:?}") };
+    assert_eq!(related.file, Path::new("darkmatter/schemas/partials/functions.yaml"));
 
     let missing = base(&[]).build();
     assert_eq!(error(missing), HostFunctionError::MissingRegistration { function: "project_label".into() });
@@ -204,7 +206,7 @@ fn a_host_catalog_locates_a_rejected_fact_in_its_source() {
     let error = HostFunctionCatalog::load(&duplicate, path).expect_err("two clauses");
     assert_eq!(error.span(), Some(&at(&duplicate, "narrows", 1)), "{error:?}");
     let [related] = error.related() else { panic!("one related location: {error:?}") };
-    assert_eq!(related.span, at(&duplicate, clause, 0));
+    assert_eq!(related.span, Some(at(&duplicate, clause, 0)));
 
     let later = "narrows(value: string; true-iff)";
     let disagreeing = catalog.replace(
@@ -214,7 +216,7 @@ fn a_host_catalog_locates_a_rejected_fact_in_its_source() {
     let error = HostFunctionCatalog::load(&disagreeing, path).expect_err("different facts");
     assert_eq!(error.span(), Some(&at(&disagreeing, later, 0)), "{error:?}");
     let [related] = error.related() else { panic!("one related location: {error:?}") };
-    assert_eq!(related.span, at(&disagreeing, clause, 0));
+    assert_eq!(related.span, Some(at(&disagreeing, clause, 0)));
 }
 
 /// A loaded catalog owns what it read: after the source text and path
@@ -268,7 +270,7 @@ fn a_host_catalog_outlives_the_strings_it_was_loaded_from() {
 #[test]
 fn a_host_catalog_failing_after_a_valid_inline_example_is_a_typed_load_error() {
     let source = concat!(
-        "kind: schema\n",
+        "kind: expression-schema\n",
         "categories:\n",
         "    - Project -> Ask about the test host's project.\n",
         "types:\n",
@@ -290,7 +292,7 @@ fn a_host_catalog_failing_after_a_valid_inline_example_is_a_typed_load_error() {
     let error: HostCatalogError = HostFunctionCatalog::load(source, "project_partial.yaml").expect_err("the load fails");
     assert_eq!(
         error.to_string(),
-        "project_partial.yaml: `types.project_second`: example file `./function-examples/as_tsv.yaml` is not embedded"
+        "project_partial.yaml: `types.project_second`: example file `./function-examples/as_tsv.yaml` is not one of this catalog's embedded examples"
     );
 }
 
@@ -755,7 +757,7 @@ fn conversion_recovery_cells() {
         &mut root["functions"]["project_round"]["conversion_recovery"]
     }
     const ROUND_CATALOG: &str = concat!(
-        "kind: schema\n",
+        "kind: expression-schema\n",
         "categories:\n",
         "    - Project -> Ask about the test host's project.\n",
         "types:\n",
@@ -913,13 +915,12 @@ fn declaring_and_using_a_catalog_fact_enters_no_handler() {
 /// catalog, contributes no document property, and is no trigger.
 #[test]
 fn a_function_catalog_in_a_schema_root_supplies_no_host_and_no_document_schema() {
-    use darkmatter::markdown::schemas::catalog::{is_global_catalog, is_host_function_catalog};
+    use darkmatter::markdown::schemas::catalog::is_global_catalog;
     let catalog = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.yaml"))
         .expect("the test catalog");
     let artifact = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.facts.json"))
         .expect("the committed artifact");
-    assert!(is_host_function_catalog(&catalog) && !is_global_catalog(&catalog));
-    assert!(!is_host_function_catalog("kind: schema\n$schema:\n  seq: object\n"), "a global catalog");
+    assert!(catalog.starts_with("kind: expression-schema\n") && !is_global_catalog(&catalog));
 
     let dir = TempDir::new().unwrap();
     let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
@@ -958,7 +959,7 @@ fn a_host_parameter_declaring_null_handles_a_missing_argument_whatever_it_return
     use darkmatter::markdown::compose::expression::static_variable_reads;
 
     let catalog = concat!(
-        "kind: schema\n",
+        "kind: expression-schema\n",
         "categories:\n",
         "    - Project -> Ask about the test host's project.\n",
         "types:\n",
@@ -1045,28 +1046,27 @@ fn a_host_parameter_declaring_null_handles_a_missing_argument() {
 }
 
 /// The built-in `try` reserves its name case-insensitively against host
-/// functions, as every built-in does.
+/// functions, as every built-in does: a catalog declaring it is refused when
+/// it loads, and an alias spelling it is refused when the set is built.
 mod try_reservation {
     use super::*;
 
-    fn single(name: &str) -> HostFunctionCatalog {
-        HostFunctionCatalog::load(
-            &format!(
-                "kind: schema\ncategories:\n  - Logical\ntypes:\n  {name}: |-\n    function(parameters(a: unknown | null); returns(unknown | null); category(Logical))\n"
-            ),
-            "try.yaml",
+    fn source(name: &str) -> String {
+        format!(
+            "kind: expression-schema\ncategories:\n  - Logical\ntypes:\n  {name}: |-\n    function(parameters(a: unknown | null); returns(unknown | null); category(Logical))\n"
         )
-        .unwrap_or_else(|error| panic!("`{name}` catalog loads: {error}"))
     }
 
     fn build(name: &str, aliases: &[&str]) -> Result<HostFunctions, HostFunctionError> {
         let handler: darkmatter::markdown::compose::expression::HostHandler = Arc::new(|_| Ok(json!(true)));
-        HostFunctions::builder(single(name)).function(name, aliases, |registration| registration, handler).build()
+        let catalog = HostFunctionCatalog::load(&source(name), "try.yaml").unwrap_or_else(|error| panic!("`{name}` catalog loads: {error}"));
+        HostFunctions::builder(catalog).function(name, aliases, |registration| registration, handler).build()
     }
 
     #[test]
     fn host_catalog_rejects_try_collision() {
-        assert_eq!(build("try", &[]).err(), Some(HostFunctionError::BuiltinCollision { name: "try".into() }));
+        let error = HostFunctionCatalog::load(&source("try"), "try.yaml").expect_err("`try` is reserved");
+        assert!(error.to_string().contains("reuses the name of the built-in function `try`"), "{error}");
         // Control: the same catalog under a free name registers.
         assert!(build("attempt", &[]).is_ok());
     }
@@ -1074,7 +1074,8 @@ mod try_reservation {
     #[test]
     fn host_catalog_rejects_try_case_variant() {
         for name in ["Try", "TRY"] {
-            assert_eq!(build(name, &[]).err(), Some(HostFunctionError::BuiltinCollision { name: name.into() }), "{name}");
+            let error = HostFunctionCatalog::load(&source(name), "try.yaml").expect_err(name);
+            assert!(error.to_string().contains("reuses the name of the built-in function `try`"), "{name}: {error}");
         }
         assert_eq!(build("attempt", &["TRY"]).err(), Some(HostFunctionError::BuiltinCollision { name: "TRY".into() }));
         assert!(build("attempt", &["tryish"]).is_ok());

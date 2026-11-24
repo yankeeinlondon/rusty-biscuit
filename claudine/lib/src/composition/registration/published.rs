@@ -22,13 +22,15 @@ pub enum FileKind {
     YamlSchema,
     /// `kind: namespace-schema`.
     Namespace,
+    /// `kind: expression-schema`: a host expression catalog.
+    ExpressionSchema,
     /// The generated lifecycle artifact.
     Lifecycle,
 }
 
 impl FileKind {
     /// `manifest`, `schema-trigger`, `schema`, `yaml-schema`,
-    /// `namespace-schema`, or `lifecycle`.
+    /// `namespace-schema`, `expression-schema`, or `lifecycle`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -37,6 +39,7 @@ impl FileKind {
             Self::Library => MemberKind::Library.as_str(),
             Self::YamlSchema => MemberKind::YamlSchema.as_str(),
             Self::Namespace => MemberKind::Namespace.as_str(),
+            Self::ExpressionSchema => MemberKind::ExpressionSchema.as_str(),
             Self::Lifecycle => "lifecycle",
         }
     }
@@ -49,6 +52,7 @@ impl From<MemberKind> for FileKind {
             MemberKind::Library => Self::Library,
             MemberKind::YamlSchema => Self::YamlSchema,
             MemberKind::Namespace => Self::Namespace,
+            MemberKind::ExpressionSchema => Self::ExpressionSchema,
         }
     }
 }
@@ -253,12 +257,11 @@ fn manifest_text(version: &str, members: &[PublishedFile]) -> String {
     format!(
         "# Written by Claudine from the registration compiled into it, and rewritten when that changes; do not edit.\n\
          kind: darkmatter-host\n\
-         format_version: 2\n\
+         format_version: 3\n\
          host: {HOST_ID}\n\
          version: {version}\n\
          files:{files}\
          lifecycle: {lifecycle}\n\
-         functions: []\n\
          digests:\n{digests}",
         version = quoted(version),
     )

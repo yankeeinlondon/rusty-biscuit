@@ -276,9 +276,9 @@ refused_install! {
             Bundle::relay().with_member("schemas/relay.yaml", &trigger).write_to(&root.join("home/.relay"))
         }
         => "home/.relay/schemas/relay.yaml" at Some("- ./seq.yaml");
-    a_manifest_naming_a_missing_member_refuses_the_host:
+    a_missing_facts_companion_refuses_the_host_at_its_catalogs_files_entry:
         |root| std::fs::remove_file(root.join("home/.relay/schemas/functions.facts.json")).unwrap()
-        => "home/.relay/darkmatter-host.yaml" at Some("facts:");
+        => "home/.relay/darkmatter-host.yaml" at Some("- ./schemas/functions.yaml");
     a_register_entry_naming_a_missing_manifest_applies_no_host:
         |root| std::fs::remove_file(root.join("home/.relay/darkmatter-host.yaml")).unwrap()
         => "home/.darkmatter.yaml" at Some("./.relay/darkmatter-host.yaml");

@@ -1,4 +1,4 @@
-//! A format 2 bundle of a Claudine-shaped host for editor tests and the A3
+//! A format 3 bundle of a Claudine-shaped host for editor tests and the A3
 //! benchmark, registered explicitly: the frozen Claudine lifecycle artifact
 //! (its events, renames, verbs, and effects) re-addressed to one namespace
 //! file per global of the frozen Claudine host catalog (`seq`, `loop`,
@@ -113,7 +113,6 @@ pub(crate) fn bundle_with(trigger: &str, seq: &str) -> Bundle {
         version: "0.0.1".to_string(),
         files: Vec::new(),
         lifecycle: LIFECYCLE.to_string(),
-        functions: Vec::new(),
         members: Default::default(),
     };
     bundle = bundle.with_file("schemas/claudine.yaml", trigger);

@@ -1600,7 +1600,7 @@ See [DMLS Schema Support](../../../darkmatter/docs/topics/schemas/dmls-schema-su
 Darkmatter can also learn Claudine's schemas without a checkout: a
 `register` entry in `~/.darkmatter.yaml` naming
 `~/.claudine/registrations/darkmatter/manifest.yaml` points `md` and DMLS at
-a format 2 `darkmatter-host` manifest that Claudine writes from its
+a format 3 `darkmatter-host` manifest that Claudine writes from its
 compiled-in copies (see
 [Host registration](../../../darkmatter/docs/topics/host-registration.md)).
 Claudine publishes it like this:

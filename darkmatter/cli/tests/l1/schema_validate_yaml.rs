@@ -657,3 +657,229 @@ fn a_mixed_batch_exits_1_and_keeps_each_failure_kind_in_its_record() {
         .collect();
     assert_eq!(errors, [None, Some("schema".to_string()), Some("yaml_parse".to_string()), None]);
 }
+
+// ── Callable catalogs ──────────────────────────────────────────────────────
+//
+// A `kind: expression-schema` or `kind: mutation-schema` file is judged by
+// its kind contract and then the catalog reader, never resolved as a schema
+// file. Every edited control below starts from the shared host catalog
+// fixture with one authored change, and carries a slot and a shell sentinel
+// in a category description: a run that resolved or composed the catalog
+// would fail on the missing `sentinel.yaml` or create `created.txt`.
+
+/// The shared valid host catalog (also DMLS's control).
+const HOST_CATALOG: &str = include_str!("../../../lib/tests/fixtures/host_functions/project.yaml");
+const FUNCTIONS_CATALOG: &str = include_str!("../../../schemas/partials/functions.yaml");
+const MUTATIONS_CATALOG: &str = include_str!("../../../schemas/partials/mutations.yaml");
+const FUNCTIONS_PATH: &str = "darkmatter/schemas/partials/functions.yaml";
+const MUTATIONS_PATH: &str = "darkmatter/schemas/partials/mutations.yaml";
+const CATALOG_CODE: &str = "dm.schema.callable_catalog";
+/// The fixture's one category line, which the sentinel edit extends.
+const CATEGORY_LINE: &str = "    - Project -> Ask about the files and names of the test host's project.";
+/// A slot naming a file that does not exist and a shell step that creates
+/// one, behind multi-byte text that makes every later byte offset differ
+/// from its character offset.
+const SENTINEL_TAIL: &str = " Ünïcödé 🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪 {{ load_data(\"./sentinel.yaml\") }} $(touch created.txt)";
+
+/// The host catalog with the sentinel tail on its category line, then
+/// `edit` applied (`from` replaced by `to`, which must occur).
+fn sentinel_catalog(from: &str, to: &str) -> String {
+    assert!(HOST_CATALOG.contains(CATEGORY_LINE), "the fixture's category line");
+    let text = HOST_CATALOG.replacen(CATEGORY_LINE, &format!("{CATEGORY_LINE}{SENTINEL_TAIL}"), 1);
+    if from.is_empty() {
+        return text;
+    }
+    assert!(text.contains(from), "the edit's anchor `{from}`");
+    text.replacen(from, to, 1)
+}
+
+/// Neither sentinel fired: nothing was created, and the slot's file was
+/// never needed (it does not exist).
+fn assert_sentinels_untouched(process: &CliProcessFixture) {
+    assert!(!process.cwd().join("created.txt").exists(), "the shell sentinel ran");
+    assert!(!process.cwd().join("sentinel.yaml").exists(), "the slot sentinel was created");
+}
+
+/// Runs `md schema validate <args> --output json`, checking the exit status
+/// and that the report satisfies the command's output contract.
+fn catalog_json(process: &CliProcessFixture, args: &[&str], status: i32) -> serde_json::Value {
+    let output = process.command().args(["schema", "validate", "--output", "json"]).args(args).output().unwrap();
+    let stdout = stdout_of(&output);
+    assert_eq!(output.status.code(), Some(status), "{stdout}{}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"));
+    let contract = simplified_schema::SimplifiedSchema::try_from(include_str!("../../schemas/output/schema-validate.yaml"))
+        .expect("the output contract parses");
+    if let Err(failure) = contract.validate_strict(&report) {
+        panic!("{failure:?}\n{report:#}");
+    }
+    report
+}
+
+/// Runs `md schema validate <args> --output plain`, checking the exit status.
+fn catalog_plain(process: &CliProcessFixture, args: &[&str], status: i32) -> String {
+    let output = process.command().args(["schema", "validate", "--output", "plain"]).args(args).output().unwrap();
+    let stdout = stdout_of(&output);
+    assert_eq!(output.status.code(), Some(status), "{stdout}{}", String::from_utf8_lossy(&output.stderr));
+    stdout
+}
+
+/// The 1-based line of byte `offset` in `text`.
+fn line_of(text: &str, offset: usize) -> u64 {
+    text[..offset].matches('\n').count() as u64 + 1
+}
+
+/// The byte span `{start, end}` of the first `needle` in `text`.
+fn span_of(text: &str, needle: &str) -> serde_json::Value {
+    let start = text.find(needle).unwrap_or_else(|| panic!("`{needle}` in the text"));
+    serde_json::json!({ "start": start, "end": start + needle.len() })
+}
+
+#[test]
+fn catalog_shipped_functions_and_mutations_validate_from_the_checkout_root() {
+    let process = CliProcessFixture::new();
+    if !process.initialize_repository() {
+        eprintln!("skipping: git is unavailable");
+        return;
+    }
+    write(&process, FUNCTIONS_PATH, FUNCTIONS_CATALOG);
+    write(&process, MUTATIONS_PATH, MUTATIONS_CATALOG);
+
+    let report = catalog_json(&process, &[FUNCTIONS_PATH, MUTATIONS_PATH], 0);
+    let records = report["files"].as_array().expect("files");
+    assert_eq!(records.len(), 2, "{report:#}");
+    for record in records {
+        assert_eq!(record["valid"], true, "{report:#}");
+        assert!(record.get("error").is_none(), "{report:#}");
+    }
+}
+
+#[test]
+fn catalog_the_shared_host_fixture_is_valid_and_its_sentinels_stay_passive() {
+    let process = CliProcessFixture::new();
+    write(&process, "project.yaml", HOST_CATALOG);
+    write(&process, "sentinel-project.yaml", &sentinel_catalog("", ""));
+
+    for file in ["project.yaml", "sentinel-project.yaml"] {
+        let stdout = catalog_plain(&process, &[file], 0);
+        assert!(stdout.contains("is valid based on its definition built-in simplified-schema/schemas/expression-schema.yaml"), "{stdout}");
+        let record = &catalog_json(&process, &[file], 0)["files"][0];
+        assert_eq!(record["valid"], true, "{record:#}");
+    }
+    assert_sentinels_untouched(&process);
+}
+
+/// `Is_Project_File` folds onto the earlier `is_project_file`: the failure
+/// is at the later key and the related location at the first, both in this
+/// file. The multi-byte sentinel text above them proves the lines come
+/// from byte offsets.
+#[test]
+fn catalog_a_folded_name_collision_exits_1_at_the_key_with_the_earlier_declaration_related() {
+    let process = CliProcessFixture::new();
+    let text = sentinel_catalog("    project_label:", "    Is_Project_File:");
+    write(&process, "fold.yaml", &text);
+    let (line, related_line) = (line_of(&text, text.find("Is_Project_File").unwrap()), line_of(&text, text.find("is_project_file").unwrap()));
+
+    let stdout = catalog_plain(&process, &["fold.yaml"], 1);
+    assert!(stdout.contains("is not a valid callable catalog"), "{stdout}");
+    assert!(stdout.contains(&format!("[{CATALOG_CODE}]")), "{stdout}");
+    assert!(stdout.contains(&format!("(at fold.yaml:{line}:5)")), "{stdout}");
+    assert!(stdout.contains(&format!("related: `is_project_file` is declared here (at fold.yaml:{related_line}:5)")), "{stdout}");
+
+    let report = catalog_json(&process, &["fold.yaml"], 1);
+    let record = &report["files"][0];
+    assert_eq!(record["error"], "schema", "{record:#}");
+    assert_eq!(record["code"], CATALOG_CODE, "{record:#}");
+    assert!(record["message"].as_str().unwrap().contains("name the same callable"), "{record:#}");
+    assert_eq!((record["line"].as_u64(), record["column"].as_u64()), (Some(line), Some(5)), "{record:#}");
+    assert_eq!(record["span"], span_of(&text, "Is_Project_File"), "{record:#}");
+    let related = record["related"].as_array().expect("related locations");
+    assert_eq!(related.len(), 1, "{record:#}");
+    assert_eq!(related[0]["file"], "fold.yaml", "{record:#}");
+    assert_eq!((related[0]["line"].as_u64(), related[0]["column"].as_u64()), (Some(related_line), Some(5)), "{record:#}");
+    assert_eq!(related[0]["span"], span_of(&text, "is_project_file"), "{record:#}");
+    assert_sentinels_untouched(&process);
+}
+
+/// A host catalog may not reuse a built-in function's name. In a checkout
+/// the related location is read from the repository's `functions.yaml`;
+/// outside one it keeps that repository path, unlocated.
+#[test]
+fn catalog_a_built_in_name_reuse_exits_1_with_the_built_in_declaration_related() {
+    let text = sentinel_catalog("    project_label:", "    min:");
+    let line = line_of(&text, text.find("    min:").unwrap() + 4);
+
+    // Outside a repository.
+    let process = CliProcessFixture::new();
+    write(&process, "reuse.yaml", &text);
+    let stdout = catalog_plain(&process, &["reuse.yaml"], 1);
+    assert!(stdout.contains(&format!("[{CATALOG_CODE}] `types.min` reuses the name of the built-in function `min` (at reuse.yaml:{line}:5)")), "{stdout}");
+    assert!(stdout.contains(&format!("(at {FUNCTIONS_PATH})")), "{stdout}");
+    let record = catalog_json(&process, &["reuse.yaml"], 1)["files"][0].clone();
+    assert_eq!(record["code"], CATALOG_CODE, "{record:#}");
+    assert_eq!((record["line"].as_u64(), record["column"].as_u64()), (Some(line), Some(5)), "{record:#}");
+    assert_eq!(record["related"][0]["file"], FUNCTIONS_PATH, "{record:#}");
+    assert!(record["related"][0]["line"].is_null(), "{record:#}");
+    assert!(record["related"][0]["span"].is_object(), "{record:#}");
+    assert_sentinels_untouched(&process);
+
+    // In a checkout holding the built-in catalog.
+    let process = CliProcessFixture::new();
+    if !process.initialize_repository() {
+        eprintln!("skipping the checkout half: git is unavailable");
+        return;
+    }
+    write(&process, FUNCTIONS_PATH, FUNCTIONS_CATALOG);
+    write(&process, "reuse.yaml", &text);
+    let record = catalog_json(&process, &["reuse.yaml"], 1)["files"][0].clone();
+    let related = &record["related"][0];
+    let file = PathBuf::from(related["file"].as_str().expect("a related file"));
+    assert!(file.ends_with(FUNCTIONS_PATH), "{record:#}");
+    let related_line = related["line"].as_u64().expect("a located built-in declaration") as usize;
+    let declared = FUNCTIONS_CATALOG.lines().nth(related_line - 1).expect("the line exists");
+    assert!(declared.trim_start().starts_with("min:"), "line {related_line} is `{declared}`: {record:#}");
+    assert_eq!(related["column"].as_u64(), Some((declared.len() - declared.trim_start().len() + 1) as u64), "{record:#}");
+    let stdout = catalog_plain(&process, &["reuse.yaml"], 1);
+    assert!(stdout.contains(&format!("functions.yaml:{related_line}:")), "{stdout}");
+    assert_sentinels_untouched(&process);
+}
+
+/// Shape failures stay what they were: an unknown top-level `$schema` is a
+/// located kind-contract problem, a duplicate key a located load error.
+/// Neither reaches the catalog reader's code, nor any sentinel.
+#[test]
+fn catalog_a_malformed_catalog_exits_1_located_as_a_contract_or_load_failure() {
+    let process = CliProcessFixture::new();
+    write(&process, "unknown.yaml", &sentinel_catalog("categories:", "$schema: {}\ncategories:"));
+    let duplicate = sentinel_catalog("", "") + "    project_label: x\n";
+    write(&process, "duplicate.yaml", &duplicate);
+
+    let stdout = catalog_plain(&process, &["unknown.yaml"], 1);
+    assert!(stdout.contains("failed schema validation") && stdout.contains("(at line 2, column 1)"), "{stdout}");
+    let record = catalog_json(&process, &["unknown.yaml"], 1)["files"][0].clone();
+    assert!(record.get("error").is_none() && record.get("code").is_none(), "{record:#}");
+    let problems = record["problems"].as_array().expect("problems");
+    assert_eq!(problems.len(), 1, "{record:#}");
+    assert!(problems[0]["message"].as_str().unwrap().contains("'$schema' was unexpected"), "{record:#}");
+    assert_eq!((problems[0]["line"].as_u64(), problems[0]["column"].as_u64()), (Some(2), Some(1)), "{record:#}");
+
+    let line = duplicate.lines().count() as u64;
+    let stdout = catalog_plain(&process, &["duplicate.yaml"], 1);
+    assert!(stdout.contains("is not a valid YAML document") && stdout.contains(&format!("(at line {line}, column 5)")), "{stdout}");
+    let record = catalog_json(&process, &["duplicate.yaml"], 1)["files"][0].clone();
+    assert_eq!(record["error"], "yaml_parse", "{record:#}");
+    assert_eq!((record["line"].as_u64(), record["column"].as_u64()), (Some(line), Some(5)), "{record:#}");
+    assert_sentinels_untouched(&process);
+}
+
+/// Control for the catalog route: an ordinary schema file holding a
+/// template still resolves its slot, so a slot whose data file is missing
+/// leaves the check unavailable (`error: slots`), never valid as written.
+#[test]
+fn catalog_route_leaves_an_ordinary_template_schema_resolved() {
+    let process = CliProcessFixture::new();
+    write(&process, "schema.yaml", "kind: schema\n$schema:\n    status: \"{{ load_data('./status.yaml', '{ type: string }').type }}(required)\"\n");
+
+    let record = catalog_json(&process, &["schema.yaml"], 1)["files"][0].clone();
+    assert_eq!(record["error"], "slots", "{record:#}");
+    assert!(record.get("code").is_none(), "{record:#}");
+}

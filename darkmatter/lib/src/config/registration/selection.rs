@@ -245,6 +245,7 @@ impl RegisteredHosts {
                 line_prefix: None,
                 entry,
                 member: None,
+                related: Vec::new(),
             });
         }
         Selected { selection: HostSelection::Ambiguous(hosts), matched: Vec::new(), diagnostics }

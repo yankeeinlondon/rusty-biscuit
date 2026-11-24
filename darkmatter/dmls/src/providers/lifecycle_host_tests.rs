@@ -2,7 +2,7 @@
 //! selected host view and shares it with the frontmatter provider; a panic
 //! while reading it drops only that provider's diagnostics.
 //!
-//! The host comes from an explicitly registered format 2 bundle
+//! The host comes from an explicitly registered format 3 bundle
 //! ([`crate::host_fixtures`]); a lifecycle artifact beside a catalog in a schema
 //! root supplies none.
 

@@ -1,4 +1,4 @@
-//! Structural admission of one host registration member: which of the four
+//! Structural admission of one host registration member: which of the five
 //! member kinds a file is, and whether its top-level envelope is the closed
 //! key set that kind's definition (`simplified-schema/schemas/*.yaml`)
 //! allows, each key holding a value of the right YAML type.
@@ -21,6 +21,11 @@
 //! | `yaml-schema` | `kind`, `description`, `categories`, `$schema`, `types` | `$schema` |
 //! | `namespace-schema` | `kind`, `namespace`, `description`, `$schema`, `types` | a string `namespace`, a `$schema` mapping |
 //! | `schema` (types-only) | `kind`, `name`, `description`, `categories`, `$schema`, `types` | a non-empty `types` mapping; `$schema` absent or `null` |
+//! | `expression-schema` | `kind`, `description`, `categories`, `types` | a non-empty `categories` list and a non-empty `types` mapping |
+//!
+//! A `kind: mutation-schema` file is refused on its `kind`: a host declares
+//! expressions, never actions ([`MUTATION_REFUSAL`]). An expression catalog's
+//! callable semantics are judged by Darkmatter's catalog reader, not here.
 //!
 //! An optional scalar may be omitted; written as `null`, a `name` and a
 //! trigger's or namespace's `description` are refused, while a
@@ -40,6 +45,9 @@ pub enum MemberKind {
     Namespace,
     /// `kind: schema` with `types` and no `$schema`: reusable types.
     Library,
+    /// `kind: expression-schema`: the host's expression functions, with a
+    /// derived `.facts.json` companion.
+    ExpressionSchema,
 }
 
 impl MemberKind {
@@ -51,6 +59,7 @@ impl MemberKind {
             Self::YamlSchema => "yaml-schema",
             Self::Namespace => "namespace-schema",
             Self::Library => "schema",
+            Self::ExpressionSchema => "expression-schema",
         }
     }
 
@@ -63,6 +72,7 @@ impl MemberKind {
             Self::YamlSchema => &["kind", "description", "categories", "$schema", "types"],
             Self::Namespace => &["kind", "namespace", "description", "$schema", "types"],
             Self::Library => &["kind", "name", "description", "categories", "$schema", "types"],
+            Self::ExpressionSchema => &["kind", "description", "categories", "types"],
         }
     }
 }
@@ -99,7 +109,11 @@ impl std::fmt::Display for MemberRefusal {
 }
 
 /// The member kinds, as a refusal lists them.
-pub const MEMBER_KINDS: &str = "a `schema-trigger`, `yaml-schema`, `namespace-schema`, or types-only `schema`";
+pub const MEMBER_KINDS: &str =
+    "a `schema-trigger`, `yaml-schema`, `namespace-schema`, `expression-schema`, or types-only `schema`";
+
+/// Why a `kind: mutation-schema` member is refused.
+pub const MUTATION_REFUSAL: &str = "host-defined actions are not supported";
 
 /// [`admit_member`] over `text`, read as one YAML document.
 ///
@@ -133,6 +147,8 @@ pub fn admit_member(value: &Value) -> Result<AdmittedMember, MemberRefusal> {
             "yaml-schema" => MemberKind::YamlSchema,
             "namespace-schema" => MemberKind::Namespace,
             "schema" => MemberKind::Library,
+            "expression-schema" => MemberKind::ExpressionSchema,
+            "mutation-schema" => return Err(at("kind", MUTATION_REFUSAL.to_string())),
             other => return Err(at("kind", format!("its `kind` is `{other}`; a member is {MEMBER_KINDS}"))),
         },
         Some(other) => return Err(at("kind", format!("its `kind` must be a string, got {}", yaml_kind(other)))),
@@ -155,10 +171,11 @@ fn admit_kind(mapping: &serde_yaml_ng::Mapping, kind: MemberKind) -> Result<Admi
     let field = |key: &str| mapping.get(key);
     let name = match kind {
         MemberKind::Trigger | MemberKind::Library => name(field("name"))?,
-        MemberKind::YamlSchema | MemberKind::Namespace => None,
+        MemberKind::YamlSchema | MemberKind::Namespace | MemberKind::ExpressionSchema => None,
     };
     // A `kind: schema` or `yaml-schema` document reads a null `description`
     // as absent on every load path; a trigger's and a namespace's refuse it.
+    // A catalog's `description` may be omitted or empty, never `null`.
     let kinded = matches!(kind, MemberKind::YamlSchema | MemberKind::Library);
     description(field("description"), Description { null_is_absent: kinded, not_empty: kinded })?;
     match kind {
@@ -206,6 +223,14 @@ fn admit_kind(mapping: &serde_yaml_ng::Mapping, kind: MemberKind) -> Result<Admi
                 return Err(at("$schema", format!("{label} is a types-only library; it may not declare `$schema`")));
             }
             categories(field("categories"))?;
+            types(field("types"), label, Types::RequiredNotEmpty)?;
+        }
+        MemberKind::ExpressionSchema => {
+            match field("categories") {
+                None => return Err(missing("categories", format!("{label} declares a non-empty `categories` list"))),
+                Some(Value::Null) => return Err(at("categories", format!("{label} declares a non-empty `categories` list"))),
+                Some(value) => categories(Some(value))?,
+            }
             types(field("types"), label, Types::RequiredNotEmpty)?;
         }
     }
@@ -333,6 +358,7 @@ fn kind_label(kind: MemberKind) -> &'static str {
         MemberKind::YamlSchema => "a `yaml-schema`",
         MemberKind::Namespace => "a `namespace-schema`",
         MemberKind::Library => "a `kind: schema` member",
+        MemberKind::ExpressionSchema => "an `expression-schema`",
     }
 }
 

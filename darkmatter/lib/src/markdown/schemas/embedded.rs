@@ -73,10 +73,6 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
         text: include_str!("../../../../schemas/partials/md-lifecycle.yaml"),
     },
     EmbeddedDocument {
-        path: "darkmatter/schemas/partials/functions.yaml",
-        text: include_str!("../../../../schemas/partials/functions.yaml"),
-    },
-    EmbeddedDocument {
         path: CONFIG_SCHEMA_PATH,
         text: include_str!("../../../../schemas/darkmatter-config.yaml"),
     },
@@ -171,7 +167,6 @@ mod tests {
                 "darkmatter/schemas/partials/timing.yaml",
                 "darkmatter/schemas/partials/lifecycle.yaml",
                 "darkmatter/schemas/partials/md-lifecycle.yaml",
-                "darkmatter/schemas/partials/functions.yaml",
                 CONFIG_SCHEMA_PATH,
                 HOST_MANIFEST_SCHEMA_PATH,
                 CONTENT_POLICY_PATH,

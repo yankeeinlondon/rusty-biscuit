@@ -195,22 +195,24 @@ pub(super) fn field(text: &str, file: &Path, segments: &[String]) -> Option<Sour
     loaded.byte_range(&locating_problem(segments)).map(|range| line_column(text, range.start))
 }
 
-/// Where an artifact reader's `site` is in `text` (read from `file`): the
-/// parser's position, or the deepest existing value along the field's path,
+/// Where an artifact reader's `site` is in the JSON `text`: the parser's
+/// position, or the deepest existing value along the field's JSON pointer,
 /// so a field the reader found in a shape the locator cannot follow is still
 /// reported at its nearest container.
-pub(super) fn artifact(text: &str, file: &Path, site: Option<&ReasonSite>) -> Option<SourcePosition> {
+pub(super) fn artifact(text: &str, site: Option<&ReasonSite>) -> Option<SourcePosition> {
     match site? {
         // `serde_json` counts the column in bytes.
         ReasonSite::Position(line, column) => reported_position(text, *line, *column, true),
-        ReasonSite::Field(segments) => {
-            let loaded = load_yaml_document(text, file).ok()?;
-            (0..=segments.len())
-                .rev()
-                .find_map(|depth| loaded.byte_range(&locating_problem(&segments[..depth])))
-                .map(|range| line_column(text, range.start))
-        }
+        ReasonSite::Field(segments) => (0..=segments.len())
+            .rev()
+            .find_map(|depth| biscuit_file::data_locations::locate_json(text, &artifact_pointer(&segments[..depth])))
+            .map(|offset| line_column(text, offset)),
     }
+}
+
+/// `segments` as an RFC 6901 JSON pointer.
+pub(super) fn artifact_pointer(segments: &[String]) -> String {
+    segments.iter().map(|segment| format!("/{}", segment.replace('~', "~0").replace('/', "~1"))).collect()
 }
 
 #[cfg(test)]
@@ -218,18 +220,18 @@ mod tests {
     use super::*;
 
     // The line and column of the locator under test.
-    fn artifact(text: &str, file: &Path, site: Option<&ReasonSite>) -> Option<(usize, usize)> {
-        super::artifact(text, file, site).map(|at| (at.line, at.column))
+    fn artifact(text: &str, site: Option<&ReasonSite>) -> Option<(usize, usize)> {
+        super::artifact(text, site).map(|at| (at.line, at.column))
     }
 
     #[test]
     fn an_artifact_field_is_located_as_deep_as_it_exists() {
         let text = "{\n  \"a\": {\n    \"b\": 1\n  }\n}\n";
-        let file = Path::new("x.json");
-        let at = |segments: &[&str]| artifact(text, file, Some(&ReasonSite::Field(segments.iter().map(|s| (*s).to_string()).collect())));
+        let at = |segments: &[&str]| artifact(text, Some(&ReasonSite::Field(segments.iter().map(|s| (*s).to_string()).collect())));
         assert_eq!(at(&["a", "b"]), Some((3, 10)));
         assert_eq!(at(&["a", "missing"]), Some((2, 8)), "the nearest container");
-        assert_eq!(artifact(text, file, Some(&ReasonSite::Position(4, 2))), Some((4, 2)));
-        assert_eq!(artifact(text, file, None), None);
+        assert_eq!(at(&[]), Some((1, 1)), "the root");
+        assert_eq!(artifact(text, Some(&ReasonSite::Position(4, 2))), Some((4, 2)));
+        assert_eq!(artifact(text, None), None);
     }
 }

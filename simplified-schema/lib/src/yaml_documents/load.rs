@@ -73,6 +73,13 @@ pub fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, SchemaE
             format!("not valid YAML: {error}")
         };
         if let Some((first, _)) = duplicate {
+            // The parser's own position is the enclosing mapping's start, not
+            // either spelling of the key, so it is replaced by the first one's.
+            if let Some(at) = message.rfind(" at line ")
+                && message[at + " at line ".len()..].split(" column ").all(|part| part.parse::<usize>().is_ok())
+            {
+                message.truncate(at);
+            }
             let (line, column) = crate::line_col_of_offset(text, first + offset);
             message.push_str(&format!("; the key is first written at line {line} column {column}"));
         }

@@ -371,6 +371,17 @@ fn a_duplicate_key_is_refused_at_the_repeat_and_names_the_first() {
     assert!(text[marks.repeated..].starts_with("Label: number"));
     assert_eq!(marks.repeated, span.start, "the loader and the marks agree");
 
+    // The parser places the failure at the mapping's start; the message names
+    // only the first spelling's line, never that start.
+    let later = "kind: expression-schema\ncategories: [Text]\ntypes:\n    A: string\n    Label: string\n    B: string\n    Label: number\n";
+    let SchemaError::SchemaDocument { message, .. } =
+        LoadedYamlDocument::load(later, Path::new("catalog.yaml")).expect_err("duplicate key")
+    else {
+        panic!("a document error");
+    };
+    assert!(message.ends_with("; the key is first written at line 5 column 5"), "{message}");
+    assert!(!message.contains("line 4"), "the mapping start is not reported: {message}");
+
     // A byte-order mark shifts both offsets into the caller's text.
     let marked = format!("\u{feff}{text}");
     let marks = duplicate_key(&marked).expect("found after a byte-order mark");

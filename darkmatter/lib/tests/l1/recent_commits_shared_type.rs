@@ -1,7 +1,8 @@
 //! `ctx.recent_commits` and `recent_commits(count)` share one named type,
-//! `recent-commits`, defined once in the function catalog. Neither declaration
-//! may own the element type itself, so a change to the named type reaches
-//! both consumers.
+//! `recent-commits`. A callable catalog is not an import source, so the
+//! context-variables partial and the expression catalog each declare it as a
+//! helper, and a test keeps the two declarations equal. Neither consumer may
+//! own the element type itself.
 
 use darkmatter::markdown::compose::expression::{expression_function_catalog, function_descriptors};
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
@@ -38,7 +39,7 @@ fn references_shared(atom: &PropertyAtom, reference: &str) -> bool {
 }
 
 #[test]
-fn ctx_recent_commits_references_the_catalog_named_type() {
+fn ctx_recent_commits_references_the_partials_named_type() {
     let types = authored_types(
         include_str!("../../../schemas/partials/context-variables.yaml"),
         "darkmatter/schemas/partials/context-variables.yaml",
@@ -47,7 +48,12 @@ fn ctx_recent_commits_references_the_catalog_named_type() {
     let TypeExpr::InlineObject(context) = &context.ty else { panic!("`context` is a shape: {context:?}") };
     let variable = single(context.properties.get("recent_commits").expect("ctx.recent_commits"));
 
-    assert!(references_shared(variable, "darkmatter:functions"), "ctx.recent_commits owns its own type: {variable:?}");
+    assert!(references_shared(variable, "this"), "ctx.recent_commits owns its own type: {variable:?}");
+    assert_eq!(
+        types.properties.get(SHARED),
+        expression_function_catalog().named_type(SHARED),
+        "the partial's `{SHARED}` and the expression catalog's are one type"
+    );
     assert!(variable.constraints.contains(&Constraint::Generated), "{variable:?}");
     assert!(variable.constraints.contains(&Constraint::Required), "{variable:?}");
     let description = variable.description.as_deref().unwrap_or_default();

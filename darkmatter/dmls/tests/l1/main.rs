@@ -9,7 +9,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-// Darkmatter's registered-host fixtures (the `acme` and `relay` format 2
+// Darkmatter's registered-host fixtures (the `acme` and `relay` format 3
 // bundles and the temporary install fixture).
 #[path = "../../../lib/tests/host_fixtures/mod.rs"]
 mod host_fixtures;
@@ -35,6 +35,7 @@ mod file_interpolate_option;
 mod formatting_transaction;
 mod frontmatter_response_contracts;
 mod full_index_removal_guard;
+mod host_catalog_reload;
 mod host_function_diagnostics;
 mod host_globals;
 mod incremental_graph_equivalence;
@@ -102,6 +103,7 @@ mod wiki_universe_equivalence;
 mod workspace_file_list;
 mod workspace_formatting_settings;
 mod workspace_schema_scopes;
+mod yaml_document_catalog_editor;
 mod yaml_document_editor;
 mod yaml_document_session;
 mod yaml_serializer_guard;

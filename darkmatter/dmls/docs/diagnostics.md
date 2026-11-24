@@ -262,6 +262,7 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.schema.unknown_key` | A key the schema does not declare is present. |
 | `dm.schema.deprecated_key` | A deprecated key is present. |
 | `dm.schema.invalid_file_reference` | A `file(...)`-typed value failed to parse, resolve, or match a file. |
+| `dm.schema.callable_catalog` | A callable catalog (`kind: expression-schema` or `kind: mutation-schema`) fails the catalog reader `md schema validate` also runs: a folded-name collision, a reused built-in name, a missing or disagreeing category, `narrows(...)` in a mutation, a reference outside the catalog. One error per failure, ranged on the failing declaration, with the conflicting declaration (another file's included, such as the built-in's in `functions.yaml`) as related information. |
 | `dm.schema.kind_check` | A YAML document of one of Darkmatter's kinds (`schema`, `schema-trigger`, `yaml-schema`) fails a check its definition cannot state, such as an invalid trigger `$path` glob. Ranged on the node the library located. |
 | `dm.schema.invalid_suggestion` | A `suggest(...)` candidate is invalid metadata for its target schema (type, range, integer, length, not-empty, or pattern violation, or unrepresentable number syntax). **Warning.** |
 | `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. An envelope error comes first: a tagged envelope with an unsupported key reports this code even when a definition inside it is also invalid, matching `md schema validate`. |
@@ -327,7 +328,14 @@ judged by its scope's configuration contract instead, whatever its `kind` or
 ([Configuration files](../../docs/topics/schemas/dmls-schema-support.md#configuration-files)):
 
 - a file that is not one admissible YAML document gets one
-  `dm.frontmatter.yaml_parse` error and nothing else;
+  `dm.frontmatter.yaml_parse` error and nothing else; for a repeated key it
+  is ranged on the repetition, with the key's first spelling as related
+  information;
+- a callable catalog stays claimed by its kind even when it fails: its
+  callable failures are `dm.schema.callable_catalog` errors, a root `$schema`
+  in it is ordinary data, never a fallback, and a `Name@file` in it is refused
+  without reading the file. While it fails, `kind`-field completion and hover
+  are unavailable; type-grammar authoring inside `types` still works;
 - a `kind` only a registered host's `kind: yaml-schema` file claims is
   judged by that definition, below the built-in and local definitions, under
   the registrations installed for the file's configuration; a registration
@@ -838,6 +846,10 @@ Some diagnostics attach secondary locations:
   failing one is ranged.
 - `dm.host.trigger_conflict` relates the top of each of the two conflicting
   trigger files.
+- A `dm.host.registration` warning for a function name or facts alias that
+  two of one host's expression catalogs claim relates the earlier claim (the
+  catalog's declaration, or the alias in its facts companion); one for a
+  catalog that reuses a built-in function's name relates that built-in.
 - `dm.transclusion.cycle` lists the transclusion ancestry that forms the cycle.
 - A schema failure of an [observed property value](#observed-property-values)
   that comes straight from a local data file points at the failing value in

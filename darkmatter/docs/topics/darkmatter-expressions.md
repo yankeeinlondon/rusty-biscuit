@@ -1455,16 +1455,23 @@ file-form ones from `schemas/partials/function-examples/`. Do not edit the
 generated table directly; run `just darkmatter regen-expr-doc` from the
 repository root to refresh it after changing the catalog.
 
-The catalog's other `types:` entries are named helper types that signatures
-use: `agentic-cli`, `ip-address`, and `recent-commits`. A schema imports one as
-`Name@darkmatter:functions` (see
-[Reserved Darkmatter References](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#reserved-darkmatter-references-namedarkmatterstem)).
-`ctx.recent_commits` is declared that way, so it and the return of
-`recent_commits(count)` are the one `recent-commits` type, a `string[]`:
+The catalog's other `types:` entries are named helper types that its
+signatures use: `agentic-cli`, `ip-address`, and `recent-commits`. They are
+local to the catalog. The catalog is a `kind: expression-schema` document, which
+is never an import library, so a schema cannot import them with
+`Name@darkmatter:functions`. A schema that needs the same shape declares it
+itself. `ctx.recent_commits` does that, and a test keeps its declaration equal
+to the catalog's, so the variable and the return of `recent_commits(count)` stay
+the same `string[]`:
 
 ```yaml
 # darkmatter/schemas/partials/context-variables.yaml
-recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …"
+kind: schema
+types:
+    recent-commits: "string[] -> …"
+    context:
+        # …
+        recent_commits: "recent-commits(generated; required) -> …"
 ```
 
 <!-- BEGIN GENERATED FUNCTION TABLE -->

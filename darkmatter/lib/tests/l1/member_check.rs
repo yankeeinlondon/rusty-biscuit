@@ -92,7 +92,7 @@ fn access_forms() {
     }
 }
 
-const HOST_CATALOG: &str = "kind: schema\ncategories:\n    - Project -> Test host.\ntypes:\n    project_server: |-\n        function(\n            parameters(id: string);\n            returns({ name: string });\n            category(Project);\n        ) -> The project's server.\n";
+const HOST_CATALOG: &str = "kind: expression-schema\ncategories:\n    - Project -> Test host.\ntypes:\n    project_server: |-\n        function(\n            parameters(id: string);\n            returns({ name: string });\n            category(Project);\n        ) -> The project's server.\n";
 
 /// A function's declared return types its result: a host registration
 /// returning a closed object (no built-in expression function returns one).

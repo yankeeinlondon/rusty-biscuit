@@ -13,10 +13,11 @@ types:
         error: enum(file_reference,frontmatter_parse,yaml_parse,schema,slots) -> why validation could not run; slots means the schema is a template whose slots did not resolve for this run
         failure: string -> the file-reference failure class
         message: string -> the error's message
-        code: string -> with error schema, the diagnostic code of a slot written where none may appear, e.g. dm.schema.slot_not_allowed_in_kind, or dm.host.trigger_conflict
-        related: string[] -> with code dm.host.trigger_conflict, the two conflicting trigger files
-        line: number
-        column: number
+        code: string -> with error schema, the diagnostic code of a slot written where none may appear, e.g. dm.schema.slot_not_allowed_in_kind, dm.host.trigger_conflict, or dm.schema.callable_catalog
+        related: (string | related-location)[] -> with code dm.host.trigger_conflict, the two conflicting trigger files; with code dm.schema.callable_catalog, the other locations the failure involves
+        line: number -> with error yaml_parse or code dm.schema.callable_catalog, the 1-based line of the failure
+        column: number -> as line, the 1-based column in characters
+        span: span -> with code dm.schema.callable_catalog, the byte range of the failing declaration in the file
         warnings: warning[] -> discovery findings, then schema advisories
         diagnostics: diagnostic[] -> with error slots, each slot's own record at the slot
         grants_needed: grant-needed[] -> with error slots, the grants any one of which would allow an unapproved read, each once
@@ -70,6 +71,12 @@ types:
         column: number -> 1-based authored column, in characters; null when unknown
         section: string -> composed anchor slug of the innermost heading at or before the problem
         inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    related-location:
+        message: string(required) -> what is at the location, e.g. the earlier declaration a name collides with
+        file: string(required) -> the file as given for the validated document itself; otherwise the file read, or a built-in catalog's repository path when no copy of it could be read
+        line: number -> 1-based line; null when the file could not be read
+        column: number -> 1-based column, in characters; null as for line
+        span: span -> byte range in the file's text
     span:
         start: number(required)
         end: number(required)

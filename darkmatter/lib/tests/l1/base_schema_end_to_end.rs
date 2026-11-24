@@ -39,7 +39,6 @@ fn claudine_fixture() -> (crate::host_fixtures::Fixture, String) {
         version: "0.0.1".to_string(),
         files: Vec::new(),
         lifecycle: "schemas/globals.lifecycle.json".to_string(),
-        functions: Vec::new(),
         members: Default::default(),
     };
     for (name, text) in files {
@@ -267,6 +266,10 @@ fn claudine_catalog_resolves_from_its_bundle() {
 fn claudine_registration_load_does_fixed_work() {
     use darkmatter::work_counters::{Work, snapshot};
     let (fixture, reference) = claudine_fixture();
+    // The `kind: schema` envelope definition is prepared once per process;
+    // prepare it before measuring, so the count is the load's own work.
+    simplified_schema::parse_standalone_schema_document("kind: schema\ntypes:\n    a: string\n", "warm.yaml")
+        .expect("a types library parses");
     let before = snapshot();
     let hosts = fixture.hosts(&[&reference]);
     let work = snapshot().since(&before);

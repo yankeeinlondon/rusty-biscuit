@@ -92,14 +92,6 @@ fn darkmatter_catalog_and_partials_resolve_from_supplied_sources() {
             text: include_str!("../../../../darkmatter/schemas/partials/md-lifecycle.yaml"),
         },
         EmbeddedDocument {
-            path: "darkmatter/schemas/partials/functions.yaml",
-            text: include_str!("../../../../darkmatter/schemas/partials/functions.yaml"),
-        },
-        EmbeddedDocument {
-            path: "darkmatter/schemas/partials/mutations.yaml",
-            text: include_str!("../../../../darkmatter/schemas/partials/mutations.yaml"),
-        },
-        EmbeddedDocument {
             path: "content-policy/schemas/content-policy.yaml",
             text: include_str!("../../../../content-policy/schemas/content-policy.yaml"),
         },
@@ -149,24 +141,21 @@ fn darkmatter_catalog_and_partials_resolve_from_supplied_sources() {
 
     // Every type of every partial resolves through the reserved namespace,
     // which names the shipped documents and never a file.
-    let (mut resolved_types, mut function_types) = (0, 0);
+    // The callable catalogs (`functions.yaml`, `mutations.yaml`) are not
+    // partials: they are never import sources, so they are not supplied.
+    let mut resolved_types = 0;
     for document in &DOCUMENTS[1..DOCUMENTS.len() - 1] {
         let stem = document.path.rsplit('/').next().and_then(|file| file.strip_suffix(".yaml")).expect("a partial stem");
         let names = type_names(document.text);
         assert!(!names.is_empty(), "{} declares no types", document.path);
         for name in names {
             let probe = single("probe", YamlValue::String(format!("{name}@darkmatter:{stem}")));
-            match prepare_embedded_inline_schema(&probe, "host/probe.yaml", &[], "", SHIPPED) {
-                Ok(_) => resolved_types += 1,
-                // A function type resolves but describes a callable, so it
-                // keeps its located lowering error rather than typing a value.
-                Err(error) if error.to_string().contains("`function` type is description-only") => function_types += 1,
-                Err(error) => panic!("`{name}@darkmatter:{stem}`: {error}"),
-            }
+            prepare_embedded_inline_schema(&probe, "host/probe.yaml", &[], "", SHIPPED)
+                .unwrap_or_else(|error| panic!("`{name}@darkmatter:{stem}`: {error}"));
+            resolved_types += 1;
         }
     }
     assert!(resolved_types > 20, "only {resolved_types} partial types resolved");
-    assert!(function_types > 0, "the function catalogs declare function types");
 }
 
 #[test]
@@ -206,10 +195,6 @@ fn claudine_bundle_and_its_triggers_resolve_from_supplied_sources() {
         EmbeddedDocument {
             path: "darkmatter/schemas/partials/md-lifecycle.yaml",
             text: include_str!("../../../../darkmatter/schemas/partials/md-lifecycle.yaml"),
-        },
-        EmbeddedDocument {
-            path: "darkmatter/schemas/partials/functions.yaml",
-            text: include_str!("../../../../darkmatter/schemas/partials/functions.yaml"),
         },
         EmbeddedDocument {
             path: "darkmatter/schemas/partials/context-variables.yaml",

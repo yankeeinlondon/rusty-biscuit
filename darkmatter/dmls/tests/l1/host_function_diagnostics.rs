@@ -6,8 +6,9 @@
 //! session.
 //!
 //! The catalog and artifact are the library's committed test host
-//! (`darkmatter/lib/tests/fixtures/host_functions/`), installed as the
-//! function pair of a format 2 bundle registered in each session's home.
+//! (`darkmatter/lib/tests/fixtures/host_functions/`), installed as an
+//! expression catalog of a format 3 bundle (the artifact is its facts
+//! companion) registered in each session's home.
 //! These tests cover the wiring only; the library's `host_functions` tests
 //! walk the reader's whole input matrix.
 
@@ -44,17 +45,16 @@ label: \"{{ project_label(42) }}\"
 const TRIGGER: &str = "kind: schema-trigger\nmatch:\n    source: string(required)\n";
 
 /// The `acme` bundle with its one trigger matching [`DOCUMENT`] and the
-/// committed `project` pair (`catalog`, and `artifact` unless `None`) as its
-/// only functions.
+/// committed `project` catalog as its only expression catalog, with
+/// `artifact` as its facts companion (missing when `None`, still digested).
 fn bundle(catalog: &str, artifact: Option<&str>) -> Bundle {
     let mut bundle = Bundle::acme()
         .without_file("schemas/widget.yaml")
         .without_file("schemas/gadget.yaml")
+        .without_file("schemas/functions.yaml")
         .with_file("schemas/project-trigger.yaml", TRIGGER)
-        .with_member("schemas/project.yaml", catalog);
-    bundle.members.remove("schemas/functions.yaml");
+        .with_file("schemas/project.yaml", catalog);
     bundle.members.remove("schemas/functions.facts.json");
-    bundle.functions = vec![("schemas/project.yaml".to_string(), "schemas/project.facts.json".to_string())];
     match artifact {
         Some(artifact) => bundle.with_member("schemas/project.facts.json", artifact),
         None => bundle,
@@ -172,7 +172,7 @@ fn untrusted_host_facts_register_no_host() {
 /// built-in) refuses the host, so its functions stay unknown.
 #[test]
 fn a_host_function_catalog_that_fails_to_load_registers_no_host() {
-    let catalog = "kind: schema\ncategories:\n  - Math\ntypes:\n  min: |-\n    function(parameters(a: number); returns(number); category(Math))\n";
+    let catalog = "kind: expression-schema\ncategories:\n  - Math\ntypes:\n  min: |-\n    function(parameters(a: number); returns(number); category(Math))\n";
     let found = diagnostics(Some(&bundle(catalog, Some(ARTIFACT))));
     assert_eq!(findings(&found), unregistered(), "{found:#?}");
 }

@@ -98,7 +98,6 @@ impl Fixture {
             version: "0.0.1".to_string(),
             files: Vec::new(),
             lifecycle: LIFECYCLE.to_string(),
-            functions: Vec::new(),
             members: Default::default(),
         };
         for (name, text) in BUNDLE {

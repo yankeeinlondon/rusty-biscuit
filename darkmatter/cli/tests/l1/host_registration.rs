@@ -1,9 +1,9 @@
 //! Host registration through `md`: a user registration in the fixture home's
-//! `~/.darkmatter.yaml` names a format 2 `darkmatter-host` bundle, loaded
+//! `~/.darkmatter.yaml` names a format 3 `darkmatter-host` bundle, loaded
 //! once per invocation; the host one of whose triggers matches a document
 //! layers its triggers into `md schema validate`, `md clean`, `md compose`,
 //! and `md schema triggers`, and a registration that does not load (missing,
-//! format 1, or a member that fails its digest) is one located
+//! an unsupported format version, or a member that fails its digest) is one located
 //! `dm.host.registration` warning per run (stderr for a formatted output,
 //! `diagnostics` for a data output, whose stderr stays empty) and no host
 //! applies. A whole YAML document whose `kind` a registered host defines is
@@ -12,7 +12,7 @@
 //! both trigger files.
 
 use crate::common;
-use crate::host_fixtures::{Bundle, MANIFEST_NAME};
+use crate::host_fixtures::{Bundle, MANIFEST_NAME, companion_of};
 
 use common::CliProcessFixture;
 use serde_json::Value;
@@ -25,15 +25,13 @@ const WIDGET_DOCUMENT: &str = "---\nwidget:\n  size: big\n---\n# Widget\n\nBody.
 const NOTES: &str = "---\ntitle: Notes\n---\n# Notes\n\nBody.\n";
 const REGISTRATION: &str = "dm.host.registration";
 
-/// The `acme` bundle without its function pair: `md` has no handler for a
-/// host function, and none of these tests calls one.
+/// The `acme` bundle without its expression catalog and companion, so the
+/// manifest lines these tests locate refusals at stay fixed; host function
+/// scope is covered by `compose_host_scope`.
 fn acme() -> Bundle {
-    let mut bundle = Bundle::acme();
-    for (catalog, facts) in std::mem::take(&mut bundle.functions) {
-        bundle.members.remove(&catalog);
-        bundle.members.remove(&facts);
-    }
-    bundle
+    let bundle = Bundle::acme();
+    let companion = companion_of("schemas/functions.yaml");
+    bundle.without_file("schemas/functions.yaml").without_file(&companion)
 }
 
 /// A fixture whose home registers `bundle` (installed under `home/.acme/`)
@@ -403,7 +401,7 @@ fn selecting_a_host_never_migrates_a_repository_legacy_policy_file() {
     assert!(!fixture.cwd().join(".darkmatter.yaml").exists(), "no repository configuration is written");
 }
 
-// ── loader wiring: one valid format 2 bundle, two located refusals ──────────
+// ── loader wiring: one valid format 3 bundle, two located refusals ──────────
 
 /// A format 1 manifest over the same members: `identify`, `triggers`, and
 /// `globals` instead of `files` and `digests`.
@@ -448,9 +446,9 @@ fn assert_refused_at(code: Option<i32>, value: &Value, line: u64, column: u64) -
 }
 
 #[test]
-fn a_format_2_bundle_types_the_document_its_trigger_matches() {
+fn a_format_3_bundle_types_the_document_its_trigger_matches() {
     let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
-    let fixture = registered("host-wiring-format-2", false);
+    let fixture = registered("host-wiring-format-3", false);
 
     let (code, value) = compose_widget(&fixture);
 
@@ -476,7 +474,10 @@ fn a_format_1_manifest_is_refused_with_an_upgrade_warning_at_its_format_version(
 
     // `format_version: 1` is line 2; its value starts at column 17.
     let message = assert_refused_at(code, &value, 2, 17);
-    assert!(message.contains("format 1") && message.contains("run `acme setup`"), "the upgrade warning: {message}");
+    assert!(
+        message.contains("unsupported host registration format version 1") && message.contains("republish the registration"),
+        "the upgrade warning: {message}"
+    );
 }
 
 #[test]

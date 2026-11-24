@@ -190,7 +190,7 @@ fn a_namespace_declared_twice_is_refused_on_every_declaration() {
     assert_eq!(
         located,
         [
-            (fixture.path("host/schemas/again.yaml"), Some(2), Some("files[4]".to_string())),
+            (fixture.path("host/schemas/again.yaml"), Some(2), Some("files[5]".to_string())),
             (fixture.path("host/schemas/run.yaml"), Some(2), Some("files[3]".to_string())),
         ]
     );

@@ -68,8 +68,8 @@
   "dependencies": [
     {
       "owner": "darkmatter",
-      "preparation_revision": 4,
-      "digest": "43fd9fe5c86852ac"
+      "preparation_revision": 5,
+      "digest": "9e3a4827a61d4600"
     },
     {
       "owner": "simplified-schema",

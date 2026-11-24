@@ -237,7 +237,9 @@ fn interpolation_completions(
     partial: &str,
 ) -> Vec<CompletionItem> {
     let frontmatter_keys = frontmatter::expression_property_keys(ctx);
-    let host = expressions::host_global_candidates(partial, &host_catalogs(ctx));
+    let view = ctx.host_view();
+    let mut host = host_function_candidates(partial, &view);
+    host.extend(expressions::host_global_candidates(partial, &HostCatalogs(view)));
     // Callback locals extend the enclosing directive scope only at this cursor.
     let candidates = with_site_scope(ctx, Some(token_start), |site| {
         let start = expressions::expression_body_start(ctx.text, offset).unwrap_or(token_start);
@@ -250,6 +252,33 @@ fn interpolation_completions(
         .filter_map(|candidate| text_edit_item(ctx, token_start, offset, candidate))
         .collect();
     if prioritize { retain_completion_order(&mut items); }
+    items
+}
+
+/// The selected view's host functions matching `partial`, each offered once
+/// under its canonical name. A canonical name or alias matches by prefix
+/// without regard to case, as dispatch resolves a host name; an `md`
+/// document, or one whose host is refused or unselected, has none.
+fn host_function_candidates(partial: &str, view: &crate::overlay::hosts::HostView) -> Vec<expressions::ExprCompletion> {
+    let partial = partial.to_ascii_lowercase();
+    let mut items = Vec::new();
+    for set in view.functions() {
+        for canonical in set.function_names() {
+            let aliases = set.aliases(canonical).unwrap_or_default();
+            let matches = std::iter::once(canonical)
+                .chain(aliases.iter().map(String::as_str))
+                .any(|name| name.to_ascii_lowercase().starts_with(&partial));
+            if matches {
+                items.push(expressions::ExprCompletion {
+                    label: canonical.to_string(),
+                    insert_text: canonical.to_string(),
+                    kind: expressions::ExprCompletionKind::Function,
+                    detail: Some("host function".to_string()),
+                    documentation: None,
+                });
+            }
+        }
+    }
     items
 }
 

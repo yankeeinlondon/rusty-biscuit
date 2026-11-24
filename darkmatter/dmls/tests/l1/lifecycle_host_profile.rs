@@ -1,6 +1,6 @@
 //! DMLS types a document's lifecycle stacks under its registered host: the
 //! lifecycle artifact of the host whose trigger matches the document (here
-//! the frozen Claudine artifact, in an explicitly registered format 2
+//! the frozen Claudine artifact, in an explicitly registered format 3
 //! bundle, [`crate::claudine_host`]) gives the host's events,
 //! renames, per-event globals, and verbs, and the library's one scoped walk
 //! (`darkmatter::lifecycle::lifecycle_call_checks`) narrows each call by the

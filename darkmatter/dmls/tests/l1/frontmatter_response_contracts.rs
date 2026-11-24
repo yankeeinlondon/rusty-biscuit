@@ -3,7 +3,7 @@
 //! diagnostic codes, ranges, messages, and severities, definition targets,
 //! and document links. The document and Claudine's schema bundle are the
 //! frozen A3 benchmark inputs, with Claudine's lifecycle and globals from an
-//! explicitly registered format 2 bundle ([`crate::claudine_host`], with
+//! explicitly registered format 3 bundle ([`crate::claudine_host`], with
 //! its A3 trigger), driven in-process through the provider registry as the
 //! benchmark drives them, so a change to how the frontmatter walk owns or
 //! caches schema shapes cannot change what an editor receives.

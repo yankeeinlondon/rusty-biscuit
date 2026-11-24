@@ -20,8 +20,10 @@
 //! declaration (its authored `kind` and root `$schema`,
 //! [`LoadedYamlDocument::declaration_key`]), its context, and its kind
 //! registry's version; and, only when its preparation depends on the whole
-//! text (the `schema` / `yaml-schema` kinds, whose checks read files), the
-//! text. A data
+//! text, the text: the `schema` / `yaml-schema` kinds, whose checks read
+//! files, and the callable catalog kinds (`expression-schema`,
+//! `mutation-schema`), whose callable semantics are judged while the contract
+//! is prepared. A data
 //! edit of any other document therefore keeps the key, and the contract
 //! judges the new data with no file read, resolution, or compilation.
 //!
@@ -82,7 +84,15 @@ pub(super) struct PreparedYaml {
     /// The files a root-`$schema` contract's named types import; empty on
     /// the kind route.
     pub(super) named_types: Arc<NamedTypeCatalog>,
+    /// The text of each other file a failed callable catalog's related
+    /// locations name, keyed as the (resolved) error names it, so its
+    /// diagnostic ranges them without reading.
+    pub(super) catalog_sources: CatalogSources,
 }
+
+/// The text of each file a [`SchemaError::CallableCatalog`]'s related
+/// locations name, other than the catalog itself.
+pub type CatalogSources = Arc<HashMap<PathBuf, Arc<str>>>;
 
 /// One document's installed preparation and what it read.
 struct Entry {
@@ -149,6 +159,7 @@ pub(super) struct PreparedJob {
     schema_references: Arc<SchemaReferenceFacts>,
     standalone: Option<StandaloneNamedTypes>,
     named_types: Arc<NamedTypeCatalog>,
+    catalog_sources: CatalogSources,
     deps: Vec<(PathBuf, u64)>,
     probes: Vec<(PathBuf, bool)>,
     folders: Vec<WatchedFolder>,
@@ -265,6 +276,7 @@ impl YamlContracts {
                 schema_references: job.schema_references,
                 standalone: job.standalone,
                 named_types: job.named_types,
+                catalog_sources: job.catalog_sources,
             }),
             deps: job.deps,
             probes: job.probes,
@@ -365,13 +377,23 @@ impl OverlayCache {
 fn declaration_part(text: &str, path: &Path, text_hash: u64) -> Option<u64> {
     let loaded = LoadedYamlDocument::load(text, path).ok()?;
     // The kinds whose checks read files are exactly the schema-document
-    // kinds whose named types are resolved here.
-    let whole_text = loaded.kind_checks_read_files();
+    // kinds whose named types are resolved here; a callable catalog's
+    // preparation judges its whole text.
+    let whole_text = loaded.kind_checks_read_files() || is_callable_catalog(&loaded);
     let mut bytes = loaded.declaration_key().to_le_bytes().to_vec();
     if whole_text {
         bytes.extend_from_slice(&text_hash.to_le_bytes());
     }
     Some(xx_hash_bytes(&bytes))
+}
+
+/// Whether `loaded` claims a callable catalog kind (`expression-schema`,
+/// `mutation-schema`).
+fn is_callable_catalog(loaded: &LoadedYamlDocument) -> bool {
+    matches!(
+        loaded.loaded().value.get("kind").and_then(serde_yaml_ng::Value::as_str),
+        Some("expression-schema" | "mutation-schema")
+    )
 }
 
 /// Whether a change at `path` affects `entry`. A failed preparation is
@@ -403,8 +425,15 @@ impl ContractJob {
         let (prepared, observed) = buffers::with(&sources, || {
             observed::collect(|| prepare(&path, &text, &context, kinds, hosts, &workspace_roots))
         });
-        let Prepared { contract, validation, schema_references, standalone, named_types, mut deps } = prepared;
+        let Prepared { mut contract, validation, schema_references, standalone, named_types, mut deps } = prepared;
         deps.extend(observed.read);
+        let mut catalog_sources = CatalogSources::default();
+        if let Err(error) = &contract
+            && let Some((resolved, texts)) = resolve_catalog_related(error, &path, &context, &sources)
+        {
+            contract = Err(Arc::new(resolved));
+            catalog_sources = Arc::new(texts);
+        }
         let mut probes = schema_references.probes();
         for (probe, existed) in &mut probes {
             *existed |= sources.get(probe).is_some();
@@ -432,11 +461,53 @@ impl ContractJob {
             schema_references,
             standalone,
             named_types,
+            catalog_sources,
             deps,
             probes,
             folders,
         }
     }
+}
+
+/// A [`SchemaError::CallableCatalog`] whose related locations name their
+/// files as an editor opens them, with the text of each file other than the
+/// catalog at `path`; `None` for any other error.
+///
+/// A relative related file (a built-in catalog's identity, such as
+/// `darkmatter/schemas/partials/functions.yaml`) is resolved against the
+/// context's captured repository root, as the library matches it; a related
+/// location whose file cannot be resolved or read is dropped, since no
+/// editor could open it. Reads through the open buffers.
+fn resolve_catalog_related(
+    error: &SchemaError,
+    path: &Path,
+    context: &FileResolutionContext,
+    sources: &SourceBuffers,
+) -> Option<(SchemaError, HashMap<PathBuf, Arc<str>>)> {
+    let SchemaError::CallableCatalog { path: catalog, message, span, related } = error else {
+        return None;
+    };
+    let mut texts = HashMap::new();
+    let related = related
+        .iter()
+        .filter_map(|entry| {
+            let file = if entry.file.is_absolute() {
+                entry.file.clone()
+            } else {
+                context.repository_root()?.join(&entry.file)
+            };
+            if file != path && file != *catalog && !texts.contains_key(&file) {
+                let text = match sources.get(&file) {
+                    Some(text) => Arc::clone(text),
+                    None => Arc::from(work_counters::read_to_string(&file).ok()?),
+                };
+                texts.insert(file.clone(), text);
+            }
+            Some(simplified_schema::errors::CatalogRelated { file, ..entry.clone() })
+        })
+        .collect();
+    let resolved = SchemaError::CallableCatalog { path: catalog.clone(), message: message.clone(), span: span.clone(), related };
+    Some((resolved, texts))
 }
 
 /// What [`prepare`] produced, before its reads are hashed.
@@ -491,9 +562,11 @@ fn prepare(
         schemas = schemas.with_registered_hosts(hosts);
     }
     let contract = schemas.prepare_yaml_contract(&loaded).map_err(Arc::new);
+    // A callable catalog whose semantics failed is still claimed by its
+    // kind: its root `$schema`, if any, is never a fallback contract.
     let kind_route = match &contract {
         Ok(Some(contract)) => matches!(contract.route(), Route::Kind(_)),
-        Err(error) => matches!(**error, SchemaError::KindSelection { .. }),
+        Err(error) => matches!(**error, SchemaError::KindSelection { .. } | SchemaError::CallableCatalog { .. }),
         Ok(None) => false,
     };
     match &contract {

@@ -321,6 +321,17 @@ pub(crate) fn alias_canonical(name: &str) -> Option<&'static str> {
     bindings().find(|binding| binding.aliases.contains(&name)).map(|binding| binding.canonical)
 }
 
+/// The built-in canonical name a lowercased `name` reserves: its own, when
+/// it is a canonical name, or the one it is an alias of. The same comparison
+/// as [`is_builtin_name`], over the static binding tables only, so an
+/// authored catalog is checked without building the registry (which loads
+/// the built-in catalog).
+pub(crate) fn reserved_builtin_name(name: &str) -> Option<&'static str> {
+    bindings()
+        .find(|binding| binding.canonical == name || binding.aliases.contains(&name))
+        .map(|binding| binding.canonical)
+}
+
 /// The aliases registered for `canonical`; empty for an unregistered name.
 pub(crate) fn registered_aliases(canonical: &str) -> &'static [&'static str] {
     bindings().find(|binding| binding.canonical == canonical).map_or(&[], |binding| binding.aliases)
@@ -1033,13 +1044,13 @@ fn call_host(entry: &host::HostEntry, name: &str, args: &[Value]) -> Result<Valu
         } => (registration, handler),
         host::FunctionState::Complete { handler: None, .. } => {
             return Err(failure(format!(
-                "host function {}() has no implementation in this process",
+                "host function {}() requires the host runtime",
                 entry.canonical()
             )));
         }
         host::FunctionState::Incomplete { reason } => {
             return Err(failure(format!(
-                "host function {}() has no implementation in this process, and its analysis is incomplete: {reason}",
+                "host function {}() requires the host runtime, and its analysis is incomplete: {reason}",
                 entry.canonical()
             )));
         }

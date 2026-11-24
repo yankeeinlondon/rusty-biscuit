@@ -296,6 +296,11 @@ Darkmatter ships the partials `fm`, `style`, `context-variables`, `error`,
 `timing`, `lifecycle`, and `md-lifecycle`. The two lifecycle partials are the
 ones written for reuse by other schemas; see
 [Lifecycle Event Typing](../../../../darkmatter/docs/topics/schemas/definition.md#lifecycle-event-typing).
+Darkmatter's callable catalogs, `functions.yaml` (`kind: expression-schema`)
+and `mutations.yaml` (`kind: mutation-schema`), are not partials, and their
+helper types are not importable: `recent-commits@darkmatter:functions` is
+`SchemaError::NoMatch`. A schema that needs one of those shapes declares it
+itself, as `context-variables` does for `recent-commits`.
 
 #### Merging use-site constraints
 

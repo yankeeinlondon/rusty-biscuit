@@ -35,6 +35,8 @@ mod clean_schema;
 mod code_block;
 mod host_registration;
 mod compose_foreign_documents;
+mod compose_host_scope;
+mod host_runtime_scope;
 mod compose_array_rendering;
 mod compose_base_schema;
 mod compose_basic;

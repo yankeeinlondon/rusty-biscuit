@@ -77,6 +77,7 @@ envelopes:
 | informal `schema` | no `kind` | `$schema` (required), `types`, `description` (a string), `categories` |
 | `schema-trigger` | `kind: schema-trigger` | match rules and a `$schema` payload; see [Repository Trigger Schemas](#repository-trigger-schemas) |
 | `yaml-schema` | `kind: yaml-schema` | `$schema` (required), `types`, `description`, `categories`; it defines a YAML document kind and is never a `$schema` target; see [YAML Documents](#yaml-documents) |
+| `expression-schema`, `mutation-schema` | `kind: expression-schema`, `kind: mutation-schema` | `categories` and `types` (both required), `description`; a callable catalog, never a `$schema` target or an import source; see [Host Functions](../host-functions.md) |
 
 Any other top-level key is a malformed-envelope error. Only a document with
 a `$schema` property can be a Markdown document's `$schema` target; a
@@ -462,7 +463,7 @@ of preparing the text. It holds:
 | --- | --- |
 | the global catalog, `fm` included | `GlobalCatalog::darkmatter()` and the runtime baseline |
 | the baseline lowered to JSON Schema with its [validator-cache digest](#validator-cache), and its definition-free form | `darkmatter_base_json_schema()`, `darkmatter_base_schema()`, and every `with_darkmatter_baseline_json_schema()` |
-| the named types of each partial under `schemas/partials/` | `Name@darkmatter:<stem>` references |
+| the named types of each schema partial under `schemas/partials/` (not the callable catalogs `functions.yaml` and `mutations.yaml`) | `Name@darkmatter:<stem>` references |
 | the YAML document-kind definitions (Simplified Schema's `schema.yaml`, `yaml-schema.yaml`, and `schema-trigger.yaml`), prepared with Darkmatter's shipped sources | `shipped_kind_registry()`, and the shipped definitions `kind_host()` seeds every kind registry with |
 | the expression-function catalog (`functions.yaml`, with its file-form examples) | `expression_function_catalog()` |
 | the side-effect catalog (`mutations.yaml`) | `effect_function_catalog()` |
@@ -937,6 +938,16 @@ flowchart TD
   `kind: schema-trigger` file is validated against the trigger definition,
   never against its own `$schema` payload, which describes the Markdown
   documents it matches.
+- **A callable catalog is checked as a host reads it.** A
+  `kind: expression-schema` or `kind: mutation-schema` file is validated
+  against its shipped definition and then by Darkmatter's catalog reader:
+  every callable needs a declared category, names may not collide without
+  regard to ASCII case, a mutation may not use `narrows(...)`, and an
+  expression catalog other than `schemas/partials/functions.yaml` may not
+  reuse a built-in function's name. A failure is reported with code
+  `dm.schema.callable_catalog` at the failing declaration, plus the other
+  declaration when two conflict. The check never runs an example or resolves
+  a `{{ … }}` slot, and the catalog never falls back to a root `$schema`.
 - **An unclaimed document uses its root `$schema`**, in any form a frontmatter
   `$schema` accepts: an inline mapping, a root union, or a reference to a
   SimplifiedSchema or JSON Schema file (see
@@ -1401,7 +1412,7 @@ The `layers` object says which schema layers judged the document, so a consumer 
 
 The terminal output names the same layers; see [Behavior Without `$schema`](#behavior-without-schema).
 
-A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, a `schema` record for a registered host whose matched triggers conflict has `code` `dm.host.trigger_conflict` and `related`, the two trigger files (see [When two triggers declare one property](../host-registration.md#when-two-triggers-declare-one-property)), and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
+A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, a `schema` record for a registered host whose matched triggers conflict has `code` `dm.host.trigger_conflict` and `related`, the two trigger files (see [When two triggers declare one property](../host-registration.md#when-two-triggers-declare-one-property)), a `schema` record for a callable catalog that fails the catalog reader has `code` `dm.schema.callable_catalog`, the failing declaration's `line`, `column` (in characters), and byte `span`, and `related`, one `{"message", "file", "line", "column", "span"}` object for each other location the failure involves (a built-in function's declaration names `darkmatter/schemas/partials/functions.yaml`, located when that file is in the repository and unlocated otherwise), and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
 ### Problem Locations
 
