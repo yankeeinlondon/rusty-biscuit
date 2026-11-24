@@ -3,9 +3,51 @@ kind: plan
 total-phases: 5
 created: 2026-11-22
 status: planned
-phase: 1
+phase: 2
 agent: codex/gpt-6.2-sol
 yolo: true
+source_files_during_phase_1:
+- simplified-schema/schemas/expression-schema.yaml
+- simplified-schema/schemas/mutation-schema.yaml
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/shipped/registry.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/triggers/finding.rs
+- simplified-schema/lib/src/yaml_documents/load.rs
+- simplified-schema/lib/src/yaml_documents/marks.rs
+- simplified-schema/lib/src/yaml_documents/mod.rs
+- simplified-schema/lib/src/yaml_documents/semantic.rs
+- simplified-schema/lib/generated/shipped.json
+- simplified-schema/lib/tests/l1/callable_catalog_envelopes.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/shipped_artifacts.rs
+- darkmatter/lib/src/markdown/schemas/schema_files.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/yaml_kind_registry.rs
+- darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/manifest.yaml
+- darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/globals.lifecycle.json
+- darkmatter/lib/tests/fixtures/host_registration_v2/darkmatter/schemas/
+- claudine/lib/generated/shipped.json
+docs_updated_during_phase_1:
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/docs/topics/language/unions.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/diagnostics.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/simplified-schema/schema-documents.md
+- .claude/skills/darkmatter/SKILL.md
+packages:
+- simplified-schema
+- darkmatter
+- darkmatter-cli
+- claudine
 ---
 
 # Expression and mutation schemas implementation plan
