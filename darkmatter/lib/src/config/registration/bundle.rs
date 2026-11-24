@@ -389,7 +389,8 @@ impl AdmittedManifest {
 /// [`load_snapshot`], with `.` and `..` applied to the spelling. A path that
 /// climbs out of the directory and back in is refused here even where the
 /// installed reader would accept it, so this admission never accepts a
-/// manifest that reader refuses.
+/// manifest that reader refuses; [`admit_installed_manifest`] admits as
+/// that reader does.
 ///
 /// ## Errors
 ///
@@ -397,13 +398,42 @@ impl AdmittedManifest {
 /// as [`load_snapshot`] locates it; [`SnapshotRefusal::legacy_format`] for a
 /// format 1 manifest.
 pub fn admit_manifest(manifest: &Path, bytes: &[u8]) -> Result<AdmittedManifest, Box<SnapshotRefusal>> {
+    admit_with(manifest, bytes, |read| read.embedded_members(manifest))
+}
+
+/// [`admit_manifest`] with each member resolved as [`load_snapshot`] and
+/// [`verify_read`] resolve it: from a context derived from `context` and
+/// anchored at the manifest, confined to the manifest's directory. A
+/// spelling that leaves the directory and comes back (`../host/x.yaml` for a
+/// bundle in `host/`) is admitted under its in-bundle
+/// [`BundleMember::path`]; one that ends outside it is refused.
+///
+/// Reads no member and checks no link: a caller that reads the members
+/// itself (`claudine doctor`) gets the paths and locations the loader
+/// would check, then reads them its own way.
+///
+/// ## Errors
+///
+/// As [`admit_manifest`], with the member path rules of [`load_snapshot`].
+pub fn admit_installed_manifest(
+    manifest: &Path,
+    bytes: &[u8],
+    context: &FileResolutionContext,
+) -> Result<AdmittedManifest, Box<SnapshotRefusal>> {
+    admit_with(manifest, bytes, |read| read.members(manifest, context))
+}
+
+fn admit_with(
+    manifest: &Path,
+    bytes: &[u8],
+    resolve: impl FnOnce(&ReadManifestV2) -> Result<MemberSpec, Refusal>,
+) -> Result<AdmittedManifest, Box<SnapshotRefusal>> {
     let refuse = |refusal: Refusal, legacy: bool| Reads::default().refuse(refusal, legacy);
     let read = manifest::read_v2(manifest, bytes.to_vec()).map_err(|refusal| match refusal {
         ManifestRefusal::Format1(refusal) => refuse(refusal, true),
         ManifestRefusal::Invalid(refusal) => refuse(refusal, false),
     })?;
-    let MemberSpec { files, lifecycle, functions } =
-        read.embedded_members(manifest).map_err(|refusal| refuse(refusal, false))?;
+    let MemberSpec { files, lifecycle, functions } = resolve(&read).map_err(|refusal| refuse(refusal, false))?;
     let ReadManifestV2 { manifest: accepted, .. } = read;
     Ok(AdmittedManifest { host: accepted.host, version: accepted.version, files, lifecycle, functions })
 }
@@ -436,7 +466,9 @@ pub fn load_snapshot_with(
 ) -> Result<VerifiedSnapshot, Box<SnapshotRefusal>> {
     let mut reads = Reads::default();
     let first = reads.read_manifest(manifest, read)?;
-    let failure = match attempt(manifest, context, &first, read, &mut reads) {
+    let root = manifest.parent().unwrap_or(manifest).to_path_buf();
+    let mut source = |member: &BundleMember, reads: &mut Reads| verify(manifest, &root, member, read, reads);
+    let failure = match attempt(manifest, context, &first, &mut reads, &mut source) {
         Ok(snapshot) => return Ok(reads.finish(snapshot)),
         Err(failure) => failure,
     };
@@ -449,7 +481,48 @@ pub fn load_snapshot_with(
         Ok(second) if second != first => second,
         _ => return Err(reads.refuse(*failure.refusal, failure.legacy)),
     };
-    match attempt(manifest, context, &second, read, &mut reads) {
+    match attempt(manifest, context, &second, &mut reads, &mut source) {
+        Ok(snapshot) => Ok(reads.finish(snapshot)),
+        Err(failure) => Err(reads.refuse(*failure.refusal, failure.legacy)),
+    }
+}
+
+/// The verified snapshot of the format 2 manifest `bytes` at `manifest`
+/// whose members' bytes the caller has already read, keyed by bundle path
+/// ([`BundleMember::path`]): the manifest's admission, member resolution,
+/// and digest checks of [`load_snapshot`], with nothing read from or probed
+/// on the disk and no retry. Member locations, and so every later
+/// diagnostic, name the installed files.
+///
+/// The caller vouches for how the bytes were read: [`load_snapshot`]'s own
+/// refusal of a member reached through a symbolic link or junction is not
+/// applied, since nothing is probed. A diagnostic that has already read a
+/// bundle without following links (`claudine doctor`) judges it this way,
+/// then prepares it with [`load_verified`](super::load_verified), as
+/// [`load_registrations`](super::load_registrations) does.
+///
+/// ## Errors
+///
+/// The first reason the bundle cannot be used, located as
+/// [`load_snapshot`] locates it: a member `members` lacks is missing from
+/// the bundle, and one whose bytes differ from its digest is a mismatch.
+pub fn verify_read(
+    manifest: &Path,
+    bytes: &[u8],
+    context: &FileResolutionContext,
+    members: &BTreeMap<String, Arc<[u8]>>,
+) -> Result<VerifiedSnapshot, Box<SnapshotRefusal>> {
+    let mut reads = Reads::default();
+    reads.probe(manifest);
+    reads.record(manifest, bytes);
+    let mut source = |member: &BundleMember, reads: &mut Reads| {
+        let Some(found) = members.get(&member.path) else {
+            return Err(member_failure(manifest, member, format!("`{}` is missing from the bundle", member.reference), true));
+        };
+        matches_digest(manifest, member, found, reads)?;
+        Ok(Arc::clone(found))
+    };
+    match attempt(manifest, context, bytes, &mut reads, &mut source) {
         Ok(snapshot) => Ok(reads.finish(snapshot)),
         Err(failure) => Err(reads.refuse(*failure.refusal, failure.legacy)),
     }
@@ -532,14 +605,18 @@ impl Reads {
     }
 }
 
-/// One verification over the manifest `bytes`: every member read fresh,
-/// nothing kept from an earlier attempt.
+/// Where one attempt takes a member's bytes from, once they matched its
+/// digest.
+type MemberSource<'a> = dyn FnMut(&BundleMember, &mut Reads) -> Result<Arc<[u8]>, Failure> + 'a;
+
+/// One verification over the manifest `bytes`: every member taken fresh from
+/// `source`, nothing kept from an earlier attempt.
 fn attempt(
     path: &Path,
     context: &FileResolutionContext,
     bytes: &[u8],
-    read: &dyn Fn(&Path) -> io::Result<Vec<u8>>,
     reads: &mut Reads,
+    source: &mut MemberSource<'_>,
 ) -> Result<VerifiedSnapshot, Failure> {
     let manifest_hash = content_hash(bytes);
     let manifest = manifest::read_v2(path, bytes.to_vec()).map_err(|refusal| match refusal {
@@ -553,7 +630,7 @@ fn attempt(
     let root = path.parent().unwrap_or(path).to_path_buf();
     let mut table: BTreeMap<String, Arc<[u8]>> = BTreeMap::new();
     for member in members(&files, &lifecycle, &functions) {
-        let bytes = verify(path, &root, member, read, reads)?;
+        let bytes = source(member, reads)?;
         table.insert(member.path.clone(), bytes);
     }
     let revision = revision(&manifest, &files, &lifecycle, &functions);
@@ -606,17 +683,7 @@ fn verify(
     read: &dyn Fn(&Path) -> io::Result<Vec<u8>>,
     reads: &mut Reads,
 ) -> Result<Arc<[u8]>, Failure> {
-    let refuse = |message: String, retryable: bool| Failure {
-        refusal: Box::new(Refusal {
-            code: HOST_REGISTRATION_CODE,
-            file: manifest.to_path_buf(),
-            at: member.at.clone(),
-            member: Some(member.field.clone()),
-            message,
-        }),
-        retryable,
-        legacy: false,
-    };
+    let refuse = |message: String, retryable: bool| member_failure(manifest, member, message, retryable);
     let missing = || refuse(format!("`{}` is missing from the bundle", member.reference), true);
     match linked_component(root, &member.path) {
         Ok(None) => {}
@@ -638,18 +705,42 @@ fn verify(
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(missing()),
         Err(error) => return Err(refuse(format!("`{}` cannot be read: {error}", member.reference), false)),
     };
-    let actual = reads.record(&member.location, &bytes);
-    if actual != member.digest {
-        return Err(refuse(
-            format!(
-                "`{}` does not match its digest (the manifest lists `{}`, the file hashes to `{actual}`); the host may \
-                 be mid-publish, or its bundle was edited",
-                member.reference, member.digest
-            ),
-            true,
-        ));
-    }
+    matches_digest(manifest, member, &bytes, reads)?;
     Ok(Arc::from(bytes))
+}
+
+/// A refusal at `member`'s manifest entry.
+fn member_failure(manifest: &Path, member: &BundleMember, message: String, retryable: bool) -> Failure {
+    Failure {
+        refusal: Box::new(Refusal {
+            code: HOST_REGISTRATION_CODE,
+            file: manifest.to_path_buf(),
+            at: member.at.clone(),
+            member: Some(member.field.clone()),
+            message,
+        }),
+        retryable,
+        legacy: false,
+    }
+}
+
+/// Records `bytes` as read from `member`'s location and refuses them unless
+/// they match its digest.
+fn matches_digest(manifest: &Path, member: &BundleMember, bytes: &[u8], reads: &mut Reads) -> Result<(), Failure> {
+    let actual = reads.record(&member.location, bytes);
+    if actual == member.digest {
+        return Ok(());
+    }
+    Err(member_failure(
+        manifest,
+        member,
+        format!(
+            "`{}` does not match its digest (the manifest lists `{}`, the file hashes to `{actual}`); the host may be \
+             mid-publish, or its bundle was edited",
+            member.reference, member.digest
+        ),
+        true,
+    ))
 }
 
 /// The first name of `path` below `root` that is a symbolic link, or on

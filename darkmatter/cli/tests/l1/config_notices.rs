@@ -215,6 +215,32 @@ fn a_missing_permissions_reference_outranks_an_exact_host() {
     });
 }
 
+/// `md init` writes only the user file, so a broken repository reference
+/// is reported with its direct correction and no `md init` remedy.
+#[test]
+fn a_broken_repository_reference_names_a_direct_correction_not_md_init() {
+    let fixture = CliProcessFixture::named("config-reference-repository-remedy");
+    assert!(fixture.initialize_repository(), "git must be available");
+    std::fs::write(fixture.home().join(".darkmatter.yaml"), "permissions: {}\n").unwrap();
+    fixture.write_file("cwd/.darkmatter.yaml", "permissions: ./policy.yaml\n");
+    fixture.write_file("cwd/doc.md", "# Doc\n\n::file https://127.0.0.1:9/child.md\n");
+    let output = run(&fixture, &["compose", "doc.md", "--allow", "host=127.0.0.1", "--output", "json"]);
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stdout));
+    let value = data_value(&output, include_str!("../../schemas/output/compose.yaml"));
+    let declared_in = fixture.cwd().join(".darkmatter.yaml").display().to_string();
+    let message = value["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .filter(|record| record["severity"] == "error")
+        .filter_map(|record| record["message"].as_str())
+        .find(|message| message.contains("`./policy.yaml`"))
+        .unwrap_or_else(|| panic!("a reference error: {value:#}"));
+    assert!(message.contains("which does not exist; create it"), "{message}");
+    assert!(message.contains(&format!("point `permissions` in `{declared_in}` at another file")), "{message}");
+    assert!(!message.contains("md init"), "{message}");
+}
+
 #[test]
 fn omitted_permissions_fetch_an_exact_host() {
     assert_fetched("config-permissions-omitted-host", "{}\n");

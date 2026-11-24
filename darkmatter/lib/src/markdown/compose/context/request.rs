@@ -852,7 +852,17 @@ pub(crate) mod test_support {
     /// A request that resolves through `context`, as the options' old
     /// context field did. A context naming a repository gets the user-only
     /// configuration of its home (see [`user_config`]).
-    pub(crate) fn request_in(options: ComposeOptions, context: FileResolutionContext) -> ComposeRequest {
+    ///
+    /// Options whose context is anchored nowhere ([`ComposeOptions::new`])
+    /// are anchored on `context`'s request directory first, as
+    /// [`ComposeRequest::prepare`] anchors them: `with_context` discovers the
+    /// request's repository at that anchor, and an empty one is the process
+    /// directory, inside this monorepo (~70 ms per request on Linux, seconds
+    /// on Windows under load).
+    pub(crate) fn request_in(mut options: ComposeOptions, context: FileResolutionContext) -> ComposeRequest {
+        if !options.context().anchor().is_absolute() {
+            options.anchor_unanchored_context(context.request_cwd());
+        }
         let options = match (options.config_snapshot(), context.repository_root()) {
             (None, Some(_)) => options.with_config_snapshot(user_config(&context)),
             _ => options,

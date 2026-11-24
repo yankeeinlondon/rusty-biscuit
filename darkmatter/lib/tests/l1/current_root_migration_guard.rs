@@ -34,6 +34,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::git_prefilter;
+
 const NEEDLES: [&str; 2] = ["current.ctx.", "current.env."];
 const EXTENSIONS: [&str; 6] = ["rs", "md", "toml", "yaml", "yml", "json"];
 const SKIPPED_DIRS: [&str; 4] = ["target", "node_modules", "features", "fixes"];
@@ -142,17 +144,12 @@ fn scoped_files(root: &Path) -> Vec<PathBuf> {
 }
 
 /// Keys of tracked files whose working-tree bytes Git reports free of every
-/// needle, so the scan need not open them; empty when Git cannot answer
-/// (no repository, as in an extracted CI archive), which makes the scan read
-/// every file.
-///
-/// A test process's first open of each file costs about 0.8 ms on the native
-/// Windows rig, about 8 s over this corpus, while a single-threaded
-/// `git grep` reads the same bytes in about 2 s. Only entries `ls-files -v`
-/// tags `H` qualify: Git greps the index blob rather than the working file
-/// for assume-unchanged and skip-worktree entries, so those are read here.
-/// The pathspecs only narrow both commands to a superset of the scope rule;
-/// a scoped file they omit is read.
+/// needle, so the scan need not open them
+/// ([`git_prefilter::clean_tracked_files_without`]). A test process's first
+/// open of each file costs about 0.8 ms on the native Windows rig, about 8 s
+/// over this corpus, while a single-threaded `git grep` reads the same bytes
+/// in about 2 s. The pathspecs only narrow Git's work to a superset of the
+/// scope rule.
 fn clean_tracked_files_without_a_needle(root: &Path) -> HashSet<String> {
     const PATHSPECS: [&str; 11] = [
         ":(glob)**/*.rs",
@@ -167,55 +164,7 @@ fn clean_tracked_files_without_a_needle(root: &Path) -> HashSet<String> {
         ":(exclude,glob)**/features/**",
         ":(exclude,glob)**/fixes/**",
     ];
-    let paths = |output: Vec<u8>| -> Vec<String> {
-        output
-            .split(|&byte| byte == 0)
-            .filter(|path| !path.is_empty())
-            .map(|path| String::from_utf8_lossy(path).into_owned())
-            .collect()
-    };
-    let Some(listed) = git(root, &["ls-files", "-z", "-v", "--"], &PATHSPECS) else {
-        return HashSet::new();
-    };
-    // `grep.fullName` would print paths from the top of the repository
-    // rather than relative to `root`, as `ls-files` does.
-    let mut grep = vec!["-c", "grep.fullName=false", "grep", "--threads", "1", "--no-color", "--no-textconv", "-a", "-l", "-z", "-F"];
-    for needle in NEEDLES {
-        grep.extend(["-e", needle]);
-    }
-    grep.push("--");
-    let Some(matching) = git(root, &grep, &PATHSPECS) else {
-        return HashSet::new();
-    };
-    let matching: HashSet<String> = paths(matching).into_iter().collect();
-    paths(listed)
-        .into_iter()
-        .filter_map(|entry| entry.strip_prefix("H ").map(str::to_string))
-        .filter(|path| !matching.contains(path))
-        .collect()
-}
-
-/// Stdout of `git <args> <pathspecs>` run in `root`, or `None` unless it exits
-/// 0 or, for `grep`, 1 (no match). Inherited repository variables are
-/// dropped so a hook's `GIT_DIR` cannot point the command elsewhere.
-fn git(root: &Path, args: &[&str], pathspecs: &[&str]) -> Option<Vec<u8>> {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .args(pathspecs)
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_COMMON_DIR")
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    match output.status.code() {
-        Some(0) => Some(output.stdout),
-        Some(1) if args.contains(&"grep") => Some(Vec::new()),
-        _ => None,
-    }
+    git_prefilter::clean_tracked_files_without(root, &NEEDLES, &PATHSPECS)
 }
 
 fn key(root: &Path, path: &Path) -> String {

@@ -5,7 +5,7 @@
 //! and the revision's independence from `files` order and install location.
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -13,7 +13,7 @@ use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::config::migration_receipt::content_hash;
 use darkmatter::config::registration::HOST_REGISTRATION_CODE;
 use darkmatter::config::registration::bundle::{
-    SnapshotRefusal, VerifiedSnapshot, admit_manifest, load_snapshot, load_snapshot_with,
+    SnapshotRefusal, VerifiedSnapshot, admit_installed_manifest, admit_manifest, load_snapshot, load_snapshot_with, verify_read,
 };
 
 const FILES: [&str; 2] = ["./schemas/a.yaml", "./schemas/b.yaml"];
@@ -229,6 +229,53 @@ fn a_valid_bundle_loads_into_one_verified_snapshot() {
     assert_eq!(read.len(), 6, "the manifest and five members, once each: {read:?}");
     assert!(snapshot.candidates().contains(&bundle.host().join("functions/facts.json")));
     assert_eq!(snapshot.revision().len(), 64);
+}
+
+/// Every default member's bytes as on disk, keyed by bundle path.
+fn read_members(bundle: &Bundle) -> BTreeMap<String, std::sync::Arc<[u8]>> {
+    Members::default()
+        .all()
+        .iter()
+        .map(|reference| {
+            let path = reference.trim_start_matches("./").to_string();
+            let bytes = std::fs::read(bundle.host().join(&path)).unwrap();
+            (path, std::sync::Arc::from(bytes))
+        })
+        .collect()
+}
+
+#[test]
+fn verifying_already_read_bytes_gives_the_snapshot_the_reader_gives() {
+    let bundle = Bundle::new();
+    let manifest = std::fs::read(bundle.manifest()).unwrap();
+
+    let verified = verify_read(&bundle.manifest(), &manifest, &bundle.context(), &read_members(&bundle))
+        .unwrap_or_else(|refusal| panic!("the bytes verify: {refusal:#?}"));
+
+    assert_eq!(verified, bundle.loaded());
+}
+
+#[test]
+fn verifying_already_read_bytes_refuses_a_missing_or_mismatched_member_at_its_entry() {
+    let bundle = Bundle::new();
+    let manifest = std::fs::read(bundle.manifest()).unwrap();
+    let verify = |members: &BTreeMap<String, std::sync::Arc<[u8]>>| {
+        *verify_read(&bundle.manifest(), &manifest, &bundle.context(), members).expect_err("the bytes are refused")
+    };
+
+    let mut missing = read_members(&bundle);
+    missing.remove("schemas/b.yaml");
+    let refusal = verify(&missing);
+    assert_refusal_in(&refusal, &bundle.manifest());
+    assert_eq!(refusal.member.as_deref(), Some("files[1]"));
+    assert!(refusal.message.contains("is missing from the bundle"), "{}", refusal.message);
+
+    let mut changed = read_members(&bundle);
+    changed.insert("schemas/b.yaml".to_string(), std::sync::Arc::from(&b"# edited\n"[..]));
+    let refusal = verify(&changed);
+    assert_refusal_in(&refusal, &bundle.manifest());
+    assert_eq!(refusal.member.as_deref(), Some("files[1]"));
+    assert!(refusal.message.contains("does not match its digest"), "{}", refusal.message);
 }
 
 #[test]
@@ -731,4 +778,51 @@ fn admission_refuses_a_path_that_climbs_out_and_back_in() {
 
     assert_eq!(refusal.member.as_deref(), Some("files[1]"), "{refusal:#?}");
     assert!(refusal.message.contains("leaves the bundle"), "{}", refusal.message);
+}
+
+/// Installed admission resolves every member category (`files`,
+/// `lifecycle`, each function's `catalog` and `facts`) as the verifying
+/// reader does: a spelling that climbs out and back in is the in-bundle
+/// member, and one that ends outside the bundle is refused at its entry,
+/// where the reader refuses it.
+#[test]
+fn installed_admission_resolves_every_member_category_as_the_reader_does() {
+    let bundle = Bundle::new();
+    let reentered = Members {
+        files: vec!["./schemas/a.yaml".to_string(), "../host/schemas/b.yaml".to_string()],
+        lifecycle: "../host/globals.lifecycle.json".to_string(),
+        functions: vec![("../host/functions/catalog.yaml".to_string(), "../host/functions/facts.json".to_string())],
+    };
+    bundle.publish(&reentered);
+    let bytes = std::fs::read(bundle.manifest()).unwrap();
+    let loaded = bundle.loaded();
+
+    let admitted = admit_installed_manifest(&bundle.manifest(), &bytes, &bundle.context())
+        .unwrap_or_else(|refusal| panic!("admitted: {refusal:#?}"));
+
+    let paths: Vec<&str> = admitted.members().map(|member| member.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["schemas/a.yaml", "schemas/b.yaml", "globals.lifecycle.json", "functions/catalog.yaml", "functions/facts.json"]
+    );
+    let read: Vec<&str> = loaded.files().iter().map(|member| member.path.as_str()).collect();
+    assert_eq!(read, paths[..2], "the reader names the same members");
+
+    let fields = ["files[1]", "lifecycle", "functions[0].catalog", "functions[0].facts"];
+    for (index, field) in fields.into_iter().enumerate() {
+        let mut escaping = Members::default();
+        match index {
+            0 => escaping.files[1] = "../schemas/b.yaml".to_string(),
+            1 => escaping.lifecycle = "../globals.lifecycle.json".to_string(),
+            2 => escaping.functions[0].0 = "../functions/catalog.yaml".to_string(),
+            _ => escaping.functions[0].1 = "../functions/facts.json".to_string(),
+        }
+        bundle.publish(&escaping);
+        let bytes = std::fs::read(bundle.manifest()).unwrap();
+        let read = *bundle.load().expect_err(field);
+        let admitted = *admit_installed_manifest(&bundle.manifest(), &bytes, &bundle.context()).expect_err(field);
+        assert_eq!(admitted.member.as_deref(), Some(field), "{admitted:#?}");
+        assert!(admitted.message.contains("leaves the bundle"), "{field}: {}", admitted.message);
+        assert_eq!((admitted.message, admitted.line, admitted.member), (read.message, read.line, read.member), "{field}");
+    }
 }

@@ -247,6 +247,10 @@
   the lockfile gains one edge and no package. `src/xvfb.rs` uses it to focus a
   window and press keys through XTEST on a private `Xvfb` display, which
   avoids depending on an installed `xdotool`.
+- `sniff` moves `tempfile` 3 from a dev-dependency to a regular one
+  (2026-11-24) for the private profile folder of a Windows PowerShell shell
+  probe. It was already in sniff's graph through `gix-odb`, so no package is
+  added. See `sniff/docs/dependencies.md`.
 - `sniff` adds `jsonc-parser` 0.33.2 (`serde` feature) (2026-09-26,
   `2026-09-26-lockfile-corroboration`) for `bun.lock`, `rush.json`, and Rush
   configuration, all JSON with comments. It is the only new crate in the

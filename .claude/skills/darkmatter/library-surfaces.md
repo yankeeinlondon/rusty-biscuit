@@ -27,7 +27,9 @@ behavior.
   `YamlEdit`, `YamlEditError`) edits plain YAML files in place with the
   frontmatter path editor's engine and never serializes the whole file; see
   [frontmatter.md](frontmatter.md#plain-yaml-files).
-- `config::write` (`ConfigTransaction`, `TargetChange`, `ConfigWriteError`)
+- `config::write` (`ConfigTransaction`, `TargetChange`, `ConfigWriteError`;
+  `TargetChange::edit_refusal` dry-runs a change's edits on its expected bytes
+  with the staging editor, writing nothing)
   is the one configuration writer: sibling `<name>.darkmatter-lock` (kept,
   `File::try_lock`, 2 s/20 ms), locks in portable-path order, re-read,
   the layout-aware edit (`edit_yaml_paths_in_layout`; `TargetChange::create_yaml`

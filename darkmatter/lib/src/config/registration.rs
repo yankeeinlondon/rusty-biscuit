@@ -840,6 +840,44 @@ fn load_manifest(path: &Path, context: &FileResolutionContext, owned: &BTreeSet<
     profile_of(snapshot, context, owned)
 }
 
+/// The profile of the installed bundle `snapshot`, prepared in `context`
+/// exactly as [`load_registrations`] prepares a `register` entry's verified
+/// snapshot: every member classified and prepared, every declared type
+/// checked, and the catalog and every artifact (the lifecycle profile, each
+/// function pair) checked against the members. A diagnostic that has
+/// already read the bundle ([`bundle::verify_read`]) learns whether
+/// Darkmatter would load it without loading it through a `register` entry.
+///
+/// `context` is the request's captured context, as for
+/// [`load_registrations`]; each member resolves in a context derived from
+/// it and anchored at the member.
+///
+/// ## Errors
+///
+/// Every refusal, located as for a `register` entry; an embedded snapshot
+/// is refused ([`load_embedded`] prepares it).
+pub fn load_verified(
+    snapshot: VerifiedSnapshot,
+    context: &FileResolutionContext,
+    owned: &BTreeSet<String>,
+) -> Result<RegisteredHostProfile, Vec<bundle::SnapshotRefusal>> {
+    let as_refusal = |Labeled { refusal, label }: Labeled| bundle::SnapshotRefusal {
+        label,
+        ..bundle::SnapshotRefusal::of(refusal, false, Vec::new(), Vec::new())
+    };
+    if snapshot.embedded_bundle().is_some() {
+        let refusal = Refusal {
+            code: HOST_REGISTRATION_CODE,
+            file: snapshot.manifest().to_path_buf(),
+            at: None,
+            member: None,
+            message: "the snapshot is embedded; load it with `load_embedded`".to_string(),
+        };
+        return Err(vec![as_refusal(Labeled { refusal, label: None })]);
+    }
+    profile_of(snapshot, context, owned).map_err(|refused| refused.refusals.into_iter().map(as_refusal).collect())
+}
+
 /// The profile of the embedded bundle `snapshot`
 /// ([`VerifiedSnapshot::from_embedded`]): every member classified and
 /// prepared from its verified bytes inside its virtual root, exactly as an

@@ -40,7 +40,14 @@ directory, not spelling (`/var` vs `/private/var`); re-deriving it with
 Unit tests use `crate::markdown::compose::test_request(options)` /
 `test_request_in(options, context)`; `lib/tests/l1` uses
 `crate::request_support::{request, request_at, request_in, configured,
-user_config, context_at, cwd_context}`.
+user_config, context_at, cwd_context}`. Unlike `prepare`,
+`ComposeRequest::with_context` does not re-anchor `ComposeOptions::new()`'s
+empty anchor, so it discovers the request's repository at the process
+directory (the whole monorepo under nextest, ~70 ms per request on Linux and
+seconds on Windows); both `request_in` helpers anchor such options on the
+context's request directory first. A test calling `with_context` directly
+anchors its options itself (`ComposeOptions::for_document`, or a context
+captured at its fixture).
 
 **Configuration snapshot.** A request always holds one
 `Arc<config::load::ConfigSnapshot>` (`ComposeRequest::config_snapshot()`;

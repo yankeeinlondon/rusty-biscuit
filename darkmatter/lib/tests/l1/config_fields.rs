@@ -3,7 +3,8 @@
 //!
 //! `file-read` gets the full shape walk of the non-null string-list
 //! validator; `shell-commands` and `register` share that shape and get a
-//! control plus one invalid case each. Every invalid shape is a located
+//! control plus one invalid case each, and `shell-commands` an all-invalid
+//! array, which must not read as an empty grant. Every invalid shape is a located
 //! error; none is recovered with a default. A missing key and an explicit
 //! `null` are the same value, so a `null` setting takes its scope's default
 //! (`a_null_setting_takes_its_scope_default`).
@@ -229,6 +230,25 @@ fn every_invalid_shell_rule_is_a_located_error() {
     }
     let (_, pointer, _) = refused(Scope::User, "permissions:\n  shell-commands: [prefix ls, 3]\n");
     assert_eq!(pointer, "/permissions/shell-commands/1");
+}
+
+/// The typing pass skips non-string elements, so an array with no valid
+/// element must be refused by the schema; read as typed, it would be an
+/// authored empty grant.
+#[test]
+fn an_all_invalid_shell_rule_array_locates_every_element_instead_of_granting_nothing() {
+    let text = "permissions:\n  shell-commands: [3, true]\n";
+    let (snapshot, file) = load(Scope::User, text, HashMap::new());
+
+    let error = snapshot.permissions().expect_err("no element is a rule");
+
+    let located: Vec<(&str, Option<usize>, Option<usize>)> =
+        error.problems().iter().map(|problem| (problem.pointer.as_str(), problem.line, problem.column)).collect();
+    assert!(error.problems().iter().all(|problem| problem.file == file), "{error}");
+    for (index, column) in [(0, 20), (1, 23)] {
+        let pointer = format!("/permissions/shell-commands/{index}");
+        assert!(located.contains(&(pointer.as_str(), Some(2), Some(column))), "{pointer} at 2:{column} in {located:?}");
+    }
 }
 
 #[test]

@@ -82,7 +82,11 @@ name biscuit-file's `file_reference::glob` module shares). `ignore`'s
 `WalkBuilder` is a walker, not a matcher, and is allowed. Match file
 references with `GlobReference`; extend the allowlist only for globs that are
 not file references (heading text, editor configuration), and add another
-package's allowlisted file to `lib/Cargo.toml` `source-inputs`.
+package's allowlisted file to `lib/Cargo.toml` `source-inputs`. It reads its
+39 MB of source through `source_scan::production_sources_where`, which blanks
+only the files whose raw text names an identifier (and the files that could
+declare one of them test-only); blanking every file took 1.4 s alone on Linux
+in debug. A new gate that searches for a few identifiers does the same.
 
 **Schema-variable docs guard.**
 `lib/tests/l1/schema_roots.rs::no_doc_or_skill_names_the_singular_schema_variable`

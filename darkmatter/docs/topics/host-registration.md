@@ -97,6 +97,41 @@ overwritten:
 replace_manifest_registration_existing(&context, ConfigScope::User, "~/.acme/registration/manifest.yaml", &old)?;
 ```
 
+The edit keeps every byte it does not change, so it cannot be made inside an
+inline list or mapping: appending to `register: [~/tools/mine.yaml]`, or
+editing any `register` in a root written as `{register: [], …}`, is refused
+with `ConfigWriteError::UnsupportedEdit`, and the block form of the same
+file is edited. A host that publishes its manifest before it registers can
+ask first, with the same arguments and an observation of the file:
+`darkmatter::config::init::replace_manifest_refusal(&observe(context, scope)?, context, new, old_path)`
+returns the editor's refusal of exactly the planned edit, or `None` when the
+edit can be made or none is needed (an inline list that already names the
+new manifest is left alone). A manifest that is not published yet is
+identified by the location the reference would open:
+
+```rust
+// ~/.darkmatter.yaml: `register: [~/tools/mine.yaml]`, manifest not yet published
+let refusal = replace_manifest_refusal(&observe(&context, ConfigScope::User)?, &context, new, &old)?;
+assert!(refusal.is_some()); // ask the person to write `register` in block form first
+```
+
+All three calls check the edited file against the rules of the `scope` you
+pass, and nothing else decides it. A user file stays a user file when it is
+reached from a repository: when the repository's `.darkmatter.yaml` is a link
+to `~/.darkmatter.yaml`, or when the home itself is the repository root. So a
+user grant that a repository file may not hold, such as reading
+`~/notes/*.md`, does not stop the host from registering:
+
+```yaml
+# ~/.darkmatter.yaml, also reached as {repo-root}/.darkmatter.yaml
+register:
+    - ~/.other/manifest.yaml
+    - ~/.acme/registration/manifest.yaml   # added with ConfigScope::User
+permissions:
+    file-read:
+        - ~/notes/*.md                     # a user grant: allowed here
+```
+
 ## The manifest
 
 The host writes the manifest and every file it lists; you never edit them by
@@ -312,6 +347,69 @@ fn previously_published(manifest: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 ```
+
+A caller that will read the members itself and needs the same member
+paths the loader checks uses
+`config::registration::bundle::admit_installed_manifest(manifest, bytes,
+context)` instead. It applies the same rules but resolves each member the
+way `load_snapshot` does: from the manifest's folder, and confined to it.
+For a bundle installed in `host/`, `../host/schemas/b.yaml` is admitted as
+`schemas/b.yaml`, and `../schemas/b.yaml`, which ends outside `host/`, is
+refused. It reads no member and checks no link, so the caller still decides
+how each `members()` entry is read. `claudine doctor` uses it this way before
+reading the bundle without following links.
+
+```rust
+use std::path::Path;
+use biscuit_file::FileResolutionContext;
+use darkmatter::config::registration::bundle::admit_installed_manifest;
+
+fn member_paths(manifest: &Path, bytes: &[u8], context: &FileResolutionContext) -> Vec<String> {
+    admit_installed_manifest(manifest, bytes, context)
+        .map(|admitted| admitted.members().map(|member| member.path.clone()).collect())
+        .unwrap_or_default()
+}
+```
+
+### Judging a bundle you have already read
+
+A diagnostic tool (such as `claudine doctor`) may need to know whether
+Darkmatter would load a bundle without going through a `register` entry,
+for example because it reads the files itself without following links.
+Digest agreement is not enough for that answer: a member can match its
+digest and still fail to parse, and a generated artifact can match its
+digest and still disagree with the schemas it was built from. Two
+functions give the same answer the loader gives:
+
+1. `config::registration::bundle::verify_read(manifest, bytes, context,
+   members)` takes the manifest's bytes and every member's bytes, keyed by
+   bundle path (`schemas/action.yaml`). It applies `load_snapshot`'s
+   admission, member resolution, and digest checks to them and returns a
+   `VerifiedSnapshot` or the same located `SnapshotRefusal`. It reads and
+   probes nothing, so the caller is responsible for how the bytes were
+   read (`load_snapshot`'s refusal of a member reached through a link is
+   not applied).
+2. `config::registration::load_verified(snapshot, context, owned)` prepares
+   that snapshot exactly as a `register` entry's snapshot is prepared:
+   every member classified and prepared, every declared type checked, the
+   catalog built, and the lifecycle and function artifacts checked against
+   it. It returns the `RegisteredHostProfile` or every refusal.
+
+```rust
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::Arc;
+use biscuit_file::FileResolutionContext;
+use darkmatter::config::registration::{bundle::verify_read, load_verified, md_owned_names};
+
+fn loads(manifest: &Path, bytes: &[u8], members: &BTreeMap<String, Arc<[u8]>>, context: &FileResolutionContext) -> bool {
+    verify_read(manifest, bytes, context, members)
+        .is_ok_and(|snapshot| load_verified(snapshot, context, md_owned_names()).is_ok())
+}
+```
+
+The loader itself goes through the same two steps (`load_snapshot` and the
+same preparation), so the answer cannot drift from what `md` and DMLS do.
 
 ## The files of a bundle
 

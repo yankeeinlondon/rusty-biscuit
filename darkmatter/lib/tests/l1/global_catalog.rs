@@ -25,6 +25,7 @@ use simplified_schema::{
     to_json_schema_with_definitions,
 };
 
+use crate::git_prefilter;
 use crate::request_support::context_at;
 
 /// The catalog bundle's repository-relative paths, in [`Texts`] order.
@@ -378,7 +379,9 @@ fn a_baseline_holding_a_slot_fails_with_the_slot_code() {
 }
 
 /// The old separately embedded baseline under `docs/schemas/` is gone, and no
-/// Darkmatter source or test names or includes it.
+/// Darkmatter source or test names or includes it. A file Git reports free of
+/// the old path is not opened: opening every source file of the area took
+/// about 2.5 s on native Windows alone and about 7 s in the package run.
 #[test]
 fn the_old_embedded_baseline_is_deleted_and_never_included() {
     let area = biscuit_test_harness::manifest_dir!().join("..");
@@ -386,17 +389,28 @@ fn the_old_embedded_baseline_is_deleted_and_never_included() {
     assert!(!area.join(&old).exists());
     let needle = format!("darkmatter/{old}");
     let include = format!("{old}\")");
+    let roots = ["lib/src", "lib/tests", "cli/src", "cli/tests", "dmls/src", "dmls/tests"];
+    let pathspecs = roots.map(|root| format!(":(glob){root}/**/*.rs"));
+    // Both spellings contain `old`, so Git's answer covers them.
+    let skippable = git_prefilter::clean_tracked_files_without(&area, &[old.as_str()], &pathspecs.each_ref().map(String::as_str));
     let mut offenders = Vec::new();
-    let mut pending: Vec<_> = ["lib/src", "lib/tests", "cli/src", "cli/tests", "dmls/src", "dmls/tests"]
-        .iter()
-        .map(|dir| area.join(dir))
-        .collect();
+    let mut pending: Vec<_> = roots.iter().map(|dir| area.join(dir)).collect();
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(&dir).expect("readable source tree") {
             let path = entry.expect("entry").path();
             if path.is_dir() {
                 pending.push(path);
             } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let key = path
+                    .strip_prefix(&area)
+                    .expect("below the area")
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                if skippable.contains(&key) {
+                    continue;
+                }
                 let text = std::fs::read_to_string(&path).expect("source");
                 let names_old = text.lines().any(|line| {
                     (line.contains(&needle) || line.contains(&include)) && !line.contains("is_none()")

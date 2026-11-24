@@ -13,7 +13,8 @@ use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
 use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot};
 use darkmatter::markdown::compose::{
-    ComposeOptions, ComposeRequest, ComposeSource, RequestSnapshot, build_resolution_context,
+    ComposeContext, ComposeOptions, ComposeRequest, ComposeSource, ContextAuthority, ContextGroup, RequestSnapshot,
+    build_resolution_context,
 };
 
 pub fn request(options: ComposeOptions) -> ComposeRequest {
@@ -101,9 +102,30 @@ pub fn user_config(
     Arc::new(ConfigSnapshot::load_user(&snapshot, ConfigLoadMode::Passive).expect("test configuration"))
 }
 
-/// `ComposeRequest::with_context` over [`configured`] options.
+/// `ComposeRequest::with_context` over [`configured`], [`anchored`] options.
 pub fn request_in(options: ComposeOptions, context: FileResolutionContext) -> ComposeRequest {
-    ComposeRequest::with_context(configured(options, &context), context).expect("test request context")
+    let options = configured(anchored(options, &context), &context);
+    ComposeRequest::with_context(options, context).expect("test request context")
+}
+
+/// `options` anchored on `context`'s request directory when their context is
+/// anchored nowhere and holds nothing else ([`ComposeOptions::new`]), as
+/// `ComposeRequest::prepare` anchors them. `with_context` discovers the
+/// request's repository at that anchor, and an empty one is the process
+/// directory, inside this monorepo (~70 ms per request on Linux, seconds on
+/// Windows under load).
+fn anchored(options: ComposeOptions, context: &FileResolutionContext) -> ComposeOptions {
+    let captured = options.context();
+    let unanchored = !captured.anchor().is_absolute()
+        && matches!(options.context_authority(), ContextAuthority::DarkmatterOwned)
+        && captured.capture_requirements().iter().all(|group| group == ContextGroup::DateTime)
+        && captured.config_source().is_none();
+    if !unanchored {
+        return options;
+    }
+    options
+        .with_context(ComposeContext::capture_for_content(context.request_cwd(), ""))
+        .with_context_authority(ContextAuthority::DarkmatterOwned)
 }
 
 /// The configuration of a user whose home is `home`, with `rules` as the

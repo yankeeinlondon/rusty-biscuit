@@ -89,6 +89,8 @@ mod host_fixtures;
 // The in-process `md` lifecycle recorder; only this suite drives a run.
 #[path = "../host_fixtures/recorder.rs"]
 mod host_recorder;
+#[path = "../git_prefilter/mod.rs"]
+mod git_prefilter;
 
 mod absent_property_contract;
 mod plain_corpus;

@@ -113,6 +113,30 @@ transaction.add(TargetChange::edit(&claudine_config, SourceExpectation::Bytes(re
 transaction.add(TargetChange::edit(&darkmatter_config, SourceExpectation::Bytes(read_too), refer).published_last())?;
 ```
 
+### Checking an edit before committing
+
+A program that wants to know ahead of time whether an edit can be made in
+place, for example to tell a person what to change before it offers a
+repair, asks the change itself. `TargetChange::edit_refusal()` applies the
+change's edits to the bytes it expects (`SourceExpectation::Bytes`, or the
+initial text of `TargetChange::create`) with the same editor a commit uses,
+and returns the editor's refusal, if any. Nothing is read, locked, or
+written. It returns `None` when it cannot know the text without reading the
+file (`SourceExpectation::Current` or a hash), so it never replaces the
+commit's own check.
+
+```rust
+// ~/.darkmatter.yaml holds `register: [~/.other/manifest.yaml]`
+let change = TargetChange::edit(&config, SourceExpectation::Bytes(read), vec![append]);
+// Some(YamlEditError { kind: FlowCollection, path: Some(register.1), .. })
+let refusal = change.edit_refusal();
+```
+
+`darkmatter::config::init::replace_manifest_refusal` does the same for the
+edit `replace_manifest_registration_existing` would make, before the host's
+new manifest is even published; see
+[host registration](./host-registration.md).
+
 Tests built with the `effects-instrumentation` feature can fail a replacement
 on purpose: `write::test_hooks::fail_next_replacement()` fails the next one,
 and `fail_replacement_after(n)` lets `n` through first (an interruption

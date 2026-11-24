@@ -486,3 +486,46 @@ fn a_dangling_symlink_target_is_refused() {
 
     assert!(matches!(error, ConfigWriteError::PathResolution { problem: PathProblem::DanglingSymlink, .. }), "{error:?}");
 }
+
+// ── TargetChange::edit_refusal ──────────────────────────────────────────────
+
+/// The dry run applies the change's edits to the bytes it expects, with the
+/// staging editor, and agrees with what a commit then does.
+#[test]
+fn edit_refusal_predicts_the_commit_for_the_expected_bytes() {
+    let (_dir, root) = workspace();
+    let cases: [(&str, &str, Option<YamlEditErrorKind>); 5] = [
+        ("inline root", "{a: 1}\n", Some(YamlEditErrorKind::FlowCollection)),
+        ("inline list walked into", "a: 1\nlist: [x]\n", Some(YamlEditErrorKind::FlowCollection)),
+        ("block root", "a: 1\n", None),
+        ("empty inline root", "{}\n", None),
+        ("inline value replaced whole", "a: {x: 1}\n", None),
+    ];
+    for (case, text, expected) in cases {
+        let path = root.join(format!("{}.yaml", case.replace(' ', "-")));
+        std::fs::write(&path, text).unwrap();
+        let edit = if case == "inline list walked into" { set("list.1", "y") } else { set("a", 2) };
+        let change = TargetChange::edit(&path, SourceExpectation::Bytes(text.as_bytes().to_vec()), vec![edit]);
+
+        assert_eq!(change.edit_refusal().map(|refusal| refusal.kind), expected, "{case}");
+        let mut transaction = ConfigTransaction::new();
+        transaction.add(change).unwrap();
+        let committed = transaction.commit(&accept);
+        match expected {
+            Some(_) => {
+                assert!(matches!(committed, Err(ConfigWriteError::UnsupportedEdit { .. })), "{case}: {committed:?}");
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{case}");
+            }
+            None => assert!(committed.is_ok(), "{case}: {committed:?}"),
+        }
+    }
+}
+
+#[test]
+fn edit_refusal_cannot_judge_bytes_it_does_not_know() {
+    let (_dir, root) = workspace();
+    let path = root.join("current.yaml");
+    std::fs::write(&path, "{a: 1}\n").unwrap();
+    let change = TargetChange::edit(&path, SourceExpectation::Current, vec![set("a", 2)]);
+    assert!(change.edit_refusal().is_none());
+}

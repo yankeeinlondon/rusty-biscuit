@@ -459,8 +459,10 @@ impl Fixture {
         self.install_bundle(folder, &Bundle::relay());
     }
 
+    /// Joined one segment at a time so the path displays with the native
+    /// separator, as the paths production reports do on Windows.
     pub fn path(&self, relative: &str) -> PathBuf {
-        self.root.join(relative)
+        relative.split('/').fold(self.root.clone(), |path, segment| path.join(segment))
     }
 
     pub fn write(&self, relative: &str, text: &str) {

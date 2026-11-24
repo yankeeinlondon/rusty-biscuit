@@ -11,9 +11,11 @@
 //! a prepared layer but never clears a conflict.
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::host_fixtures::*;
+use darkmatter::config::registration::RegisteredHosts;
 use darkmatter::config::registration::merge::HOST_TRIGGER_CONFLICT_CODE;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::report_diagnostics::schema_error_diagnostics;
@@ -36,7 +38,8 @@ fn bundle(files: &[(&str, &str)]) -> Bundle {
 /// A fixture with `bundle` installed under `host/` and `document` written
 /// at `work/doc.md`, analyzed in the plain (non-repository) context.
 struct Case {
-    fixture: Fixture,
+    fixture: Rc<Fixture>,
+    hosts: Arc<RegisteredHosts>,
     schemas: DarkmatterSchemas,
     markdown: Markdown,
 }
@@ -47,9 +50,20 @@ impl Case {
         fixture.install_bundle("host", bundle);
         let hosts = fixture.hosts(&[HOST]);
         assert!(hosts.diagnostics().is_empty(), "the bundle loads: {:#?}", hosts.diagnostics());
+        Self::analyze(Rc::new(fixture), hosts, document)
+    }
+
+    /// `document` judged under this case's loaded bundle, with fresh schemas:
+    /// loading the bundle is most of a case, so a helper judging several
+    /// documents against one bundle loads it once, as one `md` run does.
+    fn with_document(&self, document: &str) -> Self {
+        Self::analyze(Rc::clone(&self.fixture), Arc::clone(&self.hosts), document)
+    }
+
+    fn analyze(fixture: Rc<Fixture>, hosts: Arc<RegisteredHosts>, document: &str) -> Self {
         let (markdown, context) = fixture.document(&fixture.context(), "work/doc.md", document);
-        let schemas = DarkmatterSchemas::new(context).with_registered_hosts(hosts);
-        Self { fixture, schemas, markdown }
+        let schemas = DarkmatterSchemas::new(context).with_registered_hosts(Arc::clone(&hosts));
+        Self { fixture, hosts, schemas, markdown }
     }
 
     fn path(&self, relative: &str) -> PathBuf {
@@ -358,7 +372,7 @@ fn narrows(wide: &str, narrow: &str, accepted: &str, rejected: Option<&str>) {
             assert_eq!(effective.origins.get("review-model").and_then(|origin| origin.source.clone()), Some(SchemaSourceId::File(case.path(winner))));
             assert_eq!(case.problems(), Vec::<String>::new(), "{narrow} accepts {accepted}");
             let Some(rejected) = rejected else { continue };
-            let case = Case::new(&bundle, &document(&format!("prompt: hi\n{rejected}")));
+            let case = case.with_document(&document(&format!("prompt: hi\n{rejected}")));
             assert!(case.problems().iter().any(|path| path.starts_with("/review-model")), "{narrow} refuses {rejected}: {:?}", case.problems());
         }
     }
@@ -632,7 +646,7 @@ fn coalesces(a: &str, b: &str, accepted: &str, rejected: &str) {
                 let origin = effective.origins.get("review-model").expect("an origin");
                 assert_eq!(origin.source, Some(SchemaSourceId::File(case.path(A))), "the first bundle path represents the class");
             }
-            let case = Case::new(&bundle, &document(&format!("prompt: hi\n{rejected}")));
+            let case = case.with_document(&document(&format!("prompt: hi\n{rejected}")));
             assert!(case.problems().iter().any(|path| path.starts_with("/review-model")), "{rejected}: {:?}", case.problems());
         }
     }
@@ -872,7 +886,7 @@ fn a_recursive_reference_and_its_inline_unfolding_narrow_and_pair_by_alternative
             assert!(!kept.is_empty() && kept.iter().all(|schema| unkeyed(schema) == unkeyed(&expected)), "the inline tree is kept whole: {kept:#?}");
             assert_eq!(case.problems(), Vec::<String>::new());
             for refused in ["review-model: claude\n".to_string(), tree_value(BAD_TREE)] {
-                let case = Case::new(&bundle(&files), &document(&format!("prompt: hi\n{refused}")));
+                let case = case.with_document(&document(&format!("prompt: hi\n{refused}")));
                 assert!(case.problems().iter().any(|path| path.starts_with("/review-model")), "{refused}: {:?}", case.problems());
             }
         }
@@ -899,36 +913,67 @@ fn a_root_union_shares_a_recursive_key_one_arm_names_and_another_writes_inline()
         let result = case.schemas.effective_for(&case.markdown);
         assert!(matches!(result, Ok(Some(_))), "the key is shared: {:?}", result.err().map(|error| error.to_string()));
         assert_eq!(case.problems(), Vec::<String>::new());
-        let case = Case::new(&bundle(&files), &document(&format!("sections: {{}}\n{}", tree_value(GOOD_TREE))));
-        assert_eq!(case.problems(), Vec::<String>::new(), "the sections arm stays");
-        let case = Case::new(&bundle(&files), &document(&tree_value(GOOD_TREE)));
-        assert!(!case.problems().is_empty(), "the union still requires one of its arms");
-        let case = Case::new(&bundle(&files), &document(&format!("prompt: hi\n{}", tree_value(BAD_TREE))));
+        let sections = case.with_document(&document(&format!("sections: {{}}\n{}", tree_value(GOOD_TREE))));
+        assert_eq!(sections.problems(), Vec::<String>::new(), "the sections arm stays");
+        let neither = case.with_document(&document(&tree_value(GOOD_TREE)));
+        assert!(!neither.problems().is_empty(), "the union still requires one of its arms");
+        let case = case.with_document(&document(&format!("prompt: hi\n{}", tree_value(BAD_TREE))));
         assert!(case.problems().iter().any(|path| path.starts_with("/review-model")), "{:?}", case.problems());
     }
 }
 
+/// A recursive reference and its inline unfolding coalesce at a nested
+/// position: `wrap` (a payload body) holds the type at `{}`.
+fn a_recursive_reference_and_its_inline_unfolding_coalesce_inside(wrap: &str, accepted: &str, rejected: &str) {
+    let named = typed_trigger(NODE, &wrap.replace("{}", "Node"));
+    let inline = typed_trigger(NODE, &wrap.replace("{}", TREE));
+    coalesces(&named, &inline, accepted, rejected);
+}
+
+// One test per nested position: each runs `coalesces`' twelve cases.
 #[test]
-fn a_recursive_reference_and_its_inline_unfolding_coalesce_at_every_nested_position() {
-    for (wrap, accepted, rejected) in [
-        (
-            "    review-model:\n        tree: \"{}\"\n",
-            format!("review-model:\n  tree: {GOOD_TREE}\n"),
-            format!("review-model:\n  tree: {BAD_TREE}\n"),
-        ),
-        (
-            "    review-model:\n        <string>: \"{}\"\n",
-            format!("review-model:\n  first: {GOOD_TREE}\n"),
-            format!("review-model:\n  first: {BAD_TREE}\n"),
-        ),
-        ("    review-model: \"tuple([{}, string])\"\n", format!("review-model: [{GOOD_TREE}, x]\n"), format!("review-model: [{BAD_TREE}, x]\n")),
-        ("    review-model: \"tuple([string, ...{}[]])\"\n", format!("review-model: [x, {GOOD_TREE}]\n"), format!("review-model: [x, {BAD_TREE}]\n")),
-        ("    review-model: \"{}[]\"\n", format!("review-model: [{GOOD_TREE}]\n"), format!("review-model: [{BAD_TREE}]\n")),
-    ] {
-        let named = typed_trigger(NODE, &wrap.replace("{}", "Node"));
-        let inline = typed_trigger(NODE, &wrap.replace("{}", TREE));
-        coalesces(&named, &inline, &accepted, &rejected);
-    }
+fn a_recursive_reference_and_its_inline_unfolding_coalesce_in_an_object_property() {
+    a_recursive_reference_and_its_inline_unfolding_coalesce_inside(
+        "    review-model:\n        tree: \"{}\"\n",
+        &format!("review-model:\n  tree: {GOOD_TREE}\n"),
+        &format!("review-model:\n  tree: {BAD_TREE}\n"),
+    );
+}
+
+#[test]
+fn a_recursive_reference_and_its_inline_unfolding_coalesce_in_a_pattern_dictionary() {
+    a_recursive_reference_and_its_inline_unfolding_coalesce_inside(
+        "    review-model:\n        <string>: \"{}\"\n",
+        &format!("review-model:\n  first: {GOOD_TREE}\n"),
+        &format!("review-model:\n  first: {BAD_TREE}\n"),
+    );
+}
+
+#[test]
+fn a_recursive_reference_and_its_inline_unfolding_coalesce_in_a_tuple_element() {
+    a_recursive_reference_and_its_inline_unfolding_coalesce_inside(
+        "    review-model: \"tuple([{}, string])\"\n",
+        &format!("review-model: [{GOOD_TREE}, x]\n"),
+        &format!("review-model: [{BAD_TREE}, x]\n"),
+    );
+}
+
+#[test]
+fn a_recursive_reference_and_its_inline_unfolding_coalesce_in_a_tuple_rest() {
+    a_recursive_reference_and_its_inline_unfolding_coalesce_inside(
+        "    review-model: \"tuple([string, ...{}[]])\"\n",
+        &format!("review-model: [x, {GOOD_TREE}]\n"),
+        &format!("review-model: [x, {BAD_TREE}]\n"),
+    );
+}
+
+#[test]
+fn a_recursive_reference_and_its_inline_unfolding_coalesce_in_a_list() {
+    a_recursive_reference_and_its_inline_unfolding_coalesce_inside(
+        "    review-model: \"{}[]\"\n",
+        &format!("review-model: [{GOOD_TREE}]\n"),
+        &format!("review-model: [{BAD_TREE}]\n"),
+    );
 }
 
 #[test]

@@ -218,8 +218,22 @@ The reference is then followed, once per file:
 - A missing, unreadable, or invalid-YAML target, one without a
   `permissions` mapping, or one whose `permissions` is another reference (no
   chains) is an error (`dm.config.reference`) naming both files and
-  suggesting `md init --inline`. It is never replaced by defaults or an
-  empty policy; a command that needs the policy stops.
+  suggesting a repair in the referring file's own scope. It is never
+  replaced by defaults or an empty policy; a command that needs the policy
+  stops. The suggested repair:
+
+  | Reference declared in | Suggested repair |
+  | --- | --- |
+  | `~/.darkmatter.yaml` | correct the target, point `permissions` at another file, or run `md init --inline` |
+  | the repository's `.darkmatter.yaml` | correct the target, or edit the reference in that file (point it at another file or write the block inline); `md init` writes your user file, so it is never suggested here |
+  | the repository's `.darkmatter.yaml` at `HEAD` | the same correction, and commit it: the committed reference and target are what `HEAD` reads, so a working-copy fix alone leaves the error |
+
+  For example, a repository `permissions: ./policy.yaml` with no
+  `policy.yaml` reports
+
+  ```text
+  the `permissions` reference `./policy.yaml` names `/home/me/project/policy.yaml`, which does not exist; create it, or point `permissions` in `/home/me/project/.darkmatter.yaml` at another file or write the block there inline
+  ```
 - A repository file's target must really be inside the repository: in the
   working copy, a symbolic link that leads outside is an error. At `HEAD` the
   target is read from the committed tree only, never from disk; committed

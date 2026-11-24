@@ -11,7 +11,9 @@
 //! defaults (with an [`InitNotice`]) when that block cannot be read.
 //!
 //! Every write goes through one [`ConfigTransaction`]: each target is locked,
-//! re-read, edited in place, and validated before it is replaced. Nothing is
+//! re-read, edited in place, and validated, as the file of the scope it was
+//! observed as (never a scope inferred from its path, so a user file a
+//! repository links to stays a user file), before it is replaced. Nothing is
 //! written unless every scope asked for can be written: a missing home or a
 //! context that names no repository fails before any file is touched.
 //!
@@ -259,7 +261,8 @@ pub fn init(context: &FileResolutionContext, scopes: &[ConfigScope], options: In
         report.files.push(InitFile { path: observation.path, scope: *scope, action });
         report.notices.extend(notices);
     }
-    commit_checked(transaction, context, &|_| None)?;
+    let targets: Vec<(&Path, ConfigScope)> = report.files.iter().map(|file| (file.path.as_path(), file.scope)).collect();
+    commit_checked(transaction, context, &targets, &|_| None)?;
     Ok(report)
 }
 
@@ -359,10 +362,15 @@ pub fn setup_change(observation: &ConfigObservation, permissions: Option<Value>)
 }
 
 /// Commits `transaction`, judging each candidate with `other` when it
-/// returns a verdict for the target (a host's own file), and otherwise as a
-/// Darkmatter configuration file with [`check_config_text`]: of the
-/// repository scope when it is the repository file `context` names, of the
-/// user scope otherwise.
+/// returns a verdict for the target (a host's own file), and otherwise as
+/// the Darkmatter configuration file of the scope `scopes` gives its path,
+/// with [`check_config_text`].
+///
+/// The scope is the caller's, never inferred from where the target lies: a
+/// user file the repository's `.darkmatter.yaml` links to, or that sits at
+/// a repository root, is still judged as the user file. A target listed
+/// under both scopes (one file observed as each) is judged as the user
+/// file. A candidate neither `other` nor `scopes` names is refused.
 ///
 /// ## Errors
 ///
@@ -370,17 +378,24 @@ pub fn setup_change(observation: &ConfigObservation, permissions: Option<Value>)
 pub fn commit_checked(
     transaction: ConfigTransaction,
     context: &FileResolutionContext,
+    scopes: &[(&Path, ConfigScope)],
     other: &dyn Fn(&ValidationCandidate<'_>) -> Option<Result<(), ValidationRefusal>>,
 ) -> Result<CommitOutcome, InitError> {
-    let repository = context.repository_root().map(|root| root.join(CONFIG_FILE_NAME));
     transaction
         .commit(&|candidate| {
             if let Some(verdict) = other(candidate) {
                 return verdict;
             }
-            let scope = match &repository {
-                Some(path) if same_file(path, candidate.target) => ConfigScope::Repository,
-                _ => ConfigScope::User,
+            let mut named = scopes.iter().filter(|(path, _)| same_file(path, candidate.target)).map(|(_, scope)| *scope);
+            let scope = match named.next() {
+                None => {
+                    return Err(ValidationRefusal::new(format!(
+                        "{} is not a configuration file this write names",
+                        candidate.target.display()
+                    )));
+                }
+                Some(_) if named.any(|scope| scope == ConfigScope::User) => ConfigScope::User,
+                Some(first) => first,
             };
             check_config_text(candidate.candidate, candidate.target, scope, context)
         })
@@ -542,7 +557,7 @@ pub fn register_manifest(
     let action = if observation.bytes.is_some() { InitAction::Updated } else { InitAction::Created };
     let mut transaction = ConfigTransaction::new();
     transaction.add(change).map_err(InitError::Write)?;
-    commit_checked(transaction, context, &|_| None)?;
+    commit_checked(transaction, context, &[(&observation.path, scope)], &|_| None)?;
     Ok(RegisterReport { path: observation.path, action, replaced: Vec::new() })
 }
 
@@ -575,7 +590,7 @@ pub fn replace_manifest_registration(
     if let Some(change) = change {
         let mut transaction = ConfigTransaction::new();
         transaction.add(change).map_err(InitError::Write)?;
-        commit_checked(transaction, context, &|_| None)?;
+        commit_checked(transaction, context, &[(&observation.path, scope)], &|_| None)?;
     }
     Ok(report)
 }
@@ -609,7 +624,7 @@ pub fn replace_manifest_registration_existing(
     if let Some(change) = change {
         let mut transaction = ConfigTransaction::new();
         transaction.add(change).map_err(InitError::Write)?;
-        commit_checked(transaction, context, &|_| None)?;
+        commit_checked(transaction, context, &[(&observation.path, scope)], &|_| None)?;
     }
     Ok(report)
 }
@@ -649,20 +664,66 @@ pub fn replace_manifest_change(
     if let BlockState::Invalid(error) = &observation.permissions {
         return Err(InitError::Invalid(error.clone()));
     }
+    let wanted = super::registration::manifest_identity(reference, &observation.path, context)
+        .map_err(|why| invalid_setting(observation, format!("cannot register `{reference}`: {why}")))?;
+    plan_replacement(observation, context, reference, &wanted, old_path)
+}
+
+/// The editor's refusal of the change [`replace_manifest_change`] plans for
+/// `observation`'s file ([`TargetChange::edit_refusal`]), judged before the
+/// host publishes its manifest: a missing manifest is identified by the
+/// location `reference` would open, as a missing old manifest is. `None`
+/// when the change can be made in place or nothing would change.
+///
+/// A host that publishes before it registers asks this first, so a file
+/// whose layout the editor cannot change (an inline `register: [...]` list
+/// that needs an entry added, replaced, or removed, or an inline root
+/// mapping) is reported before anything is published.
+///
+/// ## Errors
+///
+/// As [`replace_manifest_change`], except that a missing manifest is not an
+/// error.
+pub fn replace_manifest_refusal(
+    observation: &ConfigObservation,
+    context: &FileResolutionContext,
+    reference: &str,
+    old_path: &Path,
+) -> Result<Option<crate::yaml_edit::YamlEditError>, InitError> {
+    if let BlockState::Invalid(error) = &observation.permissions {
+        return Err(InitError::Invalid(error.clone()));
+    }
+    let wanted = match super::registration::manifest_identity(reference, &observation.path, context) {
+        Ok(identity) => identity,
+        Err(why) => super::registration::manifest_location_identity(reference, &observation.path, context)
+            .ok_or_else(|| invalid_setting(observation, format!("cannot register `{reference}`: {why}")))?,
+    };
+    let (change, _) = plan_replacement(observation, context, reference, &wanted, old_path)?;
+    Ok(change.and_then(|change| change.edit_refusal()))
+}
+
+fn invalid_setting(observation: &ConfigObservation, message: String) -> InitError {
     let revision = match observation.scope {
         ConfigScope::User => ConfigRevision::User,
         ConfigScope::Repository => ConfigRevision::RepositoryWorktree,
     };
-    let invalid = |message: String| {
-        InitError::Invalid(ConfigError::unlocated(
-            super::load::ConfigErrorKind::InvalidSetting,
-            &observation.path,
-            revision,
-            message,
-        ))
-    };
-    let wanted = super::registration::manifest_identity(reference, &observation.path, context)
-        .map_err(|why| invalid(format!("cannot register `{reference}`: {why}")))?;
+    InitError::Invalid(ConfigError::unlocated(
+        super::load::ConfigErrorKind::InvalidSetting,
+        &observation.path,
+        revision,
+        message,
+    ))
+}
+
+/// [`replace_manifest_change`] once the manifest's identity is `wanted`.
+fn plan_replacement(
+    observation: &ConfigObservation,
+    context: &FileResolutionContext,
+    reference: &str,
+    wanted: &biscuit_file::PathIdentity,
+    old_path: &Path,
+) -> Result<(Option<TargetChange>, RegisterReport), InitError> {
+    let invalid = |message: String| invalid_setting(observation, message);
     let old = super::registration::location_identity(old_path);
     let register_path = |index: Option<usize>| {
         let mut segments = vec![String::from("register")];
@@ -700,7 +761,7 @@ pub fn replace_manifest_change(
         .filter_map(|(index, entry)| Some((index, entry.as_str()?)))
         .filter(|(_, entry)| {
             super::registration::manifest_location_identity(entry, &observation.path, context)
-                .is_some_and(|identity| identity == wanted || identity == old)
+                .is_some_and(|identity| identity == *wanted || identity == old)
         })
         .collect();
 

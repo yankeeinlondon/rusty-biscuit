@@ -172,6 +172,12 @@ impl ConfigFile {
         self.permissions.as_ref()
     }
 
+    /// Where this file writes its `permissions` value, when it does.
+    #[must_use]
+    pub const fn permissions_position(&self) -> Option<&SourcePosition> {
+        self.permissions_at.as_ref()
+    }
+
     /// This file's valid `register` entries.
     #[must_use]
     pub fn registrations(&self) -> &[Registration] {

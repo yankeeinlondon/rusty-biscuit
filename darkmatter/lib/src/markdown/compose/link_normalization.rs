@@ -920,11 +920,14 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn repo_anchor_preserves_every_unsafe_category() {
+        // One repository and request for every category: only the
+        // destination differs between them.
+        let fixture = RepoFixture::new(&[]);
+        // `canonicalize` yields the verbatim spelling on Windows, so the
+        // destination below is a genuine descendant of the repository root.
+        let verbatim_repo = fs::canonicalize(&fixture.repo).unwrap();
+        let options = options_with_repo(&fixture.source);
         for (label, unsafe_name) in unsafe_component_fixtures() {
-            let fixture = RepoFixture::new(&[]);
-            // `canonicalize` yields the verbatim spelling on Windows, so the
-            // destination below is a genuine descendant of the repository root.
-            let verbatim_repo = fs::canonicalize(&fixture.repo).unwrap();
             let destination =
                 format!(r"{}\assets\{unsafe_name}\image.png", verbatim_repo.display());
             assert!(
@@ -933,7 +936,7 @@ mod tests {
             );
 
             let content = format!("<img src=\"{destination}\">\n");
-            assert_preserved_with_warning(&content, &options_with_repo(&fixture.source), label);
+            assert_preserved_with_warning(&content, &options, label);
         }
     }
 
@@ -966,9 +969,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn env_anchor_preserves_every_unsafe_category() {
+        let dir = tempdir().unwrap();
+        let root = fs::canonicalize(dir.path()).unwrap();
+        let options = env_options(&root);
         for (label, unsafe_name) in unsafe_component_fixtures() {
-            let dir = tempdir().unwrap();
-            let root = fs::canonicalize(dir.path()).unwrap();
             let destination = format!(r"{}\docs\{unsafe_name}\f.md", root.display());
             assert!(
                 try_portable_string(Path::new(&destination)).is_none(),
@@ -976,16 +980,17 @@ mod tests {
             );
 
             let content = format!("<a href=\"{destination}\">f</a>\n");
-            assert_preserved_with_warning(&content, &env_options(&root), label);
+            assert_preserved_with_warning(&content, &options, label);
         }
     }
 
     #[cfg(windows)]
     #[test]
     fn home_anchor_preserves_every_unsafe_category() {
+        let dir = tempdir().unwrap();
+        let home = fs::canonicalize(dir.path()).unwrap();
+        let options = home_options(&home);
         for (label, unsafe_name) in unsafe_component_fixtures() {
-            let dir = tempdir().unwrap();
-            let home = fs::canonicalize(dir.path()).unwrap();
             let destination = format!(r"{}\docs\{unsafe_name}\f.md", home.display());
             assert!(
                 try_portable_string(Path::new(&destination)).is_none(),
@@ -993,7 +998,7 @@ mod tests {
             );
 
             let content = format!("<a href=\"{destination}\">f</a>\n");
-            assert_preserved_with_warning(&content, &home_options(&home), label);
+            assert_preserved_with_warning(&content, &options, label);
         }
     }
 

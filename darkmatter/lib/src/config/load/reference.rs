@@ -35,6 +35,9 @@ use super::{
 };
 use crate::config::migration_receipt::content_hash;
 
+/// The direct correction of a target whose document lacks a usable block.
+const WRITE_MAPPING: &str = "write a `permissions` mapping in it";
+
 /// The most committed symbolic links one `HEAD` reference may pass through,
 /// as for path resolution on most systems.
 pub const MAX_COMMITTED_LINKS: usize = 40;
@@ -80,10 +83,7 @@ impl Observe<'_> {
                     referenced_from: Some(file.path.clone()),
                 });
                 let Some(bytes) = bytes else {
-                    return Err(source.error(
-                        &target,
-                        "which does not exist; create it, point `permissions` at another file, or run `md init --inline` to write the block back inline",
-                    ));
+                    return Err(source.error(&target, &format!("which does not exist; {}", source.remedy("create it"))));
                 };
                 let block = self.target_block(&source, &target, &bytes, place.scope())?;
                 PolicyLayer::new(file.revision, file.path.clone(), target, block)
@@ -163,7 +163,7 @@ impl Observe<'_> {
                 SchemaError::SchemaDocument { message, .. } => message,
                 other => other.to_string(),
             };
-            source.error(target, &format!("which is not valid YAML ({message}); fix it or run `md init --inline`"))
+            source.error(target, &format!("which is not valid YAML ({message}); {}", source.remedy("fix it")))
         })?;
         let block = match loaded.json.get("permissions") {
             Some(block @ Value::Object(_)) => block.clone(),
@@ -171,19 +171,22 @@ impl Observe<'_> {
                 return Err(source.error(
                     target,
                     &format!(
-                        "whose `permissions` is another reference (`{next}`); references do not chain, so write the block in `{}` or run `md init --inline`",
-                        target.display()
+                        "whose `permissions` is another reference (`{next}`); references do not chain, so {}",
+                        source.remedy(&format!("write the block in `{}`", target.display()))
                     ),
                 ));
             }
             None if !loaded.json.is_object() => {
-                return Err(source.error(target, "which is not a YAML mapping with a `permissions` mapping; run `md init --inline` to write the block back inline"));
+                return Err(source.error(
+                    target,
+                    &format!("which is not a YAML mapping with a `permissions` mapping; {}", source.remedy(WRITE_MAPPING)),
+                ));
             }
             Some(_) => {
-                return Err(source.error(target, "whose `permissions` is not a mapping; run `md init --inline` to write the block back inline"));
+                return Err(source.error(target, &format!("whose `permissions` is not a mapping; {}", source.remedy(WRITE_MAPPING))));
             }
             None => {
-                return Err(source.error(target, "which has no `permissions` mapping; run `md init --inline` to write the block back inline"));
+                return Err(source.error(target, &format!("which has no `permissions` mapping; {}", source.remedy(WRITE_MAPPING))));
             }
         };
         let locate = |pointer: &[String]| byte_range(&loaded, pointer).map(|range| line_column(text, range.start));
@@ -252,6 +255,27 @@ struct Source<'a> {
 }
 
 impl Source<'_> {
+    /// How to repair an unusable target, after `fix` (the direct correction
+    /// of the target), in the declaring file's own scope. Only the user scope
+    /// names `md init --inline`: that command writes the user file, so for a
+    /// repository reference it would succeed and leave the error in place.
+    /// A reference declared at `HEAD` is read from the commit, so its
+    /// correction must be committed too.
+    fn remedy(&self, fix: &str) -> String {
+        let declared_in = self.reference.declared_in.display();
+        match self.revision {
+            ConfigRevision::User => {
+                format!("{fix}, point `permissions` at another file, or run `md init --inline` to write the block back inline")
+            }
+            ConfigRevision::RepositoryWorktree => {
+                format!("{fix}, or point `permissions` in `{declared_in}` at another file or write the block there inline")
+            }
+            ConfigRevision::RepositoryHead => format!(
+                "{fix}, or point `permissions` in `{declared_in}` at another file or write the block there inline; commit the correction too, because this reference is declared in the commit at HEAD and a change only in the working copy leaves it broken"
+            ),
+        }
+    }
+
     fn problem(&self, message: String) -> ConfigProblem {
         problem_at(&self.reference.declared_in, self.revision, "/permissions", self.at.clone(), message)
     }
