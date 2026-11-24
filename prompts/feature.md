@@ -1,43 +1,49 @@
 ---
-stage: "tech-design"
-feature: 
-base_dir: 
+$schema:
+    - feat: file(required)
+      fqn: file
+    - feature: file(required)
+      fqn: file
+agent: pi
+date-prefix: "{{ ctx.today + '-' }}"
+feat: "{{ feat ? feat : feature }}"
+candidates: |-
+    {{ 
+        map(
+            (feat || feature) 
+                ? find_files('features/**/*' + basename(feat || feature) + '*/spec.md') 
+                : [] 
+        , i -> relative(i))
+    }}
+
+initialize:
+    - when: "!ctx.repo"
+      then:
+        - error: "This prompt is intended to only be used inside of a repo!"
+    - when: "!feat && !feature"
+      error: "The feature name was not passed in; use `feat={name}` or `feature={name}`!"
+    - set:
+        feat: "{{ ensure_leading(kebab_case(basename(feat || feature)), date-prefix) }}"
+        fqn: |-
+            {{ 
+                ensure_leading(ensure_leading(kebab_case(basename(feat || feature)), date-prefix), "/features/")
+            }}
+    - when: "!feat"
+      then:
+          - error: "The feature name was not passed in; use `feat={name}` or `feature={name}`"
+    - when: "file_exists(fqn)"
+      then: 
+        - info: "the <i>feature</i> {{link(fqn, parent_dir(fqn))}} exists."
+        - edit: "{{ fqn }}"
+      else:
+        - when: "length(candidates) > 0"
+          then:
+            - info: "We didn't find a feature specification in <b>{{feat}}</b> but there are similarly named features:\n\n    {{ as_unordered_list(candidates) }}"
+          else:
+            - warn: "The <b>{{link(fqn, feat)}}</b> feature does not exist and we didn't find any other features that seemed to match the <dim>**/*</dim>{{without_date(feat)}}<dim>*</dim> file pattern. We will assume the goal is to create this spec now."
+            - edit: "{{ ctx.repo_root + '/' + ensure_trailing(fqn, '/spec.md') }}"
+        - skip
+blocked: 
+    - message: "- failed to create/edit **{{feat || feature }}**"
 ---
-
-# Feature
-
-## Context on Feature Building
-
-We are in the process of building out the "{{feature}}" feature. Building a feature consists of the following discrete steps:
-
-1. Create a detailed technical design (stage: `tech-design`)
-2. Create a detailed plan (stage: `plan`)
-3. Implement the plan (stage: `implement`)
-4. Commit the changes to git (stage: `commit-implement`)
-5. Review the plan (stage: `review`)
-6. Implement the suggestions in the review (stage: `suggestions`)
-7. Commit the changes to git (stage: `commit-review`)
-8. Update Documents (`update-documents`)
-
-**IMPORTANT:**
-
-- You are running in a **non-interactive session** so you should not expect the user to respond to questions
-- Your job is to act as an **Orchestrator** to help preserve the context window and take advantage of concurrency when that is possible without adding risk to the project
-
-## Your Responsibility
-
-- You are NOT responsible for all of the steps specified above!
-- You ARE responsible for precisely ONE of these steps!
-- To determine which step that is you will need to look at the `stage` frontmatter property
-    - this property will match one of the steps described above
-
-## Your Task
-
-::file @prompts/feature-prompts/tech-design.md when="stage == 'tech-design'"
-::file @prompts/feature-prompts/plan.md when="stage == 'plan'"
-::file @prompts/feature-prompts/implement.md when="stage == 'implement'"
-::file @prompts/feature-prompts/commit-implementation.md when="stage == 'commit-implement'"
-::file @prompts/feature-prompts/review.md when="stage == 'review'"
-::file @prompts/feature-prompts/suggestions.md when="stage == 'suggestions'"
-::file @prompts/feature-prompts/commit-review.md when="stage == 'commit-review'"
-::file @prompts/feature-prompts/update-documents.md when="stage == 'update-documents'"
+This prompt uses the lifecycle hooks to do it's work
