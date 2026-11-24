@@ -35,6 +35,7 @@ A comprehensive Rust library for system detection:
 - **Programs Module**: Detect installed software across 10 categories, with installation support for 8, test-runner availability, and remote-bash consent gating
 - **Services Module**: Detect and list system services across 10+ init systems
 - **Process Trees**: Own a spawned command and everything it starts, then stop or release them together, and lend an interactive one the terminal while it runs ([process trees](docs/topics/process-trees.md))
+- **Windows Shells**: Find the installed PowerShell, Git Bash/MSYS2, and Cygwin shells and ask each, without its startup files, whether it finds a program ([Windows shells](docs/topics/windows-shells.md))
 - **Remote Inspection**: Query GitHub, GitLab, Gitea, and Bitbucket APIs for repository metadata
 
 The library exposes three API tiers: `detect()` for convenience, `detect_with_plan(DetectionPlan)` for fine-grained control, and module-level functions for expert composition. See [sniff/lib/README.md](lib/README.md) for the full API and [sniff/docs/sniff-library-architecture.md](docs/sniff-library-architecture.md) for the cost model and shared-work design.

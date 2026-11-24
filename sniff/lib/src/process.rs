@@ -105,6 +105,9 @@ pub(crate) mod timeouts {
 
     /// NTP status queries.
     pub(crate) const NTP: Duration = Duration::from_secs(3);
+
+    /// One startup-free shell lookup (`programs::windows_shells`).
+    pub(crate) const SHELL_LOOKUP: Duration = Duration::from_secs(2);
 }
 
 /// How often the deadline is checked while the child runs.
@@ -332,11 +335,23 @@ pub(crate) fn run_command_with_timeout(
     command: &mut Command,
     timeout: Duration,
 ) -> Result<CapturedOutput, ProcessError> {
+    run_command_in_tree(command, timeout, TreeConfig::process_group())
+}
+
+/// [`run_command_with_timeout`] with the child's tree configuration chosen
+/// by the caller, for a probe that also needs Windows creation flags (no
+/// console window, for example). Every other part of the supervision
+/// contract is the same.
+pub(crate) fn run_command_in_tree(
+    command: &mut Command,
+    timeout: Duration,
+    tree: TreeConfig,
+) -> Result<CapturedOutput, ProcessError> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    TreeConfig::process_group().configure(command);
+    tree.configure(command);
     crate::programs::git_program::forget_installation_hint(command);
 
     let program = command.get_program().to_owned();

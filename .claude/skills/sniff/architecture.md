@@ -308,7 +308,9 @@ lookup. `_only` builders exclude platform fallback layers, which changes
 Windows App Paths behavior.
 
 All subprocesses go through `process::run_with_timeout` or
-`process::run_command_with_timeout`. These helpers own deadlines, concurrent
+`process::run_command_with_timeout` (whose core, `run_command_in_tree`, takes
+a `TreeConfig` for a probe that needs Windows creation flags, as the
+windowless shell lookups do). These helpers own deadlines, concurrent
 pipe draining, process-tree termination, and reaping on macOS, Linux, and
 Windows. Preserve caller cwd and environment when using the builder form;
 the one exception is the `EXEPATH` that

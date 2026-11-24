@@ -753,6 +753,10 @@ The `just check-windows` recipe and the GNU-not-MSVC rule are in the
 
 A cross-compile is compile evidence only. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` leg.
+To narrow that run, pass nextest's positional filters
+(`just cross-check sniff --os windows windows_shells git_program`, OR-ed).
+An `-E 'test(…)'` expression fails at once with `syntax error near
+unexpected token '('`, because the recipe re-parses its arguments in a shell.
 
 ## Inspecting another process's handles
 
