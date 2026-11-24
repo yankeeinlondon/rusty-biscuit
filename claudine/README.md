@@ -126,6 +126,9 @@ Claudine's composition features let you use Markdown as a dynamic template for a
 Composed prompts and dry-run bodies export plain Markdown, including generated
 file listings. See [Composition](docs/topics/composition.md#direct-composition).
 
+Frontmatter errors show their [focused source excerpt](docs/topics/composition.md#frontmatter-yaml-blocks-in-errors)
+in a single panel in the terminal.
+
 Prompt context uses the launch repository even for prompts stored elsewhere:
 `ctx.repo` provides its name independently of Git-variable references, while
 `ctx.area` is empty at the repository root. See [context variables](docs/topics/state-management/context-variables.md).

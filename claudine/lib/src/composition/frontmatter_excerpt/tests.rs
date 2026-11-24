@@ -204,7 +204,7 @@ fn capture_line_recognizes_four_dash_fence() {
     // Both fences fall inside line 1's window, so the region spans the block.
     assert_eq!(excerpt.line_spans(), vec![(1, 4)]);
     assert!(excerpt.regions[0].text.starts_with("----\n"), "must include opening fence");
-    assert!(excerpt.regions[0].text.ends_with("\n----"), "must include closing fence");
+    assert_eq!(excerpt.regions[0].text.lines().last(), Some("----"), "must include closing fence");
 }
 
 #[test]
@@ -348,6 +348,8 @@ fn two_problems_give_two_regions_with_an_elision_line() {
     let after = rendered.find("k: 11").unwrap();
     assert!(before < elision && elision < after, "{rendered}");
     assert_eq!(rendered.matches('⋮').count(), 1, "{rendered}");
+    assert_eq!(rendered.lines().filter(|line| *line == "```yaml").count(), 1, "{rendered}");
+    assert_eq!(rendered.lines().filter(|line| *line == "```").count(), 1, "{rendered}");
 }
 
 #[test]
@@ -365,12 +367,14 @@ fn rendered_gutter_numbers_match_source_lines() {
         assert_eq!(row.is_some(), shown, "line {number} ({text:?}) in: {rendered}");
     }
 
-    // The elision sits in the gutter column of the region below it.
+    // Both regions and the elision share one gutter and one language label.
     let rows: Vec<&str> = rendered.lines().collect();
+    assert_eq!(rows.iter().filter(|row| row.trim() == "yaml").count(), 1, "{rendered}");
     let elision = rows.iter().position(|row| row.contains('⋮')).unwrap();
     let column = |row: &str, glyph: char| row.chars().position(|c| c == glyph);
-    let next_gutter = rows[elision..].iter().find_map(|row| column(row, '│'));
-    assert_eq!(column(rows[elision], '⋮'), next_gutter, "{rendered}");
+    let gutter = column(rows[elision], '⋮');
+    assert_eq!(column(rows[elision - 1], '│'), gutter, "{rendered}");
+    assert_eq!(column(rows[elision + 1], '│'), gutter, "{rendered}");
 }
 
 #[test]

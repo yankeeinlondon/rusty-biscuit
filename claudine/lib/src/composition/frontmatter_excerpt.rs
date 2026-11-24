@@ -5,8 +5,8 @@
 //! [`FrontmatterExcerpt`] holds only the focused regions of the block: each
 //! located line with [`EXCERPT_CONTEXT_LINES`] of context either side, plus the
 //! header lines that enclose it (a `$schema:` parent, the `- …` line opening a
-//! union arm). It renders each region as a [`CodeBlock`] numbered with its real
-//! source lines, joined by a `⋮` elision line. When nothing is locatable, no
+//! union arm). It renders the regions in one [`CodeBlock`] with source line
+//! numbers and a `⋮` row for each gap. When nothing is locatable, no
 //! excerpt is captured; the whole block renders only when the focused regions
 //! already cover every line of it.
 //!
@@ -25,7 +25,6 @@ use std::path::PathBuf;
 
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::errors::SourceContext;
-use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use darkmatter::markdown::CodeBlock;
@@ -36,8 +35,8 @@ use simplified_schema::mapping_separator;
 /// is deliberately no configuration surface).
 pub const EXCERPT_CONTEXT_LINES: usize = 3;
 
-/// The focused regions of a frontmatter block, ready to render as YAML
-/// [`CodeBlock`]s appended to an error report.
+/// The focused regions of a frontmatter block, rendered as a YAML
+/// [`CodeBlock`] appended to an error report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontmatterExcerpt {
     /// Non-adjacent runs of source lines, ascending.
@@ -50,7 +49,7 @@ pub struct FrontmatterExcerpt {
 /// One contiguous run of frontmatter source lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExcerptRegion {
-    /// The run's source text, without a trailing line-ending.
+    /// The run's source text, with a newline for every selected line.
     text: String,
     /// 1-based source-file line of the run's first line.
     start_line: usize,
@@ -183,10 +182,14 @@ impl FrontmatterExcerpt {
         let regions = context
             .focused_line_regions(&lines, EXCERPT_CONTEXT_LINES)?
             .into_iter()
-            .map(|region| ExcerptRegion {
-                text: source_lines[region.start_line - 1..region.end_line].join("\n"),
-                start_line: region.start_line,
-                highlighted: region.highlighted,
+            .map(|region| {
+                let mut text = source_lines[region.start_line - 1..region.end_line].join("\n");
+                text.push('\n');
+                ExcerptRegion {
+                    text,
+                    start_line: region.start_line,
+                    highlighted: region.highlighted,
+                }
             })
             .collect();
         Some(Self {
@@ -198,38 +201,25 @@ impl FrontmatterExcerpt {
     /// Render the excerpt as a trailing appendix for an error report.
     ///
     /// Returns an empty string in non-TTY output (privacy gating). Otherwise
-    /// returns a blank-line separator and one YAML [`CodeBlock`] per region,
-    /// numbered with source lines, with a `⋮` line between regions. SGR and
+    /// returns a blank-line separator and one YAML [`CodeBlock`], numbered
+    /// with source lines, with a `⋮` row for each gap. SGR and
     /// OSC 8 escapes are stripped when the terminal has no color depth, so
     /// redirected / `NO_COLOR` output stays plain text.
     pub fn render_appendix(&self, term: &Terminal) -> String {
         if !self.stderr_is_tty {
             return String::new();
         }
-        let mut rendered = String::new();
-        for (idx, region) in self.regions.iter().enumerate() {
-            let mut meta = CodeBlockMeta {
-                line_numbering: true,
-                ..CodeBlockMeta::default()
-            };
-            for line in &region.highlighted {
-                meta.highlight.add_line(*line);
-            }
-            let block = CodeBlock::yaml(region.text.clone())
-                .with_meta(meta)
-                .with_start_line(region.start_line)
-                .render(term);
-            if idx > 0 {
-                rendered.push('\n');
-                rendered.push_str(&" ".repeat(gutter_column(&block)));
-                rendered.push_str("⋮\n");
-            }
-            rendered.push_str(block.trim_end_matches('\n'));
+        let mut meta = CodeBlockMeta::default();
+        for line in self.regions.iter().flat_map(|region| &region.highlighted) {
+            meta.highlight.add_line(*line);
         }
+        let regions = self.regions.iter().map(|region| (region.start_line, region.text.as_str()));
+        let rendered = CodeBlock::render_terminal_excerpt("yaml", regions, meta, term);
+        let rendered = rendered.trim_end_matches('\n');
         let body = if matches!(term.color_depth, ColorDepth::None) {
-            strip_escape_codes(&rendered)
+            strip_escape_codes(rendered)
         } else {
-            rendered
+            rendered.to_owned()
         };
         format!("\n\n{body}")
     }
@@ -265,16 +255,6 @@ impl FrontmatterExcerpt {
             .map(|region| (region.start_line, region.start_line + region.text.lines().count() - 1))
             .collect()
     }
-}
-
-/// The display column of the line-number gutter's `│` in a rendered block, so
-/// an elision line can sit in it. `0` when the block draws no gutter (a
-/// terminal without color renders a plain fence).
-fn gutter_column(rendered_block: &str) -> usize {
-    strip_escape_codes(rendered_block)
-        .lines()
-        .find_map(|row| row.chars().position(|c| c == '│'))
-        .unwrap_or(0)
 }
 
 /// Whether the located `path` is a `$schema` declaration of `property`: under
